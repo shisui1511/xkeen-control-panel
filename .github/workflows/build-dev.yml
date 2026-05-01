@@ -1,0 +1,185 @@
+name: Dev Build
+
+# Dev-сборки при каждом пуше в dev
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'web/**'
+      - 'embed.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/build-dev.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Determine dev version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.setver.outputs.version }}
+      short_sha: ${{ steps.setver.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: setver
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          # Получаем последний stable-тег
+          LATEST_TAG=$(git tag -l 'v[0-9]*' | grep -v -- '-dev\|-beta\|-alpha\|-rc' | sort -V | tail -1 2>/dev/null || echo "v0.0.1")
+          echo "Latest stable tag: $LATEST_TAG"
+
+          # Убираем префикс v
+          BASE=${LATEST_TAG#v}
+
+          # Парсим версию
+          MAJOR=$(echo $BASE | cut -d. -f1)
+          MINOR=$(echo $BASE | cut -d. -f2)
+          PATCH=$(echo $BASE | cut -d. -f3)
+
+          # Dev-сборка = следующая patch-версия
+          NEXT_PATCH=$((PATCH + 1))
+          # Добавляем pre-release суффикс с build number
+          NEXT_VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}-dev.${GITHUB_RUN_NUMBER}"
+
+          echo "Next dev version: $NEXT_VERSION"
+          echo "version=${NEXT_VERSION}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+  build:
+    name: Build Dev Pre-Release
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - GOARCH: arm64
+            name: arm64
+          - GOARCH: mipsle
+            GOMIPS: softfloat
+            name: mipsle
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Build binary
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.GOARCH }}
+          GOMIPS: ${{ matrix.GOMIPS }}
+          CGO_ENABLED: 0
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          go build -ldflags="-s -w -X main.Version=${VERSION}" \
+            -o build/xkeen-control-panel-${{ matrix.name }} ./cmd/xcp
+
+      - name: Compress with UPX
+        run: |
+          sudo apt-get update && sudo apt-get install -y upx-ucl
+          upx --best --lzma build/xkeen-control-panel-${{ matrix.name }} -o build/xkeen-control-panel-${{ matrix.name }}-upx
+          mv build/xkeen-control-panel-${{ matrix.name }}-upx build/xkeen-control-panel-${{ matrix.name }}
+
+      - name: Generate checksum
+        run: |
+          cd build
+          sha256sum xkeen-control-panel-${{ matrix.name }} > xkeen-control-panel-${{ matrix.name }}.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xkeen-control-panel-${{ matrix.name }}
+          path: |
+            build/xkeen-control-panel-${{ matrix.name }}
+            build/xkeen-control-panel-${{ matrix.name }}.sha256
+
+  release:
+    name: Create Dev Release
+    runs-on: ubuntu-latest
+    needs: [version, build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Delete old dev releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --limit 50 --json tagName,isPrerelease | \
+            jq -r '.[] | select(.tagName | test("-dev\\.")) | .tagName' | \
+            while read tag; do
+              echo "Deleting old dev release: $tag"
+              gh release delete "$tag" --yes 2>/dev/null || true
+              git push --delete origin "$tag" 2>/dev/null || true
+            done
+
+      - name: Create Dev Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          SHORT_SHA: ${{ needs.version.outputs.short_sha }}
+        run: |
+          cat > /tmp/release-notes.md << 'ENDNOTES'
+          ## Тестовый билд
+
+          **Это dev-сборка.** Используйте только для тестирования.
+
+          | Свойство | Значение |
+          |----------|----------|
+          | Версия | `$(echo $VERSION)` |
+          | Коммит | `$(echo $SHORT_SHA)` |
+          | Дата сборки | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
+
+          ### Поддерживаемые устройства
+
+          **ARM64** (xkeen-control-panel-arm64):
+          - KN-1810, KN-1910
+          - Другие Keenetic с ARM64 и Entware
+
+          **MIPSLE** (xkeen-control-panel-mipsle):
+          - KN-1912 Viva, KN-2410
+          - Другие Keenetic с MIPSLE и Entware
+
+          ### Установка
+          ```sh
+          chmod +x xkeen-control-panel-arm64
+          ./xkeen-control-panel-arm64 install
+          /opt/etc/init.d/S99xkeen-control-panel restart
+          ```
+          ENDNOTES
+
+          gh release create "${VERSION}" \
+            --title "Тестовый билд ${VERSION}" \
+            --notes-file /tmp/release-notes.md \
+            --prerelease \
+            artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64 \
+            artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64.sha256 \
+            artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle \
+            artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle.sha256
+
+  cleanup:
+    name: Cleanup artifacts
+    runs-on: ubuntu-latest
+    needs: release
+    if: always()
+    steps:
+      - uses: geekyeggo/delete-artifact@v5
+        with:
+          name: xkeen-control-panel-*

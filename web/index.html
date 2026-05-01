@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XKeen Control Panel</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@codemirror/theme-one-dark@6.1.2/theme.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+</head>
+<body>
+    <div x-data="app()" x-init="init()">
+        <header class="header">
+            <h1>⚡ XKeen Control Panel</h1>
+            <div class="text-sm text-gray-400">
+                Version: <span x-text="version"></span> | 
+                <span :class="status === 'running' ? 'text-green-400' : 'text-red-400'" x-text="status"></span>
+            </div>
+        </header>
+
+        <div class="grid">
+            <!-- Service Control Card -->
+            <div class="card">
+                <h2>🚀 Service Control</h2>
+                <div class="mb-4">
+                    <span class="status-dot" :class="status"></span>
+                    <span x-text="statusText"></span>
+                </div>
+                <div class="flex space-x-2">
+                    <button @click="control('start')" class="btn btn-success">Start</button>
+                    <button @click="control('stop')" class="btn btn-danger">Stop</button>
+                    <button @click="control('restart')" class="btn btn-warning">Restart</button>
+                    <button @click="fetchStatus()" class="btn btn-primary">Refresh</button>
+                </div>
+            </div>
+
+            <!-- Config Files Card -->
+            <div class="card">
+                <h2>📁 Configuration Files</h2>
+                <ul class="config-list">
+                    <template x-for="file in configs" :key="file">
+                        <li @click="loadConfig(file)" 
+                            :class="selectedConfig === file ? 'bg-blue-900' : ''"
+                            x-text="file.split('/').pop()"></li>
+                    </template>
+                </ul>
+                <button @click="fetchConfigs()" class="btn btn-primary mt-2">Refresh List</button>
+            </div>
+        </div>
+
+        <!-- Editor Card -->
+        <div class="card" style="margin: 1rem;" x-show="selectedConfig">
+            <h2>✏️ Editor: <span x-text="selectedConfig?.split('/').pop()"></span></h2>
+            <div class="editor-container" id="editor"></div>
+            <div class="mt-4 flex space-x-2">
+                <button @click="saveConfig()" class="btn btn-success">Save</button>
+                <button @click="selectedConfig = null" class="btn btn-danger">Close</button>
+            </div>
+            <div x-show="message" :class="messageType" class="alert mt-4" x-text="message"></div>
+        </div>
+
+        <!-- Logs Card -->
+        <div class="card" style="margin: 1rem;">
+            <h2>📋 Live Logs</h2>
+            <div class="log-container">
+                <pre x-text="logs"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@codemirror/lang-json@6.0.1/dist/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@codemirror/language-javascript@6.2.1/dist/index.min.js"></script>
+    <script>
+        function app() {
+            return {
+                version: '...',
+                status: 'unknown',
+                statusText: 'Checking...',
+                configs: [],
+                selectedConfig: null,
+                configContent: '',
+                logs: 'Connecting to log stream...\n',
+                message: '',
+                messageType: 'alert-success',
+                editor: null,
+                ws: null,
+
+                init() {
+                    this.fetchVersion();
+                    this.fetchStatus();
+                    this.fetchConfigs();
+                    this.connectLogs();
+                    this.initEditor();
+                },
+
+                async fetchVersion() {
+                    const res = await fetch('/api/version');
+                    const data = await res.json();
+                    this.version = data.version;
+                },
+
+                async fetchStatus() {
+                    try {
+                        const res = await fetch('/api/service/status');
+                        const text = await res.text();
+                        this.status = text.includes('running') ? 'running' : 'stopped';
+                        this.statusText = text.trim() || 'Unknown';
+                    } catch (e) {
+                        this.status = 'error';
+                        this.statusText = 'Error checking status';
+                    }
+                },
+
+                async fetchConfigs() {
+                    const res = await fetch('/api/config/list');
+                    this.configs = await res.json();
+                },
+
+                async loadConfig(path) {
+                    this.selectedConfig = path;
+                    const res = await fetch('/api/config/read?path=' + encodeURIComponent(path));
+                    this.configContent = await res.text();
+                    if (this.editor) {
+                        this.editor.dispatch({
+                            changes: {
+                                from: 0,
+                                to: this.editor.state.doc.length,
+                                insert: this.configContent
+                            }
+                        });
+                    }
+                },
+
+                async saveConfig() {
+                    if (!this.selectedConfig || !this.editor) return;
+                    
+                    const content = this.editor.state.doc.toString();
+                    const formData = new FormData();
+                    formData.append('content', content);
+                    
+                    const res = await fetch('/api/config/save?path=' + encodeURIComponent(this.selectedConfig), {
+                        method: 'POST',
+                        body: content
+                    });
+                    
+                    if (res.ok) {
+                        this.showMessage('Configuration saved successfully!', 'alert-success');
+                    } else {
+                        this.showMessage('Failed to save configuration', 'alert-error');
+                    }
+                },
+
+                async control(action) {
+                    await fetch(`/api/service/control?action=${action}`);
+                    setTimeout(() => this.fetchStatus(), 1000);
+                },
+
+                initEditor() {
+                    // Dynamically load CodeMirror
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js';
+                    script.onload = () => {
+                        const link = document.createElement('link');
+                        link.rel = 'stylesheet';
+                        link.href = 'https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.css';
+                        document.head.appendChild(link);
+                        
+                        const themeLink = document.createElement('link');
+                        themeLink.rel = 'stylesheet';
+                        themeLink.href = 'https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/dracula.css';
+                        document.head.appendChild(themeLink);
+                        
+                        setTimeout(() => {
+                            this.editor = CodeMirror(document.getElementById('editor'), {
+                                mode: 'application/json',
+                                theme: 'dracula',
+                                lineNumbers: true,
+                                lineWrapping: true,
+                                value: this.configContent
+                            });
+                        }, 500);
+                    };
+                    document.head.appendChild(script);
+                },
+
+                connectLogs() {
+                    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    this.ws = new WebSocket(`${protocol}//${location.host}/api/logs/ws`);
+                    this.ws.onmessage = (e) => {
+                        this.logs += e.data + '\n';
+                        const container = document.querySelector('.log-container');
+                        if (container) container.scrollTop = container.scrollHeight;
+                    };
+                    this.ws.onerror = () => {
+                        this.logs += 'WebSocket connection error\n';
+                    };
+                },
+
+                showMessage(text, type) {
+                    this.message = text;
+                    this.messageType = type;
+                    setTimeout(() => this.message = '', 3000);
+                }
+            }
+        }
+    </script>
+</body>
+</html>

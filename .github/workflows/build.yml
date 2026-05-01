@@ -1,0 +1,163 @@
+name: Build and Release
+
+# Создание релиза: при пуше тега v* или вручную
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Версия (например: 1.0.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - GOARCH: arm64
+            name: arm64
+          - GOARCH: mipsle
+            GOMIPS: softfloat
+            name: mipsle
+          - GOARCH: mips
+            GOMIPS: softfloat
+            name: mips
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Build binary
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.GOARCH }}
+          GOMIPS: ${{ matrix.GOMIPS }}
+          CGO_ENABLED: 0
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="v${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME}"
+          fi
+          echo "Building version: ${VERSION}"
+          go build -ldflags="-s -w -X main.Version=${VERSION}" \
+            -o build/xkeen-control-panel-${{ matrix.name }} ./cmd/xcp
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xkeen-control-panel-${{ matrix.name }}
+          path: build/xkeen-control-panel-${{ matrix.name }}
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set version variable
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -v "^${{ steps.version.outputs.version }}$" | head -n1)
+          echo "Previous tag: $PREVIOUS_TAG"
+
+          if [ -z "$PREVIOUS_TAG" ]; then
+            CHANGELOG=$(git log --reverse --pretty=format:"- %s (%h)" --no-merges)
+          else
+            CHANGELOG=$(git log --reverse --pretty=format:"- %s (%h)" --no-merges ${PREVIOUS_TAG}..HEAD)
+          fi
+
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate SHA256 checksums
+        run: |
+          cd artifacts
+          for dir in */; do
+            cd "$dir"
+            sha256sum * > checksums.sha256
+            cd ..
+          done
+          echo "Checksums:"
+          cat */checksums.sha256
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: XKeen Control Panel ${{ steps.version.outputs.version }}
+          body: |
+            ## Изменения:
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ---
+
+            ### Поддерживаемые устройства
+
+            **ARM64** (xkeen-control-panel-arm64):
+            - KN-1810, KN-1910
+            - Другие Keenetic с ARM64 и Entware
+
+            **MIPSLE** (xkeen-control-panel-mipsle):
+            - KN-1912 Viva, KN-2410
+            - Другие Keenetic с MIPSLE и Entware
+
+            **MIPS** (xkeen-control-panel-mips):
+            - Старые модели Keenetic с MIPS и Entware
+
+            ### Установка
+            ```sh
+            chmod +x xkeen-control-panel-arm64  # выберите свою архитектуру
+            ./xkeen-control-panel-arm64 install
+            /opt/etc/init.d/S99xkeen-control-panel start
+            ```
+
+            Доступ: `http://<ip-роутера>:8080`
+          files: |
+            artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64
+            artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle
+            artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips
+          draft: false
+
+  cleanup:
+    name: Cleanup artifacts
+    runs-on: ubuntu-latest
+    needs: release
+    if: always()
+    steps:
+      - uses: geekyeggo/delete-artifact@v5
+        with:
+          name: xkeen-control-panel-*
