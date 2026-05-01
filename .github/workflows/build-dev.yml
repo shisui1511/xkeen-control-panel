@@ -18,44 +18,8 @@ permissions:
   contents: write
 
 jobs:
-  version:
-    name: Determine dev version
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.setver.outputs.version }}
-      short_sha: ${{ steps.setver.outputs.short_sha }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - id: setver
-        run: |
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-          # Получаем последний stable-тег
-          LATEST_TAG=$(git tag -l 'v[0-9]*' | grep -v -- '-dev\|-beta\|-alpha\|-rc' | sort -V | tail -1 2>/dev/null || echo "v0.0.1")
-          echo "Latest stable tag: $LATEST_TAG"
-
-          # Убираем префикс v
-          BASE=${LATEST_TAG#v}
-
-          # Парсим версию
-          MAJOR=$(echo $BASE | cut -d. -f1)
-          MINOR=$(echo $BASE | cut -d. -f2)
-          PATCH=$(echo $BASE | cut -d. -f3)
-
-          # Dev-сборка = следующая patch-версия
-          NEXT_PATCH=$((PATCH + 1))
-          # Добавляем pre-release суффикс с build number
-          NEXT_VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}-dev.${GITHUB_RUN_NUMBER}"
-
-          echo "Next dev version: $NEXT_VERSION"
-          echo "version=${NEXT_VERSION}" >> $GITHUB_OUTPUT
-          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
-
   build:
     name: Build Dev Pre-Release
-    needs: version
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -82,7 +46,7 @@ jobs:
           GOARCH: ${{ matrix.GOARCH }}
           GOMIPS: ${{ matrix.GOMIPS }}
           CGO_ENABLED: 0
-          VERSION: ${{ needs.version.outputs.version }}
+          VERSION: dev.${{ github.run_number }}.${{ github.run_attempt }}
         run: |
           go build -ldflags="-s -w -X main.Version=${VERSION}" \
             -o build/xkeen-control-panel-${{ matrix.name }} ./cmd/xcp
@@ -109,19 +73,39 @@ jobs:
   release:
     name: Create Dev Release
     runs-on: ubuntu-latest
-    needs: [version, build]
+    needs: build
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Delete old dev releases
+      - name: Set version and create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+
+          # Получаем последний stable-тег
+          LATEST_TAG=$(git tag -l 'v[0-9]*' | grep -v -- '-dev\|-beta\|-alpha\|-rc' | sort -V | tail -1 2>/dev/null || echo "v0.0.1")
+          echo "Latest stable tag: $LATEST_TAG"
+
+          BASE=${LATEST_TAG#v}
+
+          MAJOR=$(echo $BASE | cut -d. -f1)
+          MINOR=$(echo $BASE | cut -d. -f2)
+          PATCH=$(echo $BASE | cut -d. -f3)
+
+          NEXT_PATCH=$((PATCH + 1))
+          VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}-dev.${GITHUB_RUN_NUMBER}"
+
+          echo "VERSION=$VERSION"
+
+          # Удаляем старые dev-релизы
           gh release list --limit 50 --json tagName,isPrerelease | \
             jq -r '.[] | select(.tagName | test("-dev\\.")) | .tagName' | \
             while read tag; do
@@ -130,21 +114,16 @@ jobs:
               git push --delete origin "$tag" 2>/dev/null || true
             done
 
-      - name: Create Dev Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.version.outputs.version }}
-          SHORT_SHA: ${{ needs.version.outputs.short_sha }}
-        run: |
-          cat > /tmp/release-notes.md << 'ENDNOTES'
+          # Создаём релиз
+          cat > /tmp/release-notes.md << ENDNOTES
           ## Тестовый билд
 
           **Это dev-сборка.** Используйте только для тестирования.
 
           | Свойство | Значение |
           |----------|----------|
-          | Версия | `$(echo $VERSION)` |
-          | Коммит | `$(echo $SHORT_SHA)` |
+          | Версия | \`${VERSION}\` |
+          | Коммит | \`${SHORT_SHA}\` |
           | Дата сборки | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
 
           ### Поддерживаемые устройства
@@ -158,13 +137,14 @@ jobs:
           - Другие Keenetic с MIPSLE и Entware
 
           ### Установка
-          ```sh
+          \`\`\`sh
           chmod +x xkeen-control-panel-arm64
           ./xkeen-control-panel-arm64 install
           /opt/etc/init.d/S99xkeen-control-panel restart
-          ```
+          \`\`\`
           ENDNOTES
 
+          echo "Creating release with tag: ${VERSION}"
           gh release create "${VERSION}" \
             --title "Тестовый билд ${VERSION}" \
             --notes-file /tmp/release-notes.md \
