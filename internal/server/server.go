@@ -1,7 +1,6 @@
 package server
 
 import (
-	"embed"
 	"fmt"
 	"io/fs"
 	"log"
@@ -9,8 +8,6 @@ import (
 	"sync"
 	"time"
 )
-
-var webFS embed.FS
 
 type Server struct {
 	cfg      *Config
@@ -62,9 +59,3 @@ func (s *Server) Start() error {
 	log.Printf("Listening on port %d", s.cfg.Port)
 	return http.ListenAndServe(fmt.Sprintf(":%d", s.cfg.Port), s.mux)
 }
-
-func (s *Server) Start() error {
-	log.Printf("Listening on port %d", s.cfg.Port)
-	return http.ListenAndServe(fmt.Sprintf(":%d", s.cfg.Port), s.mux)
-}
-

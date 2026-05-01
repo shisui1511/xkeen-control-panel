@@ -8,3 +8,8 @@ build/
 
 # Внутренняя документация разработчика
 doc/
+
+# Node.js files (это Go-проект, package-lock.json не нужен)
+package-lock.json
+node_modules/
+
