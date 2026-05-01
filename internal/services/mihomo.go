@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"time"
 )
 
@@ -20,7 +21,7 @@ func NewMihomoService(binary, configDir string) *MihomoService {
 }
 
 func (s *MihomoService) Status() (string, error) {
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("pidof %s", s.BinaryPath))
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("pidof %s", filepath.Base(s.BinaryPath)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "stopped", nil
