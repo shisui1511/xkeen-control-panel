@@ -54,6 +54,15 @@ func (s *Server) Handle(pattern string, handler http.HandlerFunc) {
 	s.mux.HandleFunc(pattern, handler)
 }
 
+func (s *Server) GetVersion() string {
+	return s.version
+}
+
+func (s *Server) Start() error {
+	log.Printf("Listening on port %d", s.cfg.Port)
+	return http.ListenAndServe(fmt.Sprintf(":%d", s.cfg.Port), s.mux)
+}
+
 func (s *Server) Start() error {
 	log.Printf("Listening on port %d", s.cfg.Port)
 	return http.ListenAndServe(fmt.Sprintf(":%d", s.cfg.Port), s.mux)

@@ -34,7 +34,7 @@ func NewAPI(cfg *config.Config, srv *server.Server) *API {
 }
 
 func (a *API) Version(w http.ResponseWriter, r *http.Request) {
-	json.NewEncoder(w).Encode(map[string]string{"version": a.cfg.DataDir})
+	json.NewEncoder(w).Encode(map[string]string{"version": a.srv.GetVersion()})
 }
 
 func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
