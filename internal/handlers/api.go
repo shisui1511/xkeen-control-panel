@@ -103,6 +103,10 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
 	action := r.URL.Query().Get("action")
 	
 	var out string
@@ -169,6 +173,10 @@ func (a *API) MihomoStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) MihomoControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
 	action := r.URL.Query().Get("action")
 	
 	var out string
