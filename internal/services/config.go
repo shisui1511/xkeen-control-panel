@@ -3,9 +3,14 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 )
 
+func sortStrings(s []string) []string {
+	sort.Strings(s)
+	return s
+}
 type ConfigService struct {
 	ConfigDir string
 }
