@@ -132,7 +132,7 @@ jobs:
           /opt/etc/init.d/S99xkeen-control-panel start
           \`\`\`
 
-          Доступ: \`http://<ip-роутера>:8080\`
+          Доступ: \`http://<ip-роутера>:8089\`
           EOF
 
           gh release create "${VERSION}" \
