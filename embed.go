@@ -9,5 +9,5 @@ import (
 var WebFS embed.FS
 
 func GetWebFS() (fs.FS, error) {
-	return fs.Sub(WebFS, ".")
+	return fs.Sub(WebFS, "web")
 }
