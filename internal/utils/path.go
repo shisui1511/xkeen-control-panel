@@ -17,9 +17,13 @@ func NewPathValidator(roots []string) *PathValidator {
 func (v *PathValidator) Validate(path string) (string, error) {
 	cleanPath := filepath.Clean(path)
 	for _, root := range v.AllowedRoots {
-		if strings.HasPrefix(cleanPath, filepath.Clean(root)) {
+		cleanRoot := filepath.Clean(root)
+		if cleanPath == cleanRoot || strings.HasPrefix(cleanPath, cleanRoot+string(filepath.Separator)) {
 			return cleanPath, nil
 		}
+	}
+	return "", errors.New("path traversal detected or path not allowed")
+}
 	}
 	return "", errors.New("path traversal detected or path not allowed")
 }
