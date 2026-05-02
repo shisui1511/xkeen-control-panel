@@ -14,12 +14,65 @@ on:
       - 'go.sum'
       - '.github/workflows/build-dev.yml'
 
+# Отменяет предыдущие запуски для того же PR/branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
 jobs:
+  # Job 1: Тестирование и линтинг
+  test:
+    name: Test and Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true # Автоматическое кэширование Go модулей
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Lint frontend
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Run Go tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Run Go vet
+        run: go vet ./...
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 7
+
+  # Job 2: Сборка бинарников
   build:
     name: Build Dev Pre-Release
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -39,6 +92,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend
         run: |
@@ -49,7 +104,32 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version: "1.23"
+          cache: true
+
+      - name: Calculate version
+        id: version
+        run: |
+          # Получаем последний stable-тег
+          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
+          
+          # Если stable-тегов нет, используем v0.0.0
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="v0.0.0"
+          fi
+          
+          echo "Latest stable tag: $LATEST_TAG"
+
+          BASE=${LATEST_TAG#v}
+          MAJOR=$(echo "$BASE" | cut -d. -f1)
+          MINOR=$(echo "$BASE" | cut -d. -f2)
+          PATCH=$(echo "$BASE" | cut -d. -f3)
+
+          # Формат: v0.MINOR.PATCH-dev.RUN_NUMBER
+          VERSION="v${MAJOR}.${MINOR}.${PATCH}-dev.${GITHUB_RUN_NUMBER}"
+          
+          echo "VERSION=$VERSION"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Build binary
         env:
@@ -57,7 +137,7 @@ jobs:
           GOARCH: ${{ matrix.GOARCH }}
           GOMIPS: ${{ matrix.GOMIPS }}
           CGO_ENABLED: 0
-          VERSION: dev.${{ github.run_number }}.${{ github.run_attempt }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           go build -ldflags="-s -w -X main.Version=${VERSION}" \
             -o build/xkeen-control-panel-${{ matrix.name }} ./cmd/xcp
@@ -81,6 +161,10 @@ jobs:
             build/xkeen-control-panel-${{ matrix.name }}
             build/xkeen-control-panel-${{ matrix.name }}.sha256
 
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  # Job 3: Создание релиза
   release:
     name: Create Dev Release
     runs-on: ubuntu-latest
@@ -95,31 +179,14 @@ jobs:
         with:
           path: artifacts
 
-      - name: Set version and create release
+      - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
           SHORT_SHA="${GITHUB_SHA:0:7}"
 
-          # Получаем последний stable-тег
-          LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
-          
-          # Если stable-тегов нет, используем v0.0.0 (следующий будет v0.0.1-dev.N)
-          if [ -z "$LATEST_TAG" ]; then
-            LATEST_TAG="v0.0.0"
-          fi
-          
-          echo "Latest stable tag: $LATEST_TAG"
-
-          BASE=${LATEST_TAG#v}
-
-          MAJOR=$(echo "$BASE" | cut -d. -f1)
-          MINOR=$(echo "$BASE" | cut -d. -f2)
-          PATCH=$(echo "$BASE" | cut -d. -f3)
-
-          VERSION="v${MAJOR}.${MINOR}.0-dev.${GITHUB_RUN_NUMBER}"
-
-          echo "VERSION=$VERSION"
+          echo "Creating release with version: ${VERSION}"
 
           # Удаляем старые dev-релизы
           gh release list --limit 50 --json tagName,isPrerelease | \
@@ -142,6 +209,10 @@ jobs:
           | Коммит | \`${SHORT_SHA}\` |
           | Дата сборки | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
 
+          ### Изменения в этой сборке
+          
+          $(git log --pretty=format:"- %s (%h)" -10)
+
           ### Поддерживаемые устройства
 
           **ARM64** (xkeen-control-panel-arm64):
@@ -160,7 +231,6 @@ jobs:
           \`\`\`
           ENDNOTES
 
-          echo "Creating release with tag: ${VERSION}"
           gh release create "${VERSION}" \
             --title "Тестовый билд ${VERSION}" \
             --notes-file /tmp/release-notes.md \
@@ -170,6 +240,7 @@ jobs:
             artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle \
             artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle.sha256
 
+  # Job 4: Очистка артефактов
   cleanup:
     name: Cleanup artifacts
     runs-on: ubuntu-latest

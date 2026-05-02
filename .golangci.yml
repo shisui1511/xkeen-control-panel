@@ -1,0 +1,48 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck      # Проверка необработанных ошибок
+    - gosimple      # Упрощение кода
+    - govet         # Стандартный go vet
+    - ineffassign   # Обнаружение неиспользуемых присваиваний
+    - staticcheck   # Статический анализ
+    - unused        # Неиспользуемый код
+    - gofmt         # Форматирование
+    - goimports     # Импорты
+    - misspell      # Опечатки в комментариях
+    - revive        # Замена golint
+    - typecheck     # Проверка типов
+
+linters-settings:
+  errcheck:
+    check-blank: true
+    check-type-assertions: true
+  
+  govet:
+    enable-all: true
+    disable:
+      - shadow
+  
+  revive:
+    rules:
+      - name: exported
+        disabled: false
+      - name: var-naming
+        disabled: false
+      - name: package-comments
+        disabled: true
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  
+  exclude-rules:
+    # Исключаем embed.go из проверок
+    - path: embed.go
+      linters:
+        - unused

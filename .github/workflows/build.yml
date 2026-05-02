@@ -1,7 +1,6 @@
 name: Build and Release (Stable)
 
 # Стабильные релизы: срабатывает на теги v* (без дефиса)
-# Для pre-release (v0.0.2-dev.1) НЕ выполняется
 on:
   push:
     tags:
@@ -9,18 +8,67 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Версия (например: 1.0.1)"
+        description: "Версия (например: 0.1.0)"
         required: true
         type: string
+
+# Отменяет предыдущие запуски для того же тега
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
 
 jobs:
+  # Job 1: Тестирование
+  test:
+    name: Test
+    # Выполняем только если тег НЕ содержит '-' (т.е. это не pre-release)
+    if: |
+      (github.event_name == 'workflow_dispatch' && contains(github.event.inputs.version, '-') == false) ||
+      (github.event_name == 'push' && contains(github.ref, '-') == false)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Run Go tests
+        run: go test -v -race ./...
+
+      - name: Run Go vet
+        run: go vet ./...
+
+  # Job 2: Сборка бинарников
   build:
     name: Build Stable Release
-    # Выполняем только если тег НЕ содержит '-' (т.е. это не pre-release)
-    # Для workflow_dispatch проверяем, что версия не содержит '-'
+    needs: test
+    # Те же условия, что и для test
     if: |
       (github.event_name == 'workflow_dispatch' && contains(github.event.inputs.version, '-') == false) ||
       (github.event_name == 'push' && contains(github.ref, '-') == false)
@@ -46,6 +94,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend
         run: |
@@ -56,17 +106,19 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version: "1.23"
+          cache: true
 
       - name: Set version
         id: version
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
+            VERSION="v${{ github.event.inputs.version }}"
           else
             VERSION="${GITHUB_REF#refs/tags/}"
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION}"
 
       - name: Build binary
         env:
@@ -92,6 +144,10 @@ jobs:
             build/xkeen-control-panel-${{ matrix.name }}
             build/xkeen-control-panel-${{ matrix.name }}.sha256
 
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+  # Job 3: Создание релиза
   release:
     name: Create Stable Release
     needs: build
@@ -113,11 +169,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
-          # Если VERSION не установлена, берём из тега
-          if [ -z "$VERSION" ]; then
-            VERSION="${GITHUB_REF#refs/tags/}"
-          fi
-          
           # Валидация формата: vMAJOR.MINOR.PATCH (без -dev)
           if echo "$VERSION" | grep -qvE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "ERROR: Invalid stable version format: $VERSION"
@@ -129,6 +180,10 @@ jobs:
           ## XKeen Control Panel ${VERSION}
 
           Стабильный релиз.
+
+          ### Изменения
+          
+          $(git log --pretty=format:"- %s (%h)" $(git describe --tags --abbrev=0 HEAD^)..HEAD 2>/dev/null || echo "Первый релиз")
 
           ### Поддерживаемые устройства
 
@@ -163,6 +218,7 @@ jobs:
             artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips \
             artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips.sha256
 
+  # Job 4: Очистка артефактов
   cleanup:
     name: Cleanup artifacts
     runs-on: ubuntu-latest
