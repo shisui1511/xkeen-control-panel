@@ -1,22 +1,11 @@
 name: CI
 
-# Запускается на pull requests и пушах в main/dev
+# Запускается только на pull requests
 on:
   pull_request:
     branches:
       - main
       - dev
-  push:
-    branches:
-      - main
-      - dev
-    paths:
-      - 'cmd/**'
-      - 'internal/**'
-      - 'frontend/**'
-      - 'go.mod'
-      - 'go.sum'
-      - '.github/workflows/ci.yml'
 
 # Отменяет предыдущие запуски для того же PR
 concurrency:
