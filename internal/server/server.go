@@ -30,7 +30,7 @@ type Config struct {
 
 func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 	mux := http.NewServeMux()
-	
+
 	// Serve static files
 	mux.Handle("/", http.FileServer(http.FS(web)))
 
@@ -62,9 +62,9 @@ func (s *Server) GetAuthService() *auth.AuthService {
 
 func (s *Server) Start() error {
 	log.Printf("Listening on port %d", s.cfg.Port)
-	
+
 	// Wrap mux with security headers
 	handler := auth.SecurityHeaders(s.mux)
-	
+
 	return http.ListenAndServe(fmt.Sprintf(":%d", s.cfg.Port), handler)
 }

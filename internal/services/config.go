@@ -43,10 +43,10 @@ func (s *ConfigService) Save(path string, data []byte) error {
 			os.WriteFile(backupPath, oldData, 0644)
 		}
 	}
-	
+
 	// Rotate backups - keep only last 5
 	s.rotateBackups(path, 5)
-	
+
 	return os.WriteFile(path, data, 0644)
 }
 
@@ -59,19 +59,19 @@ func (s *ConfigService) ListBackups(path string) ([]string, error) {
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
 	pattern := filepath.Join(dir, base+".backup-*")
-	
+
 	backups, err := filepath.Glob(pattern)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Sort by modification time (newest first)
 	sort.Slice(backups, func(i, j int) bool {
 		iInfo, _ := os.Stat(backups[i])
 		jInfo, _ := os.Stat(backups[j])
 		return iInfo.ModTime().After(jInfo.ModTime())
 	})
-	
+
 	return backups, nil
 }
 
@@ -80,7 +80,7 @@ func (s *ConfigService) rotateBackups(path string, keep int) {
 	if err != nil || len(backups) <= keep {
 		return
 	}
-	
+
 	// Delete old backups
 	for i := keep; i < len(backups); i++ {
 		os.Remove(backups[i])

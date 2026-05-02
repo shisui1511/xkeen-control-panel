@@ -7,14 +7,14 @@ import (
 )
 
 type Config struct {
-	Port            int      `json:"port"`
-	XRayConfigDir   string   `json:"xray_config_dir"`
-	XKeenBinary     string   `json:"xkeen_binary"`
-	MihomoConfigDir string   `json:"mihomo_config_dir"`
-	MihomoBinary    string   `json:"mihomo_binary"`
-	AllowedRoots    []string `json:"allowed_roots"`
-	LogLevel        string   `json:"log_level"`
-	DataDir         string   `json:"data_dir"`
+	Port            int        `json:"port"`
+	XRayConfigDir   string     `json:"xray_config_dir"`
+	XKeenBinary     string     `json:"xkeen_binary"`
+	MihomoConfigDir string     `json:"mihomo_config_dir"`
+	MihomoBinary    string     `json:"mihomo_binary"`
+	AllowedRoots    []string   `json:"allowed_roots"`
+	LogLevel        string     `json:"log_level"`
+	DataDir         string     `json:"data_dir"`
 	Auth            AuthConfig `json:"auth"`
 }
 

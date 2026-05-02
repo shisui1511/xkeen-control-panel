@@ -14,12 +14,12 @@ import (
 )
 
 type API struct {
-	cfg        *config.Config
-	srv        *server.Server
-	xkeenSvc   *services.XKeenService
-	mihomoSvc  *services.MihomoService
-	configSvc  *services.ConfigService
-	pathVal    *utils.PathValidator
+	cfg       *config.Config
+	srv       *server.Server
+	xkeenSvc  *services.XKeenService
+	mihomoSvc *services.MihomoService
+	configSvc *services.ConfigService
+	pathVal   *utils.PathValidator
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
@@ -48,13 +48,13 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
-	
+
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
 		http.Error(w, err.Error(), 403)
 		return
 	}
-	
+
 	data, err := a.configSvc.Read(cleanPath)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -69,27 +69,27 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", 405)
 		return
 	}
-	
+
 	path := r.URL.Query().Get("path")
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
 		http.Error(w, err.Error(), 403)
 		return
 	}
-	
+
 	data, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	
+
 	err = a.configSvc.Save(cleanPath, data)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	
+
 	w.Write([]byte("OK"))
 }
 
@@ -100,13 +100,13 @@ func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 403)
 		return
 	}
-	
+
 	backups, err := a.configSvc.ListBackups(cleanPath)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
-	
+
 	json.NewEncoder(w).Encode(backups)
 }
 
@@ -125,10 +125,10 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := r.URL.Query().Get("action")
-	
+
 	var out string
 	var err error
-	
+
 	switch action {
 	case "start":
 		out, err = a.xkeenSvc.Start()
@@ -140,7 +140,7 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid action", 400)
 		return
 	}
-	
+
 	if err != nil {
 		http.Error(w, out, 500)
 		return
@@ -158,16 +158,16 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
-	
+
 	cmd := exec.Command("tail", "-f", "/opt/var/log/xkeen.log")
 	stdout, _ := cmd.StdoutPipe()
-	
+
 	if err := cmd.Start(); err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("Failed to start log stream\n"))
 		return
 	}
 	defer cmd.Process.Kill()
-	
+
 	buf := make([]byte, 1024)
 	for {
 		n, err := stdout.Read(buf)
@@ -195,10 +195,10 @@ func (a *API) MihomoControl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	action := r.URL.Query().Get("action")
-	
+
 	var out string
 	var err error
-	
+
 	switch action {
 	case "start":
 		out, err = a.mihomoSvc.Start()
@@ -210,7 +210,7 @@ func (a *API) MihomoControl(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid action", 400)
 		return
 	}
-	
+
 	if err != nil {
 		http.Error(w, out, 500)
 		return

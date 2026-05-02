@@ -6,14 +6,14 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/user/xkeen-control-panel"
 	"github.com/user/xkeen-control-panel/internal/config"
 	"github.com/user/xkeen-control-panel/internal/handlers"
 	"github.com/user/xkeen-control-panel/internal/server"
-	"github.com/user/xkeen-control-panel"
 )
 
 var (
-	Version   = "dev"
+	Version    = "dev"
 	configPath = flag.String("config", "/opt/etc/xkeen-control-panel/config.json", "Path to config file")
 )
 
@@ -73,7 +73,7 @@ func main() {
 	if cfg.Auth.PasswordHash == "" {
 		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)
 	}
-	
+
 	if err := srv.Start(); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
