@@ -24,6 +24,3 @@ func (v *PathValidator) Validate(path string) (string, error) {
 	}
 	return "", errors.New("path traversal detected or path not allowed")
 }
-	}
-	return "", errors.New("path traversal detected or path not allowed")
-}
