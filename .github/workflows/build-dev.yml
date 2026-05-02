@@ -46,18 +46,28 @@ jobs:
       - name: Install frontend dependencies
         run: |
           cd frontend
+          echo "Node version: $(node --version)"
+          echo "NPM version: $(npm --version)"
           npm ci
 
       - name: Lint frontend
         run: |
           cd frontend
+          echo "Building frontend..."
           npm run build
+          echo "Frontend build completed"
 
       - name: Download Go dependencies
-        run: go mod download
+        run: |
+          go version
+          go mod download
+          go mod verify
 
       - name: Run Go tests
-        run: go test -v -coverprofile=coverage.out ./...
+        run: |
+          echo "Running Go tests..."
+          go test -v -coverprofile=coverage.out ./... || exit 1
+          echo "Tests completed successfully"
 
       - name: Run Go vet
         run: go vet ./...
