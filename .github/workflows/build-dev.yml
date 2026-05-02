@@ -34,7 +34,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-          cache: true # Автоматическое кэширование Go модулей
+          cache: false # Отключаем кэш из-за проблем с tar
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -115,7 +115,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-          cache: true
+          cache: false
 
       - name: Calculate version
         id: version
