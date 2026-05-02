@@ -5,16 +5,15 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"sync"
-	"time"
+
+	"github.com/user/xkeen-control-panel/internal/auth"
 )
 
 type Server struct {
-	cfg      *Config
-	version  string
-	mux      *http.ServeMux
-	sessions map[string]*Session
-	mu       sync.RWMutex
+	cfg         *Config
+	version     string
+	mux         *http.ServeMux
+	authService *auth.AuthService
 }
 
 type Config struct {
@@ -26,11 +25,7 @@ type Config struct {
 	AllowedRoots    []string
 	LogLevel        string
 	DataDir         string
-}
-
-type Session struct {
-	Token     string
-	CreatedAt time.Time
+	PasswordHash    string
 }
 
 func New(cfg *Config, version string, web fs.FS) (*Server, error) {
@@ -39,11 +34,13 @@ func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 	// Serve static files
 	mux.Handle("/", http.FileServer(http.FS(web)))
 
+	authService := auth.NewAuthService(cfg.PasswordHash)
+
 	return &Server{
-		cfg:      cfg,
-		version:  version,
-		mux:      mux,
-		sessions: make(map[string]*Session),
+		cfg:         cfg,
+		version:     version,
+		mux:         mux,
+		authService: authService,
 	}, nil
 }
 
@@ -51,11 +48,23 @@ func (s *Server) Handle(pattern string, handler http.HandlerFunc) {
 	s.mux.HandleFunc(pattern, handler)
 }
 
+func (s *Server) HandleProtected(pattern string, handler http.HandlerFunc) {
+	s.mux.HandleFunc(pattern, s.authService.RequireAuth(handler))
+}
+
 func (s *Server) GetVersion() string {
 	return s.version
 }
 
+func (s *Server) GetAuthService() *auth.AuthService {
+	return s.authService
+}
+
 func (s *Server) Start() error {
 	log.Printf("Listening on port %d", s.cfg.Port)
-	return http.ListenAndServe(fmt.Sprintf(":%d", s.cfg.Port), s.mux)
+	
+	// Wrap mux with security headers
+	handler := auth.SecurityHeaders(s.mux)
+	
+	return http.ListenAndServe(fmt.Sprintf(":%d", s.cfg.Port), handler)
 }

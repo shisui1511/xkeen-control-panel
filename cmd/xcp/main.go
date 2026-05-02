@@ -38,6 +38,7 @@ func main() {
 		AllowedRoots:    cfg.AllowedRoots,
 		LogLevel:        cfg.LogLevel,
 		DataDir:         cfg.DataDir,
+		PasswordHash:    cfg.Auth.PasswordHash,
 	}
 
 	webFS, _ := xkeencontrolpanel.GetWebFS()
@@ -46,19 +47,32 @@ func main() {
 		log.Fatalf("Failed to create server: %v", err)
 	}
 
-	// Register API handlers
-	api := handlers.NewAPI(cfg, srv)
-	srv.Handle("/api/version", api.Version)
-	srv.Handle("/api/config/list", api.ConfigList)
-	srv.Handle("/api/config/read", api.ConfigRead)
-	srv.Handle("/api/config/save", api.ConfigSave)
-	srv.Handle("/api/service/status", api.ServiceStatus)
-	srv.Handle("/api/service/control", api.ServiceControl)
-	srv.Handle("/api/logs/ws", api.LogsWebSocket)
-	srv.Handle("/api/mihomo/status", api.MihomoStatus)
-	srv.Handle("/api/mihomo/control", api.MihomoControl)
+	// Auth endpoints (public)
+	authSvc := srv.GetAuthService()
+	srv.Handle("/api/auth/login", authSvc.HandleLogin)
+	srv.Handle("/api/auth/logout", authSvc.HandleLogout)
+	srv.Handle("/api/auth/me", authSvc.HandleMe)
+	srv.Handle("/api/auth/setup", authSvc.HandleSetup)
 
-	log.Printf("XKeen Control Panel %s starting on :%d", Version, cfg.Port)
+	// Public endpoints
+	srv.Handle("/api/version", handlers.NewAPI(cfg, srv).Version)
+
+	// Protected API handlers
+	api := handlers.NewAPI(cfg, srv)
+	srv.HandleProtected("/api/config/list", api.ConfigList)
+	srv.HandleProtected("/api/config/read", api.ConfigRead)
+	srv.HandleProtected("/api/config/save", api.ConfigSave)
+	srv.HandleProtected("/api/service/status", api.ServiceStatus)
+	srv.HandleProtected("/api/service/control", api.ServiceControl)
+	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
+	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
+	srv.HandleProtected("/api/mihomo/control", api.MihomoControl)
+
+	log.Printf("XKeen Control Panel v%s starting...", Version)
+	if cfg.Auth.PasswordHash == "" {
+		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)
+	}
+	
 	if err := srv.Start(); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}

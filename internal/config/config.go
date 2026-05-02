@@ -20,9 +20,9 @@ type Config struct {
 
 type AuthConfig struct {
 	PasswordHash     string `json:"password_hash"`
-	SessionTimeout   int    `json:"session_timeout"`
+	SessionTimeout   int    `json:"session_timeout_hours"`
 	MaxLoginAttempts int    `json:"max_login_attempts"`
-	LockoutDuration  int    `json:"lockout_duration"`
+	LockoutDuration  int    `json:"lockout_duration_minutes"`
 }
 
 func Default() *Config {
@@ -41,6 +41,7 @@ func Default() *Config {
 			"/opt/var/log",
 		},
 		Auth: AuthConfig{
+			PasswordHash:     "",
 			SessionTimeout:   24,
 			MaxLoginAttempts: 5,
 			LockoutDuration:  5,
@@ -64,4 +65,9 @@ func Save(path string, cfg *Config) error {
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	os.MkdirAll(filepath.Dir(path), 0755)
 	return os.WriteFile(path, data, 0644)
+}
+
+func (c *Config) SavePasswordHash(path string, hash string) error {
+	c.Auth.PasswordHash = hash
+	return Save(path, c)
 }
