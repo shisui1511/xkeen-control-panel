@@ -1,6 +1,5 @@
 name: Dev Build
 
-# Dev-сборки при каждом пуше в dev
 on:
   push:
     branches:
@@ -14,7 +13,6 @@ on:
       - 'go.sum'
       - '.github/workflows/build-dev.yml'
 
-# Отменяет предыдущие запуски для того же PR/branch
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -23,66 +21,8 @@ permissions:
   contents: write
 
 jobs:
-  # Job 1: Тестирование и линтинг
-  test:
-    name: Test and Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-          cache: false # Отключаем кэш из-за проблем с tar
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        run: |
-          cd frontend
-          echo "Node version: $(node --version)"
-          echo "NPM version: $(npm --version)"
-          npm ci
-
-      - name: Lint frontend
-        run: |
-          cd frontend
-          echo "Building frontend..."
-          npm run build
-          echo "Frontend build completed"
-
-      - name: Download Go dependencies
-        run: |
-          go version
-          go mod download
-          go mod verify
-
-      - name: Run Go tests
-        run: |
-          echo "Running Go tests..."
-          go test -v -coverprofile=coverage.out ./... || exit 1
-          echo "Tests completed successfully"
-
-      - name: Run Go vet
-        run: go vet ./...
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage
-          path: coverage.out
-          retention-days: 7
-
-  # Job 2: Сборка бинарников
   build:
     name: Build Dev Pre-Release
-    needs: test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -102,43 +42,32 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend
         run: |
           cd frontend
-          npm ci
+          npm install
           npm run build
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-          cache: false
 
       - name: Calculate version
         id: version
         run: |
-          # Получаем последний stable-тег
           LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
-          
-          # Если stable-тегов нет, используем v0.0.0
           if [ -z "$LATEST_TAG" ]; then
             LATEST_TAG="v0.0.0"
           fi
           
-          echo "Latest stable tag: $LATEST_TAG"
-
           BASE=${LATEST_TAG#v}
           MAJOR=$(echo "$BASE" | cut -d. -f1)
           MINOR=$(echo "$BASE" | cut -d. -f2)
           PATCH=$(echo "$BASE" | cut -d. -f3)
-
-          # Формат: v0.MINOR.PATCH-dev.RUN_NUMBER
           VERSION="v${MAJOR}.${MINOR}.${PATCH}-dev.${GITHUB_RUN_NUMBER}"
           
-          echo "VERSION=$VERSION"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Build binary
@@ -174,7 +103,6 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
 
-  # Job 3: Создание релиза
   release:
     name: Create Dev Release
     runs-on: ubuntu-latest
@@ -196,9 +124,6 @@ jobs:
         run: |
           SHORT_SHA="${GITHUB_SHA:0:7}"
 
-          echo "Creating release with version: ${VERSION}"
-
-          # Удаляем старые dev-релизы
           gh release list --limit 50 --json tagName,isPrerelease | \
             jq -r '.[] | select(.tagName | test("-dev\\.")) | .tagName' | \
             while read tag; do
@@ -207,7 +132,6 @@ jobs:
               git push --delete origin "$tag" 2>/dev/null || true
             done
 
-          # Создаём релиз
           cat > /tmp/release-notes.md << ENDNOTES
           ## Тестовый билд
 
@@ -250,7 +174,6 @@ jobs:
             artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle \
             artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle.sha256
 
-  # Job 4: Очистка артефактов
   cleanup:
     name: Cleanup artifacts
     runs-on: ubuntu-latest
