@@ -117,8 +117,7 @@ jobs:
           MINOR=$(echo "$BASE" | cut -d. -f2)
           PATCH=$(echo "$BASE" | cut -d. -f3)
 
-          NEXT_PATCH=$((PATCH + 1))
-          VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}-dev.${GITHUB_RUN_NUMBER}"
+          VERSION="v${MAJOR}.${MINOR}.0-dev.${GITHUB_RUN_NUMBER}"
 
           echo "VERSION=$VERSION"
 

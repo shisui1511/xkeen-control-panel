@@ -117,6 +117,13 @@ jobs:
           if [ -z "$VERSION" ]; then
             VERSION="${GITHUB_REF#refs/tags/}"
           fi
+          
+          # Валидация формата: vMAJOR.MINOR.PATCH (без -dev)
+          if echo "$VERSION" | grep -qvE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "ERROR: Invalid stable version format: $VERSION"
+            echo "Expected: vMAJOR.MINOR.PATCH (e.g., v0.1.0)"
+            exit 1
+          fi
 
           cat > /tmp/release-notes.md << EOF
           ## XKeen Control Panel ${VERSION}
