@@ -1,34 +1,44 @@
 <script lang="ts">
-  let version = 'loading...'
-  
-  async function fetchVersion() {
+  import { onMount } from 'svelte'
+  import Login from './Login.svelte'
+  import Setup from './Setup.svelte'
+  import Dashboard from './Dashboard.svelte'
+  import './styles/global.css'
+
+  let authenticated = false
+  let setupRequired = false
+  let loading = true
+
+  async function checkAuth() {
     try {
-      const res = await fetch('/api/version')
+      const res = await fetch('/api/auth/me')
       const data = await res.json()
-      version = data.version
+      
+      authenticated = data.authenticated || false
+      setupRequired = data.setup_required || false
     } catch (e) {
-      version = 'error'
+      authenticated = false
+      setupRequired = false
+    } finally {
+      loading = false
     }
   }
-  
-  fetchVersion()
+
+  onMount(() => {
+    checkAuth()
+  })
 </script>
 
-<main>
-  <h1>⚡ XKeen Control Panel</h1>
-  <p>Version: {version}</p>
-  <p>Vite + Svelte + TypeScript работает!</p>
-</main>
-
-<style>
-  main {
-    text-align: center;
-    padding: 2rem;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  }
-  
-  h1 {
-    color: #333;
-    margin-bottom: 1rem;
-  }
-</style>
+{#if loading}
+  <div class="center-container">
+    <div class="card">
+      <p>Загрузка...</p>
+    </div>
+  </div>
+{:else if setupRequired}
+  <Setup />
+{:else if !authenticated}
+  <Login />
+{:else}
+  <Dashboard />
+{/if}
