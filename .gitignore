@@ -9,7 +9,8 @@ build/
 # Внутренняя документация разработчика
 doc/
 
-# Node.js files (это Go-проект, package-lock.json не нужен)
-package-lock.json
+# Node.js files (frontend build)
 node_modules/
+frontend/dist/
+frontend/node_modules/
 
