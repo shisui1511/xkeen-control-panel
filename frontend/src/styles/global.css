@@ -1,31 +1,45 @@
 :root {
   /* Light theme (default) */
+  --bg: #FAFAFA;
   --bg-page: #FAFAFA;
   --bg-card: #FFFFFF;
+  --card-bg: #FFFFFF;
   --fg-primary: #111111;
   --fg-secondary: #6B7280;
+  --text: #111111;
+  --text-secondary: #6B7280;
   --border: #E5E7EB;
+  --border-light: rgba(0,0,0,0.05);
   --accent: #2563EB;
+  --primary: #2563EB;
   --accent-hover: #1D4ED8;
   --success: #10B981;
   --warning: #F59E0B;
   --danger: #EF4444;
+  --hover: rgba(37, 99, 235, 0.05);
   --radius: 8px;
   --shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 
 [data-theme="dark"] {
   /* Dark theme */
+  --bg: #0D1117;
   --bg-page: #0D1117;
   --bg-card: #161B22;
+  --card-bg: #161B22;
   --fg-primary: #E6EDF3;
   --fg-secondary: #8B949E;
+  --text: #E6EDF3;
+  --text-secondary: #8B949E;
   --border: #30363D;
+  --border-light: rgba(255,255,255,0.05);
   --accent: #58A6FF;
+  --primary: #58A6FF;
   --accent-hover: #79C0FF;
   --success: #238636;
   --warning: #D29922;
   --danger: #DA3633;
+  --hover: rgba(88, 166, 255, 0.1);
   --shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
@@ -185,6 +199,11 @@ p {
 }
 
 /* Layout */
+.dashboard-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
 .container {
   max-width: 1200px;
   margin: 0 auto;
@@ -222,11 +241,16 @@ p {
 .nav-item {
   display: flex;
   align-items: center;
+  width: 100%;
   padding: 12px 24px;
   color: var(--fg-secondary);
   text-decoration: none;
   transition: all 0.15s ease;
   cursor: pointer;
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  text-align: left;
 }
 
 .nav-item:hover {
@@ -241,8 +265,8 @@ p {
 }
 
 .main-content {
-  margin-left: 240px;
-  padding: 32px;
+  flex: 1;
+  overflow-y: auto;
 }
 
 /* Status dot */

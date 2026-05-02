@@ -93,6 +93,23 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
+func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	cleanPath, err := a.pathVal.Validate(path)
+	if err != nil {
+		http.Error(w, err.Error(), 403)
+		return
+	}
+	
+	backups, err := a.configSvc.ListBackups(cleanPath)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	
+	json.NewEncoder(w).Encode(backups)
+}
+
 func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 	out, err := a.xkeenSvc.Status()
 	if err != nil {
