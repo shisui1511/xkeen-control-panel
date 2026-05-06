@@ -1,13 +1,37 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
 
-  let logs: string[] = []
+  interface LogEntry {
+    text: string
+    source: string
+    raw: string
+  }
+
+  let logs: LogEntry[] = []
   let ws: WebSocket | null = null
   let connected = false
   let paused = false
   let filter = ''
+  let sourceFilter = ''
   let autoScroll = true
   let logContainer: HTMLDivElement
+  let availableSources: string[] = []
+
+  function parseLogLine(raw: string): LogEntry {
+    const match = raw.match(/^\[([^\]]+)\]\s*(.*)$/)
+    if (match) {
+      return { source: match[1], text: match[2], raw }
+    }
+    return { source: '', text: raw, raw }
+  }
+
+  function updateSources() {
+    const sources = new Set<string>()
+    for (const log of logs) {
+      if (log.source) sources.add(log.source)
+    }
+    availableSources = Array.from(sources).sort()
+  }
 
   function connect() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -17,13 +41,14 @@
     
     ws.onopen = () => {
       connected = true
-      logs.push('[Подключено к серверу логов]')
+      logs = [...logs, { text: '[Подключено к серверу логов]', source: '', raw: '[Подключено к серверу логов]' }]
     }
     
     ws.onmessage = (event) => {
       if (!paused) {
-        logs.push(event.data)
-        logs = logs.slice(-1000) // Keep last 1000 lines
+        const entry = parseLogLine(event.data)
+        logs = [...logs, entry].slice(-1000)
+        updateSources()
         
         if (autoScroll && logContainer) {
           setTimeout(() => {
@@ -35,12 +60,12 @@
     
     ws.onerror = () => {
       connected = false
-      logs.push('[Ошибка подключения к серверу логов]')
+      logs = [...logs, { text: '[Ошибка подключения к серверу логов]', source: '', raw: '[Ошибка подключения к серверу логов]' }]
     }
     
     ws.onclose = () => {
       connected = false
-      logs.push('[Отключено от сервера логов]')
+      logs = [...logs, { text: '[Отключено от сервера логов]', source: '', raw: '[Отключено от сервера логов]' }]
     }
   }
 
@@ -53,6 +78,7 @@
 
   function clearLogs() {
     logs = []
+    availableSources = []
   }
 
   function togglePause() {
@@ -63,10 +89,26 @@
     autoScroll = !autoScroll
   }
 
-  function getFilteredLogs() {
-    if (!filter) return logs
-    const lowerFilter = filter.toLowerCase()
-    return logs.filter(log => log.toLowerCase().includes(lowerFilter))
+  function getFilteredLogs(): LogEntry[] {
+    let result = logs
+    if (filter) {
+      const lowerFilter = filter.toLowerCase()
+      result = result.filter(log => log.raw.toLowerCase().includes(lowerFilter))
+    }
+    if (sourceFilter) {
+      result = result.filter(log => log.source === sourceFilter)
+    }
+    return result
+  }
+
+  function getSourceColor(source: string): string {
+    if (!source) return 'var(--text-secondary)'
+    const colors = ['#58a6ff', '#a371f7', '#3fb950', '#d29922', '#f85149']
+    let hash = 0
+    for (let i = 0; i < source.length; i++) {
+      hash = source.charCodeAt(i) + ((hash << 5) - hash)
+    }
+    return colors[Math.abs(hash) % colors.length]
   }
 
   onMount(() => {
@@ -85,9 +127,21 @@
       <span class="status-indicator" class:connected>
         {connected ? '● Подключено' : '○ Отключено'}
       </span>
+      {#if availableSources.length > 0}
+        <span class="source-count">{availableSources.length} источника</span>
+      {/if}
     </div>
     
     <div class="toolbar-right">
+      {#if availableSources.length > 0}
+        <select bind:value={sourceFilter} class="source-select" title="Фильтр по источнику">
+          <option value="">Все источники</option>
+          {#each availableSources as source}
+            <option value={source}>{source}</option>
+          {/each}
+        </select>
+      {/if}
+
       <input 
         type="text" 
         placeholder="Фильтр..." 
@@ -119,13 +173,16 @@
     {#each getFilteredLogs() as log, i}
       <div class="log-line">
         <span class="log-number">{i + 1}</span>
-        <span class="log-text">{log}</span>
+        {#if log.source}
+          <span class="log-source" style="color: {getSourceColor(log.source)}">{log.source}</span>
+        {/if}
+        <span class="log-text">{log.text}</span>
       </div>
     {/each}
     
     {#if getFilteredLogs().length === 0}
       <div class="empty-state">
-        {filter ? 'Нет логов, соответствующих фильтру' : 'Нет логов'}
+        {filter || sourceFilter ? 'Нет логов, соответствующих фильтру' : 'Нет логов'}
       </div>
     {/if}
   </div>
@@ -147,6 +204,7 @@
     background: var(--card-bg);
     border-bottom: 1px solid var(--border);
     gap: 1rem;
+    flex-wrap: wrap;
   }
 
   .toolbar-left {
@@ -164,6 +222,7 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-wrap: wrap;
   }
 
   .status-indicator {
@@ -175,6 +234,14 @@
     color: var(--success, #28a745);
   }
 
+  .source-count {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    background: var(--bg);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+  }
+
   .filter-input {
     padding: 0.5rem;
     border: 1px solid var(--border);
@@ -183,6 +250,15 @@
     color: var(--text);
     font-size: 0.875rem;
     min-width: 200px;
+  }
+
+  .source-select {
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.875rem;
   }
 
   .btn-icon {
@@ -244,6 +320,7 @@
     gap: 1rem;
     padding: 0.25rem 0;
     border-bottom: 1px solid var(--border-light, rgba(0,0,0,0.05));
+    align-items: flex-start;
   }
 
   .log-number {
@@ -251,12 +328,25 @@
     min-width: 50px;
     text-align: right;
     user-select: none;
+    flex-shrink: 0;
+  }
+
+  .log-source {
+    font-weight: 600;
+    min-width: 120px;
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    padding: 0.125rem 0.375rem;
+    background: rgba(0,0,0,0.05);
+    border-radius: 3px;
+    text-align: center;
   }
 
   .log-text {
     color: var(--text);
     word-break: break-all;
     white-space: pre-wrap;
+    flex: 1;
   }
 
   .empty-state {
