@@ -66,7 +66,7 @@ jobs:
           MAJOR=$(echo "$BASE" | cut -d. -f1)
           MINOR=$(echo "$BASE" | cut -d. -f2)
           PATCH=$(echo "$BASE" | cut -d. -f3)
-          VERSION="v${MAJOR}.${MINOR}.${PATCH}-dev.${GITHUB_RUN_NUMBER}"
+          VERSION="v${MAJOR}.${MINOR}.${PATCH}-alpha.${GITHUB_RUN_NUMBER}"
           
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
@@ -125,17 +125,17 @@ jobs:
           SHORT_SHA="${GITHUB_SHA:0:7}"
 
           gh release list --limit 50 --json tagName,isPrerelease | \
-            jq -r '.[] | select(.tagName | test("-dev\\.")) | .tagName' | \
+            jq -r '.[] | select(.tagName | test("-alpha\\.")) | .tagName' | \
             while read tag; do
-              echo "Deleting old dev release: $tag"
+              echo "Deleting old alpha release: $tag"
               gh release delete "$tag" --yes 2>/dev/null || true
               git push --delete origin "$tag" 2>/dev/null || true
             done
 
           cat > /tmp/release-notes.md << ENDNOTES
-          ## Тестовый билд
+          ## Alpha-версия
 
-          **Это dev-сборка.** Используйте только для тестирования.
+          **Это alpha-сборка.** Используйте только для тестирования.
 
           | Свойство | Значение |
           |----------|----------|
@@ -166,7 +166,7 @@ jobs:
           ENDNOTES
 
           gh release create "${VERSION}" \
-            --title "Тестовый билд ${VERSION}" \
+            --title "Alpha ${VERSION}" \
             --notes-file /tmp/release-notes.md \
             --prerelease \
             artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64 \
