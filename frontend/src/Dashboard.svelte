@@ -6,6 +6,7 @@
   import Settings from './Settings.svelte'
   import Proxies from './Proxies.svelte'
   import Connections from './Connections.svelte'
+  import Rules from './Rules.svelte'
 
   let version = 'loading...'
   let loading = false
@@ -75,6 +76,9 @@
       <button class="nav-item" class:active={currentTab === 'connections'} on:click={() => switchTab('connections')}>
         🔗 Connections
       </button>
+      <button class="nav-item" class:active={currentTab === 'rules'} on:click={() => switchTab('rules')}>
+        📋 Rules
+      </button>
       <button class="nav-item" class:active={currentTab === 'services'} on:click={() => switchTab('services')}>
         🚀 Services
       </button>
@@ -126,6 +130,8 @@
       <Proxies />
     {:else if currentTab === 'connections'}
       <Connections />
+    {:else if currentTab === 'rules'}
+      <Rules />
     {:else if currentTab === 'services'}
       <Services />
     {:else if currentTab === 'settings'}
