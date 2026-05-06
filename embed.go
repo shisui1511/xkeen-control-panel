@@ -5,9 +5,9 @@ import (
 	"io/fs"
 )
 
-//go:embed frontend
+//go:embed frontend/dist
 var WebFS embed.FS
 
 func GetWebFS() (fs.FS, error) {
-	return fs.Sub(WebFS, "frontend")
+	return fs.Sub(WebFS, "frontend/dist")
 }

@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
 	"net/http"
 	"os/exec"
+	"strings"
 
 	"github.com/gorilla/websocket"
 	"github.com/user/xkeen-control-panel/internal/config"
@@ -159,7 +161,18 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	cmd := exec.Command("tail", "-f", "/opt/var/log/xkeen.log")
+	sources := a.cfg.LogSources
+	if len(sources) == 0 {
+		sources = []string{a.cfg.LogPath}
+	}
+
+	var cmd *exec.Cmd
+	if len(sources) == 1 {
+		cmd = exec.Command("tail", "-f", sources[0])
+	} else {
+		args := append([]string{"-f"}, sources...)
+		cmd = exec.Command("tail", args...)
+	}
 	stdout, _ := cmd.StdoutPipe()
 
 	if err := cmd.Start(); err != nil {
@@ -168,14 +181,19 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cmd.Process.Kill()
 
-	buf := make([]byte, 1024)
-	for {
-		n, err := stdout.Read(buf)
-		if err != nil {
-			break
+	scanner := bufio.NewScanner(stdout)
+	currentSource := ""
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "==> ") && strings.HasSuffix(line, " <==") {
+			currentSource = line[4 : len(line)-4]
+			continue
 		}
-		if n > 0 {
-			conn.WriteMessage(websocket.TextMessage, buf[:n])
+		if currentSource != "" && len(sources) > 1 {
+			line = "[" + currentSource + "] " + line
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(line+"\n")); err != nil {
+			break
 		}
 	}
 }

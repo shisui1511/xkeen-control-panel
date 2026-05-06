@@ -14,6 +14,8 @@ type Config struct {
 	MihomoBinary    string     `json:"mihomo_binary"`
 	AllowedRoots    []string   `json:"allowed_roots"`
 	LogLevel        string     `json:"log_level"`
+	LogPath         string     `json:"log_path"`
+	LogSources      []string   `json:"log_sources"`
 	DataDir         string     `json:"data_dir"`
 	Auth            AuthConfig `json:"auth"`
 }
@@ -34,6 +36,8 @@ func Default() *Config {
 		MihomoBinary:    "mihomo",
 		DataDir:         "/opt/etc/xkeen-control-panel",
 		LogLevel:        "info",
+		LogPath:         "/opt/var/log/xkeen.log",
+		LogSources:      []string{"/opt/var/log/xkeen.log"},
 		AllowedRoots: []string{
 			"/opt/etc/xray",
 			"/opt/etc/xkeen",
@@ -57,6 +61,13 @@ func Load(path string) (*Config, error) {
 	cfg := Default()
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, err
+	}
+	if len(cfg.LogSources) == 0 {
+		if cfg.LogPath != "" {
+			cfg.LogSources = []string{cfg.LogPath}
+		} else {
+			cfg.LogSources = []string{"/opt/var/log/xkeen.log"}
+		}
 	}
 	return cfg, nil
 }

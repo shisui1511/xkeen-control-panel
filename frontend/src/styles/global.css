@@ -267,6 +267,7 @@ p {
 .main-content {
   flex: 1;
   overflow-y: auto;
+  margin-left: 240px;
 }
 
 /* Status dot */
