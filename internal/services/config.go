@@ -86,3 +86,27 @@ func (s *ConfigService) rotateBackups(path string, keep int) {
 		os.Remove(backups[i])
 	}
 }
+
+func (s *ConfigService) Create(path string) error {
+	if s.Exists(path) {
+		return os.ErrExist
+	}
+	return os.WriteFile(path, []byte("{}"), 0644)
+}
+
+func (s *ConfigService) Delete(path string) error {
+	if !s.Exists(path) {
+		return os.ErrNotExist
+	}
+	return os.Remove(path)
+}
+
+func (s *ConfigService) Rename(oldPath, newPath string) error {
+	if !s.Exists(oldPath) {
+		return os.ErrNotExist
+	}
+	if s.Exists(newPath) {
+		return os.ErrExist
+	}
+	return os.Rename(oldPath, newPath)
+}

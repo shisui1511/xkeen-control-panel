@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -110,6 +111,93 @@ func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(backups)
+}
+
+func (a *API) ConfigCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+
+	path := r.URL.Query().Get("path")
+	cleanPath, err := a.pathVal.Validate(path)
+	if err != nil {
+		http.Error(w, err.Error(), 403)
+		return
+	}
+
+	if err := a.configSvc.Create(cleanPath); err != nil {
+		if os.IsExist(err) {
+			http.Error(w, "File already exists", 409)
+			return
+		}
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Write([]byte("OK"))
+}
+
+func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+
+	path := r.URL.Query().Get("path")
+	cleanPath, err := a.pathVal.Validate(path)
+	if err != nil {
+		http.Error(w, err.Error(), 403)
+		return
+	}
+
+	if err := a.configSvc.Delete(cleanPath); err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "File not found", 404)
+			return
+		}
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Write([]byte("OK"))
+}
+
+func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", 405)
+		return
+	}
+
+	oldPath := r.URL.Query().Get("old")
+	newPath := r.URL.Query().Get("new")
+
+	cleanOldPath, err := a.pathVal.Validate(oldPath)
+	if err != nil {
+		http.Error(w, err.Error(), 403)
+		return
+	}
+
+	cleanNewPath, err := a.pathVal.Validate(newPath)
+	if err != nil {
+		http.Error(w, err.Error(), 403)
+		return
+	}
+
+	if err := a.configSvc.Rename(cleanOldPath, cleanNewPath); err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "File not found", 404)
+			return
+		}
+		if os.IsExist(err) {
+			http.Error(w, "Target file already exists", 409)
+			return
+		}
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Write([]byte("OK"))
 }
 
 func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
