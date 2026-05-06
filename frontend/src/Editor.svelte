@@ -19,6 +19,12 @@
   let message = ''
   let backups: string[] = []
 
+  // CRUD modals
+  let showCreateModal = false
+  let showRenameModal = false
+  let newFileName = ''
+  let renameTarget = ''
+
   async function loadFiles() {
     try {
       const res = await fetch('/api/config/list')
@@ -41,10 +47,8 @@
       
       const content = await res.text()
       
-      // Determine language based on file extension
       const lang = path.endsWith('.yaml') || path.endsWith('.yml') ? yaml() : json()
       
-      // Create new editor state with basic setup extensions
       const state = EditorState.create({
         doc: content,
         extensions: [
@@ -164,6 +168,77 @@
     }
   }
 
+  async function createFile() {
+    if (!newFileName) return
+    
+    const csrfToken = localStorage.getItem('csrf_token')
+    const path = selectedFile ? selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + newFileName : '/opt/etc/xray/configs/' + newFileName
+    
+    try {
+      const res = await fetch(`/api/config/create?path=${encodeURIComponent(path)}`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      })
+      
+      if (!res.ok) throw new Error(await res.text())
+      
+      message = '✓ Файл создан'
+      showCreateModal = false
+      newFileName = ''
+      await loadFiles()
+      await loadFile(path)
+    } catch (e) {
+      message = 'Ошибка создания: ' + e.message
+    }
+  }
+
+  async function deleteFile() {
+    if (!selectedFile) return
+    if (!confirm(`Удалить файл ${selectedFile.split('/').pop()}?`)) return
+    
+    const csrfToken = localStorage.getItem('csrf_token')
+    
+    try {
+      const res = await fetch(`/api/config/delete?path=${encodeURIComponent(selectedFile)}`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      })
+      
+      if (!res.ok) throw new Error(await res.text())
+      
+      message = '✓ Файл удалён'
+      selectedFile = ''
+      backups = []
+      await loadFiles()
+    } catch (e) {
+      message = 'Ошибка удаления: ' + e.message
+    }
+  }
+
+  async function renameFile() {
+    if (!renameTarget || !selectedFile) return
+    
+    const csrfToken = localStorage.getItem('csrf_token')
+    const newPath = selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + renameTarget
+    
+    try {
+      const res = await fetch(`/api/config/rename?old=${encodeURIComponent(selectedFile)}&new=${encodeURIComponent(newPath)}`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      })
+      
+      if (!res.ok) throw new Error(await res.text())
+      
+      message = '✓ Файл переименован'
+      showRenameModal = false
+      renameTarget = ''
+      await loadFiles()
+      await loadFile(newPath)
+    } catch (e) {
+      message = 'Ошибка переименования: ' + e.message
+    }
+  }
+
   onMount(() => {
     loadFiles()
   })
@@ -177,7 +252,12 @@
 
 <div class="editor-page">
   <div class="sidebar">
-    <h3>Конфиги</h3>
+    <div class="sidebar-header">
+      <h3>Конфиги</h3>
+      <button class="btn-icon-small" on:click={() => { showCreateModal = true; newFileName = '' }} title="Создать файл">
+        +
+      </button>
+    </div>
     <div class="file-list">
       {#each files as file}
         <button 
@@ -209,7 +289,15 @@
     <div class="toolbar">
       <span class="file-name">{selectedFile ? selectedFile.split('/').pop() : 'Выберите файл'}</span>
       <div class="toolbar-actions">
-        <button on:click={saveFile} disabled={!selectedFile || saving}>
+        {#if selectedFile}
+          <button on:click={() => { showRenameModal = true; renameTarget = selectedFile.split('/').pop() || '' }} class="btn-secondary">
+            Переименовать
+          </button>
+          <button on:click={deleteFile} class="btn-danger">
+            Удалить
+          </button>
+        {/if}
+        <button on:click={saveFile} disabled={!selectedFile || saving} class="btn-primary">
           {saving ? 'Сохранение...' : 'Сохранить'}
         </button>
       </div>
@@ -233,6 +321,44 @@
   </div>
 </div>
 
+{#if showCreateModal}
+  <div class="modal-overlay" on:click={() => showCreateModal = false}>
+    <div class="modal" on:click|stopPropagation>
+      <h3>Создать файл</h3>
+      <input 
+        type="text" 
+        bind:value={newFileName}
+        placeholder="имя_файла.json"
+        class="input"
+        on:keydown={(e) => e.key === 'Enter' && createFile()}
+      />
+      <div class="modal-actions">
+        <button on:click={() => showCreateModal = false} class="btn-secondary">Отмена</button>
+        <button on:click={createFile} class="btn-primary">Создать</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showRenameModal}
+  <div class="modal-overlay" on:click={() => showRenameModal = false}>
+    <div class="modal" on:click|stopPropagation>
+      <h3>Переименовать файл</h3>
+      <input 
+        type="text" 
+        bind:value={renameTarget}
+        placeholder="новое_имя.json"
+        class="input"
+        on:keydown={(e) => e.key === 'Enter' && renameFile()}
+      />
+      <div class="modal-actions">
+        <button on:click={() => showRenameModal = false} class="btn-secondary">Отмена</button>
+        <button on:click={renameFile} class="btn-primary">Переименовать</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .editor-page {
     display: flex;
@@ -248,8 +374,15 @@
     overflow-y: auto;
   }
 
+  .sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+  }
+
   .sidebar h3 {
-    margin: 0 0 0.5rem 0;
+    margin: 0;
     font-size: 0.875rem;
     font-weight: 600;
     color: var(--text-secondary);
@@ -310,14 +443,18 @@
     color: var(--text);
   }
 
+  .toolbar-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
   .toolbar-actions button {
     padding: 0.5rem 1rem;
-    background: var(--primary);
-    color: white;
     border: none;
     border-radius: 4px;
     cursor: pointer;
     font-size: 0.875rem;
+    transition: opacity 0.2s;
   }
 
   .toolbar-actions button:hover:not(:disabled) {
@@ -327,6 +464,32 @@
   .toolbar-actions button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .btn-primary {
+    background: var(--primary);
+    color: white;
+  }
+
+  .btn-secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .btn-danger {
+    background: var(--danger);
+    color: white;
+  }
+
+  .btn-icon-small {
+    padding: 0.25rem 0.5rem;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1rem;
+    color: var(--text);
   }
 
   .message {
@@ -352,6 +515,50 @@
   .editor-container {
     flex: 1;
     overflow: auto;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: var(--shadow);
+  }
+
+  .modal h3 {
+    margin: 0 0 1rem 0;
+  }
+
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+
+  .input {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.875rem;
   }
 
   :global(.cm-editor) {
