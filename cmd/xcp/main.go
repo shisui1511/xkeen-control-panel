@@ -77,6 +77,7 @@ func main() {
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
 	srv.HandleProtected("/api/mihomo/control", api.MihomoControl)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
+	srv.HandleProtected("/api/system/stats", api.SystemStats)
 
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {

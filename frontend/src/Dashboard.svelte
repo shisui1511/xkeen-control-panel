@@ -14,6 +14,34 @@
   let currentTab = 'dashboard'
   let theme = document.documentElement.getAttribute('data-theme') || 'light'
 
+  interface SystemStats {
+    memory: { total: number; used: number; free: number }
+    load: [number, number, number]
+    uptime: { days: number; hours: number; minutes: number }
+    go_runtime: { goroutines: number; heap_alloc: number; heap_sys: number; num_gc: number }
+  }
+
+  let systemStats: SystemStats | null = null
+
+  async function fetchSystemStats() {
+    try {
+      const res = await fetch('/api/system/stats')
+      if (res.ok) {
+        systemStats = await res.json()
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  }
+
   function toggleTheme() {
     theme = theme === 'dark' ? 'light' : 'dark'
     document.documentElement.setAttribute('data-theme', theme)
@@ -55,6 +83,9 @@
 
   onMount(() => {
     fetchVersion()
+    fetchSystemStats()
+    const interval = setInterval(fetchSystemStats, 5000)
+    return () => clearInterval(interval)
   })
 </script>
 
@@ -110,18 +141,44 @@
           <h2>Информация о системе</h2>
           <p><strong>Версия:</strong> {version}</p>
           <p><strong>Статус:</strong> <span class="status-dot success"></span> Работает</p>
-          <p class="text-secondary">v0.2.0 — Config Editor + Unified Logs</p>
+          <p class="text-secondary">v0.3.0 — Mihomo Dashboard</p>
         </div>
 
+        {#if systemStats}
+          <div class="card mb-2">
+            <h2>System Stats</h2>
+            <div class="stats-grid">
+              <div class="stat-box">
+                <div class="stat-label">RAM</div>
+                <div class="stat-value">{formatBytes(systemStats.memory.used)} / {formatBytes(systemStats.memory.total)}</div>
+                <div class="stat-bar">
+                  <div class="stat-bar-fill" style="width: {(systemStats.memory.used / systemStats.memory.total * 100).toFixed(1)}%"></div>
+                </div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Load Average</div>
+                <div class="stat-value">{systemStats.load[0].toFixed(2)}</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Uptime</div>
+                <div class="stat-value">{systemStats.uptime.days}d {systemStats.uptime.hours}h {systemStats.uptime.minutes}m</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Go Goroutines</div>
+                <div class="stat-value">{systemStats.go_runtime.goroutines}</div>
+              </div>
+            </div>
+          </div>
+        {/if}
+
         <div class="card mb-2">
-          <h2>Быстрые действия</h2>
-          <p class="text-secondary mb-2">Основные функции будут доступны в следующих версиях:</p>
+          <h2>Релизы</h2>
           <ul style="list-style: none; padding-left: 0;">
-            <li>✅ Авторизация (bcrypt + HMAC cookie + CSRF)</li>
-            <li>✅ Минималистичный дизайн (light/dark темы)</li>
-            <li>🔄 v0.2.0 — Config Editor + Unified Logs (в разработке)</li>
-            <li>⏳ v0.3.0 — Mihomo Dashboard (proxies, connections, rules)</li>
+            <li>✅ v0.1.0 — Auth + Design Foundation</li>
+            <li>✅ v0.2.0 — Config Editor + Unified Logs</li>
+            <li>✅ v0.3.0 — Mihomo Dashboard (proxies, connections, rules, traffic)</li>
             <li>⏳ v0.4.0 — Subscriptions + Smart Proxy Manager</li>
+            <li>⏳ v0.5.0 — Network Tools + Notifications</li>
           </ul>
         </div>
 
