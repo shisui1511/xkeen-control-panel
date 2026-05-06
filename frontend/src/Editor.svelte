@@ -117,9 +117,13 @@
     try {
       const content = editorView.state.doc.toString()
       
+      const csrfToken = localStorage.getItem('csrf_token')
       const res = await fetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
         body: content
       })
       
