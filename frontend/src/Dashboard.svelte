@@ -2,10 +2,19 @@
   import { onMount } from 'svelte'
   import Editor from './Editor.svelte'
   import Logs from './Logs.svelte'
+  import Services from './Services.svelte'
+  import Settings from './Settings.svelte'
 
   let version = 'loading...'
   let loading = false
   let currentTab = 'dashboard'
+  let theme = document.documentElement.getAttribute('data-theme') || 'light'
+
+  function toggleTheme() {
+    theme = theme === 'dark' ? 'light' : 'dark'
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem('theme', theme)
+  }
 
   async function fetchVersion() {
     try {
@@ -46,9 +55,9 @@
 </script>
 
 <div class="dashboard-layout">
-  <div class="sidebar">
+  <div class="sidebar" style="display: flex; flex-direction: column;">
     <div class="sidebar-logo">⚡ XKeen CP</div>
-    <nav>
+    <nav style="flex: 1; overflow-y: auto;">
       <button class="nav-item" class:active={currentTab === 'dashboard'} on:click={() => switchTab('dashboard')}>
         📊 Dashboard
       </button>
@@ -65,6 +74,14 @@
         ⚙️ Settings
       </button>
     </nav>
+    <div style="border-top: 1px solid var(--border); padding: 0.5rem 0;">
+      <button class="nav-item" on:click={toggleTheme}>
+        {theme === 'dark' ? '☀️' : '🌙'} {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+      </button>
+      <button class="nav-item" on:click={handleLogout} disabled={loading}>
+        🚪 {loading ? 'Выход...' : 'Выйти'}
+      </button>
+    </div>
   </div>
 
   <div class="main-content">
@@ -92,31 +109,15 @@
           </ul>
         </div>
 
-        <div class="card">
-          <h3>Выход</h3>
-          <button
-            class="btn btn-danger"
-            on:click={handleLogout}
-            disabled={loading}
-          >
-            {loading ? 'Выход...' : 'Выйти из системы'}
-          </button>
-        </div>
       </div>
     {:else if currentTab === 'editor'}
       <Editor />
     {:else if currentTab === 'logs'}
       <Logs />
     {:else if currentTab === 'services'}
-      <div class="container">
-        <h1>Services</h1>
-        <p class="text-secondary">Управление сервисами (в разработке)</p>
-      </div>
+      <Services />
     {:else if currentTab === 'settings'}
-      <div class="container">
-        <h1>Settings</h1>
-        <p class="text-secondary">Настройки (в разработке)</p>
-      </div>
+      <Settings />
     {/if}
   </div>
 </div>
