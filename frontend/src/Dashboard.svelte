@@ -4,6 +4,7 @@
   import Logs from './Logs.svelte'
   import Services from './Services.svelte'
   import Settings from './Settings.svelte'
+  import Proxies from './Proxies.svelte'
 
   let version = 'loading...'
   let loading = false
@@ -67,6 +68,9 @@
       <button class="nav-item" class:active={currentTab === 'logs'} on:click={() => switchTab('logs')}>
         📋 Logs
       </button>
+      <button class="nav-item" class:active={currentTab === 'proxies'} on:click={() => switchTab('proxies')}>
+        🌐 Proxies
+      </button>
       <button class="nav-item" class:active={currentTab === 'services'} on:click={() => switchTab('services')}>
         🚀 Services
       </button>
@@ -114,6 +118,8 @@
       <Editor />
     {:else if currentTab === 'logs'}
       <Logs />
+    {:else if currentTab === 'proxies'}
+      <Proxies />
     {:else if currentTab === 'services'}
       <Services />
     {:else if currentTab === 'settings'}
