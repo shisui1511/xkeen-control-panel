@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/user/xkeen-control-panel/internal/auth"
+	"github.com/user/xkeen-control-panel/internal/middleware"
 )
 
 type Server struct {
@@ -64,8 +65,11 @@ func (s *Server) GetAuthService() *auth.AuthService {
 func (s *Server) Start() error {
 	log.Printf("Listening on port %d", s.cfg.Port)
 
-	// Wrap mux with security headers
-	handler := auth.SecurityHeaders(s.mux)
+	// Wrap mux with middleware chain
+	var handler http.Handler = s.mux
+	handler = auth.SecurityHeaders(handler)
+	handler = middleware.Recovery(handler)
+	handler = middleware.Logging(handler)
 
 	return http.ListenAndServe(fmt.Sprintf(":%d", s.cfg.Port), handler)
 }

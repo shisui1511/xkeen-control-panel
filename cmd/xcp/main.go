@@ -57,11 +57,13 @@ func main() {
 	srv.Handle("/api/auth/me", authSvc.HandleMe)
 	srv.Handle("/api/auth/setup", authSvc.HandleSetup)
 
-	// Public endpoints
-	srv.Handle("/api/version", handlers.NewAPI(cfg, srv).Version)
-
-	// Protected API handlers
+	// API handlers
 	api := handlers.NewAPI(cfg, srv)
+
+	// Public endpoints
+	srv.Handle("/api/version", api.Version)
+
+	// Protected endpoints
 	srv.HandleProtected("/api/config/list", api.ConfigList)
 	srv.HandleProtected("/api/config/read", api.ConfigRead)
 	srv.HandleProtected("/api/config/save", api.ConfigSave)
