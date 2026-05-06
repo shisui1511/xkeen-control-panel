@@ -39,6 +39,9 @@ func main() {
 		LogLevel:        cfg.LogLevel,
 		DataDir:         cfg.DataDir,
 		PasswordHash:    cfg.Auth.PasswordHash,
+		SavePasswordHash: func(hash string) error {
+			return cfg.SavePasswordHash(*configPath, hash)
+		},
 	}
 
 	webFS, _ := xkeencontrolpanel.GetWebFS()

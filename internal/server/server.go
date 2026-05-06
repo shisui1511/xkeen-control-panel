@@ -17,15 +17,16 @@ type Server struct {
 }
 
 type Config struct {
-	Port            int
-	XRayConfigDir   string
-	XKeenBinary     string
-	MihomoConfigDir string
-	MihomoBinary    string
-	AllowedRoots    []string
-	LogLevel        string
-	DataDir         string
-	PasswordHash    string
+	Port             int
+	XRayConfigDir    string
+	XKeenBinary      string
+	MihomoConfigDir  string
+	MihomoBinary     string
+	AllowedRoots     []string
+	LogLevel         string
+	DataDir          string
+	PasswordHash     string
+	SavePasswordHash func(string) error
 }
 
 func New(cfg *Config, version string, web fs.FS) (*Server, error) {
@@ -34,7 +35,7 @@ func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 	// Serve static files
 	mux.Handle("/", http.FileServer(http.FS(web)))
 
-	authService := auth.NewAuthService(cfg.PasswordHash)
+	authService := auth.NewAuthService(cfg.PasswordHash, cfg.SavePasswordHash)
 
 	return &Server{
 		cfg:         cfg,

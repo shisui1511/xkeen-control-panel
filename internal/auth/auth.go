@@ -25,6 +25,7 @@ type AuthService struct {
 	sessions      map[string]*Session
 	rateLimiter   *RateLimiter
 	mu            sync.RWMutex
+	onPasswordSet func(string) error
 }
 
 type Session struct {
@@ -45,7 +46,7 @@ type LoginAttempts struct {
 	LockedUntil time.Time
 }
 
-func NewAuthService(passwordHash string) *AuthService {
+func NewAuthService(passwordHash string, onPasswordSet func(string) error) *AuthService {
 	secret := make([]byte, 32)
 	rand.Read(secret)
 
@@ -54,6 +55,7 @@ func NewAuthService(passwordHash string) *AuthService {
 		sessionSecret: secret,
 		sessions:      make(map[string]*Session),
 		rateLimiter:   &RateLimiter{attempts: make(map[string]*LoginAttempts)},
+		onPasswordSet: onPasswordSet,
 	}
 }
 
@@ -337,6 +339,13 @@ func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.SetPasswordHash(hash)
+
+	if a.onPasswordSet != nil {
+		if err := a.onPasswordSet(hash); err != nil {
+			http.Error(w, "Failed to save password", http.StatusInternalServerError)
+			return
+		}
+	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
