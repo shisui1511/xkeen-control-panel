@@ -12,6 +12,7 @@ type Config struct {
 	XKeenBinary     string     `json:"xkeen_binary"`
 	MihomoConfigDir string     `json:"mihomo_config_dir"`
 	MihomoBinary    string     `json:"mihomo_binary"`
+	MihomoAPIURL    string     `json:"mihomo_api_url"`
 	AllowedRoots    []string   `json:"allowed_roots"`
 	LogLevel        string     `json:"log_level"`
 	LogPath         string     `json:"log_path"`
@@ -34,6 +35,7 @@ func Default() *Config {
 		XKeenBinary:     "xkeen",
 		MihomoConfigDir: "/opt/etc/mihomo",
 		MihomoBinary:    "mihomo",
+		MihomoAPIURL:    "http://localhost:9090",
 		DataDir:         "/opt/etc/xkeen-control-panel",
 		LogLevel:        "info",
 		LogPath:         "/opt/var/log/xkeen.log",

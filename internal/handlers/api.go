@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -322,4 +324,25 @@ func (a *API) MihomoControl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write([]byte(out))
+}
+
+func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
+	target, err := url.Parse(a.cfg.MihomoAPIURL)
+	if err != nil {
+		http.Error(w, "Invalid Mihomo API URL", 500)
+		return
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		http.Error(w, "Mihomo API unavailable: "+err.Error(), 502)
+	}
+
+	// Strip /api/mihomo/proxy prefix and forward the rest
+	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api/mihomo/proxy")
+	if r.URL.Path == "" {
+		r.URL.Path = "/"
+	}
+
+	proxy.ServeHTTP(w, r)
 }
