@@ -69,7 +69,10 @@ jobs:
           MAJOR=$(echo "$BASE" | cut -d. -f1)
           MINOR=$(echo "$BASE" | cut -d. -f2)
           PATCH=$(echo "$BASE" | cut -d. -f3)
-          VERSION="v${MAJOR}.${MINOR}.${PATCH}-rc.${GITHUB_RUN_NUMBER}"
+
+          # For pre-releases, increment minor version from latest stable
+          NEXT_MINOR=$((MINOR + 1))
+          VERSION="v${MAJOR}.${NEXT_MINOR}.0-rc.${GITHUB_RUN_NUMBER}"
           
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
