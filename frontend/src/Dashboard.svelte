@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { t, setLang } from './i18n'
   import Editor from './Editor.svelte'
   import Logs from './Logs.svelte'
   import Services from './Services.svelte'
@@ -94,39 +95,39 @@
     <div class="sidebar-logo">⚡ XKeen CP</div>
     <nav style="flex: 1; overflow-y: auto;">
       <button class="nav-item" class:active={currentTab === 'dashboard'} on:click={() => switchTab('dashboard')}>
-        📊 Dashboard
+        📊 {$t('nav.dashboard')}
       </button>
       <button class="nav-item" class:active={currentTab === 'editor'} on:click={() => switchTab('editor')}>
-        📝 Editor
+        📝 {$t('nav.editor')}
       </button>
       <button class="nav-item" class:active={currentTab === 'logs'} on:click={() => switchTab('logs')}>
-        📋 Logs
+        📋 {$t('nav.logs')}
       </button>
       <button class="nav-item" class:active={currentTab === 'proxies'} on:click={() => switchTab('proxies')}>
-        🌐 Proxies
+        🌐 {$t('nav.proxies')}
       </button>
       <button class="nav-item" class:active={currentTab === 'connections'} on:click={() => switchTab('connections')}>
-        🔗 Connections
+        🔗 {$t('nav.connections')}
       </button>
       <button class="nav-item" class:active={currentTab === 'rules'} on:click={() => switchTab('rules')}>
-        📋 Rules
+        📋 {$t('nav.rules')}
       </button>
       <button class="nav-item" class:active={currentTab === 'traffic'} on:click={() => switchTab('traffic')}>
-        📈 Traffic
+        📈 {$t('nav.traffic')}
       </button>
       <button class="nav-item" class:active={currentTab === 'services'} on:click={() => switchTab('services')}>
-        🚀 Services
+        🚀 {$t('nav.services')}
       </button>
       <button class="nav-item" class:active={currentTab === 'settings'} on:click={() => switchTab('settings')}>
-        ⚙️ Settings
+        ⚙️ {$t('nav.settings')}
       </button>
     </nav>
     <div style="border-top: 1px solid var(--border); padding: 0.5rem 0;">
       <button class="nav-item" on:click={toggleTheme}>
-        {theme === 'dark' ? '☀️' : '🌙'} {theme === 'dark' ? 'Светлая тема' : 'Тёмная тема'}
+        {theme === 'dark' ? '☀️' : '🌙'} {theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
       </button>
       <button class="nav-item" on:click={handleLogout} disabled={loading}>
-        🚪 {loading ? 'Выход...' : 'Выйти'}
+        🚪 {loading ? $t('auth.logging_out') : $t('auth.logout')}
       </button>
     </div>
   </div>
@@ -134,37 +135,37 @@
   <div class="main-content">
     {#if currentTab === 'dashboard'}
       <div class="container">
-        <h1>Dashboard</h1>
-        <p class="text-secondary mb-3">Добро пожаловать в панель управления XKeen</p>
+        <h1>{$t('nav.dashboard')}</h1>
+        <p class="text-secondary mb-3">{$t('dash.welcome')}</p>
 
         <div class="card mb-2">
-          <h2>Информация о системе</h2>
-          <p><strong>Версия:</strong> {version}</p>
-          <p><strong>Статус:</strong> <span class="status-dot success"></span> Работает</p>
+          <h2>{$t('dash.system_info')}</h2>
+          <p><strong>{$t('app.version')}:</strong> {version}</p>
+          <p><strong>{$t('app.status')}:</strong> <span class="status-dot success"></span> {$t('app.running')}</p>
           <p class="text-secondary">v0.3.0 — Mihomo Dashboard</p>
         </div>
 
         {#if systemStats}
           <div class="card mb-2">
-            <h2>System Stats</h2>
+            <h2>{$t('dash.system_stats')}</h2>
             <div class="stats-grid">
               <div class="stat-box">
-                <div class="stat-label">RAM</div>
+                <div class="stat-label">{$t('dash.ram')}</div>
                 <div class="stat-value">{formatBytes(systemStats.memory.used)} / {formatBytes(systemStats.memory.total)}</div>
                 <div class="stat-bar">
                   <div class="stat-bar-fill" style="width: {(systemStats.memory.used / systemStats.memory.total * 100).toFixed(1)}%"></div>
                 </div>
               </div>
               <div class="stat-box">
-                <div class="stat-label">Load Average</div>
+                <div class="stat-label">{$t('dash.load')}</div>
                 <div class="stat-value">{systemStats.load[0].toFixed(2)}</div>
               </div>
               <div class="stat-box">
-                <div class="stat-label">Uptime</div>
+                <div class="stat-label">{$t('dash.uptime')}</div>
                 <div class="stat-value">{systemStats.uptime.days}d {systemStats.uptime.hours}h {systemStats.uptime.minutes}m</div>
               </div>
               <div class="stat-box">
-                <div class="stat-label">Go Goroutines</div>
+                <div class="stat-label">{$t('dash.goroutines')}</div>
                 <div class="stat-value">{systemStats.go_runtime.goroutines}</div>
               </div>
             </div>
@@ -172,7 +173,7 @@
         {/if}
 
         <div class="card mb-2">
-          <h2>Релизы</h2>
+          <h2>{$t('dash.releases')}</h2>
           <ul style="list-style: none; padding-left: 0;">
             <li>✅ v0.1.0 — Auth + Design Foundation</li>
             <li>✅ v0.2.0 — Config Editor + Unified Logs</li>

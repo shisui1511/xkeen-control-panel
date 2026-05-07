@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { t } from './i18n'
 
   interface Rule {
     type: string
@@ -69,7 +70,7 @@
 </script>
 
 <div class="container">
-  <h1>Rules</h1>
+  <h1>{$t('rules.title')}</h1>
   <p class="text-secondary mb-3">Правила маршрутизации Mihomo</p>
 
   {#if error}
@@ -80,7 +81,7 @@
     <div class="filters">
       <input 
         type="text" 
-        placeholder="Поиск..." 
+        placeholder={$t('rules.search')} 
         bind:value={searchQuery}
         class="filter-input"
       />
@@ -92,7 +93,7 @@
       </select>
     </div>
     <button class="btn btn-secondary" on:click={fetchRules} disabled={loading}>
-      {loading ? 'Загрузка...' : '🔄 Обновить'}
+      {loading ? $t('app.loading') : '🔄 ' + $t('app.refresh')}
     </button>
   </div>
 
@@ -107,7 +108,7 @@
         <tr>
           <th>Тип</th>
           <th>Payload</th>
-          <th>Proxy</th>
+          <th>{$t('conn.proxy')}</th>
         </tr>
       </thead>
       <tbody>
@@ -126,7 +127,7 @@
         {:else}
           <tr>
             <td colspan="3" class="empty-cell">
-              {rules.length === 0 ? 'Нет правил' : 'Нет правил, соответствующих фильтру'}
+              {$t('rules.no_rules')}
             </td>
           </tr>
         {/each}

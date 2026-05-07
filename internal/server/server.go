@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/user/xkeen-control-panel/internal/auth"
+	"github.com/user/xkeen-control-panel/internal/i18n"
 	"github.com/user/xkeen-control-panel/internal/middleware"
 )
 
@@ -67,6 +68,7 @@ func (s *Server) Start() error {
 
 	// Wrap mux with middleware chain
 	var handler http.Handler = s.mux
+	handler = i18n.Middleware(handler)
 	handler = auth.SecurityHeaders(handler)
 	handler = middleware.Recovery(handler)
 	handler = middleware.Logging(handler)

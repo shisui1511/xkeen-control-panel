@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { t } from './i18n'
 
   interface Proxy {
     name: string
@@ -123,7 +124,7 @@
 </script>
 
 <div class="container">
-  <h1>Proxy Groups</h1>
+  <h1>{$t('proxies.title')}</h1>
   <p class="text-secondary mb-3">Управление прокси-группами Mihomo</p>
 
   {#if error}
@@ -132,16 +133,16 @@
 
   <div class="toolbar mb-2">
     <button class="btn btn-secondary" on:click={fetchProxies} disabled={loading}>
-      {loading ? 'Загрузка...' : '🔄 Обновить'}
+      {loading ? $t('app.loading') : '🔄 ' + $t('app.refresh')}
     </button>
     <button class="btn btn-primary" on:click={testLatency} disabled={testingLatency}>
-      {testingLatency ? 'Тестирование...' : '⚡ Latency Test'}
+      {testingLatency ? $t('proxies.testing') : '⚡ ' + $t('proxies.test_latency')}
     </button>
   </div>
 
   {#if groups.length === 0 && !loading}
     <div class="card">
-      <p class="text-secondary">Нет доступных proxy groups. Убедитесь, что Mihomo запущен и настроен.</p>
+      <p class="text-secondary">{$t('proxies.no_proxies')}</p>
     </div>
   {/if}
 

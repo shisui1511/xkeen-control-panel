@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { t } from './i18n'
   import Login from './Login.svelte'
   import Setup from './Setup.svelte'
   import Dashboard from './Dashboard.svelte'
@@ -32,7 +33,7 @@
 {#if loading}
   <div class="center-container">
     <div class="card">
-      <p>Загрузка...</p>
+      <p>{$t('app.loading')}</p>
     </div>
   </div>
 {:else if setupRequired}

@@ -1,11 +1,13 @@
 <script lang="ts">
+  import { t } from './i18n'
+
   let password = ''
   let error = ''
   let loading = false
 
   async function handleLogin() {
     if (!password) {
-      error = 'Введите пароль'
+      error = $t('auth.enter_password')
       return
     }
 
@@ -21,7 +23,7 @@
 
       if (!res.ok) {
         const text = await res.text()
-        throw new Error(text || 'Ошибка входа')
+        throw new Error(text || $t('auth.login_error'))
       }
 
       const data = await res.json()
@@ -46,21 +48,21 @@
 <div class="center-container">
   <div class="card" style="width: 100%; max-width: 400px;">
     <h1 class="text-center">⚡ XKeen Control Panel</h1>
-    <p class="text-center text-secondary mb-3">Вход в панель управления</p>
+    <p class="text-center text-secondary mb-3">{$t('auth.login')}</p>
 
     {#if error}
       <div class="alert alert-error">{error}</div>
     {/if}
 
     <div class="form-group">
-      <label class="form-label" for="password">Пароль</label>
+      <label class="form-label" for="password">{$t('auth.password')}</label>
       <input
         id="password"
         type="password"
         class="input"
         bind:value={password}
         on:keydown={handleKeydown}
-        placeholder="Введите пароль"
+        placeholder={$t('auth.enter_password')}
         disabled={loading}
       />
     </div>
@@ -71,7 +73,7 @@
       on:click={handleLogin}
       disabled={loading}
     >
-      {loading ? 'Вход...' : 'Войти'}
+      {loading ? $t('auth.logging_in') : $t('auth.login_btn')}
     </button>
   </div>
 </div>

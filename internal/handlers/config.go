@@ -35,21 +35,21 @@ func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		a.errorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 
 	path := r.URL.Query().Get("path")
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusForbidden)
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
 
 	data, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		a.errorResponse(w, a.t(r, "config.write_error"), http.StatusInternalServerError)
 		return
 	}
 
@@ -66,7 +66,7 @@ func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusForbidden)
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
 
@@ -81,20 +81,20 @@ func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) ConfigCreate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		a.errorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 
 	path := r.URL.Query().Get("path")
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusForbidden)
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
 
 	if err := a.configSvc.Create(cleanPath); err != nil {
 		if os.IsExist(err) {
-			a.errorResponse(w, "File already exists", http.StatusConflict)
+			a.errorResponse(w, a.t(r, "config.file_exists"), http.StatusConflict)
 			return
 		}
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
@@ -106,20 +106,20 @@ func (a *API) ConfigCreate(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		a.errorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 
 	path := r.URL.Query().Get("path")
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusForbidden)
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
 
 	if err := a.configSvc.Delete(cleanPath); err != nil {
 		if os.IsNotExist(err) {
-			a.errorResponse(w, "File not found", http.StatusNotFound)
+			a.errorResponse(w, a.t(r, "config.file_not_found"), http.StatusNotFound)
 			return
 		}
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
@@ -131,7 +131,7 @@ func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		a.errorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -140,23 +140,23 @@ func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 
 	cleanOldPath, err := a.pathVal.Validate(oldPath)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusForbidden)
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
 
 	cleanNewPath, err := a.pathVal.Validate(newPath)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusForbidden)
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
 		return
 	}
 
 	if err := a.configSvc.Rename(cleanOldPath, cleanNewPath); err != nil {
 		if os.IsNotExist(err) {
-			a.errorResponse(w, "File not found", http.StatusNotFound)
+			a.errorResponse(w, a.t(r, "config.file_not_found"), http.StatusNotFound)
 			return
 		}
 		if os.IsExist(err) {
-			a.errorResponse(w, "Target file already exists", http.StatusConflict)
+			a.errorResponse(w, a.t(r, "config.file_exists"), http.StatusConflict)
 			return
 		}
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)

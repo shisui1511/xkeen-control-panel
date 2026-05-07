@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { t } from './i18n'
 
-  let xkeenStatus = 'Загрузка...'
-  let mihomoStatus = 'Загрузка...'
+  let xkeenStatus = ''
+  let mihomoStatus = ''
   let loading = false
   let actionLoading: Record<string, boolean> = {}
 
@@ -12,11 +13,11 @@
         fetch('/api/service/status'),
         fetch('/api/mihomo/status')
       ])
-      xkeenStatus = xkeenRes.ok ? await xkeenRes.text() : 'Ошибка'
-      mihomoStatus = mihomoRes.ok ? await mihomoRes.text() : 'Ошибка'
+      xkeenStatus = xkeenRes.ok ? await xkeenRes.text() : $t('app.error')
+      mihomoStatus = mihomoRes.ok ? await mihomoRes.text() : $t('app.error')
     } catch (e) {
-      xkeenStatus = 'Недоступно'
-      mihomoStatus = 'Недоступно'
+      xkeenStatus = $t('app.unavailable')
+      mihomoStatus = $t('app.unavailable')
     }
   }
 
@@ -40,7 +41,7 @@
       // Обновляем статус после действия
       await fetchStatus()
     } catch (e: any) {
-      alert(`Ошибка: ${e.message}`)
+      alert(`${$t('svc.action_error')}: ${e.message}`)
     } finally {
       actionLoading[key] = false
     }
@@ -52,40 +53,40 @@
 </script>
 
 <div class="container">
-  <h1>Управление сервисами</h1>
-  <p class="text-secondary mb-3">Запуск, остановка и перезапуск XKeen и Mihomo</p>
+  <h1>{$t('svc.title')}</h1>
+  <p class="text-secondary mb-3">{$t('svc.subtitle')}</p>
 
   <div class="services-grid">
     <!-- XKeen Card -->
     <div class="card">
       <div class="service-header">
-        <h2>XKeen (Xray)</h2>
+        <h2>{$t('svc.xkeen')}</h2>
         <span class="status-badge" class:running={xkeenStatus.includes('running') || xkeenStatus.includes('работает') || xkeenStatus.includes('активен')}>
-          {xkeenStatus}
+          {xkeenStatus || $t('app.loading')}
         </span>
       </div>
-      <p class="text-secondary mb-2">Основной прокси-сервис на базе Xray-core</p>
+      <p class="text-secondary mb-2">{$t('svc.xkeen_desc')}</p>
       <div class="actions">
         <button 
           class="btn btn-primary" 
           on:click={() => controlService('xkeen', 'start')}
           disabled={actionLoading['xkeen-start']}
         >
-          {actionLoading['xkeen-start'] ? 'Запуск...' : '▶ Запустить'}
+          {actionLoading['xkeen-start'] ? $t('svc.starting') : '▶ ' + $t('app.start')}
         </button>
         <button 
           class="btn btn-secondary" 
           on:click={() => controlService('xkeen', 'stop')}
           disabled={actionLoading['xkeen-stop']}
         >
-          {actionLoading['xkeen-stop'] ? 'Остановка...' : '⏹ Остановить'}
+          {actionLoading['xkeen-stop'] ? $t('svc.stopping') : '⏹ ' + $t('app.stop')}
         </button>
         <button 
           class="btn btn-secondary" 
           on:click={() => controlService('xkeen', 'restart')}
           disabled={actionLoading['xkeen-restart']}
         >
-          {actionLoading['xkeen-restart'] ? 'Перезапуск...' : '🔄 Перезапустить'}
+          {actionLoading['xkeen-restart'] ? $t('svc.restarting') : '🔄 ' + $t('app.restart')}
         </button>
       </div>
     </div>
@@ -93,42 +94,42 @@
     <!-- Mihomo Card -->
     <div class="card">
       <div class="service-header">
-        <h2>Mihomo (Clash)</h2>
+        <h2>{$t('svc.mihomo')}</h2>
         <span class="status-badge" class:running={mihomoStatus.includes('running') || mihomoStatus.includes('pid')}>
-          {mihomoStatus}
+          {mihomoStatus || $t('app.loading')}
         </span>
       </div>
-      <p class="text-secondary mb-2">Альтернативный прокси на базе Mihomo (Clash.Meta)</p>
+      <p class="text-secondary mb-2">{$t('svc.mihomo_desc')}</p>
       <div class="actions">
         <button 
           class="btn btn-primary" 
           on:click={() => controlService('mihomo', 'start')}
           disabled={actionLoading['mihomo-start']}
         >
-          {actionLoading['mihomo-start'] ? 'Запуск...' : '▶ Запустить'}
+          {actionLoading['mihomo-start'] ? $t('svc.starting') : '▶ ' + $t('app.start')}
         </button>
         <button 
           class="btn btn-secondary" 
           on:click={() => controlService('mihomo', 'stop')}
           disabled={actionLoading['mihomo-stop']}
         >
-          {actionLoading['mihomo-stop'] ? 'Остановка...' : '⏹ Остановить'}
+          {actionLoading['mihomo-stop'] ? $t('svc.stopping') : '⏹ ' + $t('app.stop')}
         </button>
         <button 
           class="btn btn-secondary" 
           on:click={() => controlService('mihomo', 'restart')}
           disabled={actionLoading['mihomo-restart']}
         >
-          {actionLoading['mihomo-restart'] ? 'Перезапуск...' : '🔄 Перезапустить'}
+          {actionLoading['mihomo-restart'] ? $t('svc.restarting') : '🔄 ' + $t('app.restart')}
         </button>
       </div>
     </div>
   </div>
 
   <div class="card mt-2">
-    <h3>Обновить статус</h3>
+    <h3>{$t('svc.refresh_status')}</h3>
     <button class="btn btn-secondary" on:click={fetchStatus} disabled={loading}>
-      {loading ? 'Обновление...' : '🔄 Обновить'}
+      {loading ? $t('app.loading') : '🔄 ' + $t('app.refresh')}
     </button>
   </div>
 </div>

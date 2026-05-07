@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
+  import { t } from './i18n'
 
   interface Connection {
     id: string
@@ -111,8 +112,8 @@
 </script>
 
 <div class="container">
-  <h1>Connections</h1>
-  <p class="text-secondary mb-3">Активные соединения через прокси</p>
+  <h1>{$t('conn.title')}</h1>
+  <p class="text-secondary mb-3">{$t('conn.active')}</p>
 
   {#if error}
     <div class="alert alert-error mb-2">{error}</div>
@@ -120,14 +121,14 @@
 
   <div class="toolbar mb-2">
     <div class="filters">
-      <input type="text" placeholder="Source IP" bind:value={filterSource} class="filter-input" />
-      <input type="text" placeholder="Destination" bind:value={filterDest} class="filter-input" />
-      <input type="text" placeholder="Rule" bind:value={filterRule} class="filter-input" />
-      <input type="text" placeholder="Proxy" bind:value={filterProxy} class="filter-input" />
+      <input type="text" placeholder={$t('conn.source')} bind:value={filterSource} class="filter-input" />
+      <input type="text" placeholder={$t('conn.destination')} bind:value={filterDest} class="filter-input" />
+      <input type="text" placeholder={$t('conn.rule')} bind:value={filterRule} class="filter-input" />
+      <input type="text" placeholder={$t('conn.proxy')} bind:value={filterProxy} class="filter-input" />
     </div>
     <div class="actions">
       <button class="btn btn-secondary" on:click={fetchConnections} disabled={loading}>
-        {loading ? 'Загрузка...' : '🔄 Обновить'}
+        {loading ? $t('app.loading') : '🔄 ' + $t('app.refresh')}
       </button>
       <button class="btn btn-icon" class:active={autoRefresh} on:click={toggleAutoRefresh} title="Автообновление">
         {autoRefresh ? '⏸' : '▶'}
@@ -144,12 +145,12 @@
     <table class="connections-table">
       <thead>
         <tr>
-          <th>Source</th>
-          <th>Destination</th>
-          <th>Rule</th>
-          <th>Proxy</th>
-          <th>Up</th>
-          <th>Down</th>
+          <th>{$t('conn.source')}</th>
+          <th>{$t('conn.destination')}</th>
+          <th>{$t('conn.rule')}</th>
+          <th>{$t('conn.proxy')}</th>
+          <th>{$t('traffic.upload')}</th>
+          <th>{$t('traffic.download')}</th>
           <th></th>
         </tr>
       </thead>
@@ -180,7 +181,7 @@
             <td class="bytes">{formatBytes(conn.upload)}</td>
             <td class="bytes">{formatBytes(conn.download)}</td>
             <td>
-              <button class="btn-close" on:click={() => closeConnection(conn.id)} title="Закрыть">
+              <button class="btn-close" on:click={() => closeConnection(conn.id)} title={$t('app.close')}>
                 ✕
               </button>
             </td>
@@ -188,7 +189,7 @@
         {:else}
           <tr>
             <td colspan="7" class="empty-cell">
-              {connections.length === 0 ? 'Нет активных соединений' : 'Нет соединений, соответствующих фильтру'}
+              {$t('conn.no_connections')}
             </td>
           </tr>
         {/each}

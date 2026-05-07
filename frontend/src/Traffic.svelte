@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
+  import { t } from './i18n'
 
   interface TrafficPoint {
     up: number
@@ -98,12 +99,12 @@
     ctx.fillStyle = '#58a6ff'
     ctx.fillRect(width - 120, 10, 12, 12)
     ctx.fillStyle = 'var(--text)'
-    ctx.fillText('Download', width - 105, 21)
+    ctx.fillText($t('traffic.download'), width - 105, 21)
     
     ctx.fillStyle = '#3fb950'
     ctx.fillRect(width - 120, 28, 12, 12)
     ctx.fillStyle = 'var(--text)'
-    ctx.fillText('Upload', width - 105, 39)
+    ctx.fillText($t('traffic.upload'), width - 105, 39)
   }
 
   function connect() {
@@ -174,20 +175,20 @@
 
 <div class="traffic-page">
   <div class="container">
-    <h1>Traffic</h1>
-    <p class="text-secondary mb-3">Real-time трафик через прокси</p>
+  <h1>{$t('traffic.title')}</h1>
+  <p class="text-secondary mb-3">{$t('traffic.realtime')}</p>
 
     <div class="stats-grid mb-2">
       <div class="card stat-card">
-        <div class="stat-label">Upload</div>
+        <div class="stat-label">{$t('traffic.upload')}</div>
         <div class="stat-value" style="color: #3fb950">{formatSpeed(totalUp)}</div>
       </div>
       <div class="card stat-card">
-        <div class="stat-label">Download</div>
+        <div class="stat-label">{$t('traffic.download')}</div>
         <div class="stat-value" style="color: #58a6ff">{formatSpeed(totalDown)}</div>
       </div>
       <div class="card stat-card">
-        <div class="stat-label">Статус</div>
+        <div class="stat-label">{$t('app.status')}</div>
         <div class="stat-value" style="color: {connected ? 'var(--success)' : 'var(--danger)'}">
           {connected ? '● Live' : '○ Offline'}
         </div>

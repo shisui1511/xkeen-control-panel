@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from './i18n'
+
   let password = ''
   let confirmPassword = ''
   let error = ''
@@ -8,17 +10,17 @@
     error = ''
 
     if (!password || !confirmPassword) {
-      error = 'Заполните все поля'
+      error = $t('auth.fill_all')
       return
     }
 
     if (password.length < 8) {
-      error = 'Пароль должен быть не менее 8 символов'
+      error = $t('auth.password_short')
       return
     }
 
     if (password !== confirmPassword) {
-      error = 'Пароли не совпадают'
+      error = $t('auth.password_mismatch')
       return
     }
 
@@ -33,7 +35,7 @@
 
       if (!res.ok) {
         const text = await res.text()
-        throw new Error(text || 'Ошибка установки пароля')
+        throw new Error(text || $t('auth.setup_error'))
       }
 
       // После успешной установки — автоматический вход
@@ -58,9 +60,9 @@
 
 <div class="center-container">
   <div class="card" style="width: 100%; max-width: 400px;">
-    <h1 class="text-center">🔐 Первичная настройка</h1>
+    <h1 class="text-center">🔐 {$t('auth.setup_title')}</h1>
     <p class="text-center text-secondary mb-3">
-      Установите пароль для доступа к панели управления
+      {$t('auth.setup_desc')}
     </p>
 
     {#if error}
@@ -68,25 +70,25 @@
     {/if}
 
     <div class="form-group">
-      <label class="form-label" for="password">Пароль</label>
+      <label class="form-label" for="password">{$t('auth.password')}</label>
       <input
         id="password"
         type="password"
         class="input"
         bind:value={password}
-        placeholder="Минимум 8 символов"
+        placeholder={$t('auth.password_min')}
         disabled={loading}
       />
     </div>
 
     <div class="form-group">
-      <label class="form-label" for="confirm">Подтвердите пароль</label>
+      <label class="form-label" for="confirm">{$t('auth.confirm_password')}</label>
       <input
         id="confirm"
         type="password"
         class="input"
         bind:value={confirmPassword}
-        placeholder="Повторите пароль"
+        placeholder={$t('auth.repeat_password')}
         disabled={loading}
       />
     </div>
@@ -97,7 +99,7 @@
       on:click={handleSetup}
       disabled={loading}
     >
-      {loading ? 'Установка...' : 'Установить пароль'}
+      {loading ? $t('auth.setting_up') : $t('auth.setup_btn')}
     </button>
   </div>
 </div>

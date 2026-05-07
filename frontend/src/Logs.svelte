@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
+  import { t } from './i18n'
 
   interface LogEntry {
     text: string
@@ -123,7 +124,7 @@
 <div class="logs-page">
   <div class="toolbar">
     <div class="toolbar-left">
-      <h2>Логи</h2>
+      <h2>{$t('logs.title')}</h2>
       <span class="status-indicator" class:connected>
         {connected ? '● Подключено' : '○ Отключено'}
       </span>
@@ -144,12 +145,12 @@
 
       <input 
         type="text" 
-        placeholder="Фильтр..." 
+        placeholder={$t('logs.filter')} 
         bind:value={filter}
         class="filter-input"
       />
       
-      <button on:click={togglePause} class="btn-icon" title={paused ? 'Возобновить' : 'Пауза'}>
+      <button on:click={togglePause} class="btn-icon" title={paused ? $t('logs.resume') : $t('logs.pause')}>
         {paused ? '▶' : '⏸'}
       </button>
       
@@ -157,7 +158,7 @@
         ⬇
       </button>
       
-      <button on:click={clearLogs} class="btn-icon" title="Очистить">
+      <button on:click={clearLogs} class="btn-icon" title={$t('logs.clear')}>
         🗑
       </button>
       

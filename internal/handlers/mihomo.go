@@ -18,7 +18,7 @@ func (a *API) MihomoStatus(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) MihomoControl(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		a.errorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 	action := r.URL.Query().Get("action")
@@ -34,7 +34,7 @@ func (a *API) MihomoControl(w http.ResponseWriter, r *http.Request) {
 	case "restart":
 		out, err = a.mihomoSvc.Restart()
 	default:
-		a.errorResponse(w, "Invalid action", http.StatusBadRequest)
+		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
 		return
 	}
 
@@ -48,13 +48,13 @@ func (a *API) MihomoControl(w http.ResponseWriter, r *http.Request) {
 func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 	target, err := url.Parse(a.cfg.MihomoAPIURL)
 	if err != nil {
-		a.errorResponse(w, "Invalid Mihomo API URL", http.StatusInternalServerError)
+		a.errorResponse(w, a.t(r, "mihomo.api_error"), http.StatusInternalServerError)
 		return
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		http.Error(w, "Mihomo API unavailable: "+err.Error(), http.StatusBadGateway)
+		http.Error(w, a.t(r, "mihomo.not_running")+": "+err.Error(), http.StatusBadGateway)
 	}
 
 	// Strip /api/mihomo/proxy prefix and forward the rest

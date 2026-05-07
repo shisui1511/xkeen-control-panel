@@ -1,0 +1,43 @@
+{
+  "auth.invalid_credentials": "Неверные учетные данные",
+  "auth.session_expired": "Сессия истекла",
+  "auth.csrf_invalid": "Неверный CSRF токен",
+  "auth.rate_limited": "Слишком много попыток. Попробуйте позже.",
+  "auth.password_required": "Пароль обязателен",
+  "auth.password_too_short": "Пароль должен быть не менее 8 символов",
+  "auth.setup_complete": "Настройка завершена",
+  "auth.logout_success": "Выход выполнен",
+
+  "config.file_not_found": "Файл не найден",
+  "config.read_error": "Ошибка чтения файла",
+  "config.write_error": "Ошибка записи файла",
+  "config.save_success": "Файл сохранен",
+  "config.create_success": "Файл создан",
+  "config.delete_success": "Файл удален",
+  "config.rename_success": "Файл переименован",
+  "config.path_not_allowed": "Путь не разрешен",
+  "config.invalid_path": "Неверный путь",
+  "config.file_exists": "Файл уже существует",
+  "config.backup_restored": "Backup восстановлен",
+
+  "service.start_success": "Сервис запущен",
+  "service.stop_success": "Сервис остановлен",
+  "service.restart_success": "Сервис перезапущен",
+  "service.status_running": "работает",
+  "service.status_stopped": "остановлен",
+  "service.action_required": "Укажите действие",
+  "service.invalid_action": "Неверное действие",
+
+  "mihomo.not_running": "Mihomo не запущен",
+  "mihomo.api_error": "Ошибка API Mihomo",
+
+  "system.stats_error": "Ошибка получения статистики",
+  "system.unsupported_os": "Неподдерживаемая ОС",
+
+  "error.internal": "Внутренняя ошибка сервера",
+  "error.bad_request": "Неверный запрос",
+  "error.unauthorized": "Требуется авторизация",
+  "error.forbidden": "Доступ запрещен",
+  "error.not_found": "Не найдено",
+  "error.method_not_allowed": "Метод не поддерживается"
+}

@@ -1,0 +1,43 @@
+{
+  "auth.invalid_credentials": "Invalid credentials",
+  "auth.session_expired": "Session expired",
+  "auth.csrf_invalid": "Invalid CSRF token",
+  "auth.rate_limited": "Too many attempts. Please try again later.",
+  "auth.password_required": "Password is required",
+  "auth.password_too_short": "Password must be at least 8 characters",
+  "auth.setup_complete": "Setup complete",
+  "auth.logout_success": "Logged out successfully",
+
+  "config.file_not_found": "File not found",
+  "config.read_error": "Error reading file",
+  "config.write_error": "Error writing file",
+  "config.save_success": "File saved",
+  "config.create_success": "File created",
+  "config.delete_success": "File deleted",
+  "config.rename_success": "File renamed",
+  "config.path_not_allowed": "Path not allowed",
+  "config.invalid_path": "Invalid path",
+  "config.file_exists": "File already exists",
+  "config.backup_restored": "Backup restored",
+
+  "service.start_success": "Service started",
+  "service.stop_success": "Service stopped",
+  "service.restart_success": "Service restarted",
+  "service.status_running": "running",
+  "service.status_stopped": "stopped",
+  "service.action_required": "Action required",
+  "service.invalid_action": "Invalid action",
+
+  "mihomo.not_running": "Mihomo is not running",
+  "mihomo.api_error": "Mihomo API error",
+
+  "system.stats_error": "Error getting statistics",
+  "system.unsupported_os": "Unsupported OS",
+
+  "error.internal": "Internal server error",
+  "error.bad_request": "Bad request",
+  "error.unauthorized": "Authorization required",
+  "error.forbidden": "Access forbidden",
+  "error.not_found": "Not found",
+  "error.method_not_allowed": "Method not allowed"
+}

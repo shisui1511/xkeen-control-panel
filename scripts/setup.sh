@@ -24,6 +24,30 @@ ok()    { printf "${GREEN}✅ %s${NC}\n" "$1"; }
 warn()  { printf "${YELLOW}⚠  %s${NC}\n" "$1"; }
 error() { printf "${RED}❌ %s${NC}\n" "$1"; }
 
+# Detect system language
+detect_lang() {
+  # Try to get locale from system
+  SYS_LANG="en"
+  if command -v locale >/dev/null 2>&1; then
+    LOCALE=$(locale -k LC_MESSAGES 2>/dev/null | grep -o 'ru_RU\|ru' || echo "")
+    if [ -n "$LOCALE" ]; then
+      SYS_LANG="ru"
+    fi
+  fi
+  # Check environment variables
+  if [ -n "$LANG" ]; then
+    case "$LANG" in
+      ru_*|ru) SYS_LANG="ru" ;;
+    esac
+  fi
+  if [ -n "$LC_ALL" ]; then
+    case "$LC_ALL" in
+      ru_*|ru) SYS_LANG="ru" ;;
+    esac
+  fi
+  echo "$SYS_LANG"
+}
+
 # Detect architecture
 detect_arch() {
   ARCH=$(uname -m)
@@ -112,6 +136,7 @@ install_binary() {
 # Create default config
 create_config() {
   CONFIG_FILE="$INSTALL_DIR/config.json"
+  SYS_LANG=$(detect_lang)
   if [ ! -f "$CONFIG_FILE" ]; then
     cat > "$CONFIG_FILE" <<EOF
 {
@@ -120,7 +145,8 @@ create_config() {
   "xkeen_binary": "xkeen",
   "mihomo_config_dir": "/opt/etc/mihomo",
   "mihomo_binary": "mihomo",
-  "data_dir": "$INSTALL_DIR"
+  "data_dir": "$INSTALL_DIR",
+  "lang": "$SYS_LANG"
 }
 EOF
     ok "Created default config: $CONFIG_FILE"
@@ -173,11 +199,14 @@ get_version() {
 print_banner() {
   printf "${CYAN}"
   cat <<'EOF'
-   _  __  __ __                       __  __ ____
-  | |/ / / //_/___   ___   ____      / / / //  _/
-  |   / / ,<  / _ \ / _ \ / __ \    / / / / / /
- /   | / /| |/  __//  __// / / /   / /_/ /_/ /
-/_/|_|/_/ |_|\___/ \___//_/ /_/    \____//___/
+ █████ █████ █████   ████                                   █████████  ███████████ 
+▒▒███ ▒▒███ ▒▒███   ███▒                                   ███▒▒▒▒▒███▒▒███▒▒▒▒▒███
+ ▒▒███ ███   ▒███  ███     ██████   ██████  ████████      ███     ▒▒▒  ▒███    ▒███
+  ▒▒█████    ▒███████     ███▒▒███ ███▒▒███▒▒███▒▒███    ▒███          ▒██████████ 
+   ███▒███   ▒███▒▒███   ▒███████ ▒███████  ▒███ ▒███    ▒███          ▒███▒▒▒▒▒▒  
+  ███ ▒▒███  ▒███ ▒▒███  ▒███▒▒▒  ▒███▒▒▒   ▒███ ▒███    ▒▒███     ███ ▒███        
+ █████ █████ █████ ▒▒████▒▒██████ ▒▒██████  ████ █████    ▒▒█████████  █████       
+▒▒▒▒▒ ▒▒▒▒▒ ▒▒▒▒▒   ▒▒▒▒  ▒▒▒▒▒▒   ▒▒▒▒▒▒  ▒▒▒▒ ▒▒▒▒▒      ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒        
 EOF
   printf "${NC}\n"
 }

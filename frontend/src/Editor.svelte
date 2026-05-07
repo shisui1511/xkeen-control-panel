@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
+  import { t } from './i18n'
   import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine } from '@codemirror/view'
   import { EditorState } from '@codemirror/state'
   import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -31,7 +32,7 @@
       if (!res.ok) throw new Error('Failed to load files')
       files = await res.json()
     } catch (e) {
-      message = 'Ошибка загрузки списка файлов: ' + e.message
+      message = $t('editor.load_error') + ': ' + e.message
     }
   }
 
@@ -95,7 +96,7 @@
       selectedFile = path
       await loadBackups(path)
     } catch (e) {
-      message = 'Ошибка загрузки файла: ' + e.message
+      message = $t('editor.file_load_error') + ': ' + e.message
     } finally {
       loading = false
     }
@@ -133,18 +134,18 @@
       
       if (!res.ok) throw new Error('Failed to save file')
       
-      message = '✓ Файл сохранён'
+      message = $t('editor.file_saved')
       await loadBackups(selectedFile)
       setTimeout(() => message = '', 3000)
     } catch (e) {
-      message = 'Ошибка сохранения: ' + e.message
+      message = $t('editor.save_error') + ': ' + e.message
     } finally {
       saving = false
     }
   }
 
   async function restoreBackup(backupPath: string) {
-    if (!confirm('Восстановить из backup?')) return
+    if (!confirm($t('editor.backup_restored').replace('✓ ', ''))) return
     
     try {
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`)
@@ -162,9 +163,9 @@
         })
       }
       
-      message = '✓ Backup восстановлен (не забудьте сохранить)'
+      message = $t('editor.backup_restored')
     } catch (e) {
-      message = 'Ошибка восстановления: ' + e.message
+      message = $t('editor.restore_error') + ': ' + e.message
     }
   }
 
@@ -182,19 +183,19 @@
       
       if (!res.ok) throw new Error(await res.text())
       
-      message = '✓ Файл создан'
+      message = '✓ ' + $t('editor.create_file')
       showCreateModal = false
       newFileName = ''
       await loadFiles()
       await loadFile(path)
     } catch (e) {
-      message = 'Ошибка создания: ' + e.message
+      message = $t('editor.create_error') + ': ' + e.message
     }
   }
 
   async function deleteFile() {
     if (!selectedFile) return
-    if (!confirm(`Удалить файл ${selectedFile.split('/').pop()}?`)) return
+    if (!confirm($t('app.delete') + ' ' + selectedFile.split('/').pop() + '?')) return
     
     const csrfToken = localStorage.getItem('csrf_token')
     
@@ -206,12 +207,12 @@
       
       if (!res.ok) throw new Error(await res.text())
       
-      message = '✓ Файл удалён'
+      message = '✓ ' + $t('app.delete')
       selectedFile = ''
       backups = []
       await loadFiles()
     } catch (e) {
-      message = 'Ошибка удаления: ' + e.message
+      message = $t('editor.delete_error') + ': ' + e.message
     }
   }
 
@@ -229,13 +230,13 @@
       
       if (!res.ok) throw new Error(await res.text())
       
-      message = '✓ Файл переименован'
+      message = '✓ ' + $t('app.rename')
       showRenameModal = false
       renameTarget = ''
       await loadFiles()
       await loadFile(newPath)
     } catch (e) {
-      message = 'Ошибка переименования: ' + e.message
+      message = $t('editor.rename_error') + ': ' + e.message
     }
   }
 
@@ -253,8 +254,8 @@
 <div class="editor-page">
   <div class="sidebar">
     <div class="sidebar-header">
-      <h3>Конфиги</h3>
-      <button class="btn-icon-small" on:click={() => { showCreateModal = true; newFileName = '' }} title="Создать файл">
+      <h3>{$t('editor.configs')}</h3>
+      <button class="btn-icon-small" on:click={() => { showCreateModal = true; newFileName = '' }} title={$t('editor.create_file')}>
         +
       </button>
     </div>
@@ -271,7 +272,7 @@
     </div>
     
     {#if backups.length > 0}
-      <h3>Backups</h3>
+      <h3>{$t('editor.backups')}</h3>
       <div class="backup-list">
         {#each backups as backup}
           <button 
@@ -287,33 +288,33 @@
 
   <div class="editor-main">
     <div class="toolbar">
-      <span class="file-name">{selectedFile ? selectedFile.split('/').pop() : 'Выберите файл'}</span>
+      <span class="file-name">{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span>
       <div class="toolbar-actions">
         {#if selectedFile}
           <button on:click={() => { showRenameModal = true; renameTarget = selectedFile.split('/').pop() || '' }} class="btn-secondary">
-            Переименовать
+            {$t('app.rename')}
           </button>
           <button on:click={deleteFile} class="btn-danger">
-            Удалить
+            {$t('app.delete')}
           </button>
         {/if}
         <button on:click={saveFile} disabled={!selectedFile || saving} class="btn-primary">
-          {saving ? 'Сохранение...' : 'Сохранить'}
+          {saving ? $t('app.loading') : $t('app.save')}
         </button>
       </div>
     </div>
 
     {#if message}
-      <div class="message" class:error={message.includes('Ошибка')}>
+      <div class="message" class:error={message.includes($t('app.error'))}>
         {message}
       </div>
     {/if}
 
     {#if loading}
-      <div class="loading">Загрузка...</div>
+      <div class="loading">{$t('app.loading')}</div>
     {:else if !selectedFile}
       <div class="empty-state">
-        <p>Выберите файл для редактирования</p>
+        <p>{$t('editor.select_file')}</p>
       </div>
     {:else}
       <div class="editor-container" bind:this={editorContainer}></div>
@@ -324,17 +325,17 @@
 {#if showCreateModal}
   <div class="modal-overlay" on:click={() => showCreateModal = false}>
     <div class="modal" on:click|stopPropagation>
-      <h3>Создать файл</h3>
+      <h3>{$t('editor.create_file')}</h3>
       <input 
         type="text" 
         bind:value={newFileName}
-        placeholder="имя_файла.json"
+        placeholder={$t('editor.file_name')}
         class="input"
         on:keydown={(e) => e.key === 'Enter' && createFile()}
       />
       <div class="modal-actions">
-        <button on:click={() => showCreateModal = false} class="btn-secondary">Отмена</button>
-        <button on:click={createFile} class="btn-primary">Создать</button>
+        <button on:click={() => showCreateModal = false} class="btn-secondary">{$t('app.cancel')}</button>
+        <button on:click={createFile} class="btn-primary">{$t('app.create')}</button>
       </div>
     </div>
   </div>
@@ -343,17 +344,17 @@
 {#if showRenameModal}
   <div class="modal-overlay" on:click={() => showRenameModal = false}>
     <div class="modal" on:click|stopPropagation>
-      <h3>Переименовать файл</h3>
+      <h3>{$t('editor.rename_file')}</h3>
       <input 
         type="text" 
         bind:value={renameTarget}
-        placeholder="новое_имя.json"
+        placeholder={$t('editor.new_name')}
         class="input"
         on:keydown={(e) => e.key === 'Enter' && renameFile()}
       />
       <div class="modal-actions">
-        <button on:click={() => showRenameModal = false} class="btn-secondary">Отмена</button>
-        <button on:click={renameFile} class="btn-primary">Переименовать</button>
+        <button on:click={() => showRenameModal = false} class="btn-secondary">{$t('app.cancel')}</button>
+        <button on:click={renameFile} class="btn-primary">{$t('app.rename')}</button>
       </div>
     </div>
   </div>

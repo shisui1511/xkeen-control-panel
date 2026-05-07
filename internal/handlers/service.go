@@ -13,7 +13,7 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		a.errorResponse(w, "Method not allowed", http.StatusMethodNotAllowed)
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
 	action := r.URL.Query().Get("action")
@@ -29,7 +29,7 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	case "restart":
 		out, err = a.xkeenSvc.Restart()
 	default:
-		a.errorResponse(w, "Invalid action", http.StatusBadRequest)
+		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
 		return
 	}
 
