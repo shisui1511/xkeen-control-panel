@@ -11,12 +11,14 @@
 ### Быстрая установка (одной командой)
 
 ```bash
-# Stable версия
-curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/scripts/setup.sh | sh
-
-# Dev (pre-release) версия — последний коммит из main
+# Интерактивный установщик с меню
 curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/scripts/setup.sh | sh
 ```
+
+Скрипт на русском языке. Поддерживает:
+- **Stable** — стабильные релизы
+- **Pre-release** — тестовые сборки
+- Установка, обновление, удаление
 
 ### Ручная установка
 
@@ -65,17 +67,18 @@ Settings → Update → кнопка **"Проверить обновления"
 ### Через SSH
 
 ```bash
-# Stable
-curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/dev/scripts/setup.sh | sh
+# Интерактивное меню (установка/обновление/удаление + выбор канала)
+curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/scripts/setup.sh | sh
 
-# Beta
-curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/dev/scripts/setup.sh | sh -s -- beta
+# Или сразу командой:
+curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/scripts/setup.sh | sh -s -- install
 ```
 
 Скрипт автоматически:
-1. Остановит текущую версию
-2. Скачает новый бинарник
-3. Перезапустит сервис
+1. Определит архитектуру роутера
+2. Остановит текущую версию
+3. Скачает новый бинарник
+4. Перезапустит сервис
 
 ## Управление сервисом
 
