@@ -10,7 +10,6 @@ DEFAULT_PORT=8089
 BACKUP_PATH="/opt/etc/xkeen-control-panel/backup"
 
 CHANNEL="stable"
-[ "$1" = "beta" ] && CHANNEL="beta"
 
 # Colors
 GREEN='\033[32m'
@@ -67,18 +66,6 @@ detect_arch() {
 
 # Get download URL
 get_download_url() {
-  if [ "$CHANNEL" = "beta" ]; then
-    # Get latest beta release from GitHub API
-    BETA_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases" | \
-      grep -m1 '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | grep -i beta || echo "")
-    if [ -z "$BETA_TAG" ]; then
-      warn "No beta release found, falling back to stable"
-      CHANNEL="stable"
-    else
-      echo "https://github.com/${REPO}/releases/download/${BETA_TAG}/${BINARY}-linux-${ARCH_LABEL}"
-      return
-    fi
-  fi
   echo "https://github.com/${REPO}/releases/latest/download/${BINARY}-linux-${ARCH_LABEL}"
 }
 
@@ -300,13 +287,7 @@ printf "  Architecture: ${GREEN}%s${NC}\n" "$ARCH_LABEL"
 printf "  Version:      ${GREEN}%s${NC}\n\n" "$CURRENT_VERSION"
 
 # If argument provided, run action directly
-case "$CHANNEL" in
-  beta)
-    # Beta flag was set, but we still need to check if there's an action argument
-    if [ "$2" = "install" ]; then do_install; exit 0; fi
-    if [ "$2" = "update" ]; then do_update; exit 0; fi
-    if [ "$2" = "uninstall" ]; then do_uninstall; exit 0; fi
-    ;;
+case "$1" in
   install) do_install; exit 0 ;;
   update) do_update; exit 0 ;;
   uninstall) do_uninstall; exit 0 ;;

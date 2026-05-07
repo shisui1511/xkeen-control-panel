@@ -12,10 +12,10 @@
 
 ```bash
 # Stable версия
-curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/dev/scripts/setup.sh | sh
+curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/scripts/setup.sh | sh
 
-# Beta версия
-curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/dev/scripts/setup.sh | sh -s -- beta
+# Dev (pre-release) версия — последний коммит из main
+curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/scripts/setup.sh | sh
 ```
 
 ### Ручная установка
