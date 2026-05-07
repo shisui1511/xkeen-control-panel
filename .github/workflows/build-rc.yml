@@ -60,6 +60,7 @@ jobs:
       - name: Calculate version
         id: version
         run: |
+          # Find latest stable tag (no pre-release suffix)
           LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
           if [ -z "$LATEST_TAG" ]; then
             LATEST_TAG="v0.0.0"
@@ -68,12 +69,20 @@ jobs:
           BASE=${LATEST_TAG#v}
           MAJOR=$(echo "$BASE" | cut -d. -f1)
           MINOR=$(echo "$BASE" | cut -d. -f2)
-          PATCH=$(echo "$BASE" | cut -d. -f3)
 
-          # For pre-releases, increment minor version from latest stable
+          # RC branch builds NEXT minor version (release candidate)
+          # Example: stable v0.3.0 -> rc builds v0.4.0-rc.N
           NEXT_MINOR=$((MINOR + 1))
-          VERSION="v${MAJOR}.${NEXT_MINOR}.0-rc.${GITHUB_RUN_NUMBER}"
           
+          # Use commit count since last stable for build number
+          COMMIT_COUNT=$(git rev-list "${LATEST_TAG}..HEAD" --count 2>/dev/null || echo "0")
+          if [ "$COMMIT_COUNT" = "0" ]; then
+            COMMIT_COUNT=$(git rev-list --count HEAD)
+          fi
+          
+          VERSION="v${MAJOR}.${NEXT_MINOR}.0-rc.${COMMIT_COUNT}"
+          
+          echo "latest_stable=${LATEST_TAG}" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Build binary
