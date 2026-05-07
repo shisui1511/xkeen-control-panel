@@ -67,8 +67,8 @@ jobs:
           MAJOR=$(echo "$BASE" | cut -d. -f1)
           MINOR=$(echo "$BASE" | cut -d. -f2)
 
-          # Dev branch always builds NEXT minor version after latest stable
-          # Example: stable v0.3.0 -> dev builds v0.4.0-alpha.N
+          # Dev branch builds NEXT minor version after latest stable
+          # Example: stable v0.3.0 -> dev builds v0.4.0-dev.N
           NEXT_MINOR=$((MINOR + 1))
           
           # Use commit count since last stable for build number
@@ -77,10 +77,11 @@ jobs:
             COMMIT_COUNT=$(git rev-list --count HEAD)
           fi
           
-          VERSION="v${MAJOR}.${NEXT_MINOR}.0-alpha.${COMMIT_COUNT}"
+          VERSION="v${MAJOR}.${NEXT_MINOR}.0-dev.${COMMIT_COUNT}"
           
           echo "latest_stable=${LATEST_TAG}" >> $GITHUB_OUTPUT
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION} (stable: ${LATEST_TAG})"
 
       - name: Build binary
         env:
@@ -114,6 +115,7 @@ jobs:
 
     outputs:
       version: ${{ steps.version.outputs.version }}
+      latest_stable: ${{ steps.version.outputs.latest_stable }}
 
   release:
     name: Create Dev Release
@@ -133,21 +135,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
+          LATEST_TAG: ${{ needs.build.outputs.latest_stable }}
         run: |
           SHORT_SHA="${GITHUB_SHA:0:7}"
 
+          # Delete only old dev pre-releases to keep stable intact
           gh release list --limit 50 --json tagName,isPrerelease | \
-            jq -r '.[] | select(.tagName | test("-alpha\\.")) | .tagName' | \
+            jq -r '.[] | select(.tagName | test("-dev\\.")) | .tagName' | \
             while read tag; do
-              echo "Deleting old alpha release: $tag"
+              echo "Deleting old dev release: $tag"
               gh release delete "$tag" --yes 2>/dev/null || true
               git push --delete origin "$tag" 2>/dev/null || true
             done
 
           cat > /tmp/release-notes.md << ENDNOTES
-          ## Alpha-версия
+          ## Dev Pre-Release
 
-          **Это alpha-сборка.** Используйте только для тестирования.
+          **Это dev-сборка для тестирования.** Не используйте в production.
 
           | Свойство | Значение |
           |----------|----------|
@@ -179,7 +183,7 @@ jobs:
           ENDNOTES
 
           gh release create "${VERSION}" \
-            --title "Alpha ${VERSION}" \
+            --title "Dev ${VERSION}" \
             --notes-file /tmp/release-notes.md \
             --prerelease \
             artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64 \
