@@ -1,81 +1,142 @@
 # XKeen Control Panel
 
-Веб-панель для управления XKeen на роутерах Keenetic/Netcraze.
+Веб-панель для управления XKeen/Mihomo на роутерах Keenetic/Netcraze.
 
-## Возможности
-
-- Добавлю позже...
+- **Go backend** — статический бинарник, 5-10 MB RAM
+- **Svelte 5 frontend** — встроен в бинарник, bundle ~160 KB gzipped
+- **ARM64 + MIPSLE** — поддержка всех Keenetic с Entware
 
 ## Установка
 
-### Сборка из исходников (на ПК)
+### Быстрая установка (одной командой)
+
 ```bash
-cd /home/shisui/REPO/xkeen-control-panel
-export PATH=$HOME/go-install/go/bin:$PATH
+# Stable версия
+curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/dev/scripts/setup.sh | sh
 
-# Для Keenetic Viva (KN-1912 и другие) - MIPSLE
-make keenetic-mipsle
-
-# Для Keenetic ARM64 (KN-1010/1810/1910)
-make keenetic-arm64
-```
-
-### Быстрая установка на роутер
-```bash
-# Скопируйте бинарник в /opt/bin
-scp build/xkeen-control-panel-linux-mipsle root@192.168.1.1:/opt/bin/xkeen-control-panel
-
-# Или выполните setup.sh на роутере
-sh /path/to/scripts/setup.sh
+# Beta версия
+curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/dev/scripts/setup.sh | sh -s -- beta
 ```
 
 ### Ручная установка
-```bash
-# На роутере
-mkdir -p /opt/etc/xkeen-control-panel
-cd /opt/bin
-wget -O xkeen-control-panel "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xkeen-control-panel-linux-mipsle"
-chmod +x xkeen-control-panel
 
-# Создать конфиг
+```bash
+# 1. Скачать бинарник
+# ARM64 (KN-1810, KN-1910, KN-1010)
+curl -fL -o /opt/bin/xkeen-control-panel \
+  "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xkeen-control-panel-linux-arm64"
+
+# MIPSLE (KN-1912 Viva, KN-2410)
+curl -fL -o /opt/bin/xkeen-control-panel \
+  "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xkeen-control-panel-linux-mipsle"
+
+chmod +x /opt/bin/xkeen-control-panel
+
+# 2. Создать конфиг
+mkdir -p /opt/etc/xkeen-control-panel
 cat > /opt/etc/xkeen-control-panel/config.json <<EOF
 {
-    "port": 8089,
-    "xray_config_dir": "/opt/etc/xray/configs",
-    "xkeen_binary": "xkeen",
-    "mihomo_config_dir": "/opt/etc/mihomo",
-    "mihomo_binary": "mihomo",
-    "allowed_roots": ["/opt/etc/xray", "/opt/etc/xkeen", "/opt/etc/mihomo", "/opt/var/log"]
+  "port": 8089,
+  "xray_config_dir": "/opt/etc/xray/configs",
+  "mihomo_config_dir": "/opt/etc/mihomo",
+  "data_dir": "/opt/etc/xkeen-control-panel"
 }
 EOF
 
-# Запуск
+# 3. Запустить
 /opt/bin/xkeen-control-panel -config /opt/etc/xkeen-control-panel/config.json
 ```
+
+### После установки
+
+Откройте в браузере: `http://<IP-роутера>:8089`
+
+При первом входе будет предложено задать пароль администратора.
+
+## Обновление
+
+### Из веб-интерфейса (v0.4.0+)
+
+Settings → Update → кнопка **"Проверить обновления"** → **"Установить"**.
+
+Панель сама скачает новый бинарник, сделает backup и перезапустится.
+Если что-то пойдёт не так — автоматический rollback.
+
+### Через SSH
+
+```bash
+# Stable
+curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/dev/scripts/setup.sh | sh
+
+# Beta
+curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/dev/scripts/setup.sh | sh -s -- beta
+```
+
+Скрипт автоматически:
+1. Остановит текущую версию
+2. Скачает новый бинарник
+3. Перезапустит сервис
+
+## Управление сервисом
+
+```bash
+/opt/etc/init.d/S99xkeen-control-panel start    # Запуск
+/opt/etc/init.d/S99xkeen-control-panel stop     # Остановка
+/opt/etc/init.d/S99xkeen-control-panel restart  # Перезапуск
+/opt/etc/init.d/S99xkeen-control-panel status   # Статус
+```
+
+## Удаление
+
+```bash
+/opt/etc/init.d/S99xkeen-control-panel stop
+rm -f /opt/bin/xkeen-control-panel
+rm -f /opt/etc/init.d/S99xkeen-control-panel
+rm -rf /opt/etc/xkeen-control-panel   # удалить конфиги (опционально)
+```
+
+## Совместимость
+
+| Модель | Архитектура | RAM | Статус |
+|--------|-------------|-----|--------|
+| KN-1912 Viva | MIPSLE | 128 MB | ✅ |
+| KN-2410 | MIPSLE | 128 MB | ✅ |
+| KN-1810 | ARM64 | 256 MB | ✅ |
+| KN-1910 Peak | ARM64 | 256 MB | ✅ |
+| KN-1010 | ARM64 | 128 MB | ✅ |
+| KN-2300 | ARM64 | 256 MB | ✅ |
+
+Панель работает alongside других XKeen-UI и zashboard — разные порты, нет конфликтов.
 
 ## Разработка
 
 ```bash
 # Установка зависимостей
 make deps
+cd frontend && npm ci
 
-# Сборка для текущей ОС
-make build
+# Сборка
+cd frontend && npm run build
+cd .. && make build
 
-# Запуск
-make run
-
-# Тестирование
-make test
-
-# Сборка для KN-1912 (MIPSLE)
+# Cross-compile для роутеров
+make keenetic-arm64
 make keenetic-mipsle
 
-# Сжатие UPX (уменьшение размера)
-make compress
+# Frontend dev server (proxy /api → :8089)
+cd frontend && npm run dev
 ```
 
+## Стек
 
-## Источники
+| Компонент | Технология |
+|-----------|------------|
+| Backend | Go 1.25, net/http, gorilla/websocket |
+| Frontend | Svelte 5, TypeScript, Vite |
+| CSS | Custom Properties (light/dark themes) |
+| Auth | bcrypt + HMAC session cookies |
+| Build | go:embed (frontend в бинарнике) |
 
-- Добавлю
+## Лицензия
+
+MIT
