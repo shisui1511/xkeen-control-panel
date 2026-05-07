@@ -127,6 +127,14 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.language': 'Язык',
     'settings.lang_ru': 'Русский',
     'settings.lang_en': 'English',
+    'settings.update': 'Обновление',
+    'settings.current_version': 'Текущая версия',
+    'settings.available_version': 'Доступна версия',
+    'settings.check_update': 'Проверить обновления',
+    'settings.checking': 'Проверка...',
+    'settings.install_update': 'Установить',
+    'settings.installing': 'Установка...',
+    'settings.rollback': 'Откатить',
 
     // Proxies
     'proxies.title': 'Прокси',
@@ -322,6 +330,14 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.language': 'Language',
     'settings.lang_ru': 'Русский',
     'settings.lang_en': 'English',
+    'settings.update': 'Update',
+    'settings.current_version': 'Current version',
+    'settings.available_version': 'Available version',
+    'settings.check_update': 'Check for updates',
+    'settings.checking': 'Checking...',
+    'settings.install_update': 'Install',
+    'settings.installing': 'Installing...',
+    'settings.rollback': 'Rollback',
 
     // Proxies
     'proxies.title': 'Proxies',

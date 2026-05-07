@@ -31,6 +31,17 @@
   "mihomo.not_running": "Mihomo is not running",
   "mihomo.api_error": "Mihomo API error",
 
+  "update.check_failed": "Failed to check for updates",
+  "update.download_failed": "Download failed",
+  "update.install_failed": "Installation failed",
+  "update.backup_failed": "Backup creation failed",
+  "update.restart_failed": "Restart failed",
+  "update.rollback_failed": "Rollback failed",
+  "update.no_backup": "No backup found",
+  "update.in_progress": "Update already in progress",
+  "update.complete": "Update complete",
+  "update.health_check_failed": "Health check failed, rollback required",
+
   "system.stats_error": "Error getting statistics",
   "system.unsupported_os": "Unsupported OS",
 

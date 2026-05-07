@@ -79,6 +79,13 @@ func main() {
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
 
+	// Update endpoints
+	srv.HandleProtected("/api/update/check", api.UpdateCheck)
+	srv.HandleProtected("/api/update/changelog", api.UpdateChangelog)
+	srv.HandleProtected("/api/update/install", api.UpdateInstall)
+	srv.HandleProtected("/api/update/rollback", api.UpdateRollback)
+	srv.HandleProtected("/api/update/status", api.UpdateStatusEndpoint)
+
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {
 		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)
