@@ -86,6 +86,14 @@ func main() {
 	srv.HandleProtected("/api/update/rollback", api.UpdateRollback)
 	srv.HandleProtected("/api/update/status", api.UpdateStatusEndpoint)
 
+	// Subscription endpoints
+	srv.HandleProtected("/api/subscriptions", api.SubscriptionList)
+	srv.HandleProtected("/api/subscriptions/add", api.SubscriptionAdd)
+	srv.HandleProtected("/api/subscriptions/update", api.SubscriptionUpdate)
+	srv.HandleProtected("/api/subscriptions/delete", api.SubscriptionDelete)
+	srv.HandleProtected("/api/subscriptions/refresh", api.SubscriptionRefresh)
+	srv.HandleProtected("/api/subscriptions/refresh-all", api.SubscriptionRefreshAll)
+
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {
 		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)

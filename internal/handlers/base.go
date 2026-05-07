@@ -12,12 +12,13 @@ import (
 )
 
 type API struct {
-	cfg       *config.Config
-	srv       *server.Server
-	xkeenSvc  *services.XKeenService
-	mihomoSvc *services.MihomoService
-	configSvc *services.ConfigService
-	pathVal   *utils.PathValidator
+	cfg             *config.Config
+	srv             *server.Server
+	xkeenSvc        *services.XKeenService
+	mihomoSvc       *services.MihomoService
+	configSvc       *services.ConfigService
+	subscriptionSvc *services.SubscriptionService
+	pathVal         *utils.PathValidator
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {

@@ -9,6 +9,7 @@
   import Connections from './Connections.svelte'
   import Rules from './Rules.svelte'
   import Traffic from './Traffic.svelte'
+  import Subscriptions from './Subscriptions.svelte'
 
   let version = 'loading...'
   let loading = false
@@ -115,6 +116,9 @@
       <button class="nav-item" class:active={currentTab === 'traffic'} on:click={() => switchTab('traffic')}>
         📈 {$t('nav.traffic')}
       </button>
+      <button class="nav-item" class:active={currentTab === 'subscriptions'} on:click={() => switchTab('subscriptions')}>
+        📡 {$t('nav.subscriptions')}
+      </button>
       <button class="nav-item" class:active={currentTab === 'services'} on:click={() => switchTab('services')}>
         🚀 {$t('nav.services')}
       </button>
@@ -196,6 +200,8 @@
       <Rules />
     {:else if currentTab === 'traffic'}
       <Traffic />
+    {:else if currentTab === 'subscriptions'}
+      <Subscriptions />
     {:else if currentTab === 'services'}
       <Services />
     {:else if currentTab === 'settings'}
