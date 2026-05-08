@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { t } from './i18n'
+  import PageHeader from './PageHeader.svelte'
+
+  export let onSwitchTab: (tab: string) => void = () => {}
 
   interface Subscription {
     id: string
@@ -170,9 +173,13 @@
 </script>
 
 <div class="container">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-    <h1>{$t('subscr.title')}</h1>
-    <div style="display: flex; gap: 0.5rem;">
+  <PageHeader
+    title={$t('subscr.title')}
+    subtitle={$t('subscr.subtitle')}
+    breadcrumbs={[{ label: $t('nav.subscriptions') }]}
+    {onSwitchTab}
+  >
+    <div slot="actions" style="display: flex; gap: 0.5rem;">
       <button class="btn btn-secondary" on:click={refreshAll} disabled={loading}>
         {loading ? $t('app.loading') : '🔄 ' + $t('subscr.refresh_all')}
       </button>
@@ -180,9 +187,7 @@
         + {$t('subscr.add')}
       </button>
     </div>
-  </div>
-
-  <p class="text-secondary mb-3">{$t('subscr.subtitle')}</p>
+  </PageHeader>
 
   {#if subscriptions.length === 0}
     <div class="card text-center" style="padding: 3rem;">

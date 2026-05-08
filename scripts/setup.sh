@@ -203,7 +203,7 @@ install_binary() {
 # Текущая версия
 get_version() {
   if [ -f "$BIN_PATH" ]; then
-    timeout 2 "$BIN_PATH" -v 2>/dev/null | awk '{print $NF}' || echo "неизвестна"
+    "$BIN_PATH" -version 2>/dev/null || echo "неизвестна"
   else
     echo "не установлена"
   fi

@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { t } from './i18n'
+  import PageHeader from './PageHeader.svelte'
+
+  export let onSwitchTab: (tab: string) => void = () => {}
 
   interface Kernel {
     name: string
@@ -96,8 +99,12 @@
 </script>
 
 <div class="container">
-  <h1>{$t('kernels.title')}</h1>
-  <p class="text-secondary mb-3">{$t('kernels.subtitle')}</p>
+  <PageHeader
+    title={$t('kernels.title')}
+    subtitle={$t('kernels.subtitle')}
+    breadcrumbs={[{ label: $t('nav.kernels') }]}
+    {onSwitchTab}
+  />
 
   {#each kernels as kernel}
     <div class="card mb-2">

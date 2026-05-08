@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -18,6 +19,14 @@ var (
 )
 
 func main() {
+	// Handle version flag before flag.Parse
+	for _, arg := range os.Args[1:] {
+		if arg == "-v" || arg == "-version" || arg == "--version" {
+			fmt.Println(Version)
+			os.Exit(0)
+		}
+	}
+
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)

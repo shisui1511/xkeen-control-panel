@@ -181,15 +181,30 @@
         {/if}
 
         <div class="card mb-2">
-          <h2>{$t('dash.releases')}</h2>
-          <ul style="list-style: none; padding-left: 0;">
-            <li>✅ v0.1.0 — Auth + Design Foundation</li>
-            <li>✅ v0.2.0 — Config Editor + Unified Logs</li>
-            <li>✅ v0.3.0 — Mihomo Dashboard (proxies, connections, rules, traffic)</li>
-            <li>⏳ v0.4.0 — Subscriptions + Smart Proxy Manager</li>
-            <li>⏳ v0.5.0 — Network Tools + Notifications</li>
-          </ul>
+          <h2>Быстрые действия</h2>
+          <div class="quick-actions">
+            <button class="btn btn-secondary" on:click={() => switchTab('proxies')}>
+              🌐 Прокси
+            </button>
+            <button class="btn btn-secondary" on:click={() => switchTab('subscriptions')}>
+              📡 Подписки
+            </button>
+            <button class="btn btn-secondary" on:click={() => switchTab('editor')}>
+              📝 Редактор
+            </button>
+            <button class="btn btn-secondary" on:click={() => switchTab('logs')}>
+              📋 Логи
+            </button>
+          </div>
         </div>
+
+        <style>
+          .quick-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+          }
+        </style>
 
       </div>
     {:else if currentTab === 'editor'}
@@ -205,13 +220,13 @@
     {:else if currentTab === 'traffic'}
       <Traffic />
     {:else if currentTab === 'subscriptions'}
-      <Subscriptions />
+      <Subscriptions onSwitchTab={switchTab} />
     {:else if currentTab === 'services'}
-      <Services />
+      <Services onSwitchTab={switchTab} />
     {:else if currentTab === 'kernels'}
-      <KernelManager />
+      <KernelManager onSwitchTab={switchTab} />
     {:else if currentTab === 'settings'}
-      <Settings />
+      <Settings onSwitchTab={switchTab} />
     {/if}
   </div>
 </div>
