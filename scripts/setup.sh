@@ -37,8 +37,25 @@ detect_lang() {
 }
 
 # Определение архитектуры
+# uname -m может врать (на mipsel роутерах иногда возвращает 'mips')
 detect_arch() {
   ARCH=$(uname -m)
+
+  # Проверка через opkg (наиболее надёжно для Entware)
+  if command -v opkg >/dev/null 2>&1; then
+    OPKG_ARCH=$(opkg print-architecture 2>/dev/null | grep -o 'mipsel[^[:space:]]*' | head -1)
+    if [ -n "$OPKG_ARCH" ]; then
+      ARCH_LABEL="mipsle"
+      return
+    fi
+    OPKG_ARCH=$(opkg print-architecture 2>/dev/null | grep -o 'mips[^[:space:]]*' | head -1)
+    if [ -n "$OPKG_ARCH" ]; then
+      ARCH_LABEL="mips"
+      return
+    fi
+  fi
+
+  # Fallback на uname
   case "$ARCH" in
     mipsel|mipsle)
       ARCH_LABEL="mipsle"
@@ -56,21 +73,20 @@ detect_arch() {
   esac
 }
 
-# URL для загрузки (stable или pre-release)
-get_download_url() {
-  if [ "$CHANNEL" = "prerelease" ]; then
-    # Берём последний pre-release (тег с -dev. или -alpha.)
-    PREREL_TAG=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases" | \
-      grep -m1 '"tag_name":' | sed 's/.*"\([^"]*\)".*/\1/' | grep '\-dev\.' || echo "")
-    if [ -z "$PREREL_TAG" ]; then
-      warn "Pre-release не найден, используем stable"
-      CHANNEL="stable"
-    else
-      echo "https://github.com/${REPO}/releases/download/${PREREL_TAG}/${BINARY}-${ARCH_LABEL}"
-      return
-    fi
-  fi
+# Fallback URLs для скачивания бинарников
+# 1. GitHub Releases (primary)
+# 2. jsDelivr CDN (fallback) — кэширует файлы из git-репозитория
+# 3. raw.githubusercontent.com (fallback)
+get_github_releases_url() {
   echo "https://github.com/${REPO}/releases/latest/download/${BINARY}-${ARCH_LABEL}"
+}
+
+get_jsdelivr_url() {
+  echo "https://cdn.jsdelivr.net/gh/${REPO}@binaries/bin/${BINARY}-${ARCH_LABEL}"
+}
+
+get_raw_url() {
+  echo "https://raw.githubusercontent.com/${REPO}/binaries/bin/${BINARY}-${ARCH_LABEL}"
 }
 
 # Остановка сервиса
@@ -128,34 +144,60 @@ EOF
   ok "Сервис создан"
 }
 
-# Загрузка бинарника
-install_binary() {
-  DOWNLOAD_URL=$(get_download_url)
-  info "Загружаем: $DOWNLOAD_URL"
-
-  mkdir -p "$INSTALL_DIR"
-  mkdir -p "$(dirname "$BIN_PATH")"
-
-  TEMP_BIN="/tmp/${BINARY}.new"
-
+# Попытка скачать с одного URL
+try_download() {
+  _url="$1"
   if command -v curl >/dev/null 2>&1; then
-    if ! curl -fL --connect-timeout 10 --max-time 120 -o "$TEMP_BIN" "$DOWNLOAD_URL"; then
-      error "Ошибка загрузки (curl)"
-      return 1
-    fi
+    curl -fsL --connect-timeout 10 --max-time 120 -o "$TEMP_BIN" "$_url" 2>/dev/null
   elif command -v wget >/dev/null 2>&1; then
-    if ! wget -qO "$TEMP_BIN" "$DOWNLOAD_URL"; then
-      error "Ошибка загрузки (wget)"
-      return 1
-    fi
+    wget -qO "$TEMP_BIN" "$_url" 2>/dev/null
   else
-    error "Не найден curl или wget"
     return 1
   fi
+}
 
-  chmod +x "$TEMP_BIN"
-  mv "$TEMP_BIN" "$BIN_PATH"
-  ok "Бинарник установлен"
+# Загрузка бинарника с fallback chain
+install_binary() {
+  mkdir -p "$INSTALL_DIR"
+  mkdir -p "$(dirname "$BIN_PATH")"
+  TEMP_BIN="/tmp/${BINARY}.new"
+
+  # 1. Основной источник — GitHub Releases
+  info "Пробуем GitHub Releases..."
+  _url=$(get_github_releases_url)
+  if try_download "$_url"; then
+    ok "Загружено с GitHub Releases"
+    chmod +x "$TEMP_BIN"
+    mv "$TEMP_BIN" "$BIN_PATH"
+    ok "Бинарник установлен"
+    return 0
+  fi
+
+  # 2. Fallback — jsDelivr CDN (кэширует git-файлы)
+  warn "GitHub недоступен, пробуем jsDelivr..."
+  _url=$(get_jsdelivr_url)
+  if try_download "$_url"; then
+    ok "Загружено через jsDelivr"
+    chmod +x "$TEMP_BIN"
+    mv "$TEMP_BIN" "$BIN_PATH"
+    ok "Бинарник установлен"
+    return 0
+  fi
+
+  # 3. Fallback — raw.githubusercontent.com
+  warn "jsDelivr недоступен, пробуем raw.githubusercontent.com..."
+  _url=$(get_raw_url)
+  if try_download "$_url"; then
+    ok "Загружено с raw.githubusercontent.com"
+    chmod +x "$TEMP_BIN"
+    mv "$TEMP_BIN" "$BIN_PATH"
+    ok "Бинарник установлен"
+    return 0
+  fi
+
+  error "Все источники недоступны. Проверьте интернет или установите вручную:"
+  info "https://github.com/${REPO}/releases"
+  return 1
 }
 
 # Текущая версия
@@ -304,7 +346,11 @@ if [ -r /dev/tty ]; then
   while true; do
     print_banner
     show_menu
-    read choice < /dev/tty
+    read choice < /dev/tty || {
+      warn "Терминал недоступен, переключаемся в автоматический режим"
+      do_install
+      exit 0
+    }
 
     case "$choice" in
       1) do_install ;;
@@ -324,7 +370,7 @@ if [ -r /dev/tty ]; then
     esac
 
     printf "\nНажмите Enter для продолжения..."
-    read dummy < /dev/tty
+    read dummy < /dev/tty || true
   done
 else
   # Нет терминала — автоустановка stable

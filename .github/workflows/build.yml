@@ -285,6 +285,28 @@ jobs:
             artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips \
             artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips.sha256
 
+      - name: Update binaries branch for jsDelivr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          # Fetch or create binaries branch
+          git fetch origin binaries 2>/dev/null || true
+          git checkout -b binaries origin/binaries 2>/dev/null || git checkout --orphan binaries
+          
+          # Clean old files and add new binaries
+          git rm -rf . 2>/dev/null || true
+          mkdir -p bin
+          cp artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64 bin/
+          cp artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle bin/
+          cp artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips bin/
+          
+          git add bin/
+          git commit -m "Update binaries for ${VERSION}" || true
+          git push origin binaries --force
+
   cleanup:
     name: Cleanup artifacts
     runs-on: ubuntu-latest
