@@ -1,5 +1,4 @@
 #!/bin/sh
-set -e
 
 REPO="shisui1511/xkeen-control-panel"
 BINARY="xkeen-control-panel"
@@ -129,58 +128,29 @@ EOF
   ok "Сервис создан"
 }
 
-# Проверка что файл существует на сервере
-check_url() {
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsIL --connect-timeout 5 --max-time 10 "$1" >/dev/null 2>&1
-  elif command -v wget >/dev/null 2>&1; then
-    wget --spider -q -T 10 "$1" >/dev/null 2>&1
-  else
-    return 0
-  fi
-}
-
 # Загрузка бинарника
 install_binary() {
   DOWNLOAD_URL=$(get_download_url)
-  info "Проверяем: $DOWNLOAD_URL"
-
-  if ! check_url "$DOWNLOAD_URL"; then
-    if [ "$CHANNEL" = "prerelease" ]; then
-      warn "Pre-release не найден, пробуем stable..."
-      CHANNEL="stable"
-      DOWNLOAD_URL=$(get_download_url)
-      if ! check_url "$DOWNLOAD_URL"; then
-        error "Бинарник не найден: ${BINARY}-${ARCH_LABEL}"
-        info "Проверьте релизы: https://github.com/${REPO}/releases"
-        return 1
-      fi
-    else
-      error "Бинарник не найден: ${BINARY}-${ARCH_LABEL}"
-      info "Проверьте релизы: https://github.com/${REPO}/releases"
-      return 1
-    fi
-  fi
-
   info "Загружаем: $DOWNLOAD_URL"
 
   mkdir -p "$INSTALL_DIR"
   mkdir -p "$(dirname "$BIN_PATH")"
 
   TEMP_BIN="/tmp/${BINARY}.new"
+
   if command -v curl >/dev/null 2>&1; then
-    curl -fL --connect-timeout 10 --max-time 120 -o "$TEMP_BIN" "$DOWNLOAD_URL" || {
-      error "Ошибка загрузки"
+    if ! curl -fL --connect-timeout 10 --max-time 120 -o "$TEMP_BIN" "$DOWNLOAD_URL"; then
+      error "Ошибка загрузки (curl)"
       return 1
-    }
+    fi
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$TEMP_BIN" "$DOWNLOAD_URL" || {
-      error "Ошибка загрузки"
+    if ! wget -qO "$TEMP_BIN" "$DOWNLOAD_URL"; then
+      error "Ошибка загрузки (wget)"
       return 1
-    }
+    fi
   else
     error "Не найден curl или wget"
-    exit 1
+    return 1
   fi
 
   chmod +x "$TEMP_BIN"
@@ -223,15 +193,15 @@ do_install() {
   create_init_script
   start_service
 
-  local ip=$(ip -4 a s br0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p')
-  ip=${ip:-"<IP-роутера>"}
-  local port=$(grep -o '"port":[[:space:]]*[0-9]*' "$INSTALL_DIR/config.json" 2>/dev/null | grep -o '[0-9]*' || echo "$DEFAULT_PORT")
+  _ip=$(ip -4 a s br0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p')
+  _ip=${_ip:-"<IP-роутера>"}
+  _port=$(grep -o '"port":[[:space:]]*[0-9]*' "$INSTALL_DIR/config.json" 2>/dev/null | grep -o '[0-9]*' || echo "$DEFAULT_PORT")
 
   printf "\n${GREEN}${BOLD}========================================${NC}\n"
   printf "${GREEN}  Установка завершена!${NC}\n"
   printf "${GREEN}${BOLD}========================================${NC}\n"
   printf "  Версия:  %s\n" "$(get_version)"
-  printf "  Веб-UI:  http://%s:%s\n" "$ip" "$port"
+  printf "  Веб-UI:  http://%s:%s\n" "$_ip" "$_port"
   printf "  Конфиг:  %s/config.json\n" "$INSTALL_DIR"
   printf "\n  Управление:\n"
   printf "    %s start    — запуск\n" "$INIT_SCRIPT"
@@ -248,8 +218,8 @@ do_update() {
     return
   fi
 
-  local old_version=$(get_version)
-  info "Обновление с ${old_version} (${CHANNEL})..."
+  _old_version=$(get_version)
+  info "Обновление с ${_old_version} (${CHANNEL})..."
 
   detect_arch
   stop_service
@@ -259,8 +229,8 @@ do_update() {
   }
   start_service
 
-  local new_version=$(get_version)
-  ok "Обновлено: ${old_version} → ${new_version}"
+  _new_version=$(get_version)
+  ok "Обновлено: ${_old_version} → ${_new_version}"
   info "Обновите страницу в браузере: Ctrl+Shift+R"
 }
 
@@ -295,10 +265,10 @@ do_uninstall() {
 
 # Главное меню
 show_menu() {
-  local version=$(get_version)
+  _version=$(get_version)
   printf "\n"
   printf "  Архитектура: ${GREEN}%s${NC}\n" "$ARCH_LABEL"
-  printf "  Версия:      ${GREEN}%s${NC}\n" "$version"
+  printf "  Версия:      ${GREEN}%s${NC}\n" "$_version"
   printf "  Канал:       ${YELLOW}%s${NC}\n" "$([ "$CHANNEL" = "stable" ] && echo "Stable (стабильный)" || echo "Pre-release (тестовый)")"
   printf "\n"
   printf "  ${BOLD}Действия:${NC}\n"
@@ -315,16 +285,6 @@ show_menu() {
 
 # ===== Главный цикл =====
 
-# Определяем, есть ли у нас терминал для ввода
-# При запуске через curl | sh stdin — это pipe, но /dev/tty всё равно доступен
-can_interact() {
-  # Проверяем, что /dev/tty доступен для чтения
-  if [ -r /dev/tty ]; then
-    return 0
-  fi
-  return 1
-}
-
 detect_arch
 
 # Если передан аргумент — выполняем команду без меню
@@ -337,19 +297,14 @@ if [ -n "$1" ]; then
   esac
 fi
 
-# Нет аргументов — проверяем, можем ли показать интерактивное меню
-if can_interact; then
+# Пробуем интерактивное меню через /dev/tty
+if [ -r /dev/tty ]; then
   CHANNEL="stable"
 
   while true; do
     print_banner
     show_menu
-    if ! read choice < /dev/tty || [ -z "$choice" ]; then
-      # EOF или пустой ввод — выходим
-      echo
-      ok "До свидания!"
-      exit 0
-    fi
+    read choice < /dev/tty
 
     case "$choice" in
       1) do_install ;;
