@@ -61,8 +61,8 @@ detect_arch() {
 get_download_url() {
   if [ "$CHANNEL" = "prerelease" ]; then
     # Берём последний pre-release (тег с -dev. или -alpha.)
-    PREREL_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases" | \
-      grep -m1 '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | grep -E '-(dev|alpha)\.' || echo "")
+    PREREL_TAG=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases" | \
+      grep -m1 '"tag_name":' | sed 's/.*"\([^"]*\)".*/\1/' | grep -e '-dev\.' -e '-alpha\.' || echo "")
     if [ -z "$PREREL_TAG" ]; then
       warn "Pre-release не найден, используем stable"
       CHANNEL="stable"
@@ -132,9 +132,9 @@ EOF
 # Проверка что файл существует на сервере
 check_url() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsI "$1" >/dev/null 2>&1
+    curl -fsI --connect-timeout 5 --max-time 10 "$1" >/dev/null 2>&1
   elif command -v wget >/dev/null 2>&1; then
-    wget --spider -q "$1" >/dev/null 2>&1
+    wget --spider -q -T 10 "$1" >/dev/null 2>&1
   else
     return 0
   fi
@@ -171,7 +171,7 @@ install_binary() {
 
   TEMP_BIN="/tmp/${BINARY}.new"
   if command -v curl >/dev/null 2>&1; then
-    curl -fL -o "$TEMP_BIN" "$DOWNLOAD_URL" || {
+    curl -fL --connect-timeout 10 --max-time 120 -o "$TEMP_BIN" "$DOWNLOAD_URL" || {
       error "Ошибка загрузки"
       return 1
     }
