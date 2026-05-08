@@ -277,31 +277,19 @@ show_menu() {
 
 # ===== Главный цикл =====
 
-# Проверка: если запущены через pipe (curl | sh), меню не работает
-if [ ! -t 0 ]; then
-  printf "${RED}${BOLD}"
-  cat <<'EOF'
-╔═══════════════════════════════════════════════════════════════╗
-║  ОШИБКА: Скрипт запущен через pipe (curl | sh)               ║
-║  Интерактивное меню не работает в этом режиме.               ║
-╠═══════════════════════════════════════════════════════════════╣
-║  Используйте один из вариантов:                              ║
-║                                                              ║
-║  1. Сначала скачайте, потом запустите:                       ║
-║     curl -Lo setup.sh .../main/scripts/setup.sh             ║
-║     sh setup.sh                                              ║
-║                                                              ║
-║  2. Или сразу командой:                                      ║
-║     curl -L ... | sh -s install                             ║
-╚═══════════════════════════════════════════════════════════════╝
-EOF
-  printf "${NC}\n"
-  exit 1
-fi
+# Определяем, есть ли у нас терминал для ввода
+# При запуске через curl | sh stdin — это pipe, но /dev/tty всё равно доступен
+can_interact() {
+  # Проверяем, что /dev/tty доступен для чтения
+  if [ -r /dev/tty ]; then
+    return 0
+  fi
+  return 1
+}
 
 detect_arch
 
-# Если аргумент — команда
+# Если передан аргумент — выполняем команду без меню
 if [ -n "$1" ]; then
   case "$1" in
     install|i)   CHANNEL="stable"; do_install; exit 0 ;;
@@ -311,30 +299,38 @@ if [ -n "$1" ]; then
   esac
 fi
 
-CHANNEL="stable"
+# Нет аргументов — проверяем, можем ли показать интерактивное меню
+if can_interact; then
+  CHANNEL="stable"
 
-while true; do
-  print_banner
-  show_menu
-  read choice < /dev/tty
+  while true; do
+    print_banner
+    show_menu
+    read choice < /dev/tty
 
-  case "$choice" in
-    1) do_install ;;
-    2) do_update ;;
-    3) do_uninstall ;;
-    9)
-      if [ "$CHANNEL" = "stable" ]; then
-        CHANNEL="prerelease"
-        ok "Канал: Pre-release (тестовые сборки)"
-      else
-        CHANNEL="stable"
-        ok "Канал: Stable (стабильные сборки)"
-      fi
-      ;;
-    0) ok "До свидания!"; exit 0 ;;
-    *) error "Неверный выбор" ;;
-  esac
+    case "$choice" in
+      1) do_install ;;
+      2) do_update ;;
+      3) do_uninstall ;;
+      9)
+        if [ "$CHANNEL" = "stable" ]; then
+          CHANNEL="prerelease"
+          ok "Канал: Pre-release (тестовые сборки)"
+        else
+          CHANNEL="stable"
+          ok "Канал: Stable (стабильные сборки)"
+        fi
+        ;;
+      0) ok "До свидания!"; exit 0 ;;
+      *) error "Неверный выбор" ;;
+    esac
 
-  printf "\nНажмите Enter для продолжения..."
-  read dummy < /dev/tty
-done
+    printf "\nНажмите Enter для продолжения..."
+    read dummy < /dev/tty
+  done
+else
+  # Нет терминала — автоустановка stable
+  info "Запущено в неинтерактивном режиме. Устанавливаем stable..."
+  CHANNEL="stable"
+  do_install
+fi
