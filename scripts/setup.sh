@@ -62,7 +62,7 @@ get_download_url() {
   if [ "$CHANNEL" = "prerelease" ]; then
     # Берём последний pre-release (тег с -dev. или -alpha.)
     PREREL_TAG=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases" | \
-      grep -m1 '"tag_name":' | sed 's/.*"\([^"]*\)".*/\1/' | grep -e '-dev\.' -e '-alpha\.' || echo "")
+      grep -m1 '"tag_name":' | sed 's/.*"\([^"]*\)".*/\1/' | grep '\-dev\.' || echo "")
     if [ -z "$PREREL_TAG" ]; then
       warn "Pre-release не найден, используем stable"
       CHANNEL="stable"
@@ -132,7 +132,7 @@ EOF
 # Проверка что файл существует на сервере
 check_url() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsI --connect-timeout 5 --max-time 10 "$1" >/dev/null 2>&1
+    curl -fsIL --connect-timeout 5 --max-time 10 "$1" >/dev/null 2>&1
   elif command -v wget >/dev/null 2>&1; then
     wget --spider -q -T 10 "$1" >/dev/null 2>&1
   else
@@ -147,11 +147,9 @@ install_binary() {
 
   if ! check_url "$DOWNLOAD_URL"; then
     if [ "$CHANNEL" = "prerelease" ]; then
-      error "Pre-release для архитектуры ${ARCH_LABEL} не найден"
-      warn "Пробуем stable канал..."
+      warn "Pre-release не найден, пробуем stable..."
       CHANNEL="stable"
       DOWNLOAD_URL=$(get_download_url)
-      info "Проверяем: $DOWNLOAD_URL"
       if ! check_url "$DOWNLOAD_URL"; then
         error "Бинарник не найден: ${BINARY}-${ARCH_LABEL}"
         info "Проверьте релизы: https://github.com/${REPO}/releases"
