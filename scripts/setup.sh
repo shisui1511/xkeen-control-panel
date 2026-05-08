@@ -60,18 +60,18 @@ detect_arch() {
 # URL для загрузки (stable или pre-release)
 get_download_url() {
   if [ "$CHANNEL" = "prerelease" ]; then
-    # Берём последний pre-release
+    # Берём последний pre-release (тег с -dev. или -alpha.)
     PREREL_TAG=$(curl -s "https://api.github.com/repos/${REPO}/releases" | \
-      grep -m1 '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | grep -E '\-dev\.|\-alpha\.' || echo "")
+      grep -m1 '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | grep -E '-(dev|alpha)\.' || echo "")
     if [ -z "$PREREL_TAG" ]; then
       warn "Pre-release не найден, используем stable"
       CHANNEL="stable"
     else
-      echo "https://github.com/${REPO}/releases/download/${PREREL_TAG}/${BINARY}-linux-${ARCH_LABEL}"
+      echo "https://github.com/${REPO}/releases/download/${PREREL_TAG}/${BINARY}-${ARCH_LABEL}"
       return
     fi
   fi
-  echo "https://github.com/${REPO}/releases/latest/download/${BINARY}-linux-${ARCH_LABEL}"
+  echo "https://github.com/${REPO}/releases/latest/download/${BINARY}-${ARCH_LABEL}"
 }
 
 # Остановка сервиса
@@ -129,9 +129,41 @@ EOF
   ok "Сервис создан"
 }
 
+# Проверка что файл существует на сервере
+check_url() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsI "$1" >/dev/null 2>&1
+  elif command -v wget >/dev/null 2>&1; then
+    wget --spider -q "$1" >/dev/null 2>&1
+  else
+    return 0
+  fi
+}
+
 # Загрузка бинарника
 install_binary() {
   DOWNLOAD_URL=$(get_download_url)
+  info "Проверяем: $DOWNLOAD_URL"
+
+  if ! check_url "$DOWNLOAD_URL"; then
+    if [ "$CHANNEL" = "prerelease" ]; then
+      error "Pre-release для архитектуры ${ARCH_LABEL} не найден"
+      warn "Пробуем stable канал..."
+      CHANNEL="stable"
+      DOWNLOAD_URL=$(get_download_url)
+      info "Проверяем: $DOWNLOAD_URL"
+      if ! check_url "$DOWNLOAD_URL"; then
+        error "Бинарник не найден: ${BINARY}-${ARCH_LABEL}"
+        info "Проверьте релизы: https://github.com/${REPO}/releases"
+        return 1
+      fi
+    else
+      error "Бинарник не найден: ${BINARY}-${ARCH_LABEL}"
+      info "Проверьте релизы: https://github.com/${REPO}/releases"
+      return 1
+    fi
+  fi
+
   info "Загружаем: $DOWNLOAD_URL"
 
   mkdir -p "$INSTALL_DIR"
@@ -139,9 +171,15 @@ install_binary() {
 
   TEMP_BIN="/tmp/${BINARY}.new"
   if command -v curl >/dev/null 2>&1; then
-    curl -fL -o "$TEMP_BIN" "$DOWNLOAD_URL"
+    curl -fL -o "$TEMP_BIN" "$DOWNLOAD_URL" || {
+      error "Ошибка загрузки"
+      return 1
+    }
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$TEMP_BIN" "$DOWNLOAD_URL"
+    wget -qO "$TEMP_BIN" "$DOWNLOAD_URL" || {
+      error "Ошибка загрузки"
+      return 1
+    }
   else
     error "Не найден curl или wget"
     exit 1
@@ -165,15 +203,13 @@ get_version() {
 print_banner() {
   printf "${CYAN}${BOLD}"
   cat <<'EOF'
- █████ █████ █████   ████                                   █████████  ███████████ 
-▒▒███ ▒▒███ ▒▒███   ███▒                                   ███▒▒▒▒▒███▒▒███▒▒▒▒▒███
- ▒▒███ ███   ▒███  ███     ██████   ██████  ████████      ███     ▒▒▒  ▒███    ▒███
-  ▒▒█████    ▒███████     ███▒▒███ ███▒▒███▒▒███▒▒███    ▒███          ▒██████████ 
-   ███▒███   ▒███▒▒███   ▒███████ ▒███████  ▒███ ▒███    ▒███          ▒███▒▒▒▒▒▒  
-  ███ ▒▒███  ▒███ ▒▒███  ▒███▒▒▒  ▒███▒▒▒   ▒███ ▒███    ▒▒███     ███ ▒███        
- █████ █████ █████ ▒▒████▒▒██████ ▒▒██████  ████ █████    ▒▒█████████  █████       
-▒▒▒▒▒ ▒▒▒▒▒ ▒▒▒▒▒   ▒▒▒▒  ▒▒▒▒▒▒   ▒▒▒▒▒▒  ▒▒▒▒ ▒▒▒▒▒      ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒        
+  _  __  __ __                       __  __ ____
+ | |/ / / //_/___   ___   ____      / / / //  _/
+ |   / / ,<  / _ \ / _ \ / __ \    / / / / / /
+/   | / /| |/  __//  __// / / /   / /_/ /_/ /
+/_/|_|/_/ |_|\___/ \___//_/ /_/    \____//___/
 
+         Панель управления XKeen/Mihomo
 EOF
   printf "${NC}\n"
 }
@@ -184,7 +220,7 @@ do_install() {
 
   detect_arch
   create_config
-  install_binary
+  install_binary || return
   create_init_script
   start_service
 
@@ -214,15 +250,18 @@ do_update() {
   fi
 
   local old_version=$(get_version)
-  info "Обновление с v%s (%s)..." "$old_version" "$CHANNEL"
+  info "Обновление с ${old_version} (${CHANNEL})..."
 
   detect_arch
   stop_service
-  install_binary
+  install_binary || {
+    start_service
+    return
+  }
   start_service
 
   local new_version=$(get_version)
-  ok "Обновлено: v%s → v%s" "$old_version" "$new_version"
+  ok "Обновлено: ${old_version} → ${new_version}"
   info "Обновите страницу в браузере: Ctrl+Shift+R"
 }
 
@@ -306,7 +345,12 @@ if can_interact; then
   while true; do
     print_banner
     show_menu
-    read choice < /dev/tty
+    if ! read choice < /dev/tty || [ -z "$choice" ]; then
+      # EOF или пустой ввод — выходим
+      echo
+      ok "До свидания!"
+      exit 0
+    fi
 
     case "$choice" in
       1) do_install ;;
