@@ -10,6 +10,7 @@
   import Rules from './Rules.svelte'
   import Traffic from './Traffic.svelte'
   import Subscriptions from './Subscriptions.svelte'
+  import KernelManager from './KernelManager.svelte'
 
   let version = 'loading...'
   let loading = false
@@ -122,6 +123,9 @@
       <button class="nav-item" class:active={currentTab === 'services'} on:click={() => switchTab('services')}>
         🚀 {$t('nav.services')}
       </button>
+      <button class="nav-item" class:active={currentTab === 'kernels'} on:click={() => switchTab('kernels')}>
+        🧠 {$t('nav.kernels')}
+      </button>
       <button class="nav-item" class:active={currentTab === 'settings'} on:click={() => switchTab('settings')}>
         ⚙️ {$t('nav.settings')}
       </button>
@@ -204,6 +208,8 @@
       <Subscriptions />
     {:else if currentTab === 'services'}
       <Services />
+    {:else if currentTab === 'kernels'}
+      <KernelManager />
     {:else if currentTab === 'settings'}
       <Settings />
     {/if}

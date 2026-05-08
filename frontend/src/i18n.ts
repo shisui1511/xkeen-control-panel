@@ -63,6 +63,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'nav.rules': 'Правила',
     'nav.traffic': 'Трафик',
     'nav.services': 'Сервисы',
+    'nav.kernels': 'Ядра',
     'nav.settings': 'Настройки',
     'nav.theme_light': 'Светлая тема',
     'nav.theme_dark': 'Тёмная тема',
@@ -236,6 +237,19 @@ const translations: Record<Lang, Record<string, string>> = {
     'setup.remove_config': 'Удалить конфиги?',
     'setup.config_kept': 'Конфиги сохранены',
     'setup.cancelled': 'Отменено',
+
+    // Kernel Manager
+    'kernels.title': 'Управление ядрами',
+    'kernels.subtitle': 'Xray Core и Mihomo (Clash.Meta)',
+    'kernels.not_installed': 'Не установлен',
+    'kernels.channel': 'Канал',
+    'kernels.latest': 'Последняя версия',
+    'kernels.status': 'Статус',
+    'kernels.check_update': 'Проверить обновления',
+    'kernels.checking': 'Проверка...',
+    'kernels.install': 'Установить',
+    'kernels.installing': 'Установка...',
+    'kernels.empty': 'Ядра не найдены',
   },
   en: {
     // Common
@@ -295,6 +309,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'nav.rules': 'Rules',
     'nav.traffic': 'Traffic',
     'nav.services': 'Services',
+    'nav.kernels': 'Kernels',
     'nav.settings': 'Settings',
     'nav.theme_light': 'Light theme',
     'nav.theme_dark': 'Dark theme',
@@ -468,6 +483,19 @@ const translations: Record<Lang, Record<string, string>> = {
     'setup.remove_config': 'Remove config?',
     'setup.config_kept': 'Config kept',
     'setup.cancelled': 'Cancelled',
+
+    // Kernel Manager
+    'kernels.title': 'Kernel Manager',
+    'kernels.subtitle': 'Xray Core and Mihomo (Clash.Meta)',
+    'kernels.not_installed': 'Not installed',
+    'kernels.channel': 'Channel',
+    'kernels.latest': 'Latest version',
+    'kernels.status': 'Status',
+    'kernels.check_update': 'Check for updates',
+    'kernels.checking': 'Checking...',
+    'kernels.install': 'Install',
+    'kernels.installing': 'Installing...',
+    'kernels.empty': 'No kernels found',
   }
 }
 

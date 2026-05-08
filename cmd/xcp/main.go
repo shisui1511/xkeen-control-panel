@@ -94,6 +94,17 @@ func main() {
 	srv.HandleProtected("/api/subscriptions/refresh", api.SubscriptionRefresh)
 	srv.HandleProtected("/api/subscriptions/refresh-all", api.SubscriptionRefreshAll)
 
+	// Kernel endpoints
+	srv.HandleProtected("/api/kernels", api.KernelList)
+	srv.HandleProtected("/api/kernels/xray/check", api.KernelCheck)
+	srv.HandleProtected("/api/kernels/xray/install", api.KernelInstall)
+	srv.HandleProtected("/api/kernels/xray/status", api.KernelStatus)
+	srv.HandleProtected("/api/kernels/xray/channel", api.KernelChannel)
+	srv.HandleProtected("/api/kernels/mihomo/check", api.KernelCheck)
+	srv.HandleProtected("/api/kernels/mihomo/install", api.KernelInstall)
+	srv.HandleProtected("/api/kernels/mihomo/status", api.KernelStatus)
+	srv.HandleProtected("/api/kernels/mihomo/channel", api.KernelChannel)
+
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {
 		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)

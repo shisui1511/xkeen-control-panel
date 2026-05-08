@@ -18,6 +18,7 @@ type API struct {
 	mihomoSvc       *services.MihomoService
 	configSvc       *services.ConfigService
 	subscriptionSvc *services.SubscriptionService
+	kernelSvc       *services.KernelService
 	pathVal         *utils.PathValidator
 }
 
