@@ -6,14 +6,6 @@ on:
       - main
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
-    paths:
-      - 'cmd/**'
-      - 'internal/**'
-      - 'frontend/**'
-      - 'embed.go'
-      - 'go.mod'
-      - 'go.sum'
-      - '.github/workflows/build.yml'
   workflow_dispatch:
     inputs:
       version:
@@ -79,6 +71,9 @@ jobs:
           - GOARCH: mipsle
             GOMIPS: softfloat
             name: mipsle
+          - GOARCH: mips
+            GOMIPS: softfloat
+            name: mips
 
     steps:
       - uses: actions/checkout@v4
@@ -205,10 +200,11 @@ jobs:
               git push --delete origin "$tag" 2>/dev/null || true
             done
 
-          cat > /tmp/release-notes.md << ENDNOTES
-          ## Dev Pre-Release
+          # Получить последние 15 коммитов для changelog
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" -15 2>/dev/null || echo "Список изменений недоступен")
 
-          **Это dev-сборка для тестирования.** Не используйте в production.
+          cat > /tmp/release-notes.md << ENDNOTES
+          ⚠️ **Это dev-сборка для тестирования.** Не используйте в production.
 
           | Свойство | Значение |
           |----------|----------|
@@ -217,18 +213,14 @@ jobs:
           | Дата сборки | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
 
           ### Изменения
-          
-          $(git log --pretty=format:"- %s (%h)" -10)
 
-          ### Поддерживаемые устройства
+          ${CHANGELOG}
 
-          **ARM64** (xkeen-control-panel-arm64):
-          - KN-1810, KN-1910
-          - Другие Keenetic с ARM64 и Entware
+          ### Архитектуры
 
-          **MIPSLE** (xkeen-control-panel-mipsle):
-          - KN-1912 Viva, KN-2410
-          - Другие Keenetic с MIPSLE и Entware
+          - **ARM64** — `xkeen-control-panel-arm64`
+          - **MIPSLE** — `xkeen-control-panel-mipsle`
+          - **MIPS** — `xkeen-control-panel-mips`
           ENDNOTES
 
           gh release create "${VERSION}" \
@@ -238,7 +230,9 @@ jobs:
             artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64 \
             artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64.sha256 \
             artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle \
-            artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle.sha256
+            artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle.sha256 \
+            artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips \
+            artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips.sha256
 
       - name: Create stable release
         if: needs.build.outputs.is_stable == 'true'
@@ -252,24 +246,24 @@ jobs:
             exit 1
           fi
 
+          # Найти предыдущий stable тег для списка изменений
+          PREV_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -2 | head -1)
+          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$VERSION" ]; then
+            CHANGELOG="Первый релиз."
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..${VERSION}" 2>/dev/null || echo "Список изменений недоступен")
+          fi
+
           cat > /tmp/release-notes.md << EOF
-          ## XKeen Control Panel ${VERSION}
+          ### Что нового
 
-          Стабильный релиз.
+          ${CHANGELOG}
 
-          ### Изменения
-          
-          $(git log --pretty=format:"- %s (%h)" $(git describe --tags --abbrev=0 HEAD^)..HEAD 2>/dev/null || echo "Первый релиз")
+          ### Архитектуры
 
-          ### Поддерживаемые устройства
-
-          **ARM64** (xkeen-control-panel-arm64):
-          - KN-1810, KN-1910
-          - Другие Keenetic с ARM64 и Entware
-
-          **MIPSLE** (xkeen-control-panel-mipsle):
-          - KN-1912 Viva, KN-2410
-          - Другие Keenetic с MIPSLE и Entware
+          - **ARM64** — `xkeen-control-panel-arm64`
+          - **MIPSLE** — `xkeen-control-panel-mipsle`
+          - **MIPS** — `xkeen-control-panel-mips`
 
           ### Установка
           \`\`\`sh
@@ -287,7 +281,9 @@ jobs:
             artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64 \
             artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64.sha256 \
             artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle \
-            artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle.sha256
+            artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle.sha256 \
+            artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips \
+            artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips.sha256
 
   cleanup:
     name: Cleanup artifacts

@@ -41,8 +41,11 @@ detect_lang() {
 detect_arch() {
   ARCH=$(uname -m)
   case "$ARCH" in
-    mips|mipsel|mipsle)
+    mipsel|mipsle)
       ARCH_LABEL="mipsle"
+      ;;
+    mips)
+      ARCH_LABEL="mips"
       ;;
     aarch64|arm64)
       ARCH_LABEL="arm64"
