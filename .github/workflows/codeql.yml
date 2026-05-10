@@ -42,7 +42,20 @@ jobs:
           # security-extended      — больше security-запросов, чем default
           # security-and-quality   — security + quality (например, мёртвый код)
 
-      # Для Go нужно собрать проект перед анализом
+      # Для Go нужен собранный frontend/dist из-за go:embed
+      - name: Set up Node.js (for Go embed)
+        if: matrix.language == 'go'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend (for Go embed)
+        if: matrix.language == 'go'
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
       - name: Set up Go
         if: matrix.language == 'go'
         uses: actions/setup-go@v5
