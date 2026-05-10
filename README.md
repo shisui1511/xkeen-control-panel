@@ -83,6 +83,38 @@ curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/s
 3. Скачает новый бинарник
 4. Перезапустит сервис
 
+## HTTPS
+
+Панель поддерживает самоподписанные сертификаты для HTTPS в локальной сети.
+
+### Включение HTTPS
+
+В `config.json`:
+
+```json
+{
+  "https": {
+    "enabled": true,
+    "cert_path": "",
+    "key_path": ""
+  }
+}
+```
+
+При `enabled: true` и пустых путях сертификат генерируется автоматически в `/opt/etc/xkeen-control-panel/ssl/`.
+
+### Ручная генерация сертификата
+
+```bash
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /opt/etc/xkeen-control-panel/ssl/key.pem \
+  -out /opt/etc/xkeen-control-panel/ssl/cert.pem \
+  -subj "/CN=xkeen-control-panel" \
+  -addext "subjectAltName=IP:192.168.1.1"
+```
+
+> ⚠️ Браузер покажет предупреждение о самоподписанном сертификате — это нормально для LAN. Нажмите "Дополнительно" → "Перейти на сайт".
+
 ## Управление сервисом
 
 ```bash
