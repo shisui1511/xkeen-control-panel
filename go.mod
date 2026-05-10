@@ -4,4 +4,4 @@ go 1.24
 
 require github.com/gorilla/websocket v1.5.0
 
-require golang.org/x/crypto v0.50.0 // indirect
+require golang.org/x/crypto v0.28.0

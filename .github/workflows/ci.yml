@@ -46,6 +46,8 @@ jobs:
           cache: false
 
       - name: Download Go dependencies
+        env:
+          GOTOOLCHAIN: local
         run: go mod download
 
       - name: Run go fmt
@@ -92,6 +94,8 @@ jobs:
           cache: false
 
       - name: Download dependencies
+        env:
+          GOTOOLCHAIN: local
         run: go mod download
 
       - name: Run tests
