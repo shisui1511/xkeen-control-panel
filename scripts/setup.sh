@@ -92,12 +92,13 @@ get_latest_stable_version() {
 
 # Получить latest pre-release версию
 # GitHub API возвращает releases в произвольном порядке (не по дате).
-# Загружаем больше релизов, извлекаем все теги, сортируем по версии и берём максимальный.
+# Rolling pre-release: один тег vX.Y.0-dev, пересоздаётся при каждом push.
+# Загружаем releases, фильтруем только pre-release теги (содержащие -dev),
+# сортируем по версии и берём максимальный.
 get_latest_prerelease_version() {
   _json=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases?per_page=30" || echo "")
   if [ -n "$_json" ]; then
-    # Извлекаем все tag_name и сортируем по версии (sort -V)
-    _tag=$(echo "$_json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' | sort -V | tail -1)
+    _tag=$(echo "$_json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' | grep '\-dev' | sort -V | tail -1)
     echo "$_tag"
   else
     echo ""
