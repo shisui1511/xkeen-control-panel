@@ -78,9 +78,31 @@ detect_arch() {
 # 1. GitHub Releases (primary)
 # 2. jsDelivr CDN (fallback)
 # 3. raw.githubusercontent.com (fallback)
-get_latest_version() {
+
+# Получить latest stable версию
+get_latest_stable_version() {
   curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases/latest" | \
     grep -m1 '"tag_name":' | sed 's/.*"\([^"]*\)".*/\1/' || echo ""
+}
+
+# Получить latest pre-release версию
+get_latest_prerelease_version() {
+  _json=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases?per_page=1" || echo "")
+  if [ -n "$_json" ]; then
+    _tag=$(echo "$_json" | grep -m1 '"tag_name":' | sed 's/.*"\([^"]*\)".*/\1/')
+    echo "$_tag"
+  else
+    echo ""
+  fi
+}
+
+# Получить версию в зависимости от канала
+get_release_version() {
+  if [ "$CHANNEL" = "prerelease" ]; then
+    get_latest_prerelease_version
+  else
+    get_latest_stable_version
+  fi
 }
 
 get_github_releases_url() {
@@ -171,9 +193,9 @@ install_binary() {
   mkdir -p "$(dirname "$BIN_PATH")"
   TEMP_BIN="/tmp/${BINARY}.new"
 
-  # Получаем последнюю версию
+  # Получаем версию в зависимости от канала
   info "Определяем версию..."
-  LATEST_VER=$(get_latest_version)
+  LATEST_VER=$(get_release_version)
   if [ -z "$LATEST_VER" ]; then
     error "Не удалось определить версию"
     return 1
