@@ -74,19 +74,28 @@ detect_arch() {
 }
 
 # Fallback URLs для скачивания бинарников
+# Имена файлов: xcp_{VERSION}_{ARCH}
 # 1. GitHub Releases (primary)
-# 2. jsDelivr CDN (fallback) — кэширует файлы из git-репозитория
+# 2. jsDelivr CDN (fallback)
 # 3. raw.githubusercontent.com (fallback)
+get_latest_version() {
+  curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases/latest" | \
+    grep -m1 '"tag_name":' | sed 's/.*"\([^"]*\)".*/\1/' || echo ""
+}
+
 get_github_releases_url() {
-  echo "https://github.com/${REPO}/releases/latest/download/${BINARY}-${ARCH_LABEL}"
+  _ver="$1"
+  echo "https://github.com/${REPO}/releases/download/${_ver}/xcp_${_ver}_${ARCH_LABEL}"
 }
 
 get_jsdelivr_url() {
-  echo "https://cdn.jsdelivr.net/gh/${REPO}@binaries/bin/${BINARY}-${ARCH_LABEL}"
+  _ver="$1"
+  echo "https://cdn.jsdelivr.net/gh/${REPO}@binaries/bin/xcp_${_ver}_${ARCH_LABEL}"
 }
 
 get_raw_url() {
-  echo "https://raw.githubusercontent.com/${REPO}/binaries/bin/${BINARY}-${ARCH_LABEL}"
+  _ver="$1"
+  echo "https://raw.githubusercontent.com/${REPO}/binaries/bin/xcp_${_ver}_${ARCH_LABEL}"
 }
 
 # Остановка сервиса
@@ -162,9 +171,18 @@ install_binary() {
   mkdir -p "$(dirname "$BIN_PATH")"
   TEMP_BIN="/tmp/${BINARY}.new"
 
+  # Получаем последнюю версию
+  info "Определяем версию..."
+  LATEST_VER=$(get_latest_version)
+  if [ -z "$LATEST_VER" ]; then
+    error "Не удалось определить версию"
+    return 1
+  fi
+  info "Версия: $LATEST_VER"
+
   # 1. Основной источник — GitHub Releases
   info "Пробуем GitHub Releases..."
-  _url=$(get_github_releases_url)
+  _url=$(get_github_releases_url "$LATEST_VER")
   if try_download "$_url"; then
     ok "Загружено с GitHub Releases"
     chmod +x "$TEMP_BIN"
@@ -173,9 +191,9 @@ install_binary() {
     return 0
   fi
 
-  # 2. Fallback — jsDelivr CDN (кэширует git-файлы)
+  # 2. Fallback — jsDelivr CDN
   warn "GitHub недоступен, пробуем jsDelivr..."
-  _url=$(get_jsdelivr_url)
+  _url=$(get_jsdelivr_url "$LATEST_VER")
   if try_download "$_url"; then
     ok "Загружено через jsDelivr"
     chmod +x "$TEMP_BIN"
@@ -186,7 +204,7 @@ install_binary() {
 
   # 3. Fallback — raw.githubusercontent.com
   warn "jsDelivr недоступен, пробуем raw.githubusercontent.com..."
-  _url=$(get_raw_url)
+  _url=$(get_raw_url "$LATEST_VER")
   if try_download "$_url"; then
     ok "Загружено с raw.githubusercontent.com"
     chmod +x "$TEMP_BIN"

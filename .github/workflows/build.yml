@@ -103,14 +103,12 @@ jobs:
         id: version
         run: |
           if [ "${{ github.ref_type }}" = "tag" ]; then
-            # Stable release from tag
             VERSION="${GITHUB_REF#refs/tags/}"
             IS_STABLE="true"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="v${{ github.event.inputs.version }}"
             IS_STABLE="true"
           else
-            # Pre-release from push to main
             LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
             if [ -z "$LATEST_TAG" ]; then
               LATEST_TAG="v0.0.0"
@@ -143,27 +141,27 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           go build -ldflags="-s -w -X main.Version=${VERSION}" \
-            -o build/xkeen-control-panel-${{ matrix.name }} ./cmd/xcp
+            -o build/xcp_${VERSION}_${{ matrix.name }} ./cmd/xcp
 
       - name: Compress with UPX (pre-release only)
         if: steps.version.outputs.is_stable != 'true'
         run: |
           sudo apt-get update && sudo apt-get install -y upx-ucl
-          upx --best --lzma build/xkeen-control-panel-${{ matrix.name }} -o build/xkeen-control-panel-${{ matrix.name }}-upx
-          mv build/xkeen-control-panel-${{ matrix.name }}-upx build/xkeen-control-panel-${{ matrix.name }}
+          upx --best --lzma build/xcp_${VERSION}_${{ matrix.name }} -o build/xcp_${VERSION}_${{ matrix.name }}_upx
+          mv build/xcp_${VERSION}_${{ matrix.name }}_upx build/xcp_${VERSION}_${{ matrix.name }}
 
       - name: Generate checksum
         run: |
           cd build
-          sha256sum xkeen-control-panel-${{ matrix.name }} > xkeen-control-panel-${{ matrix.name }}.sha256
+          sha256sum xcp_${VERSION}_${{ matrix.name }} > xcp_${VERSION}_${{ matrix.name }}.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: xkeen-control-panel-${{ matrix.name }}
+          name: xcp_${{ matrix.name }}
           path: |
-            build/xkeen-control-panel-${{ matrix.name }}
-            build/xkeen-control-panel-${{ matrix.name }}.sha256
+            build/xcp_${{ steps.version.outputs.version }}_${{ matrix.name }}
+            build/xcp_${{ steps.version.outputs.version }}_${{ matrix.name }}.sha256
 
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -190,49 +188,37 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           SHORT_SHA="${GITHUB_SHA:0:7}"
-
-          # Delete old dev pre-releases
-          gh release list --limit 50 --json tagName,isPrerelease | \
-            jq -r '.[] | select(.tagName | test("-dev\\.")) | .tagName' | \
-            while read tag; do
-              echo "Deleting old dev release: $tag"
-              gh release delete "$tag" --yes 2>/dev/null || true
-              git push --delete origin "$tag" 2>/dev/null || true
-            done
-
-          # Получить последние 15 коммитов для changelog
           CHANGELOG=$(git log --pretty=format:"- %s (%h)" -15 2>/dev/null || echo "Список изменений недоступен")
 
           cat > /tmp/release-notes.md << ENDNOTES
-          ⚠️ **Это dev-сборка для тестирования.** Не используйте в production.
+          ⚠️ Это dev-сборка. Не используйте в production.
 
-          | Свойство | Значение |
-          |----------|----------|
-          | Версия | \`${VERSION}\` |
-          | Коммит | \`${SHORT_SHA}\` |
-          | Дата сборки | $(date -u +%Y-%m-%dT%H:%M:%SZ) |
+          **Коммит:** \`${SHORT_SHA}\`
+          **Дата:** $(date -u +%Y-%m-%d)
 
-          ### Изменения
+          ### Changelog
 
           ${CHANGELOG}
 
-          ### Архитектуры
+          ### Файлы
 
-          - **ARM64** — `xkeen-control-panel-arm64`
-          - **MIPSLE** — `xkeen-control-panel-mipsle`
-          - **MIPS** — `xkeen-control-panel-mips`
+          | Файл | Архитектура |
+          |------|-------------|
+          | xcp_${VERSION}_arm64 | ARM64 |
+          | xcp_${VERSION}_mipsle | MIPSLE |
+          | xcp_${VERSION}_mips | MIPS |
           ENDNOTES
 
           gh release create "${VERSION}" \
-            --title "Dev ${VERSION}" \
+            --title "${VERSION}" \
             --notes-file /tmp/release-notes.md \
             --prerelease \
-            artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64 \
-            artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64.sha256 \
-            artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle \
-            artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle.sha256 \
-            artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips \
-            artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips.sha256
+            artifacts/xcp_arm64/xcp_${VERSION}_arm64 \
+            artifacts/xcp_arm64/xcp_${VERSION}_arm64.sha256 \
+            artifacts/xcp_mipsle/xcp_${VERSION}_mipsle \
+            artifacts/xcp_mipsle/xcp_${VERSION}_mipsle.sha256 \
+            artifacts/xcp_mips/xcp_${VERSION}_mips \
+            artifacts/xcp_mips/xcp_${VERSION}_mips.sha256
 
       - name: Create stable release
         if: needs.build.outputs.is_stable == 'true'
@@ -240,13 +226,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
-          # Валидация формата
           if echo "$VERSION" | grep -qvE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "ERROR: Invalid stable version format: $VERSION"
             exit 1
           fi
 
-          # Найти предыдущий stable тег для списка изменений
           PREV_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -2 | head -1)
           if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$VERSION" ]; then
             CHANGELOG="Первый релиз."
@@ -255,56 +239,53 @@ jobs:
           fi
 
           cat > /tmp/release-notes.md << EOF
-          ### Что нового
+          ### Changelog
 
           ${CHANGELOG}
 
-          ### Архитектуры
-
-          - **ARM64** — `xkeen-control-panel-arm64`
-          - **MIPSLE** — `xkeen-control-panel-mipsle`
-          - **MIPS** — `xkeen-control-panel-mips`
+          [Full Changelog](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${VERSION})
 
           ### Установка
+
           \`\`\`sh
-          chmod +x xkeen-control-panel-arm64
-          ./xkeen-control-panel-arm64 install
-          /opt/etc/init.d/S99xkeen-control-panel start
+          curl -Ls https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/setup.sh | sh
           \`\`\`
 
-          Доступ: \`http://<ip-роутера>:8089\`
+          Или скачайте файл для вашей архитектуры и запустите:
+          \`\`\`sh
+          chmod +x xcp_${VERSION}_arm64
+          ./xcp_${VERSION}_arm64 -version
+          \`\`\`
           EOF
 
           gh release create "${VERSION}" \
             --title "${VERSION}" \
             --notes-file /tmp/release-notes.md \
-            artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64 \
-            artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64.sha256 \
-            artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle \
-            artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle.sha256 \
-            artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips \
-            artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips.sha256
+            artifacts/xcp_arm64/xcp_${VERSION}_arm64 \
+            artifacts/xcp_arm64/xcp_${VERSION}_arm64.sha256 \
+            artifacts/xcp_mipsle/xcp_${VERSION}_mipsle \
+            artifacts/xcp_mipsle/xcp_${VERSION}_mipsle.sha256 \
+            artifacts/xcp_mips/xcp_${VERSION}_mips \
+            artifacts/xcp_mips/xcp_${VERSION}_mips.sha256
 
-      - name: Update binaries branch for jsDelivr
+      - name: Update binaries branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          # Fetch or create binaries branch
           git fetch origin binaries 2>/dev/null || true
           git checkout -b binaries origin/binaries 2>/dev/null || git checkout --orphan binaries
           
-          # Clean old files and add new binaries
           git rm -rf . 2>/dev/null || true
           mkdir -p bin
-          cp artifacts/xkeen-control-panel-arm64/xkeen-control-panel-arm64 bin/
-          cp artifacts/xkeen-control-panel-mipsle/xkeen-control-panel-mipsle bin/
-          cp artifacts/xkeen-control-panel-mips/xkeen-control-panel-mips bin/
+          cp artifacts/xcp_arm64/xcp_${VERSION}_arm64 bin/
+          cp artifacts/xcp_mipsle/xcp_${VERSION}_mipsle bin/
+          cp artifacts/xcp_mips/xcp_${VERSION}_mips bin/
           
           git add bin/
-          git commit -m "Update binaries for ${VERSION}" || true
+          git commit -m "${VERSION}" || true
           git push origin binaries --force
 
   cleanup:
@@ -315,4 +296,4 @@ jobs:
     steps:
       - uses: geekyeggo/delete-artifact@v5
         with:
-          name: xkeen-control-panel-*
+          name: xcp_*

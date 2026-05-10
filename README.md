@@ -29,14 +29,14 @@ curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/s
 
 
 ```bash
-# 1. Скачать бинарник
+# 1. Скачать бинарник (замените {VERSION} на актуальную версию, например v0.4.0)
 # ARM64 (KN-1810, KN-1910, KN-1010)
 curl -fL -o /opt/bin/xkeen-control-panel \
-  "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xkeen-control-panel-linux-arm64"
+  "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xcp_{VERSION}_arm64"
 
 # MIPSLE (KN-1912, KN-2410)
 curl -fL -o /opt/bin/xkeen-control-panel \
-  "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xkeen-control-panel-linux-mipsle"
+  "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xcp_{VERSION}_mipsle"
 
 chmod +x /opt/bin/xkeen-control-panel
 
