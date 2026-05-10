@@ -1,0 +1,257 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Mihomo Config",
+  "description": "Configuration file for Mihomo (Clash.Meta)",
+  "type": "object",
+  "properties": {
+    "port": {
+      "type": "integer",
+      "description": "HTTP proxy port",
+      "default": 7890
+    },
+    "socks-port": {
+      "type": "integer",
+      "description": "SOCKS5 proxy port",
+      "default": 7891
+    },
+    "mixed-port": {
+      "type": "integer",
+      "description": "Mixed HTTP+SOCKS port",
+      "default": 7892
+    },
+    "redir-port": {
+      "type": "integer",
+      "description": "Transparent proxy port (Linux)"
+    },
+    "tproxy-port": {
+      "type": "integer",
+      "description": "TPROXY port (Linux)"
+    },
+    "allow-lan": {
+      "type": "boolean",
+      "description": "Allow other devices in LAN to use this proxy",
+      "default": false
+    },
+    "bind-address": {
+      "type": "string",
+      "description": "Bind address",
+      "default": "*"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["global", "rule", "direct"],
+      "description": "Proxy mode",
+      "default": "rule"
+    },
+    "log-level": {
+      "type": "string",
+      "enum": ["debug", "info", "warning", "error", "silent"],
+      "description": "Log level",
+      "default": "info"
+    },
+    "ipv6": {
+      "type": "boolean",
+      "description": "IPv6 support",
+      "default": false
+    },
+    "external-controller": {
+      "type": "string",
+      "description": "REST API listen address (e.g., 127.0.0.1:9090)",
+      "default": "127.0.0.1:9090"
+    },
+    "secret": {
+      "type": "string",
+      "description": "API secret token"
+    },
+    "external-ui": {
+      "type": "string",
+      "description": "Path to external dashboard UI files"
+    },
+    "interface-name": {
+      "type": "string",
+      "description": "Bind to specific network interface"
+    },
+    "routing-mark": {
+      "type": "integer",
+      "description": "Mark traffic for routing (Linux)"
+    },
+    "find-process-mode": {
+      "type": "string",
+      "enum": ["always", "strict", "off"],
+      "description": "Process name resolution mode",
+      "default": "strict"
+    },
+    "global-client-fingerprint": {
+      "type": "string",
+      "enum": ["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "none"],
+      "description": "Global TLS fingerprint"
+    },
+    "profile": {
+      "type": "object",
+      "description": "Profile settings",
+      "properties": {
+        "store-selected": {
+          "type": "boolean",
+          "description": "Remember selected proxy per group",
+          "default": true
+        },
+        "store-fake-ip": {
+          "type": "boolean",
+          "description": "Cache fake-ip mappings",
+          "default": true
+        }
+      }
+    },
+    "dns": {
+      "type": "object",
+      "description": "DNS configuration",
+      "properties": {
+        "enable": {
+          "type": "boolean",
+          "description": "Enable custom DNS",
+          "default": true
+        },
+        "listen": {
+          "type": "string",
+          "description": "DNS listen address (e.g., 0.0.0.0:1053)"
+        },
+        "default-nameserver": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Default DNS servers for resolving DoH/DoT"
+        },
+        "enhanced-mode": {
+          "type": "string",
+          "enum": ["redir-host", "fake-ip"],
+          "description": "DNS enhanced mode",
+          "default": "redir-host"
+        },
+        "fake-ip-range": {
+          "type": "string",
+          "description": "Fake-IP address pool",
+          "default": "198.18.0.1/16"
+        },
+        "fake-ip-filter": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Domains that skip fake-ip"
+        },
+        "nameserver": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Default nameservers"
+        },
+        "fallback": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Fallback nameservers when geoip fails"
+        },
+        "fallback-filter": {
+          "type": "object",
+          "properties": {
+            "geoip": { "type": "boolean" },
+            "geoip-code": { "type": "string" },
+            "geosite": { "type": "array", "items": { "type": "string" } },
+            "ipcidr": { "type": "array", "items": { "type": "string" } },
+            "domain": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "nameserver-policy": {
+          "type": "object",
+          "description": "Per-domain DNS rules"
+        }
+      }
+    },
+    "tun": {
+      "type": "object",
+      "description": "TUN device configuration",
+      "properties": {
+        "enable": { "type": "boolean", "default": false },
+        "stack": {
+          "type": "string",
+          "enum": ["system", "gvisor", "mixed"],
+          "default": "system"
+        },
+        "dns-hijack": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "DNS addresses to hijack"
+        },
+        "auto-route": { "type": "boolean", "default": true },
+        "auto-detect-interface": { "type": "boolean", "default": true },
+        "device": { "type": "string", "description": "TUN device name" },
+        "mtu": { "type": "integer", "default": 9000 }
+      }
+    },
+    "proxies": {
+      "type": "array",
+      "description": "Proxy server definitions",
+      "items": {
+        "type": "object",
+        "required": ["name", "type", "server", "port"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["ss", "ssr", "vmess", "vless", "trojan", " hysteria", "hysteria2", "tuic", "wireguard", "socks5", "http", "snell"]
+          },
+          "server": { "type": "string" },
+          "port": { "type": "integer" },
+          "password": { "type": "string" },
+          "uuid": { "type": "string" },
+          "udp": { "type": "boolean" }
+        }
+      }
+    },
+    "proxy-groups": {
+      "type": "array",
+      "description": "Proxy groups (select, url-test, fallback, load-balance)",
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["select", "url-test", "fallback", "load-balance", "relay"]
+          },
+          "proxies": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "url": {
+            "type": "string",
+            "description": "Test URL for url-test/fallback",
+            "default": "http://www.gstatic.com/generate_204"
+          },
+          "interval": {
+            "type": "integer",
+            "description": "Test interval in seconds",
+            "default": 300
+          },
+          "tolerance": {
+            "type": "integer",
+            "description": "Latency tolerance in ms",
+            "default": 50
+          }
+        }
+      }
+    },
+    "rules": {
+      "type": "array",
+      "description": "Routing rules",
+      "items": {
+        "type": "string",
+        "description": "Rule in format: TYPE,ARG,POLICY[,no-resolve]"
+      }
+    },
+    "rule-providers": {
+      "type": "object",
+      "description": "External rule providers"
+    },
+    "hosts": {
+      "type": "object",
+      "description": "Static DNS records"
+    }
+  }
+}

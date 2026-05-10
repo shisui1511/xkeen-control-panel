@@ -1,0 +1,247 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Xray Config",
+  "description": "Configuration file for Xray-core",
+  "type": "object",
+  "properties": {
+    "log": {
+      "type": "object",
+      "description": "Log configuration",
+      "properties": {
+        "access": { "type": "string", "description": "Access log file path" },
+        "error": { "type": "string", "description": "Error log file path" },
+        "loglevel": {
+          "type": "string",
+          "enum": ["debug", "info", "warning", "error", "none"],
+          "description": "Log level"
+        }
+      }
+    },
+    "api": {
+      "type": "object",
+      "description": "API configuration for stats and control"
+    },
+    "dns": {
+      "type": "object",
+      "description": "DNS configuration",
+      "properties": {
+        "servers": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string", "description": "DNS server address" },
+              {
+                "type": "object",
+                "properties": {
+                  "address": { "type": "string" },
+                  "port": { "type": "integer" },
+                  "domains": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "description": "Routing rules configuration",
+      "properties": {
+        "domainStrategy": {
+          "type": "string",
+          "enum": ["AsIs", "IPIfNonMatch", "IPOnDemand"],
+          "description": "Domain resolution strategy"
+        },
+        "domainMatcher": {
+          "type": "string",
+          "enum": ["hybrid", "linear"]
+        },
+        "rules": {
+          "type": "array",
+          "description": "Routing rules",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["field"]
+              },
+              "domain": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Domain matching rules"
+              },
+              "ip": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "IP matching rules"
+              },
+              "port": {
+                "oneOf": [
+                  { "type": "string" },
+                  { "type": "integer" }
+                ]
+              },
+              "network": {
+                "type": "string",
+                "enum": ["tcp", "udp"]
+              },
+              "source": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "user": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "inboundTag": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "protocol": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["http", "tls", "bittorrent"]
+                }
+              },
+              "outboundTag": {
+                "type": "string",
+                "description": "Target outbound tag"
+              },
+              "balancerTag": {
+                "type": "string",
+                "description": "Target balancer tag"
+              }
+            }
+          }
+        },
+        "balancers": {
+          "type": "array",
+          "description": "Load balancers",
+          "items": {
+            "type": "object",
+            "properties": {
+              "tag": { "type": "string" },
+              "selector": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "strategy": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["random", "leastPing", "leastLoad"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "inbounds": {
+      "type": "array",
+      "description": "Inbound connections configuration",
+      "items": {
+        "type": "object",
+        "required": ["port", "protocol"],
+        "properties": {
+          "port": {
+            "oneOf": [
+              { "type": "integer" },
+              { "type": "string" }
+            ],
+            "description": "Listening port"
+          },
+          "listen": {
+            "type": "string",
+            "description": "Listening address"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": ["vmess", "vless", "trojan", "shadowsocks", "socks", "http", "dokodemo-door", "mtproto"],
+            "description": "Inbound protocol"
+          },
+          "settings": {
+            "type": "object",
+            "description": "Protocol-specific settings"
+          },
+          "streamSettings": {
+            "type": "object",
+            "description": "Transport layer settings"
+          },
+          "tag": {
+            "type": "string",
+            "description": "Inbound tag for routing"
+          },
+          "sniffing": {
+            "type": "object",
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "destOverride": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["http", "tls", "quic"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "outbounds": {
+      "type": "array",
+      "description": "Outbound connections configuration",
+      "items": {
+        "type": "object",
+        "required": ["protocol"],
+        "properties": {
+          "protocol": {
+            "type": "string",
+            "enum": ["vmess", "vless", "trojan", "shadowsocks", "socks", "http", "freedom", "blackhole", "dns", "loopback"],
+            "description": "Outbound protocol"
+          },
+          "settings": {
+            "type": "object",
+            "description": "Protocol-specific settings"
+          },
+          "streamSettings": {
+            "type": "object",
+            "description": "Transport layer settings"
+          },
+          "tag": {
+            "type": "string",
+            "description": "Outbound tag for routing"
+          },
+          "proxySettings": {
+            "type": "object",
+            "description": "Proxy settings for chained proxy"
+          },
+          "mux": {
+            "type": "object",
+            "description": "Multiplexing settings"
+          }
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "description": "Connection policy configuration"
+    },
+    "stats": {
+      "type": "object",
+      "description": "Statistics configuration"
+    },
+    "reverse": {
+      "type": "object",
+      "description": "Reverse proxy configuration"
+    },
+    "transport": {
+      "type": "object",
+      "description": "Global transport settings"
+    }
+  }
+}
