@@ -195,7 +195,7 @@ jobs:
           CHANGELOG=$(git log --pretty=format:"- %s by @${GITHUB_ACTOR} in %h" -15 2>/dev/null || echo "Список изменений недоступен")
 
           cat > /tmp/release-notes.md << ENDNOTES
-          ⚠️ **Пре-релиз.** Не рекомендуется для production-использования.
+          ⚠️ Не рекомендуется для production-использования.
 
           **Коммит:** \`${SHORT_SHA}\`  
           **Дата:** $(date -u +%Y-%m-%d)
