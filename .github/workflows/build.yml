@@ -122,13 +122,13 @@ jobs:
             MINOR=$(echo "$BASE" | cut -d. -f2)
             NEXT_MINOR=$((MINOR + 1))
             
-            COMMIT_COUNT=$(git rev-list "${LATEST_TAG}..HEAD" --count 2>/dev/null || echo "0")
-            if [ "$COMMIT_COUNT" = "0" ]; then
-              COMMIT_COUNT=$(git rev-list --count HEAD)
-            fi
-            
-            VERSION="v${MAJOR}.${NEXT_MINOR}.0-dev.${COMMIT_COUNT}"
+            # Rolling pre-release: v0.5.0-dev (без счётчика коммитов в имени)
+            VERSION="v${MAJOR}.${NEXT_MINOR}.0-dev"
             IS_STABLE="false"
+            
+            # Счётчик коммитов для release notes
+            COMMIT_COUNT=$(git rev-list "${LATEST_TAG}..HEAD" --count 2>/dev/null || echo "0")
+            echo "commit_count=${COMMIT_COUNT}" >> $GITHUB_OUTPUT
           fi
           
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
@@ -173,6 +173,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       is_stable: ${{ steps.version.outputs.is_stable }}
+      commit_count: ${{ steps.version.outputs.commit_count }}
 
   release:
     name: Create Release
@@ -188,19 +189,28 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create pre-release
+      - name: Rolling pre-release
         if: needs.build.outputs.is_stable != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
+          COMMIT_COUNT: ${{ needs.build.outputs.commit_count }}
         run: |
           SHORT_SHA="${GITHUB_SHA:0:7}"
-          CHANGELOG=$(git log --pretty=format:"- %s by @${GITHUB_ACTOR} in %h" -15 2>/dev/null || echo "Список изменений недоступен")
+          
+          # Находим последний stable tag для changelog
+          LATEST_STABLE=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
+          if [ -n "$LATEST_STABLE" ]; then
+            CHANGELOG=$(git log --pretty=format:"- %s by @${GITHUB_ACTOR} in %h" "${LATEST_STABLE}..HEAD" 2>/dev/null || echo "Список изменений недоступен")
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s by @${GITHUB_ACTOR} in %h" -15 2>/dev/null || echo "Список изменений недоступен")
+          fi
 
           cat > /tmp/release-notes.md << ENDNOTES
-          ⚠️ Не рекомендуется для production-использования.
+          ⚠️ **Пре-релиз.** Не рекомендуется для production-использования.
 
           **Коммит:** \`${SHORT_SHA}\`  
+          **Build:** ${COMMIT_COUNT} коммитов с ${LATEST_STABLE:-начала}  
           **Дата:** $(date -u +%Y-%m-%d)
 
           ## Что изменилось
@@ -208,8 +218,18 @@ jobs:
           ${CHANGELOG}
           ENDNOTES
 
+          # Удаляем старый rolling pre-release и тег (игнорируем ошибки если нет)
+          echo "Deleting old rolling pre-release ${VERSION}..."
+          gh release delete "${VERSION}" --yes 2>/dev/null || true
+          git push origin --delete "refs/tags/${VERSION}" 2>/dev/null || true
+
+          # Создаём новый tag на текущем HEAD
+          git tag "${VERSION}" "${GITHUB_SHA}"
+          git push origin "${VERSION}"
+
+          # Создаём новый release
           gh release create "${VERSION}" \
-            --title "${VERSION}" \
+            --title "${VERSION} (build ${COMMIT_COUNT})" \
             --notes-file /tmp/release-notes.md \
             --prerelease \
             artifacts/xcp_arm64/xcp_${VERSION}_arm64 \
@@ -268,6 +288,12 @@ jobs:
             artifacts/xcp_mipsle/xcp_${VERSION}_mipsle.sha256 \
             artifacts/xcp_mips/xcp_${VERSION}_mips \
             artifacts/xcp_mips/xcp_${VERSION}_mips.sha256
+
+          # Удаляем rolling pre-release этой же версии (cleanup)
+          ROLLING_TAG="${VERSION%.*}.0-dev"
+          echo "Cleaning up rolling pre-release ${ROLLING_TAG}..."
+          gh release delete "${ROLLING_TAG}" --yes 2>/dev/null || true
+          git push origin --delete "refs/tags/${ROLLING_TAG}" 2>/dev/null || true
 
       - name: Update binaries branch
         env:
