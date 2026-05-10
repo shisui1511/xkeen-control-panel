@@ -49,6 +49,11 @@ func main() {
 		DataDir:         cfg.DataDir,
 		PasswordHash:    cfg.Auth.PasswordHash,
 		SecureCookie:    cfg.Auth.SecureCookie,
+		HTTPS: server.HTTPSConfig{
+			Enabled:  cfg.HTTPS.Enabled,
+			CertPath: cfg.HTTPS.CertPath,
+			KeyPath:  cfg.HTTPS.KeyPath,
+		},
 		SavePasswordHash: func(hash string) error {
 			return cfg.SavePasswordHash(*configPath, hash)
 		},

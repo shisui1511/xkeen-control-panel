@@ -7,18 +7,19 @@ import (
 )
 
 type Config struct {
-	Port            int        `json:"port"`
-	XRayConfigDir   string     `json:"xray_config_dir"`
-	XKeenBinary     string     `json:"xkeen_binary"`
-	MihomoConfigDir string     `json:"mihomo_config_dir"`
-	MihomoBinary    string     `json:"mihomo_binary"`
-	MihomoAPIURL    string     `json:"mihomo_api_url"`
-	AllowedRoots    []string   `json:"allowed_roots"`
-	LogLevel        string     `json:"log_level"`
-	LogPath         string     `json:"log_path"`
-	LogSources      []string   `json:"log_sources"`
-	DataDir         string     `json:"data_dir"`
-	Auth            AuthConfig `json:"auth"`
+	Port            int         `json:"port"`
+	XRayConfigDir   string      `json:"xray_config_dir"`
+	XKeenBinary     string      `json:"xkeen_binary"`
+	MihomoConfigDir string      `json:"mihomo_config_dir"`
+	MihomoBinary    string      `json:"mihomo_binary"`
+	MihomoAPIURL    string      `json:"mihomo_api_url"`
+	AllowedRoots    []string    `json:"allowed_roots"`
+	LogLevel        string      `json:"log_level"`
+	LogPath         string      `json:"log_path"`
+	LogSources      []string    `json:"log_sources"`
+	DataDir         string      `json:"data_dir"`
+	Auth            AuthConfig  `json:"auth"`
+	HTTPS           HTTPSConfig `json:"https"`
 }
 
 type AuthConfig struct {
@@ -27,6 +28,12 @@ type AuthConfig struct {
 	MaxLoginAttempts int    `json:"max_login_attempts"`
 	LockoutDuration  int    `json:"lockout_duration_minutes"`
 	SecureCookie     bool   `json:"secure_cookie"`
+}
+
+type HTTPSConfig struct {
+	Enabled  bool   `json:"enabled"`
+	CertPath string `json:"cert_path"`
+	KeyPath  string `json:"key_path"`
 }
 
 func Default() *Config {
@@ -53,6 +60,11 @@ func Default() *Config {
 			MaxLoginAttempts: 5,
 			LockoutDuration:  5,
 			SecureCookie:     false,
+		},
+		HTTPS: HTTPSConfig{
+			Enabled:  false,
+			CertPath: "",
+			KeyPath:  "",
 		},
 	}
 }

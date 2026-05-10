@@ -151,7 +151,12 @@ create_config() {
   "mihomo_config_dir": "/opt/etc/mihomo",
   "mihomo_binary": "mihomo",
   "data_dir": "$INSTALL_DIR",
-  "lang": "$SYS_LANG"
+  "lang": "$SYS_LANG",
+  "https": {
+    "enabled": false,
+    "cert_path": "",
+    "key_path": ""
+  }
 }
 EOF
     ok "Конфиг создан: $CONFIG_FILE"

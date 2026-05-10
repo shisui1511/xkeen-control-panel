@@ -1,12 +1,16 @@
 package server
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/user/xkeen-control-panel/internal/auth"
+	"github.com/user/xkeen-control-panel/internal/cert"
 	"github.com/user/xkeen-control-panel/internal/i18n"
 	"github.com/user/xkeen-control-panel/internal/middleware"
 )
@@ -29,7 +33,14 @@ type Config struct {
 	DataDir          string
 	PasswordHash     string
 	SecureCookie     bool
+	HTTPS            HTTPSConfig
 	SavePasswordHash func(string) error
+}
+
+type HTTPSConfig struct {
+	Enabled  bool
+	CertPath string
+	KeyPath  string
 }
 
 func New(cfg *Config, version string, web fs.FS) (*Server, error) {
@@ -65,8 +76,6 @@ func (s *Server) GetAuthService() *auth.AuthService {
 }
 
 func (s *Server) Start() error {
-	log.Printf("Listening on port %d", s.cfg.Port)
-
 	// Wrap mux with middleware chain
 	var handler http.Handler = s.mux
 	handler = i18n.Middleware(handler)
@@ -74,5 +83,40 @@ func (s *Server) Start() error {
 	handler = middleware.Recovery(handler)
 	handler = middleware.Logging(handler)
 
-	return http.ListenAndServe(fmt.Sprintf(":%d", s.cfg.Port), handler)
+	addr := fmt.Sprintf(":%d", s.cfg.Port)
+
+	if s.cfg.HTTPS.Enabled {
+		certPath := s.cfg.HTTPS.CertPath
+		keyPath := s.cfg.HTTPS.KeyPath
+		if certPath == "" {
+			certPath = filepath.Join(s.cfg.DataDir, "ssl", "cert.pem")
+		}
+		if keyPath == "" {
+			keyPath = filepath.Join(s.cfg.DataDir, "ssl", "key.pem")
+		}
+
+		if _, err := os.Stat(certPath); os.IsNotExist(err) {
+			log.Printf("Generating self-signed certificate: %s", certPath)
+			if err := cert.GenerateSelfSigned(certPath, keyPath, nil); err != nil {
+				return fmt.Errorf("failed to generate certificate: %w", err)
+			}
+		}
+
+		tlsConfig, err := cert.LoadOrGenerate(certPath, keyPath, nil)
+		if err != nil {
+			return fmt.Errorf("failed to load certificate: %w", err)
+		}
+
+		listener, err := tls.Listen("tcp", addr, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("failed to listen TLS: %w", err)
+		}
+		defer listener.Close()
+
+		log.Printf("Listening HTTPS on port %d", s.cfg.Port)
+		return http.Serve(listener, handler)
+	}
+
+	log.Printf("Listening HTTP on port %d", s.cfg.Port)
+	return http.ListenAndServe(addr, handler)
 }
