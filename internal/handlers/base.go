@@ -19,6 +19,7 @@ type API struct {
 	configSvc       *services.ConfigService
 	subscriptionSvc *services.SubscriptionService
 	kernelSvc       *services.KernelService
+	networkSvc      *services.NetworkToolsService
 	pathVal         *utils.PathValidator
 }
 

@@ -11,6 +11,7 @@
   import Traffic from './Traffic.svelte'
   import Subscriptions from './Subscriptions.svelte'
   import KernelManager from './KernelManager.svelte'
+  import NetworkTools from './NetworkTools.svelte'
 
   let version = 'loading...'
   let loading = false
@@ -126,6 +127,9 @@
       <button class="nav-item" class:active={currentTab === 'kernels'} on:click={() => switchTab('kernels')}>
         🧠 {$t('nav.kernels')}
       </button>
+      <button class="nav-item" class:active={currentTab === 'network'} on:click={() => switchTab('network')}>
+        🌐 Сеть
+      </button>
       <button class="nav-item" class:active={currentTab === 'settings'} on:click={() => switchTab('settings')}>
         ⚙️ {$t('nav.settings')}
       </button>
@@ -225,6 +229,8 @@
       <Services onSwitchTab={switchTab} />
     {:else if currentTab === 'kernels'}
       <KernelManager onSwitchTab={switchTab} />
+    {:else if currentTab === 'network'}
+      <NetworkTools onSwitchTab={switchTab} />
     {:else if currentTab === 'settings'}
       <Settings onSwitchTab={switchTab} />
     {/if}

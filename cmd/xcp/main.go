@@ -114,6 +114,13 @@ func main() {
 	srv.HandleProtected("/api/kernels/mihomo/status", api.KernelStatus)
 	srv.HandleProtected("/api/kernels/mihomo/channel", api.KernelChannel)
 
+	// Network Tools endpoints
+	srv.HandleProtected("/api/network/ping", api.NetworkPing)
+	srv.HandleProtected("/api/network/traceroute", api.NetworkTraceroute)
+	srv.HandleProtected("/api/network/dns", api.NetworkDNS)
+	srv.HandleProtected("/api/network/http", api.NetworkHTTPTest)
+	srv.HandleProtected("/api/network/ip", api.NetworkIP)
+
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {
 		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)
