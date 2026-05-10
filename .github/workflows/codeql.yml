@@ -9,6 +9,9 @@ on:
     # Раз в неделю, понедельник в 09:00 UTC
     - cron: '0 9 * * 1'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -34,14 +37,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: ${{ matrix.language }}
-          queries: security-extended,security-and-quality
-          # security-extended      — больше security-запросов, чем default
-          # security-and-quality   — security + quality (например, мёртвый код)
-
       # Для Go нужен собранный frontend/dist из-за go:embed
       - name: Set up Node.js (for Go embed)
         if: matrix.language == 'go'
@@ -56,12 +51,21 @@ jobs:
           npm ci
           npm run build
 
+      # Go должен быть установлен ДО codeql-action/init, чтобы CodeQL обернул go binary
       - name: Set up Go
         if: matrix.language == 'go'
         uses: actions/setup-go@v5
         with:
           go-version: "1.22"
           cache: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+          # security-extended      — больше security-запросов, чем default
+          # security-and-quality   — security + quality (например, мёртвый код)
 
       - name: Build Go (for CodeQL extraction)
         if: matrix.language == 'go'
@@ -85,6 +89,6 @@ jobs:
           npm ci
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
