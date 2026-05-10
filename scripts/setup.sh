@@ -81,15 +81,23 @@ detect_arch() {
 
 # Получить latest stable версию
 get_latest_stable_version() {
-  curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases/latest" | \
-    grep -m1 '"tag_name":' | sed 's/.*"\([^"]*\)".*/\1/' || echo ""
+  _json=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases/latest" || echo "")
+  if [ -n "$_json" ]; then
+    _tag=$(echo "$_json" | grep -m1 '"tag_name"' | sed 's/.*"\([^"]*\)"$/\1/')
+    echo "$_tag"
+  else
+    echo ""
+  fi
 }
 
 # Получить latest pre-release версию
+# GitHub API возвращает releases в произвольном порядке (не по дате).
+# Загружаем больше релизов, извлекаем все теги, сортируем по версии и берём максимальный.
 get_latest_prerelease_version() {
-  _json=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases?per_page=1" || echo "")
+  _json=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases?per_page=30" || echo "")
   if [ -n "$_json" ]; then
-    _tag=$(echo "$_json" | grep -m1 '"tag_name":' | sed 's/.*"\([^"]*\)".*/\1/')
+    # Извлекаем все tag_name и сортируем по версии (sort -V)
+    _tag=$(echo "$_json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' | sort -V | tail -1)
     echo "$_tag"
   else
     echo ""
