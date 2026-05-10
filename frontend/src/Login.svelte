@@ -47,7 +47,7 @@
 
 <div class="center-container">
   <div class="card" style="width: 100%; max-width: 400px;">
-    <h1 class="text-center">⚡ XKeen Control Panel</h1>
+    <h1 class="text-center">XKeen Control Panel</h1>
     <p class="text-center text-secondary mb-3">{$t('auth.login')}</p>
 
     {#if error}
