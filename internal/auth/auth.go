@@ -21,6 +21,7 @@ const (
 
 type AuthService struct {
 	passwordHash  string
+	secureCookie  bool
 	sessionSecret []byte
 	sessions      map[string]*Session
 	rateLimiter   *RateLimiter
@@ -46,12 +47,13 @@ type LoginAttempts struct {
 	LockedUntil time.Time
 }
 
-func NewAuthService(passwordHash string, onPasswordSet func(string) error) *AuthService {
+func NewAuthService(passwordHash string, secureCookie bool, onPasswordSet func(string) error) *AuthService {
 	secret := make([]byte, 32)
 	rand.Read(secret)
 
 	return &AuthService{
 		passwordHash:  passwordHash,
+		secureCookie:  secureCookie,
 		sessionSecret: secret,
 		sessions:      make(map[string]*Session),
 		rateLimiter:   &RateLimiter{attempts: make(map[string]*LoginAttempts)},
@@ -250,7 +252,7 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    session.Token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
+		Secure:   a.secureCookie,
 		SameSite: http.SameSiteStrictMode,
 		Expires:  session.ExpiresAt,
 	})
@@ -276,6 +278,8 @@ func (a *AuthService) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   a.secureCookie,
+		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
 	})
 

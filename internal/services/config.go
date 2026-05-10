@@ -1,11 +1,29 @@
 package services
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
+
+func validateFilePath(path string) error {
+	if path == "" {
+		return errors.New("empty path")
+	}
+	if !filepath.IsAbs(path) {
+		return errors.New("path must be absolute")
+	}
+	clean := filepath.Clean(path)
+	for _, part := range strings.Split(clean, string(filepath.Separator)) {
+		if part == ".." {
+			return errors.New("path traversal detected")
+		}
+	}
+	return nil
+}
 
 func sortStrings(s []string) []string {
 	sort.Strings(s)
@@ -30,11 +48,16 @@ func (s *ConfigService) List() ([]string, error) {
 }
 
 func (s *ConfigService) Read(path string) ([]byte, error) {
-	// Validation should be done by caller (PathValidator)
+	if err := validateFilePath(path); err != nil {
+		return nil, err
+	}
 	return os.ReadFile(path)
 }
 
 func (s *ConfigService) Save(path string, data []byte) error {
+	if err := validateFilePath(path); err != nil {
+		return err
+	}
 	// Create backup
 	backupPath := path + ".backup-" + time.Now().Format("20060102-150405")
 	if s.Exists(path) {
@@ -51,11 +74,17 @@ func (s *ConfigService) Save(path string, data []byte) error {
 }
 
 func (s *ConfigService) Exists(path string) bool {
+	if err := validateFilePath(path); err != nil {
+		return false
+	}
 	_, err := os.Stat(path)
 	return !os.IsNotExist(err)
 }
 
 func (s *ConfigService) ListBackups(path string) ([]string, error) {
+	if err := validateFilePath(path); err != nil {
+		return nil, err
+	}
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
 	pattern := filepath.Join(dir, base+".backup-*")
@@ -76,6 +105,9 @@ func (s *ConfigService) ListBackups(path string) ([]string, error) {
 }
 
 func (s *ConfigService) rotateBackups(path string, keep int) {
+	if err := validateFilePath(path); err != nil {
+		return
+	}
 	backups, err := s.ListBackups(path)
 	if err != nil || len(backups) <= keep {
 		return
@@ -88,6 +120,9 @@ func (s *ConfigService) rotateBackups(path string, keep int) {
 }
 
 func (s *ConfigService) Create(path string) error {
+	if err := validateFilePath(path); err != nil {
+		return err
+	}
 	if s.Exists(path) {
 		return os.ErrExist
 	}
@@ -95,6 +130,9 @@ func (s *ConfigService) Create(path string) error {
 }
 
 func (s *ConfigService) Delete(path string) error {
+	if err := validateFilePath(path); err != nil {
+		return err
+	}
 	if !s.Exists(path) {
 		return os.ErrNotExist
 	}
@@ -102,6 +140,12 @@ func (s *ConfigService) Delete(path string) error {
 }
 
 func (s *ConfigService) Rename(oldPath, newPath string) error {
+	if err := validateFilePath(oldPath); err != nil {
+		return err
+	}
+	if err := validateFilePath(newPath); err != nil {
+		return err
+	}
 	if !s.Exists(oldPath) {
 		return os.ErrNotExist
 	}

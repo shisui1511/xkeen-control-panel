@@ -28,6 +28,7 @@ type Config struct {
 	LogLevel         string
 	DataDir          string
 	PasswordHash     string
+	SecureCookie     bool
 	SavePasswordHash func(string) error
 }
 
@@ -37,7 +38,7 @@ func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 	// Serve static files
 	mux.Handle("/", http.FileServer(http.FS(web)))
 
-	authService := auth.NewAuthService(cfg.PasswordHash, cfg.SavePasswordHash)
+	authService := auth.NewAuthService(cfg.PasswordHash, cfg.SecureCookie, cfg.SavePasswordHash)
 
 	return &Server{
 		cfg:         cfg,

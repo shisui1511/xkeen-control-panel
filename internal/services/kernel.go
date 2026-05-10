@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,19 @@ import (
 	"strings"
 	"time"
 )
+
+func validateKernelPath(path string) error {
+	if path == "" {
+		return errors.New("empty path")
+	}
+	clean := filepath.Clean(path)
+	for _, part := range strings.Split(clean, string(filepath.Separator)) {
+		if part == ".." {
+			return errors.New("path traversal detected")
+		}
+	}
+	return nil
+}
 
 // KernelInfo holds info about an installed kernel
 type KernelInfo struct {
@@ -236,6 +250,9 @@ func (s *KernelService) Install(name string) error {
 	backupPath := filepath.Join(backupDir, fmt.Sprintf("%s.bak.%d", name, time.Now().Unix()))
 
 	if _, err := os.Stat(k.BinaryPath); err == nil {
+		if err := validateKernelPath(backupPath); err != nil {
+			return err
+		}
 		if err := copyFile(k.BinaryPath, backupPath); err != nil {
 			k.Status = "failed"
 			k.Message = "Backup failed: " + err.Error()
@@ -266,6 +283,9 @@ func (s *KernelService) Install(name string) error {
 	}
 
 	// Make executable and replace
+	if err := validateKernelPath(extractedPath); err != nil {
+		return err
+	}
 	if err := os.Chmod(extractedPath, 0755); err != nil {
 		k.Status = "failed"
 		k.Message = "Chmod failed: " + err.Error()
@@ -274,6 +294,12 @@ func (s *KernelService) Install(name string) error {
 
 	// Atomic replace
 	tempDest := k.BinaryPath + ".new"
+	if err := validateKernelPath(extractedPath); err != nil {
+		return err
+	}
+	if err := validateKernelPath(tempDest); err != nil {
+		return err
+	}
 	if err := os.Rename(extractedPath, tempDest); err != nil {
 		k.Status = "failed"
 		k.Message = "Replace failed: " + err.Error()
@@ -369,6 +395,9 @@ func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 			defer rc.Close()
 
 			outPath := filepath.Join(os.TempDir(), binaryName+".new")
+			if err := validateKernelPath(outPath); err != nil {
+				return "", err
+			}
 			out, err := os.Create(outPath)
 			if err != nil {
 				return "", err
@@ -384,6 +413,12 @@ func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 }
 
 func copyFile(src, dst string) error {
+	if err := validateKernelPath(src); err != nil {
+		return err
+	}
+	if err := validateKernelPath(dst); err != nil {
+		return err
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -414,6 +449,9 @@ func (s *KernelService) extractGz(gzPath string) (string, error) {
 	defer gr.Close()
 
 	outPath := strings.TrimSuffix(gzPath, ".gz")
+	if err := validateKernelPath(outPath); err != nil {
+		return "", err
+	}
 	out, err := os.Create(outPath)
 	if err != nil {
 		return "", err

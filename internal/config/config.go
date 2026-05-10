@@ -26,6 +26,7 @@ type AuthConfig struct {
 	SessionTimeout   int    `json:"session_timeout_hours"`
 	MaxLoginAttempts int    `json:"max_login_attempts"`
 	LockoutDuration  int    `json:"lockout_duration_minutes"`
+	SecureCookie     bool   `json:"secure_cookie"`
 }
 
 func Default() *Config {
@@ -51,6 +52,7 @@ func Default() *Config {
 			SessionTimeout:   24,
 			MaxLoginAttempts: 5,
 			LockoutDuration:  5,
+			SecureCookie:     false,
 		},
 	}
 }

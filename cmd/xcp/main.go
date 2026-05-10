@@ -48,6 +48,7 @@ func main() {
 		LogLevel:        cfg.LogLevel,
 		DataDir:         cfg.DataDir,
 		PasswordHash:    cfg.Auth.PasswordHash,
+		SecureCookie:    cfg.Auth.SecureCookie,
 		SavePasswordHash: func(hash string) error {
 			return cfg.SavePasswordHash(*configPath, hash)
 		},
