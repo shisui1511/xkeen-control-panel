@@ -47,8 +47,8 @@ func (a *API) NetworkTraceroute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Host     string `json:"host"`
-		MaxHops  int    `json:"max_hops"`
+		Host    string `json:"host"`
+		MaxHops int    `json:"max_hops"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		a.errorResponse(w, err.Error(), http.StatusBadRequest)

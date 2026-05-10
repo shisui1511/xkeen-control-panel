@@ -188,25 +188,17 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           SHORT_SHA="${GITHUB_SHA:0:7}"
-          CHANGELOG=$(git log --pretty=format:"- %s (%h)" -15 2>/dev/null || echo "Список изменений недоступен")
+          CHANGELOG=$(git log --pretty=format:"- %s by @${GITHUB_ACTOR} in %h" -15 2>/dev/null || echo "Список изменений недоступен")
 
           cat > /tmp/release-notes.md << ENDNOTES
-          ⚠️ Это dev-сборка. Не используйте в production.
+          ⚠️ **Пре-релиз.** Не рекомендуется для production-использования.
 
-          **Коммит:** \`${SHORT_SHA}\`
+          **Коммит:** \`${SHORT_SHA}\`  
           **Дата:** $(date -u +%Y-%m-%d)
 
-          ### Changelog
+          ## Что изменилось
 
           ${CHANGELOG}
-
-          ### Файлы
-
-          | Файл | Архитектура |
-          |------|-------------|
-          | xcp_${VERSION}_arm64 | ARM64 |
-          | xcp_${VERSION}_mipsle | MIPSLE |
-          | xcp_${VERSION}_mips | MIPS |
           ENDNOTES
 
           gh release create "${VERSION}" \
@@ -233,28 +225,30 @@ jobs:
 
           PREV_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -2 | head -1)
           if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$VERSION" ]; then
-            CHANGELOG="Первый релиз."
+            CHANGELOG="Initial release."
           else
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..${VERSION}" 2>/dev/null || echo "Список изменений недоступен")
+            CHANGELOG=$(git log --pretty=format:"- %s by @${GITHUB_ACTOR} in %h" "${PREV_TAG}..${VERSION}" 2>/dev/null || echo "Changelog unavailable")
           fi
 
           cat > /tmp/release-notes.md << EOF
-          ### Changelog
+          ## Что изменилось
 
           ${CHANGELOG}
 
-          [Full Changelog](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${VERSION})
+          **Полный список изменений:** https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${VERSION}
 
-          ### Установка
+          ---
 
+          ## Установка
+
+          Установка одной командой:
           \`\`\`sh
           curl -Ls https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/setup.sh | sh
           \`\`\`
 
-          Или скачайте файл для вашей архитектуры и запустите:
+          Или скачайте бинарник для вашей архитектуры, сделайте его исполняемым и запустите:
           \`\`\`sh
-          chmod +x xcp_${VERSION}_arm64
-          ./xcp_${VERSION}_arm64 -version
+          ./xcp_${VERSION}_<arch> -version
           \`\`\`
           EOF
 
