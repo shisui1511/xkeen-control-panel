@@ -62,13 +62,11 @@ jobs:
         run: go vet ./...
 
       - name: Check goimports
-        env:
-          GOTOOLCHAIN: local
         run: |
-          go install golang.org/x/tools/cmd/goimports@latest
-          if [ -n "$(goimports -l .)" ]; then
+          go install golang.org/x/tools/cmd/goimports@v0.24.0
+          if [ -n "$($(go env GOPATH)/bin/goimports -l .)" ]; then
             echo "Imports are not formatted:"
-            goimports -d .
+            $(go env GOPATH)/bin/goimports -d .
             exit 1
           fi
 
