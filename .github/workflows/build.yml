@@ -145,12 +145,16 @@ jobs:
 
       - name: Compress with UPX (pre-release only)
         if: steps.version.outputs.is_stable != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           sudo apt-get update && sudo apt-get install -y upx-ucl
           upx --best --lzma build/xcp_${VERSION}_${{ matrix.name }} -o build/xcp_${VERSION}_${{ matrix.name }}_upx
           mv build/xcp_${VERSION}_${{ matrix.name }}_upx build/xcp_${VERSION}_${{ matrix.name }}
 
       - name: Generate checksum
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           cd build
           sha256sum xcp_${VERSION}_${{ matrix.name }} > xcp_${VERSION}_${{ matrix.name }}.sha256
@@ -265,6 +269,7 @@ jobs:
       - name: Update binaries branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
