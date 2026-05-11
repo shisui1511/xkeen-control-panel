@@ -141,7 +141,31 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.rollback': 'Откатить',
 
     // Navigation
+    'nav.smartproxy': 'Smart Proxy',
     'nav.subscriptions': 'Подписки',
+
+    // Smart Proxy
+    'smartproxy.title': 'Smart Proxy',
+    'smartproxy.subtitle': 'Автоматическое переключение прокси по расписанию',
+    'smartproxy.current_status': 'Текущий статус',
+    'smartproxy.time': 'Время',
+    'smartproxy.day': 'День',
+    'smartproxy.no_active': 'Нет активных профилей',
+    'smartproxy.profiles': 'Профили',
+    'smartproxy.add': 'Добавить',
+    'smartproxy.no_profiles': 'Нет профилей. Добавьте первый.',
+    'smartproxy.new_profile': 'Новый профиль',
+    'smartproxy.edit_profile': 'Редактировать',
+    'smartproxy.name': 'Название',
+    'smartproxy.name_placeholder': 'Рабочий день',
+    'smartproxy.days_of_week': 'Дни недели',
+    'smartproxy.from': 'С',
+    'smartproxy.to': 'До',
+    'smartproxy.proxy_group': 'Proxy Group',
+    'smartproxy.proxy_group_placeholder': '🚀 Выбор прокси',
+    'smartproxy.proxy': 'Proxy',
+    'smartproxy.proxy_placeholder': 'HK-1',
+    'smartproxy.applied_count': 'Применён {count} раз',
 
     // Subscriptions
     'subscr.title': 'Подписки',
@@ -389,7 +413,31 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.rollback': 'Rollback',
 
     // Navigation
+    'nav.smartproxy': 'Smart Proxy',
     'nav.subscriptions': 'Subscriptions',
+
+    // Smart Proxy
+    'smartproxy.title': 'Smart Proxy',
+    'smartproxy.subtitle': 'Automatic proxy switching by schedule',
+    'smartproxy.current_status': 'Current Status',
+    'smartproxy.time': 'Time',
+    'smartproxy.day': 'Day',
+    'smartproxy.no_active': 'No active profiles',
+    'smartproxy.profiles': 'Profiles',
+    'smartproxy.add': 'Add',
+    'smartproxy.no_profiles': 'No profiles. Add the first one.',
+    'smartproxy.new_profile': 'New Profile',
+    'smartproxy.edit_profile': 'Edit',
+    'smartproxy.name': 'Name',
+    'smartproxy.name_placeholder': 'Workday',
+    'smartproxy.days_of_week': 'Days of Week',
+    'smartproxy.from': 'From',
+    'smartproxy.to': 'To',
+    'smartproxy.proxy_group': 'Proxy Group',
+    'smartproxy.proxy_group_placeholder': '🚀 Proxy Select',
+    'smartproxy.proxy': 'Proxy',
+    'smartproxy.proxy_placeholder': 'HK-1',
+    'smartproxy.applied_count': 'Applied {count} times',
 
     // Subscriptions
     'subscr.title': 'Subscriptions',
