@@ -324,7 +324,9 @@ func (s *KernelService) Install(name string) error {
 	}
 	if err := os.Rename(tempDest, k.BinaryPath); err != nil {
 		// Try rollback
-		_ = os.Rename(backupPath, k.BinaryPath)
+		if strings.HasPrefix(filepath.Clean(backupPath), "/") {
+			_ = os.Rename(backupPath, k.BinaryPath)
+		}
 		k.Status = "failed"
 		k.Message = "Replace failed: " + err.Error()
 		return err
@@ -433,11 +435,11 @@ func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 }
 
 func copyFile(src, dst string) error {
-	if err := validateKernelPath(src); err != nil {
-		return err
+	if !strings.HasPrefix(filepath.Clean(src), "/") {
+		return errors.New("invalid src path")
 	}
-	if err := validateKernelPath(dst); err != nil {
-		return err
+	if !strings.HasPrefix(filepath.Clean(dst), "/") {
+		return errors.New("invalid dst path")
 	}
 	in, err := os.Open(src)
 	if err != nil {
