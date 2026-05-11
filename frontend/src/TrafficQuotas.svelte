@@ -253,9 +253,9 @@
 
 <div class="container">
   <PageHeader
-    title={$t('traffic.title')}
-    subtitle={$t('traffic.subtitle')}
-    breadcrumbs={[{ label: $t('traffic.title') }]}
+    title={$t('trafficquotas.title')}
+    subtitle={$t('trafficquotas.subtitle')}
+    breadcrumbs={[{ label: $t('trafficquotas.title') }]}
     {onSwitchTab}
   />
 
@@ -267,8 +267,8 @@
   {#if alerts.length > 0}
     <div class="card mb-2">
       <div class="flex-between mb-2">
-        <h2>{$t('traffic.alerts')}</h2>
-        <button class="btn btn-secondary" on:click={clearAlerts}>{$t('traffic.clear_alerts')}</button>
+        <h2>{$t('trafficquotas.alerts')}</h2>
+        <button class="btn btn-secondary" on:click={clearAlerts}>{$t('trafficquotas.clear_alerts')}</button>
       </div>
       {#each alerts as a}
         <div class="alert mb-1" class:alert-warning={a.severity === 'warning'} class:alert-error={a.severity === 'critical'}>
@@ -281,24 +281,24 @@
   <!-- Stats -->
   {#if stats}
     <div class="card mb-2">
-      <h2>{$t('traffic.stats')}</h2>
+      <h2>{$t('trafficquotas.stats')}</h2>
       <div class="stats-grid">
         <div class="stat-box">
-          <div class="stat-label">{$t('traffic.total_upload')}</div>
+          <div class="stat-label">{$t('trafficquotas.total_upload')}</div>
           <div class="stat-value">{formatBytes(stats.total_upload)}</div>
         </div>
         <div class="stat-box">
-          <div class="stat-label">{$t('traffic.total_download')}</div>
+          <div class="stat-label">{$t('trafficquotas.total_download')}</div>
           <div class="stat-value">{formatBytes(stats.total_download)}</div>
         </div>
         <div class="stat-box">
-          <div class="stat-label">{$t('traffic.total')}</div>
+          <div class="stat-label">{$t('trafficquotas.total')}</div>
           <div class="stat-value">{formatBytes(stats.total)}</div>
         </div>
       </div>
       {#if stats.proxies.length > 0}
         <div class="proxy-stats mt-2">
-          <h3>{$t('traffic.per_proxy')}</h3>
+          <h3>{$t('trafficquotas.per_proxy')}</h3>
           <div class="proxy-list">
             {#each stats.proxies as p}
               <div class="proxy-row">
@@ -315,12 +315,12 @@
   <!-- Quotas -->
   <div class="card mb-2">
     <div class="flex-between mb-2">
-      <h2>{$t('traffic.quotas')}</h2>
-      <button class="btn btn-primary" on:click={startCreate}>+ {$t('traffic.add_quota')}</button>
+      <h2>{$t('trafficquotas.quotas')}</h2>
+      <button class="btn btn-primary" on:click={startCreate}>+ {$t('trafficquotas.add_quota')}</button>
     </div>
 
     {#if quotas.length === 0}
-      <p class="text-secondary">{$t('traffic.no_quotas')}</p>
+      <p class="text-secondary">{$t('trafficquotas.no_quotas')}</p>
     {:else}
       <div class="quota-list">
         {#each quotas as q}
@@ -334,7 +334,7 @@
                 </label>
               </div>
               <div class="quota-details">
-                <span class="detail">{q.target_type === 'global' ? $t('traffic.target_global') : q.target_id}</span>
+                <span class="detail">{q.target_type === 'global' ? $t('trafficquotas.target_global') : q.target_id}</span>
                 <span class="detail">{q.period}</span>
                 <span class="detail">{formatBytes(q.current_bytes)} / {formatBytes(q.limit_bytes)}</span>
               </div>
@@ -344,7 +344,7 @@
               <div class="progress-text">{percent(q).toFixed(1)}%</div>
             </div>
             <div class="quota-actions">
-              <button class="btn-icon" on:click={() => resetQuota(q.id)} title={$t('traffic.reset')}>↺</button>
+              <button class="btn-icon" on:click={() => resetQuota(q.id)} title={$t('trafficquotas.reset')}>↺</button>
               <button class="btn-icon" on:click={() => startEdit(q)} title={$t('app.edit')}>✏️</button>
               <button class="btn-icon" on:click={() => deleteQuota(q.id)} title={$t('app.delete')}>🗑️</button>
             </div>
@@ -358,35 +358,35 @@
   {#if editingQuota !== null || formName !== '' || (editingQuota === null && formName === '' && quotas.length === 0)}
     {#if editingQuota !== null || (editingQuota === null && formName === '')}
       <div class="card">
-        <h2>{editingQuota ? $t('traffic.edit_quota') : $t('traffic.new_quota')}</h2>
+        <h2>{editingQuota ? $t('trafficquotas.edit_quota') : $t('trafficquotas.new_quota')}</h2>
 
         <div class="form-group">
-          <label for="tq-name">{$t('traffic.name')}</label>
-          <input id="tq-name" type="text" class="input" bind:value={formName} placeholder={$t('traffic.name_placeholder')} />
+          <label for="tq-name">{$t('trafficquotas.name')}</label>
+          <input id="tq-name" type="text" class="input" bind:value={formName} placeholder={$t('trafficquotas.name_placeholder')} />
         </div>
 
         <div class="form-group">
-          <label for="tq-type">{$t('traffic.target_type')}</label>
+          <label for="tq-type">{$t('trafficquotas.target_type')}</label>
           <select id="tq-type" class="input" bind:value={formTargetType}>
-            <option value="global">{$t('traffic.target_global')}</option>
-            <option value="proxy">{$t('traffic.target_proxy')}</option>
+            <option value="global">{$t('trafficquotas.target_global')}</option>
+            <option value="proxy">{$t('trafficquotas.target_proxy')}</option>
           </select>
         </div>
 
         {#if formTargetType === 'proxy'}
           <div class="form-group">
-            <label for="tq-target">{$t('traffic.proxy_name')}</label>
+            <label for="tq-target">{$t('trafficquotas.proxy_name')}</label>
             <input id="tq-target" type="text" class="input" bind:value={formTargetID} placeholder="HK-1" />
           </div>
         {/if}
 
         <div class="form-row">
           <div class="form-group">
-            <label for="tq-limit">{$t('traffic.limit')}</label>
+            <label for="tq-limit">{$t('trafficquotas.limit')}</label>
             <input id="tq-limit" type="number" class="input" bind:value={formLimitValue} min="1" step="0.1" />
           </div>
           <div class="form-group">
-            <label for="tq-unit">{$t('traffic.unit')}</label>
+            <label for="tq-unit">{$t('trafficquotas.unit')}</label>
             <select id="tq-unit" class="input" bind:value={formLimitUnit}>
               {#each units as u}
                 <option value={u.value}>{u.value}</option>
@@ -396,7 +396,7 @@
         </div>
 
         <div class="form-group">
-          <label for="tq-period">{$t('traffic.period')}</label>
+          <label for="tq-period">{$t('trafficquotas.period')}</label>
           <select id="tq-period" class="input" bind:value={formPeriod}>
             {#each periods as p}
               <option value={p.value}>{p.label}</option>
@@ -405,7 +405,7 @@
         </div>
 
         <div class="form-group">
-          <label for="tq-threshold">{$t('traffic.alert_threshold')} (%)</label>
+          <label for="tq-threshold">{$t('trafficquotas.alert_threshold')} (%)</label>
           <input id="tq-threshold" type="number" class="input" bind:value={formAlertThreshold} min="0" max="100" />
         </div>
 
