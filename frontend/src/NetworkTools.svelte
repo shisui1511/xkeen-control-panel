@@ -191,24 +191,24 @@
           <input type="text" class="input" bind:value={url} placeholder="https://google.com" />
         </div>
         <div class="form-row">
-          <label>Таймаут (сек):</label>
+          <label>{$t('net.timeout_sec')}</label>
           <input type="number" class="input" bind:value={timeout} min="1" max="60" />
         </div>
       {/if}
 
       <button class="btn btn-primary" on:click={runTool} disabled={loading || (activeTool === 'http' ? !url : !host)}>
-        {loading ? 'Выполняется...' : 'Запустить'}
+        {loading ? $t('net.running') : $t('net.run')}
       </button>
     </div>
   </div>
 
   {#if result}
     <div class="card">
-      <h3>Результат</h3>
+      <h3>{$t('net.result')}</h3>
       {#if result.success}
-        <div class="result-success">✅ Успешно</div>
+        <div class="result-success">{$t('net.success')}</div>
       {:else}
-        <div class="result-error">❌ Ошибка: {result.error || 'Неизвестная ошибка'}</div>
+        <div class="result-error">{$t('net.error_with_msg', { error: result.error || 'Unknown error' })}</div>
       {/if}
 
       {#if result.output}

@@ -130,15 +130,15 @@
       <button class="btn btn-secondary" on:click={fetchConnections} disabled={loading}>
         {loading ? $t('app.loading') : '🔄 ' + $t('app.refresh')}
       </button>
-      <button class="btn btn-icon" class:active={autoRefresh} on:click={toggleAutoRefresh} title="Автообновление">
+      <button class="btn btn-icon" class:active={autoRefresh} on:click={toggleAutoRefresh} title={$t('conn.autorefresh')}>
         {autoRefresh ? '⏸' : '▶'}
       </button>
     </div>
   </div>
 
   <div class="stats mb-2">
-    <span class="stat">Всего: <strong>{connections.length}</strong></span>
-    <span class="stat">Показано: <strong>{getFilteredConnections().length}</strong></span>
+    <span class="stat">{$t('conn.total', { count: connections.length })}</span>
+    <span class="stat">{$t('conn.shown', { count: getFilteredConnections().length })}</span>
   </div>
 
   <div class="table-container">

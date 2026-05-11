@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { t, setLang } from './i18n'
-  import Editor from './Editor.svelte'
   import Logs from './Logs.svelte'
   import Services from './Services.svelte'
   import Settings from './Settings.svelte'
@@ -212,7 +211,13 @@
 
       </div>
     {:else if currentTab === 'editor'}
-      <Editor />
+      {#await import('./Editor.svelte')}
+        <div class="container"><p>{$t('app.loading')}</p></div>
+      {:then { default: Editor }}
+        <Editor />
+      {:catch}
+        <div class="container"><p>{$t('app.error')}</p></div>
+      {/await}
     {:else if currentTab === 'logs'}
       <Logs />
     {:else if currentTab === 'proxies'}
