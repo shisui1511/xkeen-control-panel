@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/user/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 func (a *API) NetworkPing(w http.ResponseWriter, r *http.Request) {

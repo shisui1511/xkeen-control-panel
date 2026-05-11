@@ -1,4 +1,4 @@
-module github.com/user/xkeen-control-panel
+module github.com/shisui1511/xkeen-control-panel
 
 go 1.25
 

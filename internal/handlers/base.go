@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/user/xkeen-control-panel/internal/config"
-	"github.com/user/xkeen-control-panel/internal/i18n"
-	"github.com/user/xkeen-control-panel/internal/server"
-	"github.com/user/xkeen-control-panel/internal/services"
-	"github.com/user/xkeen-control-panel/internal/utils"
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
+	"github.com/shisui1511/xkeen-control-panel/internal/i18n"
+	"github.com/shisui1511/xkeen-control-panel/internal/server"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type API struct {

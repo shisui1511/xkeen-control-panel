@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
-	xkeencontrolpanel "github.com/user/xkeen-control-panel"
-	"github.com/user/xkeen-control-panel/internal/config"
-	"github.com/user/xkeen-control-panel/internal/handlers"
-	"github.com/user/xkeen-control-panel/internal/server"
+	xkeencontrolpanel "github.com/shisui1511/xkeen-control-panel"
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
+	"github.com/shisui1511/xkeen-control-panel/internal/handlers"
+	"github.com/shisui1511/xkeen-control-panel/internal/server"
 )
 
 var (
