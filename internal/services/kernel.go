@@ -264,7 +264,9 @@ func (s *KernelService) Install(name string) error {
 		k.Message = "Backup dir failed: " + err.Error()
 		return err
 	}
-	backupPath := filepath.Join(backupDir, fmt.Sprintf("%s.bak.%d", name, time.Now().Unix()))
+	// Use only timestamp in backup name to avoid tainted data in path
+	backupName := fmt.Sprintf("kernel.bak.%d", time.Now().Unix())
+	backupPath := filepath.Join(backupDir, backupName)
 	if err := validateKernelPath(backupPath); err != nil {
 		return err
 	}
@@ -339,10 +341,8 @@ func (s *KernelService) Install(name string) error {
 		return err
 	}
 	if err := os.Rename(tempDest, k.BinaryPath); err != nil {
-		// Try rollback - backupPath is always within /opt/bin/.backup
-		backupDir := filepath.Join(filepath.Dir(k.BinaryPath), ".backup")
-		safeBackup := filepath.Join(backupDir, filepath.Base(backupPath))
-		_ = os.Rename(safeBackup, k.BinaryPath)
+		// Try rollback
+		_ = os.Rename(backupPath, k.BinaryPath)
 		k.Status = "failed"
 		k.Message = "Replace failed: " + err.Error()
 		return err
