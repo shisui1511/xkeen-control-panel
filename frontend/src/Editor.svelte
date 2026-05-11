@@ -315,9 +315,66 @@
   function toggleExpertMode() {
     expertMode = !expertMode
     // Expert mode currently just disables schema validation visual noise
-    // In future: can change completion behavior, show/hide descriptions
     if (selectedFile) {
       loadFile(selectedFile)
+    }
+  }
+
+  function applyQuickFixes() {
+    if (!editorView || !selectedFile) return
+
+    const content = editorView.state.doc.toString()
+    const isYaml = selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml')
+    const isXray = selectedFile.includes('xray')
+    const isMihomo = selectedFile.includes('mihomo') || selectedFile.includes('config.yaml')
+
+    let fixed = content
+    let fixesApplied = 0
+
+    try {
+      if (isYaml) {
+        // Simple YAML fixes
+        if (isMihomo) {
+          if (!fixed.includes('proxies:') && !fixed.includes('proxy-providers:')) {
+            fixed = 'proxies:\n' + fixed
+            fixesApplied++
+          }
+          if (!fixed.includes('proxy-groups:')) {
+            fixed = fixed + '\nproxy-groups:\n  - name: 🚀 Выбор прокси\n    type: select\n    proxies:\n      - DIRECT\n'
+            fixesApplied++
+          }
+        }
+      } else {
+        // JSON fixes
+        const data = JSON.parse(fixed)
+        if (isXray) {
+          if (!data.inbounds) {
+            data.inbounds = []
+            fixesApplied++
+          }
+          if (!data.outbounds) {
+            data.outbounds = [{ protocol: 'freedom', tag: 'direct' }]
+            fixesApplied++
+          }
+          if (!data.routing) {
+            data.routing = { rules: [] }
+            fixesApplied++
+          }
+        }
+        fixed = JSON.stringify(data, null, 2)
+      }
+
+      if (fixesApplied > 0) {
+        editorView.dispatch({
+          changes: { from: 0, to: editorView.state.doc.length, insert: fixed }
+        })
+        message = `✓ Quick fixes applied: ${fixesApplied}`
+      } else {
+        message = '✓ No quick fixes needed'
+      }
+      setTimeout(() => message = '', 3000)
+    } catch (e) {
+      message = 'Quick fix error: ' + e.message
     }
   }
 
@@ -380,6 +437,9 @@
             <input type="checkbox" bind:checked={expertMode} on:change={toggleExpertMode} />
             {$t('editor.expert')}
           </label>
+          <button on:click={applyQuickFixes} class="btn-secondary" title="Apply common fixes">
+            🔧 {$t('editor.quick_fix')}
+          </button>
           <button on:click={() => { showRenameModal = true; renameTarget = selectedFile.split('/').pop() || '' }} class="btn-secondary">
             {$t('app.rename')}
           </button>

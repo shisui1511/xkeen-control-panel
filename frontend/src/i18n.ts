@@ -101,6 +101,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.restore_error': 'Ошибка восстановления',
     'editor.schema': 'Схема',
     'editor.expert': 'Эксперт',
+    'editor.quick_fix': 'Quick Fix',
 
     // Services
     'svc.title': 'Управление сервисами',
@@ -167,6 +168,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.proxy': 'Proxy',
     'smartproxy.proxy_placeholder': 'HK-1',
     'smartproxy.applied_count': 'Применён {count} раз',
+    'smartproxy.mode': 'Режим',
+    'smartproxy.latency_threshold': 'Порог задержки',
+    'smartproxy.consecutive_failures': 'Подряд сбоев',
+    'smartproxy.fallback_proxy': 'Fallback прокси',
+    'smartproxy.round_robin_proxies': 'Список прокси',
+    'smartproxy.round_robin_hint': 'По одному прокси на строку',
 
     // Traffic Quotas
     'traffic.title': 'Лимиты трафика',
@@ -227,6 +234,17 @@ const translations: Record<Lang, Record<string, string>> = {
     'proxies.test_latency': 'Тест задержки',
     'proxies.testing': 'Тестирование...',
     'proxies.no_proxies': 'Прокси не найдены',
+    'proxies.subtitle': 'Управление proxy groups и health monitoring',
+    'proxies.observatory': 'Observatory',
+    'proxies.observatory_title': 'Xray Observatory',
+    'proxies.total': 'Всего',
+    'proxies.healthy': 'Здоровые',
+    'proxies.degraded': 'Деградированные',
+    'proxies.down': 'Недоступные',
+    'proxies.avg_latency': 'Средняя задержка',
+    'proxies.fallback_pool': 'Fallback',
+    'proxies.fallback_order': 'Порядок fallback',
+    'proxies.test_single': 'Тестировать прокси',
 
     // Connections
     'conn.title': 'Подключения',
@@ -401,6 +419,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.restore_error': 'Restore error',
     'editor.schema': 'Schema',
     'editor.expert': 'Expert',
+    'editor.quick_fix': 'Quick Fix',
 
     // Services
     'svc.title': 'Service Management',
@@ -466,6 +485,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.proxy': 'Proxy',
     'smartproxy.proxy_placeholder': 'HK-1',
     'smartproxy.applied_count': 'Applied {count} times',
+    'smartproxy.mode': 'Mode',
+    'smartproxy.latency_threshold': 'Latency threshold',
+    'smartproxy.consecutive_failures': 'Consecutive failures',
+    'smartproxy.fallback_proxy': 'Fallback proxy',
+    'smartproxy.round_robin_proxies': 'Proxy list',
+    'smartproxy.round_robin_hint': 'One proxy per line',
 
     // Traffic Quotas
     'traffic.title': 'Traffic Quotas',
@@ -526,6 +551,17 @@ const translations: Record<Lang, Record<string, string>> = {
     'proxies.test_latency': 'Test latency',
     'proxies.testing': 'Testing...',
     'proxies.no_proxies': 'No proxies found',
+    'proxies.subtitle': 'Proxy groups management and health monitoring',
+    'proxies.observatory': 'Observatory',
+    'proxies.observatory_title': 'Xray Observatory',
+    'proxies.total': 'Total',
+    'proxies.healthy': 'Healthy',
+    'proxies.degraded': 'Degraded',
+    'proxies.down': 'Down',
+    'proxies.avg_latency': 'Avg latency',
+    'proxies.fallback_pool': 'Fallback',
+    'proxies.fallback_order': 'Fallback order',
+    'proxies.test_single': 'Test proxy',
 
     // Connections
     'conn.title': 'Connections',

@@ -9,11 +9,18 @@
     id: string
     name: string
     enabled: boolean
+    mode: string
     days_of_week: number[]
     start_time: string
     end_time: string
     group_name: string
     proxy_name: string
+    latency_threshold?: number
+    consecutive_failures?: number
+    fallback_proxy?: string
+    round_robin_proxies?: string[]
+    current_proxy?: string
+    current_failures?: number
     last_applied: number
     apply_count: number
   }
@@ -34,14 +41,25 @@
   let editingProfile: Profile | null = null
   let formName = ''
   let formEnabled = true
+  let formMode = 'time-based'
   let formDays: number[] = [1, 2, 3, 4, 5]
   let formStartTime = '09:00'
   let formEndTime = '18:00'
   let formGroupName = ''
   let formProxyName = ''
+  let formLatencyThreshold = 500
+  let formConsecutiveFailures = 3
+  let formFallbackProxy = ''
+  let formRoundRobinProxies = ''
 
   const dayNames = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
   const allDays = [0, 1, 2, 3, 4, 5, 6]
+
+  const modes = [
+    { value: 'time-based', label: 'По расписанию' },
+    { value: 'auto-failover', label: 'Auto-failover' },
+    { value: 'round-robin', label: 'Round-robin' }
+  ]
 
   async function fetchProfiles() {
     loading = true
@@ -68,22 +86,32 @@
     editingProfile = null
     formName = ''
     formEnabled = true
+    formMode = 'time-based'
     formDays = [1, 2, 3, 4, 5]
     formStartTime = '09:00'
     formEndTime = '18:00'
     formGroupName = ''
     formProxyName = ''
+    formLatencyThreshold = 500
+    formConsecutiveFailures = 3
+    formFallbackProxy = ''
+    formRoundRobinProxies = ''
   }
 
   function startEdit(p: Profile) {
     editingProfile = p
     formName = p.name
     formEnabled = p.enabled
-    formDays = [...p.days_of_week]
-    formStartTime = p.start_time
-    formEndTime = p.end_time
+    formMode = p.mode || 'time-based'
+    formDays = [...(p.days_of_week || [])]
+    formStartTime = p.start_time || '09:00'
+    formEndTime = p.end_time || '18:00'
     formGroupName = p.group_name
     formProxyName = p.proxy_name
+    formLatencyThreshold = p.latency_threshold || 500
+    formConsecutiveFailures = p.consecutive_failures || 3
+    formFallbackProxy = p.fallback_proxy || ''
+    formRoundRobinProxies = p.round_robin_proxies ? p.round_robin_proxies.join('\n') : ''
   }
 
   function cancelEdit() {
@@ -100,14 +128,24 @@
 
   async function saveProfile() {
     const csrfToken = localStorage.getItem('csrf_token')
-    const payload = {
+    const payload: any = {
       name: formName,
       enabled: formEnabled,
-      days_of_week: formDays,
-      start_time: formStartTime,
-      end_time: formEndTime,
+      mode: formMode,
       group_name: formGroupName,
       proxy_name: formProxyName
+    }
+
+    if (formMode === 'time-based') {
+      payload.days_of_week = formDays
+      payload.start_time = formStartTime
+      payload.end_time = formEndTime
+    } else if (formMode === 'auto-failover') {
+      payload.latency_threshold = formLatencyThreshold
+      payload.consecutive_failures = formConsecutiveFailures
+      payload.fallback_proxy = formFallbackProxy
+    } else if (formMode === 'round-robin') {
+      payload.round_robin_proxies = formRoundRobinProxies.split('\n').filter(s => s.trim())
     }
 
     const url = editingProfile
@@ -224,11 +262,24 @@
                 </label>
               </div>
               <div class="profile-details">
-                <span class="detail">
-                  {p.days_of_week.map(d => dayNames[d]).join(', ')}
-                </span>
-                <span class="detail">{p.start_time} – {p.end_time}</span>
-                <span class="detail">{p.group_name} → {p.proxy_name}</span>
+                <span class="detail mode-badge">{p.mode || 'time-based'}</span>
+                {#if p.mode === 'auto-failover'}
+                  <span class="detail">{p.group_name} → {p.proxy_name} (fallback: {p.fallback_proxy || 'DIRECT'})</span>
+                  {#if p.current_failures && p.current_failures > 0}
+                    <span class="detail alert">⚠️ failures: {p.current_failures}</span>
+                  {/if}
+                  {#if p.current_proxy}
+                    <span class="detail active-proxy">→ {p.current_proxy}</span>
+                  {/if}
+                {:else if p.mode === 'round-robin'}
+                  <span class="detail">{p.group_name} → round-robin ({p.round_robin_proxies?.length || 0} proxies)</span>
+                {:else}
+                  <span class="detail">
+                    {p.days_of_week?.map(d => dayNames[d]).join(', ')}
+                  </span>
+                  <span class="detail">{p.start_time} – {p.end_time}</span>
+                  <span class="detail">{p.group_name} → {p.proxy_name}</span>
+                {/if}
                 {#if p.apply_count > 0}
                   <span class="detail">{$t('smartproxy.applied_count', { count: p.apply_count })}</span>
                 {/if}
@@ -256,30 +307,62 @@
         </div>
 
         <div class="form-group">
-          <label for="sp-days">{$t('smartproxy.days_of_week')}</label>
-          <div class="day-selector" id="sp-days">
-            {#each allDays as day}
-              <button
-                class="day-btn"
-                class:selected={formDays.includes(day)}
-                on:click={() => toggleDay(day)}
-              >
-                {dayNames[day]}
-              </button>
+          <label for="sp-mode">{$t('smartproxy.mode')}</label>
+          <select id="sp-mode" class="input" bind:value={formMode}>
+            {#each modes as m}
+              <option value={m.value}>{m.label}</option>
             {/each}
-          </div>
+          </select>
         </div>
 
-        <div class="form-row">
+        {#if formMode === 'time-based'}
           <div class="form-group">
-            <label for="sp-start">{$t('smartproxy.from')}</label>
-            <input id="sp-start" type="time" class="input" bind:value={formStartTime} />
+            <label for="sp-days">{$t('smartproxy.days_of_week')}</label>
+            <div class="day-selector" id="sp-days">
+              {#each allDays as day}
+                <button
+                  class="day-btn"
+                  class:selected={formDays.includes(day)}
+                  on:click={() => toggleDay(day)}
+                >
+                  {dayNames[day]}
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="sp-start">{$t('smartproxy.from')}</label>
+              <input id="sp-start" type="time" class="input" bind:value={formStartTime} />
+            </div>
+            <div class="form-group">
+              <label for="sp-end">{$t('smartproxy.to')}</label>
+              <input id="sp-end" type="time" class="input" bind:value={formEndTime} />
+            </div>
+          </div>
+        {:else if formMode === 'auto-failover'}
+          <div class="form-row">
+            <div class="form-group">
+              <label for="sp-threshold">{$t('smartproxy.latency_threshold')} (ms)</label>
+              <input id="sp-threshold" type="number" class="input" bind:value={formLatencyThreshold} min="50" max="5000" />
+            </div>
+            <div class="form-group">
+              <label for="sp-failures">{$t('smartproxy.consecutive_failures')}</label>
+              <input id="sp-failures" type="number" class="input" bind:value={formConsecutiveFailures} min="1" max="10" />
+            </div>
           </div>
           <div class="form-group">
-            <label for="sp-end">{$t('smartproxy.to')}</label>
-            <input id="sp-end" type="time" class="input" bind:value={formEndTime} />
+            <label for="sp-fallback">{$t('smartproxy.fallback_proxy')}</label>
+            <input id="sp-fallback" type="text" class="input" bind:value={formFallbackProxy} placeholder="DIRECT" />
           </div>
-        </div>
+        {:else if formMode === 'round-robin'}
+          <div class="form-group">
+            <label for="sp-rr">{$t('smartproxy.round_robin_proxies')}</label>
+            <textarea id="sp-rr" class="input" bind:value={formRoundRobinProxies} rows="4" placeholder="proxy1&#10;proxy2&#10;proxy3"></textarea>
+            <p class="hint">{$t('smartproxy.round_robin_hint')}</p>
+          </div>
+        {/if}
 
         <div class="form-group">
           <label for="sp-group">{$t('smartproxy.proxy_group')}</label>
@@ -370,6 +453,38 @@
     flex-wrap: wrap;
     font-size: 0.8rem;
     color: var(--text-secondary);
+    align-items: center;
+  }
+
+  .mode-badge {
+    background: var(--primary-bg, rgba(0, 123, 255, 0.1));
+    color: var(--primary);
+    padding: 0.125rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  .detail.alert {
+    color: var(--warning, #ffc107);
+    font-weight: 500;
+  }
+
+  .detail.active-proxy {
+    color: var(--success, #28a745);
+    font-weight: 500;
+  }
+
+  .hint {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+  }
+
+  textarea.input {
+    resize: vertical;
+    font-family: inherit;
   }
 
   .profile-actions {
