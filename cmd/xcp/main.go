@@ -160,6 +160,22 @@ func main() {
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
 
+	// DAT Manager
+	datSvc := services.NewDATManagerService(cfg.DataDir)
+	api.SetDATManagerService(datSvc)
+
+	srv.HandleProtected("/api/dat/list", api.DATList)
+	srv.HandleProtected("/api/dat/update", api.DATUpdate)
+	srv.HandleProtected("/api/dat/update-all", api.DATUpdateAll)
+	srv.HandleProtected("/api/dat/info", api.DATInfo)
+
+	// Xkeen Console
+	xkeenPath := "/opt/bin/xkeen"
+	consoleSvc := services.NewConsoleService(xkeenPath)
+	api.SetConsoleService(consoleSvc)
+	srv.HandleProtected("/api/console/commands", api.ConsoleListCommands)
+	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)
+
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {
 		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)
