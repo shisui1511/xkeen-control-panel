@@ -21,6 +21,7 @@ type API struct {
 	kernelSvc       *services.KernelService
 	networkSvc      *services.NetworkToolsService
 	smartProxySvc   *services.SmartProxyService
+	trafficQuotaSvc *services.TrafficQuotaService
 	pathVal         *utils.PathValidator
 }
 
@@ -37,6 +38,10 @@ func NewAPI(cfg *config.Config, srv *server.Server) *API {
 
 func (a *API) SetSmartProxyService(svc *services.SmartProxyService) {
 	a.smartProxySvc = svc
+}
+
+func (a *API) SetTrafficQuotaService(svc *services.TrafficQuotaService) {
+	a.trafficQuotaSvc = svc
 }
 
 func (a *API) t(r *http.Request, key string) string {
