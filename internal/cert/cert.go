@@ -68,30 +68,14 @@ func GenerateSelfSigned(certPath, keyPath string, hosts []string) error {
 		return fmt.Errorf("create certificate: %w", err)
 	}
 
-	certFile, err := os.OpenFile(certPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("open cert file: %w", err)
-	}
-
-	if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
-		_ = certFile.Close()
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	if err := os.WriteFile(certPath, certPEM, 0644); err != nil {
 		return fmt.Errorf("write cert: %w", err)
 	}
-	if err := certFile.Close(); err != nil {
-		return fmt.Errorf("close cert file: %w", err)
-	}
 
-	keyFile, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("open key file: %w", err)
-	}
-
-	if err := pem.Encode(keyFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}); err != nil {
-		_ = keyFile.Close()
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
+	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
 		return fmt.Errorf("write key: %w", err)
-	}
-	if err := keyFile.Close(); err != nil {
-		return fmt.Errorf("close key file: %w", err)
 	}
 
 	return nil
