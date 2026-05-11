@@ -218,14 +218,16 @@ jobs:
           ${CHANGELOG}
           ENDNOTES
 
-          # Удаляем старый rolling pre-release и тег (игнорируем ошибки если нет)
+          # Удаляем старый rolling pre-release и тег
           echo "Deleting old rolling pre-release ${VERSION}..."
           gh release delete "${VERSION}" --yes 2>/dev/null || true
+          # Удаляем локально и на удалённом, игнорируя ошибки
+          git tag -d "${VERSION}" 2>/dev/null || true
           git push origin --delete "refs/tags/${VERSION}" 2>/dev/null || true
 
-          # Создаём новый tag на текущем HEAD
-          git tag "${VERSION}" "${GITHUB_SHA}"
-          git push origin "${VERSION}"
+          # Создаём новый tag на текущем HEAD (force на случай race condition)
+          git tag -f "${VERSION}" "${GITHUB_SHA}"
+          git push origin -f "${VERSION}"
 
           # Создаём новый release
           gh release create "${VERSION}" \
