@@ -83,7 +83,7 @@ detect_arch() {
 get_latest_stable_version() {
   _json=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases/latest" || echo "")
   if [ -n "$_json" ]; then
-    _tag=$(echo "$_json" | grep -m1 '"tag_name"' | sed 's/.*"\([^"]*\)"$/\1/')
+    _tag=$(echo "$_json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' | head -1)
     echo "$_tag"
   else
     echo ""
