@@ -18,7 +18,7 @@ type TrafficQuota struct {
 	TargetType     string `json:"target_type"` // "proxy", "global"
 	TargetID       string `json:"target_id"`   // proxy name or empty
 	LimitBytes     int64  `json:"limit_bytes"`
-	Period         string `json:"period"`      // "daily", "weekly", "monthly"
+	Period         string `json:"period"` // "daily", "weekly", "monthly"
 	Enabled        bool   `json:"enabled"`
 	AlertThreshold int    `json:"alert_threshold"` // 0-100, percent
 	CurrentBytes   int64  `json:"current_bytes"`

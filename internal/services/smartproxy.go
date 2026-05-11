@@ -25,10 +25,10 @@ const (
 
 // Profile represents a proxy switching profile (time-based, auto-failover or round-robin)
 type Profile struct {
-	ID                  string      `json:"id"`
-	Name                string      `json:"name"`
-	Enabled             bool        `json:"enabled"`
-	Mode                ProfileMode `json:"mode"` // "time-based" | "auto-failover" | "round-robin"
+	ID      string      `json:"id"`
+	Name    string      `json:"name"`
+	Enabled bool        `json:"enabled"`
+	Mode    ProfileMode `json:"mode"` // "time-based" | "auto-failover" | "round-robin"
 
 	// Time-based fields
 	DaysOfWeek []int  `json:"days_of_week"` // 0=Sunday, 1=Monday, ... 6=Saturday
@@ -36,9 +36,9 @@ type Profile struct {
 	EndTime    string `json:"end_time"`     // HH:MM format
 
 	// Auto-failover fields
-	LatencyThreshold    int    `json:"latency_threshold"`     // ms
-	ConsecutiveFailures int    `json:"consecutive_failures"`  // count
-	FallbackProxy       string `json:"fallback_proxy"`        // proxy name
+	LatencyThreshold    int    `json:"latency_threshold"`    // ms
+	ConsecutiveFailures int    `json:"consecutive_failures"` // count
+	FallbackProxy       string `json:"fallback_proxy"`       // proxy name
 
 	// Round-robin fields
 	RoundRobinProxies []string `json:"round_robin_proxies"`
@@ -63,12 +63,12 @@ type Profile struct {
 
 // SmartProxyService manages time-based proxy profiles
 type SmartProxyService struct {
-	dataDir    string
-	profiles   []Profile
-	mu         sync.RWMutex
-	mihomoURL  string
-	stopCh     chan struct{}
-	wg         sync.WaitGroup
+	dataDir   string
+	profiles  []Profile
+	mu        sync.RWMutex
+	mihomoURL string
+	stopCh    chan struct{}
+	wg        sync.WaitGroup
 }
 
 // ProfileStore is the on-disk format
