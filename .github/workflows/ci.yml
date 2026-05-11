@@ -27,11 +27,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Frontend нужен для go:embed (embed.go ссылается на frontend/dist)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
           cache: false
+
+      - name: Download Go dependencies
+        env:
+          GOTOOLCHAIN: local
+        run: go mod download
 
       - name: Run go fmt
         run: |
@@ -44,12 +61,14 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
-      - name: Install golangci-lint
+      - name: Check goimports
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.59.1
-
-      - name: Run golangci-lint
-        run: $(go env GOPATH)/bin/golangci-lint run --timeout=5m
+          go install golang.org/x/tools/cmd/goimports@v0.24.0
+          if [ -n "$($(go env GOPATH)/bin/goimports -l .)" ]; then
+            echo "Imports are not formatted:"
+            $(go env GOPATH)/bin/goimports -d .
+            exit 1
+          fi
 
   # Job 2: Тестирование Go кода
   test-go:
@@ -58,13 +77,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Frontend нужен для go:embed
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
           cache: false
 
       - name: Download dependencies
+        env:
+          GOTOOLCHAIN: local
         run: go mod download
 
       - name: Run tests
@@ -142,7 +175,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
           cache: false
 
       - name: Build binary

@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/user/xkeen-control-panel"
+	xkeencontrolpanel "github.com/user/xkeen-control-panel"
 	"github.com/user/xkeen-control-panel/internal/config"
 	"github.com/user/xkeen-control-panel/internal/handlers"
 	"github.com/user/xkeen-control-panel/internal/server"
