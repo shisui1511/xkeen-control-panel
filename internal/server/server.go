@@ -9,10 +9,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/user/xkeen-control-panel/internal/auth"
-	"github.com/user/xkeen-control-panel/internal/cert"
-	"github.com/user/xkeen-control-panel/internal/i18n"
-	"github.com/user/xkeen-control-panel/internal/middleware"
+	"github.com/shisui1511/xkeen-control-panel/internal/auth"
+	"github.com/shisui1511/xkeen-control-panel/internal/cert"
+	"github.com/shisui1511/xkeen-control-panel/internal/i18n"
+	"github.com/shisui1511/xkeen-control-panel/internal/middleware"
 )
 
 type Server struct {

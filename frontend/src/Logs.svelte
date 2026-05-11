@@ -42,7 +42,8 @@
     
     ws.onopen = () => {
       connected = true
-      logs = [...logs, { text: '[Подключено к серверу логов]', source: '', raw: '[Подключено к серверу логов]' }]
+      const msg = $t('logs.connected')
+      logs = [...logs, { text: msg, source: '', raw: msg }]
     }
     
     ws.onmessage = (event) => {
@@ -61,12 +62,14 @@
     
     ws.onerror = () => {
       connected = false
-      logs = [...logs, { text: '[Ошибка подключения к серверу логов]', source: '', raw: '[Ошибка подключения к серверу логов]' }]
+      const msg = $t('logs.connection_error')
+      logs = [...logs, { text: msg, source: '', raw: msg }]
     }
     
     ws.onclose = () => {
       connected = false
-      logs = [...logs, { text: '[Отключено от сервера логов]', source: '', raw: '[Отключено от сервера логов]' }]
+      const msg = $t('logs.disconnected')
+      logs = [...logs, { text: msg, source: '', raw: msg }]
     }
   }
 
@@ -126,17 +129,17 @@
     <div class="toolbar-left">
       <h2>{$t('logs.title')}</h2>
       <span class="status-indicator" class:connected>
-        {connected ? '● Подключено' : '○ Отключено'}
+        {connected ? $t('logs.status_connected') : $t('logs.status_disconnected')}
       </span>
       {#if availableSources.length > 0}
-        <span class="source-count">{availableSources.length} источника</span>
+        <span class="source-count">{$t('logs.source_count', { count: availableSources.length })}</span>
       {/if}
     </div>
     
     <div class="toolbar-right">
       {#if availableSources.length > 0}
-        <select bind:value={sourceFilter} class="source-select" title="Фильтр по источнику">
-          <option value="">Все источники</option>
+        <select bind:value={sourceFilter} class="source-select" title={$t('logs.source')}>
+          <option value="">{$t('logs.all_sources')}</option>
           {#each availableSources as source}
             <option value={source}>{source}</option>
           {/each}
@@ -154,7 +157,7 @@
         {paused ? '▶' : '⏸'}
       </button>
       
-      <button on:click={toggleAutoScroll} class="btn-icon" class:active={autoScroll} title="Авто-прокрутка">
+      <button on:click={toggleAutoScroll} class="btn-icon" class:active={autoScroll} title={$t('logs.autoscroll')}>
         ⬇
       </button>
       
@@ -163,9 +166,9 @@
       </button>
       
       {#if connected}
-        <button on:click={disconnect} class="btn-small btn-danger">Отключить</button>
+        <button on:click={disconnect} class="btn-small btn-danger">{$t('logs.disconnect')}</button>
       {:else}
-        <button on:click={connect} class="btn-small btn-primary">Подключить</button>
+        <button on:click={connect} class="btn-small btn-primary">{$t('logs.connect')}</button>
       {/if}
     </div>
   </div>
@@ -183,7 +186,7 @@
     
     {#if getFilteredLogs().length === 0}
       <div class="empty-state">
-        {filter || sourceFilter ? 'Нет логов, соответствующих фильтру' : 'Нет логов'}
+        {filter || sourceFilter ? $t('logs.no_filtered_logs') : $t('logs.no_logs')}
       </div>
     {/if}
   </div>

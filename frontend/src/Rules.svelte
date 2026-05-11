@@ -71,7 +71,7 @@
 
 <div class="container">
   <h1>{$t('rules.title')}</h1>
-  <p class="text-secondary mb-3">Правила маршрутизации Mihomo</p>
+  <p class="text-secondary mb-3">{$t('rules.subtitle')}</p>
 
   {#if error}
     <div class="alert alert-error mb-2">{error}</div>
@@ -86,7 +86,7 @@
         class="filter-input"
       />
       <select bind:value={typeFilter} class="filter-select">
-        <option value="">Все типы</option>
+        <option value="">{$t('rules.all_types')}</option>
         {#each getUniqueTypes() as type}
           <option value={type}>{type}</option>
         {/each}
@@ -98,15 +98,15 @@
   </div>
 
   <div class="stats mb-2">
-    <span class="stat">Всего: <strong>{rules.length}</strong></span>
-    <span class="stat">Показано: <strong>{getFilteredRules().length}</strong></span>
+    <span class="stat">{$t('rules.total', { count: rules.length })}</span>
+    <span class="stat">{$t('rules.shown', { count: getFilteredRules().length })}</span>
   </div>
 
   <div class="table-container">
     <table class="rules-table">
       <thead>
         <tr>
-          <th>Тип</th>
+          <th>{$t('rules.type_col')}</th>
           <th>Payload</th>
           <th>{$t('conn.proxy')}</th>
         </tr>

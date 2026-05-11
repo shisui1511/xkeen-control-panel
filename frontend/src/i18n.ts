@@ -501,7 +501,12 @@ const translations: Record<Lang, Record<string, string>> = {
 
 // Detect browser language
 function detectLanguage(): Lang {
-  const saved = localStorage.getItem('lang') as Lang
+  let saved: Lang | null = null
+  try {
+    saved = localStorage.getItem('lang') as Lang
+  } catch (e) {
+    // localStorage may be unavailable
+  }
   if (saved && translations[saved]) return saved
   
   const browserLang = navigator.language.split('-')[0]
@@ -531,7 +536,11 @@ export const t = derived(currentLang, $lang => {
 // Switch language
 export function setLang(lang: Lang) {
   currentLang.set(lang)
-  localStorage.setItem('lang', lang)
+  try {
+    localStorage.setItem('lang', lang)
+  } catch (e) {
+    // localStorage may be unavailable
+  }
 }
 
 // Get available languages

@@ -125,7 +125,7 @@
 
 <div class="container">
   <h1>{$t('proxies.title')}</h1>
-  <p class="text-secondary mb-3">Управление прокси-группами Mihomo</p>
+  <p class="text-secondary mb-3">{$t('proxies.subtitle')}</p>
 
   {#if error}
     <div class="alert alert-error mb-2">{error}</div>
