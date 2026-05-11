@@ -12,6 +12,8 @@
   import Subscriptions from './Subscriptions.svelte'
   import KernelManager from './KernelManager.svelte'
   import NetworkTools from './NetworkTools.svelte'
+  import SmartProxy from './SmartProxy.svelte'
+  import TrafficQuotas from './TrafficQuotas.svelte'
 
   let version = 'loading...'
   let loading = false
@@ -127,10 +129,17 @@
       <button class="nav-item" class:active={currentTab === 'kernels'} on:click={() => switchTab('kernels')}>
         🧠 {$t('nav.kernels')}
       </button>
+      <button class="nav-item" class:active={currentTab === 'smartproxy'} on:click={() => switchTab('smartproxy')}>
+        ⚡ {$t('nav.smartproxy')}
+      </button>
+      <button class="nav-item" class:active={currentTab === 'trafficquotas'} on:click={() => switchTab('trafficquotas')}>
+        📊 {$t('nav.trafficquotas')}
+      </button>
       <button class="nav-item" class:active={currentTab === 'network'} on:click={() => switchTab('network')}>
         🌐 Сеть
       </button>
       <button class="nav-item" class:active={currentTab === 'settings'} on:click={() => switchTab('settings')}>
+
         ⚙️ {$t('nav.settings')}
       </button>
     </nav>
@@ -229,6 +238,10 @@
       <Services onSwitchTab={switchTab} />
     {:else if currentTab === 'kernels'}
       <KernelManager onSwitchTab={switchTab} />
+    {:else if currentTab === 'smartproxy'}
+      <SmartProxy onSwitchTab={switchTab} />
+    {:else if currentTab === 'trafficquotas'}
+      <TrafficQuotas onSwitchTab={switchTab} />
     {:else if currentTab === 'network'}
       <NetworkTools onSwitchTab={switchTab} />
     {:else if currentTab === 'settings'}

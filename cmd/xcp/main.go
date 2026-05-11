@@ -11,6 +11,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/handlers"
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 var (
@@ -126,6 +127,38 @@ func main() {
 	srv.HandleProtected("/api/network/dns", api.NetworkDNS)
 	srv.HandleProtected("/api/network/http", api.NetworkHTTPTest)
 	srv.HandleProtected("/api/network/ip", api.NetworkIP)
+
+	// Smart Proxy Manager endpoints
+	srv.HandleProtected("/api/smart-proxy/profiles", api.SmartProxyList)
+	srv.HandleProtected("/api/smart-proxy/profiles/get", api.SmartProxyGet)
+	srv.HandleProtected("/api/smart-proxy/profiles/add", api.SmartProxyAdd)
+	srv.HandleProtected("/api/smart-proxy/profiles/update", api.SmartProxyUpdate)
+	srv.HandleProtected("/api/smart-proxy/profiles/delete", api.SmartProxyDelete)
+	srv.HandleProtected("/api/smart-proxy/profiles/enabled", api.SmartProxySetEnabled)
+	srv.HandleProtected("/api/smart-proxy/status", api.SmartProxyStatus)
+
+	// Traffic Quotas endpoints
+	srv.HandleProtected("/api/traffic/quotas", api.TrafficQuotaList)
+	srv.HandleProtected("/api/traffic/quotas/get", api.TrafficQuotaGet)
+	srv.HandleProtected("/api/traffic/quotas/add", api.TrafficQuotaAdd)
+	srv.HandleProtected("/api/traffic/quotas/update", api.TrafficQuotaUpdate)
+	srv.HandleProtected("/api/traffic/quotas/delete", api.TrafficQuotaDelete)
+	srv.HandleProtected("/api/traffic/quotas/enabled", api.TrafficQuotaSetEnabled)
+	srv.HandleProtected("/api/traffic/quotas/reset", api.TrafficQuotaReset)
+	srv.HandleProtected("/api/traffic/stats", api.TrafficStats)
+	srv.HandleProtected("/api/traffic/alerts", api.TrafficAlerts)
+	srv.HandleProtected("/api/traffic/alerts/clear", api.TrafficAlertsClear)
+
+	// Start background services
+	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, cfg.MihomoAPIURL)
+	smartProxySvc.Start()
+	api.SetSmartProxyService(smartProxySvc)
+	defer smartProxySvc.Stop()
+
+	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL)
+	trafficQuotaSvc.Start()
+	api.SetTrafficQuotaService(trafficQuotaSvc)
+	defer trafficQuotaSvc.Stop()
 
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {
