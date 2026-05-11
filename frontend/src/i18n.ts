@@ -99,6 +99,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.delete_error': 'Ошибка удаления',
     'editor.rename_error': 'Ошибка переименования',
     'editor.restore_error': 'Ошибка восстановления',
+    'editor.schema': 'Схема',
+    'editor.expert': 'Эксперт',
 
     // Services
     'svc.title': 'Управление сервисами',
@@ -345,6 +347,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.delete_error': 'Delete error',
     'editor.rename_error': 'Rename error',
     'editor.restore_error': 'Restore error',
+    'editor.schema': 'Schema',
+    'editor.expert': 'Expert',
 
     // Services
     'svc.title': 'Service Management',
