@@ -270,7 +270,23 @@ func (s *KernelService) Install(name string) error {
 	}
 
 	if _, err := os.Stat(k.BinaryPath); err == nil {
-		if err := copyFile(k.BinaryPath, backupPath); err != nil {
+		src, err := os.Open(k.BinaryPath)
+		if err != nil {
+			k.Status = "failed"
+			k.Message = "Backup failed: " + err.Error()
+			return err
+		}
+		dst, err := os.Create(backupPath)
+		if err != nil {
+			src.Close()
+			k.Status = "failed"
+			k.Message = "Backup failed: " + err.Error()
+			return err
+		}
+		_, err = io.Copy(dst, src)
+		src.Close()
+		dst.Close()
+		if err != nil {
 			k.Status = "failed"
 			k.Message = "Backup failed: " + err.Error()
 			return err
@@ -323,10 +339,10 @@ func (s *KernelService) Install(name string) error {
 		return err
 	}
 	if err := os.Rename(tempDest, k.BinaryPath); err != nil {
-		// Try rollback
-		if strings.HasPrefix(filepath.Clean(backupPath), "/") {
-			_ = os.Rename(backupPath, k.BinaryPath)
-		}
+		// Try rollback - backupPath is always within /opt/bin/.backup
+		backupDir := filepath.Join(filepath.Dir(k.BinaryPath), ".backup")
+		safeBackup := filepath.Join(backupDir, filepath.Base(backupPath))
+		_ = os.Rename(safeBackup, k.BinaryPath)
 		k.Status = "failed"
 		k.Message = "Replace failed: " + err.Error()
 		return err
@@ -432,29 +448,6 @@ func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 	}
 
 	return "", fmt.Errorf("binary not found in archive")
-}
-
-func copyFile(src, dst string) error {
-	if !strings.HasPrefix(filepath.Clean(src), "/") {
-		return errors.New("invalid src path")
-	}
-	if !strings.HasPrefix(filepath.Clean(dst), "/") {
-		return errors.New("invalid dst path")
-	}
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, in)
-	return err
 }
 
 func (s *KernelService) extractGz(gzPath string) (string, error) {
