@@ -14,3 +14,4 @@ doc/
 node_modules/
 frontend/dist/
 frontend/node_modules/coverage.out
+bin/golangci-lint
