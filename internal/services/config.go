@@ -9,38 +9,18 @@ import (
 	"time"
 )
 
-func validateFilePath(path string) error {
+func (s *ConfigService) resolvePath(path string) (string, error) {
 	if path == "" {
-		return errors.New("empty path")
-	}
-	if !filepath.IsAbs(path) {
-		return errors.New("path must be absolute")
+		return "", errors.New("empty path")
 	}
 	clean := filepath.Clean(path)
 	if strings.Contains(clean, "..") {
-		return errors.New("path traversal detected")
-	}
-	return nil
-}
-
-func resolveSafePath(baseDir, subPath string) (string, error) {
-	if !filepath.IsAbs(baseDir) {
-		return "", errors.New("base dir must be absolute")
-	}
-	cleanSub := filepath.Clean(subPath)
-	if strings.Contains(cleanSub, "..") {
 		return "", errors.New("path traversal detected")
 	}
-	resolved := filepath.Join(baseDir, cleanSub)
-	// Ensure resolved path is within baseDir
-	rel, err := filepath.Rel(baseDir, resolved)
-	if err != nil {
-		return "", errors.New("invalid path")
+	if !strings.HasPrefix(clean, s.ConfigDir) {
+		return "", errors.New("path outside config directory")
 	}
-	if strings.HasPrefix(rel, "..") {
-		return "", errors.New("path traversal detected")
-	}
-	return resolved, nil
+	return clean, nil
 }
 
 func sortStrings(s []string) []string {
@@ -66,19 +46,21 @@ func (s *ConfigService) List() ([]string, error) {
 }
 
 func (s *ConfigService) Read(path string) ([]byte, error) {
-	if err := validateFilePath(path); err != nil {
+	path, err := s.resolvePath(path)
+	if err != nil {
 		return nil, err
 	}
 	return os.ReadFile(path)
 }
 
 func (s *ConfigService) Save(path string, data []byte) error {
-	if err := validateFilePath(path); err != nil {
+	path, err := s.resolvePath(path)
+	if err != nil {
 		return err
 	}
 	// Create backup in same directory as target file
 	backupPath := filepath.Join(filepath.Dir(path), filepath.Base(path)+".backup-"+time.Now().Format("20060102-150405"))
-	if err := validateFilePath(backupPath); err != nil {
+	if _, err := s.resolvePath(backupPath); err != nil {
 		return err
 	}
 	if s.Exists(path) {
@@ -99,15 +81,17 @@ func (s *ConfigService) Save(path string, data []byte) error {
 }
 
 func (s *ConfigService) Exists(path string) bool {
-	if err := validateFilePath(path); err != nil {
+	path, err := s.resolvePath(path)
+	if err != nil {
 		return false
 	}
-	_, err := os.Stat(path)
+	_, err = os.Stat(path)
 	return !os.IsNotExist(err)
 }
 
 func (s *ConfigService) ListBackups(path string) ([]string, error) {
-	if err := validateFilePath(path); err != nil {
+	path, err := s.resolvePath(path)
+	if err != nil {
 		return nil, err
 	}
 	dir := filepath.Dir(path)
@@ -122,7 +106,7 @@ func (s *ConfigService) ListBackups(path string) ([]string, error) {
 	// Validate and filter backups to ensure they are within config dir
 	var valid []string
 	for _, b := range backups {
-		if err := validateFilePath(b); err != nil {
+		if _, err := s.resolvePath(b); err != nil {
 			continue
 		}
 		valid = append(valid, b)
@@ -143,7 +127,8 @@ func (s *ConfigService) ListBackups(path string) ([]string, error) {
 }
 
 func (s *ConfigService) rotateBackups(path string, keep int) error {
-	if err := validateFilePath(path); err != nil {
+	path, err := s.resolvePath(path)
+	if err != nil {
 		return err
 	}
 	backups, err := s.ListBackups(path)
@@ -153,7 +138,7 @@ func (s *ConfigService) rotateBackups(path string, keep int) error {
 
 	// Delete old backups
 	for i := keep; i < len(backups); i++ {
-		if err := validateFilePath(backups[i]); err != nil {
+		if _, err := s.resolvePath(backups[i]); err != nil {
 			continue
 		}
 		if err := os.Remove(backups[i]); err != nil {
@@ -164,7 +149,8 @@ func (s *ConfigService) rotateBackups(path string, keep int) error {
 }
 
 func (s *ConfigService) Create(path string) error {
-	if err := validateFilePath(path); err != nil {
+	path, err := s.resolvePath(path)
+	if err != nil {
 		return err
 	}
 	if s.Exists(path) {
@@ -174,7 +160,8 @@ func (s *ConfigService) Create(path string) error {
 }
 
 func (s *ConfigService) Delete(path string) error {
-	if err := validateFilePath(path); err != nil {
+	path, err := s.resolvePath(path)
+	if err != nil {
 		return err
 	}
 	if !s.Exists(path) {
@@ -184,10 +171,12 @@ func (s *ConfigService) Delete(path string) error {
 }
 
 func (s *ConfigService) Rename(oldPath, newPath string) error {
-	if err := validateFilePath(oldPath); err != nil {
+	oldPath, err := s.resolvePath(oldPath)
+	if err != nil {
 		return err
 	}
-	if err := validateFilePath(newPath); err != nil {
+	newPath, err = s.resolvePath(newPath)
+	if err != nil {
 		return err
 	}
 	if !s.Exists(oldPath) {
