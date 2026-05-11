@@ -98,7 +98,8 @@ get_latest_stable_version() {
 get_latest_prerelease_version() {
   _json=$(curl -s --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO}/releases?per_page=30" || echo "")
   if [ -n "$_json" ]; then
-    _tag=$(echo "$_json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' | grep '\-dev' | sort -V | tail -1)
+    # Берём только rolling pre-release (вида vX.Y.0-dev, без суффикса .N)
+    _tag=$(echo "$_json" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' | grep '\-dev$' | sort -V | tail -1)
     echo "$_tag"
   else
     echo ""
