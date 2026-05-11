@@ -17,12 +17,30 @@ func validateFilePath(path string) error {
 		return errors.New("path must be absolute")
 	}
 	clean := filepath.Clean(path)
-	for _, part := range strings.Split(clean, string(filepath.Separator)) {
-		if part == ".." {
-			return errors.New("path traversal detected")
-		}
+	if strings.Contains(clean, "..") {
+		return errors.New("path traversal detected")
 	}
 	return nil
+}
+
+func resolveSafePath(baseDir, subPath string) (string, error) {
+	if !filepath.IsAbs(baseDir) {
+		return "", errors.New("base dir must be absolute")
+	}
+	cleanSub := filepath.Clean(subPath)
+	if strings.Contains(cleanSub, "..") {
+		return "", errors.New("path traversal detected")
+	}
+	resolved := filepath.Join(baseDir, cleanSub)
+	// Ensure resolved path is within baseDir
+	rel, err := filepath.Rel(baseDir, resolved)
+	if err != nil {
+		return "", errors.New("invalid path")
+	}
+	if strings.HasPrefix(rel, "..") {
+		return "", errors.New("path traversal detected")
+	}
+	return resolved, nil
 }
 
 func sortStrings(s []string) []string {
@@ -58,17 +76,24 @@ func (s *ConfigService) Save(path string, data []byte) error {
 	if err := validateFilePath(path); err != nil {
 		return err
 	}
-	// Create backup
-	backupPath := path + ".backup-" + time.Now().Format("20060102-150405")
+	// Create backup in same directory as target file
+	backupPath := filepath.Join(filepath.Dir(path), filepath.Base(path)+".backup-"+time.Now().Format("20060102-150405"))
+	if err := validateFilePath(backupPath); err != nil {
+		return err
+	}
 	if s.Exists(path) {
 		oldData, err := os.ReadFile(path)
 		if err == nil {
-			os.WriteFile(backupPath, oldData, 0644)
+			if err := os.WriteFile(backupPath, oldData, 0644); err != nil {
+				return err
+			}
 		}
 	}
 
 	// Rotate backups - keep only last 5
-	s.rotateBackups(path, 5)
+	if err := s.rotateBackups(path, 5); err != nil {
+		return err
+	}
 
 	return os.WriteFile(path, data, 0644)
 }
@@ -94,29 +119,48 @@ func (s *ConfigService) ListBackups(path string) ([]string, error) {
 		return nil, err
 	}
 
+	// Validate and filter backups to ensure they are within config dir
+	var valid []string
+	for _, b := range backups {
+		if err := validateFilePath(b); err != nil {
+			continue
+		}
+		valid = append(valid, b)
+	}
+	backups = valid
+
 	// Sort by modification time (newest first)
 	sort.Slice(backups, func(i, j int) bool {
 		iInfo, _ := os.Stat(backups[i])
 		jInfo, _ := os.Stat(backups[j])
+		if iInfo == nil || jInfo == nil {
+			return false
+		}
 		return iInfo.ModTime().After(jInfo.ModTime())
 	})
 
 	return backups, nil
 }
 
-func (s *ConfigService) rotateBackups(path string, keep int) {
+func (s *ConfigService) rotateBackups(path string, keep int) error {
 	if err := validateFilePath(path); err != nil {
-		return
+		return err
 	}
 	backups, err := s.ListBackups(path)
 	if err != nil || len(backups) <= keep {
-		return
+		return err
 	}
 
 	// Delete old backups
 	for i := keep; i < len(backups); i++ {
-		os.Remove(backups[i])
+		if err := validateFilePath(backups[i]); err != nil {
+			continue
+		}
+		if err := os.Remove(backups[i]); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (s *ConfigService) Create(path string) error {

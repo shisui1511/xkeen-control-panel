@@ -21,13 +21,21 @@ func validateKernelPath(path string) error {
 	if path == "" {
 		return errors.New("empty path")
 	}
+	if !filepath.IsAbs(path) {
+		return errors.New("path must be absolute")
+	}
 	clean := filepath.Clean(path)
-	for _, part := range strings.Split(clean, string(filepath.Separator)) {
-		if part == ".." {
-			return errors.New("path traversal detected")
-		}
+	if strings.Contains(clean, "..") {
+		return errors.New("path traversal detected")
 	}
 	return nil
+}
+
+func safeTempPath(name string) (string, error) {
+	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return "", errors.New("invalid temp file name")
+	}
+	return filepath.Join(os.TempDir(), name), nil
 }
 
 // KernelInfo holds info about an installed kernel
@@ -234,7 +242,12 @@ func (s *KernelService) Install(name string) error {
 		return fmt.Errorf("unsupported architecture: %s", arch)
 	}
 
-	tempFile := filepath.Join(os.TempDir(), filename)
+	tempFile, err := safeTempPath(filename)
+	if err != nil {
+		k.Status = "failed"
+		k.Message = "Invalid filename: " + err.Error()
+		return err
+	}
 	if err := s.downloadFile(downloadURL, tempFile); err != nil {
 		k.Status = "failed"
 		k.Message = "Download failed: " + err.Error()
@@ -246,13 +259,17 @@ func (s *KernelService) Install(name string) error {
 	k.Message = "Creating backup..."
 
 	backupDir := filepath.Join(filepath.Dir(k.BinaryPath), ".backup")
-	os.MkdirAll(backupDir, 0755)
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		k.Status = "failed"
+		k.Message = "Backup dir failed: " + err.Error()
+		return err
+	}
 	backupPath := filepath.Join(backupDir, fmt.Sprintf("%s.bak.%d", name, time.Now().Unix()))
+	if err := validateKernelPath(backupPath); err != nil {
+		return err
+	}
 
 	if _, err := os.Stat(k.BinaryPath); err == nil {
-		if err := validateKernelPath(backupPath); err != nil {
-			return err
-		}
 		if err := copyFile(k.BinaryPath, backupPath); err != nil {
 			k.Status = "failed"
 			k.Message = "Backup failed: " + err.Error()
@@ -293,7 +310,7 @@ func (s *KernelService) Install(name string) error {
 	}
 
 	// Atomic replace
-	tempDest := k.BinaryPath + ".new"
+	tempDest := filepath.Join(filepath.Dir(k.BinaryPath), filepath.Base(k.BinaryPath)+".new")
 	if err := validateKernelPath(extractedPath); err != nil {
 		return err
 	}
@@ -307,7 +324,7 @@ func (s *KernelService) Install(name string) error {
 	}
 	if err := os.Rename(tempDest, k.BinaryPath); err != nil {
 		// Try rollback
-		os.Rename(backupPath, k.BinaryPath)
+		_ = os.Rename(backupPath, k.BinaryPath)
 		k.Status = "failed"
 		k.Message = "Replace failed: " + err.Error()
 		return err
@@ -394,7 +411,10 @@ func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 			}
 			defer rc.Close()
 
-			outPath := filepath.Join(os.TempDir(), binaryName+".new")
+			outPath, err := safeTempPath(binaryName + ".new")
+			if err != nil {
+				return "", err
+			}
 			if err := validateKernelPath(outPath); err != nil {
 				return "", err
 			}
@@ -448,7 +468,11 @@ func (s *KernelService) extractGz(gzPath string) (string, error) {
 	}
 	defer gr.Close()
 
-	outPath := strings.TrimSuffix(gzPath, ".gz")
+	outPath := strings.TrimSuffix(filepath.Base(gzPath), ".gz")
+	outPath, err = safeTempPath(outPath)
+	if err != nil {
+		return "", err
+	}
 	if err := validateKernelPath(outPath); err != nil {
 		return "", err
 	}

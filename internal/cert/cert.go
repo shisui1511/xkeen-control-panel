@@ -72,20 +72,26 @@ func GenerateSelfSigned(certPath, keyPath string, hosts []string) error {
 	if err != nil {
 		return fmt.Errorf("open cert file: %w", err)
 	}
-	defer certFile.Close()
 
 	if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		_ = certFile.Close()
 		return fmt.Errorf("write cert: %w", err)
+	}
+	if err := certFile.Close(); err != nil {
+		return fmt.Errorf("close cert file: %w", err)
 	}
 
 	keyFile, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("open key file: %w", err)
 	}
-	defer keyFile.Close()
 
 	if err := pem.Encode(keyFile, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)}); err != nil {
+		_ = keyFile.Close()
 		return fmt.Errorf("write key: %w", err)
+	}
+	if err := keyFile.Close(); err != nil {
+		return fmt.Errorf("close key file: %w", err)
 	}
 
 	return nil
