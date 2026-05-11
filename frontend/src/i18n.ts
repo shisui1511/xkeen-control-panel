@@ -142,6 +142,7 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // Navigation
     'nav.smartproxy': 'Smart Proxy',
+    'nav.trafficquotas': 'Лимиты трафика',
     'nav.subscriptions': 'Подписки',
 
     // Smart Proxy
@@ -166,6 +167,33 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.proxy': 'Proxy',
     'smartproxy.proxy_placeholder': 'HK-1',
     'smartproxy.applied_count': 'Применён {count} раз',
+
+    // Traffic Quotas
+    'traffic.title': 'Лимиты трафика',
+    'traffic.subtitle': 'Учёт трафика и ограничения потребления',
+    'traffic.alerts': 'Алерты',
+    'traffic.clear_alerts': 'Очистить алерты',
+    'traffic.stats': 'Статистика',
+    'traffic.total_upload': 'Upload',
+    'traffic.total_download': 'Download',
+    'traffic.total': 'Всего',
+    'traffic.per_proxy': 'По прокси',
+    'traffic.quotas': 'Лимиты',
+    'traffic.add_quota': 'Добавить лимит',
+    'traffic.no_quotas': 'Нет лимитов. Добавьте первый.',
+    'traffic.new_quota': 'Новый лимит',
+    'traffic.edit_quota': 'Редактировать лимит',
+    'traffic.name': 'Название',
+    'traffic.name_placeholder': 'Месячный лимит',
+    'traffic.target_type': 'Тип цели',
+    'traffic.target_global': 'Глобальный',
+    'traffic.target_proxy': 'Прокси',
+    'traffic.proxy_name': 'Имя прокси',
+    'traffic.limit': 'Лимит',
+    'traffic.unit': 'Единица',
+    'traffic.period': 'Период',
+    'traffic.alert_threshold': 'Порог алерта',
+    'traffic.reset': 'Сбросить',
 
     // Subscriptions
     'subscr.title': 'Подписки',
@@ -438,6 +466,33 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.proxy': 'Proxy',
     'smartproxy.proxy_placeholder': 'HK-1',
     'smartproxy.applied_count': 'Applied {count} times',
+
+    // Traffic Quotas
+    'traffic.title': 'Traffic Quotas',
+    'traffic.subtitle': 'Traffic accounting and consumption limits',
+    'traffic.alerts': 'Alerts',
+    'traffic.clear_alerts': 'Clear alerts',
+    'traffic.stats': 'Statistics',
+    'traffic.total_upload': 'Upload',
+    'traffic.total_download': 'Download',
+    'traffic.total': 'Total',
+    'traffic.per_proxy': 'Per proxy',
+    'traffic.quotas': 'Quotas',
+    'traffic.add_quota': 'Add quota',
+    'traffic.no_quotas': 'No quotas. Add the first one.',
+    'traffic.new_quota': 'New Quota',
+    'traffic.edit_quota': 'Edit Quota',
+    'traffic.name': 'Name',
+    'traffic.name_placeholder': 'Monthly limit',
+    'traffic.target_type': 'Target type',
+    'traffic.target_global': 'Global',
+    'traffic.target_proxy': 'Proxy',
+    'traffic.proxy_name': 'Proxy name',
+    'traffic.limit': 'Limit',
+    'traffic.unit': 'Unit',
+    'traffic.period': 'Period',
+    'traffic.alert_threshold': 'Alert threshold',
+    'traffic.reset': 'Reset',
 
     // Subscriptions
     'subscr.title': 'Subscriptions',

@@ -13,6 +13,7 @@
   import KernelManager from './KernelManager.svelte'
   import NetworkTools from './NetworkTools.svelte'
   import SmartProxy from './SmartProxy.svelte'
+  import TrafficQuotas from './TrafficQuotas.svelte'
 
   let version = 'loading...'
   let loading = false
@@ -129,7 +130,10 @@
         🧠 {$t('nav.kernels')}
       </button>
       <button class="nav-item" class:active={currentTab === 'smartproxy'} on:click={() => switchTab('smartproxy')}>
-        ⚡ Smart Proxy
+        ⚡ {$t('nav.smartproxy')}
+      </button>
+      <button class="nav-item" class:active={currentTab === 'trafficquotas'} on:click={() => switchTab('trafficquotas')}>
+        📊 {$t('nav.trafficquotas')}
       </button>
       <button class="nav-item" class:active={currentTab === 'network'} on:click={() => switchTab('network')}>
         🌐 Сеть
@@ -236,6 +240,8 @@
       <KernelManager onSwitchTab={switchTab} />
     {:else if currentTab === 'smartproxy'}
       <SmartProxy onSwitchTab={switchTab} />
+    {:else if currentTab === 'trafficquotas'}
+      <TrafficQuotas onSwitchTab={switchTab} />
     {:else if currentTab === 'network'}
       <NetworkTools onSwitchTab={switchTab} />
     {:else if currentTab === 'settings'}
