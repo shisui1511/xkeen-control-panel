@@ -20,6 +20,7 @@ type API struct {
 	subscriptionSvc *services.SubscriptionService
 	kernelSvc       *services.KernelService
 	networkSvc      *services.NetworkToolsService
+	smartProxySvc   *services.SmartProxyService
 	pathVal         *utils.PathValidator
 }
 
@@ -32,6 +33,10 @@ func NewAPI(cfg *config.Config, srv *server.Server) *API {
 		configSvc: services.NewConfigService(cfg.XRayConfigDir),
 		pathVal:   utils.NewPathValidator(cfg.AllowedRoots),
 	}
+}
+
+func (a *API) SetSmartProxyService(svc *services.SmartProxyService) {
+	a.smartProxySvc = svc
 }
 
 func (a *API) t(r *http.Request, key string) string {

@@ -11,6 +11,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/handlers"
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 var (
@@ -126,6 +127,21 @@ func main() {
 	srv.HandleProtected("/api/network/dns", api.NetworkDNS)
 	srv.HandleProtected("/api/network/http", api.NetworkHTTPTest)
 	srv.HandleProtected("/api/network/ip", api.NetworkIP)
+
+	// Smart Proxy Manager endpoints
+	srv.HandleProtected("/api/smart-proxy/profiles", api.SmartProxyList)
+	srv.HandleProtected("/api/smart-proxy/profiles/get", api.SmartProxyGet)
+	srv.HandleProtected("/api/smart-proxy/profiles/add", api.SmartProxyAdd)
+	srv.HandleProtected("/api/smart-proxy/profiles/update", api.SmartProxyUpdate)
+	srv.HandleProtected("/api/smart-proxy/profiles/delete", api.SmartProxyDelete)
+	srv.HandleProtected("/api/smart-proxy/profiles/enabled", api.SmartProxySetEnabled)
+	srv.HandleProtected("/api/smart-proxy/status", api.SmartProxyStatus)
+
+	// Start background services
+	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, cfg.MihomoAPIURL)
+	smartProxySvc.Start()
+	api.SetSmartProxyService(smartProxySvc)
+	defer smartProxySvc.Stop()
 
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {
