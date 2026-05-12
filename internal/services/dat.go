@@ -121,11 +121,40 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	// Final absolute path - fully controlled and sanitized
 	targetAbs := filepath.Join(baseDir, safeName)
 
-	// 2. URL validation & SSRF protection
+	// 2. URL validation & sanitization
 	u, err := url.Parse(remoteURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return 0, fmt.Errorf("invalid or unsupported URL scheme")
 	}
+
+	// Reject URLs with embedded credentials
+	if u.User != nil {
+		return 0, fmt.Errorf("URL must not contain credentials")
+	}
+
+	// Restrict path to prevent path traversal via URL
+	cleanPath := u.Path
+	if cleanPath == "" {
+		cleanPath = "/"
+	}
+
+	// Validate host explicitly before making any request
+	hostname := u.Hostname()
+	if hostname == "" {
+		return 0, fmt.Errorf("URL has no host")
+	}
+	ips, err := net.LookupIP(hostname)
+	if err != nil {
+		return 0, fmt.Errorf("failed to resolve host: %w", err)
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+			return 0, fmt.Errorf("access to private network is prohibited")
+		}
+	}
+
+	// Reconstruct a sanitized URL from validated components only
+	sanitizedURL := fmt.Sprintf("%s://%s%s", u.Scheme, u.Host, cleanPath)
 
 	// Robust SSRF protection using custom DialContext that prevents connections to private IPs
 	transport := &http.Transport{
@@ -152,7 +181,7 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		Timeout:   5 * time.Minute,
 	}
 
-	resp, err := client.Get(u.String())
+	resp, err := client.Get(sanitizedURL)
 	if err != nil {
 		return 0, fmt.Errorf("failed to download: %w", err)
 	}
@@ -184,6 +213,5 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 
 	return written, nil
 }
-
 
 var safePathComponentRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
