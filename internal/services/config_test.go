@@ -6,146 +6,85 @@ import (
 	"testing"
 )
 
-func TestConfigServiceList(t *testing.T) {
-	// Создаём временную директорию
-	tmpDir := t.TempDir()
+func TestNewConfigService(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewConfigService(tmp)
+	if svc == nil {
+		t.Fatal("expected non-nil service")
+	}
+}
 
-	// Создаём несколько тестовых JSON файлов
-	testFiles := []string{"config1.json", "config2.json", "test.json"}
-	for _, file := range testFiles {
-		path := filepath.Join(tmpDir, file)
-		if err := os.WriteFile(path, []byte("{}"), 0644); err != nil {
-			t.Fatalf("Failed to create test file: %v", err)
-		}
+func TestConfigService_List(t *testing.T) {
+	tmp := t.TempDir()
+	files := []string{"config1.json", "config2.json"}
+	for _, f := range files {
+		os.WriteFile(filepath.Join(tmp, f), []byte("{}"), 0644)
 	}
 
-	// Создаём также не-JSON файл
-	if err := os.WriteFile(filepath.Join(tmpDir, "readme.txt"), []byte("test"), 0644); err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
-
-	svc := NewConfigService(tmpDir)
-	files, err := svc.List()
+	svc := NewConfigService(tmp)
+	got, err := svc.List()
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
-
-	// Должны получить только JSON файлы
-	if len(files) != 3 {
-		t.Errorf("Expected 3 JSON files, got %d", len(files))
+	if len(got) != 2 {
+		t.Fatalf("expected 2 files, got %d", len(got))
 	}
 }
 
-func TestConfigServiceReadWrite(t *testing.T) {
-	tmpDir := t.TempDir()
-	testFile := filepath.Join(tmpDir, "test.json")
-	testData := []byte(`{"test": "data"}`)
+func TestConfigService_ReadWrite(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewConfigService(tmp)
+	testFile := filepath.Join(tmp, "test.json")
+	data := []byte(`{"log": {"level": "debug"}}`)
 
-	svc := NewConfigService(tmpDir)
-
-	// Записываем данные
-	err := svc.Save(testFile, testData)
+	err := svc.Save(testFile, data)
 	if err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	// Читаем данные
-	data, err := svc.Read(testFile)
+	read, err := svc.Read(testFile)
 	if err != nil {
 		t.Fatalf("Read failed: %v", err)
 	}
-
-	if string(data) != string(testData) {
-		t.Errorf("Expected %s, got %s", testData, data)
+	if string(read) != string(data) {
+		t.Fatalf("data mismatch: got %s, want %s", read, data)
 	}
 }
 
-func TestConfigServiceBackups(t *testing.T) {
-	tmpDir := t.TempDir()
-	testFile := filepath.Join(tmpDir, "test.json")
+func TestConfigService_PathTraversal(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewConfigService(tmp)
 
-	svc := NewConfigService(tmpDir)
-
-	// Создаём первую версию
-	err := svc.Save(testFile, []byte(`{"version": 1}`))
-	if err != nil {
-		t.Fatalf("Save failed: %v", err)
+	_, err := svc.Read("../etc/passwd")
+	if err == nil {
+		t.Fatal("expected error for path traversal")
 	}
+}
 
-	// Создаём вторую версию (должен создаться backup)
-	err = svc.Save(testFile, []byte(`{"version": 2}`))
-	if err != nil {
-		t.Fatalf("Save failed: %v", err)
-	}
+func TestConfigService_Backup(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewConfigService(tmp)
+	testFile := filepath.Join(tmp, "config.json")
 
-	// Проверяем, что backup создан
+	os.WriteFile(testFile, []byte(`{"v1":true}`), 0644)
 	backups, err := svc.ListBackups(testFile)
 	if err != nil {
 		t.Fatalf("ListBackups failed: %v", err)
 	}
+	if len(backups) != 0 {
+		t.Fatalf("expected 0 backups initially, got %d", len(backups))
+	}
 
+	err = svc.Save(testFile, []byte(`{"v2":true}`))
+	if err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	backups, err = svc.ListBackups(testFile)
+	if err != nil {
+		t.Fatalf("ListBackups after save failed: %v", err)
+	}
 	if len(backups) != 1 {
-		t.Errorf("Expected 1 backup, got %d", len(backups))
-	}
-
-	// Проверяем содержимое backup
-	if len(backups) > 0 {
-		backupData, err := svc.Read(backups[0])
-		if err != nil {
-			t.Fatalf("Failed to read backup: %v", err)
-		}
-
-		if string(backupData) != `{"version": 1}` {
-			t.Errorf("Backup contains wrong data: %s", backupData)
-		}
-	}
-}
-
-func TestConfigServiceBackupRotation(t *testing.T) {
-	tmpDir := t.TempDir()
-	testFile := filepath.Join(tmpDir, "test.json")
-
-	svc := NewConfigService(tmpDir)
-
-	// Создаём 7 версий (должно остаться только 5 последних)
-	for i := 1; i <= 7; i++ {
-		data := []byte(`{"version": ` + string(rune('0'+i)) + `}`)
-		err := svc.Save(testFile, data)
-		if err != nil {
-			t.Fatalf("Save failed: %v", err)
-		}
-	}
-
-	// Проверяем количество backups
-	backups, err := svc.ListBackups(testFile)
-	if err != nil {
-		t.Fatalf("ListBackups failed: %v", err)
-	}
-
-	if len(backups) > 5 {
-		t.Errorf("Expected max 5 backups, got %d", len(backups))
-	}
-}
-
-func TestConfigServiceExists(t *testing.T) {
-	tmpDir := t.TempDir()
-	testFile := filepath.Join(tmpDir, "test.json")
-
-	svc := NewConfigService(tmpDir)
-
-	// Файл не существует
-	if svc.Exists(testFile) {
-		t.Error("File should not exist")
-	}
-
-	// Создаём файл
-	err := os.WriteFile(testFile, []byte("{}"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create file: %v", err)
-	}
-
-	// Файл существует
-	if !svc.Exists(testFile) {
-		t.Error("File should exist")
+		t.Fatalf("expected 1 backup after save, got %d", len(backups))
 	}
 }

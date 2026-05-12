@@ -106,13 +106,12 @@ func (s *TrafficQuotaService) load() {
 	s.mu.Unlock()
 }
 
-func (s *TrafficQuotaService) save() error {
-	s.mu.RLock()
+// saveLocked writes state to disk. Caller MUST hold s.mu.
+func (s *TrafficQuotaService) saveLocked() error {
 	store := TrafficStore{
 		Quotas:     s.quotas,
 		ProxyStats: s.proxyStats,
 	}
-	s.mu.RUnlock()
 
 	data, err := json.MarshalIndent(store, "", "  ")
 	if err != nil {
@@ -120,6 +119,13 @@ func (s *TrafficQuotaService) save() error {
 	}
 	os.MkdirAll(s.dataDir, 0755)
 	return os.WriteFile(s.storePath(), data, 0644)
+}
+
+// save acquires the lock and writes state to disk.
+func (s *TrafficQuotaService) save() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saveLocked()
 }
 
 // --- CRUD for quotas ---
@@ -149,9 +155,9 @@ func (s *TrafficQuotaService) AddQuota(q *TrafficQuota) error {
 	}
 	q.LastReset = time.Now().Unix()
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.quotas = append(s.quotas, *q)
-	s.mu.Unlock()
-	return s.save()
+	return s.saveLocked()
 }
 
 func (s *TrafficQuotaService) UpdateQuota(id string, q *TrafficQuota) error {
@@ -161,7 +167,7 @@ func (s *TrafficQuotaService) UpdateQuota(id string, q *TrafficQuota) error {
 		if s.quotas[i].ID == id {
 			s.quotas[i] = *q
 			s.quotas[i].ID = id
-			return s.save()
+			return s.saveLocked()
 		}
 	}
 	return fmt.Errorf("quota not found")
@@ -173,7 +179,7 @@ func (s *TrafficQuotaService) DeleteQuota(id string) error {
 	for i, q := range s.quotas {
 		if q.ID == id {
 			s.quotas = append(s.quotas[:i], s.quotas[i+1:]...)
-			return s.save()
+			return s.saveLocked()
 		}
 	}
 	return fmt.Errorf("quota not found")
@@ -185,7 +191,7 @@ func (s *TrafficQuotaService) SetQuotaEnabled(id string, enabled bool) error {
 	for i := range s.quotas {
 		if s.quotas[i].ID == id {
 			s.quotas[i].Enabled = enabled
-			return s.save()
+			return s.saveLocked()
 		}
 	}
 	return fmt.Errorf("quota not found")
@@ -198,7 +204,7 @@ func (s *TrafficQuotaService) ResetQuota(id string) error {
 		if s.quotas[i].ID == id {
 			s.quotas[i].CurrentBytes = 0
 			s.quotas[i].LastReset = time.Now().Unix()
-			return s.save()
+			return s.saveLocked()
 		}
 	}
 	return fmt.Errorf("quota not found")
@@ -293,7 +299,7 @@ func (s *TrafficQuotaService) checkResets() {
 		}
 	}
 
-	_ = s.save()
+	_ = s.saveLocked()
 }
 
 // mihomoConnectionsResponse matches Mihomo /connections endpoint
@@ -347,7 +353,7 @@ func (s *TrafficQuotaService) collectTraffic() {
 		stat.TotalBytes = stat.UploadBytes + stat.DownloadBytes
 	}
 
-	if err := s.save(); err != nil {
+	if err := s.saveLocked(); err != nil {
 		log.Printf("TrafficQuota: failed to save stats: %v", err)
 	}
 }

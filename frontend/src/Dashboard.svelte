@@ -14,11 +14,14 @@
   import NetworkTools from './NetworkTools.svelte'
   import SmartProxy from './SmartProxy.svelte'
   import TrafficQuotas from './TrafficQuotas.svelte'
+  import DATManager from './DATManager.svelte'
+  import Console from './Console.svelte'
 
   let version = 'loading...'
   let loading = false
   let currentTab = 'dashboard'
   let theme = document.documentElement.getAttribute('data-theme') || 'light'
+  let pwaInstallPrompt: any = null
 
   interface SystemStats {
     memory: { total: number; used: number; free: number }
@@ -91,8 +94,21 @@
     fetchVersion()
     fetchSystemStats()
     const interval = setInterval(fetchSystemStats, 5000)
+    window.addEventListener('beforeinstallprompt', (e: Event) => {
+      e.preventDefault()
+      pwaInstallPrompt = e
+    })
     return () => clearInterval(interval)
   })
+
+  async function installPWA() {
+    if (!pwaInstallPrompt) return
+    pwaInstallPrompt.prompt()
+    const { outcome } = await pwaInstallPrompt.userChoice
+    if (outcome === 'accepted') {
+      pwaInstallPrompt = null
+    }
+  }
 </script>
 
 <div class="dashboard-layout">
@@ -135,6 +151,12 @@
       <button class="nav-item" class:active={currentTab === 'trafficquotas'} on:click={() => switchTab('trafficquotas')}>
         📊 {$t('nav.trafficquotas')}
       </button>
+      <button class="nav-item" class:active={currentTab === 'dat'} on:click={() => switchTab('dat')}>
+        🌍 {$t('nav.dat')}
+      </button>
+      <button class="nav-item" class:active={currentTab === 'console'} on:click={() => switchTab('console')}>
+        💻 {$t('nav.console')}
+      </button>
       <button class="nav-item" class:active={currentTab === 'network'} on:click={() => switchTab('network')}>
         🌐 Сеть
       </button>
@@ -144,6 +166,11 @@
       </button>
     </nav>
     <div style="border-top: 1px solid var(--border); padding: 0.5rem 0;">
+      {#if pwaInstallPrompt}
+        <button class="nav-item" on:click={installPWA}>
+          📲 {$t('nav.install_pwa')}
+        </button>
+      {/if}
       <button class="nav-item" on:click={toggleTheme}>
         {theme === 'dark' ? '☀️' : '🌙'} {theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
       </button>
@@ -242,6 +269,10 @@
       <SmartProxy onSwitchTab={switchTab} />
     {:else if currentTab === 'trafficquotas'}
       <TrafficQuotas onSwitchTab={switchTab} />
+    {:else if currentTab === 'dat'}
+      <DATManager onSwitchTab={switchTab} />
+    {:else if currentTab === 'console'}
+      <Console onSwitchTab={switchTab} />
     {:else if currentTab === 'network'}
       <NetworkTools onSwitchTab={switchTab} />
     {:else if currentTab === 'settings'}

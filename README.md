@@ -5,6 +5,12 @@
 - **Go backend** — статический бинарник, 5-10 MB RAM
 - **Svelte 5 frontend** — встроен в бинарник, bundle ~160 KB gzipped
 - **ARM64 + MIPSLE** — поддержка всех Keenetic с Entware
+- **Smart Proxy** — автоматическое переключение прокси по расписанию и задержке
+- **Traffic Quotas** — учёт трафика и гибкие лимиты на прокси
+- **Kernel Manager** — установка и обновление Xray и Mihomo прямо из UI
+- **DAT Manager** — управление базами GeoIP и GeoSite
+- **Console** — выполнение команд XKeen с просмотром вывода в реальном времени
+- **PWA** — поддержка установки как приложения на телефон или компьютер
 
 ## Установка
 
@@ -39,7 +45,7 @@ chmod +x /opt/bin/xkeen-control-panel
 mkdir -p /opt/etc/xkeen-control-panel
 cat > /opt/etc/xkeen-control-panel/config.json <<EOF
 {
-  "port": 8089,
+  "port": 8090,
   "xray_config_dir": "/opt/etc/xray/configs",
   "mihomo_config_dir": "/opt/etc/mihomo",
   "data_dir": "/opt/etc/xkeen-control-panel"
@@ -52,7 +58,7 @@ EOF
 
 ### После установки
 
-Откройте в браузере: `http://<IP-роутера>:8089`
+Откройте в браузере: `http://<IP-роутера>:8090`
 
 При первом входе будет предложено задать пароль администратора.
 
@@ -78,7 +84,7 @@ curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/s
 ```
 
 Скрипт автоматически:
-1. Определит архитектуру роутера
+1. Опредерит архитектуру роутера
 2. Остановит текущую версию
 3. Скачает новый бинарник
 4. Перезапустит сервис
@@ -160,7 +166,7 @@ cd .. && make build
 make keenetic-arm64
 make keenetic-mipsle
 
-# Frontend dev server (proxy /api → :8089)
+# Frontend dev server (proxy /api → :8090)
 cd frontend && npm run dev
 ```
 

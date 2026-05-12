@@ -22,6 +22,8 @@ type API struct {
 	networkSvc      *services.NetworkToolsService
 	smartProxySvc   *services.SmartProxyService
 	trafficQuotaSvc *services.TrafficQuotaService
+	datSvc          *services.DATManagerService
+	consoleSvc      *services.ConsoleService
 	pathVal         *utils.PathValidator
 }
 
@@ -42,6 +44,14 @@ func (a *API) SetSmartProxyService(svc *services.SmartProxyService) {
 
 func (a *API) SetTrafficQuotaService(svc *services.TrafficQuotaService) {
 	a.trafficQuotaSvc = svc
+}
+
+func (a *API) SetDATManagerService(svc *services.DATManagerService) {
+	a.datSvc = svc
+}
+
+func (a *API) SetConsoleService(svc *services.ConsoleService) {
+	a.consoleSvc = svc
 }
 
 func (a *API) t(r *http.Request, key string) string {

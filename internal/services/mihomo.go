@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -27,7 +28,7 @@ func (s *MihomoService) Status() (string, error) {
 		return "stopped", nil
 	}
 	if len(out) > 0 {
-		return "running (pid: " + string(out) + ")", nil
+		return "running (pid: " + strings.TrimSpace(string(out)) + ")", nil
 	}
 	return "stopped", nil
 }

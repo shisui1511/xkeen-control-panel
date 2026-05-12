@@ -5,7 +5,7 @@ BINARY="xkeen-control-panel"
 INSTALL_DIR="/opt/etc/xkeen-control-panel"
 BIN_PATH="/opt/bin/xkeen-control-panel"
 INIT_SCRIPT="/opt/etc/init.d/S99xkeen-control-panel"
-DEFAULT_PORT=8089
+DEFAULT_PORT=8090
 
 # Цвета
 GREEN='\033[32m'
