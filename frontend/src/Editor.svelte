@@ -30,6 +30,8 @@
   import { xraySchema } from './schemas/xray'
   import { mihomoSchema } from './schemas/mihomo'
 
+  export let onSwitchTab: (tab: string) => void = () => {}
+
   let editorContainer: HTMLDivElement
   let editorView: EditorView | null = null
   let files: string[] = []
@@ -54,7 +56,7 @@
       const res = await fetch('/api/config/list')
       if (!res.ok) throw new Error('Failed to load files')
       files = await res.json()
-    } catch (e) {
+    } catch (e: any) {
       message = $t('editor.load_error') + ': ' + e.message
     }
   }
@@ -392,7 +394,12 @@
 <div class="editor-page">
   <div class="sidebar">
     <div class="sidebar-header">
-      <h3>{$t('editor.configs')}</h3>
+      <div style="display: flex; align-items: center; gap: 0.5rem;">
+        <button class="btn-icon-small" on:click={() => onSwitchTab('dashboard')} title="Назад">
+          ←
+        </button>
+        <h3>{$t('editor.configs')}</h3>
+      </div>
       <button class="btn-icon-small" on:click={() => { showCreateModal = true; newFileName = '' }} title={$t('editor.create_file')}>
         +
       </button>
@@ -483,8 +490,8 @@
         on:keydown={(e) => e.key === 'Enter' && createFile()}
       />
       <div class="modal-actions">
-        <button on:click={() => showCreateModal = false} class="btn-secondary">{$t('app.cancel')}</button>
-        <button on:click={createFile} class="btn-primary">{$t('app.create')}</button>
+        <button on:click={() => showCreateModal = false} class="btn btn-secondary">{$t('app.cancel')}</button>
+        <button on:click={createFile} class="btn btn-primary">{$t('app.create')}</button>
       </div>
     </div>
   </div>
@@ -502,8 +509,8 @@
         on:keydown={(e) => e.key === 'Enter' && renameFile()}
       />
       <div class="modal-actions">
-        <button on:click={() => showRenameModal = false} class="btn-secondary">{$t('app.cancel')}</button>
-        <button on:click={renameFile} class="btn-primary">{$t('app.rename')}</button>
+        <button on:click={() => showRenameModal = false} class="btn btn-secondary">{$t('app.cancel')}</button>
+        <button on:click={renameFile} class="btn btn-primary">{$t('app.rename')}</button>
       </div>
     </div>
   </div>

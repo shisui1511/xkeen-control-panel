@@ -4,7 +4,7 @@ REPO="shisui1511/xkeen-control-panel"
 BINARY="xkeen-control-panel"
 INSTALL_DIR="/opt/etc/xkeen-control-panel"
 BIN_PATH="/opt/bin/xkeen-control-panel"
-INIT_SCRIPT="/opt/etc/init.d/S99xkeen-control-panel"
+INIT_SCRIPT="/opt/etc/init.d/S99xcp"
 DEFAULT_PORT=8090
 
 # Цвета

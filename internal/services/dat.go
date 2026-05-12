@@ -1,95 +1,189 @@
 package services
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
 
-// DATFile represents a geo database file (GeoIP or GeoSite)
 type DATFile struct {
 	Name       string `json:"name"`
 	Path       string `json:"path"`
 	Size       int64  `json:"size"`
 	LastUpdate int64  `json:"last_update"`
 	Exists     bool   `json:"exists"`
-	RemoteURL  string `json:"remote_url"`
+	Type       string `json:"type"` // "xray" or "mihomo"
 }
 
-// DATManagerService manages GeoIP and GeoSite DAT files
 type DATManagerService struct {
-	dataDir     string
-	geoIPPath   string
-	geoSitePath string
-	mu          sync.RWMutex
+	xrayDir   string
+	mihomoDir string
+	mu        sync.RWMutex
 }
 
-func NewDATManagerService(dataDir string) *DATManagerService {
-	svc := &DATManagerService{
-		dataDir:     dataDir,
-		geoIPPath:   filepath.Join(dataDir, "geoip.dat"),
-		geoSitePath: filepath.Join(dataDir, "geosite.dat"),
+func NewDATManagerService(dirs ...string) *DATManagerService {
+	xrayDir := "/opt/etc/xray/dat"
+	mihomoDir := "/opt/etc/mihomo"
+
+	if len(dirs) > 0 && dirs[0] != "" {
+		xrayDir = dirs[0]
 	}
-	return svc
+	if len(dirs) > 1 && dirs[1] != "" {
+		mihomoDir = dirs[1]
+	}
+
+	return &DATManagerService{
+		xrayDir:   xrayDir,
+		mihomoDir: mihomoDir,
+	}
 }
 
-// List returns information about all DAT files
-func (s *DATManagerService) List() map[string]*DATFile {
-	files := map[string]*DATFile{
-		"geoip": {
-			Name:      "GeoIP",
-			Path:      s.geoIPPath,
-			RemoteURL: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
-		},
-		"geosite": {
-			Name:      "GeoSite",
-			Path:      s.geoSitePath,
-			RemoteURL: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
-		},
-	}
+func (s *DATManagerService) List() []DATFile {
+	var files []DATFile
 
 	s.mu.RLock()
-	for _, f := range files {
-		if info, err := os.Stat(f.Path); err == nil {
-			f.Exists = true
-			f.Size = info.Size()
-			f.LastUpdate = info.ModTime().Unix()
+	defer s.mu.RUnlock()
+
+	// Scan Xray
+	if matches, err := filepath.Glob(filepath.Join(s.xrayDir, "*.dat")); err == nil {
+		for _, match := range matches {
+			f := DATFile{Name: filepath.Base(match), Path: match, Exists: true, Type: "xray"}
+			if info, err := os.Stat(match); err == nil {
+				f.Size = info.Size()
+				f.LastUpdate = info.ModTime().Unix()
+			}
+			files = append(files, f)
 		}
 	}
-	s.mu.RUnlock()
+
+	// Scan Mihomo .dat
+	if matches, err := filepath.Glob(filepath.Join(s.mihomoDir, "*.dat")); err == nil {
+		for _, match := range matches {
+			f := DATFile{Name: filepath.Base(match), Path: match, Exists: true, Type: "mihomo"}
+			if info, err := os.Stat(match); err == nil {
+				f.Size = info.Size()
+				f.LastUpdate = info.ModTime().Unix()
+			}
+			files = append(files, f)
+		}
+	}
+
+	// Scan Mihomo .mmdb
+	if matches, err := filepath.Glob(filepath.Join(s.mihomoDir, "*.mmdb")); err == nil {
+		for _, match := range matches {
+			f := DATFile{Name: filepath.Base(match), Path: match, Exists: true, Type: "mihomo"}
+			if info, err := os.Stat(match); err == nil {
+				f.Size = info.Size()
+				f.LastUpdate = info.ModTime().Unix()
+			}
+			files = append(files, f)
+		}
+	}
 
 	return files
 }
 
-// Update downloads and replaces a DAT file
-func (s *DATManagerService) Update(datType string) (int64, error) {
+func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var localPath, remoteURL string
-	switch datType {
-	case "geoip":
-		localPath = s.geoIPPath
-		remoteURL = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
-	case "geosite":
-		localPath = s.geoSitePath
-		remoteURL = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
-	case "mmdb":
-		localPath = filepath.Join(s.dataDir, "country.mmdb")
-		remoteURL = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/Country.mmdb"
-	default:
-		return 0, fmt.Errorf("unknown DAT type: %s", datType)
+	// 1. Path validation - strictly root files only to prevent path injection
+	safeName := filepath.Base(filepath.Clean(localPath))
+	if safeName == "." || safeName == ".." || safeName == "" {
+		return 0, fmt.Errorf("invalid file name")
 	}
 
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Get(remoteURL)
+	// Basic regex check for the filename to be even safer
+	if !safePathComponentRe.MatchString(safeName) {
+		return 0, fmt.Errorf("invalid characters in file name")
+	}
+
+	// Determine base directory (prefer xray for .dat, mihomo for .mmdb)
+	baseDir := s.xrayDir
+	if strings.HasSuffix(safeName, ".mmdb") {
+		baseDir = s.mihomoDir
+	} else {
+		// For .dat, check if it already exists in mihomo
+		if _, err := os.Stat(filepath.Join(s.mihomoDir, safeName)); err == nil {
+			baseDir = s.mihomoDir
+		}
+	}
+
+	// Final absolute path - fully controlled and sanitized
+	targetAbs := filepath.Join(baseDir, safeName)
+
+	// 2. URL validation & sanitization
+	u, err := url.Parse(remoteURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return 0, fmt.Errorf("invalid or unsupported URL scheme")
+	}
+
+	// Reject URLs with embedded credentials
+	if u.User != nil {
+		return 0, fmt.Errorf("URL must not contain credentials")
+	}
+
+	// Restrict path to prevent path traversal via URL
+	cleanPath := u.Path
+	if cleanPath == "" {
+		cleanPath = "/"
+	}
+
+	// Validate host explicitly before making any request
+	hostname := u.Hostname()
+	if hostname == "" {
+		return 0, fmt.Errorf("URL has no host")
+	}
+	ips, err := net.LookupIP(hostname)
 	if err != nil {
-		return 0, fmt.Errorf("failed to download %s: %w", datType, err)
+		return 0, fmt.Errorf("failed to resolve host: %w", err)
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+			return 0, fmt.Errorf("access to private network is prohibited")
+		}
+	}
+
+	// Reconstruct a sanitized URL from validated components only
+	sanitizedURL := fmt.Sprintf("%s://%s%s", u.Scheme, u.Host, cleanPath)
+
+	// Robust SSRF protection using custom DialContext that prevents connections to private IPs
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, _, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.LookupIP(host)
+			if err != nil {
+				return nil, err
+			}
+			for _, ip := range ips {
+				if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+					return nil, fmt.Errorf("access to private network is prohibited")
+				}
+			}
+			return (&net.Dialer{Timeout: 30 * time.Second}).DialContext(ctx, network, addr)
+		},
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   5 * time.Minute,
+	}
+
+	resp, err := client.Get(sanitizedURL)
+	if err != nil {
+		return 0, fmt.Errorf("failed to download: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -97,12 +191,12 @@ func (s *DATManagerService) Update(datType string) (int64, error) {
 		return 0, fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	// Download to temp file first
-	tmpFile := localPath + ".tmp"
-	out, err := os.Create(tmpFile)
+	// Create temp file in the same directory
+	out, err := os.CreateTemp(baseDir, safeName+".*.tmp")
 	if err != nil {
 		return 0, fmt.Errorf("failed to create temp file: %w", err)
 	}
+	tmpFile := out.Name()
 
 	written, err := io.Copy(out, resp.Body)
 	out.Close()
@@ -111,8 +205,8 @@ func (s *DATManagerService) Update(datType string) (int64, error) {
 		return 0, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	// Replace old file
-	if err := os.Rename(tmpFile, localPath); err != nil {
+	// targetAbs is now fully sanitized and restricted to baseDir
+	if err := os.Rename(tmpFile, targetAbs); err != nil {
 		os.Remove(tmpFile)
 		return 0, fmt.Errorf("failed to replace file: %w", err)
 	}
@@ -120,42 +214,4 @@ func (s *DATManagerService) Update(datType string) (int64, error) {
 	return written, nil
 }
 
-// UpdateAll updates all DAT files
-func (s *DATManagerService) UpdateAll() (map[string]error, error) {
-	types := []string{"geoip", "geosite", "mmdb"}
-	results := make(map[string]error)
-
-	for _, t := range types {
-		_, err := s.Update(t)
-		results[t] = err
-	}
-
-	return results, nil
-}
-
-// GetUpdateURL returns the download URL for a DAT type
-func GetDATUpdateURL(datType string) string {
-	urls := map[string]string{
-		"geoip":   "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
-		"geosite": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
-		"mmdb":    "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/Country.mmdb",
-	}
-	return urls[datType]
-}
-
-// GetLatestReleaseInfo returns info about the latest remote release
-func GetLatestReleaseInfo() (map[string]interface{}, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get("https://api.github.com/repos/Loyalsoldier/v2ray-rules-dat/releases/latest")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var data map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
-	}
-
-	return data, nil
-}
+var safePathComponentRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)

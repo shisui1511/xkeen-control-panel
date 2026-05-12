@@ -308,7 +308,7 @@ func parseVMessLink(link string) *Outbound {
 		return nil
 	}
 
-	port, _ := vmess.Port, 0
+	port := vmess.Port
 
 	return &Outbound{
 		Tag:      vmess.PS,
@@ -338,7 +338,7 @@ func parseVLESSLink(link string) *Outbound {
 		return nil
 	}
 
-	id := strings.TrimPrefix(u.Scheme, "vless://")
+	id := ""
 	if u.User != nil {
 		id = u.User.Username()
 	}

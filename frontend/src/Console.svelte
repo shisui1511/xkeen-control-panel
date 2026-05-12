@@ -33,7 +33,7 @@
   async function fetchCommands() {
     try {
       const res = await fetch('/api/console/commands')
-      if (!res.ok) throw new Error('Failed to load commands')
+      if (!res.ok) throw new Error($t('console.load_error'))
       categories = await res.json()
     } catch (e: any) {
       error = e.message
@@ -69,14 +69,6 @@
     }
   }
 
-  const categoryLabels: Record<string, string> = {
-    service: '🔧 Service',
-    config: '📋 Config',
-    network: '🌐 Network',
-    update: '📦 Update',
-    system: '💻 System'
-  }
-
   onMount(fetchCommands)
 </script>
 
@@ -96,7 +88,7 @@
     <div class="commands-panel">
       {#each categories as category}
         <div class="category">
-          <h3 class="category-title">{categoryLabels[category.name] || category.name}</h3>
+          <h3 class="category-title">{$t('console.cat_' + category.name) || category.name}</h3>
           <div class="command-list">
             {#each category.commands as cmd}
               <button

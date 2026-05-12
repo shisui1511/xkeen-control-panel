@@ -23,11 +23,6 @@ func (s *ConfigService) resolvePath(path string) (string, error) {
 	return clean, nil
 }
 
-func sortStrings(s []string) []string {
-	sort.Strings(s)
-	return s
-}
-
 type ConfigService struct {
 	ConfigDir string
 }

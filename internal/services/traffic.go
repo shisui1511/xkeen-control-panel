@@ -121,13 +121,6 @@ func (s *TrafficQuotaService) saveLocked() error {
 	return os.WriteFile(s.storePath(), data, 0644)
 }
 
-// save acquires the lock and writes state to disk.
-func (s *TrafficQuotaService) save() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.saveLocked()
-}
-
 // --- CRUD for quotas ---
 
 func (s *TrafficQuotaService) ListQuotas() []TrafficQuota {

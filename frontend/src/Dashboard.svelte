@@ -158,10 +158,9 @@
         💻 {$t('nav.console')}
       </button>
       <button class="nav-item" class:active={currentTab === 'network'} on:click={() => switchTab('network')}>
-        🌐 Сеть
+        🌐 {$t('nav.network')}
       </button>
       <button class="nav-item" class:active={currentTab === 'settings'} on:click={() => switchTab('settings')}>
-
         ⚙️ {$t('nav.settings')}
       </button>
     </nav>
@@ -190,7 +189,6 @@
           <h2>{$t('dash.system_info')}</h2>
           <p><strong>{$t('app.version')}:</strong> {version}</p>
           <p><strong>{$t('app.status')}:</strong> <span class="status-dot success"></span> {$t('app.running')}</p>
-          <p class="text-secondary">v0.3.0 — Mihomo Dashboard</p>
         </div>
 
         {#if systemStats}
@@ -221,19 +219,19 @@
         {/if}
 
         <div class="card mb-2">
-          <h2>Быстрые действия</h2>
+          <h2>{$t('dash.quick_actions')}</h2>
           <div class="quick-actions">
             <button class="btn btn-secondary" on:click={() => switchTab('proxies')}>
-              🌐 Прокси
+              🌐 {$t('nav.proxies')}
             </button>
             <button class="btn btn-secondary" on:click={() => switchTab('subscriptions')}>
-              📡 Подписки
+              📡 {$t('nav.subscriptions')}
             </button>
             <button class="btn btn-secondary" on:click={() => switchTab('editor')}>
-              📝 Редактор
+              📝 {$t('nav.editor')}
             </button>
             <button class="btn btn-secondary" on:click={() => switchTab('logs')}>
-              📋 Логи
+              📋 {$t('nav.logs')}
             </button>
           </div>
         </div>
@@ -248,7 +246,7 @@
 
       </div>
     {:else if currentTab === 'editor'}
-      <Editor />
+      <Editor onSwitchTab={switchTab} />
     {:else if currentTab === 'logs'}
       <Logs />
     {:else if currentTab === 'proxies'}

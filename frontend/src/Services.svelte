@@ -91,6 +91,20 @@
       </div>
     </div>
 
+    <!-- Xray Card -->
+    <div class="card">
+      <div class="service-header">
+        <h2>{$t('svc.xray')}</h2>
+        <span class="status-badge" class:running={xkeenStatus.includes('running') || xkeenStatus.includes('работает') || xkeenStatus.includes('активен')}>
+          {xkeenStatus || $t('app.loading')}
+        </span>
+      </div>
+      <p class="text-secondary mb-2">{$t('svc.xray_desc')}</p>
+      <div class="actions" style="display: flex; align-items: center; height: 36px;">
+        <span class="text-secondary" style="font-size: 0.85rem;">{$t('svc.xray_managed')}</span>
+      </div>
+    </div>
+
     <!-- Mihomo Card -->
     <div class="card">
       <div class="service-header">
