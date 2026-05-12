@@ -95,8 +95,8 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	cleanPath := filepath.Clean(localPath)
-	if !isSafeRelativePath(cleanPath) {
+	safeRelPath := filepath.Clean(localPath)
+	if !isSafeRelativePath(safeRelPath) {
 		return 0, fmt.Errorf("invalid file path")
 	}
 
@@ -128,7 +128,7 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	}
 
 	resolveWithin := func(base string) (string, bool) {
-		candidate := filepath.Join(base, cleanPath)
+		candidate := filepath.Join(base, safeRelPath)
 		parent := filepath.Dir(candidate)
 		parentReal, err := filepath.EvalSymlinks(parent)
 		if err != nil {
