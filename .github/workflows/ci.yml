@@ -166,6 +166,11 @@ jobs:
           cd frontend
           npx playwright install --with-deps
 
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
