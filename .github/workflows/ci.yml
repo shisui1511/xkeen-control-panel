@@ -142,10 +142,46 @@ jobs:
           cd frontend
           npm run build
 
-  # Job 4: Проверка сборки
+  # Job 4: Тестирование Frontend (E2E)
+  test-frontend:
+    name: Test Frontend E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Install Playwright Browsers
+        run: |
+          cd frontend
+          npx playwright install --with-deps
+
+      - name: Run Playwright tests
+        run: |
+          cd frontend
+          npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 30
+
+  # Job 5: Проверка сборки
   build-check:
     name: Build Check
-    needs: [lint-go, test-go, lint-frontend]
+    needs: [lint-go, test-go, lint-frontend, test-frontend]
     runs-on: ubuntu-latest
     strategy:
       matrix:
