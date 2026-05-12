@@ -23,17 +23,17 @@ type DATFile struct {
 
 // DATManagerService manages GeoIP and GeoSite DAT files
 type DATManagerService struct {
-	dataDir     string
 	geoIPPath   string
 	geoSitePath string
+	mmdbPath    string
 	mu          sync.RWMutex
 }
 
 func NewDATManagerService(dataDir string) *DATManagerService {
 	svc := &DATManagerService{
-		dataDir:     dataDir,
-		geoIPPath:   filepath.Join(dataDir, "geoip.dat"),
-		geoSitePath: filepath.Join(dataDir, "geosite.dat"),
+		geoIPPath:   "/opt/etc/xray/dat/geoip.dat",
+		geoSitePath: "/opt/etc/xray/dat/geosite.dat",
+		mmdbPath:    "/opt/etc/mihomo/country.mmdb",
 	}
 	return svc
 }
@@ -50,6 +50,11 @@ func (s *DATManagerService) List() map[string]*DATFile {
 			Name:      "GeoSite",
 			Path:      s.geoSitePath,
 			RemoteURL: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat",
+		},
+		"mmdb": {
+			Name:      "Country MMDB",
+			Path:      s.mmdbPath,
+			RemoteURL: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/Country.mmdb",
 		},
 	}
 
@@ -80,7 +85,7 @@ func (s *DATManagerService) Update(datType string) (int64, error) {
 		localPath = s.geoSitePath
 		remoteURL = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
 	case "mmdb":
-		localPath = filepath.Join(s.dataDir, "country.mmdb")
+		localPath = s.mmdbPath
 		remoteURL = "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/Country.mmdb"
 	default:
 		return 0, fmt.Errorf("unknown DAT type: %s", datType)

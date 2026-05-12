@@ -296,8 +296,8 @@
       </div>
 
       <div class="modal-actions">
-        <button on:click={closeModal} class="btn-secondary">{$t('app.cancel')}</button>
-        <button on:click={saveSubscription} class="btn-primary">{$t('app.save')}</button>
+        <button on:click={closeModal} class="btn btn-secondary">{$t('app.cancel')}</button>
+        <button on:click={saveSubscription} class="btn btn-primary">{$t('app.save')}</button>
       </div>
     </div>
   </div>
