@@ -219,7 +219,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.updating': 'Обновление...',
     'dat.update': 'Обновить',
     'dat.not_found': 'Не найден',
-'dat.updated': 'Обновлён',
+    'dat.updated': 'Обновлён',
+    'dat.url_required': 'Укажите URL для обновления',
+    'dat.no_files': 'Файлы DAT не найдены в /opt/etc/xray/dat/ или /opt/etc/mihomo/',
+    'dat.url_placeholder': 'URL для загрузки обновления (https://...)',
 
     // Console Commands
     'console.title': 'Консоль XKeen',
@@ -232,6 +235,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'console.cat_network': '🌐 Сеть',
     'console.cat_update': '📦 Обновление',
     'console.cat_system': '💻 Система',
+    'console.load_error': 'Ошибка загрузки команд',
 
     // Subscriptions
     'subscr.title': 'Подписки',
@@ -524,7 +528,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.updating': 'Updating...',
     'dat.update': 'Update',
     'dat.not_found': 'Not found',
-'dat.updated': 'Updated',
+    'dat.updated': 'Updated',
+    'dat.url_required': 'Specify update URL',
+    'dat.no_files': 'DAT files not found in /opt/etc/xray/dat/ or /opt/etc/mihomo/',
+    'dat.url_placeholder': 'Update download URL (https://...)',
 
     // Console Commands
     'console.title': 'XKeen Console',
@@ -537,6 +544,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'console.cat_network': '🌐 Network',
     'console.cat_update': '📦 Update',
     'console.cat_system': '💻 System',
+    'console.load_error': 'Failed to load commands',
 
     // Subscriptions
     'subscr.title': 'Subscriptions',

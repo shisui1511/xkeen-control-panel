@@ -6,6 +6,7 @@ import (
 "net/http"
 "os"
 "path/filepath"
+"strings"
 "sync"
 "time"
 )
@@ -25,11 +26,21 @@ mihomoDir string
 mu        sync.RWMutex
 }
 
-func NewDATManagerService() *DATManagerService {
-return &DATManagerService{
-xrayDir:   "/opt/etc/xray/dat",
-mihomoDir: "/opt/etc/mihomo",
-}
+func NewDATManagerService(dirs ...string) *DATManagerService {
+	xrayDir := "/opt/etc/xray/dat"
+	mihomoDir := "/opt/etc/mihomo"
+
+	if len(dirs) > 0 && dirs[0] != "" {
+		xrayDir = dirs[0]
+	}
+	if len(dirs) > 1 && dirs[1] != "" {
+		mihomoDir = dirs[1]
+	}
+
+	return &DATManagerService{
+		xrayDir:   xrayDir,
+		mihomoDir: mihomoDir,
+	}
 }
 
 func (s *DATManagerService) List() []DATFile {
@@ -97,20 +108,21 @@ defer s.mu.Unlock()
 		return 0, fmt.Errorf("invalid service directory")
 	}
 
-	isWithinDir := func(baseDir, target string) bool {
-		rel, err := filepath.Rel(baseDir, target)
+
+	// Robust path validation: must be within one of the managed directories
+	isInside := func(base, target string) bool {
+		rel, err := filepath.Rel(base, target)
 		if err != nil {
 			return false
 		}
-		return rel != ".." && rel != "." && rel != "" && rel[:0] == rel[:0] && rel != "" && rel[0] != filepath.Separator && rel != ".." && (rel == filepath.Base(rel) || rel != "")
+		// Must not be outside (..) and not the base itself (.)
+		return rel != "." && rel != ".." && !filepath.IsAbs(rel) && 
+			(len(rel) < 2 || rel[:2] != "..") && 
+			!strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
 
-	relToXray, errX := filepath.Rel(xrayAbs, targetPath)
-	relToMihomo, errM := filepath.Rel(mihomoAbs, targetPath)
-	inXray := errX == nil && relToXray != ".." && relToXray != "." && relToXray != "" && !filepath.IsAbs(relToXray) && relToXray[:2] != ".."
-	inMihomo := errM == nil && relToMihomo != ".." && relToMihomo != "." && relToMihomo != "" && !filepath.IsAbs(relToMihomo) && relToMihomo[:2] != ".."
-	if !inXray && !inMihomo {
-		return 0, fmt.Errorf("invalid file path")
+	if !isInside(xrayAbs, targetPath) && !isInside(mihomoAbs, targetPath) {
+		return 0, fmt.Errorf("invalid file path: outside allowed directories")
 	}
 
 	client := &http.Client{Timeout: 5 * time.Minute}

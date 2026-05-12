@@ -56,7 +56,7 @@
       const res = await fetch('/api/config/list')
       if (!res.ok) throw new Error('Failed to load files')
       files = await res.json()
-    } catch (e) {
+    } catch (e: any) {
       message = $t('editor.load_error') + ': ' + e.message
     }
   }

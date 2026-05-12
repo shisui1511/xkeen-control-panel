@@ -7,40 +7,50 @@ import (
 )
 
 func TestDATManagerService_List(t *testing.T) {
-	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, "geoip.dat"), []byte("dummy dat content"), 0644)
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+	
+	os.WriteFile(filepath.Join(tmpXray, "geoip.dat"), []byte("dummy xray dat"), 0644)
+	os.WriteFile(filepath.Join(tmpMihomo, "country.mmdb"), []byte("dummy mmdb"), 0644)
+	os.WriteFile(filepath.Join(tmpMihomo, "config.dat"), []byte("dummy mihomo dat"), 0644)
 
-	svc := NewDATManagerService(tmp)
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
 	files := svc.List()
 
-	geoip, ok := files["geoip"]
-	if !ok {
-		t.Fatal("expected geoip file entry")
-	}
-	if !geoip.Exists {
-		t.Fatal("expected geoip to exist")
-	}
-	if geoip.Size == 0 {
-		t.Fatal("expected geoip size > 0")
+	foundGeoIP := false
+	foundMMDB := false
+	foundMihomoDat := false
+
+	for _, f := range files {
+		if f.Name == "geoip.dat" && f.Type == "xray" {
+			foundGeoIP = true
+		}
+		if f.Name == "country.mmdb" && f.Type == "mihomo" {
+			foundMMDB = true
+		}
+		if f.Name == "config.dat" && f.Type == "mihomo" {
+			foundMihomoDat = true
+		}
 	}
 
-	geosite, ok := files["geosite"]
-	if !ok {
-		t.Fatal("expected geosite file entry")
+	if !foundGeoIP {
+		t.Error("expected geoip.dat in xray dir")
 	}
-	if geosite.Exists {
-		t.Fatal("expected geosite to not exist")
+	if !foundMMDB {
+		t.Error("expected country.mmdb in mihomo dir")
+	}
+	if !foundMihomoDat {
+		t.Error("expected config.dat in mihomo dir")
 	}
 }
 
 func TestDATManagerService_List_NoFiles(t *testing.T) {
-	tmp := t.TempDir()
-	svc := NewDATManagerService(tmp)
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
 	files := svc.List()
 
-	for _, f := range files {
-		if f.Exists {
-			t.Fatal("expected no files to exist")
-		}
+	if len(files) != 0 {
+		t.Errorf("expected 0 files, got %d", len(files))
 	}
 }

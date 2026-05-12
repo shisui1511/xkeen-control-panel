@@ -57,7 +57,7 @@
   async function updateFile(path: string) {
     const url = updateUrls[path]
     if (!url) {
-      error = 'Укажите URL для обновления'
+      error = $t('dat.url_required')
       return
     }
     
@@ -118,7 +118,7 @@
     {#if loading}
       <p class="text-secondary">{$t('app.loading')}</p>
     {:else if files.length === 0}
-      <p class="text-secondary">Файлы DAT не найдены в /opt/etc/xray/dat/ или /opt/etc/mihomo/</p>
+      <p class="text-secondary">{$t('dat.no_files')}</p>
     {:else}
       <div class="file-list">
         {#each files as file}
@@ -144,7 +144,7 @@
                   type="text" 
                   class="input url-input" 
                   bind:value={updateUrls[file.path]} 
-                  placeholder="URL для загрузки обновления (https://...)" 
+                  placeholder={$t('dat.url_placeholder')} 
                 />
               </div>
             </div>

@@ -33,7 +33,7 @@
   async function fetchCommands() {
     try {
       const res = await fetch('/api/console/commands')
-      if (!res.ok) throw new Error('Failed to load commands')
+      if (!res.ok) throw new Error($t('console.load_error'))
       categories = await res.json()
     } catch (e: any) {
       error = e.message
