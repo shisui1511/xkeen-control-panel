@@ -1,7 +1,6 @@
 // Simple PWA icon generator - run with Node.js to create PNG icons
 // Requires: npm install sharp
 // Usage: node generate-icons.js
-const sharp = require('sharp');
 
 const iconSvg = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
