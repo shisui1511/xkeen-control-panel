@@ -1,0 +1,42 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/handlers/service.go:1:1
+package handlers
+
+import "net/http"
+
+func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__36[0] = 3 ; goCover_ba8d34378140__36[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__36[2] = 36 ; goCover_ba8d34378140__36[3] = 1;
+	out, err := a.xkeenSvc.Status()
+	if err != nil {goCover_ba8d34378140__36[5] = 1;
+		a.errorResponse(w, out, http.StatusInternalServerError)
+		return
+	}
+	goCover_ba8d34378140__36[4] = 1;w.Write([]byte(out))
+}
+
+func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__37[0] = 10 ; goCover_ba8d34378140__37[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__37[2] = 37 ; goCover_ba8d34378140__37[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__37[7] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	goCover_ba8d34378140__37[4] = 1;action := r.URL.Query().Get("action")
+
+	var out string
+	var err error
+
+	switch action {
+	case "start":goCover_ba8d34378140__37[8] = 1;
+		out, err = a.xkeenSvc.Start()
+	case "stop":goCover_ba8d34378140__37[9] = 1;
+		out, err = a.xkeenSvc.Stop()
+	case "restart":goCover_ba8d34378140__37[10] = 1;
+		out, err = a.xkeenSvc.Restart()
+	default:goCover_ba8d34378140__37[11] = 1;
+		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__37[5] = 1;if err != nil {goCover_ba8d34378140__37[12] = 1;
+		a.errorResponse(w, out, http.StatusInternalServerError)
+		return
+	}
+	goCover_ba8d34378140__37[6] = 1;w.Write([]byte(out))
+}

@@ -1,0 +1,357 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/auth/auth.go:1:1
+package auth
+
+import (
+	"crypto/hmac"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"sync"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+const (
+	SessionCookieName = "xcp_session"
+	CSRFHeaderName    = "X-CSRF-Token"
+	SessionDuration   = 24 * time.Hour
+)
+
+type AuthService struct {
+	passwordHash  string
+	secureCookie  bool
+	sessionSecret []byte
+	sessions      map[string]*Session
+	rateLimiter   *RateLimiter
+	mu            sync.RWMutex
+	onPasswordSet func(string) error
+}
+
+type Session struct {
+	Token     string
+	CSRFToken string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
+type RateLimiter struct {
+	attempts map[string]*LoginAttempts
+	mu       sync.RWMutex
+}
+
+type LoginAttempts struct {
+	Count       int
+	LastAttempt time.Time
+	LockedUntil time.Time
+}
+
+func NewAuthService(passwordHash string, secureCookie bool, onPasswordSet func(string) error) *AuthService {goCover_56e7b18d857b__0[0] = 1 ; goCover_56e7b18d857b__0[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__0[2] = 0 ; goCover_56e7b18d857b__0[3] = 1;
+	secret := make([]byte, 32)
+	rand.Read(secret)
+
+	return &AuthService{
+		passwordHash:  passwordHash,
+		secureCookie:  secureCookie,
+		sessionSecret: secret,
+		sessions:      make(map[string]*Session),
+		rateLimiter:   &RateLimiter{attempts: make(map[string]*LoginAttempts)},
+		onPasswordSet: onPasswordSet,
+	}
+}
+
+func (a *AuthService) SetPasswordHash(hash string) {goCover_56e7b18d857b__1[0] = 1 ; goCover_56e7b18d857b__1[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__1[2] = 1 ; goCover_56e7b18d857b__1[3] = 1;
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.passwordHash = hash
+}
+
+func (a *AuthService) GetPasswordHash() string {goCover_56e7b18d857b__2[0] = 1 ; goCover_56e7b18d857b__2[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__2[2] = 2 ; goCover_56e7b18d857b__2[3] = 1;
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.passwordHash
+}
+
+func (a *AuthService) HashPassword(password string) (string, error) {goCover_56e7b18d857b__3[0] = 3 ; goCover_56e7b18d857b__3[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__3[2] = 3 ; goCover_56e7b18d857b__3[3] = 1;
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {goCover_56e7b18d857b__3[5] = 1;
+		return "", err
+	}
+	goCover_56e7b18d857b__3[4] = 1;return string(hash), nil
+}
+
+func (a *AuthService) VerifyPassword(password string) error {goCover_56e7b18d857b__4[0] = 3 ; goCover_56e7b18d857b__4[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__4[2] = 4 ; goCover_56e7b18d857b__4[3] = 1;
+	a.mu.RLock()
+	hash := a.passwordHash
+	a.mu.RUnlock()
+
+	if hash == "" {goCover_56e7b18d857b__4[5] = 1;
+		return errors.New("password not set")
+	}
+
+	goCover_56e7b18d857b__4[4] = 1;return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+}
+
+func (a *AuthService) CreateSession() (*Session, error) {goCover_56e7b18d857b__5[0] = 5 ; goCover_56e7b18d857b__5[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__5[2] = 5 ; goCover_56e7b18d857b__5[3] = 1;
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {goCover_56e7b18d857b__5[6] = 1;
+		return nil, err
+	}
+
+	goCover_56e7b18d857b__5[4] = 1;csrfToken := make([]byte, 32)
+	if _, err := rand.Read(csrfToken); err != nil {goCover_56e7b18d857b__5[7] = 1;
+		return nil, err
+	}
+
+	goCover_56e7b18d857b__5[5] = 1;session := &Session{
+		Token:     base64.URLEncoding.EncodeToString(token),
+		CSRFToken: base64.URLEncoding.EncodeToString(csrfToken),
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(SessionDuration),
+	}
+
+	a.mu.Lock()
+	a.sessions[session.Token] = session
+	a.mu.Unlock()
+
+	return session, nil
+}
+
+func (a *AuthService) ValidateSession(token string) (*Session, error) {goCover_56e7b18d857b__6[0] = 5 ; goCover_56e7b18d857b__6[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__6[2] = 6 ; goCover_56e7b18d857b__6[3] = 1;
+	a.mu.RLock()
+	session, exists := a.sessions[token]
+	a.mu.RUnlock()
+
+	if !exists {goCover_56e7b18d857b__6[6] = 1;
+		return nil, errors.New("session not found")
+	}
+
+	goCover_56e7b18d857b__6[4] = 1;if time.Now().After(session.ExpiresAt) {goCover_56e7b18d857b__6[7] = 1;
+		a.mu.Lock()
+		delete(a.sessions, token)
+		a.mu.Unlock()
+		return nil, errors.New("session expired")
+	}
+
+	goCover_56e7b18d857b__6[5] = 1;return session, nil
+}
+
+func (a *AuthService) DeleteSession(token string) {goCover_56e7b18d857b__7[0] = 1 ; goCover_56e7b18d857b__7[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__7[2] = 7 ; goCover_56e7b18d857b__7[3] = 1;
+	a.mu.Lock()
+	delete(a.sessions, token)
+	a.mu.Unlock()
+}
+
+func (a *AuthService) ValidateCSRF(session *Session, csrfToken string) bool {goCover_56e7b18d857b__8[0] = 1 ; goCover_56e7b18d857b__8[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__8[2] = 8 ; goCover_56e7b18d857b__8[3] = 1;
+	return hmac.Equal([]byte(session.CSRFToken), []byte(csrfToken))
+}
+
+func (rl *RateLimiter) CheckLimit(ip string, maxAttempts int, lockoutDuration time.Duration) error {goCover_56e7b18d857b__9[0] = 9 ; goCover_56e7b18d857b__9[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__9[2] = 9 ; goCover_56e7b18d857b__9[3] = 1;
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	attempts, exists := rl.attempts[ip]
+	if !exists {goCover_56e7b18d857b__9[8] = 1;
+		rl.attempts[ip] = &LoginAttempts{Count: 1, LastAttempt: time.Now()}
+		return nil
+	}
+
+	goCover_56e7b18d857b__9[4] = 1;if time.Now().Before(attempts.LockedUntil) {goCover_56e7b18d857b__9[9] = 1;
+		return errors.New("too many login attempts, account locked")
+	}
+
+	goCover_56e7b18d857b__9[5] = 1;if time.Since(attempts.LastAttempt) > 15*time.Minute {goCover_56e7b18d857b__9[10] = 1;
+		attempts.Count = 1
+		attempts.LastAttempt = time.Now()
+		return nil
+	}
+
+	goCover_56e7b18d857b__9[6] = 1;attempts.Count++
+	attempts.LastAttempt = time.Now()
+
+	if attempts.Count >= maxAttempts {goCover_56e7b18d857b__9[11] = 1;
+		attempts.LockedUntil = time.Now().Add(lockoutDuration)
+		return errors.New("too many login attempts, account locked")
+	}
+
+	goCover_56e7b18d857b__9[7] = 1;return nil
+}
+
+func (rl *RateLimiter) ResetAttempts(ip string) {goCover_56e7b18d857b__10[0] = 1 ; goCover_56e7b18d857b__10[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__10[2] = 10 ; goCover_56e7b18d857b__10[3] = 1;
+	rl.mu.Lock()
+	delete(rl.attempts, ip)
+	rl.mu.Unlock()
+}
+
+// Middleware
+func (a *AuthService) RequireAuth(next http.HandlerFunc) http.HandlerFunc {goCover_56e7b18d857b__11[0] = 9 ; goCover_56e7b18d857b__11[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__11[2] = 11 ; goCover_56e7b18d857b__11[3] = 1;
+	return func(w http.ResponseWriter, r *http.Request) {goCover_56e7b18d857b__11[4] = 1;
+		cookie, err := r.Cookie(SessionCookieName)
+		if err != nil {goCover_56e7b18d857b__11[8] = 1;
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		goCover_56e7b18d857b__11[5] = 1;session, err := a.ValidateSession(cookie.Value)
+		if err != nil {goCover_56e7b18d857b__11[9] = 1;
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Validate CSRF for mutating requests
+		goCover_56e7b18d857b__11[6] = 1;if r.Method != http.MethodGet && r.Method != http.MethodHead {goCover_56e7b18d857b__11[10] = 1;
+			csrfToken := r.Header.Get(CSRFHeaderName)
+			if !a.ValidateCSRF(session, csrfToken) {goCover_56e7b18d857b__11[11] = 1;
+				http.Error(w, "CSRF validation failed", http.StatusForbidden)
+				return
+			}
+		}
+
+		goCover_56e7b18d857b__11[7] = 1;next(w, r)
+	}
+}
+
+// Handlers
+func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {goCover_56e7b18d857b__12[0] = 11 ; goCover_56e7b18d857b__12[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__12[2] = 12 ; goCover_56e7b18d857b__12[3] = 1;
+	if r.Method != http.MethodPost {goCover_56e7b18d857b__12[9] = 1;
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_56e7b18d857b__12[4] = 1;ip := r.RemoteAddr
+	if err := a.rateLimiter.CheckLimit(ip, 5, 5*time.Minute); err != nil {goCover_56e7b18d857b__12[10] = 1;
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		return
+	}
+
+	goCover_56e7b18d857b__12[5] = 1;var req struct {
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {goCover_56e7b18d857b__12[11] = 1;
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	goCover_56e7b18d857b__12[6] = 1;if err := a.VerifyPassword(req.Password); err != nil {goCover_56e7b18d857b__12[12] = 1;
+		http.Error(w, "Invalid password", http.StatusUnauthorized)
+		return
+	}
+
+	goCover_56e7b18d857b__12[7] = 1;a.rateLimiter.ResetAttempts(ip)
+
+	session, err := a.CreateSession()
+	if err != nil {goCover_56e7b18d857b__12[13] = 1;
+		http.Error(w, "Failed to create session", http.StatusInternalServerError)
+		return
+	}
+
+	goCover_56e7b18d857b__12[8] = 1;http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookieName,
+		Value:    session.Token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   a.secureCookie,
+		SameSite: http.SameSiteStrictMode,
+		Expires:  session.ExpiresAt,
+	})
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"csrf_token": session.CSRFToken,
+	})
+}
+
+func (a *AuthService) HandleLogout(w http.ResponseWriter, r *http.Request) {goCover_56e7b18d857b__13[0] = 5 ; goCover_56e7b18d857b__13[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__13[2] = 13 ; goCover_56e7b18d857b__13[3] = 1;
+	if r.Method != http.MethodPost {goCover_56e7b18d857b__13[6] = 1;
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_56e7b18d857b__13[4] = 1;cookie, err := r.Cookie(SessionCookieName)
+	if err == nil {goCover_56e7b18d857b__13[7] = 1;
+		a.DeleteSession(cookie.Value)
+	}
+
+	goCover_56e7b18d857b__13[5] = 1;http.SetCookie(w, &http.Cookie{
+		Name:     SessionCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   a.secureCookie,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (a *AuthService) HandleMe(w http.ResponseWriter, r *http.Request) {goCover_56e7b18d857b__14[0] = 5 ; goCover_56e7b18d857b__14[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__14[2] = 14 ; goCover_56e7b18d857b__14[3] = 1;
+	cookie, err := r.Cookie(SessionCookieName)
+	if err != nil {goCover_56e7b18d857b__14[6] = 1;
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"authenticated":  false,
+			"setup_required": a.GetPasswordHash() == "",
+		})
+		return
+	}
+
+	goCover_56e7b18d857b__14[4] = 1;session, err := a.ValidateSession(cookie.Value)
+	if err != nil {goCover_56e7b18d857b__14[7] = 1;
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"authenticated":  false,
+			"setup_required": a.GetPasswordHash() == "",
+		})
+		return
+	}
+
+	goCover_56e7b18d857b__14[5] = 1;json.NewEncoder(w).Encode(map[string]interface{}{
+		"authenticated": true,
+		"csrf_token":    session.CSRFToken,
+	})
+}
+
+func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {goCover_56e7b18d857b__15[0] = 14 ; goCover_56e7b18d857b__15[1] = goCover_56e7b18d857b_P ; goCover_56e7b18d857b__15[2] = 15 ; goCover_56e7b18d857b__15[3] = 1;
+	if r.Method != http.MethodPost {goCover_56e7b18d857b__15[10] = 1;
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_56e7b18d857b__15[4] = 1;if a.GetPasswordHash() != "" {goCover_56e7b18d857b__15[11] = 1;
+		http.Error(w, "Setup already completed", http.StatusForbidden)
+		return
+	}
+
+	goCover_56e7b18d857b__15[5] = 1;var req struct {
+		Password string `json:"password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {goCover_56e7b18d857b__15[12] = 1;
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	goCover_56e7b18d857b__15[6] = 1;if len(req.Password) < 8 {goCover_56e7b18d857b__15[13] = 1;
+		http.Error(w, "Password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	goCover_56e7b18d857b__15[7] = 1;hash, err := a.HashPassword(req.Password)
+	if err != nil {goCover_56e7b18d857b__15[14] = 1;
+		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		return
+	}
+
+	goCover_56e7b18d857b__15[8] = 1;a.SetPasswordHash(hash)
+
+	if a.onPasswordSet != nil {goCover_56e7b18d857b__15[15] = 1;
+		if err := a.onPasswordSet(hash); err != nil {goCover_56e7b18d857b__15[16] = 1;
+			http.Error(w, "Failed to save password", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	goCover_56e7b18d857b__15[9] = 1;w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}

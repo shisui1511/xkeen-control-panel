@@ -1,0 +1,64 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/services/xkeen.go:1:1
+package services
+
+import (
+	"bytes"
+	"fmt"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+type XKeenService struct {
+	BinaryPath string
+}
+
+func NewXKeenService(binary string) *XKeenService {goCover_0bc995578321__111[0] = 1 ; goCover_0bc995578321__111[1] = goCover_0bc995578321_P ; goCover_0bc995578321__111[2] = 111 ; goCover_0bc995578321__111[3] = 1;
+	return &XKeenService{BinaryPath: binary}
+}
+
+func (s *XKeenService) Status() (string, error) {goCover_0bc995578321__112[0] = 3 ; goCover_0bc995578321__112[1] = goCover_0bc995578321_P ; goCover_0bc995578321__112[2] = 112 ; goCover_0bc995578321__112[3] = 1;
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s status", s.BinaryPath))
+	out, err := cmd.CombinedOutput()
+	if err != nil {goCover_0bc995578321__112[5] = 1;
+		return string(out), err
+	}
+	goCover_0bc995578321__112[4] = 1;return strings.TrimSpace(string(out)), nil
+}
+
+func (s *XKeenService) Start() (string, error) {goCover_0bc995578321__113[0] = 1 ; goCover_0bc995578321__113[1] = goCover_0bc995578321_P ; goCover_0bc995578321__113[2] = 113 ; goCover_0bc995578321__113[3] = 1;
+	return s.runWithTimeout("start", 30*time.Second)
+}
+
+func (s *XKeenService) Stop() (string, error) {goCover_0bc995578321__114[0] = 1 ; goCover_0bc995578321__114[1] = goCover_0bc995578321_P ; goCover_0bc995578321__114[2] = 114 ; goCover_0bc995578321__114[3] = 1;
+	return s.runWithTimeout("stop", 30*time.Second)
+}
+
+func (s *XKeenService) Restart() (string, error) {goCover_0bc995578321__115[0] = 1 ; goCover_0bc995578321__115[1] = goCover_0bc995578321_P ; goCover_0bc995578321__115[2] = 115 ; goCover_0bc995578321__115[3] = 1;
+	return s.runWithTimeout("restart", 45*time.Second)
+}
+
+func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (string, error) {goCover_0bc995578321__116[0] = 7 ; goCover_0bc995578321__116[1] = goCover_0bc995578321_P ; goCover_0bc995578321__116[2] = 116 ; goCover_0bc995578321__116[3] = 1;
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s %s", s.BinaryPath, action))
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	err := cmd.Start()
+	if err != nil {goCover_0bc995578321__116[6] = 1;
+		return "", err
+	}
+
+	goCover_0bc995578321__116[4] = 1;done := make(chan error, 1)
+	go func() {goCover_0bc995578321__116[7] = 1;
+		done <- cmd.Wait()
+	}()
+
+	goCover_0bc995578321__116[5] = 1;select {
+	case <-time.After(timeout):goCover_0bc995578321__116[8] = 1;
+		cmd.Process.Kill()
+		return out.String(), fmt.Errorf("timeout exceeded")
+	case err := <-done:goCover_0bc995578321__116[9] = 1;
+		return out.String(), err
+	}
+}

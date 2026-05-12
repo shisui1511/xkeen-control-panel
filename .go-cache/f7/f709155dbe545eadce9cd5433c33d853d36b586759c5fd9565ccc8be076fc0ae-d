@@ -1,0 +1,67 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/handlers/logs.go:1:1
+package handlers
+
+import (
+	"bufio"
+	"net/http"
+	"os/exec"
+	"strings"
+
+	"github.com/gorilla/websocket"
+)
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {goCover_ba8d34378140__26[0] = 1 ; goCover_ba8d34378140__26[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__26[2] = 26 ; goCover_ba8d34378140__26[3] = 1; return true },
+}
+
+func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__27[0] = 19 ; goCover_ba8d34378140__27[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__27[2] = 27 ; goCover_ba8d34378140__27[3] = 1;
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {goCover_ba8d34378140__27[8] = 1;
+		return
+	}
+	goCover_ba8d34378140__27[4] = 1;defer conn.Close()
+
+	sources := a.cfg.LogSources
+	if len(sources) == 0 {goCover_ba8d34378140__27[9] = 1;
+		sources = []string{a.cfg.LogPath}
+	}
+
+	goCover_ba8d34378140__27[5] = 1;ctx := r.Context()
+
+	var cmd *exec.Cmd
+	if len(sources) == 1 {goCover_ba8d34378140__27[10] = 1;
+		cmd = exec.CommandContext(ctx, "tail", "-f", sources[0])
+	} else{ goCover_ba8d34378140__27[11] = 1;{
+		args := append([]string{"-f"}, sources...)
+		cmd = exec.CommandContext(ctx, "tail", args...)
+	}}
+	goCover_ba8d34378140__27[6] = 1;stdout, _ := cmd.StdoutPipe()
+
+	if err := cmd.Start(); err != nil {goCover_ba8d34378140__27[12] = 1;
+		conn.WriteMessage(websocket.TextMessage, []byte("Failed to start log stream\n"))
+		return
+	}
+	goCover_ba8d34378140__27[7] = 1;defer cmd.Process.Kill()
+
+	scanner := bufio.NewScanner(stdout)
+	currentSource := ""
+	for scanner.Scan() {goCover_ba8d34378140__27[13] = 1;
+		select {
+		case <-ctx.Done():goCover_ba8d34378140__27[17] = 1;
+			return
+		default:goCover_ba8d34378140__27[18] = 1;
+		}
+
+		goCover_ba8d34378140__27[14] = 1;line := scanner.Text()
+		if strings.HasPrefix(line, "==> ") && strings.HasSuffix(line, " <==") {goCover_ba8d34378140__27[19] = 1;
+			currentSource = line[4 : len(line)-4]
+			continue
+		}
+		goCover_ba8d34378140__27[15] = 1;if currentSource != "" && len(sources) > 1 {goCover_ba8d34378140__27[20] = 1;
+			line = "[" + currentSource + "] " + line
+		}
+		goCover_ba8d34378140__27[16] = 1;if err := conn.WriteMessage(websocket.TextMessage, []byte(line+"\n")); err != nil {goCover_ba8d34378140__27[21] = 1;
+			break
+		}
+	}
+}

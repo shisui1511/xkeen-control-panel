@@ -1,0 +1,68 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/handlers/mihomo.go:1:1
+package handlers
+
+import (
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"strings"
+)
+
+func (a *API) MihomoStatus(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__28[0] = 3 ; goCover_ba8d34378140__28[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__28[2] = 28 ; goCover_ba8d34378140__28[3] = 1;
+	out, err := a.mihomoSvc.Status()
+	if err != nil {goCover_ba8d34378140__28[5] = 1;
+		a.errorResponse(w, out, http.StatusInternalServerError)
+		return
+	}
+	goCover_ba8d34378140__28[4] = 1;w.Write([]byte(out))
+}
+
+func (a *API) MihomoControl(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__29[0] = 10 ; goCover_ba8d34378140__29[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__29[2] = 29 ; goCover_ba8d34378140__29[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__29[7] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	goCover_ba8d34378140__29[4] = 1;action := r.URL.Query().Get("action")
+
+	var out string
+	var err error
+
+	switch action {
+	case "start":goCover_ba8d34378140__29[8] = 1;
+		out, err = a.mihomoSvc.Start()
+	case "stop":goCover_ba8d34378140__29[9] = 1;
+		out, err = a.mihomoSvc.Stop()
+	case "restart":goCover_ba8d34378140__29[10] = 1;
+		out, err = a.mihomoSvc.Restart()
+	default:goCover_ba8d34378140__29[11] = 1;
+		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__29[5] = 1;if err != nil {goCover_ba8d34378140__29[12] = 1;
+		a.errorResponse(w, out, http.StatusInternalServerError)
+		return
+	}
+	goCover_ba8d34378140__29[6] = 1;w.Write([]byte(out))
+}
+
+func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__30[0] = 7 ; goCover_ba8d34378140__30[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__30[2] = 30 ; goCover_ba8d34378140__30[3] = 1;
+	target, err := url.Parse(a.cfg.MihomoAPIURL)
+	if err != nil {goCover_ba8d34378140__30[7] = 1;
+		a.errorResponse(w, a.t(r, "mihomo.api_error"), http.StatusInternalServerError)
+		return
+	}
+
+	goCover_ba8d34378140__30[4] = 1;proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {goCover_ba8d34378140__30[8] = 1;
+		http.Error(w, a.t(r, "mihomo.not_running")+": "+err.Error(), http.StatusBadGateway)
+	}
+
+	// Strip /api/mihomo/proxy prefix and forward the rest
+	goCover_ba8d34378140__30[5] = 1;r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api/mihomo/proxy")
+	if r.URL.Path == "" {goCover_ba8d34378140__30[9] = 1;
+		r.URL.Path = "/"
+	}
+
+	goCover_ba8d34378140__30[6] = 1;proxy.ServeHTTP(w, r)
+}

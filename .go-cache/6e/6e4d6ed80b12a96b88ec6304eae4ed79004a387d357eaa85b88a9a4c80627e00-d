@@ -1,0 +1,27 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/utils/path.go:1:1
+package utils
+
+import (
+	"errors"
+	"path/filepath"
+	"strings"
+)
+
+type PathValidator struct {
+	AllowedRoots []string
+}
+
+func NewPathValidator(roots []string) *PathValidator {goCover_7e32e6ee33b6__0[0] = 1 ; goCover_7e32e6ee33b6__0[1] = goCover_7e32e6ee33b6_P ; goCover_7e32e6ee33b6__0[2] = 0 ; goCover_7e32e6ee33b6__0[3] = 1;
+	return &PathValidator{AllowedRoots: roots}
+}
+
+func (v *PathValidator) Validate(path string) (string, error) {goCover_7e32e6ee33b6__1[0] = 4 ; goCover_7e32e6ee33b6__1[1] = goCover_7e32e6ee33b6_P ; goCover_7e32e6ee33b6__1[2] = 1 ; goCover_7e32e6ee33b6__1[3] = 1;
+	cleanPath := filepath.Clean(path)
+	for _, root := range v.AllowedRoots {goCover_7e32e6ee33b6__1[5] = 1;
+		cleanRoot := filepath.Clean(root)
+		if cleanPath == cleanRoot || strings.HasPrefix(cleanPath, cleanRoot+string(filepath.Separator)) {goCover_7e32e6ee33b6__1[6] = 1;
+			return cleanPath, nil
+		}
+	}
+	goCover_7e32e6ee33b6__1[4] = 1;return "", errors.New("path traversal detected or path not allowed")
+}

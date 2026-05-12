@@ -1,0 +1,168 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/handlers/config.go:1:1
+package handlers
+
+import (
+	"io"
+	"net/http"
+	"os"
+)
+
+func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__8[0] = 3 ; goCover_ba8d34378140__8[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__8[2] = 8 ; goCover_ba8d34378140__8[3] = 1;
+	files, err := a.configSvc.List()
+	if err != nil {goCover_ba8d34378140__8[5] = 1;
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	goCover_ba8d34378140__8[4] = 1;a.jsonResponse(w, files)
+}
+
+func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__9[0] = 5 ; goCover_ba8d34378140__9[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__9[2] = 9 ; goCover_ba8d34378140__9[3] = 1;
+	path := r.URL.Query().Get("path")
+
+	cleanPath, err := a.pathVal.Validate(path)
+	if err != nil {goCover_ba8d34378140__9[6] = 1;
+		a.errorResponse(w, err.Error(), http.StatusForbidden)
+		return
+	}
+
+	goCover_ba8d34378140__9[4] = 1;data, err := a.configSvc.Read(cleanPath)
+	if err != nil {goCover_ba8d34378140__9[7] = 1;
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	goCover_ba8d34378140__9[5] = 1;w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+}
+
+func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__10[0] = 9 ; goCover_ba8d34378140__10[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__10[2] = 10 ; goCover_ba8d34378140__10[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__10[8] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__10[4] = 1;path := r.URL.Query().Get("path")
+	cleanPath, err := a.pathVal.Validate(path)
+	if err != nil {goCover_ba8d34378140__10[9] = 1;
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	goCover_ba8d34378140__10[5] = 1;data, err := io.ReadAll(r.Body)
+	defer r.Body.Close()
+	if err != nil {goCover_ba8d34378140__10[10] = 1;
+		a.errorResponse(w, a.t(r, "config.write_error"), http.StatusInternalServerError)
+		return
+	}
+
+	goCover_ba8d34378140__10[6] = 1;err = a.configSvc.Save(cleanPath, data)
+	if err != nil {goCover_ba8d34378140__10[11] = 1;
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	goCover_ba8d34378140__10[7] = 1;w.Write([]byte("OK"))
+}
+
+func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__11[0] = 5 ; goCover_ba8d34378140__11[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__11[2] = 11 ; goCover_ba8d34378140__11[3] = 1;
+	path := r.URL.Query().Get("path")
+	cleanPath, err := a.pathVal.Validate(path)
+	if err != nil {goCover_ba8d34378140__11[6] = 1;
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	goCover_ba8d34378140__11[4] = 1;backups, err := a.configSvc.ListBackups(cleanPath)
+	if err != nil {goCover_ba8d34378140__11[7] = 1;
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	goCover_ba8d34378140__11[5] = 1;a.jsonResponse(w, backups)
+}
+
+func (a *API) ConfigCreate(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__12[0] = 9 ; goCover_ba8d34378140__12[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__12[2] = 12 ; goCover_ba8d34378140__12[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__12[7] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__12[4] = 1;path := r.URL.Query().Get("path")
+	cleanPath, err := a.pathVal.Validate(path)
+	if err != nil {goCover_ba8d34378140__12[8] = 1;
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	goCover_ba8d34378140__12[5] = 1;if err := a.configSvc.Create(cleanPath); err != nil {goCover_ba8d34378140__12[9] = 1;
+		if os.IsExist(err) {goCover_ba8d34378140__12[11] = 1;
+			a.errorResponse(w, a.t(r, "config.file_exists"), http.StatusConflict)
+			return
+		}
+		goCover_ba8d34378140__12[10] = 1;a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	goCover_ba8d34378140__12[6] = 1;w.Write([]byte("OK"))
+}
+
+func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__13[0] = 9 ; goCover_ba8d34378140__13[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__13[2] = 13 ; goCover_ba8d34378140__13[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__13[7] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__13[4] = 1;path := r.URL.Query().Get("path")
+	cleanPath, err := a.pathVal.Validate(path)
+	if err != nil {goCover_ba8d34378140__13[8] = 1;
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	goCover_ba8d34378140__13[5] = 1;if err := a.configSvc.Delete(cleanPath); err != nil {goCover_ba8d34378140__13[9] = 1;
+		if os.IsNotExist(err) {goCover_ba8d34378140__13[11] = 1;
+			a.errorResponse(w, a.t(r, "config.file_not_found"), http.StatusNotFound)
+			return
+		}
+		goCover_ba8d34378140__13[10] = 1;a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	goCover_ba8d34378140__13[6] = 1;w.Write([]byte("OK"))
+}
+
+func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__14[0] = 13 ; goCover_ba8d34378140__14[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__14[2] = 14 ; goCover_ba8d34378140__14[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__14[8] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__14[4] = 1;oldPath := r.URL.Query().Get("old")
+	newPath := r.URL.Query().Get("new")
+
+	cleanOldPath, err := a.pathVal.Validate(oldPath)
+	if err != nil {goCover_ba8d34378140__14[9] = 1;
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	goCover_ba8d34378140__14[5] = 1;cleanNewPath, err := a.pathVal.Validate(newPath)
+	if err != nil {goCover_ba8d34378140__14[10] = 1;
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	goCover_ba8d34378140__14[6] = 1;if err := a.configSvc.Rename(cleanOldPath, cleanNewPath); err != nil {goCover_ba8d34378140__14[11] = 1;
+		if os.IsNotExist(err) {goCover_ba8d34378140__14[14] = 1;
+			a.errorResponse(w, a.t(r, "config.file_not_found"), http.StatusNotFound)
+			return
+		}
+		goCover_ba8d34378140__14[12] = 1;if os.IsExist(err) {goCover_ba8d34378140__14[15] = 1;
+			a.errorResponse(w, a.t(r, "config.file_exists"), http.StatusConflict)
+			return
+		}
+		goCover_ba8d34378140__14[13] = 1;a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	goCover_ba8d34378140__14[7] = 1;w.Write([]byte("OK"))
+}

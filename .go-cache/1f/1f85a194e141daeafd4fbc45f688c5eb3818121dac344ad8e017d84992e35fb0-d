@@ -1,0 +1,91 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/handlers/system.go:1:1
+package handlers
+
+import (
+	"bufio"
+	"net/http"
+	"os"
+	"runtime"
+	"strconv"
+	"strings"
+)
+
+type SystemStats struct {
+	Memory struct {
+		Total uint64 `json:"total"`
+		Used  uint64 `json:"used"`
+		Free  uint64 `json:"free"`
+	} `json:"memory"`
+	Load   [3]float64 `json:"load"`
+	Uptime struct {
+		Seconds float64 `json:"seconds"`
+		Days    int     `json:"days"`
+		Hours   int     `json:"hours"`
+		Minutes int     `json:"minutes"`
+	} `json:"uptime"`
+	GoRuntime struct {
+		Goroutines int    `json:"goroutines"`
+		HeapAlloc  uint64 `json:"heap_alloc"`
+		HeapSys    uint64 `json:"heap_sys"`
+		NumGC      uint32 `json:"num_gc"`
+	} `json:"go_runtime"`
+}
+
+func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__52[0] = 15 ; goCover_ba8d34378140__52[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__52[2] = 52 ; goCover_ba8d34378140__52[3] = 1;
+	stats := SystemStats{}
+
+	// Memory from /proc/meminfo
+	if data, err := os.ReadFile("/proc/meminfo"); err == nil {goCover_ba8d34378140__52[7] = 1;
+		scanner := bufio.NewScanner(strings.NewReader(string(data)))
+		for scanner.Scan() {goCover_ba8d34378140__52[9] = 1;
+			line := scanner.Text()
+			fields := strings.Fields(line)
+			if len(fields) < 2 {goCover_ba8d34378140__52[11] = 1;
+				continue
+			}
+			goCover_ba8d34378140__52[10] = 1;key := strings.TrimSuffix(fields[0], ":")
+			val, _ := strconv.ParseUint(fields[1], 10, 64)
+			val *= 1024 // kB to bytes
+
+			switch key {
+			case "MemTotal":goCover_ba8d34378140__52[12] = 1;
+				stats.Memory.Total = val
+			case "MemAvailable":goCover_ba8d34378140__52[13] = 1;
+				stats.Memory.Free = val
+			}
+		}
+		goCover_ba8d34378140__52[8] = 1;stats.Memory.Used = stats.Memory.Total - stats.Memory.Free
+	}
+
+	// Load average from /proc/loadavg
+	goCover_ba8d34378140__52[4] = 1;if data, err := os.ReadFile("/proc/loadavg"); err == nil {goCover_ba8d34378140__52[14] = 1;
+		fields := strings.Fields(string(data))
+		if len(fields) >= 3 {goCover_ba8d34378140__52[15] = 1;
+			stats.Load[0], _ = strconv.ParseFloat(fields[0], 64)
+			stats.Load[1], _ = strconv.ParseFloat(fields[1], 64)
+			stats.Load[2], _ = strconv.ParseFloat(fields[2], 64)
+		}
+	}
+
+	// Uptime from /proc/uptime
+	goCover_ba8d34378140__52[5] = 1;if data, err := os.ReadFile("/proc/uptime"); err == nil {goCover_ba8d34378140__52[16] = 1;
+		fields := strings.Fields(string(data))
+		if len(fields) >= 1 {goCover_ba8d34378140__52[17] = 1;
+			seconds, _ := strconv.ParseFloat(fields[0], 64)
+			stats.Uptime.Seconds = seconds
+			stats.Uptime.Days = int(seconds) / 86400
+			stats.Uptime.Hours = (int(seconds) % 86400) / 3600
+			stats.Uptime.Minutes = (int(seconds) % 3600) / 60
+		}
+	}
+
+	// Go runtime stats
+	goCover_ba8d34378140__52[6] = 1;var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	stats.GoRuntime.Goroutines = runtime.NumGoroutine()
+	stats.GoRuntime.HeapAlloc = m.HeapAlloc
+	stats.GoRuntime.HeapSys = m.HeapSys
+	stats.GoRuntime.NumGC = m.NumGC
+
+	a.jsonResponse(w, stats)
+}

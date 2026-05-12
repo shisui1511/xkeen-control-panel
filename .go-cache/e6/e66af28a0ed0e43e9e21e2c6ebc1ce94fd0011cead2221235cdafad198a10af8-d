@@ -1,0 +1,162 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/handlers/subscription.go:1:1
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
+)
+
+func (a *API) SubscriptionList(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__46[0] = 3 ; goCover_ba8d34378140__46[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__46[2] = 46 ; goCover_ba8d34378140__46[3] = 1;
+	if a.subscriptionSvc == nil {goCover_ba8d34378140__46[5] = 1;
+		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
+	}
+	goCover_ba8d34378140__46[4] = 1;subs := a.subscriptionSvc.List()
+	a.jsonResponse(w, subs)
+}
+
+func (a *API) SubscriptionAdd(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__47[0] = 13 ; goCover_ba8d34378140__47[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__47[2] = 47 ; goCover_ba8d34378140__47[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__47[10] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__47[4] = 1;if a.subscriptionSvc == nil {goCover_ba8d34378140__47[11] = 1;
+		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
+	}
+
+	goCover_ba8d34378140__47[5] = 1;var sub services.Subscription
+	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {goCover_ba8d34378140__47[12] = 1;
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__47[6] = 1;if sub.URL == "" {goCover_ba8d34378140__47[13] = 1;
+		a.errorResponse(w, "URL is required", http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__47[7] = 1;if sub.Interval == 0 {goCover_ba8d34378140__47[14] = 1;
+		sub.Interval = 24 // default 24 hours
+	}
+
+	goCover_ba8d34378140__47[8] = 1;if err := a.subscriptionSvc.Add(&sub); err != nil {goCover_ba8d34378140__47[15] = 1;
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	goCover_ba8d34378140__47[9] = 1;a.jsonResponse(w, sub)
+}
+
+func (a *API) SubscriptionUpdate(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__48[0] = 11 ; goCover_ba8d34378140__48[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__48[2] = 48 ; goCover_ba8d34378140__48[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__48[9] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__48[4] = 1;if a.subscriptionSvc == nil {goCover_ba8d34378140__48[10] = 1;
+		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
+	}
+
+	goCover_ba8d34378140__48[5] = 1;id := r.URL.Query().Get("id")
+	if id == "" {goCover_ba8d34378140__48[11] = 1;
+		a.errorResponse(w, "ID is required", http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__48[6] = 1;var sub services.Subscription
+	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {goCover_ba8d34378140__48[12] = 1;
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__48[7] = 1;if err := a.subscriptionSvc.Update(id, &sub); err != nil {goCover_ba8d34378140__48[13] = 1;
+		a.errorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	goCover_ba8d34378140__48[8] = 1;a.jsonResponse(w, sub)
+}
+
+func (a *API) SubscriptionDelete(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__49[0] = 9 ; goCover_ba8d34378140__49[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__49[2] = 49 ; goCover_ba8d34378140__49[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__49[8] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__49[4] = 1;if a.subscriptionSvc == nil {goCover_ba8d34378140__49[9] = 1;
+		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
+	}
+
+	goCover_ba8d34378140__49[5] = 1;id := r.URL.Query().Get("id")
+	if id == "" {goCover_ba8d34378140__49[10] = 1;
+		a.errorResponse(w, "ID is required", http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__49[6] = 1;if err := a.subscriptionSvc.Delete(id); err != nil {goCover_ba8d34378140__49[11] = 1;
+		a.errorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	goCover_ba8d34378140__49[7] = 1;w.Write([]byte("OK"))
+}
+
+func (a *API) SubscriptionRefresh(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__50[0] = 9 ; goCover_ba8d34378140__50[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__50[2] = 50 ; goCover_ba8d34378140__50[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__50[8] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__50[4] = 1;if a.subscriptionSvc == nil {goCover_ba8d34378140__50[9] = 1;
+		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
+	}
+
+	goCover_ba8d34378140__50[5] = 1;id := r.URL.Query().Get("id")
+	if id == "" {goCover_ba8d34378140__50[10] = 1;
+		a.errorResponse(w, "ID is required", http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__50[6] = 1;if err := a.subscriptionSvc.Refresh(id); err != nil {goCover_ba8d34378140__50[11] = 1;
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	goCover_ba8d34378140__50[7] = 1;sub := a.subscriptionSvc.Get(id)
+	a.jsonResponse(w, sub)
+}
+
+func (a *API) SubscriptionRefreshAll(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__51[0] = 11 ; goCover_ba8d34378140__51[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__51[2] = 51 ; goCover_ba8d34378140__51[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__51[7] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__51[4] = 1;if a.subscriptionSvc == nil {goCover_ba8d34378140__51[8] = 1;
+		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
+	}
+
+	goCover_ba8d34378140__51[5] = 1;var results []map[string]interface{}
+	for _, sub := range a.subscriptionSvc.List() {goCover_ba8d34378140__51[9] = 1;
+		if !sub.Enabled {goCover_ba8d34378140__51[12] = 1;
+			continue
+		}
+		// Check if update is due
+		goCover_ba8d34378140__51[10] = 1;if !sub.LastUpdate.IsZero() && time.Since(sub.LastUpdate) < time.Duration(sub.Interval)*time.Hour {goCover_ba8d34378140__51[13] = 1;
+			continue
+		}
+
+		goCover_ba8d34378140__51[11] = 1;err := a.subscriptionSvc.Refresh(sub.ID)
+		results = append(results, map[string]interface{}{
+			"id":     sub.ID,
+			"name":   sub.Name,
+			"status": err == nil,
+			"error":  err,
+		})
+	}
+
+	goCover_ba8d34378140__51[6] = 1;a.jsonResponse(w, results)
+}

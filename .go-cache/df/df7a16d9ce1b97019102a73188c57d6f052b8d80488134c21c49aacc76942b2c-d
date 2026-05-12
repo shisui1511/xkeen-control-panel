@@ -1,0 +1,10 @@
+./config.go
+./console.go
+./dat.go
+./kernel.go
+./mihomo.go
+./network.go
+./smartproxy.go
+./subscription.go
+./traffic.go
+./xkeen.go

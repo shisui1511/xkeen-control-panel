@@ -1,0 +1,11 @@
+=== RUN   TestDefault
+--- PASS: TestDefault (0.00s)
+=== RUN   TestSaveAndLoad
+--- PASS: TestSaveAndLoad (0.00s)
+=== RUN   TestSavePasswordHash
+--- PASS: TestSavePasswordHash (0.00s)
+=== RUN   TestLoadNonExistent
+--- PASS: TestLoadNonExistent (0.00s)
+PASS
+coverage: 76.5% of statements
+ok  	github.com/shisui1511/xkeen-control-panel/internal/config	0.007s	coverage: 76.5% of statements

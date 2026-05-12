@@ -1,0 +1,448 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/services/subscription.go:1:1
+package services
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// Subscription represents a proxy subscription
+type Subscription struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	URL        string    `json:"url"`
+	TagPrefix  string    `json:"tag_prefix"`
+	Interval   int       `json:"interval"` // hours
+	LastUpdate time.Time `json:"last_update"`
+	Enabled    bool      `json:"enabled"`
+
+	// Filters
+	FilterName      string `json:"filter_name,omitempty"`
+	FilterType      string `json:"filter_type,omitempty"`
+	FilterTransport string `json:"filter_transport,omitempty"`
+}
+
+// Outbound represents a parsed proxy outbound
+type Outbound struct {
+	Tag            string                 `json:"tag"`
+	Protocol       string                 `json:"protocol"`
+	Settings       map[string]interface{} `json:"settings"`
+	StreamSettings map[string]interface{} `json:"streamSettings,omitempty"`
+}
+
+// SubscriptionService manages subscriptions
+type SubscriptionService struct {
+	dataDir       string
+	configDir     string
+	subscriptions []Subscription
+}
+
+func NewSubscriptionService(dataDir, configDir string) *SubscriptionService {goCover_0bc995578321__71[0] = 1 ; goCover_0bc995578321__71[1] = goCover_0bc995578321_P ; goCover_0bc995578321__71[2] = 71 ; goCover_0bc995578321__71[3] = 1;
+	svc := &SubscriptionService{
+		dataDir:   dataDir,
+		configDir: configDir,
+	}
+	svc.load()
+	return svc
+}
+
+func (s *SubscriptionService) load() {goCover_0bc995578321__72[0] = 3 ; goCover_0bc995578321__72[1] = goCover_0bc995578321_P ; goCover_0bc995578321__72[2] = 72 ; goCover_0bc995578321__72[3] = 1;
+	path := filepath.Join(s.dataDir, "subscriptions.json")
+	data, err := os.ReadFile(path)
+	if err != nil {goCover_0bc995578321__72[5] = 1;
+		return
+	}
+	goCover_0bc995578321__72[4] = 1;json.Unmarshal(data, &s.subscriptions)
+}
+
+func (s *SubscriptionService) save() error {goCover_0bc995578321__73[0] = 3 ; goCover_0bc995578321__73[1] = goCover_0bc995578321_P ; goCover_0bc995578321__73[2] = 73 ; goCover_0bc995578321__73[3] = 1;
+	path := filepath.Join(s.dataDir, "subscriptions.json")
+	data, err := json.MarshalIndent(s.subscriptions, "", "  ")
+	if err != nil {goCover_0bc995578321__73[5] = 1;
+		return err
+	}
+	goCover_0bc995578321__73[4] = 1;return os.WriteFile(path, data, 0644)
+}
+
+func (s *SubscriptionService) List() []Subscription {goCover_0bc995578321__74[0] = 1 ; goCover_0bc995578321__74[1] = goCover_0bc995578321_P ; goCover_0bc995578321__74[2] = 74 ; goCover_0bc995578321__74[3] = 1;
+	return s.subscriptions
+}
+
+func (s *SubscriptionService) Get(id string) *Subscription {goCover_0bc995578321__75[0] = 4 ; goCover_0bc995578321__75[1] = goCover_0bc995578321_P ; goCover_0bc995578321__75[2] = 75 ; goCover_0bc995578321__75[3] = 1;
+	for i := range s.subscriptions {goCover_0bc995578321__75[5] = 1;
+		if s.subscriptions[i].ID == id {goCover_0bc995578321__75[6] = 1;
+			return &s.subscriptions[i]
+		}
+	}
+	goCover_0bc995578321__75[4] = 1;return nil
+}
+
+func (s *SubscriptionService) Add(sub *Subscription) error {goCover_0bc995578321__76[0] = 3 ; goCover_0bc995578321__76[1] = goCover_0bc995578321_P ; goCover_0bc995578321__76[2] = 76 ; goCover_0bc995578321__76[3] = 1;
+	if sub.ID == "" {goCover_0bc995578321__76[5] = 1;
+		sub.ID = fmt.Sprintf("sub_%d", time.Now().Unix())
+	}
+	goCover_0bc995578321__76[4] = 1;s.subscriptions = append(s.subscriptions, *sub)
+	return s.save()
+}
+
+func (s *SubscriptionService) Update(id string, sub *Subscription) error {goCover_0bc995578321__77[0] = 4 ; goCover_0bc995578321__77[1] = goCover_0bc995578321_P ; goCover_0bc995578321__77[2] = 77 ; goCover_0bc995578321__77[3] = 1;
+	for i := range s.subscriptions {goCover_0bc995578321__77[5] = 1;
+		if s.subscriptions[i].ID == id {goCover_0bc995578321__77[6] = 1;
+			s.subscriptions[i] = *sub
+			return s.save()
+		}
+	}
+	goCover_0bc995578321__77[4] = 1;return fmt.Errorf("subscription not found")
+}
+
+func (s *SubscriptionService) Delete(id string) error {goCover_0bc995578321__78[0] = 9 ; goCover_0bc995578321__78[1] = goCover_0bc995578321_P ; goCover_0bc995578321__78[2] = 78 ; goCover_0bc995578321__78[3] = 1;
+	// Find subscription
+	var sub *Subscription
+	for i := range s.subscriptions {goCover_0bc995578321__78[7] = 1;
+		if s.subscriptions[i].ID == id {goCover_0bc995578321__78[8] = 1;
+			sub = &s.subscriptions[i]
+			break
+		}
+	}
+	goCover_0bc995578321__78[4] = 1;if sub == nil {goCover_0bc995578321__78[9] = 1;
+		return fmt.Errorf("subscription not found")
+	}
+
+	// Remove from list
+	goCover_0bc995578321__78[5] = 1;newList := make([]Subscription, 0, len(s.subscriptions)-1)
+	for _, s := range s.subscriptions {goCover_0bc995578321__78[10] = 1;
+		if s.ID != id {goCover_0bc995578321__78[11] = 1;
+			newList = append(newList, s)
+		}
+	}
+	goCover_0bc995578321__78[6] = 1;s.subscriptions = newList
+
+	// Delete managed fragment file
+	fragmentPath := s.getFragmentPath(sub)
+	os.Remove(fragmentPath)
+
+	return s.save()
+}
+
+func (s *SubscriptionService) Refresh(id string) error {goCover_0bc995578321__79[0] = 7 ; goCover_0bc995578321__79[1] = goCover_0bc995578321_P ; goCover_0bc995578321__79[2] = 79 ; goCover_0bc995578321__79[3] = 1;
+	sub := s.Get(id)
+	if sub == nil {goCover_0bc995578321__79[7] = 1;
+		return fmt.Errorf("subscription not found")
+	}
+
+	// Download subscription
+	goCover_0bc995578321__79[4] = 1;outbounds, err := s.downloadAndParse(sub.URL)
+	if err != nil {goCover_0bc995578321__79[8] = 1;
+		return err
+	}
+
+	// Apply filters
+	goCover_0bc995578321__79[5] = 1;outbounds = s.applyFilters(outbounds, sub)
+
+	// Generate fragment file
+	fragmentPath := s.getFragmentPath(sub)
+	if err := s.writeFragment(fragmentPath, outbounds, sub); err != nil {goCover_0bc995578321__79[9] = 1;
+		return err
+	}
+
+	// Update last update time
+	goCover_0bc995578321__79[6] = 1;sub.LastUpdate = time.Now()
+	return s.save()
+}
+
+func (s *SubscriptionService) downloadAndParse(subURL string) ([]Outbound, error) {goCover_0bc995578321__80[0] = 18 ; goCover_0bc995578321__80[1] = goCover_0bc995578321_P ; goCover_0bc995578321__80[2] = 80 ; goCover_0bc995578321__80[3] = 1;
+	resp, err := http.Get(subURL)
+	if err != nil {goCover_0bc995578321__80[11] = 1;
+		return nil, err
+	}
+	goCover_0bc995578321__80[4] = 1;defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {goCover_0bc995578321__80[12] = 1;
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	goCover_0bc995578321__80[5] = 1;body, err := io.ReadAll(resp.Body)
+	if err != nil {goCover_0bc995578321__80[13] = 1;
+		return nil, err
+	}
+
+	goCover_0bc995578321__80[6] = 1;content := string(body)
+	content = strings.TrimSpace(content)
+
+	// Try JSON array first
+	var jsonOutbounds []Outbound
+	if err := json.Unmarshal(body, &jsonOutbounds); err == nil && len(jsonOutbounds) > 0 {goCover_0bc995578321__80[14] = 1;
+		return jsonOutbounds, nil
+	}
+
+	// Try JSON object with outbounds field
+	goCover_0bc995578321__80[7] = 1;var jsonConfig struct {
+		Outbounds []Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(body, &jsonConfig); err == nil && len(jsonConfig.Outbounds) > 0 {goCover_0bc995578321__80[15] = 1;
+		return jsonConfig.Outbounds, nil
+	}
+
+	// Try base64 encoded list
+	goCover_0bc995578321__80[8] = 1;decoded, err := base64.StdEncoding.DecodeString(content)
+	if err == nil {goCover_0bc995578321__80[16] = 1;
+		content = string(decoded)
+	}
+
+	// Parse share links (one per line)
+	goCover_0bc995578321__80[9] = 1;var outbounds []Outbound
+	for _, line := range strings.Split(content, "\n") {goCover_0bc995578321__80[17] = 1;
+		line = strings.TrimSpace(line)
+		if line == "" {goCover_0bc995578321__80[19] = 1;
+			continue
+		}
+
+		goCover_0bc995578321__80[18] = 1;outbound := parseShareLink(line)
+		if outbound != nil {goCover_0bc995578321__80[20] = 1;
+			outbounds = append(outbounds, *outbound)
+		}
+	}
+
+	goCover_0bc995578321__80[10] = 1;return outbounds, nil
+}
+
+func (s *SubscriptionService) applyFilters(outbounds []Outbound, sub *Subscription) []Outbound {goCover_0bc995578321__81[0] = 9 ; goCover_0bc995578321__81[1] = goCover_0bc995578321_P ; goCover_0bc995578321__81[2] = 81 ; goCover_0bc995578321__81[3] = 1;
+	if sub.FilterName == "" && sub.FilterType == "" && sub.FilterTransport == "" {goCover_0bc995578321__81[6] = 1;
+		return outbounds
+	}
+
+	goCover_0bc995578321__81[4] = 1;var filtered []Outbound
+	for _, ob := range outbounds {goCover_0bc995578321__81[7] = 1;
+		if sub.FilterName != "" && !strings.Contains(strings.ToLower(ob.Tag), strings.ToLower(sub.FilterName)) {goCover_0bc995578321__81[10] = 1;
+			continue
+		}
+		goCover_0bc995578321__81[8] = 1;if sub.FilterType != "" && !strings.EqualFold(ob.Protocol, sub.FilterType) {goCover_0bc995578321__81[11] = 1;
+			continue
+		}
+		goCover_0bc995578321__81[9] = 1;filtered = append(filtered, ob)
+	}
+
+	goCover_0bc995578321__81[5] = 1;return filtered
+}
+
+func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {goCover_0bc995578321__82[0] = 1 ; goCover_0bc995578321__82[1] = goCover_0bc995578321_P ; goCover_0bc995578321__82[2] = 82 ; goCover_0bc995578321__82[3] = 1;
+	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", sub.ID))
+}
+
+func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, sub *Subscription) error {goCover_0bc995578321__83[0] = 8 ; goCover_0bc995578321__83[1] = goCover_0bc995578321_P ; goCover_0bc995578321__83[2] = 83 ; goCover_0bc995578321__83[3] = 1;
+	// Ensure directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {goCover_0bc995578321__83[7] = 1;
+		return err
+	}
+
+	// Add tag prefix
+	goCover_0bc995578321__83[4] = 1;for i := range outbounds {goCover_0bc995578321__83[8] = 1;
+		if sub.TagPrefix != "" {goCover_0bc995578321__83[9] = 1;
+			outbounds[i].Tag = fmt.Sprintf("%s-%s", sub.TagPrefix, outbounds[i].Tag)
+		}
+	}
+
+	goCover_0bc995578321__83[5] = 1;data, err := json.MarshalIndent(outbounds, "", "  ")
+	if err != nil {goCover_0bc995578321__83[10] = 1;
+		return err
+	}
+
+	goCover_0bc995578321__83[6] = 1;return os.WriteFile(path, data, 0644)
+}
+
+// parseShareLink parses various share link formats
+func parseShareLink(link string) *Outbound {goCover_0bc995578321__84[0] = 9 ; goCover_0bc995578321__84[1] = goCover_0bc995578321_P ; goCover_0bc995578321__84[2] = 84 ; goCover_0bc995578321__84[3] = 1;
+	// vmess://
+	if strings.HasPrefix(link, "vmess://") {goCover_0bc995578321__84[8] = 1;
+		return parseVMessLink(link)
+	}
+
+	// vless://
+	goCover_0bc995578321__84[4] = 1;if strings.HasPrefix(link, "vless://") {goCover_0bc995578321__84[9] = 1;
+		return parseVLESSLink(link)
+	}
+
+	// trojan://
+	goCover_0bc995578321__84[5] = 1;if strings.HasPrefix(link, "trojan://") {goCover_0bc995578321__84[10] = 1;
+		return parseTrojanLink(link)
+	}
+
+	// ss:// (Shadowsocks)
+	goCover_0bc995578321__84[6] = 1;if strings.HasPrefix(link, "ss://") {goCover_0bc995578321__84[11] = 1;
+		return parseSSLink(link)
+	}
+
+	goCover_0bc995578321__84[7] = 1;return nil
+}
+
+func parseVMessLink(link string) *Outbound {goCover_0bc995578321__85[0] = 5 ; goCover_0bc995578321__85[1] = goCover_0bc995578321_P ; goCover_0bc995578321__85[2] = 85 ; goCover_0bc995578321__85[3] = 1;
+	// vmess://base64(json)
+	b64 := strings.TrimPrefix(link, "vmess://")
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {goCover_0bc995578321__85[6] = 1;
+		return nil
+	}
+
+	goCover_0bc995578321__85[4] = 1;var vmess struct {
+		PS   string `json:"ps"`
+		Add  string `json:"add"`
+		Port string `json:"port"`
+		ID   string `json:"id"`
+		Aid  string `json:"aid"`
+		Net  string `json:"net"`
+		Type string `json:"type"`
+		Host string `json:"host"`
+		Path string `json:"path"`
+		TLS  string `json:"tls"`
+	}
+
+	if err := json.Unmarshal(data, &vmess); err != nil {goCover_0bc995578321__85[7] = 1;
+		return nil
+	}
+
+	goCover_0bc995578321__85[5] = 1;port, _ := vmess.Port, 0
+
+	return &Outbound{
+		Tag:      vmess.PS,
+		Protocol: "vmess",
+		Settings: map[string]interface{}{
+			"vnext": []map[string]interface{}{
+				{
+					"address": vmess.Add,
+					"port":    port,
+					"users": []map[string]interface{}{
+						{
+							"id":       vmess.ID,
+							"alterId":  vmess.Aid,
+							"security": "auto",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func parseVLESSLink(link string) *Outbound {goCover_0bc995578321__86[0] = 7 ; goCover_0bc995578321__86[1] = goCover_0bc995578321_P ; goCover_0bc995578321__86[2] = 86 ; goCover_0bc995578321__86[3] = 1;
+	// vless://id@host:port?params#tag
+	u, err := url.Parse(link)
+	if err != nil {goCover_0bc995578321__86[7] = 1;
+		return nil
+	}
+
+	goCover_0bc995578321__86[4] = 1;id := strings.TrimPrefix(u.Scheme, "vless://")
+	if u.User != nil {goCover_0bc995578321__86[8] = 1;
+		id = u.User.Username()
+	}
+
+	goCover_0bc995578321__86[5] = 1;tag := u.Fragment
+	if tag == "" {goCover_0bc995578321__86[9] = 1;
+		tag = u.Hostname()
+	}
+
+	goCover_0bc995578321__86[6] = 1;return &Outbound{
+		Tag:      tag,
+		Protocol: "vless",
+		Settings: map[string]interface{}{
+			"vnext": []map[string]interface{}{
+				{
+					"address": u.Hostname(),
+					"port":    u.Port(),
+					"users": []map[string]interface{}{
+						{
+							"id":         id,
+							"encryption": "none",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func parseTrojanLink(link string) *Outbound {goCover_0bc995578321__87[0] = 7 ; goCover_0bc995578321__87[1] = goCover_0bc995578321_P ; goCover_0bc995578321__87[2] = 87 ; goCover_0bc995578321__87[3] = 1;
+	// trojan://password@host:port?params#tag
+	u, err := url.Parse(link)
+	if err != nil {goCover_0bc995578321__87[7] = 1;
+		return nil
+	}
+
+	goCover_0bc995578321__87[4] = 1;password := ""
+	if u.User != nil {goCover_0bc995578321__87[8] = 1;
+		password, _ = u.User.Password()
+	}
+
+	goCover_0bc995578321__87[5] = 1;tag := u.Fragment
+	if tag == "" {goCover_0bc995578321__87[9] = 1;
+		tag = u.Hostname()
+	}
+
+	goCover_0bc995578321__87[6] = 1;return &Outbound{
+		Tag:      tag,
+		Protocol: "trojan",
+		Settings: map[string]interface{}{
+			"servers": []map[string]interface{}{
+				{
+					"address":  u.Hostname(),
+					"port":     u.Port(),
+					"password": password,
+				},
+			},
+		},
+	}
+}
+
+func parseSSLink(link string) *Outbound {goCover_0bc995578321__88[0] = 10 ; goCover_0bc995578321__88[1] = goCover_0bc995578321_P ; goCover_0bc995578321__88[2] = 88 ; goCover_0bc995578321__88[3] = 1;
+	// ss://method:password@host:port#tag
+	// or ss://base64(method:password)@host:port#tag
+	u, err := url.Parse(link)
+	if err != nil {goCover_0bc995578321__88[8] = 1;
+		return nil
+	}
+
+	// Try to decode base64 user info
+	goCover_0bc995578321__88[4] = 1;userInfo := u.User.String()
+	decoded, err := base64.StdEncoding.DecodeString(userInfo)
+	if err == nil {goCover_0bc995578321__88[9] = 1;
+		parts := strings.SplitN(string(decoded), ":", 2)
+		if len(parts) == 2 {goCover_0bc995578321__88[10] = 1;
+			u.User = url.UserPassword(parts[0], parts[1])
+		}
+	}
+
+	goCover_0bc995578321__88[5] = 1;method := ""
+	password := ""
+	if u.User != nil {goCover_0bc995578321__88[11] = 1;
+		method = u.User.Username()
+		password, _ = u.User.Password()
+	}
+
+	goCover_0bc995578321__88[6] = 1;tag := u.Fragment
+	if tag == "" {goCover_0bc995578321__88[12] = 1;
+		tag = u.Hostname()
+	}
+
+	goCover_0bc995578321__88[7] = 1;return &Outbound{
+		Tag:      tag,
+		Protocol: "shadowsocks",
+		Settings: map[string]interface{}{
+			"servers": []map[string]interface{}{
+				{
+					"address":  u.Hostname(),
+					"port":     u.Port(),
+					"method":   method,
+					"password": password,
+				},
+			},
+		},
+	}
+}

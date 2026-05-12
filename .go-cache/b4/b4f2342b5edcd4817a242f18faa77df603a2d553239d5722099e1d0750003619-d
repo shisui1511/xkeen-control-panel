@@ -1,0 +1,34 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/middleware/logging.go:1:1
+package middleware
+
+import (
+	"log"
+	"net/http"
+	"strings"
+	"time"
+)
+
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {goCover_da3414bc170c__0[0] = 1 ; goCover_da3414bc170c__0[1] = goCover_da3414bc170c_P ; goCover_da3414bc170c__0[2] = 0 ; goCover_da3414bc170c__0[3] = 1;
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func sanitizeLogInput(s string) string {goCover_da3414bc170c__1[0] = 1 ; goCover_da3414bc170c__1[1] = goCover_da3414bc170c_P ; goCover_da3414bc170c__1[2] = 1 ; goCover_da3414bc170c__1[3] = 1;
+	s = strings.ReplaceAll(s, "\n", "")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
+}
+
+func Logging(next http.Handler) http.Handler {goCover_da3414bc170c__2[0] = 2 ; goCover_da3414bc170c__2[1] = goCover_da3414bc170c_P ; goCover_da3414bc170c__2[2] = 2 ; goCover_da3414bc170c__2[3] = 1;
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {goCover_da3414bc170c__2[4] = 1;
+		start := time.Now()
+		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(wrapped, r)
+		log.Printf("%s %s %d %s", sanitizeLogInput(r.Method), sanitizeLogInput(r.URL.Path), wrapped.statusCode, time.Since(start))
+	})
+}

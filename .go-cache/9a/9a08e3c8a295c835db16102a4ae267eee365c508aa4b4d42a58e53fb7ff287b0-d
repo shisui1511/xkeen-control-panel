@@ -1,0 +1,16 @@
+covervars.go
+base.cover.go
+config.cover.go
+console.cover.go
+dat.cover.go
+kernel.cover.go
+logs.cover.go
+mihomo.cover.go
+network.cover.go
+service.cover.go
+smartproxy.cover.go
+subscription.cover.go
+system.cover.go
+traffic.cover.go
+update.cover.go
+version.cover.go

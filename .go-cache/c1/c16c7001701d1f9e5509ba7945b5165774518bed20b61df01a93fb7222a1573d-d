@@ -1,0 +1,15 @@
+# test log
+getenv GOTMPDIR
+getenv TMPDIR
+stat /tmp/TestSaveAndLoad979274659/001
+open /tmp/TestSaveAndLoad979274659/001/config.json
+stat /tmp/TestSaveAndLoad979274659/001/config.json
+open /tmp/TestSaveAndLoad979274659/001/config.json
+open /tmp
+getenv GOTMPDIR
+getenv TMPDIR
+stat /tmp/TestSavePasswordHash2121574470/001
+open /tmp/TestSavePasswordHash2121574470/001/config.json
+open /tmp/TestSavePasswordHash2121574470/001/config.json
+open /tmp
+open /nonexistent/path/config.json

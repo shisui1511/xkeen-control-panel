@@ -1,0 +1,258 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/services/network.go:1:1
+package services
+
+import (
+	"fmt"
+	"net"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+// NetworkToolsService provides network diagnostic tools
+type NetworkToolsService struct{}
+
+func NewNetworkToolsService() *NetworkToolsService {goCover_0bc995578321__41[0] = 1 ; goCover_0bc995578321__41[1] = goCover_0bc995578321_P ; goCover_0bc995578321__41[2] = 41 ; goCover_0bc995578321__41[3] = 1;
+	return &NetworkToolsService{}
+}
+
+// PingResult holds ping output
+type PingResult struct {
+	Host    string `json:"host"`
+	Output  string `json:"output"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// Ping executes ping command
+func (s *NetworkToolsService) Ping(host string, count int) (*PingResult, error) {goCover_0bc995578321__42[0] = 6 ; goCover_0bc995578321__42[1] = goCover_0bc995578321_P ; goCover_0bc995578321__42[2] = 42 ; goCover_0bc995578321__42[3] = 1;
+	if count <= 0 || count > 20 {goCover_0bc995578321__42[6] = 1;
+		count = 4
+	}
+
+	goCover_0bc995578321__42[4] = 1;cmd := exec.Command("ping", "-c", fmt.Sprintf("%d", count), host)
+	out, err := cmd.CombinedOutput()
+
+	result := &PingResult{
+		Host:   host,
+		Output: string(out),
+	}
+
+	if err != nil {goCover_0bc995578321__42[7] = 1;
+		result.Success = false
+		result.Error = err.Error()
+	} else{ goCover_0bc995578321__42[8] = 1;{
+		result.Success = true
+	}}
+
+	goCover_0bc995578321__42[5] = 1;return result, nil
+}
+
+// TracerouteResult holds traceroute output
+type TracerouteResult struct {
+	Host    string `json:"host"`
+	Output  string `json:"output"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// Traceroute executes traceroute command
+func (s *NetworkToolsService) Traceroute(host string, maxHops int) (*TracerouteResult, error) {goCover_0bc995578321__43[0] = 6 ; goCover_0bc995578321__43[1] = goCover_0bc995578321_P ; goCover_0bc995578321__43[2] = 43 ; goCover_0bc995578321__43[3] = 1;
+	if maxHops <= 0 || maxHops > 30 {goCover_0bc995578321__43[6] = 1;
+		maxHops = 20
+	}
+
+	goCover_0bc995578321__43[4] = 1;cmd := exec.Command("traceroute", "-m", fmt.Sprintf("%d", maxHops), host)
+	out, err := cmd.CombinedOutput()
+
+	result := &TracerouteResult{
+		Host:   host,
+		Output: string(out),
+	}
+
+	if err != nil {goCover_0bc995578321__43[7] = 1;
+		result.Success = false
+		result.Error = err.Error()
+	} else{ goCover_0bc995578321__43[8] = 1;{
+		result.Success = true
+	}}
+
+	goCover_0bc995578321__43[5] = 1;return result, nil
+}
+
+// DNSResult holds DNS lookup results
+type DNSResult struct {
+	Host    string   `json:"host"`
+	Records []string `json:"records"`
+	Success bool     `json:"success"`
+	Error   string   `json:"error,omitempty"`
+}
+
+// DNSLookup performs DNS lookup
+func (s *NetworkToolsService) DNSLookup(host string, recordType string) (*DNSResult, error) {goCover_0bc995578321__44[0] = 28 ; goCover_0bc995578321__44[1] = goCover_0bc995578321_P ; goCover_0bc995578321__44[2] = 44 ; goCover_0bc995578321__44[3] = 1;
+	if recordType == "" {goCover_0bc995578321__44[6] = 1;
+		recordType = "A"
+	}
+
+	goCover_0bc995578321__44[4] = 1;result := &DNSResult{
+		Host: host,
+	}
+
+	switch strings.ToUpper(recordType) {
+	case "A", "AAAA":goCover_0bc995578321__44[7] = 1;
+		ips, err := net.LookupIP(host)
+		if err != nil {goCover_0bc995578321__44[22] = 1;
+			result.Success = false
+			result.Error = err.Error()
+			return result, nil
+		}
+		goCover_0bc995578321__44[8] = 1;for _, ip := range ips {goCover_0bc995578321__44[23] = 1;
+			result.Records = append(result.Records, ip.String())
+		}
+		goCover_0bc995578321__44[9] = 1;result.Success = true
+
+	case "CNAME":goCover_0bc995578321__44[10] = 1;
+		cname, err := net.LookupCNAME(host)
+		if err != nil {goCover_0bc995578321__44[24] = 1;
+			result.Success = false
+			result.Error = err.Error()
+			return result, nil
+		}
+		goCover_0bc995578321__44[11] = 1;result.Records = append(result.Records, cname)
+		result.Success = true
+
+	case "MX":goCover_0bc995578321__44[12] = 1;
+		mxs, err := net.LookupMX(host)
+		if err != nil {goCover_0bc995578321__44[25] = 1;
+			result.Success = false
+			result.Error = err.Error()
+			return result, nil
+		}
+		goCover_0bc995578321__44[13] = 1;for _, mx := range mxs {goCover_0bc995578321__44[26] = 1;
+			result.Records = append(result.Records, fmt.Sprintf("%s (priority: %d)", mx.Host, mx.Pref))
+		}
+		goCover_0bc995578321__44[14] = 1;result.Success = true
+
+	case "NS":goCover_0bc995578321__44[15] = 1;
+		nss, err := net.LookupNS(host)
+		if err != nil {goCover_0bc995578321__44[27] = 1;
+			result.Success = false
+			result.Error = err.Error()
+			return result, nil
+		}
+		goCover_0bc995578321__44[16] = 1;for _, ns := range nss {goCover_0bc995578321__44[28] = 1;
+			result.Records = append(result.Records, ns.Host)
+		}
+		goCover_0bc995578321__44[17] = 1;result.Success = true
+
+	case "TXT":goCover_0bc995578321__44[18] = 1;
+		txts, err := net.LookupTXT(host)
+		if err != nil {goCover_0bc995578321__44[29] = 1;
+			result.Success = false
+			result.Error = err.Error()
+			return result, nil
+		}
+		goCover_0bc995578321__44[19] = 1;result.Records = txts
+		result.Success = true
+
+	default:goCover_0bc995578321__44[20] = 1;
+		// Try nslookup for other types
+		cmd := exec.Command("nslookup", "-type="+recordType, host)
+		out, err := cmd.CombinedOutput()
+		if err != nil {goCover_0bc995578321__44[30] = 1;
+			result.Success = false
+			result.Error = string(out)
+			return result, nil
+		}
+		goCover_0bc995578321__44[21] = 1;result.Records = append(result.Records, string(out))
+		result.Success = true
+	}
+
+	goCover_0bc995578321__44[5] = 1;return result, nil
+}
+
+// CurlResult holds curl/wget output
+type CurlResult struct {
+	URL     string `json:"url"`
+	Output  string `json:"output"`
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// HTTPTest performs HTTP request test
+func (s *NetworkToolsService) HTTPTest(url string, timeout int) (*CurlResult, error) {goCover_0bc995578321__45[0] = 11 ; goCover_0bc995578321__45[1] = goCover_0bc995578321_P ; goCover_0bc995578321__45[2] = 45 ; goCover_0bc995578321__45[3] = 1;
+	if timeout <= 0 || timeout > 60 {goCover_0bc995578321__45[7] = 1;
+		timeout = 10
+	}
+
+	goCover_0bc995578321__45[4] = 1;result := &CurlResult{
+		URL: url,
+	}
+
+	var cmd *exec.Cmd
+	if _, err := exec.LookPath("curl"); err == nil {goCover_0bc995578321__45[8] = 1;
+		cmd = exec.Command("curl", "-sL", "--connect-timeout", fmt.Sprintf("%d", timeout),
+			"-w", "\nHTTP_CODE: %{http_code}\nTIME_TOTAL: %{time_total}\nSIZE: %{size_download}",
+			url)
+	} else{ goCover_0bc995578321__45[9] = 1;if _, err := exec.LookPath("wget"); err == nil {goCover_0bc995578321__45[10] = 1;
+		cmd = exec.Command("wget", "-qO", "-", "--timeout="+fmt.Sprintf("%d", timeout), url)
+	} else{ goCover_0bc995578321__45[11] = 1;{
+		result.Success = false
+		result.Error = "curl или wget не найдены"
+		return result, nil
+	}}}
+
+	goCover_0bc995578321__45[5] = 1;out, err := cmd.CombinedOutput()
+	result.Output = string(out)
+
+	if err != nil {goCover_0bc995578321__45[12] = 1;
+		result.Success = false
+		result.Error = err.Error()
+	} else{ goCover_0bc995578321__45[13] = 1;{
+		result.Success = true
+	}}
+
+	goCover_0bc995578321__45[6] = 1;return result, nil
+}
+
+// IPInfo holds public IP information
+type IPInfo struct {
+	IP       string `json:"ip"`
+	Hostname string `json:"hostname,omitempty"`
+	Success  bool   `json:"success"`
+	Error    string `json:"error,omitempty"`
+}
+
+// GetPublicIP gets current public IP
+func (s *NetworkToolsService) GetPublicIP() (*IPInfo, error) {goCover_0bc995578321__46[0] = 6 ; goCover_0bc995578321__46[1] = goCover_0bc995578321_P ; goCover_0bc995578321__46[2] = 46 ; goCover_0bc995578321__46[3] = 1;
+	result := &IPInfo{}
+
+	// Try multiple services
+	services := []string{
+		"https://api.ipify.org",
+		"https://icanhazip.com",
+		"https://ifconfig.me/ip",
+	}
+
+	client := &net.Dialer{Timeout: 5 * time.Second}
+
+	for _, svc := range services {goCover_0bc995578321__46[5] = 1;
+		conn, err := client.Dial("tcp", svc+":443")
+		if err != nil {goCover_0bc995578321__46[7] = 1;
+			continue
+		}
+		goCover_0bc995578321__46[6] = 1;conn.Close()
+		// If we can connect, try curl
+		cmd := exec.Command("curl", "-s", "--connect-timeout", "5", svc)
+		out, err := cmd.Output()
+		if err == nil {goCover_0bc995578321__46[8] = 1;
+			result.IP = strings.TrimSpace(string(out))
+			result.Success = true
+			return result, nil
+		}
+	}
+
+	goCover_0bc995578321__46[4] = 1;result.Success = false
+	result.Error = "Не удалось определить IP"
+	return result, nil
+}

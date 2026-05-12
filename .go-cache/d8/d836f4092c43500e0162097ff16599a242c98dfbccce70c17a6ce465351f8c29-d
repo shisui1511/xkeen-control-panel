@@ -1,0 +1,164 @@
+//line /home/shisui/REPO/xkeen-control-panel/internal/handlers/smartproxy.go:1:1
+package handlers
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
+)
+
+func (a *API) smartProxy() *services.SmartProxyService {goCover_ba8d34378140__38[0] = 1 ; goCover_ba8d34378140__38[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__38[2] = 38 ; goCover_ba8d34378140__38[3] = 1;
+	return a.smartProxySvc
+}
+
+func (a *API) SmartProxyList(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__39[0] = 3 ; goCover_ba8d34378140__39[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__39[2] = 39 ; goCover_ba8d34378140__39[3] = 1;
+	if a.smartProxySvc == nil {goCover_ba8d34378140__39[5] = 1;
+		a.errorResponse(w, "Smart Proxy service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	goCover_ba8d34378140__39[4] = 1;a.jsonResponse(w, a.smartProxySvc.List())
+}
+
+func (a *API) SmartProxyGet(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__40[0] = 7 ; goCover_ba8d34378140__40[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__40[2] = 40 ; goCover_ba8d34378140__40[3] = 1;
+	if a.smartProxySvc == nil {goCover_ba8d34378140__40[7] = 1;
+		a.errorResponse(w, "Smart Proxy service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	goCover_ba8d34378140__40[4] = 1;id := r.URL.Query().Get("id")
+	if id == "" {goCover_ba8d34378140__40[8] = 1;
+		a.errorResponse(w, "ID required", http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__40[5] = 1;p := a.smartProxySvc.Get(id)
+	if p == nil {goCover_ba8d34378140__40[9] = 1;
+		a.errorResponse(w, "Profile not found", http.StatusNotFound)
+		return
+	}
+
+	goCover_ba8d34378140__40[6] = 1;a.jsonResponse(w, p)
+}
+
+func (a *API) SmartProxyAdd(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__41[0] = 11 ; goCover_ba8d34378140__41[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__41[2] = 41 ; goCover_ba8d34378140__41[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__41[9] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__41[4] = 1;if a.smartProxySvc == nil {goCover_ba8d34378140__41[10] = 1;
+		a.errorResponse(w, "Smart Proxy service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	goCover_ba8d34378140__41[5] = 1;var p services.Profile
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {goCover_ba8d34378140__41[11] = 1;
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__41[6] = 1;if p.Name == "" || p.GroupName == "" || p.ProxyName == "" {goCover_ba8d34378140__41[12] = 1;
+		a.errorResponse(w, "Name, group_name and proxy_name are required", http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__41[7] = 1;if err := a.smartProxySvc.Add(&p); err != nil {goCover_ba8d34378140__41[13] = 1;
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	goCover_ba8d34378140__41[8] = 1;a.jsonResponse(w, p)
+}
+
+func (a *API) SmartProxyUpdate(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__42[0] = 11 ; goCover_ba8d34378140__42[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__42[2] = 42 ; goCover_ba8d34378140__42[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__42[9] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__42[4] = 1;if a.smartProxySvc == nil {goCover_ba8d34378140__42[10] = 1;
+		a.errorResponse(w, "Smart Proxy service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	goCover_ba8d34378140__42[5] = 1;id := r.URL.Query().Get("id")
+	if id == "" {goCover_ba8d34378140__42[11] = 1;
+		a.errorResponse(w, "ID required", http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__42[6] = 1;var p services.Profile
+	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {goCover_ba8d34378140__42[12] = 1;
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__42[7] = 1;if err := a.smartProxySvc.Update(id, &p); err != nil {goCover_ba8d34378140__42[13] = 1;
+		a.errorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	goCover_ba8d34378140__42[8] = 1;a.jsonResponse(w, p)
+}
+
+func (a *API) SmartProxyDelete(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__43[0] = 9 ; goCover_ba8d34378140__43[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__43[2] = 43 ; goCover_ba8d34378140__43[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__43[8] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__43[4] = 1;if a.smartProxySvc == nil {goCover_ba8d34378140__43[9] = 1;
+		a.errorResponse(w, "Smart Proxy service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	goCover_ba8d34378140__43[5] = 1;id := r.URL.Query().Get("id")
+	if id == "" {goCover_ba8d34378140__43[10] = 1;
+		a.errorResponse(w, "ID required", http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__43[6] = 1;if err := a.smartProxySvc.Delete(id); err != nil {goCover_ba8d34378140__43[11] = 1;
+		a.errorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	goCover_ba8d34378140__43[7] = 1;w.Write([]byte("OK"))
+}
+
+func (a *API) SmartProxySetEnabled(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__44[0] = 9 ; goCover_ba8d34378140__44[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__44[2] = 44 ; goCover_ba8d34378140__44[3] = 1;
+	if r.Method != http.MethodPost {goCover_ba8d34378140__44[8] = 1;
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	goCover_ba8d34378140__44[4] = 1;if a.smartProxySvc == nil {goCover_ba8d34378140__44[9] = 1;
+		a.errorResponse(w, "Smart Proxy service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	goCover_ba8d34378140__44[5] = 1;id := r.URL.Query().Get("id")
+	if id == "" {goCover_ba8d34378140__44[10] = 1;
+		a.errorResponse(w, "ID required", http.StatusBadRequest)
+		return
+	}
+
+	goCover_ba8d34378140__44[6] = 1;enabled := r.URL.Query().Get("enabled") == "true"
+
+	if err := a.smartProxySvc.SetEnabled(id, enabled); err != nil {goCover_ba8d34378140__44[11] = 1;
+		a.errorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	goCover_ba8d34378140__44[7] = 1;w.Write([]byte("OK"))
+}
+
+func (a *API) SmartProxyStatus(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__45[0] = 3 ; goCover_ba8d34378140__45[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__45[2] = 45 ; goCover_ba8d34378140__45[3] = 1;
+	if a.smartProxySvc == nil {goCover_ba8d34378140__45[5] = 1;
+		a.errorResponse(w, "Smart Proxy service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	goCover_ba8d34378140__45[4] = 1;a.jsonResponse(w, a.smartProxySvc.CurrentStatus())
+}
