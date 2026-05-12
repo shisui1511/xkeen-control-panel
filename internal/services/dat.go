@@ -6,6 +6,7 @@ import (
 "net/http"
 "os"
 "path/filepath"
+"regexp"
 "strings"
 "sync"
 "time"
@@ -93,10 +94,7 @@ s.mu.Lock()
 defer s.mu.Unlock()
 
 	cleanPath := filepath.Clean(localPath)
-	if cleanPath == "." || cleanPath == "" || filepath.IsAbs(cleanPath) {
-		return 0, fmt.Errorf("invalid file path")
-	}
-	if strings.HasPrefix(cleanPath, ".."+string(filepath.Separator)) || cleanPath == ".." {
+	if !isSafeRelativePath(cleanPath) {
 		return 0, fmt.Errorf("invalid file path")
 	}
 
@@ -179,4 +177,29 @@ defer s.mu.Unlock()
 	}
 
 	return written, nil
+}
+
+var safePathComponentRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+func isSafeRelativePath(cleanPath string) bool {
+	if cleanPath == "" || cleanPath == "." || cleanPath == ".." {
+		return false
+	}
+	if filepath.IsAbs(cleanPath) {
+		return false
+	}
+	if strings.HasPrefix(cleanPath, ".."+string(filepath.Separator)) {
+		return false
+	}
+
+	parts := strings.Split(cleanPath, string(filepath.Separator))
+	for _, p := range parts {
+		if p == "" || p == "." || p == ".." {
+			return false
+		}
+		if !safePathComponentRe.MatchString(p) {
+			return false
+		}
+	}
+	return true
 }
