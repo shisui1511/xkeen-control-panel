@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -156,6 +157,19 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		return 0, fmt.Errorf("invalid or unsupported URL scheme")
 	}
 
+	// Basic SSRF protection
+	host := u.Hostname()
+	if ips, err := net.LookupIP(host); err == nil {
+		for _, ip := range ips {
+			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+				return 0, fmt.Errorf("local or private addresses are not allowed")
+			}
+		}
+	} else if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		// Fallback for cases where lookup fails but it's clearly local
+		return 0, fmt.Errorf("local addresses are not allowed")
+	}
+
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Get(u.String())
 	if err != nil {
@@ -180,7 +194,7 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		return 0, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	if err := os.Rename(tmpFile, targetPath); err != nil {
+	if err := os.Rename(filepath.Clean(tmpFile), filepath.Clean(targetPath)); err != nil {
 		os.Remove(tmpFile)
 		return 0, fmt.Errorf("failed to replace file: %w", err)
 	}
