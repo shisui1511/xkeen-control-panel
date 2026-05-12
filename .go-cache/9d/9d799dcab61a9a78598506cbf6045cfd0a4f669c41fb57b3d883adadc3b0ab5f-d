@@ -1,8 +1,0 @@
-//line /home/shisui/REPO/xkeen-control-panel/internal/handlers/version.go:1:1
-package handlers
-
-import "net/http"
-
-func (a *API) Version(w http.ResponseWriter, r *http.Request) {goCover_ba8d34378140__74[0] = 1 ; goCover_ba8d34378140__74[1] = goCover_ba8d34378140_P ; goCover_ba8d34378140__74[2] = 74 ; goCover_ba8d34378140__74[3] = 1;
-	a.jsonResponse(w, map[string]string{"version": a.srv.GetVersion()})
-}
