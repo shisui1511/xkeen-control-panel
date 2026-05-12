@@ -124,18 +124,18 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 ## Управление сервисом
 
 ```bash
-/opt/etc/init.d/S99xkeen-control-panel start    # Запуск
-/opt/etc/init.d/S99xkeen-control-panel stop     # Остановка
-/opt/etc/init.d/S99xkeen-control-panel restart  # Перезапуск
-/opt/etc/init.d/S99xkeen-control-panel status   # Статус
+/opt/etc/init.d/S99xcp start    # Запуск
+/opt/etc/init.d/S99xcp stop     # Остановка
+/opt/etc/init.d/S99xcp restart  # Перезапуск
+/opt/etc/init.d/S99xcp status   # Статус
 ```
 
 ## Удаление
 
 ```bash
-/opt/etc/init.d/S99xkeen-control-panel stop
+/opt/etc/init.d/S99xcp stop
 rm -f /opt/bin/xkeen-control-panel
-rm -f /opt/etc/init.d/S99xkeen-control-panel
+rm -f /opt/etc/init.d/S99xcp
 rm -rf /opt/etc/xkeen-control-panel   # удалить конфиги (опционально)
 ```
 
