@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -149,8 +150,14 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		return 0, fmt.Errorf("invalid file path: outside allowed directories")
 	}
 
+	// Validate URL to prevent SSRF
+	u, err := url.Parse(remoteURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return 0, fmt.Errorf("invalid or unsupported URL scheme")
+	}
+
 	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Get(remoteURL)
+	resp, err := client.Get(u.String())
 	if err != nil {
 		return 0, fmt.Errorf("failed to download: %w", err)
 	}
