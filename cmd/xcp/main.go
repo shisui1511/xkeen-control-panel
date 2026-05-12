@@ -161,13 +161,11 @@ func main() {
 	defer trafficQuotaSvc.Stop()
 
 	// DAT Manager
-	datSvc := services.NewDATManagerService(cfg.DataDir)
+	datSvc := services.NewDATManagerService()
 	api.SetDATManagerService(datSvc)
 
 	srv.HandleProtected("/api/dat/list", api.DATList)
 	srv.HandleProtected("/api/dat/update", api.DATUpdate)
-	srv.HandleProtected("/api/dat/update-all", api.DATUpdateAll)
-	srv.HandleProtected("/api/dat/info", api.DATInfo)
 
 	// Xkeen Console
 	xkeenPath := "/opt/bin/xkeen"
