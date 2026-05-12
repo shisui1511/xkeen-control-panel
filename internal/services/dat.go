@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -95,90 +96,62 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	safeRelPath := filepath.Clean(localPath)
-	if !isSafeRelativePath(safeRelPath) {
-		return 0, fmt.Errorf("invalid file path")
+	// 1. Path validation - strictly root files only to prevent path injection
+	safeName := filepath.Base(filepath.Clean(localPath))
+	if safeName == "." || safeName == ".." || safeName == "" {
+		return 0, fmt.Errorf("invalid file name")
 	}
 
-	xrayAbs, err := filepath.Abs(s.xrayDir)
-	if err != nil {
-		return 0, fmt.Errorf("invalid service directory")
-	}
-	xrayBase, err := filepath.EvalSymlinks(xrayAbs)
-	if err != nil {
-		return 0, fmt.Errorf("invalid service directory")
+	// Basic regex check for the filename to be even safer
+	if !safePathComponentRe.MatchString(safeName) {
+		return 0, fmt.Errorf("invalid characters in file name")
 	}
 
-	mihomoAbs, err := filepath.Abs(s.mihomoDir)
-	if err != nil {
-		return 0, fmt.Errorf("invalid service directory")
-	}
-	mihomoBase, err := filepath.EvalSymlinks(mihomoAbs)
-	if err != nil {
-		return 0, fmt.Errorf("invalid service directory")
-	}
-
-	isInside := func(base, target string) bool {
-		rel, err := filepath.Rel(base, target)
-		if err != nil {
-			return false
+	// Determine base directory (prefer xray for .dat, mihomo for .mmdb)
+	baseDir := s.xrayDir
+	if strings.HasSuffix(safeName, ".mmdb") {
+		baseDir = s.mihomoDir
+	} else {
+		// For .dat, check if it already exists in mihomo
+		if _, err := os.Stat(filepath.Join(s.mihomoDir, safeName)); err == nil {
+			baseDir = s.mihomoDir
 		}
-		return rel != "." && rel != ".." && !filepath.IsAbs(rel) &&
-			!strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
 
-	resolveWithin := func(base string) (string, bool) {
-		candidate := filepath.Join(base, safeRelPath)
-		parent := filepath.Dir(candidate)
-		parentReal, err := filepath.EvalSymlinks(parent)
-		if err != nil {
-			return "", false
-		}
-		finalPath := filepath.Join(parentReal, filepath.Base(candidate))
-		if !isInside(base, finalPath) {
-			return "", false
-		}
-		return finalPath, true
-	}
+	// Final absolute path - fully controlled and sanitized
+	targetAbs := filepath.Join(baseDir, safeName)
 
-	targetPath, ok := resolveWithin(xrayBase)
-	tempBase := xrayBase
-	if !ok {
-		targetPath, ok = resolveWithin(mihomoBase)
-		tempBase = mihomoBase
-	}
-	if !ok {
-		return 0, fmt.Errorf("invalid file path: outside allowed directories")
-	}
-
-	targetAbs, err := filepath.Abs(targetPath)
-	if err != nil {
-		return 0, fmt.Errorf("invalid file path")
-	}
-	if !isInside(xrayBase, targetAbs) && !isInside(mihomoBase, targetAbs) {
-		return 0, fmt.Errorf("invalid file path: outside allowed directories")
-	}
-
-	// Validate URL to prevent SSRF
+	// 2. URL validation & SSRF protection
 	u, err := url.Parse(remoteURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return 0, fmt.Errorf("invalid or unsupported URL scheme")
 	}
 
-	// Basic SSRF protection
-	host := u.Hostname()
-	if ips, err := net.LookupIP(host); err == nil {
-		for _, ip := range ips {
-			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
-				return 0, fmt.Errorf("local or private addresses are not allowed")
+	// Robust SSRF protection using custom DialContext that prevents connections to private IPs
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, _, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
 			}
-		}
-	} else if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		// Fallback for cases where lookup fails but it's clearly local
-		return 0, fmt.Errorf("local addresses are not allowed")
+			ips, err := net.LookupIP(host)
+			if err != nil {
+				return nil, err
+			}
+			for _, ip := range ips {
+				if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+					return nil, fmt.Errorf("access to private network is prohibited")
+				}
+			}
+			return (&net.Dialer{Timeout: 30 * time.Second}).DialContext(ctx, network, addr)
+		},
 	}
 
-	client := &http.Client{Timeout: 5 * time.Minute}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   5 * time.Minute,
+	}
+
 	resp, err := client.Get(u.String())
 	if err != nil {
 		return 0, fmt.Errorf("failed to download: %w", err)
@@ -189,7 +162,8 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		return 0, fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	out, err := os.CreateTemp(tempBase, filepath.Base(targetAbs)+".*.tmp")
+	// Create temp file in the same directory
+	out, err := os.CreateTemp(baseDir, safeName+".*.tmp")
 	if err != nil {
 		return 0, fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -202,6 +176,7 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		return 0, fmt.Errorf("failed to write file: %w", err)
 	}
 
+	// targetAbs is now fully sanitized and restricted to baseDir
 	if err := os.Rename(tmpFile, targetAbs); err != nil {
 		os.Remove(tmpFile)
 		return 0, fmt.Errorf("failed to replace file: %w", err)
@@ -210,27 +185,5 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	return written, nil
 }
 
+
 var safePathComponentRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-
-func isSafeRelativePath(cleanPath string) bool {
-	if cleanPath == "" || cleanPath == "." || cleanPath == ".." {
-		return false
-	}
-	if filepath.IsAbs(cleanPath) {
-		return false
-	}
-	if strings.HasPrefix(cleanPath, ".."+string(filepath.Separator)) {
-		return false
-	}
-
-	parts := strings.Split(cleanPath, string(filepath.Separator))
-	for _, p := range parts {
-		if p == "" || p == "." || p == ".." {
-			return false
-		}
-		if !safePathComponentRe.MatchString(p) {
-			return false
-		}
-	}
-	return true
-}
