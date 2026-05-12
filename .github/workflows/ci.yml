@@ -166,6 +166,29 @@ jobs:
           cd frontend
           npx playwright install --with-deps
 
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: false
+
+      - name: Build Go backend
+        run: |
+          go mod download
+          go build -ldflags="-s -w" -o xcp ./cmd/xcp
+
+      - name: Run Go backend
+        run: |
+          mkdir -p /tmp/xcp-data
+          cat > config.json <<EOF
+          {
+            "port": 8090,
+            "data_dir": "/tmp/xcp-data"
+          }
+          EOF
+          ./xcp -config config.json &
+          sleep 2
+
       - name: Run Playwright tests
         run: |
           cd frontend

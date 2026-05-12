@@ -116,9 +116,7 @@ func (s *SmartProxyService) load() {
 	s.mu.Unlock()
 }
 
-func (s *SmartProxyService) save() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *SmartProxyService) saveLocked() error {
 	store := ProfileStore{Profiles: s.profiles}
 
 	data, err := json.MarshalIndent(store, "", "  ")
@@ -128,6 +126,12 @@ func (s *SmartProxyService) save() error {
 
 	os.MkdirAll(s.dataDir, 0755)
 	return os.WriteFile(s.storePath(), data, 0644)
+}
+
+func (s *SmartProxyService) save() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saveLocked()
 }
 
 // CRUD operations
@@ -156,9 +160,9 @@ func (s *SmartProxyService) Add(p *Profile) error {
 		p.ID = fmt.Sprintf("profile_%d", time.Now().UnixNano())
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.profiles = append(s.profiles, *p)
-	s.mu.Unlock()
-	return s.save()
+	return s.saveLocked()
 }
 
 func (s *SmartProxyService) Update(id string, p *Profile) error {
@@ -168,7 +172,7 @@ func (s *SmartProxyService) Update(id string, p *Profile) error {
 		if s.profiles[i].ID == id {
 			s.profiles[i] = *p
 			s.profiles[i].ID = id
-			return s.save()
+			return s.saveLocked()
 		}
 	}
 	return fmt.Errorf("profile not found")
@@ -180,7 +184,7 @@ func (s *SmartProxyService) Delete(id string) error {
 	for i, p := range s.profiles {
 		if p.ID == id {
 			s.profiles = append(s.profiles[:i], s.profiles[i+1:]...)
-			return s.save()
+			return s.saveLocked()
 		}
 	}
 	return fmt.Errorf("profile not found")
@@ -192,7 +196,7 @@ func (s *SmartProxyService) SetEnabled(id string, enabled bool) error {
 	for i := range s.profiles {
 		if s.profiles[i].ID == id {
 			s.profiles[i].Enabled = enabled
-			return s.save()
+			return s.saveLocked()
 		}
 	}
 	return fmt.Errorf("profile not found")
