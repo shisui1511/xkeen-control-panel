@@ -140,8 +140,10 @@ defer s.mu.Unlock()
 	}
 
 	targetPath, ok := resolveWithin(xrayBase)
+	tempBase := xrayBase
 	if !ok {
 		targetPath, ok = resolveWithin(mihomoBase)
+		tempBase = mihomoBase
 	}
 	if !ok {
 		return 0, fmt.Errorf("invalid file path: outside allowed directories")
@@ -158,7 +160,7 @@ defer s.mu.Unlock()
 		return 0, fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	out, err := os.CreateTemp(filepath.Dir(targetPath), filepath.Base(targetPath)+".*.tmp")
+	out, err := os.CreateTemp(tempBase, filepath.Base(targetPath)+".*.tmp")
 	if err != nil {
 		return 0, fmt.Errorf("failed to create temp file: %w", err)
 	}
