@@ -92,10 +92,11 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 s.mu.Lock()
 defer s.mu.Unlock()
 
-	// Safety check: resolve to absolute path and ensure it's within allowed directories.
 	cleanPath := filepath.Clean(localPath)
-	targetPath, err := filepath.Abs(cleanPath)
-	if err != nil {
+	if cleanPath == "." || cleanPath == "" || filepath.IsAbs(cleanPath) {
+		return 0, fmt.Errorf("invalid file path")
+	}
+	if strings.HasPrefix(cleanPath, ".."+string(filepath.Separator)) || cleanPath == ".." {
 		return 0, fmt.Errorf("invalid file path")
 	}
 
@@ -103,25 +104,48 @@ defer s.mu.Unlock()
 	if err != nil {
 		return 0, fmt.Errorf("invalid service directory")
 	}
-	mihomoAbs, err := filepath.Abs(s.mihomoDir)
+	xrayBase, err := filepath.EvalSymlinks(xrayAbs)
 	if err != nil {
 		return 0, fmt.Errorf("invalid service directory")
 	}
 
+	mihomoAbs, err := filepath.Abs(s.mihomoDir)
+	if err != nil {
+		return 0, fmt.Errorf("invalid service directory")
+	}
+	mihomoBase, err := filepath.EvalSymlinks(mihomoAbs)
+	if err != nil {
+		return 0, fmt.Errorf("invalid service directory")
+	}
 
-	// Robust path validation: must be within one of the managed directories
 	isInside := func(base, target string) bool {
 		rel, err := filepath.Rel(base, target)
 		if err != nil {
 			return false
 		}
-		// Must not be outside (..) and not the base itself (.)
-		return rel != "." && rel != ".." && !filepath.IsAbs(rel) && 
-			(len(rel) < 2 || rel[:2] != "..") && 
+		return rel != "." && rel != ".." && !filepath.IsAbs(rel) &&
 			!strings.HasPrefix(rel, ".."+string(filepath.Separator))
 	}
 
-	if !isInside(xrayAbs, targetPath) && !isInside(mihomoAbs, targetPath) {
+	resolveWithin := func(base string) (string, bool) {
+		candidate := filepath.Join(base, cleanPath)
+		parent := filepath.Dir(candidate)
+		parentReal, err := filepath.EvalSymlinks(parent)
+		if err != nil {
+			return "", false
+		}
+		finalPath := filepath.Join(parentReal, filepath.Base(candidate))
+		if !isInside(base, finalPath) {
+			return "", false
+		}
+		return finalPath, true
+	}
+
+	targetPath, ok := resolveWithin(xrayBase)
+	if !ok {
+		targetPath, ok = resolveWithin(mihomoBase)
+	}
+	if !ok {
 		return 0, fmt.Errorf("invalid file path: outside allowed directories")
 	}
 
@@ -136,11 +160,11 @@ defer s.mu.Unlock()
 		return 0, fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	tmpFile := targetPath + ".tmp"
-	out, err := os.Create(tmpFile)
+	out, err := os.CreateTemp(filepath.Dir(targetPath), filepath.Base(targetPath)+".*.tmp")
 	if err != nil {
 		return 0, fmt.Errorf("failed to create temp file: %w", err)
 	}
+	tmpFile := out.Name()
 
 	written, err := io.Copy(out, resp.Body)
 	out.Close()
