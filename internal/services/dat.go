@@ -23,10 +23,10 @@ type DATFile struct {
 
 // DATManagerService manages GeoIP and GeoSite DAT files
 type DATManagerService struct {
-	dataDir   string
-	geoIPPath string
+	dataDir     string
+	geoIPPath   string
 	geoSitePath string
-	mu        sync.RWMutex
+	mu          sync.RWMutex
 }
 
 func NewDATManagerService(dataDir string) *DATManagerService {

@@ -9,8 +9,8 @@ import (
 
 // CommandCategory represents a group of related commands
 type CommandCategory struct {
-	Name     string            `json:"name"`
-	Commands []CommandDef     `json:"commands"`
+	Name     string       `json:"name"`
+	Commands []CommandDef `json:"commands"`
 }
 
 // CommandDef represents a single console command
