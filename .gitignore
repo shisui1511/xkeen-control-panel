@@ -13,5 +13,14 @@ doc/
 # Node.js files (frontend build)
 node_modules/
 frontend/dist/
-frontend/node_modules/coverage.out
+frontend/node_modules/
+coverage.out
 bin/golangci-lint
+
+# Go cache
+.go/
+.go-cache/
+
+# Playwright
+frontend/playwright-report/
+frontend/test-results/
