@@ -9,7 +9,7 @@ import (
 func TestDATManagerService_List(t *testing.T) {
 	tmpXray := t.TempDir()
 	tmpMihomo := t.TempDir()
-	
+
 	os.WriteFile(filepath.Join(tmpXray, "geoip.dat"), []byte("dummy xray dat"), 0644)
 	os.WriteFile(filepath.Join(tmpMihomo, "country.mmdb"), []byte("dummy mmdb"), 0644)
 	os.WriteFile(filepath.Join(tmpMihomo, "config.dat"), []byte("dummy mihomo dat"), 0644)

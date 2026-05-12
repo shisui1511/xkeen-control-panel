@@ -7,10 +7,6 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
-func (a *API) smartProxy() *services.SmartProxyService {
-	return a.smartProxySvc
-}
-
 func (a *API) SmartProxyList(w http.ResponseWriter, r *http.Request) {
 	if a.smartProxySvc == nil {
 		a.errorResponse(w, "Smart Proxy service unavailable", http.StatusServiceUnavailable)
