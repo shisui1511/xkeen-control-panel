@@ -2,13 +2,17 @@ import { test, expect } from '@playwright/test';
 
 test('has title', async ({ page }) => {
   await page.goto('/');
-  // Expect a title "to contain" a substring.
   await expect(page).toHaveTitle(/XKeen Control Panel/);
 });
 
-test('shows login form', async ({ page }) => {
+test('shows auth form', async ({ page }) => {
   await page.goto('/');
-  // Expect login form elements to be visible
+  // Password field is present on both Login and Setup screens
   await expect(page.locator('#password')).toBeVisible();
-  await expect(page.locator('button', { hasText: /Войти|Login/ })).toBeVisible();
+  // Button text depends on whether setup is required or login is shown
+  // Setup: "Установить пароль" / "Set Password"
+  // Login: "Войти" / "Login"
+  await expect(
+    page.locator('button.btn-primary')
+  ).toBeVisible();
 });
