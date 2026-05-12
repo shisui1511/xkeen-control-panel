@@ -1,4 +1,3 @@
-<script>
 // Simple PWA icon generator - run with Node.js to create PNG icons
 // Requires: npm install sharp
 // Usage: node generate-icons.js
