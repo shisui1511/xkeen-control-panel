@@ -151,6 +151,14 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		return 0, fmt.Errorf("invalid file path: outside allowed directories")
 	}
 
+	targetAbs, err := filepath.Abs(targetPath)
+	if err != nil {
+		return 0, fmt.Errorf("invalid file path")
+	}
+	if !isInside(xrayBase, targetAbs) && !isInside(mihomoBase, targetAbs) {
+		return 0, fmt.Errorf("invalid file path: outside allowed directories")
+	}
+
 	// Validate URL to prevent SSRF
 	u, err := url.Parse(remoteURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
@@ -181,7 +189,7 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		return 0, fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	out, err := os.CreateTemp(tempBase, filepath.Base(targetPath)+".*.tmp")
+	out, err := os.CreateTemp(tempBase, filepath.Base(targetAbs)+".*.tmp")
 	if err != nil {
 		return 0, fmt.Errorf("failed to create temp file: %w", err)
 	}
@@ -194,7 +202,7 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		return 0, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	if err := os.Rename(filepath.Clean(tmpFile), filepath.Clean(targetPath)); err != nil {
+	if err := os.Rename(tmpFile, targetAbs); err != nil {
 		os.Remove(tmpFile)
 		return 0, fmt.Errorf("failed to replace file: %w", err)
 	}
