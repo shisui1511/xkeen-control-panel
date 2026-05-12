@@ -9,8 +9,8 @@ import (
 func TestDefault(t *testing.T) {
 	cfg := Default()
 
-	if cfg.Port != 8089 {
-		t.Errorf("Expected port 8089, got %d", cfg.Port)
+	if cfg.Port != 8090 {
+		t.Errorf("Expected port 8090, got %d", cfg.Port)
 	}
 
 	if cfg.XRayConfigDir != "/opt/etc/xray/configs" {

@@ -117,9 +117,9 @@ func (s *SmartProxyService) load() {
 }
 
 func (s *SmartProxyService) save() error {
-	s.mu.RLock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	store := ProfileStore{Profiles: s.profiles}
-	s.mu.RUnlock()
 
 	data, err := json.MarshalIndent(store, "", "  ")
 	if err != nil {

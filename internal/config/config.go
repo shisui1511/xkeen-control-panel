@@ -38,7 +38,7 @@ type HTTPSConfig struct {
 
 func Default() *Config {
 	return &Config{
-		Port:            8089,
+		Port:            8090,
 		XRayConfigDir:   "/opt/etc/xray/configs",
 		XKeenBinary:     "xkeen",
 		MihomoConfigDir: "/opt/etc/mihomo",
