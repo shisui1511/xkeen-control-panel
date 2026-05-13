@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type Config struct {
@@ -113,7 +115,7 @@ func Load(path string) (*Config, error) {
 func Save(path string, cfg *Config) error {
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	os.MkdirAll(filepath.Dir(path), 0755)
-	return os.WriteFile(path, data, 0644)
+	return utils.AtomicWriteFile(path, data, 0644)
 }
 
 func (c *Config) SavePasswordHash(path string, hash string) error {

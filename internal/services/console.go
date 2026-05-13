@@ -84,6 +84,14 @@ func (s *ConsoleService) GetCommands() []CommandCategory {
 
 // Execute runs an XKeen command and returns its output
 func (s *ConsoleService) Execute(command string) (*CommandResult, error) {
+	// Validate command against whitelist
+	if !s.isAllowedCommand(command) {
+		return &CommandResult{
+			Success: false,
+			Error:   fmt.Sprintf("command %q is not allowed", command),
+		}, nil
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -108,4 +116,16 @@ func (s *ConsoleService) Execute(command string) (*CommandResult, error) {
 	}
 
 	return result, nil
+}
+
+// isAllowedCommand checks if a command is in the whitelist
+func (s *ConsoleService) isAllowedCommand(command string) bool {
+	for _, cat := range s.GetCommands() {
+		for _, cmd := range cat.Commands {
+			if cmd.Command == command {
+				return true
+			}
+		}
+	}
+	return false
 }

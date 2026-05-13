@@ -10,7 +10,15 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // allow non-browser clients
+		}
+		// Accept if Origin matches the request Host
+		host := r.Host
+		return strings.Contains(origin, host)
+	},
 }
 
 func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {

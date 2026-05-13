@@ -78,6 +78,20 @@
   let genShortId = ''
   let genSpiderDomain = ''
 
+  // Dirty state tracking
+  let originalContent = ''
+  let isDirty = false
+
+  function checkDirty(): boolean {
+    if (!editorView) return false
+    return editorView.state.doc.toString() !== originalContent
+  }
+
+  function confirmUnsaved(): boolean {
+    if (!checkDirty()) return true
+    return confirm($t('editor.unsaved_warning') || 'You have unsaved changes. Discard them?')
+  }
+
   async function loadFiles(dir?: string) {
     if (dir) currentDir = dir
     try {
@@ -91,9 +105,12 @@
 
   function switchDir(dir: string) {
     if (currentDir === dir) return
+    if (!confirmUnsaved()) return
     currentDir = dir
     selectedFile = ''
     backups = []
+    originalContent = ''
+    isDirty = false
     if (editorView) {
       editorView.setState(EditorState.create({ doc: '' }))
     }
@@ -140,9 +157,11 @@
 
   async function loadFile(path: string) {
     if (!path) return
+    if (selectedFile && path !== selectedFile && !confirmUnsaved()) return
     
     loading = true
     message = ''
+    isDirty = false
     
     try {
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`)
@@ -198,6 +217,8 @@
       }
       
       selectedFile = path
+      originalContent = content
+      isDirty = false
       await loadBackups(path)
     } catch (e) {
       message = $t('editor.file_load_error') + ': ' + e.message
@@ -239,6 +260,8 @@
       if (!res.ok) throw new Error('Failed to save file')
       
       message = $t('editor.file_saved')
+      originalContent = editorView.state.doc.toString()
+      isDirty = false
       await loadBackups(selectedFile)
       setTimeout(() => message = '', 3000)
     } catch (e) {

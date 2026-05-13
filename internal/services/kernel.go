@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -55,6 +56,7 @@ type KernelInfo struct {
 // KernelService manages proxy kernels (xray, mihomo)
 type KernelService struct {
 	kernels map[string]*KernelInfo
+	mu      sync.RWMutex
 }
 
 func NewKernelService() *KernelService {
@@ -88,6 +90,8 @@ func NewKernelService() *KernelService {
 }
 
 func (s *KernelService) List() []KernelInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	result := make([]KernelInfo, 0, len(s.kernels))
 	for _, k := range s.kernels {
 		result = append(result, *k)
@@ -96,6 +100,8 @@ func (s *KernelService) List() []KernelInfo {
 }
 
 func (s *KernelService) Get(name string) *KernelInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if k, ok := s.kernels[name]; ok {
 		// Refresh version
 		k.CurrentVersion = s.detectVersion(k)
@@ -105,6 +111,8 @@ func (s *KernelService) Get(name string) *KernelInfo {
 }
 
 func (s *KernelService) SetChannel(name, channel string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if k, ok := s.kernels[name]; ok {
 		k.Channel = channel
 		return true
@@ -157,6 +165,8 @@ func (s *KernelService) parseVersion(name, output string) string {
 
 // CheckLatest queries GitHub API for latest release
 func (s *KernelService) CheckLatest(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	k := s.kernels[name]
 	if k == nil {
 		return fmt.Errorf("kernel not found: %s", name)
@@ -220,6 +230,8 @@ func (s *KernelService) CheckLatest(name string) error {
 
 // Install downloads and installs the kernel
 func (s *KernelService) Install(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	k := s.kernels[name]
 	if k == nil {
 		return fmt.Errorf("kernel not found: %s", name)

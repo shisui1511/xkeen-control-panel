@@ -416,9 +416,10 @@ func parseTrojanLink(link string) *Outbound {
 		return nil
 	}
 
+	// In trojan:// URIs, the password is the entire userinfo (before @), not a "password" field
 	password := ""
 	if u.User != nil {
-		password, _ = u.User.Password()
+		password = u.User.Username()
 	}
 
 	tag := u.Fragment
