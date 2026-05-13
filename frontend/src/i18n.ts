@@ -243,6 +243,11 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.templates': 'Шаблоны',
     'editor.templates_desc': 'Выберите готовый шаблон для быстрой настройки. Внимание: текущий контент будет заменен!',
     'editor.confirm_template': 'Вы уверены, что хотите применить этот шаблон? Текущее содержимое файла будет заменено.',
+    'editor.generator': 'Генератор',
+    'editor.protocol': 'Протокол',
+    'editor.address': 'Адрес',
+    'editor.port': 'Порт',
+    'app.generate': 'Сгенерировать',
 
     // Connections
     'conn.title': 'Подключения',
@@ -571,6 +576,11 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.templates': 'Templates',
     'editor.templates_desc': 'Select a pre-made template for quick setup. Warning: current content will be replaced!',
     'editor.confirm_template': 'Are you sure you want to apply this template? Current file content will be replaced.',
+    'editor.generator': 'Generator',
+    'editor.protocol': 'Protocol',
+    'editor.address': 'Address',
+    'editor.port': 'Port',
+    'app.generate': 'Generate',
 
     // Connections
     'conn.title': 'Connections',

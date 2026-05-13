@@ -64,6 +64,19 @@
   let newFileName = ''
   let renameTarget = ''
   let templates: Template[] = []
+  
+  // Generator state
+  let showGeneratorModal = false
+  let genProtocol = 'vless'
+  let genAddress = ''
+  let genPort = 443
+  let genUUID = crypto.randomUUID()
+  let genSNI = ''
+  let genFlow = 'xtls-rprx-vision'
+  let genSecurity = 'reality'
+  let genPublicKey = ''
+  let genShortId = ''
+  let genSpiderDomain = ''
 
   async function loadFiles(dir?: string) {
     if (dir) currentDir = dir
@@ -433,6 +446,55 @@
     }
   }
 
+  function generateOutbound() {
+    if (!editorView) return
+    
+    let config: any = {}
+    if (genProtocol === 'vless') {
+      config = {
+        protocol: "vless",
+        settings: {
+          vnext: [{
+            address: genAddress,
+            port: genPort,
+            users: [{ id: genUUID, encryption: "none", flow: genFlow }]
+          }]
+        },
+        streamSettings: {
+          network: "tcp",
+          security: genSecurity,
+          realitySettings: genSecurity === 'reality' ? {
+            show: false,
+            dest: genSpiderDomain + ":443",
+            xver: 0,
+            serverNames: [genSNI],
+            privateKey: "", // User must fill
+            shortIds: [genShortId]
+          } : undefined
+        }
+      }
+    } else if (genProtocol === 'shadowsocks') {
+      config = {
+        protocol: "shadowsocks",
+        settings: {
+          servers: [{
+            address: genAddress,
+            port: genPort,
+            method: "256-gcm",
+            password: genUUID
+          }]
+        }
+      }
+    }
+
+    const content = JSON.stringify(config, null, 2)
+    const cursor = editorView.state.selection.main.head
+    editorView.dispatch({
+      changes: { from: cursor, insert: content }
+    })
+    showGeneratorModal = false
+  }
+
   onMount(() => {
     loadFiles()
     loadTemplates()
@@ -508,6 +570,9 @@
           </button>
           <button on:click={() => showTemplatesModal = true} class="btn-secondary" title="Apply configuration templates">
             📂 {$t('editor.templates')}
+          </button>
+          <button on:click={() => showGeneratorModal = true} class="btn-secondary" title="Generate outbound config">
+            ✨ {$t('editor.generator')}
           </button>
           <button on:click={() => { showRenameModal = true; renameTarget = selectedFile.split('/').pop() || '' }} class="btn-secondary">
             {$t('app.rename')}
@@ -599,6 +664,73 @@
         {:else}
           <p class="text-center p-3">{$t('app.loading')}</p>
         {/each}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showGeneratorModal}
+  <div class="modal-overlay" on:click={() => showGeneratorModal = false}>
+    <div class="modal generator-modal" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3>{$t('editor.generator')}</h3>
+        <button class="btn-close" on:click={() => showGeneratorModal = false}>✕</button>
+      </div>
+      
+      <div class="form-group mb-2">
+        <label>{$t('editor.protocol')}</label>
+        <select bind:value={genProtocol} class="input">
+          <option value="vless">VLESS</option>
+          <option value="shadowsocks">Shadowsocks</option>
+        </select>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label>{$t('editor.address')}</label>
+          <input type="text" bind:value={genAddress} placeholder="example.com" class="input" />
+        </div>
+        <div class="form-group">
+          <label>{$t('editor.port')}</label>
+          <input type="number" bind:value={genPort} class="input" />
+        </div>
+      </div>
+
+      <div class="form-group mt-2">
+        <label>{genProtocol === 'vless' ? 'UUID' : 'Password'}</label>
+        <div class="input-group">
+          <input type="text" bind:value={genUUID} class="input" />
+          <button class="btn btn-secondary" on:click={() => genUUID = crypto.randomUUID()}>🎲</button>
+        </div>
+      </div>
+
+      {#if genProtocol === 'vless'}
+        <div class="form-group mt-2">
+          <label>SNI</label>
+          <input type="text" bind:value={genSNI} placeholder="sni.example.com" class="input" />
+        </div>
+        
+        <div class="form-grid mt-2">
+          <div class="form-group">
+            <label>Security</label>
+            <select bind:value={genSecurity} class="input">
+              <option value="reality">Reality</option>
+              <option value="tls">TLS</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+          {#if genSecurity === 'reality'}
+            <div class="form-group">
+              <label>Short ID</label>
+              <input type="text" bind:value={genShortId} placeholder="hex string" class="input" />
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <div class="modal-actions mt-3">
+        <button on:click={() => showGeneratorModal = false} class="btn btn-secondary">{$t('app.cancel')}</button>
+        <button on:click={generateOutbound} class="btn btn-primary">{$t('app.generate')}</button>
       </div>
     </div>
   </div>
@@ -938,4 +1070,21 @@
   .text-center {
     text-align: center;
   }
+  .generator-modal {
+    max-width: 500px;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 1rem;
+  }
+
+  .input-group {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .mt-3 { margin-top: 1.5rem; }
+  .mb-2 { margin-bottom: 1rem; }
 </style>

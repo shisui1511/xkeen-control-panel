@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -36,11 +37,30 @@ type HTTPSConfig struct {
 	KeyPath  string `json:"key_path"`
 }
 
+func findXKeen() string {
+	paths := []string{
+		"/opt/sbin/xkeen",
+		"/opt/bin/xkeen",
+		"/usr/local/bin/xkeen",
+		"/usr/bin/xkeen",
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	// Try which
+	if path, err := exec.LookPath("xkeen"); err == nil {
+		return path
+	}
+	return "/opt/sbin/xkeen" // fallback
+}
+
 func Default() *Config {
 	return &Config{
 		Port:            8090,
 		XRayConfigDir:   "/opt/etc/xray/configs",
-		XKeenBinary:     "/opt/sbin/xkeen",
+		XKeenBinary:     findXKeen(),
 		MihomoConfigDir: "/opt/etc/mihomo",
 		MihomoBinary:    "/opt/sbin/mihomo",
 		MihomoAPIURL:    "http://localhost:9090",
