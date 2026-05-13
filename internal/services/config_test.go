@@ -22,7 +22,7 @@ func TestConfigService_List(t *testing.T) {
 	}
 
 	svc := NewConfigService(tmp)
-	got, err := svc.List()
+	got, err := svc.List("")
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
