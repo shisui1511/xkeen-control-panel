@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 )
 
 type Template struct {
@@ -59,7 +60,25 @@ func (s *TemplateService) List() []Template {
 }
 
 func (s *TemplateService) Fetch(url string) (string, error) {
-	resp, err := http.Get(url)
+	s.mu.RLock()
+	allowed := false
+	for _, t := range s.templates {
+		if t.URL == url {
+			allowed = true
+			break
+		}
+	}
+	s.mu.RUnlock()
+
+	if !allowed {
+		return "", fmt.Errorf("requested URL is not in the allowed templates list")
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get(url)
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +88,8 @@ func (s *TemplateService) Fetch(url string) (string, error) {
 		return "", fmt.Errorf("failed to fetch template: %s", resp.Status)
 	}
 
-	content, err := io.ReadAll(resp.Body)
+	// Limit response size to 1MB
+	content, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if err != nil {
 		return "", err
 	}
