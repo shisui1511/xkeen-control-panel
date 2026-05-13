@@ -40,6 +40,15 @@ func (s *XKeenService) Restart() (string, error) {
 	return s.runWithTimeout("-restart", 45*time.Second)
 }
 
+func (s *XKeenService) SwitchKernel(name string) (string, error) {
+	if name == "xray" {
+		return s.runWithTimeout("-xray", 30*time.Second)
+	} else if name == "mihomo" {
+		return s.runWithTimeout("-mihomo", 30*time.Second)
+	}
+	return "", fmt.Errorf("invalid kernel: %s", name)
+}
+
 func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (string, error) {
 	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s %s", s.BinaryPath, action))
 	var out bytes.Buffer

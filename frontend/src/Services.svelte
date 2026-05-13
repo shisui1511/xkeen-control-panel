@@ -51,14 +51,35 @@
     } catch (e) {}
   }
 
-  async function controlService(service: 'xkeen' | 'mihomo', action: string) {
-    const key = `${service}-${action}`
+  async function controlService(action: string) {
+    const key = `xkeen-${action}`
     actionLoading[key] = true
     
     try {
-      const endpoint = service === 'xkeen' ? '/api/service/control' : '/api/mihomo/control'
       const csrfToken = localStorage.getItem('csrf_token')
-      const res = await fetch(`${endpoint}?action=${action}`, {
+      const res = await fetch(`/api/service/control?action=${action}`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      })
+      
+      const text = await res.text()
+      if (!res.ok) throw new Error(text)
+      
+      await fetchStatus()
+    } catch (e: any) {
+      alert(`${$t('svc.action_error')}: ${e.message}`)
+    } finally {
+      actionLoading[key] = false
+    }
+  }
+
+  async function switchKernel(kernel: string) {
+    const key = `switch-${kernel}`
+    actionLoading[key] = true
+    
+    try {
+      const csrfToken = localStorage.getItem('csrf_token')
+      const res = await fetch(`/api/service/control?action=switch_kernel&kernel=${kernel}`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
       })
@@ -130,8 +151,8 @@
     return kernels.find(k => k.name === name)
   }
 
-  $: xray = getKernel('xray')
-  $: mihomo = getKernel('mihomo')
+  $: activeKernel = xkeenStatus.toLowerCase().includes('xray') ? 'xray' : (xkeenStatus.toLowerCase().includes('mihomo') ? 'mihomo' : 'unknown')
+  $: isRunning = xkeenStatus.includes('running') || xkeenStatus.includes('работает') || xkeenStatus.includes('активен')
 
   onMount(() => {
     fetchStatus()
@@ -149,33 +170,57 @@
   <p class="text-secondary mb-3">{$t('svc.subtitle')}</p>
 
   <div class="services-grid">
-    <!-- XKeen Card -->
-    <div class="card">
+    <!-- XKeen Main Control Card -->
+    <div class="card main-control">
       <div class="service-header">
         <div class="title-group">
           <h2>{$t('svc.xkeen')}</h2>
-          <span class="version-tag">Tool</span>
+          <span class="version-tag">Service</span>
         </div>
-        <span class="status-badge" class:running={xkeenStatus.includes('running') || xkeenStatus.includes('работает') || xkeenStatus.includes('активен')}>
+        <span class="status-badge" class:running={isRunning}>
           {xkeenStatus || $t('app.loading')}
         </span>
       </div>
-      <p class="text-secondary mb-2">{$t('svc.xkeen_desc')}</p>
+      
+      <div class="kernel-selector mb-2">
+        <span class="text-secondary mr-2">{$t('svc.active_kernel')}:</span>
+        <div class="btn-group">
+          <button 
+            class="btn btn-sm" 
+            class:btn-primary={activeKernel === 'xray'} 
+            class:btn-secondary={activeKernel !== 'xray'}
+            on:click={() => switchKernel('xray')}
+            disabled={actionLoading['switch-xray']}
+          >
+            Xray
+          </button>
+          <button 
+            class="btn btn-sm" 
+            class:btn-primary={activeKernel === 'mihomo'} 
+            class:btn-secondary={activeKernel !== 'mihomo'}
+            on:click={() => switchKernel('mihomo')}
+            disabled={actionLoading['switch-mihomo']}
+          >
+            Mihomo
+          </button>
+        </div>
+      </div>
+
       <div class="actions">
-        <button class="btn btn-primary" on:click={() => controlService('xkeen', 'start')} disabled={actionLoading['xkeen-start']}>
+        <button class="btn btn-primary" on:click={() => controlService('start')} disabled={actionLoading['xkeen-start']}>
           {actionLoading['xkeen-start'] ? $t('svc.starting') : '▶ ' + $t('app.start')}
         </button>
-        <button class="btn btn-secondary" on:click={() => controlService('xkeen', 'stop')} disabled={actionLoading['xkeen-stop']}>
+        <button class="btn btn-secondary" on:click={() => controlService('stop')} disabled={actionLoading['xkeen-stop']}>
           {actionLoading['xkeen-stop'] ? $t('svc.stopping') : '⏹ ' + $t('app.stop')}
         </button>
-        <button class="btn btn-secondary" on:click={() => controlService('xkeen', 'restart')} disabled={actionLoading['xkeen-restart']}>
+        <button class="btn btn-secondary" on:click={() => controlService('restart')} disabled={actionLoading['xkeen-restart']}>
           {actionLoading['xkeen-restart'] ? $t('svc.restarting') : '🔄 ' + $t('app.restart')}
         </button>
       </div>
     </div>
 
-    <!-- Xray Card -->
-    <div class="card">
+    <!-- Xray Details Card -->
+    <div class="card" class:active-card={activeKernel === 'xray'}>
       <div class="service-header">
         <div class="title-group">
           <h2>{$t('svc.xray')}</h2>
@@ -183,9 +228,9 @@
             <span class="version-tag">{xray.current_version === 'not installed' ? $t('kernels.not_installed') : 'v' + xray.current_version}</span>
           {/if}
         </div>
-        <span class="status-badge" class:running={xkeenStatus.includes('running') || xkeenStatus.includes('работает') || xkeenStatus.includes('активен')}>
-          {xkeenStatus || $t('app.loading')}
-        </span>
+        {#if activeKernel === 'xray'}
+          <span class="active-tag">Active</span>
+        {/if}
       </div>
       <p class="text-secondary mb-2">{$t('svc.xray_desc')}</p>
       
@@ -213,15 +258,14 @@
       {/if}
 
       <div class="actions">
-        <span class="text-secondary" style="font-size: 0.85rem;">{$t('svc.xray_managed')}</span>
         <button class="btn btn-icon-small" on:click={() => checkKernelUpdate('xray')} title={$t('kernels.check_update')} disabled={xray?.status !== 'idle'}>
           {xray?.status === 'checking' ? '...' : '🔄'}
         </button>
       </div>
     </div>
 
-    <!-- Mihomo Card -->
-    <div class="card">
+    <!-- Mihomo Details Card -->
+    <div class="card" class:active-card={activeKernel === 'mihomo'}>
       <div class="service-header">
         <div class="title-group">
           <h2>{$t('svc.mihomo')}</h2>
@@ -229,9 +273,9 @@
             <span class="version-tag">{mihomo.current_version === 'not installed' ? $t('kernels.not_installed') : 'v' + mihomo.current_version}</span>
           {/if}
         </div>
-        <span class="status-badge" class:running={mihomoStatus.includes('running') || mihomoStatus.includes('pid')}>
-          {mihomoStatus || $t('app.loading')}
-        </span>
+        {#if activeKernel === 'mihomo'}
+          <span class="active-tag">Active</span>
+        {/if}
       </div>
       <p class="text-secondary mb-2">{$t('svc.mihomo_desc')}</p>
 
@@ -243,6 +287,12 @@
               <option value="stable">Stable</option>
               <option value="preview">Preview</option>
             </select>
+          </div>
+          <div class="detail-row">
+            <span>Status:</span>
+            <span class="status-text" class:text-success={mihomoStatus.includes('running')}>
+              {mihomoStatus}
+            </span>
           </div>
           {#if mihomo.latest_version && mihomo.has_update}
             <div class="detail-row update-available">
@@ -259,15 +309,6 @@
       {/if}
 
       <div class="actions">
-        <button class="btn btn-primary" on:click={() => controlService('mihomo', 'start')} disabled={actionLoading['mihomo-start']}>
-          {actionLoading['mihomo-start'] ? $t('svc.starting') : '▶ ' + $t('app.start')}
-        </button>
-        <button class="btn btn-secondary" on:click={() => controlService('mihomo', 'stop')} disabled={actionLoading['mihomo-stop']}>
-          {actionLoading['mihomo-stop'] ? $t('svc.stopping') : '⏹ ' + $t('app.stop')}
-        </button>
-        <button class="btn btn-secondary" on:click={() => controlService('mihomo', 'restart')} disabled={actionLoading['mihomo-restart']}>
-          {actionLoading['mihomo-restart'] ? $t('svc.restarting') : '🔄 ' + $t('app.restart')}
-        </button>
         <button class="btn btn-icon-small" on:click={() => checkKernelUpdate('mihomo')} title={$t('kernels.check_update')} disabled={mihomo?.status !== 'idle'}>
           {mihomo?.status === 'checking' ? '...' : '🔄'}
         </button>
@@ -284,6 +325,57 @@
 </div>
 
 <style>
+  .main-control {
+    grid-column: 1 / -1;
+    border-left: 4px solid var(--primary);
+  }
+
+  .kernel-selector {
+    display: flex;
+    align-items: center;
+    background: var(--bg);
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius);
+  }
+
+  .btn-group {
+    display: flex;
+    gap: 1px;
+    background: var(--border);
+    padding: 2px;
+    border-radius: 6px;
+  }
+
+  .btn-sm {
+    padding: 0.25rem 1rem;
+    font-size: 0.85rem;
+    border-radius: 4px;
+  }
+
+  .active-card {
+    border: 1px solid var(--primary);
+    box-shadow: 0 0 10px rgba(var(--primary-rgb), 0.1);
+  }
+
+  .active-tag {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    font-weight: bold;
+    color: var(--success);
+    background: rgba(16, 185, 129, 0.1);
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+  }
+
+  .status-text {
+    font-family: monospace;
+    font-size: 0.8rem;
+  }
+
+  .text-success {
+    color: var(--success);
+  }
+
   .services-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));

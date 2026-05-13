@@ -91,7 +91,6 @@ func main() {
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
 	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
-	srv.HandleProtected("/api/mihomo/control", api.MihomoControl)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
 

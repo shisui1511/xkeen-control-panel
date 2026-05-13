@@ -28,6 +28,9 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 		out, err = a.xkeenSvc.Stop()
 	case "restart":
 		out, err = a.xkeenSvc.Restart()
+	case "switch_kernel":
+		kernel := r.URL.Query().Get("kernel")
+		out, err = a.xkeenSvc.SwitchKernel(kernel)
 	default:
 		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
 		return
