@@ -580,12 +580,12 @@
       <span class="file-name">{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span>
       <div class="toolbar-actions">
         {#if selectedFile}
-          <label class="toggle-label" title="Enable schema validation, autocomplete and hover tooltips">
-            <input type="checkbox" bind:checked={schemaEnabled} on:change={toggleSchema} />
+          <label class="toggle-label" for="schema-toggle" title="Enable schema validation, autocomplete and hover tooltips">
+            <input id="schema-toggle" type="checkbox" bind:checked={schemaEnabled} on:change={toggleSchema} />
             {$t('editor.schema')}
           </label>
-          <label class="toggle-label" title="Expert mode: full schema assist / Beginner: simplified">
-            <input type="checkbox" bind:checked={expertMode} on:change={toggleExpertMode} />
+          <label class="toggle-label" for="expert-toggle" title="Expert mode: full schema assist / Beginner: simplified">
+            <input id="expert-toggle" type="checkbox" bind:checked={expertMode} on:change={toggleExpertMode} />
             {$t('editor.expert')}
           </label>
           <button on:click={applyQuickFixes} class="btn-secondary" title="Apply common fixes">
@@ -629,10 +629,12 @@
 </div>
 
 {#if showCreateModal}
-  <div class="modal-overlay" on:click={() => showCreateModal = false}>
-    <div class="modal" on:click|stopPropagation>
+  <div class="modal-overlay" role="button" tabindex="0" on:click={() => showCreateModal = false} on:keydown={(e) => e.key === 'Escape' && (showCreateModal = false)}>
+    <div class="modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
       <h3>{$t('editor.create_file')}</h3>
+      <label for="new-file-name" class="sr-only">{$t('editor.file_name')}</label>
       <input 
+        id="new-file-name"
         type="text" 
         bind:value={newFileName}
         placeholder={$t('editor.file_name')}
@@ -648,10 +650,12 @@
 {/if}
 
 {#if showRenameModal}
-  <div class="modal-overlay" on:click={() => showRenameModal = false}>
-    <div class="modal" on:click|stopPropagation>
+  <div class="modal-overlay" role="button" tabindex="0" on:click={() => showRenameModal = false} on:keydown={(e) => e.key === 'Escape' && (showRenameModal = false)}>
+    <div class="modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
       <h3>{$t('editor.rename_file')}</h3>
+      <label for="rename-target" class="sr-only">{$t('editor.new_name')}</label>
       <input 
+        id="rename-target"
         type="text" 
         bind:value={renameTarget}
         placeholder={$t('editor.new_name')}
@@ -667,8 +671,8 @@
 {/if}
 
 {#if showTemplatesModal}
-  <div class="modal-overlay" on:click={() => showTemplatesModal = false}>
-    <div class="modal templates-modal" on:click|stopPropagation>
+  <div class="modal-overlay" role="button" tabindex="0" on:click={() => showTemplatesModal = false} on:keydown={(e) => e.key === 'Escape' && (showTemplatesModal = false)}>
+    <div class="modal templates-modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
       <div class="modal-header">
         <h3>{$t('editor.templates')}</h3>
         <button class="btn-close" on:click={() => showTemplatesModal = false}>✕</button>
@@ -693,16 +697,16 @@
 {/if}
 
 {#if showGeneratorModal}
-  <div class="modal-overlay" on:click={() => showGeneratorModal = false}>
-    <div class="modal generator-modal" on:click|stopPropagation>
+  <div class="modal-overlay" role="button" tabindex="0" on:click={() => showGeneratorModal = false} on:keydown={(e) => e.key === 'Escape' && (showGeneratorModal = false)}>
+    <div class="modal generator-modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
       <div class="modal-header">
         <h3>{$t('editor.generator')}</h3>
         <button class="btn-close" on:click={() => showGeneratorModal = false}>✕</button>
       </div>
       
       <div class="form-group mb-2">
-        <label>{$t('editor.protocol')}</label>
-        <select bind:value={genProtocol} class="input">
+        <label for="gen-protocol">{$t('editor.protocol')}</label>
+        <select id="gen-protocol" bind:value={genProtocol} class="input">
           <option value="vless">VLESS</option>
           <option value="shadowsocks">Shadowsocks</option>
         </select>
@@ -710,33 +714,33 @@
 
       <div class="form-grid">
         <div class="form-group">
-          <label>{$t('editor.address')}</label>
-          <input type="text" bind:value={genAddress} placeholder="example.com" class="input" />
+          <label for="gen-address">{$t('editor.address')}</label>
+          <input id="gen-address" type="text" bind:value={genAddress} placeholder="example.com" class="input" />
         </div>
         <div class="form-group">
-          <label>{$t('editor.port')}</label>
-          <input type="number" bind:value={genPort} class="input" />
+          <label for="gen-port">{$t('editor.port')}</label>
+          <input id="gen-port" type="number" bind:value={genPort} class="input" />
         </div>
       </div>
 
       <div class="form-group mt-2">
-        <label>{genProtocol === 'vless' ? 'UUID' : 'Password'}</label>
+        <label for="gen-uuid">{genProtocol === 'vless' ? 'UUID' : 'Password'}</label>
         <div class="input-group">
-          <input type="text" bind:value={genUUID} class="input" />
+          <input id="gen-uuid" type="text" bind:value={genUUID} class="input" />
           <button class="btn btn-secondary" on:click={() => genUUID = crypto.randomUUID()}>🎲</button>
         </div>
       </div>
 
       {#if genProtocol === 'vless'}
         <div class="form-group mt-2">
-          <label>SNI</label>
-          <input type="text" bind:value={genSNI} placeholder="sni.example.com" class="input" />
+          <label for="gen-sni">SNI</label>
+          <input id="gen-sni" type="text" bind:value={genSNI} placeholder="sni.example.com" class="input" />
         </div>
         
         <div class="form-grid mt-2">
           <div class="form-group">
-            <label>Security</label>
-            <select bind:value={genSecurity} class="input">
+            <label for="gen-security">Security</label>
+            <select id="gen-security" bind:value={genSecurity} class="input">
               <option value="reality">Reality</option>
               <option value="tls">TLS</option>
               <option value="none">None</option>
@@ -744,8 +748,8 @@
           </div>
           {#if genSecurity === 'reality'}
             <div class="form-group">
-              <label>Short ID</label>
-              <input type="text" bind:value={genShortId} placeholder="hex string" class="input" />
+              <label for="gen-shortid">Short ID</label>
+              <input id="gen-shortid" type="text" bind:value={genShortId} placeholder="hex string" class="input" />
             </div>
           {/if}
         </div>
@@ -1106,6 +1110,18 @@
   .input-group {
     display: flex;
     gap: 0.5rem;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
   }
 
   .mt-3 { margin-top: 1.5rem; }
