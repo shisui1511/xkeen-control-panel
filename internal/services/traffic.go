@@ -444,6 +444,11 @@ func (s *TrafficQuotaService) addAlert(q *TrafficQuota, severity, message string
 		}
 	}
 
+	// Cap alerts list to 100 items to prevent memory leak
+	if len(s.alerts) >= 100 {
+		s.alerts = s.alerts[1:]
+	}
+
 	s.alerts = append(s.alerts, TrafficAlert{
 		QuotaID:   q.ID,
 		QuotaName: q.Name,

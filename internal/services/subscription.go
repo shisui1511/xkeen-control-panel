@@ -46,6 +46,7 @@ type SubscriptionService struct {
 	configDir     string
 	subscriptions []Subscription
 	mu            sync.RWMutex
+	ongoing       sync.Map // Map of ID -> struct{}{} to track active refreshes
 }
 
 func NewSubscriptionService(dataDir, configDir string) *SubscriptionService {
@@ -149,6 +150,12 @@ func (s *SubscriptionService) Delete(id string) error {
 }
 
 func (s *SubscriptionService) Refresh(id string) error {
+	// Prevent concurrent refreshes for the same ID
+	if _, loaded := s.ongoing.LoadOrStore(id, struct{}{}); loaded {
+		return fmt.Errorf("refresh already in progress for this subscription")
+	}
+	defer s.ongoing.Delete(id)
+
 	s.mu.Lock()
 	sub := s.GetLocked(id)
 	if sub == nil {

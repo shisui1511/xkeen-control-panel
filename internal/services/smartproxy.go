@@ -433,17 +433,42 @@ func (s *SmartProxyService) evaluateGeo(p *Profile) {
 		return
 	}
 
-	// Test latency for all candidates and pick the best
+	// Test latency for all candidates in parallel and pick the best
+	type result struct {
+		name  string
+		delay int
+	}
+	results := make(chan result, len(candidates))
+	var wg sync.WaitGroup
+
+	// Limit concurrency to 5 simultaneous tests
+	sem := make(chan struct{}, 5)
+
+	for _, candidate := range candidates {
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			delay, err := s.testProxyLatency(name)
+			if err == nil && delay > 0 {
+				results <- result{name, delay}
+			}
+		}(candidate)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
 	bestProxy := ""
 	bestDelay := 999999
-	for _, candidate := range candidates {
-		delay, err := s.testProxyLatency(candidate)
-		if err != nil {
-			continue
-		}
-		if delay < bestDelay && delay > 0 {
-			bestDelay = delay
-			bestProxy = candidate
+	for res := range results {
+		if res.delay < bestDelay {
+			bestDelay = res.delay
+			bestProxy = res.name
 		}
 	}
 

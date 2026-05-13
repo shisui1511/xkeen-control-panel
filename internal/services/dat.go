@@ -201,7 +201,8 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	}
 	tmpFile := out.Name()
 
-	written, err := io.Copy(out, resp.Body)
+	// Limit response size to 50MB to prevent disk exhaustion on routers
+	written, err := io.Copy(out, io.LimitReader(resp.Body, 50*1024*1024))
 	out.Close()
 	if err != nil {
 		os.Remove(tmpFile)

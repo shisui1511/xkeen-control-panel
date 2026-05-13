@@ -262,6 +262,8 @@ func (s *KernelService) Install(name string) error {
 		k.Message = "Invalid filename: " + err.Error()
 		return err
 	}
+	defer os.Remove(tempFile) // Cleanup archive after extraction
+
 	if err := s.downloadFile(downloadURL, tempFile); err != nil {
 		k.Status = "failed"
 		k.Message = "Download failed: " + err.Error()
@@ -331,6 +333,11 @@ func (s *KernelService) Install(name string) error {
 		extractedPath = extracted
 	}
 
+	// Ensure extracted file is cleaned up if rename fails or it's not moved
+	if extractedPath != tempFile {
+		defer os.Remove(extractedPath)
+	}
+
 	// Make executable and replace
 	if err := validateKernelPath(extractedPath); err != nil {
 		return err
@@ -343,9 +350,6 @@ func (s *KernelService) Install(name string) error {
 
 	// Atomic replace
 	tempDest := filepath.Join(filepath.Dir(k.BinaryPath), filepath.Base(k.BinaryPath)+".new")
-	if err := validateKernelPath(extractedPath); err != nil {
-		return err
-	}
 	if err := validateKernelPath(tempDest); err != nil {
 		return err
 	}
