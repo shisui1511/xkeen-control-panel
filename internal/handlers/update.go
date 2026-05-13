@@ -277,7 +277,7 @@ func (a *API) restartProcess(binPath string, dataDir string) {
 	port := a.cfg.Port
 	healthURL := fmt.Sprintf("http://localhost:%d/api/version", port)
 
-	client := utils.SafeHTTPClient(5 * time.Second)
+	client := &http.Client{Timeout: 5 * time.Second}
 	for i := 0; i < 10; i++ {
 		resp, err := client.Get(healthURL)
 		if err == nil && resp.StatusCode == http.StatusOK {

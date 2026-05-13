@@ -188,7 +188,8 @@ jobs:
           cat > config.json <<EOF
           {
             "port": 8090,
-            "data_dir": "/tmp/xcp-data"
+            "data_dir": "/tmp/xcp-data",
+            "https": { "enabled": false }
           }
           EOF
           ./xcp -config config.json &
