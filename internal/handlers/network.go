@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
-
-	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 func (a *API) NetworkPing(w http.ResponseWriter, r *http.Request) {
@@ -32,10 +30,6 @@ func (a *API) NetworkPing(w http.ResponseWriter, r *http.Request) {
 	if !regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9]$`).MatchString(req.Host) {
 		a.errorResponse(w, "Invalid host format", http.StatusBadRequest)
 		return
-	}
-
-	if a.networkSvc == nil {
-		a.networkSvc = services.NewNetworkToolsService()
 	}
 
 	result, err := a.networkSvc.Ping(req.Host, req.Count)
@@ -72,10 +66,6 @@ func (a *API) NetworkTraceroute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.networkSvc == nil {
-		a.networkSvc = services.NewNetworkToolsService()
-	}
-
 	result, err := a.networkSvc.Traceroute(req.Host, req.MaxHops)
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
@@ -110,10 +100,6 @@ func (a *API) NetworkDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.networkSvc == nil {
-		a.networkSvc = services.NewNetworkToolsService()
-	}
-
 	result, err := a.networkSvc.DNSLookup(req.Host, req.RecordType)
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
@@ -143,10 +129,6 @@ func (a *API) NetworkHTTPTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.networkSvc == nil {
-		a.networkSvc = services.NewNetworkToolsService()
-	}
-
 	result, err := a.networkSvc.HTTPTest(req.URL, req.Timeout)
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
@@ -157,9 +139,6 @@ func (a *API) NetworkHTTPTest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) NetworkIP(w http.ResponseWriter, r *http.Request) {
-	if a.networkSvc == nil {
-		a.networkSvc = services.NewNetworkToolsService()
-	}
 
 	result, err := a.networkSvc.GetPublicIP()
 	if err != nil {

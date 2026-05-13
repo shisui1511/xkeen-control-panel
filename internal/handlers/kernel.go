@@ -4,14 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-
-	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 func (a *API) KernelList(w http.ResponseWriter, r *http.Request) {
-	if a.kernelSvc == nil {
-		a.kernelSvc = services.NewKernelService()
-	}
+
 	a.jsonResponse(w, a.kernelSvc.List())
 }
 
@@ -19,10 +15,6 @@ func (a *API) KernelCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
-	}
-
-	if a.kernelSvc == nil {
-		a.kernelSvc = services.NewKernelService()
 	}
 
 	name := strings.TrimPrefix(r.URL.Path, "/api/kernels/")
@@ -46,10 +38,6 @@ func (a *API) KernelInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.kernelSvc == nil {
-		a.kernelSvc = services.NewKernelService()
-	}
-
 	name := strings.TrimPrefix(r.URL.Path, "/api/kernels/")
 	name = strings.TrimSuffix(name, "/install")
 
@@ -68,9 +56,6 @@ func (a *API) KernelInstall(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) KernelStatus(w http.ResponseWriter, r *http.Request) {
-	if a.kernelSvc == nil {
-		a.kernelSvc = services.NewKernelService()
-	}
 
 	name := strings.TrimPrefix(r.URL.Path, "/api/kernels/")
 	name = strings.TrimSuffix(name, "/status")
@@ -88,10 +73,6 @@ func (a *API) KernelChannel(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
-	}
-
-	if a.kernelSvc == nil {
-		a.kernelSvc = services.NewKernelService()
 	}
 
 	name := strings.TrimPrefix(r.URL.Path, "/api/kernels/")
