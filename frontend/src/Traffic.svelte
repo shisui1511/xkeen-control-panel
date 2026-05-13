@@ -16,6 +16,8 @@
   let connected = false
   let totalUp = 0
   let totalDown = 0
+  let sessionUp = 0
+  let sessionDown = 0
 
   function formatSpeed(bytesPerSecond: number): string {
     if (bytesPerSecond === 0) return '0 B/s'
@@ -132,6 +134,8 @@
         
         totalUp = data.up || 0
         totalDown = data.down || 0
+        sessionUp += totalUp
+        sessionDown += totalDown
         
         drawChart()
       } catch (e) {
@@ -154,9 +158,11 @@
 
   function resizeCanvas() {
     if (!canvas) return
+    const dpr = window.devicePixelRatio || 1
     const rect = canvas.getBoundingClientRect()
-    canvas.width = rect.width
-    canvas.height = rect.height
+    canvas.width = rect.width * dpr
+    canvas.height = rect.height * dpr
+    ctx.scale(dpr, dpr)
     drawChart()
   }
 
@@ -182,10 +188,12 @@
       <div class="card stat-card">
         <div class="stat-label">{$t('traffic.upload')}</div>
         <div class="stat-value" style="color: #3fb950">{formatSpeed(totalUp)}</div>
+        <div class="stat-session">Σ {formatSpeed(sessionUp).replace('/s', '')}</div>
       </div>
       <div class="card stat-card">
         <div class="stat-label">{$t('traffic.download')}</div>
         <div class="stat-value" style="color: #58a6ff">{formatSpeed(totalDown)}</div>
+        <div class="stat-session">Σ {formatSpeed(sessionDown).replace('/s', '')}</div>
       </div>
       <div class="card stat-card">
         <div class="stat-label">{$t('app.status')}</div>
@@ -228,6 +236,12 @@
     font-size: 1.5rem;
     font-weight: 600;
     font-family: monospace;
+  }
+
+  .stat-session {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
   }
 
   .chart-card {

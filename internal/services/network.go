@@ -197,7 +197,7 @@ func (s *NetworkToolsService) HTTPTest(url string, timeout int) (*CurlResult, er
 		cmd = exec.Command("wget", "-qO", "-", "--timeout="+fmt.Sprintf("%d", timeout), url)
 	} else {
 		result.Success = false
-		result.Error = "curl или wget не найдены"
+		result.Error = "curl or wget not found"
 		return result, nil
 	}
 
@@ -236,7 +236,7 @@ func (s *NetworkToolsService) GetPublicIP() (*IPInfo, error) {
 	client := &net.Dialer{Timeout: 5 * time.Second}
 
 	for _, svc := range services {
-		conn, err := client.Dial("tcp", svc+":443")
+		conn, err := client.Dial("tcp", strings.TrimPrefix(strings.TrimPrefix(svc, "https://"), "http://")+":443")
 		if err != nil {
 			continue
 		}
@@ -252,6 +252,6 @@ func (s *NetworkToolsService) GetPublicIP() (*IPInfo, error) {
 	}
 
 	result.Success = false
-	result.Error = "Не удалось определить IP"
+	result.Error = "failed to detect public IP"
 	return result, nil
 }

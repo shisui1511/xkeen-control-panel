@@ -259,6 +259,23 @@ const translations: Record<Lang, Record<string, string>> = {
     'conn.total': 'Всего: {count}',
     'conn.shown': 'Показано: {count}',
     'conn.no_connections': 'Активных подключений не найдено',
+    
+    // Network Tools
+    'net.title': 'Сетевые инструменты',
+    'net.subtitle': 'Ping, traceroute, DNS lookup, HTTP test',
+    'net.host_ip': 'Хост/IP',
+    'net.count': 'Количество пакетов',
+    'net.max_hops': 'Максимум прыжков',
+    'net.record_type': 'Тип записи',
+    'net.timeout_sec': 'Таймаут (сек)',
+    'net.run': 'Запустить',
+    'net.running': 'Выполняется...',
+    'net.result': 'Результат',
+    'net.success': 'Успешно',
+    'net.error_with_msg': 'Ошибка: {error}',
+    'net.your_ip': 'Ваш IP: {ip}',
+    'net.invalid_host': 'Некорректный хост или IP',
+    'net.invalid_url': 'Некорректный URL',
     'conn.autorefresh': 'Автообновление',
 
     // Subscriptions
@@ -592,6 +609,23 @@ const translations: Record<Lang, Record<string, string>> = {
     'conn.total': 'Total: {count}',
     'conn.shown': 'Shown: {count}',
     'conn.no_connections': 'No active connections found',
+
+    // Network Tools
+    'net.title': 'Network Tools',
+    'net.subtitle': 'Ping, traceroute, DNS lookup, HTTP test',
+    'net.host_ip': 'Host/IP',
+    'net.count': 'Packet count',
+    'net.max_hops': 'Max hops',
+    'net.record_type': 'Record type',
+    'net.timeout_sec': 'Timeout (sec)',
+    'net.run': 'Run',
+    'net.running': 'Running...',
+    'net.result': 'Result',
+    'net.success': 'Success',
+    'net.error_with_msg': 'Error: {error}',
+    'net.your_ip': 'Your IP: {ip}',
+    'net.invalid_host': 'Invalid host or IP',
+    'net.invalid_url': 'Invalid URL',
     'conn.autorefresh': 'Auto-refresh',
 
     // Subscriptions

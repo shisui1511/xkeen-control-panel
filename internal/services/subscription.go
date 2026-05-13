@@ -190,8 +190,11 @@ func (s *SubscriptionService) downloadAndParse(subURL string) ([]Outbound, error
 		return jsonConfig.Outbounds, nil
 	}
 
-	// Try base64 encoded list
+	// Try base64 encoded list (Standard or URL encoding)
 	decoded, err := base64.StdEncoding.DecodeString(content)
+	if err != nil {
+		decoded, err = base64.URLEncoding.DecodeString(content)
+	}
 	if err == nil {
 		content = string(decoded)
 	}

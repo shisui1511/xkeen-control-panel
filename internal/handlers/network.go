@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
@@ -24,6 +25,12 @@ func (a *API) NetworkPing(w http.ResponseWriter, r *http.Request) {
 
 	if req.Host == "" {
 		a.errorResponse(w, "Host required", http.StatusBadRequest)
+		return
+	}
+
+	// Basic host validation to prevent command injection
+	if !regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9]$`).MatchString(req.Host) {
+		a.errorResponse(w, "Invalid host format", http.StatusBadRequest)
 		return
 	}
 
@@ -60,6 +67,11 @@ func (a *API) NetworkTraceroute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9]$`).MatchString(req.Host) {
+		a.errorResponse(w, "Invalid host format", http.StatusBadRequest)
+		return
+	}
+
 	if a.networkSvc == nil {
 		a.networkSvc = services.NewNetworkToolsService()
 	}
@@ -90,6 +102,11 @@ func (a *API) NetworkDNS(w http.ResponseWriter, r *http.Request) {
 
 	if req.Host == "" {
 		a.errorResponse(w, "Host required", http.StatusBadRequest)
+		return
+	}
+
+	if !regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9]$`).MatchString(req.Host) {
+		a.errorResponse(w, "Invalid host format", http.StatusBadRequest)
 		return
 	}
 

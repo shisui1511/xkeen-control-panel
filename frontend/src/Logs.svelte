@@ -19,7 +19,8 @@
   let availableSources: string[] = []
 
   function parseLogLine(raw: string): LogEntry {
-    const match = raw.match(/^\[([^\]]+)\]\s*(.*)$/)
+    // Better regex for Xray/Mihomo: 2024/05/13 03:22:12 [Info] ... or [Source] ...
+    const match = raw.match(/^(?:\d{4}\/\d{2}\/\d{2}\s\d{2}:\d{2}:\d{2}\s)?\[([^\]]+)\]\s*(.*)$/)
     if (match) {
       return { source: match[1], text: match[2], raw }
     }
@@ -70,6 +71,11 @@
       connected = false
       const msg = $t('logs.disconnected')
       logs = [...logs, { text: msg, source: '', raw: msg }]
+      
+      // Auto-reconnect after 3 seconds
+      if (!paused) {
+        setTimeout(connect, 3000)
+      }
     }
   }
 
@@ -83,6 +89,19 @@
   function clearLogs() {
     logs = []
     availableSources = []
+  }
+
+  function exportLogs() {
+    const content = logs.map(l => l.raw).join('\n')
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `xkeen_logs_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   function togglePause() {
@@ -163,6 +182,10 @@
       
       <button on:click={clearLogs} class="btn-icon" title={$t('logs.clear')}>
         🗑
+      </button>
+      
+      <button on:click={exportLogs} class="btn-icon" title="Export to TXT">
+        📥
       </button>
       
       {#if connected}
