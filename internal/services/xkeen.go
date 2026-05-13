@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type XKeenService struct {
@@ -17,24 +19,25 @@ func NewXKeenService(binary string) *XKeenService {
 }
 
 func (s *XKeenService) Status() (string, error) {
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s status", s.BinaryPath))
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s -status", s.BinaryPath))
 	out, err := cmd.CombinedOutput()
+	output := utils.StripANSI(string(out))
 	if err != nil {
-		return string(out), err
+		return output, err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(output), nil
 }
 
 func (s *XKeenService) Start() (string, error) {
-	return s.runWithTimeout("start", 30*time.Second)
+	return s.runWithTimeout("-start", 30*time.Second)
 }
 
 func (s *XKeenService) Stop() (string, error) {
-	return s.runWithTimeout("stop", 30*time.Second)
+	return s.runWithTimeout("-stop", 30*time.Second)
 }
 
 func (s *XKeenService) Restart() (string, error) {
-	return s.runWithTimeout("restart", 45*time.Second)
+	return s.runWithTimeout("-restart", 45*time.Second)
 }
 
 func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (string, error) {
@@ -55,9 +58,11 @@ func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (str
 
 	select {
 	case <-time.After(timeout):
-		cmd.Process.Kill()
-		return out.String(), fmt.Errorf("timeout exceeded")
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+		return utils.StripANSI(out.String()), fmt.Errorf("timeout exceeded")
 	case err := <-done:
-		return out.String(), err
+		return utils.StripANSI(out.String()), err
 	}
 }
