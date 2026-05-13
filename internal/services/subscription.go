@@ -165,7 +165,7 @@ func (s *SubscriptionService) Refresh(id string) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Re-get sub in case it was modified
 	sub = s.GetLocked(id)
 	if sub == nil {

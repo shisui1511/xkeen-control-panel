@@ -63,11 +63,11 @@ func (s *ConfigService) Save(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	
+
 	// Create backup in 'backups' subdirectory
 	backupDir := filepath.Join(filepath.Dir(path), "backups")
 	backupPath := filepath.Join(backupDir, filepath.Base(path)+".backup-"+time.Now().Format("20060102-150405"))
-	
+
 	if s.Exists(path) {
 		oldData, err := os.ReadFile(path)
 		if err == nil {

@@ -363,8 +363,12 @@ func (s *TrafficQuotaService) collectTraffic() {
 		}
 
 		// Only add positive deltas (Mihomo stats might reset if reconnected with same ID? unlikely but safe)
-		if deltaUp < 0 { deltaUp = 0 }
-		if deltaDown < 0 { deltaDown = 0 }
+		if deltaUp < 0 {
+			deltaUp = 0
+		}
+		if deltaDown < 0 {
+			deltaDown = 0
+		}
 
 		if deltaUp > 0 || deltaDown > 0 {
 			stat, ok := s.proxyStats[proxyName]
