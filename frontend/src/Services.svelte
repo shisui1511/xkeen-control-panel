@@ -130,6 +130,9 @@
     return kernels.find(k => k.name === name)
   }
 
+  $: xray = getKernel('xray')
+  $: mihomo = getKernel('mihomo')
+
   onMount(() => {
     fetchStatus()
     fetchKernels()
@@ -172,7 +175,6 @@
     </div>
 
     <!-- Xray Card -->
-    {#const xray = getKernel('xray')}
     <div class="card">
       <div class="service-header">
         <div class="title-group">
@@ -219,7 +221,6 @@
     </div>
 
     <!-- Mihomo Card -->
-    {#const mihomo = getKernel('mihomo')}
     <div class="card">
       <div class="service-header">
         <div class="title-group">
