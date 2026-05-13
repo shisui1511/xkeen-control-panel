@@ -173,6 +173,21 @@ func main() {
 	srv.HandleProtected("/api/console/commands", api.ConsoleListCommands)
 	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)
 
+	// Templates
+	templateSvc := services.NewTemplateService()
+	api.SetTemplateService(templateSvc)
+	srv.HandleProtected("/api/templates/list", api.TemplateList)
+	srv.HandleProtected("/api/templates/fetch", api.TemplateFetch)
+
+	// Kernels
+	kernelSvc := services.NewKernelService(cfg.XKeenBinary)
+	api.SetKernelService(kernelSvc)
+	srv.HandleProtected("/api/kernels", api.KernelList)
+	srv.HandleProtected("/api/kernels/{name}/check", api.KernelCheck)
+	srv.HandleProtected("/api/kernels/{name}/install", api.KernelInstall)
+	srv.HandleProtected("/api/kernels/{name}/status", api.KernelStatus)
+	srv.HandleProtected("/api/kernels/{name}/channel", api.KernelSetChannel)
+
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {
 		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)

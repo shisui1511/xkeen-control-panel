@@ -240,6 +240,9 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // Editor Extras
     'editor.back_to_dashboard': 'Вернуться на Dashboard',
+    'editor.templates': 'Шаблоны',
+    'editor.templates_desc': 'Выберите готовый шаблон для быстрой настройки. Внимание: текущий контент будет заменен!',
+    'editor.confirm_template': 'Вы уверены, что хотите применить этот шаблон? Текущее содержимое файла будет заменено.',
 
     // Connections
     'conn.title': 'Подключения',
@@ -565,6 +568,9 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // Editor Extras
     'editor.back_to_dashboard': 'Back to Dashboard',
+    'editor.templates': 'Templates',
+    'editor.templates_desc': 'Select a pre-made template for quick setup. Warning: current content will be replaced!',
+    'editor.confirm_template': 'Are you sure you want to apply this template? Current file content will be replaced.',
 
     // Connections
     'conn.title': 'Connections',

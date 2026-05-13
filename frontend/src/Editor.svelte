@@ -34,6 +34,13 @@
 
   let editorContainer: HTMLDivElement
   let editorView: EditorView | null = null
+  interface Template {
+    name: string
+    description: string
+    type: string
+    url: string
+  }
+
   let files: string[] = []
   let selectedFile = ''
   let loading = false
@@ -53,8 +60,10 @@
   // CRUD modals
   let showCreateModal = false
   let showRenameModal = false
+  let showTemplatesModal = false
   let newFileName = ''
   let renameTarget = ''
+  let templates: Template[] = []
 
   async function loadFiles(dir?: string) {
     if (dir) currentDir = dir
@@ -397,8 +406,36 @@
     }
   }
 
+  async function loadTemplates() {
+    try {
+      const res = await fetch('/api/templates/list')
+      if (res.ok) templates = await res.json()
+    } catch (e) {}
+  }
+
+  async function applyTemplate(template: Template) {
+    if (!editorView) return
+    if (!confirm($t('editor.confirm_template'))) return
+    
+    try {
+      const res = await fetch(`/api/templates/fetch?url=${encodeURIComponent(template.url)}`)
+      if (!res.ok) throw new Error('Failed to fetch template')
+      const data = await res.json()
+      
+      editorView.dispatch({
+        changes: { from: 0, to: editorView.state.doc.length, insert: data.content }
+      })
+      showTemplatesModal = false
+      message = '✓ Template applied'
+      setTimeout(() => message = '', 3000)
+    } catch (e: any) {
+      alert('Error: ' + e.message)
+    }
+  }
+
   onMount(() => {
     loadFiles()
+    loadTemplates()
   })
 
   onDestroy(() => {
@@ -469,6 +506,9 @@
           <button on:click={applyQuickFixes} class="btn-secondary" title="Apply common fixes">
             🔧 {$t('editor.quick_fix')}
           </button>
+          <button on:click={() => showTemplatesModal = true} class="btn-secondary" title="Apply configuration templates">
+            📂 {$t('editor.templates')}
+          </button>
           <button on:click={() => { showRenameModal = true; renameTarget = selectedFile.split('/').pop() || '' }} class="btn-secondary">
             {$t('app.rename')}
           </button>
@@ -533,6 +573,32 @@
       <div class="modal-actions">
         <button on:click={() => showRenameModal = false} class="btn btn-secondary">{$t('app.cancel')}</button>
         <button on:click={renameFile} class="btn btn-primary">{$t('app.rename')}</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showTemplatesModal}
+  <div class="modal-overlay" on:click={() => showTemplatesModal = false}>
+    <div class="modal templates-modal" on:click|stopPropagation>
+      <div class="modal-header">
+        <h3>{$t('editor.templates')}</h3>
+        <button class="btn-close" on:click={() => showTemplatesModal = false}>✕</button>
+      </div>
+      <p class="text-secondary mb-2">{$t('editor.templates_desc')}</p>
+      
+      <div class="template-list">
+        {#each templates as template}
+          <button class="template-item" on:click={() => applyTemplate(template)}>
+            <div class="template-info">
+              <span class="template-name">{template.name}</span>
+              <span class="template-desc">{template.description}</span>
+            </div>
+            <span class="template-type">{template.type}</span>
+          </button>
+        {:else}
+          <p class="text-center p-3">{$t('app.loading')}</p>
+        {/each}
       </div>
     </div>
   </div>
@@ -793,5 +859,83 @@
 
   :global(.cm-scroller) {
     overflow: auto;
+  }
+  .templates-modal {
+    max-width: 600px;
+    width: 90%;
+  }
+
+  .template-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .template-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s;
+  }
+
+  .template-item:hover {
+    border-color: var(--primary);
+    background: var(--hover);
+  }
+
+  .template-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .template-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .template-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+  }
+
+  .template-type {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    background: var(--bg-page);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .btn-close {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+  }
+
+  .p-3 {
+    padding: 1rem;
+  }
+
+  .text-center {
+    text-align: center;
   }
 </style>
