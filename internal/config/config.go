@@ -83,10 +83,10 @@ func Default() *Config {
 			SessionTimeout:   24,
 			MaxLoginAttempts: 5,
 			LockoutDuration:  5,
-			SecureCookie:     false,
+			SecureCookie:     true,
 		},
 		HTTPS: HTTPSConfig{
-			Enabled:  false,
+			Enabled:  true,
 			CertPath: "",
 			KeyPath:  "",
 		},

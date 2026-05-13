@@ -163,7 +163,7 @@ create_config() {
   "data_dir": "$INSTALL_DIR",
   "lang": "$SYS_LANG",
   "https": {
-    "enabled": false,
+    "enabled": true,
     "cert_path": "",
     "key_path": ""
   }
