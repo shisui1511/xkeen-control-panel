@@ -62,8 +62,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'nav.connections': 'Подключения',
     'nav.rules': 'Правила',
     'nav.traffic': 'Трафик',
-    'nav.services': 'Сервисы',
-    'nav.kernels': 'Ядра',
+    'nav.services': 'Управление',
     'nav.settings': 'Настройки',
     'nav.network': 'Сеть',
     'nav.theme_light': 'Светлая тема',
@@ -236,6 +235,23 @@ const translations: Record<Lang, Record<string, string>> = {
     'console.cat_update': '📦 Обновление',
     'console.cat_system': '💻 Система',
     'console.load_error': 'Ошибка загрузки команд',
+    'status': 'Статус',
+    'xkeen.h': 'Справка XKeen',
+
+    // Editor Extras
+    'editor.back_to_dashboard': 'Вернуться на Dashboard',
+
+    // Connections
+    'conn.title': 'Подключения',
+    'conn.active': 'Активные сессии в реальном времени',
+    'conn.source': 'Источник',
+    'conn.destination': 'Назначение',
+    'conn.rule': 'Правило',
+    'conn.proxy': 'Прокси',
+    'conn.total': 'Всего: {count}',
+    'conn.shown': 'Показано: {count}',
+    'conn.no_connections': 'Активных подключений не найдено',
+    'conn.autorefresh': 'Автообновление',
 
     // Subscriptions
     'subscr.title': 'Подписки',
@@ -373,8 +389,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'nav.connections': 'Connections',
     'nav.rules': 'Rules',
     'nav.traffic': 'Traffic',
-    'nav.services': 'Services',
-    'nav.kernels': 'Kernels',
+    'nav.services': 'Management',
     'nav.settings': 'Settings',
     'nav.network': 'Network',
     'nav.install_pwa': 'Install app',
@@ -545,6 +560,23 @@ const translations: Record<Lang, Record<string, string>> = {
     'console.cat_update': '📦 Update',
     'console.cat_system': '💻 System',
     'console.load_error': 'Failed to load commands',
+    'status': 'Status',
+    'xkeen.h': 'XKeen Help',
+
+    // Editor Extras
+    'editor.back_to_dashboard': 'Back to Dashboard',
+
+    // Connections
+    'conn.title': 'Connections',
+    'conn.active': 'Active real-time sessions',
+    'conn.source': 'Source',
+    'conn.destination': 'Destination',
+    'conn.rule': 'Rule',
+    'conn.proxy': 'Proxy',
+    'conn.total': 'Total: {count}',
+    'conn.shown': 'Shown: {count}',
+    'conn.no_connections': 'No active connections found',
+    'conn.autorefresh': 'Auto-refresh',
 
     // Subscriptions
     'subscr.title': 'Subscriptions',

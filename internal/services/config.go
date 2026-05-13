@@ -17,9 +17,8 @@ func (s *ConfigService) resolvePath(path string) (string, error) {
 	if strings.Contains(clean, "..") {
 		return "", errors.New("path traversal detected")
 	}
-	if !strings.HasPrefix(clean, s.ConfigDir) {
-		return "", errors.New("path outside config directory")
-	}
+	// Note: We don't check against s.ConfigDir here anymore because the API handler
+	// uses PathValidator which checks against multiple AllowedRoots.
 	return clean, nil
 }
 
@@ -31,13 +30,22 @@ func NewConfigService(dir string) *ConfigService {
 	return &ConfigService{ConfigDir: dir}
 }
 
-func (s *ConfigService) List() ([]string, error) {
-	pattern := filepath.Join(s.ConfigDir, "*.json")
-	files, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil, err
+func (s *ConfigService) List(dir string) ([]string, error) {
+	if dir == "" {
+		dir = s.ConfigDir
 	}
-	return files, nil
+	var allFiles []string
+	extensions := []string{"*.json", "*.yaml", "*.yml", "*.conf"}
+	for _, ext := range extensions {
+		pattern := filepath.Join(dir, ext)
+		files, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		allFiles = append(allFiles, files...)
+	}
+	sort.Strings(allFiles)
+	return allFiles, nil
 }
 
 func (s *ConfigService) Read(path string) ([]byte, error) {

@@ -7,7 +7,18 @@ import (
 )
 
 func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
-	files, err := a.configSvc.List()
+	dir := r.URL.Query().Get("dir")
+	if dir == "" {
+		dir = a.cfg.XRayConfigDir
+	}
+
+	cleanDir, err := a.pathVal.Validate(dir)
+	if err != nil {
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	files, err := a.configSvc.List(cleanDir)
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return

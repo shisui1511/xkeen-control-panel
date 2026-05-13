@@ -168,8 +168,7 @@ func main() {
 	srv.HandleProtected("/api/dat/update", api.DATUpdate)
 
 	// Xkeen Console
-	xkeenPath := "/opt/bin/xkeen"
-	consoleSvc := services.NewConsoleService(xkeenPath)
+	consoleSvc := services.NewConsoleService(cfg.XKeenBinary)
 	api.SetConsoleService(consoleSvc)
 	srv.HandleProtected("/api/console/commands", api.ConsoleListCommands)
 	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)

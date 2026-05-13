@@ -40,9 +40,9 @@ func Default() *Config {
 	return &Config{
 		Port:            8090,
 		XRayConfigDir:   "/opt/etc/xray/configs",
-		XKeenBinary:     "xkeen",
+		XKeenBinary:     "/opt/sbin/xkeen",
 		MihomoConfigDir: "/opt/etc/mihomo",
-		MihomoBinary:    "mihomo",
+		MihomoBinary:    "/opt/sbin/mihomo",
 		MihomoAPIURL:    "http://localhost:9090",
 		DataDir:         "/opt/etc/xkeen-control-panel",
 		LogLevel:        "info",
@@ -53,6 +53,8 @@ func Default() *Config {
 			"/opt/etc/xkeen",
 			"/opt/etc/mihomo",
 			"/opt/var/log",
+			"/opt/sbin",
+			"/opt/bin",
 		},
 		Auth: AuthConfig{
 			PasswordHash:     "",

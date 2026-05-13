@@ -41,6 +41,11 @@
   let message = ''
   let backups: string[] = []
 
+  // Directory management
+  const xrayDir = '/opt/etc/xray/configs'
+  const mihomoDir = '/opt/etc/mihomo'
+  let currentDir = xrayDir
+
   // Schema assist mode
   let schemaEnabled = true
   let expertMode = false
@@ -51,14 +56,26 @@
   let newFileName = ''
   let renameTarget = ''
 
-  async function loadFiles() {
+  async function loadFiles(dir?: string) {
+    if (dir) currentDir = dir
     try {
-      const res = await fetch('/api/config/list')
+      const res = await fetch(`/api/config/list?dir=${encodeURIComponent(currentDir)}`)
       if (!res.ok) throw new Error('Failed to load files')
       files = await res.json()
     } catch (e: any) {
       message = $t('editor.load_error') + ': ' + e.message
     }
+  }
+
+  function switchDir(dir: string) {
+    if (currentDir === dir) return
+    currentDir = dir
+    selectedFile = ''
+    backups = []
+    if (editorView) {
+      editorView.setState(EditorState.create({ doc: '' }))
+    }
+    loadFiles()
   }
 
   function getSchemaExtensions(path: string) {
@@ -395,7 +412,7 @@
   <div class="sidebar">
     <div class="sidebar-header">
       <div style="display: flex; align-items: center; gap: 0.5rem;">
-        <button class="btn-icon-small" on:click={() => onSwitchTab('dashboard')} title="Назад">
+        <button class="btn-icon-small" on:click={() => onSwitchTab('dashboard')} title={$t('editor.back_to_dashboard')}>
           ←
         </button>
         <h3>{$t('editor.configs')}</h3>
@@ -403,6 +420,11 @@
       <button class="btn-icon-small" on:click={() => { showCreateModal = true; newFileName = '' }} title={$t('editor.create_file')}>
         +
       </button>
+    </div>
+
+    <div class="dir-toggle">
+      <button class:active={currentDir === xrayDir} on:click={() => switchDir(xrayDir)}>Xray</button>
+      <button class:active={currentDir === mihomoDir} on:click={() => switchDir(mihomoDir)}>Mihomo</button>
     </div>
     <div class="file-list">
       {#each files as file}
@@ -544,6 +566,38 @@
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
+  }
+  
+  .dir-toggle {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.5rem;
+    background: var(--bg);
+    border-radius: var(--radius);
+    margin: 0.5rem 0 1rem 0;
+  }
+
+  .dir-toggle button {
+    flex: 1;
+    padding: 0.4rem;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+  }
+
+  .dir-toggle button:hover {
+    background: var(--hover);
+  }
+
+  .dir-toggle button.active {
+    background: var(--card-bg);
+    color: var(--primary);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   }
 
   .file-list, .backup-list {
