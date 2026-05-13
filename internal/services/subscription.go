@@ -10,7 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // Subscription represents a proxy subscription
@@ -42,6 +45,7 @@ type SubscriptionService struct {
 	dataDir       string
 	configDir     string
 	subscriptions []Subscription
+	mu            sync.RWMutex
 }
 
 func NewSubscriptionService(dataDir, configDir string) *SubscriptionService {
@@ -54,6 +58,8 @@ func NewSubscriptionService(dataDir, configDir string) *SubscriptionService {
 }
 
 func (s *SubscriptionService) load() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	path := filepath.Join(s.dataDir, "subscriptions.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -63,19 +69,24 @@ func (s *SubscriptionService) load() {
 }
 
 func (s *SubscriptionService) save() error {
+	// Note: mu must be held by caller or we use a separate locked version
 	path := filepath.Join(s.dataDir, "subscriptions.json")
 	data, err := json.MarshalIndent(s.subscriptions, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	return utils.AtomicWriteFile(path, data, 0644)
 }
 
 func (s *SubscriptionService) List() []Subscription {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.subscriptions
 }
 
 func (s *SubscriptionService) Get(id string) *Subscription {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	for i := range s.subscriptions {
 		if s.subscriptions[i].ID == id {
 			return &s.subscriptions[i]
@@ -85,6 +96,8 @@ func (s *SubscriptionService) Get(id string) *Subscription {
 }
 
 func (s *SubscriptionService) Add(sub *Subscription) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if sub.ID == "" {
 		sub.ID = fmt.Sprintf("sub_%d", time.Now().Unix())
 	}
@@ -93,6 +106,8 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 }
 
 func (s *SubscriptionService) Update(id string, sub *Subscription) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for i := range s.subscriptions {
 		if s.subscriptions[i].ID == id {
 			s.subscriptions[i] = *sub
@@ -103,6 +118,8 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 }
 
 func (s *SubscriptionService) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	// Find subscription
 	var sub *Subscription
 	for i := range s.subscriptions {
@@ -132,15 +149,27 @@ func (s *SubscriptionService) Delete(id string) error {
 }
 
 func (s *SubscriptionService) Refresh(id string) error {
-	sub := s.Get(id)
+	s.mu.Lock()
+	sub := s.GetLocked(id)
 	if sub == nil {
+		s.mu.Unlock()
 		return fmt.Errorf("subscription not found")
 	}
+	s.mu.Unlock()
 
-	// Download subscription
+	// Download subscription (outside of lock to avoid blocking other operations)
 	outbounds, err := s.downloadAndParse(sub.URL)
 	if err != nil {
 		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	// Re-get sub in case it was modified
+	sub = s.GetLocked(id)
+	if sub == nil {
+		return fmt.Errorf("subscription not found")
 	}
 
 	// Apply filters
@@ -155,6 +184,15 @@ func (s *SubscriptionService) Refresh(id string) error {
 	// Update last update time
 	sub.LastUpdate = time.Now()
 	return s.save()
+}
+
+func (s *SubscriptionService) GetLocked(id string) *Subscription {
+	for i := range s.subscriptions {
+		if s.subscriptions[i].ID == id {
+			return &s.subscriptions[i]
+		}
+	}
+	return nil
 }
 
 func (s *SubscriptionService) downloadAndParse(subURL string) ([]Outbound, error) {

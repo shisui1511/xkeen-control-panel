@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // ProfileMode defines how a profile operates
@@ -63,12 +65,13 @@ type Profile struct {
 
 // SmartProxyService manages time-based proxy profiles
 type SmartProxyService struct {
-	dataDir   string
-	profiles  []Profile
-	mu        sync.RWMutex
-	mihomoURL string
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
+	dataDir    string
+	profiles   []Profile
+	mu         sync.RWMutex
+	mihomoURL  string
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
+	httpClient *http.Client
 }
 
 // ProfileStore is the on-disk format
@@ -78,10 +81,11 @@ type ProfileStore struct {
 
 func NewSmartProxyService(dataDir, mihomoURL string) *SmartProxyService {
 	svc := &SmartProxyService{
-		dataDir:   dataDir,
-		profiles:  []Profile{},
-		mihomoURL: mihomoURL,
-		stopCh:    make(chan struct{}),
+		dataDir:    dataDir,
+		profiles:   []Profile{},
+		mihomoURL:  mihomoURL,
+		stopCh:     make(chan struct{}),
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 	svc.load()
 	return svc
@@ -124,8 +128,7 @@ func (s *SmartProxyService) saveLocked() error {
 		return err
 	}
 
-	os.MkdirAll(s.dataDir, 0755)
-	return os.WriteFile(s.storePath(), data, 0644)
+	return utils.AtomicWriteFile(s.storePath(), data, 0644)
 }
 
 func (s *SmartProxyService) save() error {
@@ -283,8 +286,7 @@ type mihomoDelayResponse struct {
 func (s *SmartProxyService) testProxyLatency(proxyName string) (int, error) {
 	url := fmt.Sprintf("%s/proxies/%s/delay?url=http://www.gstatic.com/generate_204&timeout=5000",
 		s.mihomoURL, proxyName)
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	resp, err := s.httpClient.Get(url)
 	if err != nil {
 		return -1, err
 	}
@@ -459,7 +461,7 @@ func (s *SmartProxyService) evaluateGeo(p *Profile) {
 }
 
 func (s *SmartProxyService) fetchProxiesList() ([]string, error) {
-	resp, err := http.Get(s.mihomoURL + "/proxies")
+	resp, err := s.httpClient.Get(s.mihomoURL + "/proxies")
 	if err != nil {
 		return nil, err
 	}
@@ -501,8 +503,7 @@ func (s *SmartProxyService) applyProxyToGroup(groupName, proxyName string) error
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
