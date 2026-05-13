@@ -22,15 +22,7 @@ func (a *API) DATUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := r.URL.Query().Get("path")
-	remoteURL := r.URL.Query().Get("url")
-
-	if path == "" || remoteURL == "" {
-		a.errorResponse(w, "path and url parameters are required", http.StatusBadRequest)
-		return
-	}
-
-	size, err := a.datSvc.UpdateCustom(path, remoteURL)
+	err := a.datSvc.Update()
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -38,6 +30,5 @@ func (a *API) DATUpdate(w http.ResponseWriter, r *http.Request) {
 
 	a.jsonResponse(w, map[string]interface{}{
 		"success": true,
-		"size":    size,
 	})
 }

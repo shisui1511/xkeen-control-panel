@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -22,17 +23,21 @@ type DATFile struct {
 	LastUpdate int64  `json:"last_update"`
 	Exists     bool   `json:"exists"`
 	Type       string `json:"type"` // "xray" or "mihomo"
+	IsSymlink  bool   `json:"is_symlink"`
+	SymlinkTo  string `json:"symlink_to,omitempty"`
 }
 
 type DATManagerService struct {
-	xrayDir   string
-	mihomoDir string
-	mu        sync.RWMutex
+	xrayDir    string
+	mihomoDir  string
+	binaryPath string
+	mu         sync.RWMutex
 }
 
 func NewDATManagerService(dirs ...string) *DATManagerService {
 	xrayDir := "/opt/etc/xray/dat"
 	mihomoDir := "/opt/etc/mihomo"
+	binaryPath := "/opt/sbin/xkeen"
 
 	if len(dirs) > 0 && dirs[0] != "" {
 		xrayDir = dirs[0]
@@ -40,10 +45,14 @@ func NewDATManagerService(dirs ...string) *DATManagerService {
 	if len(dirs) > 1 && dirs[1] != "" {
 		mihomoDir = dirs[1]
 	}
+	if len(dirs) > 2 && dirs[2] != "" {
+		binaryPath = dirs[2]
+	}
 
 	return &DATManagerService{
-		xrayDir:   xrayDir,
-		mihomoDir: mihomoDir,
+		xrayDir:    xrayDir,
+		mihomoDir:  mihomoDir,
+		binaryPath: binaryPath,
 	}
 }
 
@@ -53,43 +62,65 @@ func (s *DATManagerService) List() []DATFile {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Scan Xray
-	if matches, err := filepath.Glob(filepath.Join(s.xrayDir, "*.dat")); err == nil {
-		for _, match := range matches {
-			f := DATFile{Name: filepath.Base(match), Path: match, Exists: true, Type: "xray"}
-			if info, err := os.Stat(match); err == nil {
-				f.Size = info.Size()
-				f.LastUpdate = info.ModTime().Unix()
+	scanDir := func(dir string, fileType string, patterns ...string) {
+		for _, pattern := range patterns {
+			matches, err := filepath.Glob(filepath.Join(dir, pattern))
+			if err != nil {
+				continue
 			}
-			files = append(files, f)
+			for _, match := range matches {
+				f := DATFile{
+					Name:   filepath.Base(match),
+					Path:   match,
+					Exists: true,
+					Type:   fileType,
+				}
+
+				info, err := os.Lstat(match)
+				if err != nil {
+					continue
+				}
+
+				if info.Mode()&os.ModeSymlink != 0 {
+					f.IsSymlink = true
+					if target, err := os.Readlink(match); err == nil {
+						f.SymlinkTo = target
+						// Try to get size of target
+						if targetInfo, err := os.Stat(match); err == nil {
+							f.Size = targetInfo.Size()
+							f.LastUpdate = targetInfo.ModTime().Unix()
+						}
+					}
+				} else {
+					f.Size = info.Size()
+					f.LastUpdate = info.ModTime().Unix()
+				}
+
+				files = append(files, f)
+			}
 		}
 	}
 
-	// Scan Mihomo .dat
-	if matches, err := filepath.Glob(filepath.Join(s.mihomoDir, "*.dat")); err == nil {
-		for _, match := range matches {
-			f := DATFile{Name: filepath.Base(match), Path: match, Exists: true, Type: "mihomo"}
-			if info, err := os.Stat(match); err == nil {
-				f.Size = info.Size()
-				f.LastUpdate = info.ModTime().Unix()
-			}
-			files = append(files, f)
-		}
-	}
-
-	// Scan Mihomo .mmdb
-	if matches, err := filepath.Glob(filepath.Join(s.mihomoDir, "*.mmdb")); err == nil {
-		for _, match := range matches {
-			f := DATFile{Name: filepath.Base(match), Path: match, Exists: true, Type: "mihomo"}
-			if info, err := os.Stat(match); err == nil {
-				f.Size = info.Size()
-				f.LastUpdate = info.ModTime().Unix()
-			}
-			files = append(files, f)
-		}
-	}
+	scanDir(s.xrayDir, "xray", "*.dat")
+	scanDir(s.mihomoDir, "mihomo", "*.dat", "*.mmdb")
 
 	return files
+}
+
+func (s *DATManagerService) Update() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Use xkeen -ug to update DAT files
+	// -u: check for updates
+	// -g: geoip/geosite update
+	// We use both to ensure update
+	cmd := exec.Command(s.binaryPath, "-ug")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("xkeen -ug failed: %v, output: %s", err, string(out))
+	}
+	return nil
 }
 
 func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (int64, error) {
