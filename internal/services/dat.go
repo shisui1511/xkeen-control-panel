@@ -2,7 +2,6 @@ package services
 
 import (
 	"fmt"
-	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type DATFile struct {
