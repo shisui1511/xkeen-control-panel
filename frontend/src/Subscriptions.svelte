@@ -256,38 +256,38 @@
 </div>
 
 {#if showAddModal}
-  <div class="modal-overlay" on:click={closeModal}>
-    <div class="modal" on:click|stopPropagation>
+  <div class="modal-overlay" role="button" tabindex="0" on:click={closeModal} on:keydown={(e) => e.key === 'Escape' && closeModal()}>
+    <div class="modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
       <h3>{editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}</h3>
 
       <div class="form-group">
-        <label class="form-label">{$t('subscr.name')}</label>
-        <input type="text" class="input" bind:value={formName} placeholder={$t('subscr.name_placeholder')} />
+        <label for="form-name" class="form-label">{$t('subscr.name')}</label>
+        <input id="form-name" type="text" class="input" bind:value={formName} placeholder={$t('subscr.name_placeholder')} />
       </div>
 
       <div class="form-group">
-        <label class="form-label">{$t('subscr.url')}</label>
-        <input type="text" class="input" bind:value={formURL} placeholder="https://..." />
+        <label for="form-url" class="form-label">{$t('subscr.url')}</label>
+        <input id="form-url" type="text" class="input" bind:value={formURL} placeholder="https://..." />
       </div>
 
       <div class="form-group">
-        <label class="form-label">{$t('subscr.tag_prefix')}</label>
-        <input type="text" class="input" bind:value={formTagPrefix} placeholder={$t('subscr.tag_prefix_placeholder')} />
+        <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
+        <input id="form-tag-prefix" type="text" class="input" bind:value={formTagPrefix} placeholder={$t('subscr.tag_prefix_placeholder')} />
       </div>
 
       <div class="form-group">
-        <label class="form-label">{$t('subscr.interval')}</label>
-        <input type="number" class="input" bind:value={formInterval} min="1" max="168" />
+        <label for="form-interval" class="form-label">{$t('subscr.interval')}</label>
+        <input id="form-interval" type="number" class="input" bind:value={formInterval} min="1" max="168" />
       </div>
 
       <div class="form-group">
-        <label class="form-label">{$t('subscr.filter_name')}</label>
-        <input type="text" class="input" bind:value={formFilterName} placeholder={$t('subscr.filter_placeholder')} />
+        <label for="form-filter-name" class="form-label">{$t('subscr.filter_name')}</label>
+        <input id="form-filter-name" type="text" class="input" bind:value={formFilterName} placeholder={$t('subscr.filter_placeholder')} />
       </div>
 
       <div class="form-group">
-        <label class="form-label">{$t('subscr.filter_type')}</label>
-        <input type="text" class="input" bind:value={formFilterType} placeholder="vmess, vless, trojan..." />
+        <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
+        <input id="form-filter-type" type="text" class="input" bind:value={formFilterType} placeholder="vmess, vless, trojan..." />
       </div>
 
       <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem;">
