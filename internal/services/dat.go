@@ -173,13 +173,20 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	// Reconstruct a sanitized URL from validated components only
 	sanitizedURL := fmt.Sprintf("%s://%s%s", u.Scheme, u.Host, cleanPath)
 
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return 0, fmt.Errorf("access to localhost is prohibited")
+	}
+
 	// Redundant check to satisfy CodeQL SSRF analysis.
 	// Actual security is provided by SafeHTTPClient's DialContext to prevent TOCTOU.
-	if ips, err := net.LookupIP(u.Hostname()); err == nil {
-		for _, ip := range ips {
-			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
-				return 0, fmt.Errorf("access to private network is prohibited")
-			}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return 0, fmt.Errorf("failed to resolve host: %w", err)
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+			return 0, fmt.Errorf("access to private network is prohibited")
 		}
 	}
 
