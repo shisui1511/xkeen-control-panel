@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 func validateKernelPath(path string) error {
@@ -181,7 +182,7 @@ func (s *KernelService) CheckLatest(name string) error {
 		url = fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=5", k.Repo)
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := utils.SafeHTTPClient(15 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		k.Status = "failed"
@@ -405,7 +406,7 @@ func (s *KernelService) buildDownloadURL(k *KernelInfo, arch string) (string, st
 }
 
 func (s *KernelService) downloadFile(url, filepath string) error {
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := utils.SafeHTTPClient(120 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		return err

@@ -196,7 +196,8 @@ func (s *SubscriptionService) GetLocked(id string) *Subscription {
 }
 
 func (s *SubscriptionService) downloadAndParse(subURL string) ([]Outbound, error) {
-	resp, err := http.Get(subURL)
+	client := utils.SafeHTTPClient(30 * time.Second)
+	resp, err := client.Get(subURL)
 	if err != nil {
 		return nil, err
 	}

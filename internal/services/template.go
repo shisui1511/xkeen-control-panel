@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type Template struct {
@@ -74,9 +75,7 @@ func (s *TemplateService) Fetch(url string) (string, error) {
 		return "", fmt.Errorf("requested URL is not in the allowed templates list")
 	}
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
+	client := utils.SafeHTTPClient(10 * time.Second)
 
 	resp, err := client.Get(url)
 	if err != nil {

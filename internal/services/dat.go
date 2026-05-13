@@ -1,10 +1,8 @@
 package services
 
 import (
-	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type DATFile struct {
@@ -169,48 +168,10 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		cleanPath = "/"
 	}
 
-	// Validate host explicitly before making any request
-	hostname := u.Hostname()
-	if hostname == "" {
-		return 0, fmt.Errorf("URL has no host")
-	}
-	ips, err := net.LookupIP(hostname)
-	if err != nil {
-		return 0, fmt.Errorf("failed to resolve host: %w", err)
-	}
-	for _, ip := range ips {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
-			return 0, fmt.Errorf("access to private network is prohibited")
-		}
-	}
-
 	// Reconstruct a sanitized URL from validated components only
 	sanitizedURL := fmt.Sprintf("%s://%s%s", u.Scheme, u.Host, cleanPath)
 
-	// Robust SSRF protection using custom DialContext that prevents connections to private IPs
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, _, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, err
-			}
-			ips, err := net.LookupIP(host)
-			if err != nil {
-				return nil, err
-			}
-			for _, ip := range ips {
-				if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
-					return nil, fmt.Errorf("access to private network is prohibited")
-				}
-			}
-			return (&net.Dialer{Timeout: 30 * time.Second}).DialContext(ctx, network, addr)
-		},
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   5 * time.Minute,
-	}
+	client := utils.SafeHTTPClient(5 * time.Minute)
 
 	resp, err := client.Get(sanitizedURL)
 	if err != nil {
