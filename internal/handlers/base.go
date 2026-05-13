@@ -63,6 +63,14 @@ func (a *API) SetKernelService(svc *services.KernelService) {
 	a.kernelSvc = svc
 }
 
+func (a *API) SetSubscriptionService(svc *services.SubscriptionService) {
+	a.subscriptionSvc = svc
+}
+
+func (a *API) SetNetworkToolsService(svc *services.NetworkToolsService) {
+	a.networkSvc = svc
+}
+
 func (a *API) t(r *http.Request, key string) string {
 	return i18n.T(i18n.LangFromContext(r.Context()), key)
 }
