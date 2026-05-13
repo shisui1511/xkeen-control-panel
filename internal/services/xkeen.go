@@ -61,8 +61,24 @@ func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (str
 		if cmd.Process != nil {
 			cmd.Process.Kill()
 		}
-		return utils.StripANSI(out.String()), fmt.Errorf("timeout exceeded")
+		output := utils.StripANSI(out.String())
+		// If it was a start/restart, check if it actually started despite the timeout
+		if strings.Contains(action, "start") || strings.Contains(action, "restart") {
+			status, _ := s.Status()
+			if strings.Contains(status, "running") || strings.Contains(status, "активен") {
+				return output, nil
+			}
+		}
+		return output, fmt.Errorf("timeout exceeded")
 	case err := <-done:
-		return utils.StripANSI(out.String()), err
+		output := utils.StripANSI(out.String())
+		if err != nil && (strings.Contains(action, "start") || strings.Contains(action, "restart")) {
+			// Check if it's running despite the error code
+			status, _ := s.Status()
+			if strings.Contains(status, "running") || strings.Contains(status, "активен") {
+				return output, nil
+			}
+		}
+		return output, err
 	}
 }
