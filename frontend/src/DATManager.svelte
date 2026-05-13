@@ -12,15 +12,14 @@
     last_update: number
     exists: boolean
     type: string
+    is_symlink: boolean
+    symlink_to?: string
   }
 
   let files: DATFile[] = []
   let loading = false
   let error = ''
-  let updating: string | null = null
-
-  // URL для каждого файла по его пути
-  let updateUrls: Record<string, string> = {}
+  let globalUpdating = false
 
   async function fetchFiles() {
     loading = true
@@ -34,19 +33,6 @@
         if (a.type !== b.type) return a.type.localeCompare(b.type)
         return a.name.localeCompare(b.name)
       })
-      
-      // Заполняем дефолтные URL для известных файлов, если они пустые
-      files.forEach(f => {
-        if (!updateUrls[f.path]) {
-          if (f.name.includes('geoip')) {
-            updateUrls[f.path] = 'https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat'
-          } else if (f.name.includes('geosite')) {
-            updateUrls[f.path] = 'https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat'
-          } else if (f.name.includes('mmdb') || f.name.includes('Country')) {
-            updateUrls[f.path] = 'https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/Country.mmdb'
-          }
-        }
-      })
     } catch (e: any) {
       error = e.message
     } finally {
@@ -54,18 +40,12 @@
     }
   }
 
-  async function updateFile(path: string) {
-    const url = updateUrls[path]
-    if (!url) {
-      error = $t('dat.url_required')
-      return
-    }
-    
-    updating = path
+  async function updateAll() {
+    globalUpdating = true
     error = ''
     try {
       const csrfToken = localStorage.getItem('csrf_token')
-      const res = await fetch(`/api/dat/update?path=${encodeURIComponent(path)}&url=${encodeURIComponent(url)}`, {
+      const res = await fetch('/api/dat/update', {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
       })
@@ -77,7 +57,7 @@
     } catch (e: any) {
       error = e.message
     } finally {
-      updating = null
+      globalUpdating = false
     }
   }
 
@@ -109,23 +89,32 @@
 
   <div class="card mb-2">
     <div class="flex-between">
-      <h2>{$t('dat.database_files')}</h2>
+      <div class="title-group">
+        <h2>{$t('dat.database_files')}</h2>
+        <button class="btn btn-primary ml-2" on:click={updateAll} disabled={globalUpdating || loading}>
+          {globalUpdating ? '⏳ ' + $t('app.loading') : '📥 ' + $t('dat.update_all')}
+        </button>
+      </div>
       <button class="btn btn-secondary" on:click={fetchFiles} disabled={loading}>
         🔄 {$t('app.refresh')}
       </button>
     </div>
 
-    {#if loading}
-      <p class="text-secondary">{$t('app.loading')}</p>
+    {#if loading && !globalUpdating}
+      <p class="text-secondary mt-2">{$t('app.loading')}</p>
     {:else if files.length === 0}
-      <p class="text-secondary">{$t('dat.no_files')}</p>
+      <p class="text-secondary mt-2">{$t('dat.no_files')}</p>
     {:else}
       <div class="file-list">
         {#each files as file}
-          <div class="file-item">
+          <div class="file-item" class:is-symlink={file.is_symlink}>
             <div class="file-info">
               <div class="file-name">
+                <span class="icon">{file.is_symlink ? '🔗' : '📄'}</span>
                 {file.name}
+                {#if file.is_symlink}
+                  <span class="symlink-target">→ {file.symlink_to}</span>
+                {/if}
                 {#if !file.exists}
                   <span class="badge badge-warning">{$t('dat.not_found')}</span>
                 {:else}
@@ -138,25 +127,6 @@
                 <span>{formatSize(file.size)}</span>
                 <span>{$t('dat.updated')}: {formatDate(file.last_update)}</span>
               </div>
-              
-              <div class="url-input-wrapper mt-2">
-                <input 
-                  type="text" 
-                  class="input url-input" 
-                  bind:value={updateUrls[file.path]} 
-                  placeholder={$t('dat.url_placeholder')} 
-                />
-              </div>
-            </div>
-            
-            <div class="actions">
-              <button
-                class="btn btn-secondary"
-                on:click={() => updateFile(file.path)}
-                disabled={updating === file.path}
-              >
-                {updating === file.path ? '⏳' : '📥'} {$t('dat.update')}
-              </button>
             </div>
           </div>
         {/each}
@@ -170,6 +140,15 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+  }
+
+  .title-group {
+    display: flex;
+    align-items: center;
+  }
+
+  .ml-2 {
+    margin-left: 1rem;
   }
 
   .file-list {
@@ -187,6 +166,16 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--bg);
+    transition: transform 0.2s;
+  }
+
+  .file-item:hover {
+    border-color: var(--primary);
+  }
+
+  .file-item.is-symlink {
+    border-style: dashed;
+    background: rgba(var(--primary-rgb), 0.02);
   }
 
   .file-info {
@@ -200,6 +189,21 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .icon {
+    font-size: 1.1rem;
+  }
+
+  .symlink-target {
+    font-weight: 400;
+    color: var(--primary);
+    font-family: monospace;
+    font-size: 0.85rem;
+    background: var(--bg-page);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
   }
 
   .file-details {
@@ -207,27 +211,10 @@
     gap: 1rem;
     font-size: 0.8rem;
     color: var(--text-secondary);
-    margin-bottom: 0.5rem;
-  }
-
-  .url-input-wrapper {
-    max-width: 600px;
-  }
-
-  .url-input {
-    width: 100%;
-    padding: 0.4rem 0.5rem;
-    font-size: 0.8rem;
-    font-family: monospace;
-  }
-
-  .actions {
-    margin-left: 1rem;
-    flex-shrink: 0;
   }
 
   .mt-2 {
-    margin-top: 0.5rem;
+    margin-top: 1rem;
   }
 
   .badge {

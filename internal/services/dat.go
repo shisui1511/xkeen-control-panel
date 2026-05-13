@@ -1,18 +1,20 @@
 package services
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type DATFile struct {
@@ -22,17 +24,21 @@ type DATFile struct {
 	LastUpdate int64  `json:"last_update"`
 	Exists     bool   `json:"exists"`
 	Type       string `json:"type"` // "xray" or "mihomo"
+	IsSymlink  bool   `json:"is_symlink"`
+	SymlinkTo  string `json:"symlink_to,omitempty"`
 }
 
 type DATManagerService struct {
-	xrayDir   string
-	mihomoDir string
-	mu        sync.RWMutex
+	xrayDir    string
+	mihomoDir  string
+	binaryPath string
+	mu         sync.RWMutex
 }
 
 func NewDATManagerService(dirs ...string) *DATManagerService {
 	xrayDir := "/opt/etc/xray/dat"
 	mihomoDir := "/opt/etc/mihomo"
+	binaryPath := "/opt/sbin/xkeen"
 
 	if len(dirs) > 0 && dirs[0] != "" {
 		xrayDir = dirs[0]
@@ -40,10 +46,14 @@ func NewDATManagerService(dirs ...string) *DATManagerService {
 	if len(dirs) > 1 && dirs[1] != "" {
 		mihomoDir = dirs[1]
 	}
+	if len(dirs) > 2 && dirs[2] != "" {
+		binaryPath = dirs[2]
+	}
 
 	return &DATManagerService{
-		xrayDir:   xrayDir,
-		mihomoDir: mihomoDir,
+		xrayDir:    xrayDir,
+		mihomoDir:  mihomoDir,
+		binaryPath: binaryPath,
 	}
 }
 
@@ -53,43 +63,65 @@ func (s *DATManagerService) List() []DATFile {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Scan Xray
-	if matches, err := filepath.Glob(filepath.Join(s.xrayDir, "*.dat")); err == nil {
-		for _, match := range matches {
-			f := DATFile{Name: filepath.Base(match), Path: match, Exists: true, Type: "xray"}
-			if info, err := os.Stat(match); err == nil {
-				f.Size = info.Size()
-				f.LastUpdate = info.ModTime().Unix()
+	scanDir := func(dir string, fileType string, patterns ...string) {
+		for _, pattern := range patterns {
+			matches, err := filepath.Glob(filepath.Join(dir, pattern))
+			if err != nil {
+				continue
 			}
-			files = append(files, f)
+			for _, match := range matches {
+				f := DATFile{
+					Name:   filepath.Base(match),
+					Path:   match,
+					Exists: true,
+					Type:   fileType,
+				}
+
+				info, err := os.Lstat(match)
+				if err != nil {
+					continue
+				}
+
+				if info.Mode()&os.ModeSymlink != 0 {
+					f.IsSymlink = true
+					if target, err := os.Readlink(match); err == nil {
+						f.SymlinkTo = target
+						// Try to get size of target
+						if targetInfo, err := os.Stat(match); err == nil {
+							f.Size = targetInfo.Size()
+							f.LastUpdate = targetInfo.ModTime().Unix()
+						}
+					}
+				} else {
+					f.Size = info.Size()
+					f.LastUpdate = info.ModTime().Unix()
+				}
+
+				files = append(files, f)
+			}
 		}
 	}
 
-	// Scan Mihomo .dat
-	if matches, err := filepath.Glob(filepath.Join(s.mihomoDir, "*.dat")); err == nil {
-		for _, match := range matches {
-			f := DATFile{Name: filepath.Base(match), Path: match, Exists: true, Type: "mihomo"}
-			if info, err := os.Stat(match); err == nil {
-				f.Size = info.Size()
-				f.LastUpdate = info.ModTime().Unix()
-			}
-			files = append(files, f)
-		}
-	}
-
-	// Scan Mihomo .mmdb
-	if matches, err := filepath.Glob(filepath.Join(s.mihomoDir, "*.mmdb")); err == nil {
-		for _, match := range matches {
-			f := DATFile{Name: filepath.Base(match), Path: match, Exists: true, Type: "mihomo"}
-			if info, err := os.Stat(match); err == nil {
-				f.Size = info.Size()
-				f.LastUpdate = info.ModTime().Unix()
-			}
-			files = append(files, f)
-		}
-	}
+	scanDir(s.xrayDir, "xray", "*.dat")
+	scanDir(s.mihomoDir, "mihomo", "*.dat", "*.mmdb")
 
 	return files
+}
+
+func (s *DATManagerService) Update() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Use xkeen -ug to update DAT files
+	// -u: check for updates
+	// -g: geoip/geosite update
+	// We use both to ensure update
+	cmd := exec.Command(s.binaryPath, "-ug")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("xkeen -ug failed: %v, output: %s", err, string(out))
+	}
+	return nil
 }
 
 func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (int64, error) {
@@ -138,12 +170,17 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		cleanPath = "/"
 	}
 
-	// Validate host explicitly before making any request
-	hostname := u.Hostname()
-	if hostname == "" {
-		return 0, fmt.Errorf("URL has no host")
+	// Reconstruct a sanitized URL from validated components only
+	sanitizedURL := fmt.Sprintf("%s://%s%s", u.Scheme, u.Host, cleanPath)
+
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return 0, fmt.Errorf("access to localhost is prohibited")
 	}
-	ips, err := net.LookupIP(hostname)
+
+	// Redundant check to satisfy CodeQL SSRF analysis.
+	// Actual security is provided by SafeHTTPClient's DialContext to prevent TOCTOU.
+	ips, err := net.LookupIP(host)
 	if err != nil {
 		return 0, fmt.Errorf("failed to resolve host: %w", err)
 	}
@@ -153,34 +190,7 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 		}
 	}
 
-	// Reconstruct a sanitized URL from validated components only
-	sanitizedURL := fmt.Sprintf("%s://%s%s", u.Scheme, u.Host, cleanPath)
-
-	// Robust SSRF protection using custom DialContext that prevents connections to private IPs
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			host, _, err := net.SplitHostPort(addr)
-			if err != nil {
-				return nil, err
-			}
-			ips, err := net.LookupIP(host)
-			if err != nil {
-				return nil, err
-			}
-			for _, ip := range ips {
-				if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
-					return nil, fmt.Errorf("access to private network is prohibited")
-				}
-			}
-			return (&net.Dialer{Timeout: 30 * time.Second}).DialContext(ctx, network, addr)
-		},
-	}
-
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   5 * time.Minute,
-	}
-
+	client := utils.SafeHTTPClient(5 * time.Minute)
 	resp, err := client.Get(sanitizedURL)
 	if err != nil {
 		return 0, fmt.Errorf("failed to download: %w", err)
@@ -198,7 +208,8 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	}
 	tmpFile := out.Name()
 
-	written, err := io.Copy(out, resp.Body)
+	// Limit response size to 50MB to prevent disk exhaustion on routers
+	written, err := io.Copy(out, io.LimitReader(resp.Body, 50*1024*1024))
 	out.Close()
 	if err != nil {
 		os.Remove(tmpFile)

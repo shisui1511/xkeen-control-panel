@@ -24,6 +24,7 @@ type API struct {
 	trafficQuotaSvc *services.TrafficQuotaService
 	datSvc          *services.DATManagerService
 	consoleSvc      *services.ConsoleService
+	templateSvc     *services.TemplateService
 	pathVal         *utils.PathValidator
 }
 
@@ -52,6 +53,22 @@ func (a *API) SetDATManagerService(svc *services.DATManagerService) {
 
 func (a *API) SetConsoleService(svc *services.ConsoleService) {
 	a.consoleSvc = svc
+}
+
+func (a *API) SetTemplateService(svc *services.TemplateService) {
+	a.templateSvc = svc
+}
+
+func (a *API) SetKernelService(svc *services.KernelService) {
+	a.kernelSvc = svc
+}
+
+func (a *API) SetSubscriptionService(svc *services.SubscriptionService) {
+	a.subscriptionSvc = svc
+}
+
+func (a *API) SetNetworkToolsService(svc *services.NetworkToolsService) {
+	a.networkSvc = svc
 }
 
 func (a *API) t(r *http.Request, key string) string {

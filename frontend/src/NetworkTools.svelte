@@ -26,8 +26,26 @@
 
   const recordTypes = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT']
 
+  function validateHost(h: string): boolean {
+    const hostRegex = /^[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9]$/
+    return hostRegex.test(h)
+  }
+
+  function validateURL(u: string): boolean {
+    try {
+      new URL(u)
+      return true
+    } catch (e) {
+      return false
+    }
+  }
+
   async function runPing() {
     if (!host) return
+    if (!validateHost(host)) {
+      result = { success: false, error: $t('net.invalid_host') }
+      return
+    }
     loading = true
     try {
       const res = await fetch('/api/network/ping', {
@@ -45,6 +63,10 @@
 
   async function runTraceroute() {
     if (!host) return
+    if (!validateHost(host)) {
+      result = { success: false, error: $t('net.invalid_host') }
+      return
+    }
     loading = true
     try {
       const res = await fetch('/api/network/traceroute', {
@@ -62,6 +84,10 @@
 
   async function runDNS() {
     if (!host) return
+    if (!validateHost(host)) {
+      result = { success: false, error: $t('net.invalid_host') }
+      return
+    }
     loading = true
     try {
       const res = await fetch('/api/network/dns', {
@@ -79,6 +105,10 @@
 
   async function runHTTP() {
     if (!url) return
+    if (!validateURL(url)) {
+      result = { success: false, error: $t('net.invalid_url') }
+      return
+    }
     loading = true
     try {
       const res = await fetch('/api/network/http', {
@@ -122,9 +152,9 @@
 
 <div class="container">
   <PageHeader
-    title="Сетевые инструменты"
-    subtitle="Ping, traceroute, DNS lookup, HTTP test"
-    breadcrumbs={[{ label: 'Сетевые инструменты' }]}
+    title={$t('net.title')}
+    subtitle={$t('net.subtitle')}
+    breadcrumbs={[{ label: $t('net.title') }]}
     {onSwitchTab}
   />
 
@@ -132,7 +162,7 @@
     <div class="card mb-2">
       <div style="display: flex; align-items: center; gap: 0.5rem;">
         <span>🌍</span>
-        <span>Ваш IP: <strong>{publicIP}</strong></span>
+        <span>{$t('net.your_ip', { ip: publicIP })}</span>
       </div>
     </div>
   {/if}
@@ -156,30 +186,30 @@
     <div class="tool-form">
       {#if activeTool === 'ping'}
         <div class="form-row">
-          <label>Хост/IP:</label>
-          <input type="text" class="input" bind:value={host} placeholder="google.com" />
+          <label for="ping-host">{$t('net.host_ip')}:</label>
+          <input id="ping-host" type="text" class="input" bind:value={host} placeholder="google.com" />
         </div>
         <div class="form-row">
-          <label>Количество пакетов:</label>
-          <input type="number" class="input" bind:value={count} min="1" max="20" />
+          <label for="ping-count">{$t('net.count')}:</label>
+          <input id="ping-count" type="number" class="input" bind:value={count} min="1" max="20" />
         </div>
       {:else if activeTool === 'traceroute'}
         <div class="form-row">
-          <label>Хост/IP:</label>
-          <input type="text" class="input" bind:value={host} placeholder="google.com" />
+          <label for="trace-host">{$t('net.host_ip')}:</label>
+          <input id="trace-host" type="text" class="input" bind:value={host} placeholder="google.com" />
         </div>
         <div class="form-row">
-          <label>Максимум прыжков:</label>
-          <input type="number" class="input" bind:value={maxHops} min="1" max="30" />
+          <label for="trace-hops">{$t('net.max_hops')}:</label>
+          <input id="trace-hops" type="number" class="input" bind:value={maxHops} min="1" max="30" />
         </div>
       {:else if activeTool === 'dns'}
         <div class="form-row">
-          <label>Домен:</label>
-          <input type="text" class="input" bind:value={host} placeholder="google.com" />
+          <label for="dns-host">{$t('editor.domain')}:</label>
+          <input id="dns-host" type="text" class="input" bind:value={host} placeholder="google.com" />
         </div>
         <div class="form-row">
-          <label>Тип записи:</label>
-          <select class="input" bind:value={recordType}>
+          <label for="dns-type">{$t('net.record_type')}:</label>
+          <select id="dns-type" class="input" bind:value={recordType}>
             {#each recordTypes as type}
               <option value={type}>{type}</option>
             {/each}
@@ -187,12 +217,12 @@
         </div>
       {:else if activeTool === 'http'}
         <div class="form-row">
-          <label>URL:</label>
-          <input type="text" class="input" bind:value={url} placeholder="https://google.com" />
+          <label for="http-url">URL:</label>
+          <input id="http-url" type="text" class="input" bind:value={url} placeholder="https://google.com" />
         </div>
         <div class="form-row">
-          <label>{$t('net.timeout_sec')}</label>
-          <input type="number" class="input" bind:value={timeout} min="1" max="60" />
+          <label for="http-timeout">{$t('net.timeout_sec')}</label>
+          <input id="http-timeout" type="number" class="input" bind:value={timeout} min="1" max="60" />
         </div>
       {/if}
 

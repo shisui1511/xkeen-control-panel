@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 const (
@@ -303,7 +305,8 @@ func (a *API) restartProcess(binPath string, dataDir string) {
 }
 
 func fetchLatestRelease(channel string) (*UpdateInfo, error) {
-	resp, err := http.Get(githubAPIReleases + "?per_page=10")
+	client := utils.SafeHTTPClient(15 * time.Second)
+	resp, err := client.Get(githubAPIReleases + "?per_page=10")
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +349,8 @@ func fetchLatestRelease(channel string) (*UpdateInfo, error) {
 }
 
 func fetchChangelog(version string) (string, error) {
-	resp, err := http.Get(githubAPIReleases + "/tags/v" + version)
+	client := utils.SafeHTTPClient(15 * time.Second)
+	resp, err := client.Get(githubAPIReleases + "/tags/v" + version)
 	if err != nil {
 		return "", err
 	}
@@ -363,7 +367,8 @@ func fetchChangelog(version string) (string, error) {
 }
 
 func downloadFile(url, filepath string) error {
-	resp, err := http.Get(url)
+	client := utils.SafeHTTPClient(300 * time.Second)
+	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}

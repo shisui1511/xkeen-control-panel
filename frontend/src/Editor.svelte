@@ -34,12 +34,24 @@
 
   let editorContainer: HTMLDivElement
   let editorView: EditorView | null = null
+  interface Template {
+    name: string
+    description: string
+    type: string
+    url: string
+  }
+
   let files: string[] = []
   let selectedFile = ''
   let loading = false
   let saving = false
   let message = ''
   let backups: string[] = []
+
+  // Directory management
+  const xrayDir = '/opt/etc/xray/configs'
+  const mihomoDir = '/opt/etc/mihomo'
+  let currentDir = xrayDir
 
   // Schema assist mode
   let schemaEnabled = true
@@ -48,17 +60,61 @@
   // CRUD modals
   let showCreateModal = false
   let showRenameModal = false
+  let showTemplatesModal = false
   let newFileName = ''
   let renameTarget = ''
+  let templates: Template[] = []
+  
+  // Generator state
+  let showGeneratorModal = false
+  let genProtocol = 'vless'
+  let genAddress = ''
+  let genPort = 443
+  let genUUID = crypto.randomUUID()
+  let genSNI = ''
+  let genFlow = 'xtls-rprx-vision'
+  let genSecurity = 'reality'
+  let genPublicKey = ''
+  let genShortId = ''
+  let genSpiderDomain = ''
 
-  async function loadFiles() {
+  // Dirty state tracking
+  let originalContent = ''
+  let isDirty = false
+
+  function checkDirty(): boolean {
+    if (!editorView) return false
+    return editorView.state.doc.toString() !== originalContent
+  }
+
+  function confirmUnsaved(): boolean {
+    if (!checkDirty()) return true
+    return confirm($t('editor.unsaved_warning') || 'You have unsaved changes. Discard them?')
+  }
+
+  async function loadFiles(dir?: string) {
+    if (dir) currentDir = dir
     try {
-      const res = await fetch('/api/config/list')
+      const res = await fetch(`/api/config/list?dir=${encodeURIComponent(currentDir)}`)
       if (!res.ok) throw new Error('Failed to load files')
       files = await res.json()
     } catch (e: any) {
       message = $t('editor.load_error') + ': ' + e.message
     }
+  }
+
+  function switchDir(dir: string) {
+    if (currentDir === dir) return
+    if (!confirmUnsaved()) return
+    currentDir = dir
+    selectedFile = ''
+    backups = []
+    originalContent = ''
+    isDirty = false
+    if (editorView) {
+      editorView.setState(EditorState.create({ doc: '' }))
+    }
+    loadFiles()
   }
 
   function getSchemaExtensions(path: string) {
@@ -101,9 +157,11 @@
 
   async function loadFile(path: string) {
     if (!path) return
+    if (selectedFile && path !== selectedFile && !confirmUnsaved()) return
     
     loading = true
     message = ''
+    isDirty = false
     
     try {
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`)
@@ -159,6 +217,8 @@
       }
       
       selectedFile = path
+      originalContent = content
+      isDirty = false
       await loadBackups(path)
     } catch (e) {
       message = $t('editor.file_load_error') + ': ' + e.message
@@ -200,6 +260,8 @@
       if (!res.ok) throw new Error('Failed to save file')
       
       message = $t('editor.file_saved')
+      originalContent = editorView.state.doc.toString()
+      isDirty = false
       await loadBackups(selectedFile)
       setTimeout(() => message = '', 3000)
     } catch (e) {
@@ -380,8 +442,85 @@
     }
   }
 
+  async function loadTemplates() {
+    try {
+      const res = await fetch('/api/templates/list')
+      if (res.ok) templates = await res.json()
+    } catch (e) {}
+  }
+
+  async function applyTemplate(template: Template) {
+    if (!editorView) return
+    if (!confirm($t('editor.confirm_template'))) return
+    
+    try {
+      const res = await fetch(`/api/templates/fetch?url=${encodeURIComponent(template.url)}`)
+      if (!res.ok) throw new Error('Failed to fetch template')
+      const data = await res.json()
+      
+      editorView.dispatch({
+        changes: { from: 0, to: editorView.state.doc.length, insert: data.content }
+      })
+      showTemplatesModal = false
+      message = '✓ Template applied'
+      setTimeout(() => message = '', 3000)
+    } catch (e: any) {
+      alert('Error: ' + e.message)
+    }
+  }
+
+  function generateOutbound() {
+    if (!editorView) return
+    
+    let config: any = {}
+    if (genProtocol === 'vless') {
+      config = {
+        protocol: "vless",
+        settings: {
+          vnext: [{
+            address: genAddress,
+            port: genPort,
+            users: [{ id: genUUID, encryption: "none", flow: genFlow }]
+          }]
+        },
+        streamSettings: {
+          network: "tcp",
+          security: genSecurity,
+          realitySettings: genSecurity === 'reality' ? {
+            show: false,
+            dest: genSpiderDomain + ":443",
+            xver: 0,
+            serverNames: [genSNI],
+            privateKey: "", // User must fill
+            shortIds: [genShortId]
+          } : undefined
+        }
+      }
+    } else if (genProtocol === 'shadowsocks') {
+      config = {
+        protocol: "shadowsocks",
+        settings: {
+          servers: [{
+            address: genAddress,
+            port: genPort,
+            method: "256-gcm",
+            password: genUUID
+          }]
+        }
+      }
+    }
+
+    const content = JSON.stringify(config, null, 2)
+    const cursor = editorView.state.selection.main.head
+    editorView.dispatch({
+      changes: { from: cursor, insert: content }
+    })
+    showGeneratorModal = false
+  }
+
   onMount(() => {
     loadFiles()
+    loadTemplates()
   })
 
   onDestroy(() => {
@@ -395,7 +534,7 @@
   <div class="sidebar">
     <div class="sidebar-header">
       <div style="display: flex; align-items: center; gap: 0.5rem;">
-        <button class="btn-icon-small" on:click={() => onSwitchTab('dashboard')} title="Назад">
+        <button class="btn-icon-small" on:click={() => onSwitchTab('dashboard')} title={$t('editor.back_to_dashboard')}>
           ←
         </button>
         <h3>{$t('editor.configs')}</h3>
@@ -403,6 +542,11 @@
       <button class="btn-icon-small" on:click={() => { showCreateModal = true; newFileName = '' }} title={$t('editor.create_file')}>
         +
       </button>
+    </div>
+
+    <div class="dir-toggle">
+      <button class:active={currentDir === xrayDir} on:click={() => switchDir(xrayDir)}>Xray</button>
+      <button class:active={currentDir === mihomoDir} on:click={() => switchDir(mihomoDir)}>Mihomo</button>
     </div>
     <div class="file-list">
       {#each files as file}
@@ -436,16 +580,22 @@
       <span class="file-name">{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span>
       <div class="toolbar-actions">
         {#if selectedFile}
-          <label class="toggle-label" title="Enable schema validation, autocomplete and hover tooltips">
-            <input type="checkbox" bind:checked={schemaEnabled} on:change={toggleSchema} />
+          <label class="toggle-label" for="schema-toggle" title="Enable schema validation, autocomplete and hover tooltips">
+            <input id="schema-toggle" type="checkbox" bind:checked={schemaEnabled} on:change={toggleSchema} />
             {$t('editor.schema')}
           </label>
-          <label class="toggle-label" title="Expert mode: full schema assist / Beginner: simplified">
-            <input type="checkbox" bind:checked={expertMode} on:change={toggleExpertMode} />
+          <label class="toggle-label" for="expert-toggle" title="Expert mode: full schema assist / Beginner: simplified">
+            <input id="expert-toggle" type="checkbox" bind:checked={expertMode} on:change={toggleExpertMode} />
             {$t('editor.expert')}
           </label>
           <button on:click={applyQuickFixes} class="btn-secondary" title="Apply common fixes">
             🔧 {$t('editor.quick_fix')}
+          </button>
+          <button on:click={() => showTemplatesModal = true} class="btn-secondary" title="Apply configuration templates">
+            📂 {$t('editor.templates')}
+          </button>
+          <button on:click={() => showGeneratorModal = true} class="btn-secondary" title="Generate outbound config">
+            ✨ {$t('editor.generator')}
           </button>
           <button on:click={() => { showRenameModal = true; renameTarget = selectedFile.split('/').pop() || '' }} class="btn-secondary">
             {$t('app.rename')}
@@ -479,10 +629,12 @@
 </div>
 
 {#if showCreateModal}
-  <div class="modal-overlay" on:click={() => showCreateModal = false}>
-    <div class="modal" on:click|stopPropagation>
+  <div class="modal-overlay" role="button" tabindex="0" on:click={() => showCreateModal = false} on:keydown={(e) => e.key === 'Escape' && (showCreateModal = false)}>
+    <div class="modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
       <h3>{$t('editor.create_file')}</h3>
+      <label for="new-file-name" class="sr-only">{$t('editor.file_name')}</label>
       <input 
+        id="new-file-name"
         type="text" 
         bind:value={newFileName}
         placeholder={$t('editor.file_name')}
@@ -498,10 +650,12 @@
 {/if}
 
 {#if showRenameModal}
-  <div class="modal-overlay" on:click={() => showRenameModal = false}>
-    <div class="modal" on:click|stopPropagation>
+  <div class="modal-overlay" role="button" tabindex="0" on:click={() => showRenameModal = false} on:keydown={(e) => e.key === 'Escape' && (showRenameModal = false)}>
+    <div class="modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
       <h3>{$t('editor.rename_file')}</h3>
+      <label for="rename-target" class="sr-only">{$t('editor.new_name')}</label>
       <input 
+        id="rename-target"
         type="text" 
         bind:value={renameTarget}
         placeholder={$t('editor.new_name')}
@@ -511,6 +665,99 @@
       <div class="modal-actions">
         <button on:click={() => showRenameModal = false} class="btn btn-secondary">{$t('app.cancel')}</button>
         <button on:click={renameFile} class="btn btn-primary">{$t('app.rename')}</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showTemplatesModal}
+  <div class="modal-overlay" role="button" tabindex="0" on:click={() => showTemplatesModal = false} on:keydown={(e) => e.key === 'Escape' && (showTemplatesModal = false)}>
+    <div class="modal templates-modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
+      <div class="modal-header">
+        <h3>{$t('editor.templates')}</h3>
+        <button class="btn-close" on:click={() => showTemplatesModal = false}>✕</button>
+      </div>
+      <p class="text-secondary mb-2">{$t('editor.templates_desc')}</p>
+      
+      <div class="template-list">
+        {#each templates as template}
+          <button class="template-item" on:click={() => applyTemplate(template)}>
+            <div class="template-info">
+              <span class="template-name">{template.name}</span>
+              <span class="template-desc">{template.description}</span>
+            </div>
+            <span class="template-type">{template.type}</span>
+          </button>
+        {:else}
+          <p class="text-center p-3">{$t('app.loading')}</p>
+        {/each}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showGeneratorModal}
+  <div class="modal-overlay" role="button" tabindex="0" on:click={() => showGeneratorModal = false} on:keydown={(e) => e.key === 'Escape' && (showGeneratorModal = false)}>
+    <div class="modal generator-modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
+      <div class="modal-header">
+        <h3>{$t('editor.generator')}</h3>
+        <button class="btn-close" on:click={() => showGeneratorModal = false}>✕</button>
+      </div>
+      
+      <div class="form-group mb-2">
+        <label for="gen-protocol">{$t('editor.protocol')}</label>
+        <select id="gen-protocol" bind:value={genProtocol} class="input">
+          <option value="vless">VLESS</option>
+          <option value="shadowsocks">Shadowsocks</option>
+        </select>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="gen-address">{$t('editor.address')}</label>
+          <input id="gen-address" type="text" bind:value={genAddress} placeholder="example.com" class="input" />
+        </div>
+        <div class="form-group">
+          <label for="gen-port">{$t('editor.port')}</label>
+          <input id="gen-port" type="number" bind:value={genPort} class="input" />
+        </div>
+      </div>
+
+      <div class="form-group mt-2">
+        <label for="gen-uuid">{genProtocol === 'vless' ? 'UUID' : 'Password'}</label>
+        <div class="input-group">
+          <input id="gen-uuid" type="text" bind:value={genUUID} class="input" />
+          <button class="btn btn-secondary" on:click={() => genUUID = crypto.randomUUID()}>🎲</button>
+        </div>
+      </div>
+
+      {#if genProtocol === 'vless'}
+        <div class="form-group mt-2">
+          <label for="gen-sni">SNI</label>
+          <input id="gen-sni" type="text" bind:value={genSNI} placeholder="sni.example.com" class="input" />
+        </div>
+        
+        <div class="form-grid mt-2">
+          <div class="form-group">
+            <label for="gen-security">Security</label>
+            <select id="gen-security" bind:value={genSecurity} class="input">
+              <option value="reality">Reality</option>
+              <option value="tls">TLS</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+          {#if genSecurity === 'reality'}
+            <div class="form-group">
+              <label for="gen-shortid">Short ID</label>
+              <input id="gen-shortid" type="text" bind:value={genShortId} placeholder="hex string" class="input" />
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <div class="modal-actions mt-3">
+        <button on:click={() => showGeneratorModal = false} class="btn btn-secondary">{$t('app.cancel')}</button>
+        <button on:click={generateOutbound} class="btn btn-primary">{$t('app.generate')}</button>
       </div>
     </div>
   </div>
@@ -544,6 +791,38 @@
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
+  }
+  
+  .dir-toggle {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.5rem;
+    background: var(--bg);
+    border-radius: var(--radius);
+    margin: 0.5rem 0 1rem 0;
+  }
+
+  .dir-toggle button {
+    flex: 1;
+    padding: 0.4rem;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+  }
+
+  .dir-toggle button:hover {
+    background: var(--hover);
+  }
+
+  .dir-toggle button.active {
+    background: var(--card-bg);
+    color: var(--primary);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   }
 
   .file-list, .backup-list {
@@ -740,4 +1019,111 @@
   :global(.cm-scroller) {
     overflow: auto;
   }
+  .templates-modal {
+    max-width: 600px;
+    width: 90%;
+  }
+
+  .template-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .template-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s;
+  }
+
+  .template-item:hover {
+    border-color: var(--primary);
+    background: var(--hover);
+  }
+
+  .template-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .template-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+
+  .template-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+  }
+
+  .template-type {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    background: var(--bg-page);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .btn-close {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+  }
+
+  .p-3 {
+    padding: 1rem;
+  }
+
+  .text-center {
+    text-align: center;
+  }
+  .generator-modal {
+    max-width: 500px;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 1rem;
+  }
+
+  .input-group {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  .mt-3 { margin-top: 1.5rem; }
+  .mb-2 { margin-bottom: 1rem; }
 </style>

@@ -3,8 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-
-	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"regexp"
 )
 
 func (a *API) NetworkPing(w http.ResponseWriter, r *http.Request) {
@@ -27,8 +26,10 @@ func (a *API) NetworkPing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.networkSvc == nil {
-		a.networkSvc = services.NewNetworkToolsService()
+	// Basic host validation to prevent command injection
+	if !regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9]$`).MatchString(req.Host) {
+		a.errorResponse(w, "Invalid host format", http.StatusBadRequest)
+		return
 	}
 
 	result, err := a.networkSvc.Ping(req.Host, req.Count)
@@ -60,8 +61,9 @@ func (a *API) NetworkTraceroute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.networkSvc == nil {
-		a.networkSvc = services.NewNetworkToolsService()
+	if !regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9]$`).MatchString(req.Host) {
+		a.errorResponse(w, "Invalid host format", http.StatusBadRequest)
+		return
 	}
 
 	result, err := a.networkSvc.Traceroute(req.Host, req.MaxHops)
@@ -93,8 +95,9 @@ func (a *API) NetworkDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.networkSvc == nil {
-		a.networkSvc = services.NewNetworkToolsService()
+	if !regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9]$`).MatchString(req.Host) {
+		a.errorResponse(w, "Invalid host format", http.StatusBadRequest)
+		return
 	}
 
 	result, err := a.networkSvc.DNSLookup(req.Host, req.RecordType)
@@ -126,10 +129,6 @@ func (a *API) NetworkHTTPTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.networkSvc == nil {
-		a.networkSvc = services.NewNetworkToolsService()
-	}
-
 	result, err := a.networkSvc.HTTPTest(req.URL, req.Timeout)
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
@@ -140,9 +139,6 @@ func (a *API) NetworkHTTPTest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) NetworkIP(w http.ResponseWriter, r *http.Request) {
-	if a.networkSvc == nil {
-		a.networkSvc = services.NewNetworkToolsService()
-	}
 
 	result, err := a.networkSvc.GetPublicIP()
 	if err != nil {

@@ -3,7 +3,10 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type Config struct {
@@ -36,13 +39,32 @@ type HTTPSConfig struct {
 	KeyPath  string `json:"key_path"`
 }
 
+func findXKeen() string {
+	paths := []string{
+		"/opt/sbin/xkeen",
+		"/opt/bin/xkeen",
+		"/usr/local/bin/xkeen",
+		"/usr/bin/xkeen",
+	}
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	// Try which
+	if path, err := exec.LookPath("xkeen"); err == nil {
+		return path
+	}
+	return "/opt/sbin/xkeen" // fallback
+}
+
 func Default() *Config {
 	return &Config{
 		Port:            8090,
 		XRayConfigDir:   "/opt/etc/xray/configs",
-		XKeenBinary:     "xkeen",
+		XKeenBinary:     findXKeen(),
 		MihomoConfigDir: "/opt/etc/mihomo",
-		MihomoBinary:    "mihomo",
+		MihomoBinary:    "/opt/sbin/mihomo",
 		MihomoAPIURL:    "http://localhost:9090",
 		DataDir:         "/opt/etc/xkeen-control-panel",
 		LogLevel:        "info",
@@ -53,16 +75,18 @@ func Default() *Config {
 			"/opt/etc/xkeen",
 			"/opt/etc/mihomo",
 			"/opt/var/log",
+			"/opt/sbin",
+			"/opt/bin",
 		},
 		Auth: AuthConfig{
 			PasswordHash:     "",
 			SessionTimeout:   24,
 			MaxLoginAttempts: 5,
 			LockoutDuration:  5,
-			SecureCookie:     false,
+			SecureCookie:     true,
 		},
 		HTTPS: HTTPSConfig{
-			Enabled:  false,
+			Enabled:  true,
 			CertPath: "",
 			KeyPath:  "",
 		},
@@ -91,7 +115,7 @@ func Load(path string) (*Config, error) {
 func Save(path string, cfg *Config) error {
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	os.MkdirAll(filepath.Dir(path), 0755)
-	return os.WriteFile(path, data, 0644)
+	return utils.AtomicWriteFile(path, data, 0644)
 }
 
 func (c *Config) SavePasswordHash(path string, hash string) error {

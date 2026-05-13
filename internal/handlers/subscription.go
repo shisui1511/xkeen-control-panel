@@ -9,9 +9,7 @@ import (
 )
 
 func (a *API) SubscriptionList(w http.ResponseWriter, r *http.Request) {
-	if a.subscriptionSvc == nil {
-		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
-	}
+
 	subs := a.subscriptionSvc.List()
 	a.jsonResponse(w, subs)
 }
@@ -20,10 +18,6 @@ func (a *API) SubscriptionAdd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
-	}
-
-	if a.subscriptionSvc == nil {
-		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
 	}
 
 	var sub services.Subscription
@@ -55,10 +49,6 @@ func (a *API) SubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.subscriptionSvc == nil {
-		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
-	}
-
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		a.errorResponse(w, "ID is required", http.StatusBadRequest)
@@ -85,10 +75,6 @@ func (a *API) SubscriptionDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if a.subscriptionSvc == nil {
-		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
-	}
-
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		a.errorResponse(w, "ID is required", http.StatusBadRequest)
@@ -107,10 +93,6 @@ func (a *API) SubscriptionRefresh(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
-	}
-
-	if a.subscriptionSvc == nil {
-		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
 	}
 
 	id := r.URL.Query().Get("id")
@@ -132,10 +114,6 @@ func (a *API) SubscriptionRefreshAll(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
-	}
-
-	if a.subscriptionSvc == nil {
-		a.subscriptionSvc = services.NewSubscriptionService(a.cfg.DataDir, a.cfg.XRayConfigDir)
 	}
 
 	var results []map[string]interface{}

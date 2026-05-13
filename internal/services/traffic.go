@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // TrafficQuota represents a traffic limit
@@ -58,6 +60,10 @@ type TrafficQuotaService struct {
 	mu         sync.RWMutex
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
+	httpClient *http.Client
+
+	// connectionTracker maps connection ID -> last seen {upload, download}
+	connectionTracker sync.Map
 }
 
 func NewTrafficQuotaService(dataDir, mihomoURL string) *TrafficQuotaService {
@@ -68,6 +74,7 @@ func NewTrafficQuotaService(dataDir, mihomoURL string) *TrafficQuotaService {
 		proxyStats: make(map[string]*ProxyTraffic),
 		alerts:     []TrafficAlert{},
 		stopCh:     make(chan struct{}),
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 	svc.load()
 	return svc
@@ -117,8 +124,7 @@ func (s *TrafficQuotaService) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	os.MkdirAll(s.dataDir, 0755)
-	return os.WriteFile(s.storePath(), data, 0644)
+	return utils.AtomicWriteFile(s.storePath(), data, 0644)
 }
 
 // --- CRUD for quotas ---
@@ -295,18 +301,16 @@ func (s *TrafficQuotaService) checkResets() {
 	_ = s.saveLocked()
 }
 
-// mihomoConnectionsResponse matches Mihomo /connections endpoint
-type mihomoConnectionsResponse struct {
-	Connections []struct {
-		Chains   []string `json:"chains"`
-		Upload   int64    `json:"upload"`
-		Download int64    `json:"download"`
-	} `json:"connections"`
+// checkQuotas checks all quotas against current stats
+
+// connStats holds last seen bytes for a connection
+type connStats struct {
+	Upload   int64
+	Download int64
 }
 
 func (s *TrafficQuotaService) collectTraffic() {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(s.mihomoURL + "/connections")
+	resp, err := s.httpClient.Get(s.mihomoURL + "/connections")
 	if err != nil {
 		log.Printf("TrafficQuota: failed to fetch connections: %v", err)
 		return
@@ -318,7 +322,14 @@ func (s *TrafficQuotaService) collectTraffic() {
 		return
 	}
 
-	var data mihomoConnectionsResponse
+	var data struct {
+		Connections []struct {
+			ID       string   `json:"id"`
+			Chains   []string `json:"chains"`
+			Upload   int64    `json:"upload"`
+			Download int64    `json:"download"`
+		} `json:"connections"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		log.Printf("TrafficQuota: failed to decode connections: %v", err)
 		return
@@ -326,6 +337,8 @@ func (s *TrafficQuotaService) collectTraffic() {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	activeIDs := make(map[string]bool)
 
 	for _, conn := range data.Connections {
 		if len(conn.Chains) == 0 {
@@ -336,15 +349,50 @@ func (s *TrafficQuotaService) collectTraffic() {
 			continue
 		}
 
-		stat, ok := s.proxyStats[proxyName]
-		if !ok {
-			stat = &ProxyTraffic{ProxyName: proxyName}
-			s.proxyStats[proxyName] = stat
+		activeIDs[conn.ID] = true
+
+		var deltaUp, deltaDown int64
+		if val, ok := s.connectionTracker.Load(conn.ID); ok {
+			last := val.(connStats)
+			deltaUp = conn.Upload - last.Upload
+			deltaDown = conn.Download - last.Download
+		} else {
+			// New connection, use current as delta
+			deltaUp = conn.Upload
+			deltaDown = conn.Download
 		}
-		stat.UploadBytes += conn.Upload
-		stat.DownloadBytes += conn.Download
-		stat.TotalBytes = stat.UploadBytes + stat.DownloadBytes
+
+		// Only add positive deltas (Mihomo stats might reset if reconnected with same ID? unlikely but safe)
+		if deltaUp < 0 {
+			deltaUp = 0
+		}
+		if deltaDown < 0 {
+			deltaDown = 0
+		}
+
+		if deltaUp > 0 || deltaDown > 0 {
+			stat, ok := s.proxyStats[proxyName]
+			if !ok {
+				stat = &ProxyTraffic{ProxyName: proxyName}
+				s.proxyStats[proxyName] = stat
+			}
+			stat.UploadBytes += deltaUp
+			stat.DownloadBytes += deltaDown
+			stat.TotalBytes = stat.UploadBytes + stat.DownloadBytes
+
+			// Update tracker
+			s.connectionTracker.Store(conn.ID, connStats{Upload: conn.Upload, Download: conn.Download})
+		}
 	}
+
+	// Clean up stale connections from tracker
+	s.connectionTracker.Range(func(key, value interface{}) bool {
+		id := key.(string)
+		if !activeIDs[id] {
+			s.connectionTracker.Delete(id)
+		}
+		return true
+	})
 
 	if err := s.saveLocked(); err != nil {
 		log.Printf("TrafficQuota: failed to save stats: %v", err)
@@ -394,6 +442,11 @@ func (s *TrafficQuotaService) addAlert(q *TrafficQuota, severity, message string
 				return
 			}
 		}
+	}
+
+	// Cap alerts list to 100 items to prevent memory leak
+	if len(s.alerts) >= 100 {
+		s.alerts = s.alerts[1:]
 	}
 
 	s.alerts = append(s.alerts, TrafficAlert{

@@ -195,18 +195,7 @@
     </ul>
   </div>
 
-  <div class="card">
-    <h2>{$t('settings.roadmap')}</h2>
-    <ul style="list-style: none; padding-left: 0;">
-      <li class="mb-1">✅ v0.1.0 — Auth + Design Foundation</li>
-      <li class="mb-1">✅ v0.2.0 — Config Editor + Unified Logs</li>
-      <li class="mb-1">✅ v0.3.0 — Mihomo Dashboard</li>
-      <li class="mb-1">✅ v0.4.0 — Self-Update + Subscriptions + Kernel Manager</li>
-      <li class="mb-1">✅ v0.5.0 — Network Tools + Schema-Assist v2</li>
-      <li class="mb-1">✅ v0.6.0 — Smart Proxy Manager + Traffic Quotas</li>
-      <li class="mb-1">⏳ v0.7.0 — Polish + PWA + DAT Manager</li>
-    </ul>
-  </div>
+
 </div>
 
 <style>

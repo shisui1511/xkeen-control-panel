@@ -14,7 +14,10 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 func validateKernelPath(path string) error {
@@ -55,6 +58,7 @@ type KernelInfo struct {
 // KernelService manages proxy kernels (xray, mihomo)
 type KernelService struct {
 	kernels map[string]*KernelInfo
+	mu      sync.RWMutex
 }
 
 func NewKernelService() *KernelService {
@@ -88,6 +92,8 @@ func NewKernelService() *KernelService {
 }
 
 func (s *KernelService) List() []KernelInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	result := make([]KernelInfo, 0, len(s.kernels))
 	for _, k := range s.kernels {
 		result = append(result, *k)
@@ -96,6 +102,8 @@ func (s *KernelService) List() []KernelInfo {
 }
 
 func (s *KernelService) Get(name string) *KernelInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if k, ok := s.kernels[name]; ok {
 		// Refresh version
 		k.CurrentVersion = s.detectVersion(k)
@@ -105,6 +113,8 @@ func (s *KernelService) Get(name string) *KernelInfo {
 }
 
 func (s *KernelService) SetChannel(name, channel string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if k, ok := s.kernels[name]; ok {
 		k.Channel = channel
 		return true
@@ -157,6 +167,8 @@ func (s *KernelService) parseVersion(name, output string) string {
 
 // CheckLatest queries GitHub API for latest release
 func (s *KernelService) CheckLatest(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	k := s.kernels[name]
 	if k == nil {
 		return fmt.Errorf("kernel not found: %s", name)
@@ -171,7 +183,7 @@ func (s *KernelService) CheckLatest(name string) error {
 		url = fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=5", k.Repo)
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := utils.SafeHTTPClient(15 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		k.Status = "failed"
@@ -220,6 +232,8 @@ func (s *KernelService) CheckLatest(name string) error {
 
 // Install downloads and installs the kernel
 func (s *KernelService) Install(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	k := s.kernels[name]
 	if k == nil {
 		return fmt.Errorf("kernel not found: %s", name)
@@ -248,6 +262,8 @@ func (s *KernelService) Install(name string) error {
 		k.Message = "Invalid filename: " + err.Error()
 		return err
 	}
+	defer os.Remove(tempFile) // Cleanup archive after extraction
+
 	if err := s.downloadFile(downloadURL, tempFile); err != nil {
 		k.Status = "failed"
 		k.Message = "Download failed: " + err.Error()
@@ -317,6 +333,11 @@ func (s *KernelService) Install(name string) error {
 		extractedPath = extracted
 	}
 
+	// Ensure extracted file is cleaned up if rename fails or it's not moved
+	if extractedPath != tempFile {
+		defer os.Remove(extractedPath)
+	}
+
 	// Make executable and replace
 	if err := validateKernelPath(extractedPath); err != nil {
 		return err
@@ -329,9 +350,6 @@ func (s *KernelService) Install(name string) error {
 
 	// Atomic replace
 	tempDest := filepath.Join(filepath.Dir(k.BinaryPath), filepath.Base(k.BinaryPath)+".new")
-	if err := validateKernelPath(extractedPath); err != nil {
-		return err
-	}
 	if err := validateKernelPath(tempDest); err != nil {
 		return err
 	}
@@ -393,7 +411,7 @@ func (s *KernelService) buildDownloadURL(k *KernelInfo, arch string) (string, st
 }
 
 func (s *KernelService) downloadFile(url, filepath string) error {
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := utils.SafeHTTPClient(120 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		return err

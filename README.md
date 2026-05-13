@@ -174,7 +174,7 @@ cd frontend && npm run dev
 
 | Компонент | Технология |
 |-----------|------------|
-| Backend | Go 1.24, net/http, gorilla/websocket |
+| Backend | Go 1.25, net/http, gorilla/websocket |
 | Frontend | Svelte 5, TypeScript, Vite |
 | CSS | Custom Properties (light/dark themes) |
 | Auth | bcrypt + HMAC session cookies |

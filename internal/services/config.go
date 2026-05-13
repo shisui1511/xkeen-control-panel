@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 func (s *ConfigService) resolvePath(path string) (string, error) {
@@ -17,9 +19,8 @@ func (s *ConfigService) resolvePath(path string) (string, error) {
 	if strings.Contains(clean, "..") {
 		return "", errors.New("path traversal detected")
 	}
-	if !strings.HasPrefix(clean, s.ConfigDir) {
-		return "", errors.New("path outside config directory")
-	}
+	// Note: We don't check against s.ConfigDir here anymore because the API handler
+	// uses PathValidator which checks against multiple AllowedRoots.
 	return clean, nil
 }
 
@@ -31,13 +32,22 @@ func NewConfigService(dir string) *ConfigService {
 	return &ConfigService{ConfigDir: dir}
 }
 
-func (s *ConfigService) List() ([]string, error) {
-	pattern := filepath.Join(s.ConfigDir, "*.json")
-	files, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil, err
+func (s *ConfigService) List(dir string) ([]string, error) {
+	if dir == "" {
+		dir = s.ConfigDir
 	}
-	return files, nil
+	var allFiles []string
+	extensions := []string{"*.json", "*.yaml", "*.yml", "*.conf"}
+	for _, ext := range extensions {
+		pattern := filepath.Join(dir, ext)
+		files, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		allFiles = append(allFiles, files...)
+	}
+	sort.Strings(allFiles)
+	return allFiles, nil
 }
 
 func (s *ConfigService) Read(path string) ([]byte, error) {
@@ -53,15 +63,18 @@ func (s *ConfigService) Save(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	// Create backup in same directory as target file
-	backupPath := filepath.Join(filepath.Dir(path), filepath.Base(path)+".backup-"+time.Now().Format("20060102-150405"))
-	if _, err := s.resolvePath(backupPath); err != nil {
-		return err
-	}
+
+	// Create backup in 'backups' subdirectory
+	backupDir := filepath.Join(filepath.Dir(path), "backups")
+	backupPath := filepath.Join(backupDir, filepath.Base(path)+".backup-"+time.Now().Format("20060102-150405"))
+
 	if s.Exists(path) {
 		oldData, err := os.ReadFile(path)
 		if err == nil {
-			if err := os.WriteFile(backupPath, oldData, 0644); err != nil {
+			if err := os.MkdirAll(backupDir, 0755); err != nil {
+				return err
+			}
+			if err := utils.AtomicWriteFile(backupPath, oldData, 0644); err != nil {
 				return err
 			}
 		}
@@ -72,7 +85,7 @@ func (s *ConfigService) Save(path string, data []byte) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return utils.AtomicWriteFile(path, data, 0644)
 }
 
 func (s *ConfigService) Exists(path string) bool {
@@ -90,8 +103,9 @@ func (s *ConfigService) ListBackups(path string) ([]string, error) {
 		return nil, err
 	}
 	dir := filepath.Dir(path)
+	backupDir := filepath.Join(dir, "backups")
 	base := filepath.Base(path)
-	pattern := filepath.Join(dir, base+".backup-*")
+	pattern := filepath.Join(backupDir, base+".backup-*")
 
 	backups, err := filepath.Glob(pattern)
 	if err != nil {

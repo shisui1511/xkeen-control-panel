@@ -119,10 +119,10 @@
         <h4 class="mt-2">{$t('console.history')}</h4>
         <div class="history-list">
           {#each history as entry, i}
-            <div class="history-item" class:error={!entry.success} on:click={() => { output = entry.output }}>
+            <button class="history-item" class:error={!entry.success} on:click={() => { output = entry.output }}>
               <span class="history-cmd">${entry.command}</span>
               <span class="history-status">{entry.success ? '✓' : '✗'}</span>
-            </div>
+            </button>
           {/each}
         </div>
       {/if}

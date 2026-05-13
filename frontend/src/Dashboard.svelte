@@ -10,7 +10,6 @@
   import Rules from './Rules.svelte'
   import Traffic from './Traffic.svelte'
   import Subscriptions from './Subscriptions.svelte'
-  import KernelManager from './KernelManager.svelte'
   import NetworkTools from './NetworkTools.svelte'
   import SmartProxy from './SmartProxy.svelte'
   import TrafficQuotas from './TrafficQuotas.svelte'
@@ -139,30 +138,13 @@
       <button class="nav-item" class:active={currentTab === 'subscriptions'} on:click={() => switchTab('subscriptions')}>
         📡 {$t('nav.subscriptions')}
       </button>
-      <button class="nav-item" class:active={currentTab === 'services'} on:click={() => switchTab('services')}>
-        🚀 {$t('nav.services')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'kernels'} on:click={() => switchTab('kernels')}>
-        🧠 {$t('nav.kernels')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'smartproxy'} on:click={() => switchTab('smartproxy')}>
-        ⚡ {$t('nav.smartproxy')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'trafficquotas'} on:click={() => switchTab('trafficquotas')}>
-        📊 {$t('nav.trafficquotas')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'dat'} on:click={() => switchTab('dat')}>
-        🌍 {$t('nav.dat')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'console'} on:click={() => switchTab('console')}>
-        💻 {$t('nav.console')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'network'} on:click={() => switchTab('network')}>
-        🌐 {$t('nav.network')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'settings'} on:click={() => switchTab('settings')}>
-        ⚙️ {$t('nav.settings')}
-      </button>
+      <button class="nav-item" class:active={currentTab === 'services'} on:click={() => switchTab('services')}>🚀 {$t('nav.services')}</button>
+      <button class="nav-item" class:active={currentTab === 'smartproxy'} on:click={() => switchTab('smartproxy')}>⚡ {$t('nav.smartproxy')}</button>
+      <button class="nav-item" class:active={currentTab === 'trafficquotas'} on:click={() => switchTab('trafficquotas')}>📊 {$t('nav.trafficquotas')}</button>
+      <button class="nav-item" class:active={currentTab === 'dat'} on:click={() => switchTab('dat')}>🌍 {$t('nav.dat')}</button>
+      <button class="nav-item" class:active={currentTab === 'console'} on:click={() => switchTab('console')}>💻 {$t('nav.console')}</button>
+      <button class="nav-item" class:active={currentTab === 'network'} on:click={() => switchTab('network')}>🌐 {$t('nav.network')}</button>
+      <button class="nav-item" class:active={currentTab === 'settings'} on:click={() => switchTab('settings')}>⚙️ {$t('nav.settings')}</button>
     </nav>
     <div style="border-top: 1px solid var(--border); padding: 0.5rem 0;">
       {#if pwaInstallPrompt}
@@ -261,8 +243,6 @@
       <Subscriptions onSwitchTab={switchTab} />
     {:else if currentTab === 'services'}
       <Services onSwitchTab={switchTab} />
-    {:else if currentTab === 'kernels'}
-      <KernelManager onSwitchTab={switchTab} />
     {:else if currentTab === 'smartproxy'}
       <SmartProxy onSwitchTab={switchTab} />
     {:else if currentTab === 'trafficquotas'}
