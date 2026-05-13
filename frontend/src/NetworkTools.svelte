@@ -186,43 +186,43 @@
     <div class="tool-form">
       {#if activeTool === 'ping'}
         <div class="form-row">
-          <label>{$t('net.host_ip')}:</label>
-          <input type="text" class="input" bind:value={host} placeholder="google.com" />
+          <label for="ping-host">{$t('net.host_ip')}:</label>
+          <input id="ping-host" type="text" class="input" bind:value={host} placeholder="google.com" />
         </div>
         <div class="form-row">
-          <label>{$t('net.count')}:</label>
-          <input type="number" class="input" bind:value={count} min="1" max="20" />
+          <label for="ping-count">{$t('net.count')}:</label>
+          <input id="ping-count" type="number" class="input" bind:value={count} min="1" max="20" />
         </div>
       {:else if activeTool === 'traceroute'}
         <div class="form-row">
-          <label>{$t('net.host_ip')}:</label>
-          <input type="text" class="input" bind:value={host} placeholder="google.com" />
+          <label for="trace-host">{$t('net.host_ip')}:</label>
+          <input id="trace-host" type="text" class="input" bind:value={host} placeholder="google.com" />
         </div>
         <div class="form-row">
-          <label>{$t('net.max_hops')}:</label>
-          <input type="number" class="input" bind:value={maxHops} min="1" max="30" />
+          <label for="trace-hops">{$t('net.max_hops')}:</label>
+          <input id="trace-hops" type="number" class="input" bind:value={maxHops} min="1" max="30" />
         </div>
       {:else if activeTool === 'dns'}
         <div class="form-row">
-          <label>{$t('editor.domain')}:</label>
-          <input type="text" class="input" bind:value={host} placeholder="google.com" />
+          <label for="dns-host">{$t('editor.domain')}:</label>
+          <input id="dns-host" type="text" class="input" bind:value={host} placeholder="google.com" />
         </div>
         <div class="form-row">
-          <label>{$t('net.record_type')}:</label>
-          <select class="input" bind:value={recordType}>
+          <label for="dns-type">{$t('net.record_type')}:</label>
+          <select id="dns-type" class="input" bind:value={recordType}>
             {#each recordTypes as type}
               <option value={type}>{type}</option>
-            {#/each}
+            {/each}
           </select>
         </div>
       {:else if activeTool === 'http'}
         <div class="form-row">
-          <label>URL:</label>
-          <input type="text" class="input" bind:value={url} placeholder="https://google.com" />
+          <label for="http-url">URL:</label>
+          <input id="http-url" type="text" class="input" bind:value={url} placeholder="https://google.com" />
         </div>
         <div class="form-row">
-          <label>{$t('net.timeout_sec')}</label>
-          <input type="number" class="input" bind:value={timeout} min="1" max="60" />
+          <label for="http-timeout">{$t('net.timeout_sec')}</label>
+          <input id="http-timeout" type="number" class="input" bind:value={timeout} min="1" max="60" />
         </div>
       {/if}
 
