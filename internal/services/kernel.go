@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 	"io"
 	"net/http"
 	"os"
@@ -16,7 +17,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 func validateKernelPath(path string) error {
