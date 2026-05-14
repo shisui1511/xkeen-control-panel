@@ -16,7 +16,7 @@
   import DATManager from './DATManager.svelte'
   import Console from './Console.svelte'
 
-  let version = 'loading...'
+  let version = $t('app.loading')
   let loading = false
   let currentTab = 'dashboard'
   let theme = document.documentElement.getAttribute('data-theme') || 'light'
@@ -62,7 +62,7 @@
       const data = await res.json()
       version = data.version
     } catch (e) {
-      version = 'error'
+      version = $t('app.error')
     }
   }
 

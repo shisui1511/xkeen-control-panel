@@ -32,6 +32,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'app.continue': 'Продолжить',
     'app.yes': 'Да',
     'app.no': 'Нет',
+    'app.conn_error': 'Ошибка подключения',
+    'app.conn_error_desc': 'Проверьте подключение к сети или обновите страницу.',
+    'app.reload': 'Обновить',
 
     // Auth
     'auth.login': 'Вход в панель управления',
@@ -183,6 +186,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.fallback_proxy': 'Fallback прокси',
     'smartproxy.round_robin_proxies': 'Список прокси',
     'smartproxy.round_robin_hint': 'По одному прокси на строку',
+    'smartproxy.mode_time': 'По расписанию',
+    'smartproxy.mode_failover': 'Auto-failover',
+    'smartproxy.mode_roundrobin': 'Round-robin',
+    'smartproxy.days': 'Вс,Пн,Вт,Ср,Чт,Пт,Сб',
 
     // Traffic Quotas
     'trafficquotas.title': 'Лимиты трафика',
@@ -210,6 +217,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'trafficquotas.period': 'Период',
     'trafficquotas.alert_threshold': 'Порог алерта',
     'trafficquotas.reset': 'Сбросить',
+    'trafficquotas.period_daily': 'Ежедневно',
+    'trafficquotas.period_weekly': 'Еженедельно',
+    'trafficquotas.period_monthly': 'Ежемесячно',
 
     // DAT Manager
     'dat.title': 'DAT Manager',
@@ -311,6 +321,37 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.pause': 'Пауза',
     'logs.resume': 'Возобновить',
     'logs.clear': 'Очистить',
+    'logs.connected': 'Подключено к серверу логов',
+    'logs.connection_error': 'Ошибка подключения к серверу логов',
+    'logs.disconnected': 'Отключено от сервера логов',
+    'logs.status_connected': 'Подключено',
+    'logs.status_disconnected': 'Отключено',
+    'logs.source_count': '{count} источников',
+    'logs.all_sources': 'Все источники',
+    'logs.autoscroll': 'Автопрокрутка',
+    'logs.disconnect': 'Отключить',
+    'logs.connect': 'Подключить',
+    'logs.no_filtered_logs': 'Логов с таким фильтром не найдено',
+    'logs.no_logs': 'Логов пока нет',
+
+    // Proxies
+    'proxies.title': 'Прокси',
+    'proxies.subtitle': 'Управление прокси-группами и проверка задержки',
+    'proxies.testing': 'Тестирование...',
+    'proxies.test_latency': 'Тест задержки',
+    'proxies.observatory': 'Обсерватория',
+    'proxies.observatory_title': 'Статистика прокси',
+    'proxies.total': 'Всего',
+    'proxies.healthy': 'Доступно',
+    'proxies.degraded': 'Задержка',
+    'proxies.down': 'Недоступно',
+    'proxies.avg_latency': 'Средняя задержка',
+    'proxies.no_proxies': 'Прокси не найдены. Проверьте конфигурацию Mihomo.',
+    'proxies.fallback_pool': 'Fallback Pool',
+    'proxies.test_single': 'Тест задержки',
+    'proxies.fallback_order': 'Порядок переключения',
+    'proxies.load_error': 'Ошибка загрузки прокси',
+    'proxies.select_error': 'Ошибка выбора прокси',
 
     // Setup script
     'setup.install': 'Установка',
@@ -385,6 +426,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'app.continue': 'Continue',
     'app.yes': 'Yes',
     'app.no': 'No',
+    'app.conn_error': 'Connection Error',
+    'app.conn_error_desc': 'Please check your network connection or reload the page.',
+    'app.reload': 'Reload',
 
     // Auth
     'auth.login': 'Control Panel Login',
@@ -534,6 +578,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.fallback_proxy': 'Fallback proxy',
     'smartproxy.round_robin_proxies': 'Proxy list',
     'smartproxy.round_robin_hint': 'One proxy per line',
+    'smartproxy.mode_time': 'Time-based',
+    'smartproxy.mode_failover': 'Auto-failover',
+    'smartproxy.mode_roundrobin': 'Round-robin',
+    'smartproxy.days': 'Sun,Mon,Tue,Wed,Thu,Fri,Sat',
 
     // Traffic Quotas
     'trafficquotas.title': 'Traffic Quotas',
@@ -561,6 +609,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'trafficquotas.period': 'Period',
     'trafficquotas.alert_threshold': 'Alert threshold',
     'trafficquotas.reset': 'Reset',
+    'trafficquotas.period_daily': 'Daily',
+    'trafficquotas.period_weekly': 'Weekly',
+    'trafficquotas.period_monthly': 'Monthly',
 
     // DAT Manager
     'dat.title': 'DAT Manager',
@@ -662,6 +713,37 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.pause': 'Pause',
     'logs.resume': 'Resume',
     'logs.clear': 'Clear',
+    'logs.connected': 'Connected to logs server',
+    'logs.connection_error': 'Logs server connection error',
+    'logs.disconnected': 'Disconnected from logs server',
+    'logs.status_connected': 'Connected',
+    'logs.status_disconnected': 'Disconnected',
+    'logs.source_count': '{count} sources',
+    'logs.all_sources': 'All sources',
+    'logs.autoscroll': 'Auto-scroll',
+    'logs.disconnect': 'Disconnect',
+    'logs.connect': 'Connect',
+    'logs.no_filtered_logs': 'No logs found with this filter',
+    'logs.no_logs': 'No logs yet',
+
+    // Proxies
+    'proxies.title': 'Proxies',
+    'proxies.subtitle': 'Proxy group management and latency testing',
+    'proxies.testing': 'Testing...',
+    'proxies.test_latency': 'Test Latency',
+    'proxies.observatory': 'Observatory',
+    'proxies.observatory_title': 'Proxy Statistics',
+    'proxies.total': 'Total',
+    'proxies.healthy': 'Healthy',
+    'proxies.degraded': 'Degraded',
+    'proxies.down': 'Down',
+    'proxies.avg_latency': 'Avg Latency',
+    'proxies.no_proxies': 'No proxies found. Check Mihomo configuration.',
+    'proxies.fallback_pool': 'Fallback Pool',
+    'proxies.test_single': 'Test latency',
+    'proxies.fallback_order': 'Fallback order',
+    'proxies.load_error': 'Failed to load proxies',
+    'proxies.select_error': 'Failed to select proxy',
 
     // Setup script
     'setup.install': 'Install',
