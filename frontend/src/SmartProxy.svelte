@@ -52,13 +52,13 @@
   let formFallbackProxy = ''
   let formRoundRobinProxies = ''
 
-  const dayNames = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+  $: dayNames = $t('smartproxy.days').split(',')
   const allDays = [0, 1, 2, 3, 4, 5, 6]
 
-  const modes = [
-    { value: 'time-based', label: 'По расписанию' },
-    { value: 'auto-failover', label: 'Auto-failover' },
-    { value: 'round-robin', label: 'Round-robin' }
+  $: modes = [
+    { value: 'time-based', label: $t('smartproxy.mode_time') },
+    { value: 'auto-failover', label: $t('smartproxy.mode_failover') },
+    { value: 'round-robin', label: $t('smartproxy.mode_roundrobin') }
   ]
 
   async function fetchProfiles() {

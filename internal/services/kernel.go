@@ -139,11 +139,12 @@ func (s *KernelService) detectVersion(k *KernelInfo) string {
 	}
 
 	out, err := cmd.CombinedOutput()
+	output := utils.StripANSI(string(out))
 	if err != nil {
 		return "error"
 	}
 
-	return s.parseVersion(k.Name, string(out))
+	return s.parseVersion(k.Name, output)
 }
 
 func (s *KernelService) parseVersion(name, output string) string {

@@ -56,10 +56,10 @@
     { value: 'TB', bytes: 1024 * 1024 * 1024 * 1024 }
   ]
 
-  const periods = [
-    { value: 'daily', label: 'Ежедневно' },
-    { value: 'weekly', label: 'Еженедельно' },
-    { value: 'monthly', label: 'Ежемесячно' }
+  $: periods = [
+    { value: 'daily', label: $t('trafficquotas.period_daily') },
+    { value: 'weekly', label: $t('trafficquotas.period_weekly') },
+    { value: 'monthly', label: $t('trafficquotas.period_monthly') }
   ]
 
   async function fetchQuotas() {

@@ -16,35 +16,6 @@ func (a *API) MihomoStatus(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(out))
 }
 
-func (a *API) MihomoControl(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
-		return
-	}
-	action := r.URL.Query().Get("action")
-
-	var out string
-	var err error
-
-	switch action {
-	case "start":
-		out, err = a.mihomoSvc.Start()
-	case "stop":
-		out, err = a.mihomoSvc.Stop()
-	case "restart":
-		out, err = a.mihomoSvc.Restart()
-	default:
-		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
-		return
-	}
-
-	if err != nil {
-		a.errorResponse(w, out, http.StatusInternalServerError)
-		return
-	}
-	w.Write([]byte(out))
-}
-
 func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 	target, err := url.Parse(a.cfg.MihomoAPIURL)
 	if err != nil {

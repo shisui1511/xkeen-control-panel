@@ -1,27 +1,28 @@
 package services
 
 import (
-	"bytes"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 type MihomoService struct {
 	BinaryPath string
+	XKeenPath  string
 	ConfigDir  string
 }
 
-func NewMihomoService(binary, configDir string) *MihomoService {
+func NewMihomoService(binary, xkeenPath, configDir string) *MihomoService {
 	return &MihomoService{
 		BinaryPath: binary,
+		XKeenPath:  xkeenPath,
 		ConfigDir:  configDir,
 	}
 }
 
 func (s *MihomoService) Status() (string, error) {
+	// Status checks if the binary is in the process list
 	cmd := exec.Command("sh", "-c", fmt.Sprintf("pidof %s", filepath.Base(s.BinaryPath)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -31,41 +32,4 @@ func (s *MihomoService) Status() (string, error) {
 		return "running (pid: " + strings.TrimSpace(string(out)) + ")", nil
 	}
 	return "stopped", nil
-}
-
-func (s *MihomoService) Start() (string, error) {
-	return s.runWithTimeout("start", 30*time.Second)
-}
-
-func (s *MihomoService) Stop() (string, error) {
-	return s.runWithTimeout("stop", 30*time.Second)
-}
-
-func (s *MihomoService) Restart() (string, error) {
-	return s.runWithTimeout("restart", 45*time.Second)
-}
-
-func (s *MihomoService) runWithTimeout(action string, timeout time.Duration) (string, error) {
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s %s", s.BinaryPath, action))
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	err := cmd.Start()
-	if err != nil {
-		return "", err
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
-
-	select {
-	case <-time.After(timeout):
-		cmd.Process.Kill()
-		return out.String(), fmt.Errorf("timeout exceeded")
-	case err := <-done:
-		return out.String(), err
-	}
 }

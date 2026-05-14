@@ -57,7 +57,7 @@
     error = ''
     try {
       const res = await fetch('/api/mihomo/proxy/proxies')
-      if (!res.ok) throw new Error('Failed to load proxies')
+      if (!res.ok) throw new Error($t('proxies.load_error'))
       const data = await res.json()
       proxies = data.proxies || {}
       groups = Object.values(proxies).filter((p: Proxy) => {
@@ -95,7 +95,7 @@
         },
         body: JSON.stringify({ name: proxyName })
       })
-      if (!res.ok) throw new Error('Failed to select proxy')
+      if (!res.ok) throw new Error($t('proxies.select_error'))
       await fetchProxies()
     } catch (e: any) {
       error = e.message
