@@ -1,7 +1,7 @@
 .PHONY: build run clean test lint fmt deps keenetic-arm64 keenetic-mipsle keenetic-mips compress
 
 BINARY_NAME=xkeen-control-panel
-VERSION?=dev
+VERSION?=0.0.1
 
 deps:
 	go mod download
