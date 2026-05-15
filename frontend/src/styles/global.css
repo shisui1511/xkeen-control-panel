@@ -227,22 +227,64 @@ p {
   top: 0;
   background: var(--bg-card);
   border-right: 1px solid var(--border);
-  padding: 24px 0;
+  padding: 0;
   overflow-y: auto;
+  z-index: 200;
+  transition: transform 0.25s ease;
 }
 
 .sidebar-logo {
-  padding: 0 24px 24px;
+  padding: 16px 24px;
   font-size: 18px;
   font-weight: 600;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Sidebar nav groups (accordion sections) */
+.nav-group {
+  border-bottom: 1px solid var(--border-light);
+}
+
+.nav-group summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 24px 10px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.nav-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-group summary:hover {
+  color: var(--accent);
+}
+
+.nav-group-arrow {
+  transition: transform 0.2s ease;
+  font-size: 10px;
+}
+
+.nav-group[open] .nav-group-arrow {
+  transform: rotate(90deg);
 }
 
 .nav-item {
   display: flex;
   align-items: center;
   width: 100%;
-  padding: 12px 24px;
+  padding: 10px 24px;
   color: var(--fg-secondary);
   text-decoration: none;
   transition: all 0.15s ease;
@@ -251,10 +293,11 @@ p {
   border: none;
   font-size: 14px;
   text-align: left;
+  gap: 8px;
 }
 
 .nav-item:hover {
-  background: rgba(37, 99, 235, 0.05);
+  background: var(--hover);
   color: var(--accent);
 }
 
@@ -268,6 +311,115 @@ p {
   flex: 1;
   overflow-y: auto;
   margin-left: 240px;
+  min-width: 0;
+}
+
+/* Mobile header (visible only on small screens) */
+.mobile-header {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.burger-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  color: var(--fg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.burger-btn:hover {
+  background: var(--hover);
+}
+
+/* Sidebar overlay backdrop for mobile */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 150;
+}
+
+/* Mobile: danger/confirmation modal */
+.confirm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.confirm-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.confirm-modal h3 {
+  margin-bottom: 0.75rem;
+  color: var(--danger);
+}
+
+.confirm-modal p {
+  margin-bottom: 1.25rem;
+  color: var(--fg-secondary);
+}
+
+.confirm-modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+/* Mobile breakpoint */
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+  }
+
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay {
+    display: block;
+  }
+
+  .sidebar-overlay.hidden {
+    display: none;
+  }
+
+  .mobile-header {
+    display: flex;
+  }
+
+  .main-content {
+    margin-left: 0;
+  }
+
+  body {
+    overflow-x: hidden;
+  }
 }
 
 /* Status dot */

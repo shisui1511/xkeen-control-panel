@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { fade } from 'svelte/transition'
   import { t, setLang } from './i18n'
+  import { isSidebarOpen } from './stores'
+  import Sidebar from './components/Sidebar.svelte'
   import Editor from './Editor.svelte'
   import Logs from './Logs.svelte'
   import Services from './Services.svelte'
@@ -22,6 +25,27 @@
   let theme = document.documentElement.getAttribute('data-theme') || 'light'
   let pwaInstallPrompt: any = null
 
+  // Dashboard live monitoring state
+  interface ServiceStatus {
+    xkeen: string
+    xray: string
+    mihomo: string
+    connections: number
+    xrayVersion: string
+    mihomoVersion: string
+  }
+
+  let serviceStatus: ServiceStatus = {
+    xkeen: '',
+    xray: '',
+    mihomo: '',
+    connections: 0,
+    xrayVersion: '',
+    mihomoVersion: ''
+  }
+  let statusError = false
+  let statusLoading = true
+
   interface SystemStats {
     memory: { total: number; used: number; free: number }
     load: [number, number, number]
@@ -30,6 +54,60 @@
   }
 
   let systemStats: SystemStats | null = null
+
+  async function fetchLiveStatus() {
+    statusError = false
+    try {
+      const [svcRes, mihomoRes] = await Promise.allSettled([
+        fetch('/api/service/status'),
+        fetch('/api/mihomo/status')
+      ])
+
+      const svcText = svcRes.status === 'fulfilled' && svcRes.value.ok
+        ? await svcRes.value.text()
+        : ''
+      const mihomoText = mihomoRes.status === 'fulfilled' && mihomoRes.value.ok
+        ? await mihomoRes.value.text()
+        : ''
+
+      // Try to get connection count from mihomo
+      let connCount = 0
+      try {
+        const connRes = await fetch('/api/mihomo/proxy/connections?limit=1')
+        if (connRes.ok) {
+          const connData = await connRes.json()
+          connCount = connData?.connections?.length ?? 0
+        }
+      } catch (_) {}
+
+      // Try to get kernel versions
+      let xrayVer = ''
+      let mihomoVer = ''
+      try {
+        const kernelsRes = await fetch('/api/kernels')
+        if (kernelsRes.ok) {
+          const kernels = await kernelsRes.json()
+          for (const k of kernels) {
+            if (k.name === 'xray') xrayVer = k.current_version || ''
+            if (k.name === 'mihomo') mihomoVer = k.current_version || ''
+          }
+        }
+      } catch (_) {}
+
+      serviceStatus = {
+        xkeen: svcText.toLowerCase().includes('running') ? 'running' : svcText || 'unknown',
+        xray: svcText.toLowerCase().includes('running') ? 'running' : 'stopped',
+        mihomo: mihomoText.toLowerCase().includes('running') ? 'running' : mihomoText || 'unknown',
+        connections: connCount,
+        xrayVersion: xrayVer,
+        mihomoVersion: mihomoVer
+      }
+    } catch (_) {
+      statusError = true
+    } finally {
+      statusLoading = false
+    }
+  }
 
   async function fetchSystemStats() {
     try {
@@ -72,9 +150,7 @@
       const csrfToken = localStorage.getItem('csrf_token')
       await fetch('/api/auth/logout', {
         method: 'POST',
-        headers: {
-          'X-CSRF-Token': csrfToken || ''
-        }
+        headers: { 'X-CSRF-Token': csrfToken || '' }
       })
       localStorage.removeItem('csrf_token')
       window.location.href = '/'
@@ -89,16 +165,13 @@
     currentTab = tab
   }
 
-  onMount(() => {
-    fetchVersion()
-    fetchSystemStats()
-    const interval = setInterval(fetchSystemStats, 5000)
-    window.addEventListener('beforeinstallprompt', (e: Event) => {
-      e.preventDefault()
-      pwaInstallPrompt = e
-    })
-    return () => clearInterval(interval)
-  })
+  function toggleSidebar() {
+    isSidebarOpen.update(v => !v)
+  }
+
+  function closeSidebar() {
+    isSidebarOpen.set(false)
+  }
 
   async function installPWA() {
     if (!pwaInstallPrompt) return
@@ -108,69 +181,145 @@
       pwaInstallPrompt = null
     }
   }
+
+  function statusColor(status: string): string {
+    if (status === 'running') return 'success'
+    if (status === 'stopped' || status === 'unknown') return 'error'
+    return 'warning'
+  }
+
+  onMount(() => {
+    fetchVersion()
+    fetchLiveStatus()
+    fetchSystemStats()
+    const statusInterval = setInterval(fetchLiveStatus, 10000)
+    const statsInterval = setInterval(fetchSystemStats, 5000)
+    window.addEventListener('beforeinstallprompt', (e: Event) => {
+      e.preventDefault()
+      pwaInstallPrompt = e
+    })
+    return () => {
+      clearInterval(statusInterval)
+      clearInterval(statsInterval)
+    }
+  })
 </script>
 
 <div class="dashboard-layout">
-  <div class="sidebar" style="display: flex; flex-direction: column;">
-    <div class="sidebar-logo">⚡ XKeen CP</div>
-    <nav style="flex: 1; overflow-y: auto;">
-      <button class="nav-item" class:active={currentTab === 'dashboard'} on:click={() => switchTab('dashboard')}>
-        📊 {$t('nav.dashboard')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'editor'} on:click={() => switchTab('editor')}>
-        📝 {$t('nav.editor')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'logs'} on:click={() => switchTab('logs')}>
-        📋 {$t('nav.logs')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'proxies'} on:click={() => switchTab('proxies')}>
-        🌐 {$t('nav.proxies')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'connections'} on:click={() => switchTab('connections')}>
-        🔗 {$t('nav.connections')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'rules'} on:click={() => switchTab('rules')}>
-        📋 {$t('nav.rules')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'traffic'} on:click={() => switchTab('traffic')}>
-        📈 {$t('nav.traffic')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'subscriptions'} on:click={() => switchTab('subscriptions')}>
-        📡 {$t('nav.subscriptions')}
-      </button>
-      <button class="nav-item" class:active={currentTab === 'services'} on:click={() => switchTab('services')}>🚀 {$t('nav.services')}</button>
-      <button class="nav-item" class:active={currentTab === 'smartproxy'} on:click={() => switchTab('smartproxy')}>⚡ {$t('nav.smartproxy')}</button>
-      <button class="nav-item" class:active={currentTab === 'trafficquotas'} on:click={() => switchTab('trafficquotas')}>📊 {$t('nav.trafficquotas')}</button>
-      <button class="nav-item" class:active={currentTab === 'dat'} on:click={() => switchTab('dat')}>🌍 {$t('nav.dat')}</button>
-      <button class="nav-item" class:active={currentTab === 'console'} on:click={() => switchTab('console')}>💻 {$t('nav.console')}</button>
-      <button class="nav-item" class:active={currentTab === 'network'} on:click={() => switchTab('network')}>🌐 {$t('nav.network')}</button>
-      <button class="nav-item" class:active={currentTab === 'settings'} on:click={() => switchTab('settings')}>⚙️ {$t('nav.settings')}</button>
-    </nav>
-    <div style="border-top: 1px solid var(--border); padding: 0.5rem 0;">
-      {#if pwaInstallPrompt}
-        <button class="nav-item" on:click={installPWA}>
-          📲 {$t('nav.install_pwa')}
-        </button>
-      {/if}
-      <button class="nav-item" on:click={toggleTheme}>
-        {theme === 'dark' ? '☀️' : '🌙'} {theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
-      </button>
-      <button class="nav-item" on:click={handleLogout} disabled={loading}>
-        🚪 {loading ? $t('auth.logging_out') : $t('auth.logout')}
-      </button>
-    </div>
+  <!-- Mobile header bar -->
+  <header class="mobile-header">
+    <button
+      class="burger-btn"
+      on:click={toggleSidebar}
+      aria-label={$t('nav.open_menu')}
+      title={$t('nav.open_menu')}
+    >
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+        <rect y="3" width="22" height="2.5" rx="1.25" fill="currentColor"/>
+        <rect y="9.75" width="22" height="2.5" rx="1.25" fill="currentColor"/>
+        <rect y="16.5" width="22" height="2.5" rx="1.25" fill="currentColor"/>
+      </svg>
+    </button>
+    <span style="font-weight: 600; font-size: 16px;">⚡ XKeen CP</span>
+    <span style="width: 34px;"></span>
+  </header>
+
+  <!-- Off-canvas overlay (mobile only) -->
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div
+    class="sidebar-overlay"
+    class:hidden={!$isSidebarOpen}
+    on:click={closeSidebar}
+    role="button"
+    tabindex="0"
+    aria-label={$t('nav.close_menu')}
+    title={$t('nav.close_menu')}
+  ></div>
+
+  <!-- Sidebar -->
+  <div
+    class="sidebar"
+    class:sidebar-open={$isSidebarOpen}
+    style="display: flex; flex-direction: column;"
+  >
+    <Sidebar
+      {currentTab}
+      onSwitchTab={switchTab}
+      {theme}
+      onToggleTheme={toggleTheme}
+      onLogout={handleLogout}
+      {loading}
+      {pwaInstallPrompt}
+      onInstallPWA={installPWA}
+    />
   </div>
 
+  <!-- Main content area -->
   <div class="main-content">
     {#if currentTab === 'dashboard'}
-      <div class="container">
+      <div class="container" transition:fade={{ duration: 150 }}>
         <h1>{$t('nav.dashboard')}</h1>
         <p class="text-secondary mb-3">{$t('dash.welcome')}</p>
+
+        <!-- Live Service Status card -->
+        <div class="card mb-2">
+          <h2>{$t('dash.service_status')}</h2>
+          {#if statusLoading}
+            <p class="text-secondary">{$t('app.loading')}</p>
+          {:else if statusError}
+            <div class="status-error-row">
+              <span>⚠️ {$t('dash.status_error')}</span>
+              <button
+                class="btn btn-secondary"
+                style="padding: 4px 12px; font-size: 12px;"
+                on:click={fetchLiveStatus}
+                title={$t('app.refresh')}
+              >
+                ↺ {$t('app.refresh')}
+              </button>
+            </div>
+          {:else}
+            <div class="status-badges-row">
+              <div class="status-badge-item">
+                <span class="status-dot {statusColor(serviceStatus.xkeen)}"></span>
+                <span class="status-badge-label">XKeen</span>
+                <span class="status-badge-value status-{statusColor(serviceStatus.xkeen)}">
+                  {serviceStatus.xkeen === 'running' ? $t('app.running') : $t('app.stop')}
+                </span>
+              </div>
+              <div class="status-badge-item">
+                <span class="status-dot {statusColor(serviceStatus.xray)}"></span>
+                <span class="status-badge-label">Xray</span>
+                <span class="status-badge-value status-{statusColor(serviceStatus.xray)}">
+                  {serviceStatus.xray === 'running' ? $t('app.running') : $t('app.stop')}
+                  {#if serviceStatus.xrayVersion}
+                    <span class="version-badge">{serviceStatus.xrayVersion}</span>
+                  {/if}
+                </span>
+              </div>
+              <div class="status-badge-item">
+                <span class="status-dot {statusColor(serviceStatus.mihomo)}"></span>
+                <span class="status-badge-label">Mihomo</span>
+                <span class="status-badge-value status-{statusColor(serviceStatus.mihomo)}">
+                  {serviceStatus.mihomo === 'running' ? $t('app.running') : $t('app.stop')}
+                  {#if serviceStatus.mihomoVersion}
+                    <span class="version-badge">{serviceStatus.mihomoVersion}</span>
+                  {/if}
+                </span>
+              </div>
+              <div class="status-badge-item">
+                <span class="status-dot {serviceStatus.connections > 0 ? 'success' : 'warning'}"></span>
+                <span class="status-badge-label">{$t('dash.connections')}</span>
+                <span class="status-badge-value">{serviceStatus.connections}</span>
+              </div>
+            </div>
+          {/if}
+        </div>
 
         <div class="card mb-2">
           <h2>{$t('dash.system_info')}</h2>
           <p><strong>{$t('app.version')}:</strong> {version}</p>
-          <p><strong>{$t('app.status')}:</strong> <span class="status-dot success"></span> {$t('app.running')}</p>
         </div>
 
         {#if systemStats}
@@ -203,58 +352,145 @@
         <div class="card mb-2">
           <h2>{$t('dash.quick_actions')}</h2>
           <div class="quick-actions">
-            <button class="btn btn-secondary" on:click={() => switchTab('proxies')}>
+            <button class="btn btn-secondary" on:click={() => switchTab('proxies')} title={$t('nav.proxies')}>
               🌐 {$t('nav.proxies')}
             </button>
-            <button class="btn btn-secondary" on:click={() => switchTab('subscriptions')}>
+            <button class="btn btn-secondary" on:click={() => switchTab('subscriptions')} title={$t('nav.subscriptions')}>
               📡 {$t('nav.subscriptions')}
             </button>
-            <button class="btn btn-secondary" on:click={() => switchTab('editor')}>
+            <button class="btn btn-secondary" on:click={() => switchTab('editor')} title={$t('nav.editor')}>
               📝 {$t('nav.editor')}
             </button>
-            <button class="btn btn-secondary" on:click={() => switchTab('logs')}>
+            <button class="btn btn-secondary" on:click={() => switchTab('logs')} title={$t('nav.logs')}>
               📋 {$t('nav.logs')}
             </button>
           </div>
         </div>
-
-        <style>
-          .quick-actions {
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-          }
-        </style>
-
       </div>
     {:else if currentTab === 'editor'}
-      <Editor onSwitchTab={switchTab} />
+      <div transition:fade={{ duration: 150 }}>
+        <Editor onSwitchTab={switchTab} />
+      </div>
     {:else if currentTab === 'logs'}
-      <Logs />
+      <div transition:fade={{ duration: 150 }}>
+        <Logs />
+      </div>
     {:else if currentTab === 'proxies'}
-      <Proxies />
+      <div transition:fade={{ duration: 150 }}>
+        <Proxies />
+      </div>
     {:else if currentTab === 'connections'}
-      <Connections />
+      <div transition:fade={{ duration: 150 }}>
+        <Connections />
+      </div>
     {:else if currentTab === 'rules'}
-      <Rules />
+      <div transition:fade={{ duration: 150 }}>
+        <Rules />
+      </div>
     {:else if currentTab === 'traffic'}
-      <Traffic />
+      <div transition:fade={{ duration: 150 }}>
+        <Traffic />
+      </div>
     {:else if currentTab === 'subscriptions'}
-      <Subscriptions onSwitchTab={switchTab} />
+      <div transition:fade={{ duration: 150 }}>
+        <Subscriptions onSwitchTab={switchTab} />
+      </div>
     {:else if currentTab === 'services'}
-      <Services onSwitchTab={switchTab} />
+      <div transition:fade={{ duration: 150 }}>
+        <Services onSwitchTab={switchTab} />
+      </div>
     {:else if currentTab === 'smartproxy'}
-      <SmartProxy onSwitchTab={switchTab} />
+      <div transition:fade={{ duration: 150 }}>
+        <SmartProxy onSwitchTab={switchTab} />
+      </div>
     {:else if currentTab === 'trafficquotas'}
-      <TrafficQuotas onSwitchTab={switchTab} />
+      <div transition:fade={{ duration: 150 }}>
+        <TrafficQuotas onSwitchTab={switchTab} />
+      </div>
     {:else if currentTab === 'dat'}
-      <DATManager onSwitchTab={switchTab} />
+      <div transition:fade={{ duration: 150 }}>
+        <DATManager onSwitchTab={switchTab} />
+      </div>
     {:else if currentTab === 'console'}
-      <Console onSwitchTab={switchTab} />
+      <div transition:fade={{ duration: 150 }}>
+        <Console onSwitchTab={switchTab} />
+      </div>
     {:else if currentTab === 'network'}
-      <NetworkTools onSwitchTab={switchTab} />
+      <div transition:fade={{ duration: 150 }}>
+        <NetworkTools onSwitchTab={switchTab} />
+      </div>
     {:else if currentTab === 'settings'}
-      <Settings onSwitchTab={switchTab} />
+      <div transition:fade={{ duration: 150 }}>
+        <Settings onSwitchTab={switchTab} />
+      </div>
     {/if}
   </div>
 </div>
+
+<style>
+  .quick-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  /* Live status badges */
+  .status-badges-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 4px;
+  }
+
+  .status-badge-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .status-badge-label {
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .status-badge-value {
+    color: var(--fg-secondary);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .status-success {
+    color: var(--success);
+  }
+
+  .status-error {
+    color: var(--danger);
+  }
+
+  .status-warning {
+    color: var(--warning);
+  }
+
+  .version-badge {
+    font-size: 11px;
+    background: var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: monospace;
+    color: var(--fg-secondary);
+  }
+
+  .status-error-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--danger);
+    padding: 8px 0;
+  }
+</style>
