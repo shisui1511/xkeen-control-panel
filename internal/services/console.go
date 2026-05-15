@@ -46,37 +46,53 @@ func (s *ConsoleService) GetCommands() []CommandCategory {
 		{
 			Name: "service",
 			Commands: []CommandDef{
-				{Name: "start", Description: "Start XKeen", Command: "start"},
-				{Name: "stop", Description: "Stop XKeen", Command: "stop"},
-				{Name: "restart", Description: "Restart XKeen", Command: "restart"},
-				{Name: "status", Description: "XKeen status", Command: "status"},
-			},
-		},
-		{
-			Name: "config",
-			Commands: []CommandDef{
-				{Name: "check", Description: "Check config", Command: "check"},
-				{Name: "show", Description: "Show current config", Command: "show"},
-			},
-		},
-		{
-			Name: "network",
-			Commands: []CommandDef{
-				{Name: "dns", Description: "DNS status", Command: "dns"},
-				{Name: "routes", Description: "Show routes", Command: "routes"},
+				{Name: "Start", Description: "Запуск прокси-клиента", Command: "-start"},
+				{Name: "Stop", Description: "Остановка прокси-клиента", Command: "-stop"},
+				{Name: "Restart", Description: "Перезапуск прокси-клиента", Command: "-restart"},
+				{Name: "Status", Description: "Статус работы", Command: "-status"},
+				{Name: "Toggle Auto", Description: "Вкл/Выкл автозапуск", Command: "-auto"},
+				{Name: "Diag", Description: "Выполнить диагностику", Command: "-diag"},
+				{Name: "Switch Xray", Description: "Переключить на ядро Xray", Command: "-xray", Dangerous: true},
+				{Name: "Switch Mihomo", Description: "Переключить на ядро Mihomo", Command: "-mihomo", Dangerous: true},
 			},
 		},
 		{
 			Name: "update",
 			Commands: []CommandDef{
-				{Name: "update", Description: "Check for updates", Command: "update"},
+				{Name: "Update XKeen", Description: "Обновление XKeen", Command: "-uk"},
+				{Name: "Update Geo", Description: "Обновление GeoFile/GeoIPSET", Command: "-ug"},
+				{Name: "Update Xray", Description: "Обновление Xray", Command: "-ux"},
+				{Name: "Update Mihomo", Description: "Обновление Mihomo", Command: "-um"},
+				{Name: "Channel", Description: "Переключить канал (Stable/Dev)", Command: "-channel"},
+			},
+		},
+		{
+			Name: "backup",
+			Commands: []CommandDef{
+				{Name: "Backup XKeen", Description: "Создать резервную копию XKeen", Command: "-kb"},
+				{Name: "Restore XKeen", Description: "Восстановить XKeen", Command: "-kbr", Dangerous: true},
+				{Name: "Backup Xray", Description: "Создать резервную копию Xray", Command: "-xb"},
+				{Name: "Restore Xray", Description: "Восстановить Xray", Command: "-xbr", Dangerous: true},
+				{Name: "Backup Mihomo", Description: "Создать резервную копию Mihomo", Command: "-mb"},
+				{Name: "Restore Mihomo", Description: "Восстановить Mihomo", Command: "-mbr", Dangerous: true},
+			},
+		},
+		{
+			Name: "network",
+			Commands: []CommandDef{
+				{Name: "Ports & Gateway", Description: "Порты, шлюз и протокол", Command: "-tp"},
+				{Name: "Toggle IPv6", Description: "Вкл/Выкл протокол IPv6", Command: "-ipv6"},
+				{Name: "Toggle DNS", Description: "Вкл/Выкл перенаправление DNS", Command: "-dns"},
+				{Name: "View Ports", Description: "Посмотреть проксируемые порты", Command: "-cp"},
+				{Name: "View Excl. Ports", Description: "Посмотреть исключенные порты", Command: "-cpe"},
 			},
 		},
 		{
 			Name: "system",
 			Commands: []CommandDef{
-				{Name: "version", Description: "Show version", Command: "version"},
-				{Name: "info", Description: "System info", Command: "info"},
+				{Name: "Version", Description: "Версия XKeen", Command: "-v"},
+				{Name: "Help", Description: "Справка XKeen", Command: "-h"},
+				{Name: "About", Description: "О программе", Command: "-about"},
 			},
 		},
 	}
