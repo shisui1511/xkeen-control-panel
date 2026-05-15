@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { slide } from 'svelte/transition'
   import { t } from './i18n'
   import PageHeader from './PageHeader.svelte'
 
@@ -30,6 +31,9 @@
   let output = ''
   let history: { command: string; output: string; success: boolean }[] = []
 
+  // Confirmation modal state
+  let confirmPending: CommandDef | null = null
+
   async function fetchCommands() {
     try {
       const res = await fetch('/api/console/commands')
@@ -44,6 +48,7 @@
     executing = command
     output = ''
     error = ''
+    confirmPending = null
     try {
       const csrfToken = localStorage.getItem('csrf_token')
       const res = await fetch('/api/console/execute', {
@@ -69,8 +74,61 @@
     }
   }
 
+  function handleCommandClick(cmd: CommandDef) {
+    if (cmd.dangerous) {
+      confirmPending = cmd
+    } else {
+      executeCommand(cmd.command)
+    }
+  }
+
+  function cancelConfirm() {
+    confirmPending = null
+  }
+
+  function confirmExecute() {
+    if (confirmPending) {
+      executeCommand(confirmPending.command)
+    }
+  }
+
   onMount(fetchCommands)
 </script>
+
+<!-- Confirmation modal for dangerous commands -->
+{#if confirmPending}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div
+    class="confirm-modal-backdrop"
+    on:click|self={cancelConfirm}
+    role="dialog"
+    tabindex="-1"
+    aria-modal="true"
+    aria-label={$t('console.confirm_title')}
+  >
+    <div class="confirm-modal">
+      <h3>⚠️ {$t('console.confirm_title')}</h3>
+      <p>{$t('console.confirm_desc', { name: confirmPending.name })}</p>
+      <div class="confirm-modal-actions">
+        <button
+          class="btn btn-secondary"
+          on:click={cancelConfirm}
+          title={$t('app.cancel')}
+        >
+          {$t('app.cancel')}
+        </button>
+        <button
+          class="btn btn-danger"
+          on:click={confirmExecute}
+          title={$t('app.confirm')}
+        >
+          ⚠️ {$t('app.confirm')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <div class="container">
   <PageHeader
@@ -87,22 +145,29 @@
   <div class="console-layout">
     <div class="commands-panel">
       {#each categories as category}
-        <div class="category">
-          <h3 class="category-title">{$t('console.cat_' + category.name) || category.name}</h3>
-          <div class="command-list">
+        <details class="category-details" open>
+          <summary class="category-title" title={$t('console.cat_' + category.name) || category.name}>
+            {$t('console.cat_' + category.name) || category.name}
+            <span class="cat-arrow">▶</span>
+          </summary>
+          <div class="command-list" transition:slide={{ duration: 180 }}>
             {#each category.commands as cmd}
               <button
                 class="btn cmd-btn"
                 class:dangerous={cmd.dangerous}
-                on:click={() => executeCommand(cmd.command)}
+                on:click={() => handleCommandClick(cmd)}
                 disabled={executing === cmd.command}
+                title={cmd.description}
               >
+                {#if cmd.dangerous}
+                  <span class="danger-icon" aria-label={$t('console.danger_label')}>⚠️</span>
+                {/if}
                 <span class="cmd-name">{cmd.name}</span>
                 <span class="cmd-desc">{cmd.description}</span>
               </button>
             {/each}
           </div>
-        </div>
+        </details>
       {/each}
     </div>
 
@@ -110,7 +175,11 @@
       <div class="panel-header">
         <h3>{$t('console.output')}</h3>
         {#if output}
-          <button class="btn btn-secondary btn-sm" on:click={() => { output = '' }}>✕</button>
+          <button
+            class="btn btn-secondary btn-sm"
+            on:click={() => { output = '' }}
+            title={$t('app.close')}
+          >✕</button>
         {/if}
       </div>
       <pre class="output-box">{output || $t('console.no_output')}</pre>
@@ -118,8 +187,13 @@
       {#if history.length > 0}
         <h4 class="mt-2">{$t('console.history')}</h4>
         <div class="history-list">
-          {#each history as entry, i}
-            <button class="history-item" class:error={!entry.success} on:click={() => { output = entry.output }}>
+          {#each history as entry}
+            <button
+              class="history-item"
+              class:error={!entry.success}
+              on:click={() => { output = entry.output }}
+              title={entry.command}
+            >
               <span class="history-cmd">${entry.command}</span>
               <span class="history-status">{entry.success ? '✓' : '✗'}</span>
             </button>
@@ -133,43 +207,76 @@
 <style>
   .console-layout {
     display: grid;
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: 320px 1fr;
     gap: 1rem;
   }
 
   .commands-panel {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 0.5rem;
+  }
+
+  .category-details {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
   }
 
   .category-title {
-    font-size: 0.85rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 700;
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+
+  .category-title::-webkit-details-marker {
+    display: none;
+  }
+
+  .category-title:hover {
+    color: var(--accent);
+  }
+
+  .cat-arrow {
+    font-size: 10px;
+    transition: transform 0.2s ease;
+  }
+
+  .category-details[open] .cat-arrow {
+    transform: rotate(90deg);
   }
 
   .command-list {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
+    padding: 0.25rem 0.5rem 0.5rem;
   }
 
   .cmd-btn {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: flex-start;
     padding: 0.5rem 0.75rem;
-    background: var(--card-bg);
+    background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 4px;
     cursor: pointer;
     text-align: left;
     width: 100%;
     transition: background 0.15s;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
 
   .cmd-btn:hover {
@@ -177,7 +284,21 @@
   }
 
   .cmd-btn.dangerous {
-    border-color: var(--danger, #dc3545);
+    border-color: var(--danger);
+    background: rgba(239, 68, 68, 0.04);
+  }
+
+  .cmd-btn.dangerous:hover {
+    background: rgba(239, 68, 68, 0.1);
+  }
+
+  .cmd-btn.dangerous .cmd-name {
+    color: var(--danger);
+  }
+
+  .danger-icon {
+    flex-shrink: 0;
+    font-size: 0.9rem;
   }
 
   .cmd-name {
@@ -188,6 +309,8 @@
   .cmd-desc {
     font-size: 0.75rem;
     color: var(--text-secondary);
+    flex-basis: 100%;
+    margin-left: 0;
   }
 
   .output-panel {
@@ -245,7 +368,7 @@
   }
 
   .history-item.error {
-    border-color: var(--danger, #dc3545);
+    border-color: var(--danger);
   }
 
   .history-cmd {

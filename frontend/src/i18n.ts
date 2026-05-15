@@ -70,6 +70,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'nav.network': 'Сеть',
     'nav.theme_light': 'Светлая тема',
     'nav.theme_dark': 'Тёмная тема',
+    'nav.group_core': 'Основное',
+    'nav.group_services': 'Сервисы',
+    'nav.group_proxy': 'Прокси и Правила',
+    'nav.group_tools': 'Инструменты',
+    'nav.open_menu': 'Открыть меню',
+    'nav.close_menu': 'Закрыть меню',
 
     // Dashboard
     'dash.title': 'Dashboard',
@@ -82,6 +88,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.load': 'Load Average',
     'dash.uptime': 'Uptime',
     'dash.goroutines': 'Go Goroutines',
+    'dash.service_status': 'Статус сервисов',
+    'dash.connections': 'Подключения',
+    'dash.status_error': 'Не удалось получить статус сервисов',
 
     // Editor
     'editor.title': 'Управление сервисами',
@@ -263,6 +272,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'console.cat_backup': '💾 Бэкапы',
     'console.cat_system': '💻 Система',
     'console.load_error': 'Ошибка загрузки команд',
+    'console.confirm_title': 'Опасное действие',
+    'console.confirm_desc': 'Вы уверены, что хотите выполнить команду "{name}"? Это действие нельзя отменить.',
+    'console.danger_label': 'Опасная команда',
     'status': 'Статус',
     'xkeen.h': 'Справка XKeen',
 
@@ -484,6 +496,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'nav.console': 'Console',
     'nav.theme_light': 'Light theme',
     'nav.theme_dark': 'Dark theme',
+    'nav.group_core': 'Core',
+    'nav.group_services': 'Services',
+    'nav.group_proxy': 'Proxy & Rules',
+    'nav.group_tools': 'Tools',
+    'nav.open_menu': 'Open menu',
+    'nav.close_menu': 'Close menu',
 
     // Dashboard
     'dash.title': 'Dashboard',
@@ -496,6 +514,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.load': 'Load Average',
     'dash.uptime': 'Uptime',
     'dash.goroutines': 'Go Goroutines',
+    'dash.service_status': 'Service Status',
+    'dash.connections': 'Connections',
+    'dash.status_error': 'Failed to load service status',
 
     // Editor
     'editor.title': 'Service Management',
@@ -566,6 +587,7 @@ const translations: Record<Lang, Record<string, string>> = {
     // Navigation
     'nav.smartproxy': 'Smart Proxy',
     'nav.subscriptions': 'Subscriptions',
+    'nav.trafficquotas': 'Traffic Quotas',
 
     // Smart Proxy
     'smartproxy.title': 'Smart Proxy',
@@ -672,6 +694,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'console.cat_backup': '💾 Backup',
     'console.cat_system': '💻 System',
     'console.load_error': 'Failed to load commands',
+    'console.confirm_title': 'Dangerous Action',
+    'console.confirm_desc': 'Are you sure you want to run "{name}"? This action cannot be undone.',
+    'console.danger_label': 'Dangerous command',
     'status': 'Status',
     'xkeen.h': 'XKeen Help',
 

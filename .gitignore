@@ -8,7 +8,13 @@ build/
 /xcp
 
 # Внутренняя документация разработчика
-doc/
+AGENTS.md
+ROADMAP.md
+CLAUDE.md
+.specify
+.opencode
+.claude
+specs
 
 # Node.js files (frontend build)
 node_modules/
