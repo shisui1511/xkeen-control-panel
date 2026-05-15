@@ -221,6 +221,22 @@ const translations: Record<Lang, Record<string, string>> = {
     'trafficquotas.period_weekly': 'Еженедельно',
     'trafficquotas.period_monthly': 'Ежемесячно',
 
+    // Rules
+    'rules.title': 'Правила',
+    'rules.subtitle': 'Активные правила маршрутизации',
+    'rules.search': 'Поиск по правилам...',
+    'rules.all_types': 'Все типы',
+    'rules.total': 'Всего: {count}',
+    'rules.shown': 'Показано: {count}',
+    'rules.type_col': 'Тип',
+    'rules.no_rules': 'Правила не найдены',
+
+    // Traffic
+    'traffic.title': 'Трафик',
+    'traffic.realtime': 'Трафик в реальном времени',
+    'traffic.upload': 'Отдача',
+    'traffic.download': 'Загрузка',
+
     // DAT Manager
     'dat.title': 'DAT Manager',
     'dat.subtitle': 'GeoIP / GeoSite файлы',
@@ -612,6 +628,22 @@ const translations: Record<Lang, Record<string, string>> = {
     'trafficquotas.period_daily': 'Daily',
     'trafficquotas.period_weekly': 'Weekly',
     'trafficquotas.period_monthly': 'Monthly',
+
+    // Rules
+    'rules.title': 'Rules',
+    'rules.subtitle': 'Active routing rules',
+    'rules.search': 'Search rules...',
+    'rules.all_types': 'All types',
+    'rules.total': 'Total: {count}',
+    'rules.shown': 'Shown: {count}',
+    'rules.type_col': 'Type',
+    'rules.no_rules': 'No rules found',
+
+    // Traffic
+    'traffic.title': 'Traffic',
+    'traffic.realtime': 'Real-time traffic',
+    'traffic.upload': 'Upload',
+    'traffic.download': 'Download',
 
     // DAT Manager
     'dat.title': 'DAT Manager',
