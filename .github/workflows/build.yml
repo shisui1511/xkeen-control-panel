@@ -120,10 +120,12 @@ jobs:
             BASE=${LATEST_TAG#v}
             MAJOR=$(echo "$BASE" | cut -d. -f1)
             MINOR=$(echo "$BASE" | cut -d. -f2)
-            NEXT_MINOR=$((MINOR + 1))
+            PATCH=$(echo "$BASE" | cut -d. -f3)
+            NEXT_PATCH=$((PATCH + 1))
             
-            # Rolling pre-release: v0.5.0-dev (без счётчика коммитов в имени)
-            VERSION="v${MAJOR}.${NEXT_MINOR}.0-dev"
+            # Rolling pre-release: PATCH+1 от последнего stable
+            # Пример: v0.9.0 (stable) → v0.9.1-dev (pre-release)
+            VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}-dev"
             IS_STABLE="false"
             
             # Счётчик коммитов для release notes
@@ -292,7 +294,13 @@ jobs:
             artifacts/xcp_mips/xcp_${VERSION}_mips.sha256
 
           # Удаляем rolling pre-release этой же версии (cleanup)
-          ROLLING_TAG="${VERSION%.*}.0-dev"
+          # При выпуске v0.9.1 удаляем v0.9.2-dev (PATCH+1 от нового stable)
+          _BASE="${VERSION#v}"
+          _MAJOR=$(echo "$_BASE" | cut -d. -f1)
+          _MINOR=$(echo "$_BASE" | cut -d. -f2)
+          _PATCH=$(echo "$_BASE" | cut -d. -f3)
+          _NEXT_PATCH=$((_PATCH + 1))
+          ROLLING_TAG="v${_MAJOR}.${_MINOR}.${_NEXT_PATCH}-dev"
           echo "Cleaning up rolling pre-release ${ROLLING_TAG}..."
           gh release delete "${ROLLING_TAG}" --yes 2>/dev/null || true
           git push origin --delete "refs/tags/${ROLLING_TAG}" 2>/dev/null || true
