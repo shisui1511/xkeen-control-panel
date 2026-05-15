@@ -153,6 +153,8 @@
 
   $: activeKernel = xkeenStatus.toLowerCase().includes('xray') ? 'xray' : (xkeenStatus.toLowerCase().includes('mihomo') ? 'mihomo' : 'unknown')
   $: isRunning = xkeenStatus.includes('running') || xkeenStatus.includes('работает') || xkeenStatus.includes('активен')
+  $: xray = getKernel('xray')
+  $: mihomo = getKernel('mihomo')
 
   onMount(() => {
     fetchStatus()

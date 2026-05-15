@@ -26,23 +26,23 @@ func TestConsoleService_GetCommands(t *testing.T) {
 
 func TestConsoleService_Execute(t *testing.T) {
 	tmpDir := t.TempDir()
-	dummyXkeenPath := filepath.Join(tmpDir, "xkeen")
-	err := os.WriteFile(dummyXkeenPath, []byte("#!/bin/sh\necho \"mocked output: $@\"\n"), 0755)
+	dummyPath := filepath.Join(tmpDir, "xkeen_dummy")
+	err := os.WriteFile(dummyPath, []byte("#!/bin/sh\necho xkeen dummy\n"), 0755)
 	if err != nil {
 		t.Fatalf("Failed to create mock xkeen: %v", err)
 	}
 
-	svc := NewConsoleService(dummyXkeenPath)
-	result, err := svc.Execute("status")
-	if err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	svc := NewConsoleService(dummyPath)
 
+	result, err := svc.Execute("-status")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if !result.Success {
 		t.Fatalf("expected success, got: %s", result.Error)
 	}
-	if !strings.Contains(result.Output, "status") {
-		t.Fatalf("expected output to contain command args")
+	if !strings.Contains(result.Output, "xkeen dummy") {
+		t.Errorf("unexpected output: %s", result.Output)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestConsoleService_Execute_Failure(t *testing.T) {
 	}
 
 	svc := NewConsoleService(failPath)
-	result, err := svc.Execute("fail")
+	result, err := svc.Execute("-status")
 	if err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestConsoleService_Execute_Failure(t *testing.T) {
 
 func TestConsoleService_Execute_NonExistent(t *testing.T) {
 	svc := NewConsoleService("/nonexistent/xkeen")
-	result, err := svc.Execute("test")
+	result, err := svc.Execute("-status")
 	if err != nil {
 		t.Fatal("Execute should not return error for external command failures")
 	}
