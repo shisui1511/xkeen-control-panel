@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte'
+  import { onMount, onDestroy, tick } from 'svelte'
   import { t } from './i18n'
   import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine } from '@codemirror/view'
   import { EditorState } from '@codemirror/state'
@@ -207,21 +207,26 @@
         ]
       })
       
+      // Set selectedFile first so Svelte renders editorContainer in the DOM
+      selectedFile = path
+      originalContent = content
+      isDirty = false
+
+      // Wait for Svelte to render the editorContainer div
+      await tick()
+
       if (editorView) {
         editorView.setState(state)
-      } else {
+      } else if (editorContainer) {
         editorView = new EditorView({
           state,
           parent: editorContainer
         })
       }
-      
-      selectedFile = path
-      originalContent = content
-      isDirty = false
+
       await loadBackups(path)
-    } catch (e) {
-      message = $t('editor.file_load_error') + ': ' + e.message
+    } catch (e: any) {
+      message = $t('editor.file_load_error') + ': ' + (e?.message || e)
     } finally {
       loading = false
     }
@@ -445,12 +450,20 @@
   async function loadTemplates() {
     try {
       const res = await fetch('/api/templates/list')
-      if (res.ok) templates = await res.json()
-    } catch (e) {}
+      if (res.ok) {
+        const data = await res.json()
+        templates = Array.isArray(data) ? data : []
+      } else {
+        templates = []
+      }
+    } catch (e) {
+      templates = []
+    }
   }
 
   async function applyTemplate(template: Template) {
     if (!editorView) return
+    if (isDirty && !confirmUnsaved()) return
     if (!confirm($t('editor.confirm_template'))) return
     
     try {
@@ -461,11 +474,12 @@
       editorView.dispatch({
         changes: { from: 0, to: editorView.state.doc.length, insert: data.content }
       })
+      isDirty = true
       showTemplatesModal = false
       message = '✓ Template applied'
       setTimeout(() => message = '', 3000)
     } catch (e: any) {
-      alert('Error: ' + e.message)
+      alert('Error: ' + (e?.message || e))
     }
   }
 
@@ -591,7 +605,7 @@
           <button on:click={applyQuickFixes} class="btn-secondary" title="Apply common fixes">
             🔧 {$t('editor.quick_fix')}
           </button>
-          <button on:click={() => showTemplatesModal = true} class="btn-secondary" title="Apply configuration templates">
+          <button on:click={() => { showTemplatesModal = true; loadTemplates() }} class="btn-secondary" title="Apply configuration templates">
             📂 {$t('editor.templates')}
           </button>
           <button on:click={() => showGeneratorModal = true} class="btn-secondary" title="Generate outbound config">
@@ -689,7 +703,7 @@
             <span class="template-type">{template.type}</span>
           </button>
         {:else}
-          <p class="text-center p-3">{$t('app.loading')}</p>
+          <p class="text-center p-3">{$t('editor.no_templates')}</p>
         {/each}
       </div>
     </div>

@@ -150,7 +150,7 @@
             {$t('console.cat_' + category.name) || category.name}
             <span class="cat-arrow">▶</span>
           </summary>
-          <div class="command-list" transition:slide={{ duration: 180 }}>
+          <div class="command-list commands-grid" transition:slide={{ duration: 180 }}>
             {#each category.commands as cmd}
               <button
                 class="btn cmd-btn"
@@ -263,9 +263,15 @@
     padding: 0.25rem 0.5rem 0.5rem;
   }
 
+  .commands-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.4rem;
+  }
+
   .cmd-btn {
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     align-items: flex-start;
     padding: 0.5rem 0.75rem;
     background: var(--bg);
@@ -274,9 +280,9 @@
     cursor: pointer;
     text-align: left;
     width: 100%;
+    color: var(--fg-primary, #111111);
     transition: background 0.15s;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    gap: 0.25rem;
   }
 
   .cmd-btn:hover {

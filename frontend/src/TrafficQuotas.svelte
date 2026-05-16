@@ -335,7 +335,7 @@
               </div>
               <div class="quota-details">
                 <span class="detail">{q.target_type === 'global' ? $t('trafficquotas.target_global') : q.target_id}</span>
-                <span class="detail">{q.period}</span>
+                <span class="detail">{q.period === 'daily' ? $t('trafficquotas.period_daily') : q.period === 'weekly' ? $t('trafficquotas.period_weekly') : q.period === 'monthly' ? $t('trafficquotas.period_monthly') : q.period}</span>
                 <span class="detail">{formatBytes(q.current_bytes)} / {formatBytes(q.limit_bytes)}</span>
               </div>
               <div class="progress-bar">

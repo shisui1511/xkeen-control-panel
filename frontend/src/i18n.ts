@@ -132,6 +132,26 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.restarting': 'Перезапуск...',
     'svc.refresh_status': 'Обновить статус',
     'svc.action_error': 'Ошибка',
+    'svc.active_kernel': 'Активное ядро',
+    'svc.kernel_switch': 'Переключить ядро',
+    'svc.version': 'Версия',
+    'svc.status': 'Статус',
+    'svc.active_label': 'Активно',
+    'svc.channel_stable': 'Стабильный',
+    'svc.channel_preview': 'Предварительный',
+    'svc.service_label': 'Сервис',
+    'svc.switching': 'Переключение...',
+
+    // Kernel process status
+    'kernel.status.running': 'Запущено',
+    'kernel.status.stopped': 'Остановлено',
+    'kernel.status.not_installed': 'Не установлено',
+    'kernel.status.unknown': 'Неизвестно',
+    'kernel.status.loading': 'Загрузка...',
+    'kernel.status.error': 'Ошибка',
+
+    // Editor extras
+    'editor.no_templates': 'Шаблоны не найдены',
 
     // Settings
     'settings.title': 'Настройки',
@@ -199,6 +219,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.mode_failover': 'Auto-failover',
     'smartproxy.mode_roundrobin': 'Round-robin',
     'smartproxy.days': 'Вс,Пн,Вт,Ср,Чт,Пт,Сб',
+    'smartproxy.fallback_label': 'Fallback',
+    'smartproxy.failures_label': 'Сбоев',
+    'smartproxy.proxies_label': 'прокси',
 
     // Traffic Quotas
     'trafficquotas.title': 'Лимиты трафика',
@@ -316,6 +339,13 @@ const translations: Record<Lang, Record<string, string>> = {
     'net.your_ip': 'Ваш IP: {ip}',
     'net.invalid_host': 'Некорректный хост или IP',
     'net.invalid_url': 'Некорректный URL',
+    'net.domain': 'Домен',
+    'net.url': 'URL',
+    'net.tab_ping': 'Ping',
+    'net.tab_traceroute': 'Traceroute',
+    'net.tab_dns': 'DNS',
+    'net.tab_http': 'HTTP Test',
+    'logs.export': 'Экспорт в TXT',
     'conn.autorefresh': 'Автообновление',
 
     // Subscriptions
@@ -558,6 +588,26 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.restarting': 'Restarting...',
     'svc.refresh_status': 'Refresh status',
     'svc.action_error': 'Error',
+    'svc.active_kernel': 'Active Kernel',
+    'svc.kernel_switch': 'Switch Kernel',
+    'svc.version': 'Version',
+    'svc.status': 'Status',
+    'svc.active_label': 'Active',
+    'svc.channel_stable': 'Stable',
+    'svc.channel_preview': 'Preview',
+    'svc.service_label': 'Service',
+    'svc.switching': 'Switching...',
+
+    // Kernel process status
+    'kernel.status.running': 'Running',
+    'kernel.status.stopped': 'Stopped',
+    'kernel.status.not_installed': 'Not installed',
+    'kernel.status.unknown': 'Unknown',
+    'kernel.status.loading': 'Loading...',
+    'kernel.status.error': 'Error',
+
+    // Editor extras
+    'editor.no_templates': 'No templates found',
 
     // Settings
     'settings.title': 'Settings',
@@ -621,6 +671,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.mode_failover': 'Auto-failover',
     'smartproxy.mode_roundrobin': 'Round-robin',
     'smartproxy.days': 'Sun,Mon,Tue,Wed,Thu,Fri,Sat',
+    'smartproxy.fallback_label': 'Fallback',
+    'smartproxy.failures_label': 'failures',
+    'smartproxy.proxies_label': 'proxies',
 
     // Traffic Quotas
     'trafficquotas.title': 'Traffic Quotas',
@@ -738,6 +791,13 @@ const translations: Record<Lang, Record<string, string>> = {
     'net.your_ip': 'Your IP: {ip}',
     'net.invalid_host': 'Invalid host or IP',
     'net.invalid_url': 'Invalid URL',
+    'net.domain': 'Domain',
+    'net.url': 'URL',
+    'net.tab_ping': 'Ping',
+    'net.tab_traceroute': 'Traceroute',
+    'net.tab_dns': 'DNS',
+    'net.tab_http': 'HTTP Test',
+    'logs.export': 'Export to TXT',
     'conn.autorefresh': 'Auto-refresh',
 
     // Subscriptions

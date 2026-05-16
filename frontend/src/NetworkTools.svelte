@@ -169,17 +169,17 @@
 
   <div class="card mb-2">
     <div class="tool-tabs">
-      <button class="tool-tab" class:active={activeTool === 'ping'} on:click={() => { activeTool = 'ping'; result = null; }}>
-        📡 Ping
+      <button class="tool-tab" class:active={activeTool === 'ping'} on:click={() => { activeTool = 'ping'; result = null; }} title={$t('net.tab_ping')}>
+        📡 {$t('net.tab_ping')}
       </button>
-      <button class="tool-tab" class:active={activeTool === 'traceroute'} on:click={() => { activeTool = 'traceroute'; result = null; }}>
-        🔍 Traceroute
+      <button class="tool-tab" class:active={activeTool === 'traceroute'} on:click={() => { activeTool = 'traceroute'; result = null; }} title={$t('net.tab_traceroute')}>
+        🔍 {$t('net.tab_traceroute')}
       </button>
-      <button class="tool-tab" class:active={activeTool === 'dns'} on:click={() => { activeTool = 'dns'; result = null; }}>
-        🌐 DNS
+      <button class="tool-tab" class:active={activeTool === 'dns'} on:click={() => { activeTool = 'dns'; result = null; }} title={$t('net.tab_dns')}>
+        🌐 {$t('net.tab_dns')}
       </button>
-      <button class="tool-tab" class:active={activeTool === 'http'} on:click={() => { activeTool = 'http'; result = null; }}>
-        🚀 HTTP Test
+      <button class="tool-tab" class:active={activeTool === 'http'} on:click={() => { activeTool = 'http'; result = null; }} title={$t('net.tab_http')}>
+        🚀 {$t('net.tab_http')}
       </button>
     </div>
 
@@ -204,7 +204,7 @@
         </div>
       {:else if activeTool === 'dns'}
         <div class="form-row">
-          <label for="dns-host">{$t('editor.domain')}:</label>
+          <label for="dns-host">{$t('net.domain')}:</label>
           <input id="dns-host" type="text" class="input" bind:value={host} placeholder="google.com" />
         </div>
         <div class="form-row">
@@ -217,7 +217,7 @@
         </div>
       {:else if activeTool === 'http'}
         <div class="form-row">
-          <label for="http-url">URL:</label>
+          <label for="http-url">{$t('net.url')}:</label>
           <input id="http-url" type="text" class="input" bind:value={url} placeholder="https://google.com" />
         </div>
         <div class="form-row">

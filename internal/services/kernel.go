@@ -51,8 +51,43 @@ type KernelInfo struct {
 	HasUpdate      bool   `json:"has_update"`
 	Channel        string `json:"channel"` // stable, preview
 	Repo           string `json:"repo"`
-	Status         string `json:"status"` // idle, checking, downloading, installing, done, failed
+	Status         string `json:"status"`         // idle, checking, downloading, installing, done, failed
+	ProcessStatus  string `json:"process_status"` // running, stopped, not_installed, unknown
 	Message        string `json:"message"`
+}
+
+// kernelProcessStatus detects whether the kernel process is running.
+// Method 1: scan /proc/*/exe readlinks for the binary basename.
+// Method 2 (fallback): run pidof <basename> if /proc appears empty.
+// Returns "not_installed", "running", "stopped", or "unknown".
+func kernelProcessStatus(binaryPath string) string {
+	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+		return "not_installed"
+	}
+	base := filepath.Base(binaryPath)
+
+	// Method 1: /proc/*/exe readlink (no external tools required)
+	matches, _ := filepath.Glob("/proc/*/exe")
+	for _, link := range matches {
+		target, err := os.Readlink(link)
+		if err == nil && filepath.Base(target) == base {
+			return "running"
+		}
+	}
+
+	// Method 2: pidof fallback when /proc gives no entries
+	if len(matches) == 0 {
+		out, err := exec.Command("pidof", base).Output()
+		if err == nil && len(strings.TrimSpace(string(out))) > 0 {
+			return "running"
+		}
+		if err != nil {
+			// pidof itself unavailable — cannot determine state
+			return "unknown"
+		}
+	}
+
+	return "stopped"
 }
 
 // KernelService manages proxy kernels (xray, mihomo)
@@ -96,7 +131,9 @@ func (s *KernelService) List() []KernelInfo {
 	defer s.mu.RUnlock()
 	result := make([]KernelInfo, 0, len(s.kernels))
 	for _, k := range s.kernels {
-		result = append(result, *k)
+		info := *k
+		info.ProcessStatus = kernelProcessStatus(k.BinaryPath)
+		result = append(result, info)
 	}
 	return result
 }
@@ -105,8 +142,9 @@ func (s *KernelService) Get(name string) *KernelInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if k, ok := s.kernels[name]; ok {
-		// Refresh version
+		// Refresh version and process status
 		k.CurrentVersion = s.detectVersion(k)
+		k.ProcessStatus = kernelProcessStatus(k.BinaryPath)
 		return k
 	}
 	return nil

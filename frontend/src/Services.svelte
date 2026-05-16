@@ -11,6 +11,7 @@
     has_update: boolean
     channel: string
     status: string
+    process_status: string
     message: string
   }
 
@@ -73,7 +74,10 @@
     }
   }
 
+  let switchingKernel = false
+
   async function switchKernel(kernel: string) {
+    switchingKernel = true
     const key = `switch-${kernel}`
     actionLoading[key] = true
     
@@ -88,10 +92,12 @@
       if (!res.ok) throw new Error(text)
       
       await fetchStatus()
+      await fetchKernels()
     } catch (e: any) {
       alert(`${$t('svc.action_error')}: ${e.message}`)
     } finally {
       actionLoading[key] = false
+      switchingKernel = false
     }
   }
 
@@ -151,10 +157,12 @@
     return kernels.find(k => k.name === name)
   }
 
-  $: activeKernel = xkeenStatus.toLowerCase().includes('xray') ? 'xray' : (xkeenStatus.toLowerCase().includes('mihomo') ? 'mihomo' : 'unknown')
-  $: isRunning = xkeenStatus.includes('running') || xkeenStatus.includes('работает') || xkeenStatus.includes('активен')
   $: xray = getKernel('xray')
   $: mihomo = getKernel('mihomo')
+  $: activeKernel = xray?.process_status === 'running' ? 'xray'
+      : mihomo?.process_status === 'running' ? 'mihomo'
+      : 'unknown'
+  $: isRunning = xkeenStatus.includes('running') || xkeenStatus.includes('работает') || xkeenStatus.includes('активен')
 
   onMount(() => {
     fetchStatus()
@@ -177,7 +185,7 @@
       <div class="service-header">
         <div class="title-group">
           <h2>{$t('svc.xkeen')}</h2>
-          <span class="version-tag">Service</span>
+          <span class="version-tag">{$t('svc.service_label')}</span>
         </div>
         <span class="status-badge" class:running={isRunning}>
           {xkeenStatus || $t('app.loading')}
@@ -185,27 +193,20 @@
       </div>
       
       <div class="kernel-selector mb-2">
-        <span class="text-secondary mr-2">{$t('svc.active_kernel')}:</span>
-        <div class="btn-group">
-          <button 
-            class="btn btn-sm" 
-            class:btn-primary={activeKernel === 'xray'} 
-            class:btn-secondary={activeKernel !== 'xray'}
-            on:click={() => switchKernel('xray')}
-            disabled={actionLoading['switch-xray']}
-          >
-            Xray
-          </button>
-          <button 
-            class="btn btn-sm" 
-            class:btn-primary={activeKernel === 'mihomo'} 
-            class:btn-secondary={activeKernel !== 'mihomo'}
-            on:click={() => switchKernel('mihomo')}
-            disabled={actionLoading['switch-mihomo']}
-          >
-            Mihomo
-          </button>
-        </div>
+        <label for="kernel-select" class="text-secondary mr-2">{$t('svc.active_kernel')}:</label>
+        <select
+          id="kernel-select"
+          title={$t('svc.kernel_switch')}
+          value={activeKernel === 'unknown' ? '' : activeKernel}
+          on:change={(e) => e.currentTarget.value && switchKernel(e.currentTarget.value)}
+          disabled={switchingKernel}
+        >
+          <option value="xray">{$t('svc.xray')}</option>
+          <option value="mihomo">{$t('svc.mihomo')}</option>
+        </select>
+        {#if switchingKernel}
+          <span class="text-secondary ml-2">{$t('svc.switching')}</span>
+        {/if}
       </div>
 
       <div class="actions">
@@ -227,22 +228,30 @@
         <div class="title-group">
           <h2>{$t('svc.xray')}</h2>
           {#if xray}
-            <span class="version-tag">{xray.current_version === 'not installed' ? $t('kernels.not_installed') : 'v' + xray.current_version}</span>
+            <span class="version-tag process-status-{xray.process_status}">
+              {$t('kernel.status.' + (xray.process_status || 'unknown'))}
+            </span>
           {/if}
         </div>
         {#if activeKernel === 'xray'}
-          <span class="active-tag">Active</span>
+          <span class="active-tag">{$t('svc.active_label')}</span>
         {/if}
       </div>
       <p class="text-secondary mb-2">{$t('svc.xray_desc')}</p>
       
       {#if xray}
         <div class="kernel-details mb-2">
+          {#if xray.current_version && xray.current_version !== 'not installed'}
+            <div class="detail-row">
+              <span>{$t('svc.version')}:</span>
+              <span>v{xray.current_version}</span>
+            </div>
+          {/if}
           <div class="detail-row">
             <span>{$t('kernels.channel')}:</span>
             <select class="small-select" value={xray.channel} on:change={(e) => setKernelChannel('xray', e.currentTarget.value)}>
-              <option value="stable">Stable</option>
-              <option value="preview">Preview</option>
+              <option value="stable">{$t('svc.channel_stable')}</option>
+              <option value="preview">{$t('svc.channel_preview')}</option>
             </select>
           </div>
           {#if xray.latest_version && xray.has_update}
@@ -272,29 +281,37 @@
         <div class="title-group">
           <h2>{$t('svc.mihomo')}</h2>
           {#if mihomo}
-            <span class="version-tag">{mihomo.current_version === 'not installed' ? $t('kernels.not_installed') : 'v' + mihomo.current_version}</span>
+            <span class="version-tag process-status-{mihomo.process_status}">
+              {$t('kernel.status.' + (mihomo.process_status || 'unknown'))}
+            </span>
           {/if}
         </div>
         {#if activeKernel === 'mihomo'}
-          <span class="active-tag">Active</span>
+          <span class="active-tag">{$t('svc.active_label')}</span>
         {/if}
       </div>
       <p class="text-secondary mb-2">{$t('svc.mihomo_desc')}</p>
 
       {#if mihomo}
         <div class="kernel-details mb-2">
+          {#if mihomo.current_version && mihomo.current_version !== 'not installed'}
+            <div class="detail-row">
+              <span>{$t('svc.version')}:</span>
+              <span>v{mihomo.current_version}</span>
+            </div>
+          {/if}
           <div class="detail-row">
-            <span>{$t('kernels.channel')}:</span>
-            <select class="small-select" value={mihomo.channel} on:change={(e) => setKernelChannel('mihomo', e.currentTarget.value)}>
-              <option value="stable">Stable</option>
-              <option value="preview">Preview</option>
-            </select>
-          </div>
-          <div class="detail-row">
-            <span>Status:</span>
+            <span>{$t('svc.status')}:</span>
             <span class="status-text" class:text-success={mihomoStatus.includes('running')}>
               {mihomoStatus}
             </span>
+          </div>
+          <div class="detail-row">
+            <span>{$t('kernels.channel')}:</span>
+            <select class="small-select" value={mihomo.channel} on:change={(e) => setKernelChannel('mihomo', e.currentTarget.value)}>
+              <option value="stable">{$t('svc.channel_stable')}</option>
+              <option value="preview">{$t('svc.channel_preview')}</option>
+            </select>
           </div>
           {#if mihomo.latest_version && mihomo.has_update}
             <div class="detail-row update-available">

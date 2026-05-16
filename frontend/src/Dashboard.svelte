@@ -36,9 +36,9 @@
   }
 
   let serviceStatus: ServiceStatus = {
-    xkeen: '',
-    xray: '',
-    mihomo: '',
+    xkeen: 'loading',
+    xray: 'loading',
+    mihomo: 'loading',
     connections: 0,
     xrayVersion: '',
     mihomoVersion: ''
@@ -80,30 +80,45 @@
         }
       } catch (_) {}
 
-      // Try to get kernel versions
+      // Get kernel versions and process_status from /api/kernels
       let xrayVer = ''
       let mihomoVer = ''
+      let xrayProcessStatus = 'unknown'
+      let mihomoProcessStatus = 'unknown'
       try {
         const kernelsRes = await fetch('/api/kernels')
         if (kernelsRes.ok) {
           const kernels = await kernelsRes.json()
           for (const k of kernels) {
-            if (k.name === 'xray') xrayVer = k.current_version || ''
-            if (k.name === 'mihomo') mihomoVer = k.current_version || ''
+            if (k.name === 'xray') {
+              xrayVer = k.current_version || ''
+              xrayProcessStatus = k.process_status || 'unknown'
+            }
+            if (k.name === 'mihomo') {
+              mihomoVer = k.current_version || ''
+              mihomoProcessStatus = k.process_status || 'unknown'
+            }
           }
+        } else {
+          xrayProcessStatus = 'error'
+          mihomoProcessStatus = 'error'
         }
-      } catch (_) {}
+      } catch (_) {
+        xrayProcessStatus = 'error'
+        mihomoProcessStatus = 'error'
+      }
 
       serviceStatus = {
         xkeen: svcText.toLowerCase().includes('running') ? 'running' : svcText || 'unknown',
-        xray: svcText.toLowerCase().includes('running') ? 'running' : 'stopped',
-        mihomo: mihomoText.toLowerCase().includes('running') ? 'running' : mihomoText || 'unknown',
+        xray: xrayProcessStatus,
+        mihomo: mihomoProcessStatus,
         connections: connCount,
         xrayVersion: xrayVer,
         mihomoVersion: mihomoVer
       }
     } catch (_) {
       statusError = true
+      serviceStatus = { ...serviceStatus, xray: 'error', mihomo: 'error' }
     } finally {
       statusLoading = false
     }
@@ -184,8 +199,10 @@
 
   function statusColor(status: string): string {
     if (status === 'running') return 'success'
-    if (status === 'stopped' || status === 'unknown') return 'error'
-    return 'warning'
+    if (status === 'stopped' || status === 'not_installed') return 'error'
+    if (status === 'error') return 'error'
+    if (status === 'loading') return 'warning'
+    return 'warning' // unknown
   }
 
   onMount(() => {
@@ -292,8 +309,8 @@
                 <span class="status-dot {statusColor(serviceStatus.xray)}"></span>
                 <span class="status-badge-label">Xray</span>
                 <span class="status-badge-value status-{statusColor(serviceStatus.xray)}">
-                  {serviceStatus.xray === 'running' ? $t('app.running') : $t('app.stop')}
-                  {#if serviceStatus.xrayVersion}
+                  {$t('kernel.status.' + (serviceStatus.xray || 'unknown'))}
+                  {#if serviceStatus.xrayVersion && serviceStatus.xray !== 'not_installed'}
                     <span class="version-badge">{serviceStatus.xrayVersion}</span>
                   {/if}
                 </span>
@@ -302,8 +319,8 @@
                 <span class="status-dot {statusColor(serviceStatus.mihomo)}"></span>
                 <span class="status-badge-label">Mihomo</span>
                 <span class="status-badge-value status-{statusColor(serviceStatus.mihomo)}">
-                  {serviceStatus.mihomo === 'running' ? $t('app.running') : $t('app.stop')}
-                  {#if serviceStatus.mihomoVersion}
+                  {$t('kernel.status.' + (serviceStatus.mihomo || 'unknown'))}
+                  {#if serviceStatus.mihomoVersion && serviceStatus.mihomo !== 'not_installed'}
                     <span class="version-badge">{serviceStatus.mihomoVersion}</span>
                   {/if}
                 </span>
