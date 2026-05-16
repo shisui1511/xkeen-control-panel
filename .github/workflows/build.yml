@@ -114,22 +114,38 @@ jobs:
           else
             LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
             if [ -z "$LATEST_TAG" ]; then
-              LATEST_TAG="v0.0.0"
+              BASE="0.0.0"
+              RANGE="HEAD"
+            else
+              BASE=${LATEST_TAG#v}
+              RANGE="${LATEST_TAG}..HEAD"
             fi
             
-            BASE=${LATEST_TAG#v}
             MAJOR=$(echo "$BASE" | cut -d. -f1)
             MINOR=$(echo "$BASE" | cut -d. -f2)
             PATCH=$(echo "$BASE" | cut -d. -f3)
-            NEXT_PATCH=$((PATCH + 1))
+
+            # Анализируем коммиты для определения типа инкремента (Conventional Commits)
+            COMMITS=$(git log "$RANGE" --pretty=format:"%s%b" 2>/dev/null || git log --pretty=format:"%s%b")
             
-            # Rolling pre-release: PATCH+1 от последнего stable
-            # Пример: v0.9.0 (stable) → v0.9.1-dev (pre-release)
-            VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}-dev"
+            if echo "$COMMITS" | grep -qE "BREAKING CHANGE|[a-zA-Z]+(\(.*\))?!:"; then
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              echo "Detected BREAKING CHANGE, bumping MAJOR"
+            elif echo "$COMMITS" | grep -qE "^feat(\(.*\))?:"; then
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              echo "Detected feature, bumping MINOR"
+            else
+              PATCH=$((PATCH + 1))
+              echo "No major/minor changes, bumping PATCH"
+            fi
+            
+            VERSION="v${MAJOR}.${MINOR}.${PATCH}-dev"
             IS_STABLE="false"
             
-            # Счётчик коммитов для release notes
-            COMMIT_COUNT=$(git rev-list "${LATEST_TAG}..HEAD" --count 2>/dev/null || echo "0")
+            COMMIT_COUNT=$(git rev-list "$RANGE" --count 2>/dev/null || git rev-list HEAD --count)
             echo "commit_count=${COMMIT_COUNT}" >> $GITHUB_OUTPUT
           fi
           
