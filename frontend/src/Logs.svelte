@@ -184,7 +184,7 @@
         🗑
       </button>
       
-      <button on:click={exportLogs} class="btn-icon" title="Export to TXT">
+      <button on:click={exportLogs} class="btn-icon" title={$t('logs.export')}>
         📥
       </button>
       

@@ -11,9 +11,13 @@ build/
 AGENTS.md
 ROADMAP.md
 CLAUDE.md
+GEMINI.md
+PLAN-091.md
+
 .specify
 .opencode
 .claude
+.gemini
 specs
 
 # Node.js files (frontend build)

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"sync"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // CommandCategory represents a group of related commands
@@ -118,16 +120,16 @@ func (s *ConsoleService) Execute(command string) (*CommandResult, error) {
 
 	err := cmd.Run()
 	result := &CommandResult{
-		Output: stdout.String(),
+		Output: utils.StripANSI(stdout.String()),
 	}
 
 	if err != nil {
 		result.Success = false
-		result.Error = fmt.Sprintf("%s\n%s", err.Error(), stderr.String())
+		result.Error = utils.StripANSI(fmt.Sprintf("%s\n%s", err.Error(), stderr.String()))
 	} else {
 		result.Success = true
 		if stderr.Len() > 0 {
-			result.Output += "\n" + stderr.String()
+			result.Output += "\n" + utils.StripANSI(stderr.String())
 		}
 	}
 

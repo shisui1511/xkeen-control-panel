@@ -262,17 +262,17 @@
                 </label>
               </div>
               <div class="profile-details">
-                <span class="detail mode-badge">{p.mode || 'time-based'}</span>
+                <span class="detail mode-badge">{p.mode === 'time-based' ? $t('smartproxy.mode_time') : p.mode === 'auto-failover' ? $t('smartproxy.mode_failover') : p.mode === 'round-robin' ? $t('smartproxy.mode_roundrobin') : p.mode || $t('smartproxy.mode_time')}</span>
                 {#if p.mode === 'auto-failover'}
-                  <span class="detail">{p.group_name} → {p.proxy_name} (fallback: {p.fallback_proxy || 'DIRECT'})</span>
+                  <span class="detail">{p.group_name} → {p.proxy_name} ({$t('smartproxy.fallback_label')}: {p.fallback_proxy || 'DIRECT'})</span>
                   {#if p.current_failures && p.current_failures > 0}
-                    <span class="detail alert">⚠️ failures: {p.current_failures}</span>
+                    <span class="detail alert">⚠️ {$t('smartproxy.failures_label')}: {p.current_failures}</span>
                   {/if}
                   {#if p.current_proxy}
                     <span class="detail active-proxy">→ {p.current_proxy}</span>
                   {/if}
                 {:else if p.mode === 'round-robin'}
-                  <span class="detail">{p.group_name} → round-robin ({p.round_robin_proxies?.length || 0} proxies)</span>
+                  <span class="detail">{p.group_name} → {$t('smartproxy.mode_roundrobin')} ({p.round_robin_proxies?.length || 0} {$t('smartproxy.proxies_label')})</span>
                 {:else}
                   <span class="detail">
                     {p.days_of_week?.map(d => dayNames[d]).join(', ')}
