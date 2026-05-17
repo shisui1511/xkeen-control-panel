@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -179,22 +180,32 @@ type CurlResult struct {
 }
 
 // HTTPTest performs HTTP request test
-func (s *NetworkToolsService) HTTPTest(url string, timeout int) (*CurlResult, error) {
+func (s *NetworkToolsService) HTTPTest(rawURL string, timeout int) (*CurlResult, error) {
 	if timeout <= 0 || timeout > 60 {
 		timeout = 10
 	}
 
+	// Validate URL scheme — only http and https are allowed
+	parsed, err := url.Parse(rawURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return &CurlResult{
+			URL:     rawURL,
+			Success: false,
+			Error:   "only http and https URLs are allowed",
+		}, nil
+	}
+
 	result := &CurlResult{
-		URL: url,
+		URL: rawURL,
 	}
 
 	var cmd *exec.Cmd
 	if _, err := exec.LookPath("curl"); err == nil {
 		cmd = exec.Command("curl", "-sL", "--connect-timeout", fmt.Sprintf("%d", timeout),
 			"-w", "\nHTTP_CODE: %{http_code}\nTIME_TOTAL: %{time_total}\nSIZE: %{size_download}",
-			url)
+			"--", rawURL)
 	} else if _, err := exec.LookPath("wget"); err == nil {
-		cmd = exec.Command("wget", "-qO", "-", "--timeout="+fmt.Sprintf("%d", timeout), url)
+		cmd = exec.Command("wget", "-qO", "-", "--timeout="+fmt.Sprintf("%d", timeout), "--", rawURL)
 	} else {
 		result.Success = false
 		result.Error = "curl or wget not found"

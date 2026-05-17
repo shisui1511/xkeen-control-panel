@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	xkeencontrolpanel "github.com/shisui1511/xkeen-control-panel"
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
@@ -40,16 +41,18 @@ func main() {
 	}
 
 	srvCfg := &server.Config{
-		Port:            cfg.Port,
-		XRayConfigDir:   cfg.XRayConfigDir,
-		XKeenBinary:     cfg.XKeenBinary,
-		MihomoConfigDir: cfg.MihomoConfigDir,
-		MihomoBinary:    cfg.MihomoBinary,
-		AllowedRoots:    cfg.AllowedRoots,
-		LogLevel:        cfg.LogLevel,
-		DataDir:         cfg.DataDir,
-		PasswordHash:    cfg.Auth.PasswordHash,
-		SecureCookie:    cfg.Auth.SecureCookie,
+		Port:             cfg.Port,
+		XRayConfigDir:    cfg.XRayConfigDir,
+		XKeenBinary:      cfg.XKeenBinary,
+		MihomoConfigDir:  cfg.MihomoConfigDir,
+		MihomoBinary:     cfg.MihomoBinary,
+		AllowedRoots:     cfg.AllowedRoots,
+		LogLevel:         cfg.LogLevel,
+		DataDir:          cfg.DataDir,
+		PasswordHash:     cfg.Auth.PasswordHash,
+		SecureCookie:     cfg.Auth.SecureCookie,
+		MaxLoginAttempts: cfg.Auth.MaxLoginAttempts,
+		LockoutDuration:  time.Duration(cfg.Auth.LockoutDuration) * time.Minute,
 		HTTPS: server.HTTPSConfig{
 			Enabled:  cfg.HTTPS.Enabled,
 			CertPath: cfg.HTTPS.CertPath,

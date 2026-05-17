@@ -6,6 +6,8 @@ import (
 	"os"
 )
 
+const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
+
 func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 	dir := r.URL.Query().Get("dir")
 	if dir == "" {
@@ -57,9 +59,14 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
 	data, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
+		if err.Error() == "http: request body too large" {
+			a.errorResponse(w, "request body too large (max 1 MB)", http.StatusRequestEntityTooLarge)
+			return
+		}
 		a.errorResponse(w, a.t(r, "config.write_error"), http.StatusInternalServerError)
 		return
 	}
