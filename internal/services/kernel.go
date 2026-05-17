@@ -20,6 +20,13 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
+// allowedKernelRoots are the only directories where kernel binaries and backups may live.
+var allowedKernelRoots = []string{
+	"/opt/bin/",
+	"/opt/etc/",
+	os.TempDir() + "/",
+}
+
 func validateKernelPath(path string) error {
 	if path == "" {
 		return errors.New("empty path")
@@ -27,11 +34,20 @@ func validateKernelPath(path string) error {
 	if !filepath.IsAbs(path) {
 		return errors.New("path must be absolute")
 	}
-	clean := filepath.Clean(path)
-	if strings.Contains(clean, "..") {
-		return errors.New("path traversal detected")
+	// Reject raw paths containing ".." components to prevent traversal regardless of Clean result.
+	for _, part := range strings.Split(path, "/") {
+		if part == ".." {
+			return errors.New("path traversal detected")
+		}
 	}
-	return nil
+	clean := filepath.Clean(path)
+	// Ensure the cleaned path actually starts with one of the allowed roots
+	for _, root := range allowedKernelRoots {
+		if strings.HasPrefix(clean+"/", root) || strings.HasPrefix(clean, root) {
+			return nil
+		}
+	}
+	return errors.New("path is outside allowed directories")
 }
 
 func safeTempPath(name string) (string, error) {
@@ -92,13 +108,15 @@ func kernelProcessStatus(binaryPath string) string {
 
 // KernelService manages proxy kernels (xray, mihomo)
 type KernelService struct {
-	kernels map[string]*KernelInfo
-	mu      sync.RWMutex
+	kernels    map[string]*KernelInfo
+	mu         sync.RWMutex
+	installMus map[string]*sync.Mutex // per-kernel install lock
 }
 
 func NewKernelService() *KernelService {
 	svc := &KernelService{
-		kernels: make(map[string]*KernelInfo),
+		kernels:    make(map[string]*KernelInfo),
+		installMus: make(map[string]*sync.Mutex),
 	}
 
 	// Register known kernels
@@ -109,6 +127,7 @@ func NewKernelService() *KernelService {
 		Channel:     "stable",
 		Repo:        "XTLS/Xray-core",
 	}
+	svc.installMus["xray"] = &sync.Mutex{}
 
 	svc.kernels["mihomo"] = &KernelInfo{
 		Name:        "mihomo",
@@ -117,8 +136,9 @@ func NewKernelService() *KernelService {
 		Channel:     "stable",
 		Repo:        "MetaCubeX/mihomo",
 	}
+	svc.installMus["mihomo"] = &sync.Mutex{}
 
-	// Detect current versions
+	// Detect current versions (outside lock — no concurrent calls yet)
 	for _, k := range svc.kernels {
 		k.CurrentVersion = svc.detectVersion(k)
 	}
@@ -128,29 +148,42 @@ func NewKernelService() *KernelService {
 
 func (s *KernelService) List() []KernelInfo {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]KernelInfo, 0, len(s.kernels))
+	snapshots := make([]KernelInfo, 0, len(s.kernels))
 	for _, k := range s.kernels {
-		info := *k
-		info.ProcessStatus = kernelProcessStatus(k.BinaryPath)
-		result = append(result, info)
+		snapshots = append(snapshots, *k)
 	}
-	return result
+	s.mu.RUnlock()
+
+	// Resolve live data outside the global lock to avoid blocking Install/CheckLatest
+	for i := range snapshots {
+		snapshots[i].CurrentVersion = s.detectVersion(&snapshots[i])
+		snapshots[i].ProcessStatus = kernelProcessStatus(snapshots[i].BinaryPath)
+	}
+	return snapshots
 }
 
 func (s *KernelService) Get(name string) *KernelInfo {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if k, ok := s.kernels[name]; ok {
-		// Refresh version and process status
-		k.CurrentVersion = s.detectVersion(k)
-		k.ProcessStatus = kernelProcessStatus(k.BinaryPath)
-		return k
+	k, ok := s.kernels[name]
+	var snap KernelInfo
+	if ok {
+		snap = *k
 	}
-	return nil
+	s.mu.RUnlock()
+
+	if !ok {
+		return nil
+	}
+	// Refresh version and process status outside global lock
+	snap.CurrentVersion = s.detectVersion(&snap)
+	snap.ProcessStatus = kernelProcessStatus(snap.BinaryPath)
+	return &snap
 }
 
 func (s *KernelService) SetChannel(name, channel string) bool {
+	if channel != "stable" && channel != "preview" {
+		return false
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if k, ok := s.kernels[name]; ok {
@@ -207,79 +240,119 @@ func (s *KernelService) parseVersion(name, output string) string {
 // CheckLatest queries GitHub API for latest release
 func (s *KernelService) CheckLatest(name string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	k := s.kernels[name]
 	if k == nil {
+		s.mu.Unlock()
 		return fmt.Errorf("kernel not found: %s", name)
 	}
-
 	k.Status = "checking"
 	k.Message = "Checking for updates..."
+	// Snapshot fields needed for the HTTP call
+	repo := k.Repo
+	channel := k.Channel
+	currentVersion := k.CurrentVersion
+	s.mu.Unlock()
 
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", k.Repo)
-	if k.Channel != "stable" {
-		// For preview/beta, list all releases and pick first prerelease or latest
-		url = fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=5", k.Repo)
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
+	if channel != "stable" {
+		apiURL = fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=5", repo)
 	}
 
 	client := utils.SafeHTTPClient(15 * time.Second)
-	resp, err := client.Get(url)
+	resp, err := client.Get(apiURL)
 	if err != nil {
-		k.Status = "failed"
-		k.Message = "GitHub API error: " + err.Error()
+		s.mu.Lock()
+		if kk := s.kernels[name]; kk != nil {
+			kk.Status = "failed"
+			kk.Message = "GitHub API error: " + err.Error()
+		}
+		s.mu.Unlock()
 		return err
 	}
 	defer resp.Body.Close()
 
-	if k.Channel == "stable" {
+	var latestVersion string
+	if channel == "stable" {
 		var release struct {
 			TagName string `json:"tag_name"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-			k.Status = "failed"
-			k.Message = "Parse error: " + err.Error()
+			s.mu.Lock()
+			if kk := s.kernels[name]; kk != nil {
+				kk.Status = "failed"
+				kk.Message = "Parse error: " + err.Error()
+			}
+			s.mu.Unlock()
 			return err
 		}
-		k.LatestVersion = strings.TrimPrefix(release.TagName, "v")
+		latestVersion = strings.TrimPrefix(release.TagName, "v")
 	} else {
 		var releases []struct {
 			TagName    string `json:"tag_name"`
 			Prerelease bool   `json:"prerelease"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-			k.Status = "failed"
-			k.Message = "Parse error: " + err.Error()
+			s.mu.Lock()
+			if kk := s.kernels[name]; kk != nil {
+				kk.Status = "failed"
+				kk.Message = "Parse error: " + err.Error()
+			}
+			s.mu.Unlock()
 			return err
 		}
 		for _, rel := range releases {
-			if k.Channel == "preview" && rel.Prerelease {
-				k.LatestVersion = strings.TrimPrefix(rel.TagName, "v")
-				break
-			}
-			if k.Channel == "stable" && !rel.Prerelease {
-				k.LatestVersion = strings.TrimPrefix(rel.TagName, "v")
+			if channel == "preview" && rel.Prerelease {
+				latestVersion = strings.TrimPrefix(rel.TagName, "v")
 				break
 			}
 		}
 	}
 
-	k.HasUpdate = k.LatestVersion != "" && k.LatestVersion != k.CurrentVersion
-	k.Status = "idle"
-	k.Message = ""
+	s.mu.Lock()
+	if kk := s.kernels[name]; kk != nil {
+		kk.LatestVersion = latestVersion
+		kk.HasUpdate = latestVersion != "" && latestVersion != currentVersion
+		kk.Status = "idle"
+		kk.Message = ""
+	}
+	s.mu.Unlock()
 	return nil
 }
 
 // Install downloads and installs the kernel
 func (s *KernelService) Install(name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	k := s.kernels[name]
-	if k == nil {
+	// Acquire per-kernel install lock so only one concurrent install per kernel is allowed
+	s.mu.RLock()
+	installMu, muOk := s.installMus[name]
+	s.mu.RUnlock()
+	if !muOk {
 		return fmt.Errorf("kernel not found: %s", name)
 	}
+	installMu.Lock()
+	defer installMu.Unlock()
 
+	// helper to update kernel status under the global lock
+	setStatus := func(status, message string) {
+		s.mu.Lock()
+		if kk := s.kernels[name]; kk != nil {
+			kk.Status = status
+			kk.Message = message
+		}
+		s.mu.Unlock()
+	}
+
+	s.mu.Lock()
+	k := s.kernels[name]
+	if k == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("kernel not found: %s", name)
+	}
 	k.Status = "downloading"
 	k.Message = "Downloading..."
+	// Snapshot immutable fields needed outside the lock
+	binaryPath := k.BinaryPath
+	latestVersion := k.LatestVersion
+	s.mu.Unlock()
 
 	arch := runtime.GOARCH
 	if arch == "mipsle" || arch == "mipsel" {
@@ -288,64 +361,62 @@ func (s *KernelService) Install(name string) error {
 		arch = "mips-softfloat"
 	}
 
-	downloadURL, filename := s.buildDownloadURL(k, arch)
+	// Build a temporary KernelInfo for buildDownloadURL (only needs Name, Repo, LatestVersion, Channel)
+	s.mu.RLock()
+	snap := *s.kernels[name]
+	s.mu.RUnlock()
+
+	downloadURL, filename := s.buildDownloadURL(&snap, arch)
 	if downloadURL == "" {
-		k.Status = "failed"
-		k.Message = "Unsupported architecture: " + arch
+		setStatus("failed", "Unsupported architecture: "+arch)
 		return fmt.Errorf("unsupported architecture: %s", arch)
 	}
 
 	tempFile, err := safeTempPath(filename)
 	if err != nil {
-		k.Status = "failed"
-		k.Message = "Invalid filename: " + err.Error()
+		setStatus("failed", "Invalid filename: "+err.Error())
 		return err
 	}
 	defer os.Remove(tempFile) // Cleanup archive after extraction
 
 	if err := s.downloadFile(downloadURL, tempFile); err != nil {
-		k.Status = "failed"
-		k.Message = "Download failed: " + err.Error()
+		setStatus("failed", "Download failed: "+err.Error())
 		return err
 	}
 
 	// Backup current binary
-	k.Status = "installing"
-	k.Message = "Creating backup..."
+	setStatus("installing", "Creating backup...")
 
-	backupDir := filepath.Join(filepath.Dir(k.BinaryPath), ".backup")
+	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
-		k.Status = "failed"
-		k.Message = "Backup dir failed: " + err.Error()
+		setStatus("failed", "Backup dir failed: "+err.Error())
 		return err
 	}
 	// Use only timestamp in backup name to avoid tainted data in path
 	backupName := fmt.Sprintf("kernel.bak.%d", time.Now().Unix())
 	backupPath := filepath.Join(backupDir, backupName)
 	if err := validateKernelPath(backupPath); err != nil {
+		setStatus("failed", "Invalid backup path: "+err.Error())
 		return err
 	}
 
-	if _, err := os.Stat(k.BinaryPath); err == nil {
-		src, err := os.Open(k.BinaryPath)
+	if _, err := os.Stat(binaryPath); err == nil {
+		src, err := os.Open(binaryPath)
 		if err != nil {
-			k.Status = "failed"
-			k.Message = "Backup failed: " + err.Error()
+			setStatus("failed", "Backup failed: "+err.Error())
 			return err
 		}
 		dst, err := os.Create(backupPath)
 		if err != nil {
 			src.Close()
-			k.Status = "failed"
-			k.Message = "Backup failed: " + err.Error()
+			setStatus("failed", "Backup failed: "+err.Error())
 			return err
 		}
 		_, err = io.Copy(dst, src)
 		src.Close()
 		dst.Close()
 		if err != nil {
-			k.Status = "failed"
-			k.Message = "Backup failed: " + err.Error()
+			setStatus("failed", "Backup failed: "+err.Error())
 			return err
 		}
 	}
@@ -353,20 +424,18 @@ func (s *KernelService) Install(name string) error {
 	// Extract if needed
 	extractedPath := tempFile
 	if strings.HasSuffix(tempFile, ".zip") {
-		k.Message = "Extracting..."
+		setStatus("installing", "Extracting...")
 		extracted, err := s.extractZip(tempFile, name)
 		if err != nil {
-			k.Status = "failed"
-			k.Message = "Extract failed: " + err.Error()
+			setStatus("failed", "Extract failed: "+err.Error())
 			return err
 		}
 		extractedPath = extracted
 	} else if strings.HasSuffix(tempFile, ".gz") {
-		k.Message = "Extracting..."
+		setStatus("installing", "Extracting...")
 		extracted, err := s.extractGz(tempFile)
 		if err != nil {
-			k.Status = "failed"
-			k.Message = "Extract failed: " + err.Error()
+			setStatus("failed", "Extract failed: "+err.Error())
 			return err
 		}
 		extractedPath = extracted
@@ -379,37 +448,40 @@ func (s *KernelService) Install(name string) error {
 
 	// Make executable and replace
 	if err := validateKernelPath(extractedPath); err != nil {
+		setStatus("failed", "Invalid extracted path: "+err.Error())
 		return err
 	}
 	if err := os.Chmod(extractedPath, 0755); err != nil {
-		k.Status = "failed"
-		k.Message = "Chmod failed: " + err.Error()
+		setStatus("failed", "Chmod failed: "+err.Error())
 		return err
 	}
 
 	// Atomic replace
-	tempDest := filepath.Join(filepath.Dir(k.BinaryPath), filepath.Base(k.BinaryPath)+".new")
+	tempDest := filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new")
 	if err := validateKernelPath(tempDest); err != nil {
+		setStatus("failed", "Invalid temp dest path: "+err.Error())
 		return err
 	}
 	if err := os.Rename(extractedPath, tempDest); err != nil {
-		k.Status = "failed"
-		k.Message = "Replace failed: " + err.Error()
+		setStatus("failed", "Replace failed: "+err.Error())
 		return err
 	}
-	if err := os.Rename(tempDest, k.BinaryPath); err != nil {
+	if err := os.Rename(tempDest, binaryPath); err != nil {
 		// Try rollback
-		_ = os.Rename(backupPath, k.BinaryPath)
-		k.Status = "failed"
-		k.Message = "Replace failed: " + err.Error()
+		_ = os.Rename(backupPath, binaryPath)
+		setStatus("failed", "Replace failed: "+err.Error())
 		return err
 	}
 
-	// Verify new version
-	k.CurrentVersion = s.detectVersion(k)
-	k.HasUpdate = false
-	k.Status = "done"
-	k.Message = "Updated to " + k.CurrentVersion
+	// Verify new version and update metadata under lock
+	s.mu.Lock()
+	if kk := s.kernels[name]; kk != nil {
+		kk.CurrentVersion = s.detectVersion(kk)
+		kk.HasUpdate = kk.CurrentVersion != latestVersion
+		kk.Status = "done"
+		kk.Message = "Updated to " + kk.CurrentVersion
+	}
+	s.mu.Unlock()
 
 	return nil
 }
@@ -471,6 +543,9 @@ func (s *KernelService) downloadFile(url, filepath string) error {
 	return err
 }
 
+// maxKernelExtractBytes caps the size of decompressed kernel binaries (50 MB).
+const maxKernelExtractBytes = 50 * 1024 * 1024
+
 func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -499,7 +574,7 @@ func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 			}
 			defer out.Close()
 
-			_, err = io.Copy(out, rc)
+			_, err = io.Copy(out, io.LimitReader(rc, maxKernelExtractBytes))
 			return outPath, err
 		}
 	}
@@ -534,6 +609,6 @@ func (s *KernelService) extractGz(gzPath string) (string, error) {
 	}
 	defer out.Close()
 
-	_, err = io.Copy(out, gr)
+	_, err = io.Copy(out, io.LimitReader(gr, maxKernelExtractBytes))
 	return outPath, err
 }
