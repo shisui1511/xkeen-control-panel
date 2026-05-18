@@ -9,12 +9,16 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
+
+// maxSubscriptionBytes caps the download size to 10 MB
+const maxSubscriptionBytes = 10 * 1024 * 1024
 
 // Subscription represents a proxy subscription
 type Subscription struct {
@@ -203,6 +207,12 @@ func (s *SubscriptionService) GetLocked(id string) *Subscription {
 }
 
 func (s *SubscriptionService) downloadAndParse(subURL string) ([]Outbound, error) {
+	// C-6: validate URL scheme
+	parsed, err := url.Parse(subURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return nil, fmt.Errorf("only http and https URLs are allowed for subscriptions")
+	}
+
 	client := utils.SafeHTTPClient(30 * time.Second)
 	resp, err := client.Get(subURL)
 	if err != nil {
@@ -214,7 +224,8 @@ func (s *SubscriptionService) downloadAndParse(subURL string) ([]Outbound, error
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	// C-4: cap download size to 10 MB
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSubscriptionBytes))
 	if err != nil {
 		return nil, err
 	}
@@ -275,6 +286,17 @@ func (s *SubscriptionService) applyFilters(outbounds []Outbound, sub *Subscripti
 		if sub.FilterType != "" && !strings.EqualFold(ob.Protocol, sub.FilterType) {
 			continue
 		}
+		if sub.FilterTransport != "" {
+			transport := ""
+			if ob.StreamSettings != nil {
+				if net, ok := ob.StreamSettings["network"].(string); ok {
+					transport = net
+				}
+			}
+			if !strings.EqualFold(transport, sub.FilterTransport) {
+				continue
+			}
+		}
 		filtered = append(filtered, ob)
 	}
 
@@ -304,7 +326,7 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return utils.AtomicWriteFile(path, data, 0644)
 }
 
 // parseShareLink parses various share link formats
@@ -333,11 +355,24 @@ func parseShareLink(link string) *Outbound {
 }
 
 func parseVMessLink(link string) *Outbound {
-	// vmess://base64(json)
+	// vmess://base64(json) — some clients use URL-safe base64 without padding
 	b64 := strings.TrimPrefix(link, "vmess://")
 	data, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
-		return nil
+		// Try URL-safe base64 with padding
+		padded := b64
+		if rem := len(padded) % 4; rem != 0 {
+			padded += strings.Repeat("=", 4-rem)
+		}
+		var err2 error
+		data, err2 = base64.URLEncoding.DecodeString(padded)
+		if err2 != nil {
+			// Try raw URL-safe base64 (no padding required)
+			data, err2 = base64.RawURLEncoding.DecodeString(b64)
+			if err2 != nil {
+				return nil
+			}
+		}
 	}
 
 	var vmess struct {
@@ -357,7 +392,10 @@ func parseVMessLink(link string) *Outbound {
 		return nil
 	}
 
-	port := vmess.Port
+	portInt, err := strconv.Atoi(vmess.Port)
+	if err != nil || portInt < 1 || portInt > 65535 {
+		return nil
+	}
 
 	return &Outbound{
 		Tag:      vmess.PS,
@@ -366,7 +404,7 @@ func parseVMessLink(link string) *Outbound {
 			"vnext": []map[string]interface{}{
 				{
 					"address": vmess.Add,
-					"port":    port,
+					"port":    portInt,
 					"users": []map[string]interface{}{
 						{
 							"id":       vmess.ID,
@@ -397,6 +435,11 @@ func parseVLESSLink(link string) *Outbound {
 		tag = u.Hostname()
 	}
 
+	portInt, err := strconv.Atoi(u.Port())
+	if err != nil || portInt < 1 || portInt > 65535 {
+		return nil
+	}
+
 	return &Outbound{
 		Tag:      tag,
 		Protocol: "vless",
@@ -404,7 +447,7 @@ func parseVLESSLink(link string) *Outbound {
 			"vnext": []map[string]interface{}{
 				{
 					"address": u.Hostname(),
-					"port":    u.Port(),
+					"port":    portInt,
 					"users": []map[string]interface{}{
 						{
 							"id":         id,
@@ -435,6 +478,11 @@ func parseTrojanLink(link string) *Outbound {
 		tag = u.Hostname()
 	}
 
+	portInt, err := strconv.Atoi(u.Port())
+	if err != nil || portInt < 1 || portInt > 65535 {
+		return nil
+	}
+
 	return &Outbound{
 		Tag:      tag,
 		Protocol: "trojan",
@@ -442,7 +490,7 @@ func parseTrojanLink(link string) *Outbound {
 			"servers": []map[string]interface{}{
 				{
 					"address":  u.Hostname(),
-					"port":     u.Port(),
+					"port":     portInt,
 					"password": password,
 				},
 			},
@@ -480,6 +528,11 @@ func parseSSLink(link string) *Outbound {
 		tag = u.Hostname()
 	}
 
+	portInt, err := strconv.Atoi(u.Port())
+	if err != nil || portInt < 1 || portInt > 65535 {
+		return nil
+	}
+
 	return &Outbound{
 		Tag:      tag,
 		Protocol: "shadowsocks",
@@ -487,7 +540,7 @@ func parseSSLink(link string) *Outbound {
 			"servers": []map[string]interface{}{
 				{
 					"address":  u.Hostname(),
-					"port":     u.Port(),
+					"port":     portInt,
 					"method":   method,
 					"password": password,
 				},

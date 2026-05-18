@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -37,7 +38,22 @@ type UpdateStatus struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-var updateState = UpdateStatus{Status: "idle"}
+var (
+	updateState   = UpdateStatus{Status: "idle"}
+	updateStateMu sync.RWMutex
+)
+
+func getUpdateState() UpdateStatus {
+	updateStateMu.RLock()
+	defer updateStateMu.RUnlock()
+	return updateState
+}
+
+func setUpdateState(s UpdateStatus) {
+	updateStateMu.Lock()
+	defer updateStateMu.Unlock()
+	updateState = s
+}
 
 func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 	channel := r.URL.Query().Get("channel")
@@ -94,7 +110,8 @@ func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if updateState.Status != "idle" && updateState.Status != "failed" {
+	st := getUpdateState()
+	if st.Status != "idle" && st.Status != "failed" {
 		a.errorResponse(w, "Update already in progress", http.StatusConflict)
 		return
 	}
@@ -107,11 +124,12 @@ func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
 	// Run update in background
 	go a.performUpdate(channel)
 
-	updateState.Status = "checking"
-	updateState.Progress = 5
-	updateState.Timestamp = time.Now().Unix()
+	st.Status = "checking"
+	st.Progress = 5
+	st.Timestamp = time.Now().Unix()
+	setUpdateState(st)
 
-	a.jsonResponse(w, updateState)
+	a.jsonResponse(w, getUpdateState())
 }
 
 func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
@@ -128,66 +146,83 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 	latestBackup := filepath.Join(backupDir, backups[len(backups)-1].Name())
 
 	// Stop current binary
-	updateState.Status = "restoring"
-	updateState.Progress = 10
-	updateState.Timestamp = time.Now().Unix()
+	st := UpdateStatus{
+		Status:    "restoring",
+		Progress:  10,
+		Timestamp: time.Now().Unix(),
+	}
+	setUpdateState(st)
 
 	// Replace with backup
 	if err := os.Rename(latestBackup, binPath); err != nil {
-		updateState.Status = "failed"
-		updateState.Message = "Rollback failed: " + err.Error()
-		a.errorResponse(w, updateState.Message, http.StatusInternalServerError)
+		st = getUpdateState()
+		st.Status = "failed"
+		st.Message = "Rollback failed: " + err.Error()
+		setUpdateState(st)
+		a.errorResponse(w, st.Message, http.StatusInternalServerError)
 		return
 	}
 
 	// Restart
-	updateState.Status = "restarting"
-	updateState.Progress = 90
+	st = getUpdateState()
+	st.Status = "restarting"
+	st.Progress = 90
+	setUpdateState(st)
 
 	go a.restartProcess(binPath, a.cfg.DataDir)
 
-	a.jsonResponse(w, updateState)
+	a.jsonResponse(w, getUpdateState())
 }
 
 func (a *API) UpdateStatusEndpoint(w http.ResponseWriter, r *http.Request) {
-	a.jsonResponse(w, updateState)
+	a.jsonResponse(w, getUpdateState())
 }
 
 func (a *API) performUpdate(channel string) {
 	defer func() {
 		if r := recover(); r != nil {
-			updateState.Status = "failed"
-			updateState.Message = fmt.Sprintf("Panic: %v", r)
-			updateState.Timestamp = time.Now().Unix()
+			setUpdateState(UpdateStatus{
+				Status:    "failed",
+				Message:   fmt.Sprintf("Panic: %v", r),
+				Timestamp: time.Now().Unix(),
+			})
 		}
 	}()
 
 	// Step 1: Check latest release
-	updateState.Status = "checking"
-	updateState.Progress = 10
-	updateState.Message = "Checking for updates..."
+	setUpdateState(UpdateStatus{
+		Status:   "checking",
+		Progress: 10,
+		Message:  "Checking for updates...",
+	})
 
 	info, err := fetchLatestRelease(channel)
 	if err != nil {
-		updateState.Status = "failed"
-		updateState.Message = "Failed to check updates: " + err.Error()
-		updateState.Timestamp = time.Now().Unix()
+		setUpdateState(UpdateStatus{
+			Status:    "failed",
+			Message:   "Failed to check updates: " + err.Error(),
+			Timestamp: time.Now().Unix(),
+		})
 		return
 	}
 
 	currentVersion := strings.TrimPrefix(a.srv.GetVersion(), "v")
 	if info.LatestVersion == currentVersion {
-		updateState.Status = "done"
-		updateState.Progress = 100
-		updateState.Message = "Already up to date"
-		updateState.Timestamp = time.Now().Unix()
+		setUpdateState(UpdateStatus{
+			Status:    "done",
+			Progress:  100,
+			Message:   "Already up to date",
+			Timestamp: time.Now().Unix(),
+		})
 		return
 	}
 
 	// Step 2: Download
-	updateState.Status = "downloading"
-	updateState.Progress = 30
-	updateState.Message = "Downloading update..."
+	setUpdateState(UpdateStatus{
+		Status:   "downloading",
+		Progress: 30,
+		Message:  "Downloading update...",
+	})
 
 	arch := runtime.GOARCH
 	if arch == "mipsle" || arch == "mipsel" {
@@ -199,23 +234,29 @@ func (a *API) performUpdate(channel string) {
 
 	tempFile := filepath.Join(os.TempDir(), "xkeen-control-panel.new")
 	if err := downloadFile(downloadURL, tempFile); err != nil {
-		updateState.Status = "failed"
-		updateState.Message = "Download failed: " + err.Error()
-		updateState.Timestamp = time.Now().Unix()
+		setUpdateState(UpdateStatus{
+			Status:    "failed",
+			Message:   "Download failed: " + err.Error(),
+			Timestamp: time.Now().Unix(),
+		})
 		return
 	}
 
 	if err := os.Chmod(tempFile, 0755); err != nil {
-		updateState.Status = "failed"
-		updateState.Message = "Failed to set permissions: " + err.Error()
-		updateState.Timestamp = time.Now().Unix()
+		setUpdateState(UpdateStatus{
+			Status:    "failed",
+			Message:   "Failed to set permissions: " + err.Error(),
+			Timestamp: time.Now().Unix(),
+		})
 		return
 	}
 
 	// Step 3: Backup current binary
-	updateState.Status = "installing"
-	updateState.Progress = 60
-	updateState.Message = "Creating backup..."
+	setUpdateState(UpdateStatus{
+		Status:   "installing",
+		Progress: 60,
+		Message:  "Creating backup...",
+	})
 
 	binPath := filepath.Join(filepath.Dir(a.cfg.DataDir), "bin/xkeen-control-panel")
 	backupDir := filepath.Join(a.cfg.DataDir, "backup")
@@ -223,30 +264,38 @@ func (a *API) performUpdate(channel string) {
 
 	backupPath := filepath.Join(backupDir, fmt.Sprintf("xkeen-control-panel.bak.%d", time.Now().Unix()))
 	if err := copyFile(binPath, backupPath); err != nil {
-		updateState.Status = "failed"
-		updateState.Message = "Backup failed: " + err.Error()
-		updateState.Timestamp = time.Now().Unix()
+		setUpdateState(UpdateStatus{
+			Status:    "failed",
+			Message:   "Backup failed: " + err.Error(),
+			Timestamp: time.Now().Unix(),
+		})
 		return
 	}
 
 	// Step 4: Atomic replace
-	updateState.Progress = 75
-	updateState.Message = "Installing update..."
+	st := getUpdateState()
+	st.Progress = 75
+	st.Message = "Installing update..."
+	setUpdateState(st)
 
 	if err := os.Rename(tempFile, binPath); err != nil {
 		// Try to restore backup
 		os.Rename(backupPath, binPath)
-		updateState.Status = "failed"
-		updateState.Message = "Install failed: " + err.Error()
-		updateState.Timestamp = time.Now().Unix()
+		setUpdateState(UpdateStatus{
+			Status:    "failed",
+			Message:   "Install failed: " + err.Error(),
+			Timestamp: time.Now().Unix(),
+		})
 		return
 	}
 
 	// Step 5: Restart
-	updateState.Status = "restarting"
-	updateState.Progress = 90
-	updateState.Message = "Restarting..."
-	updateState.Timestamp = time.Now().Unix()
+	setUpdateState(UpdateStatus{
+		Status:    "restarting",
+		Progress:  90,
+		Message:   "Restarting...",
+		Timestamp: time.Now().Unix(),
+	})
 
 	// Give time for response to be sent
 	time.Sleep(500 * time.Millisecond)
@@ -266,9 +315,11 @@ func (a *API) restartProcess(binPath string, dataDir string) {
 	}
 
 	if err := cmd.Start(); err != nil {
-		updateState.Status = "failed"
-		updateState.Message = "Restart failed: " + err.Error()
-		updateState.Timestamp = time.Now().Unix()
+		setUpdateState(UpdateStatus{
+			Status:    "failed",
+			Message:   "Restart failed: " + err.Error(),
+			Timestamp: time.Now().Unix(),
+		})
 		return
 	}
 
@@ -283,10 +334,12 @@ func (a *API) restartProcess(binPath string, dataDir string) {
 		resp, err := client.Get(healthURL)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			resp.Body.Close()
-			updateState.Status = "done"
-			updateState.Progress = 100
-			updateState.Message = "Update complete"
-			updateState.Timestamp = time.Now().Unix()
+			setUpdateState(UpdateStatus{
+				Status:    "done",
+				Progress:  100,
+				Message:   "Update complete",
+				Timestamp: time.Now().Unix(),
+			})
 
 			// Exit old process
 			time.Sleep(1 * time.Second)
@@ -299,9 +352,11 @@ func (a *API) restartProcess(binPath string, dataDir string) {
 	}
 
 	// Health check failed - rollback
-	updateState.Status = "failed"
-	updateState.Message = "Health check failed, rollback required"
-	updateState.Timestamp = time.Now().Unix()
+	setUpdateState(UpdateStatus{
+		Status:    "failed",
+		Message:   "Health check failed, rollback required",
+		Timestamp: time.Now().Unix(),
+	})
 }
 
 func fetchLatestRelease(channel string) (*UpdateInfo, error) {

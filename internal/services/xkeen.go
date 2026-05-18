@@ -19,7 +19,7 @@ func NewXKeenService(binary string) *XKeenService {
 }
 
 func (s *XKeenService) Status() (string, error) {
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s -status", s.BinaryPath))
+	cmd := exec.Command(s.BinaryPath, "-status")
 	out, err := cmd.CombinedOutput()
 	output := utils.StripANSI(string(out))
 	if err != nil {
@@ -50,7 +50,7 @@ func (s *XKeenService) SwitchKernel(name string) (string, error) {
 }
 
 func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (string, error) {
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s %s", s.BinaryPath, action))
+	cmd := exec.Command(s.BinaryPath, action)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out

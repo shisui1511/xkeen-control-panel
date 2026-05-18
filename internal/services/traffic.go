@@ -137,15 +137,15 @@ func (s *TrafficQuotaService) ListQuotas() []TrafficQuota {
 	return result
 }
 
-func (s *TrafficQuotaService) GetQuota(id string) *TrafficQuota {
+func (s *TrafficQuotaService) GetQuota(id string) (TrafficQuota, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for i := range s.quotas {
 		if s.quotas[i].ID == id {
-			return &s.quotas[i]
+			return s.quotas[i], true
 		}
 	}
-	return nil
+	return TrafficQuota{}, false
 }
 
 func (s *TrafficQuotaService) AddQuota(q *TrafficQuota) error {
@@ -273,6 +273,7 @@ func (s *TrafficQuotaService) checkResets() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	changed := false
 	for i := range s.quotas {
 		q := &s.quotas[i]
 		if !q.Enabled {
@@ -285,9 +286,7 @@ func (s *TrafficQuotaService) checkResets() {
 		case "daily":
 			shouldReset = lastReset.Year() != now.Year() || lastReset.YearDay() != now.YearDay()
 		case "weekly":
-			_, lastWeek := lastReset.ISOWeek()
-			_, nowWeek := now.ISOWeek()
-			shouldReset = lastWeek != nowWeek
+			shouldReset = lastReset.AddDate(0, 0, 7).Before(now)
 		case "monthly":
 			shouldReset = lastReset.Year() != now.Year() || lastReset.Month() != now.Month()
 		}
@@ -295,10 +294,13 @@ func (s *TrafficQuotaService) checkResets() {
 		if shouldReset {
 			q.CurrentBytes = 0
 			q.LastReset = now.Unix()
+			changed = true
 		}
 	}
 
-	_ = s.saveLocked()
+	if changed {
+		_ = s.saveLocked()
+	}
 }
 
 // checkQuotas checks all quotas against current stats

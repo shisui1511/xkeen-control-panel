@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -20,13 +21,15 @@ const (
 )
 
 type AuthService struct {
-	passwordHash  string
-	secureCookie  bool
-	sessionSecret []byte
-	sessions      map[string]*Session
-	rateLimiter   *RateLimiter
-	mu            sync.RWMutex
-	onPasswordSet func(string) error
+	passwordHash     string
+	secureCookie     bool
+	sessionSecret    []byte
+	sessions         map[string]*Session
+	rateLimiter      *RateLimiter
+	mu               sync.RWMutex
+	onPasswordSet    func(string) error
+	maxLoginAttempts int
+	lockoutDuration  time.Duration
 }
 
 type Session struct {
@@ -47,17 +50,26 @@ type LoginAttempts struct {
 	LockedUntil time.Time
 }
 
-func NewAuthService(passwordHash string, secureCookie bool, onPasswordSet func(string) error) *AuthService {
+func NewAuthService(passwordHash string, secureCookie bool, maxLoginAttempts int, lockoutDuration time.Duration, onPasswordSet func(string) error) *AuthService {
 	secret := make([]byte, 32)
 	rand.Read(secret)
 
+	if maxLoginAttempts <= 0 {
+		maxLoginAttempts = 5
+	}
+	if lockoutDuration <= 0 {
+		lockoutDuration = 5 * time.Minute
+	}
+
 	return &AuthService{
-		passwordHash:  passwordHash,
-		secureCookie:  secureCookie,
-		sessionSecret: secret,
-		sessions:      make(map[string]*Session),
-		rateLimiter:   &RateLimiter{attempts: make(map[string]*LoginAttempts)},
-		onPasswordSet: onPasswordSet,
+		passwordHash:     passwordHash,
+		secureCookie:     secureCookie,
+		sessionSecret:    secret,
+		sessions:         make(map[string]*Session),
+		rateLimiter:      &RateLimiter{attempts: make(map[string]*LoginAttempts)},
+		onPasswordSet:    onPasswordSet,
+		maxLoginAttempts: maxLoginAttempts,
+		lockoutDuration:  lockoutDuration,
 	}
 }
 
@@ -119,18 +131,24 @@ func (a *AuthService) CreateSession() (*Session, error) {
 }
 
 func (a *AuthService) ValidateSession(token string) (*Session, error) {
-	a.mu.RLock()
-	session, exists := a.sessions[token]
-	a.mu.RUnlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
+	// Evict expired sessions
+	now := time.Now()
+	for k, s := range a.sessions {
+		if now.After(s.ExpiresAt) {
+			delete(a.sessions, k)
+		}
+	}
+
+	session, exists := a.sessions[token]
 	if !exists {
 		return nil, errors.New("session not found")
 	}
 
-	if time.Now().After(session.ExpiresAt) {
-		a.mu.Lock()
+	if now.After(session.ExpiresAt) {
 		delete(a.sessions, token)
-		a.mu.Unlock()
 		return nil, errors.New("session expired")
 	}
 
@@ -151,9 +169,17 @@ func (rl *RateLimiter) CheckLimit(ip string, maxAttempts int, lockoutDuration ti
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
+	// Evict stale entries
+	now := time.Now()
+	for k, v := range rl.attempts {
+		if now.After(v.LockedUntil.Add(lockoutDuration)) && now.Sub(v.LastAttempt) > 2*lockoutDuration {
+			delete(rl.attempts, k)
+		}
+	}
+
 	attempts, exists := rl.attempts[ip]
 	if !exists {
-		rl.attempts[ip] = &LoginAttempts{Count: 1, LastAttempt: time.Now()}
+		rl.attempts[ip] = &LoginAttempts{Count: 1, LastAttempt: now}
 		return nil
 	}
 
@@ -219,8 +245,11 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip := r.RemoteAddr
-	if err := a.rateLimiter.CheckLimit(ip, 5, 5*time.Minute); err != nil {
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+	if err := a.rateLimiter.CheckLimit(ip, a.maxLoginAttempts, a.lockoutDuration); err != nil {
 		http.Error(w, err.Error(), http.StatusTooManyRequests)
 		return
 	}
@@ -319,6 +348,15 @@ func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 
 	if a.GetPasswordHash() != "" {
 		http.Error(w, "Setup already completed", http.StatusForbidden)
+		return
+	}
+
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
+	if err := a.rateLimiter.CheckLimit(ip, 3, 15*time.Minute); err != nil {
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
 		return
 	}
 

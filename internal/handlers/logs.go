@@ -3,6 +3,7 @@ package handlers
 import (
 	"bufio"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
 
@@ -15,9 +16,11 @@ var upgrader = websocket.Upgrader{
 		if origin == "" {
 			return true // allow non-browser clients
 		}
-		// Accept if Origin matches the request Host
-		host := r.Host
-		return strings.Contains(origin, host)
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		return u.Host == r.Host
 	},
 }
 
