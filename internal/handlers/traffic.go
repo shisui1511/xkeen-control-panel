@@ -27,8 +27,8 @@ func (a *API) TrafficQuotaGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	q := a.trafficQuotaSvc.GetQuota(id)
-	if q == nil {
+	q, ok := a.trafficQuotaSvc.GetQuota(id)
+	if !ok {
 		a.errorResponse(w, "Quota not found", http.StatusNotFound)
 		return
 	}

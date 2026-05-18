@@ -137,16 +137,15 @@ func (s *TrafficQuotaService) ListQuotas() []TrafficQuota {
 	return result
 }
 
-func (s *TrafficQuotaService) GetQuota(id string) *TrafficQuota {
+func (s *TrafficQuotaService) GetQuota(id string) (TrafficQuota, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for i := range s.quotas {
 		if s.quotas[i].ID == id {
-			q := s.quotas[i] // copy to avoid returning pointer into slice
-			return &q
+			return s.quotas[i], true
 		}
 	}
-	return nil
+	return TrafficQuota{}, false
 }
 
 func (s *TrafficQuotaService) AddQuota(q *TrafficQuota) error {
@@ -287,9 +286,7 @@ func (s *TrafficQuotaService) checkResets() {
 		case "daily":
 			shouldReset = lastReset.Year() != now.Year() || lastReset.YearDay() != now.YearDay()
 		case "weekly":
-			lastYear, lastWeek := lastReset.ISOWeek()
-			nowYear, nowWeek := now.ISOWeek()
-			shouldReset = lastYear != nowYear || lastWeek != nowWeek
+			shouldReset = lastReset.AddDate(0, 0, 7).Before(now)
 		case "monthly":
 			shouldReset = lastReset.Year() != now.Year() || lastReset.Month() != now.Month()
 		}
