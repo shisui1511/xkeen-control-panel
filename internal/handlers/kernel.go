@@ -47,6 +47,13 @@ func (a *API) KernelInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject concurrent install requests: if this kernel is already downloading or installing,
+	// return HTTP 409 Conflict immediately.
+	if k.Status == "downloading" || k.Status == "installing" {
+		a.errorResponse(w, "install already in progress", http.StatusConflict)
+		return
+	}
+
 	// Run install in background
 	go func() {
 		_ = a.kernelSvc.Install(name)

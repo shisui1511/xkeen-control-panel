@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -139,6 +141,28 @@ func TestSetChannel_InvalidValue(t *testing.T) {
 	ok = svc.SetChannel("xray", "stable")
 	if !ok {
 		t.Error("expected SetChannel to return true for 'stable'")
+	}
+}
+
+// TestConcurrentInstall409: calling Install twice on the same kernel while the first is in progress
+// returns an error containing "install already in progress".
+func TestConcurrentInstall409(t *testing.T) {
+	svc := NewKernelService()
+
+	// Manually acquire the install lock for "xray" to simulate an in-progress install.
+	mu := &sync.Mutex{}
+	actual, _ := svc.installLocks.LoadOrStore("xray", mu)
+	installMu := actual.(*sync.Mutex)
+	installMu.Lock() // hold the lock — simulates an ongoing install
+	defer installMu.Unlock()
+
+	// Now calling Install should fail immediately with "install already in progress".
+	err := svc.Install("xray")
+	if err == nil {
+		t.Fatal("expected error from Install when lock is held, got nil")
+	}
+	if !strings.Contains(err.Error(), "install already in progress") {
+		t.Errorf("expected 'install already in progress' error, got: %v", err)
 	}
 }
 

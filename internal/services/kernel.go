@@ -108,15 +108,14 @@ func kernelProcessStatus(binaryPath string) string {
 
 // KernelService manages proxy kernels (xray, mihomo)
 type KernelService struct {
-	kernels    map[string]*KernelInfo
-	mu         sync.RWMutex
-	installMus map[string]*sync.Mutex // per-kernel install lock
+	kernels      map[string]*KernelInfo
+	mu           sync.RWMutex
+	installLocks sync.Map // per-kernel install lock; key: string, value: *sync.Mutex
 }
 
 func NewKernelService() *KernelService {
 	svc := &KernelService{
-		kernels:    make(map[string]*KernelInfo),
-		installMus: make(map[string]*sync.Mutex),
+		kernels: make(map[string]*KernelInfo),
 	}
 
 	// Register known kernels
@@ -127,7 +126,6 @@ func NewKernelService() *KernelService {
 		Channel:     "stable",
 		Repo:        "XTLS/Xray-core",
 	}
-	svc.installMus["xray"] = &sync.Mutex{}
 
 	svc.kernels["mihomo"] = &KernelInfo{
 		Name:        "mihomo",
@@ -136,7 +134,6 @@ func NewKernelService() *KernelService {
 		Channel:     "stable",
 		Repo:        "MetaCubeX/mihomo",
 	}
-	svc.installMus["mihomo"] = &sync.Mutex{}
 
 	// Detect current versions (outside lock — no concurrent calls yet)
 	for _, k := range svc.kernels {
@@ -321,14 +318,21 @@ func (s *KernelService) CheckLatest(name string) error {
 
 // Install downloads and installs the kernel
 func (s *KernelService) Install(name string) error {
-	// Acquire per-kernel install lock so only one concurrent install per kernel is allowed
+	// Verify kernel exists first
 	s.mu.RLock()
-	installMu, muOk := s.installMus[name]
+	_, kernelExists := s.kernels[name]
 	s.mu.RUnlock()
-	if !muOk {
+	if !kernelExists {
 		return fmt.Errorf("kernel not found: %s", name)
 	}
-	installMu.Lock()
+
+	// Acquire per-kernel install lock using TryLock; return 409-style error if already in progress
+	mu := &sync.Mutex{}
+	actual, _ := s.installLocks.LoadOrStore(name, mu)
+	installMu := actual.(*sync.Mutex)
+	if !installMu.TryLock() {
+		return fmt.Errorf("install already in progress")
+	}
 	defer installMu.Unlock()
 
 	// helper to update kernel status under the global lock
