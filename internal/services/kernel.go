@@ -27,6 +27,58 @@ var allowedKernelRoots = []string{
 	os.TempDir() + "/",
 }
 
+// xrayProbePaths and mihomoProbePaths list directories to search for each kernel binary.
+// These are package-level variables so tests can override them.
+var xrayProbePaths = []string{
+	"/opt/sbin/xray",
+	"/opt/bin/xray",
+	"/opt/xray/xray",
+	"/usr/sbin/xray",
+	"/usr/local/bin/xray",
+	"/usr/bin/xray",
+}
+
+var mihomoProbePaths = []string{
+	"/opt/sbin/mihomo",
+	"/opt/bin/mihomo",
+	"/opt/mihomo/mihomo",
+	"/usr/sbin/mihomo",
+	"/usr/local/bin/mihomo",
+	"/usr/bin/mihomo",
+}
+
+// findKernelBinary searches known paths for the kernel binary named `name`.
+// Returns the first found path, or "" if not found anywhere.
+func findKernelBinary(name string) string {
+	var paths []string
+	switch name {
+	case "xray":
+		paths = xrayProbePaths
+	case "mihomo":
+		paths = mihomoProbePaths
+	default:
+		paths = []string{
+			"/opt/sbin/" + name,
+			"/opt/bin/" + name,
+			"/usr/sbin/" + name,
+			"/usr/local/bin/" + name,
+			"/usr/bin/" + name,
+		}
+	}
+
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+
+	// Fallback: use PATH lookup
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	return ""
+}
+
 func validateKernelPath(path string) error {
 	if path == "" {
 		return errors.New("empty path")
@@ -68,18 +120,33 @@ type KernelInfo struct {
 	Channel        string `json:"channel"` // stable, preview
 	Repo           string `json:"repo"`
 	Status         string `json:"status"`         // idle, checking, downloading, installing, done, failed
-	ProcessStatus  string `json:"process_status"` // running, stopped, not_installed, unknown
+	ProcessStatus  string `json:"process_status"` // running, stopped, not_installed, not_accessible, unknown
 	Message        string `json:"message"`
+
+	// binaryPathCachedAt records when BinaryPath was last resolved via auto-detection.
+	// Access must be protected by the KernelService mutex.
+	binaryPathCachedAt time.Time
 }
 
 // kernelProcessStatus detects whether the kernel process is running.
 // Method 1: scan /proc/*/exe readlinks for the binary basename.
 // Method 2 (fallback): run pidof <basename> if /proc appears empty.
-// Returns "not_installed", "running", "stopped", or "unknown".
+// Returns "not_installed", "not_accessible", "running", "stopped", or "unknown".
 func kernelProcessStatus(binaryPath string) string {
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
 		return "not_installed"
 	}
+
+	// Check if the binary is accessible (readable/executable)
+	f, err := os.Open(binaryPath)
+	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return "not_accessible"
+		}
+		return "not_accessible"
+	}
+	f.Close()
+
 	base := filepath.Base(binaryPath)
 
 	// Method 1: /proc/*/exe readlink (no external tools required)
@@ -111,28 +178,45 @@ type KernelService struct {
 	kernels      map[string]*KernelInfo
 	mu           sync.RWMutex
 	installLocks sync.Map // per-kernel install lock; key: string, value: *sync.Mutex
+
+	// statFunc is used to check if a file exists; defaults to os.Stat.
+	// Overridable in tests to verify TTL caching without touching the filesystem.
+	statFunc func(string) (os.FileInfo, error)
 }
 
 func NewKernelService() *KernelService {
 	svc := &KernelService{
-		kernels: make(map[string]*KernelInfo),
+		kernels:  make(map[string]*KernelInfo),
+		statFunc: os.Stat,
 	}
 
-	// Register known kernels
+	now := time.Now()
+
+	// Register known kernels with auto-detected binary paths
+	xrayPath := findKernelBinary("xray")
+	if xrayPath == "" {
+		xrayPath = "/opt/bin/xray" // fallback default for display
+	}
 	svc.kernels["xray"] = &KernelInfo{
-		Name:        "xray",
-		DisplayName: "Xray Core",
-		BinaryPath:  "/opt/bin/xray",
-		Channel:     "stable",
-		Repo:        "XTLS/Xray-core",
+		Name:               "xray",
+		DisplayName:        "Xray Core",
+		BinaryPath:         xrayPath,
+		Channel:            "stable",
+		Repo:               "XTLS/Xray-core",
+		binaryPathCachedAt: now,
 	}
 
+	mihomoPath := findKernelBinary("mihomo")
+	if mihomoPath == "" {
+		mihomoPath = "/opt/bin/mihomo" // fallback default for display
+	}
 	svc.kernels["mihomo"] = &KernelInfo{
-		Name:        "mihomo",
-		DisplayName: "Mihomo (Clash.Meta)",
-		BinaryPath:  "/opt/bin/mihomo",
-		Channel:     "stable",
-		Repo:        "MetaCubeX/mihomo",
+		Name:               "mihomo",
+		DisplayName:        "Mihomo (Clash.Meta)",
+		BinaryPath:         mihomoPath,
+		Channel:            "stable",
+		Repo:               "MetaCubeX/mihomo",
+		binaryPathCachedAt: now,
 	}
 
 	// Detect current versions (outside lock — no concurrent calls yet)
@@ -143,13 +227,59 @@ func NewKernelService() *KernelService {
 	return svc
 }
 
+// resolveBinaryPath refreshes k.BinaryPath via auto-detection if the 60s TTL has expired.
+// Must be called while holding s.mu (write lock).
+func (s *KernelService) resolveBinaryPath(k *KernelInfo) {
+	if time.Since(k.binaryPathCachedAt) <= 60*time.Second {
+		return
+	}
+	// Use statFunc (injectable for tests) to probe paths
+	found := ""
+	var paths []string
+	switch k.Name {
+	case "xray":
+		paths = xrayProbePaths
+	case "mihomo":
+		paths = mihomoProbePaths
+	default:
+		paths = []string{
+			"/opt/sbin/" + k.Name,
+			"/opt/bin/" + k.Name,
+			"/usr/sbin/" + k.Name,
+			"/usr/local/bin/" + k.Name,
+			"/usr/bin/" + k.Name,
+		}
+	}
+	for _, p := range paths {
+		if _, err := s.statFunc(p); err == nil {
+			found = p
+			break
+		}
+	}
+	// Fallback to exec.LookPath if statFunc didn't find anything
+	if found == "" {
+		if p, err := exec.LookPath(k.Name); err == nil {
+			found = p
+		}
+	}
+	// Only update if a path was found; preserve previous working path otherwise
+	if found != "" {
+		k.BinaryPath = found
+	}
+	k.binaryPathCachedAt = time.Now()
+}
+
 func (s *KernelService) List() []KernelInfo {
-	s.mu.RLock()
+	// Resolve binary paths under write lock before taking snapshots
+	s.mu.Lock()
+	for _, k := range s.kernels {
+		s.resolveBinaryPath(k)
+	}
 	snapshots := make([]KernelInfo, 0, len(s.kernels))
 	for _, k := range s.kernels {
 		snapshots = append(snapshots, *k)
 	}
-	s.mu.RUnlock()
+	s.mu.Unlock()
 
 	// Resolve live data outside the global lock to avoid blocking Install/CheckLatest
 	for i := range snapshots {
@@ -160,13 +290,15 @@ func (s *KernelService) List() []KernelInfo {
 }
 
 func (s *KernelService) Get(name string) *KernelInfo {
-	s.mu.RLock()
+	// Resolve binary path under write lock before taking snapshot
+	s.mu.Lock()
 	k, ok := s.kernels[name]
 	var snap KernelInfo
 	if ok {
+		s.resolveBinaryPath(k)
 		snap = *k
 	}
-	s.mu.RUnlock()
+	s.mu.Unlock()
 
 	if !ok {
 		return nil

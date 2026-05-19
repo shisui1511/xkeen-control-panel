@@ -370,6 +370,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.tag_prefix_placeholder': 'Например: PROXY-',
     'subscr.filter_placeholder': 'Например: RU|TR',
     'subscr.enabled': 'Включена',
+    'subscr.delete_confirm': 'Вы уверены, что хотите удалить эту подписку?',
 
     // Logs
     'logs.title': 'Логи',
@@ -822,6 +823,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.tag_prefix_placeholder': 'E.g.: PROXY-',
     'subscr.filter_placeholder': 'E.g.: US|UK',
     'subscr.enabled': 'Enabled',
+    'subscr.delete_confirm': 'Are you sure you want to delete this subscription?',
 
     // Logs
     'logs.title': 'Logs',

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { t } from './i18n'
+  import { showConfirm } from './stores'
   import PageHeader from './PageHeader.svelte'
 
   export let onSwitchTab: (tab: string) => void = () => {}
@@ -119,7 +120,7 @@
   }
 
   async function deleteSubscription(id: string) {
-    if (!confirm($t('app.confirm') + '?')) return
+    if (!await showConfirm($t('app.confirm'), $t('subscr.delete_confirm'))) return
     try {
       const csrfToken = localStorage.getItem('csrf_token')
       await fetch(`/api/subscriptions/delete?id=${id}`, {

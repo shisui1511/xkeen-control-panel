@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -51,12 +52,14 @@ type SubscriptionService struct {
 	subscriptions []Subscription
 	mu            sync.RWMutex
 	ongoing       sync.Map // Map of ID -> struct{}{} to track active refreshes
+	httpClient    *http.Client
 }
 
 func NewSubscriptionService(dataDir, configDir string) *SubscriptionService {
 	svc := &SubscriptionService{
-		dataDir:   dataDir,
-		configDir: configDir,
+		dataDir:    dataDir,
+		configDir:  configDir,
+		httpClient: utils.SafeHTTPClient(30 * time.Second),
 	}
 	svc.load()
 	return svc
@@ -213,8 +216,7 @@ func (s *SubscriptionService) downloadAndParse(subURL string) ([]Outbound, error
 		return nil, fmt.Errorf("only http and https URLs are allowed for subscriptions")
 	}
 
-	client := utils.SafeHTTPClient(30 * time.Second)
-	resp, err := client.Get(subURL)
+	resp, err := s.httpClient.Get(subURL)
 	if err != nil {
 		return nil, err
 	}
@@ -256,9 +258,21 @@ func (s *SubscriptionService) downloadAndParse(subURL string) ([]Outbound, error
 		content = string(decoded)
 	}
 
+	// Count non-empty lines and enforce 500-entry limit
+	lines := strings.Split(content, "\n")
+	nonEmpty := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty > 500 {
+		return nil, fmt.Errorf("subscription too large: %d entries (max 500)", nonEmpty)
+	}
+
 	// Parse share links (one per line)
 	var outbounds []Outbound
-	for _, line := range strings.Split(content, "\n") {
+	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -314,10 +328,18 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 		return err
 	}
 
-	// Add tag prefix
+	// Add tag prefix and deduplicate tags
+	seen := make(map[string]int)
 	for i := range outbounds {
 		if sub.TagPrefix != "" {
 			outbounds[i].Tag = fmt.Sprintf("%s-%s", sub.TagPrefix, outbounds[i].Tag)
+		}
+		tag := outbounds[i].Tag
+		if count, exists := seen[tag]; exists {
+			outbounds[i].Tag = fmt.Sprintf("%s-%d", tag, count)
+			seen[tag]++
+		} else {
+			seen[tag] = 1
 		}
 	}
 
@@ -349,6 +371,16 @@ func parseShareLink(link string) *Outbound {
 	// ss:// (Shadowsocks)
 	if strings.HasPrefix(link, "ss://") {
 		return parseSSLink(link)
+	}
+
+	// hy2:// (Hysteria2)
+	if strings.HasPrefix(link, "hy2://") {
+		return parseHysteria2Link(link)
+	}
+
+	// tuic:// (TUIC)
+	if strings.HasPrefix(link, "tuic://") {
+		return parseTUICLink(link)
 	}
 
 	return nil
@@ -386,6 +418,7 @@ func parseVMessLink(link string) *Outbound {
 		Host string `json:"host"`
 		Path string `json:"path"`
 		TLS  string `json:"tls"`
+		Sni  string `json:"sni"`
 	}
 
 	if err := json.Unmarshal(data, &vmess); err != nil {
@@ -397,7 +430,43 @@ func parseVMessLink(link string) *Outbound {
 		return nil
 	}
 
-	return &Outbound{
+	// Build StreamSettings from VMess JSON fields
+	streamSettings := map[string]interface{}{}
+	if vmess.Net != "" {
+		streamSettings["network"] = vmess.Net
+	}
+	switch vmess.Net {
+	case "ws":
+		wsSettings := map[string]interface{}{}
+		if vmess.Path != "" {
+			wsSettings["path"] = vmess.Path
+		}
+		if vmess.Host != "" {
+			wsSettings["headers"] = map[string]interface{}{"Host": vmess.Host}
+		}
+		if len(wsSettings) > 0 {
+			streamSettings["wsSettings"] = wsSettings
+		}
+	case "grpc":
+		if vmess.Path != "" {
+			streamSettings["grpcSettings"] = map[string]interface{}{"serviceName": vmess.Path}
+		}
+	}
+	if vmess.TLS == "tls" {
+		tlsSettings := map[string]interface{}{}
+		sni := vmess.Sni
+		if sni == "" {
+			sni = vmess.Host
+		}
+		if sni != "" {
+			tlsSettings["serverName"] = sni
+		}
+		if len(tlsSettings) > 0 {
+			streamSettings["tlsSettings"] = tlsSettings
+		}
+	}
+
+	ob := &Outbound{
 		Tag:      vmess.PS,
 		Protocol: "vmess",
 		Settings: map[string]interface{}{
@@ -416,6 +485,10 @@ func parseVMessLink(link string) *Outbound {
 			},
 		},
 	}
+	if len(streamSettings) > 0 {
+		ob.StreamSettings = streamSettings
+	}
+	return ob
 }
 
 func parseVLESSLink(link string) *Outbound {
@@ -440,7 +513,78 @@ func parseVLESSLink(link string) *Outbound {
 		return nil
 	}
 
-	return &Outbound{
+	q := u.Query()
+
+	// Build user entry
+	user := map[string]interface{}{
+		"id":         id,
+		"encryption": "none",
+	}
+	// flow parameter
+	if flow := q.Get("flow"); flow != "" {
+		user["flow"] = flow
+	}
+
+	// Build StreamSettings from query params; unknown keys are silently ignored
+	streamSettings := map[string]interface{}{}
+	network := q.Get("type")
+	if network != "" {
+		streamSettings["network"] = network
+	}
+	security := q.Get("security")
+	if security != "" {
+		streamSettings["security"] = security
+	}
+
+	switch security {
+	case "reality":
+		realitySettings := map[string]interface{}{}
+		if pbk := q.Get("pbk"); pbk != "" {
+			realitySettings["publicKey"] = pbk
+		}
+		if sid := q.Get("sid"); sid != "" {
+			realitySettings["shortId"] = sid
+		}
+		if sni := q.Get("sni"); sni != "" {
+			realitySettings["serverName"] = sni
+		}
+		if fp := q.Get("fp"); fp != "" {
+			realitySettings["fingerprint"] = fp
+		}
+		if len(realitySettings) > 0 {
+			streamSettings["realitySettings"] = realitySettings
+		}
+	case "tls":
+		tlsSettings := map[string]interface{}{}
+		if sni := q.Get("sni"); sni != "" {
+			tlsSettings["serverName"] = sni
+		}
+		if fp := q.Get("fp"); fp != "" {
+			tlsSettings["fingerprint"] = fp
+		}
+		if alpnStr := q.Get("alpn"); alpnStr != "" {
+			tlsSettings["alpn"] = strings.Split(alpnStr, ",")
+		}
+		if len(tlsSettings) > 0 {
+			streamSettings["tlsSettings"] = tlsSettings
+		}
+	}
+
+	// WebSocket settings (network=ws)
+	if network == "ws" {
+		wsSettings := map[string]interface{}{}
+		if path := q.Get("path"); path != "" {
+			wsSettings["path"] = path
+		}
+		if host := q.Get("host"); host != "" {
+			wsSettings["headers"] = map[string]interface{}{"Host": host}
+		}
+		if len(wsSettings) > 0 {
+			streamSettings["wsSettings"] = wsSettings
+		}
+	}
+
+	ob := &Outbound{
 		Tag:      tag,
 		Protocol: "vless",
 		Settings: map[string]interface{}{
@@ -448,16 +592,15 @@ func parseVLESSLink(link string) *Outbound {
 				{
 					"address": u.Hostname(),
 					"port":    portInt,
-					"users": []map[string]interface{}{
-						{
-							"id":         id,
-							"encryption": "none",
-						},
-					},
+					"users":   []map[string]interface{}{user},
 				},
 			},
 		},
 	}
+	if len(streamSettings) > 0 {
+		ob.StreamSettings = streamSettings
+	}
+	return ob
 }
 
 func parseTrojanLink(link string) *Outbound {
@@ -483,6 +626,30 @@ func parseTrojanLink(link string) *Outbound {
 		return nil
 	}
 
+	q := u.Query()
+
+	// Build StreamSettings from query params; unknown keys are silently ignored
+	security := q.Get("security")
+	if security == "" {
+		security = "tls" // default for trojan
+	}
+	streamSettings := map[string]interface{}{
+		"security": security,
+	}
+	tlsSettings := map[string]interface{}{}
+	if sni := q.Get("sni"); sni != "" {
+		tlsSettings["serverName"] = sni
+	}
+	if fp := q.Get("fp"); fp != "" {
+		tlsSettings["fingerprint"] = fp
+	}
+	if alpnStr := q.Get("alpn"); alpnStr != "" {
+		tlsSettings["alpn"] = strings.Split(alpnStr, ",")
+	}
+	if len(tlsSettings) > 0 {
+		streamSettings["tlsSettings"] = tlsSettings
+	}
+
 	return &Outbound{
 		Tag:      tag,
 		Protocol: "trojan",
@@ -494,6 +661,133 @@ func parseTrojanLink(link string) *Outbound {
 					"password": password,
 				},
 			},
+		},
+		StreamSettings: streamSettings,
+	}
+}
+
+func parseHysteria2Link(link string) *Outbound {
+	// hy2://password@host:port?sni=...&obfs=...&obfs-password=...&insecure=...#tag
+	u, err := url.Parse(link)
+	if err != nil {
+		return nil
+	}
+
+	password := ""
+	if u.User != nil {
+		password = u.User.Username()
+	}
+
+	tag := u.Fragment
+	if tag == "" {
+		tag = u.Hostname()
+	}
+
+	portInt, err := strconv.Atoi(u.Port())
+	if err != nil || portInt < 1 || portInt > 65535 {
+		return nil
+	}
+
+	q := u.Query()
+
+	tlsSettings := map[string]interface{}{}
+	if sni := q.Get("sni"); sni != "" {
+		tlsSettings["serverName"] = sni
+	}
+	if insecure := q.Get("insecure"); insecure == "1" || insecure == "true" {
+		tlsSettings["allowInsecure"] = true
+	}
+
+	streamSettings := map[string]interface{}{
+		"network":     "tcp",
+		"security":    "tls",
+		"tlsSettings": tlsSettings,
+	}
+
+	settings := map[string]interface{}{
+		"servers": []map[string]interface{}{
+			{
+				"address":  u.Hostname(),
+				"port":     portInt,
+				"password": password,
+			},
+		},
+	}
+
+	// obfs settings placed in settings; unknown params silently ignored
+	if obfs := q.Get("obfs"); obfs != "" {
+		obfsMap := map[string]interface{}{"type": obfs}
+		if obfsPass := q.Get("obfs-password"); obfsPass != "" {
+			obfsMap["password"] = obfsPass
+		}
+		settings["hysteria2Settings"] = map[string]interface{}{
+			"obfs": obfsMap,
+		}
+	}
+
+	return &Outbound{
+		Tag:            tag,
+		Protocol:       "hysteria2",
+		Settings:       settings,
+		StreamSettings: streamSettings,
+	}
+}
+
+func parseTUICLink(link string) *Outbound {
+	// tuic://uuid:password@host:port?sni=...&congestion_control=...&alpn=...#tag
+	u, err := url.Parse(link)
+	if err != nil {
+		return nil
+	}
+
+	uuid := ""
+	password := ""
+	if u.User != nil {
+		uuid = u.User.Username()
+		password, _ = u.User.Password()
+	}
+
+	tag := u.Fragment
+	if tag == "" {
+		tag = u.Hostname()
+	}
+
+	portInt, err := strconv.Atoi(u.Port())
+	if err != nil || portInt < 1 || portInt > 65535 {
+		return nil
+	}
+
+	q := u.Query()
+
+	tlsSettings := map[string]interface{}{}
+	if sni := q.Get("sni"); sni != "" {
+		tlsSettings["serverName"] = sni
+	}
+	if alpnStr := q.Get("alpn"); alpnStr != "" {
+		tlsSettings["alpn"] = strings.Split(alpnStr, ",")
+	}
+
+	server := map[string]interface{}{
+		"address":  u.Hostname(),
+		"port":     portInt,
+		"uuid":     uuid,
+		"password": password,
+	}
+	// unknown params silently ignored
+	if cc := q.Get("congestion_control"); cc != "" {
+		server["congestionControl"] = cc
+	}
+
+	return &Outbound{
+		Tag:      tag,
+		Protocol: "tuic",
+		Settings: map[string]interface{}{
+			"servers": []map[string]interface{}{server},
+		},
+		StreamSettings: map[string]interface{}{
+			"network":     "udp",
+			"security":    "tls",
+			"tlsSettings": tlsSettings,
 		},
 	}
 }
@@ -546,5 +840,40 @@ func parseSSLink(link string) *Outbound {
 				},
 			},
 		},
+	}
+}
+
+// isDue returns true if a subscription is overdue for a refresh.
+// A subscription is due when it is enabled, has a non-zero interval, and
+// the elapsed time since LastUpdate exceeds Interval hours.
+func (s *SubscriptionService) isDue(sub *Subscription, now time.Time) bool {
+	return sub.Enabled && sub.Interval > 0 && now.Sub(sub.LastUpdate) >= time.Duration(sub.Interval)*time.Hour
+}
+
+// checkAndRefreshDue scans all subscriptions and launches a goroutine for
+// each one that is due at the given point in time.
+func (s *SubscriptionService) checkAndRefreshDue(now time.Time) {
+	subs := s.List()
+	for _, sub := range subs {
+		if s.isDue(&sub, now) {
+			go func(id string) {
+				_ = s.Refresh(id) // errors are logged inside Refresh
+			}(sub.ID)
+		}
+	}
+}
+
+// RunScheduler starts a background loop that refreshes overdue subscriptions
+// every checkInterval. It exits cleanly when ctx is cancelled.
+func (s *SubscriptionService) RunScheduler(ctx context.Context, checkInterval time.Duration) {
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case t := <-ticker.C:
+			s.checkAndRefreshDue(t)
+		}
 	}
 }

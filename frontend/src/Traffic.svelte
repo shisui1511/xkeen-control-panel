@@ -63,7 +63,7 @@
       ctx.stroke()
       
       // Y-axis labels
-      ctx.fillStyle = 'var(--text-secondary)'
+      ctx.fillStyle = getComputedStyle(canvas).getPropertyValue('--text-secondary').trim() || '#888888'
       ctx.font = '10px monospace'
       ctx.textAlign = 'right'
       const value = maxValue * (1 - i / 4)
@@ -100,12 +100,12 @@
     
     ctx.fillStyle = '#58a6ff'
     ctx.fillRect(width - 120, 10, 12, 12)
-    ctx.fillStyle = 'var(--text)'
+    ctx.fillStyle = getComputedStyle(canvas).getPropertyValue('--text').trim() || '#c9d1d9'
     ctx.fillText($t('traffic.download'), width - 105, 21)
     
     ctx.fillStyle = '#3fb950'
     ctx.fillRect(width - 120, 28, 12, 12)
-    ctx.fillStyle = 'var(--text)'
+    ctx.fillStyle = getComputedStyle(canvas).getPropertyValue('--text').trim() || '#c9d1d9'
     ctx.fillText($t('traffic.upload'), width - 105, 39)
   }
 

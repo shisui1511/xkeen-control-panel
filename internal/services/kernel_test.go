@@ -8,7 +8,87 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
+
+// TestFindKernelBinary: verifies that findKernelBinary locates a binary present
+// in a probed path and returns "" when no path exists.
+func TestFindKernelBinary(t *testing.T) {
+	// Create a temp dir with an "xray" executable
+	tmpDir := t.TempDir()
+	xrayPath := filepath.Join(tmpDir, "xray")
+	if err := os.WriteFile(xrayPath, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Temporarily override the probe list for "xray" by injecting tmpDir as first path.
+	// We do this by calling findKernelBinary with our own wrapper that prepends tmpDir.
+	// Since findKernelBinary is package-private, we test it directly here in the same package.
+	origXrayPaths := xrayProbePaths
+	xrayProbePaths = append([]string{xrayPath}, origXrayPaths...)
+	defer func() { xrayProbePaths = origXrayPaths }()
+
+	got := findKernelBinary("xray")
+	if got != xrayPath {
+		t.Errorf("expected %q, got %q", xrayPath, got)
+	}
+
+	// No binary in any probe path
+	xrayProbePaths = []string{"/nonexistent/xray-does-not-exist"}
+	got = findKernelBinary("xray")
+	if got != "" {
+		t.Errorf("expected empty string when binary not found, got %q", got)
+	}
+}
+
+// TestKernelProcessStatus_NotAccessible: a binary that exists but is not readable
+// should return "not_accessible".
+func TestKernelProcessStatus_NotAccessible(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping: running as root, permission check not applicable")
+	}
+	tmpDir := t.TempDir()
+	binaryPath := filepath.Join(tmpDir, "mykernel")
+	// Write file without read permission
+	if err := os.WriteFile(binaryPath, []byte("binary"), 0000); err != nil {
+		t.Fatal(err)
+	}
+	status := kernelProcessStatus(binaryPath)
+	if status != "not_accessible" {
+		t.Errorf("expected 'not_accessible', got %q", status)
+	}
+}
+
+// TestKernelBinaryCache_TTL: verifies that resolveBinaryPath respects the 60s TTL cache.
+func TestKernelBinaryCache_TTL(t *testing.T) {
+	svc := NewKernelService()
+
+	// Override statFunc with a counter
+	callCount := 0
+	svc.statFunc = func(path string) (os.FileInfo, error) {
+		callCount++
+		return nil, os.ErrNotExist
+	}
+
+	k := &KernelInfo{Name: "xray"}
+
+	// Scenario 1: binaryPathCachedAt is recent (within TTL) → statFunc NOT called again
+	k.binaryPathCachedAt = time.Now()
+	k.BinaryPath = "/cached/path"
+	callCount = 0
+	svc.resolveBinaryPath(k)
+	if callCount != 0 {
+		t.Errorf("within TTL: expected 0 statFunc calls, got %d", callCount)
+	}
+
+	// Scenario 2: binaryPathCachedAt is expired (> 60s ago) → statFunc called
+	k.binaryPathCachedAt = time.Now().Add(-120 * time.Second)
+	callCount = 0
+	svc.resolveBinaryPath(k)
+	if callCount == 0 {
+		t.Errorf("expired TTL: expected statFunc to be called, got 0 calls")
+	}
+}
 
 func TestKernelService_New(t *testing.T) {
 	svc := NewKernelService()
