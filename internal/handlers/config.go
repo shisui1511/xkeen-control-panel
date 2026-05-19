@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 )
 
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
@@ -56,6 +57,13 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
 		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	// T032: extension whitelist — only .json, .yaml, .yml allowed
+	ext := filepath.Ext(cleanPath)
+	if ext != ".json" && ext != ".yaml" && ext != ".yml" {
+		a.errorResponse(w, "only .json, .yaml, .yml files are allowed", http.StatusForbidden)
 		return
 	}
 
