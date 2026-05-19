@@ -23,6 +23,7 @@ type Config struct {
 	DataDir         string      `json:"data_dir"`
 	Auth            AuthConfig  `json:"auth"`
 	HTTPS           HTTPSConfig `json:"https"`
+	MihomoSecret    string      `json:"mihomo_secret"`
 }
 
 type AuthConfig struct {
