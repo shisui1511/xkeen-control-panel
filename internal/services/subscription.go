@@ -833,12 +833,12 @@ func parseSSLink(link string) *Outbound {
 		Settings: map[string]interface{}{
 			"servers": []map[string]interface{}{
 				{
-				"address":  u.Hostname(),
-				"port":     portInt,
-				"method":   method,
-				"password": password,
+					"address":  u.Hostname(),
+					"port":     portInt,
+					"method":   method,
+					"password": password,
+				},
 			},
-		},
 		},
 	}
 }
