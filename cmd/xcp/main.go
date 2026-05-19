@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	xkeencontrolpanel "github.com/shisui1511/xkeen-control-panel"
@@ -170,9 +173,15 @@ func main() {
 	srv.HandleProtected("/api/templates/list", api.TemplateList)
 	srv.HandleProtected("/api/templates/fetch", api.TemplateFetch)
 
-	// Subscriptions
+	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir)
 	api.SetSubscriptionService(subscriptionSvc)
+
+	// Start subscription auto-refresh scheduler. It checks every 15 minutes
+	// and refreshes any subscription whose Interval has elapsed.
+	schedulerCtx, cancelScheduler := context.WithCancel(context.Background())
+	go subscriptionSvc.RunScheduler(schedulerCtx, 15*time.Minute)
+	defer cancelScheduler()
 
 	// Network Tools
 	networkSvc := services.NewNetworkToolsService()
@@ -186,6 +195,14 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/install", api.KernelInstall)
 	srv.HandleProtected("/api/kernels/{name}/status", api.KernelStatus)
 	srv.HandleProtected("/api/kernels/{name}/channel", api.KernelChannel)
+
+	// Cancel scheduler on OS signal
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		cancelScheduler()
+	}()
 
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {
