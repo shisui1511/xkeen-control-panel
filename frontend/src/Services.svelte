@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { t } from './i18n'
+  import { showToast } from './stores'
 
   interface Kernel {
     name: string
@@ -68,7 +69,7 @@
       
       await fetchStatus()
     } catch (e: any) {
-      alert(`${$t('svc.action_error')}: ${e.message}`)
+      showToast('error', `${$t('svc.action_error')}: ${e.message}`)
     } finally {
       actionLoading[key] = false
     }
@@ -94,7 +95,7 @@
       await fetchStatus()
       await fetchKernels()
     } catch (e: any) {
-      alert(`${$t('svc.action_error')}: ${e.message}`)
+      showToast('error', `${$t('svc.action_error')}: ${e.message}`)
     } finally {
       actionLoading[key] = false
       switchingKernel = false

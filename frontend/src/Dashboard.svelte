@@ -4,6 +4,8 @@
   import { t, setLang } from './i18n'
   import { isSidebarOpen } from './stores'
   import Sidebar from './components/Sidebar.svelte'
+  import Toast from './components/Toast.svelte'
+  import ConfirmDialog from './components/ConfirmDialog.svelte'
   import Editor from './Editor.svelte'
   import Logs from './Logs.svelte'
   import Services from './Services.svelte'
@@ -443,6 +445,9 @@
     {/if}
   </div>
 </div>
+
+<Toast />
+<ConfirmDialog />
 
 <style>
   .quick-actions {
