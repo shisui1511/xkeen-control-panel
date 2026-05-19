@@ -38,6 +38,7 @@
   let error = ''
 
   // Form state
+  let showForm = false
   let editingProfile: Profile | null = null
   let formName = ''
   let formEnabled = true
@@ -83,6 +84,7 @@
   }
 
   function startCreate() {
+    showForm = true
     editingProfile = null
     formName = ''
     formEnabled = true
@@ -115,6 +117,7 @@
   }
 
   function cancelEdit() {
+    showForm = false
     editingProfile = null
   }
 
@@ -164,6 +167,7 @@
 
       if (!res.ok) throw new Error('Failed to save')
 
+      showForm = false
       editingProfile = null
       await fetchProfiles()
       await fetchStatus()
@@ -296,10 +300,9 @@
   </div>
 
   <!-- Edit/Create Form -->
-  {#if editingProfile !== null || formName !== '' || editingProfile === null && formName === '' && profiles.length === 0}
-    {#if editingProfile !== null || (editingProfile === null && formName === '')}
-      <div class="card">
-        <h2>{editingProfile ? $t('smartproxy.edit_profile') : $t('smartproxy.new_profile')}</h2>
+  {#if showForm || editingProfile !== null}
+    <div class="card">
+      <h2>{editingProfile ? $t('smartproxy.edit_profile') : $t('smartproxy.new_profile')}</h2>
 
         <div class="form-group">
           <label for="sp-name">{$t('smartproxy.name')}</label>
@@ -379,7 +382,6 @@
           <button class="btn btn-primary" on:click={saveProfile}>{$t('app.save')}</button>
         </div>
       </div>
-    {/if}
   {/if}
 </div>
 

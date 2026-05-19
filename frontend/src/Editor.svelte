@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
   import { t } from './i18n'
+  import { showToast } from './stores'
   import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine } from '@codemirror/view'
   import { EditorState } from '@codemirror/state'
   import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -45,7 +46,6 @@
   let selectedFile = ''
   let loading = false
   let saving = false
-  let message = ''
   let backups: string[] = []
 
   // Directory management
@@ -99,7 +99,7 @@
       if (!res.ok) throw new Error('Failed to load files')
       files = await res.json()
     } catch (e: any) {
-      message = $t('editor.load_error') + ': ' + e.message
+      showToast('error', $t('editor.load_error') + ': ' + e.message)
     }
   }
 
@@ -160,7 +160,6 @@
     if (selectedFile && path !== selectedFile && !confirmUnsaved()) return
     
     loading = true
-    message = ''
     isDirty = false
     
     try {
@@ -226,7 +225,7 @@
 
       await loadBackups(path)
     } catch (e: any) {
-      message = $t('editor.file_load_error') + ': ' + (e?.message || e)
+      showToast('error', $t('editor.file_load_error') + ': ' + (e?.message || e))
     } finally {
       loading = false
     }
@@ -247,7 +246,6 @@
     if (!selectedFile || !editorView) return
     
     saving = true
-    message = ''
     
     try {
       const content = editorView.state.doc.toString()
@@ -264,13 +262,12 @@
       
       if (!res.ok) throw new Error('Failed to save file')
       
-      message = $t('editor.file_saved')
+      showToast('success', $t('editor.file_saved'))
       originalContent = editorView.state.doc.toString()
       isDirty = false
       await loadBackups(selectedFile)
-      setTimeout(() => message = '', 3000)
     } catch (e) {
-      message = $t('editor.save_error') + ': ' + e.message
+      showToast('error', $t('editor.save_error') + ': ' + e.message)
     } finally {
       saving = false
     }
@@ -295,9 +292,9 @@
         })
       }
       
-      message = $t('editor.backup_restored')
+      showToast('success', $t('editor.backup_restored'))
     } catch (e) {
-      message = $t('editor.restore_error') + ': ' + e.message
+      showToast('error', $t('editor.restore_error') + ': ' + e.message)
     }
   }
 
@@ -315,13 +312,13 @@
       
       if (!res.ok) throw new Error(await res.text())
       
-      message = '✓ ' + $t('editor.create_file')
+      showToast('success', $t('editor.create_file'))
       showCreateModal = false
       newFileName = ''
       await loadFiles()
       await loadFile(path)
     } catch (e) {
-      message = $t('editor.create_error') + ': ' + e.message
+      showToast('error', $t('editor.create_error') + ': ' + e.message)
     }
   }
 
@@ -339,12 +336,12 @@
       
       if (!res.ok) throw new Error(await res.text())
       
-      message = '✓ ' + $t('app.delete')
+      showToast('success', $t('app.delete'))
       selectedFile = ''
       backups = []
       await loadFiles()
     } catch (e) {
-      message = $t('editor.delete_error') + ': ' + e.message
+      showToast('error', $t('editor.delete_error') + ': ' + e.message)
     }
   }
 
@@ -362,13 +359,13 @@
       
       if (!res.ok) throw new Error(await res.text())
       
-      message = '✓ ' + $t('app.rename')
+      showToast('success', $t('app.rename'))
       showRenameModal = false
       renameTarget = ''
       await loadFiles()
       await loadFile(newPath)
     } catch (e) {
-      message = $t('editor.rename_error') + ': ' + e.message
+      showToast('error', $t('editor.rename_error') + ': ' + e.message)
     }
   }
 
@@ -437,13 +434,12 @@
         editorView.dispatch({
           changes: { from: 0, to: editorView.state.doc.length, insert: fixed }
         })
-        message = `✓ Quick fixes applied: ${fixesApplied}`
+        showToast('success', `Quick fixes applied: ${fixesApplied}`)
       } else {
-        message = '✓ No quick fixes needed'
+        showToast('info', 'No quick fixes needed')
       }
-      setTimeout(() => message = '', 3000)
     } catch (e) {
-      message = 'Quick fix error: ' + e.message
+      showToast('error', 'Quick fix error: ' + e.message)
     }
   }
 
@@ -476,8 +472,7 @@
       })
       isDirty = true
       showTemplatesModal = false
-      message = '✓ Template applied'
-      setTimeout(() => message = '', 3000)
+      showToast('success', 'Template applied')
     } catch (e: any) {
       alert('Error: ' + (e?.message || e))
     }
@@ -591,7 +586,14 @@
 
   <div class="editor-main">
     <div class="toolbar">
-      <span class="file-name">{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span>
+      <div class="toolbar-left">
+        <span class="file-name">{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span>
+        {#if selectedFile}
+          <button on:click={deleteFile} class="btn-danger">
+            {$t('app.delete')}
+          </button>
+        {/if}
+      </div>
       <div class="toolbar-actions">
         {#if selectedFile}
           <label class="toggle-label" for="schema-toggle" title="Enable schema validation, autocomplete and hover tooltips">
@@ -614,21 +616,12 @@
           <button on:click={() => { showRenameModal = true; renameTarget = selectedFile.split('/').pop() || '' }} class="btn-secondary">
             {$t('app.rename')}
           </button>
-          <button on:click={deleteFile} class="btn-danger">
-            {$t('app.delete')}
-          </button>
         {/if}
         <button on:click={saveFile} disabled={!selectedFile || saving} class="btn-primary">
           {saving ? $t('app.loading') : $t('app.save')}
         </button>
       </div>
     </div>
-
-    {#if message}
-      <div class="message" class:error={message.includes($t('app.error'))}>
-        {message}
-      </div>
-    {/if}
 
     {#if loading}
       <div class="loading">{$t('app.loading')}</div>
@@ -888,6 +881,12 @@
     border-bottom: 1px solid var(--border);
   }
 
+  .toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
   .file-name {
     font-weight: 500;
     color: var(--text);
@@ -954,18 +953,6 @@
 
   .toggle-label input[type="checkbox"] {
     cursor: pointer;
-  }
-
-  .message {
-    padding: 0.75rem 1rem;
-    background: var(--success-bg, #d4edda);
-    color: var(--success-text, #155724);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .message.error {
-    background: var(--error-bg, #f8d7da);
-    color: var(--error-text, #721c24);
   }
 
   .loading, .empty-state {

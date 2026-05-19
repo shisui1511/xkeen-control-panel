@@ -40,6 +40,7 @@
   let error = ''
 
   // Form state
+  let showForm = false
   let editingQuota: Quota | null = null
   let formName = ''
   let formTargetType = 'global'
@@ -93,6 +94,7 @@
   }
 
   function startCreate() {
+    showForm = true
     editingQuota = null
     formName = ''
     formTargetType = 'global'
@@ -127,6 +129,7 @@
   }
 
   function cancelEdit() {
+    showForm = false
     editingQuota = null
   }
 
@@ -161,6 +164,7 @@
         body: JSON.stringify(payload)
       })
       if (!res.ok) throw new Error('Failed to save')
+      showForm = false
       editingQuota = null
       await fetchQuotas()
     } catch (e: any) {
@@ -355,8 +359,7 @@
   </div>
 
   <!-- Edit/Create Form -->
-  {#if editingQuota !== null || formName !== '' || (editingQuota === null && formName === '' && quotas.length === 0)}
-    {#if editingQuota !== null || (editingQuota === null && formName === '')}
+  {#if showForm || editingQuota !== null}
       <div class="card">
         <h2>{editingQuota ? $t('trafficquotas.edit_quota') : $t('trafficquotas.new_quota')}</h2>
 
@@ -414,7 +417,6 @@
           <button class="btn btn-primary" on:click={saveQuota}>{$t('app.save')}</button>
         </div>
       </div>
-    {/if}
   {/if}
 </div>
 
