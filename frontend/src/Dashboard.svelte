@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { fade } from 'svelte/transition'
   import { t, setLang } from './i18n'
-  import { isSidebarOpen } from './stores'
+  import { isSidebarOpen, capabilities, fetchCapabilities } from './stores'
   import Sidebar from './components/Sidebar.svelte'
   import Toast from './components/Toast.svelte'
   import ConfirmDialog from './components/ConfirmDialog.svelte'
@@ -211,8 +211,10 @@
     fetchVersion()
     fetchLiveStatus()
     fetchSystemStats()
+    fetchCapabilities()
     const statusInterval = setInterval(fetchLiveStatus, 10000)
     const statsInterval = setInterval(fetchSystemStats, 5000)
+    const capInterval = setInterval(fetchCapabilities, 30000)
     window.addEventListener('beforeinstallprompt', (e: Event) => {
       e.preventDefault()
       pwaInstallPrompt = e
@@ -220,6 +222,7 @@
     return () => {
       clearInterval(statusInterval)
       clearInterval(statsInterval)
+      clearInterval(capInterval)
     }
   })
 </script>
@@ -276,6 +279,13 @@
 
   <!-- Main content area -->
   <div class="main-content">
+    <!-- Mihomo offline warning banner -->
+    {#if $capabilities !== null && !$capabilities.mihomo.reachable}
+      <div class="alert alert-warning" style="margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px; font-size: 13px;">
+        ⚠️ <strong>{$t('capabilities.mihomo_offline')}</strong> — {$t('capabilities.mihomo_offline_desc')}
+      </div>
+    {/if}
+
     {#if currentTab === 'dashboard'}
       <div class="container" transition:fade={{ duration: 150 }}>
         <h1>{$t('nav.dashboard')}</h1>

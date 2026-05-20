@@ -458,6 +458,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'kernels.install': 'Установить',
     'kernels.installing': 'Установка...',
     'kernels.empty': 'Ядра не найдены',
+
+    // Capabilities
+    'capabilities.mihomo_offline': 'Mihomo API недоступен',
+    'capabilities.mihomo_offline_desc': 'Прокси, подключения и правила недоступны. Запустите Mihomo или проверьте настройки.',
+    'capabilities.mihomo_empty_title': 'Mihomo недоступен',
+    'capabilities.mihomo_empty_desc': 'API Mihomo не отвечает. Перейдите в раздел «Сервисы» для запуска Mihomo.',
   },
   en: {
     // Common
@@ -911,6 +917,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'kernels.install': 'Install',
     'kernels.installing': 'Installing...',
     'kernels.empty': 'No kernels found',
+
+    // Capabilities
+    'capabilities.mihomo_offline': 'Mihomo API unavailable',
+    'capabilities.mihomo_offline_desc': 'Proxies, connections and rules are unavailable. Start Mihomo or check settings.',
+    'capabilities.mihomo_empty_title': 'Mihomo unavailable',
+    'capabilities.mihomo_empty_desc': 'Mihomo API is not responding. Go to Services to start Mihomo.',
   }
 }
 

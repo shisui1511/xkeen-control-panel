@@ -1,5 +1,33 @@
 import { writable } from 'svelte/store'
 
+// --- Capabilities store ---
+
+export interface KernelCapability {
+  installed: boolean
+  version?: string
+  channel?: string
+}
+
+export interface CapabilitiesData {
+  kernels: Record<string, KernelCapability>
+  mihomo: {
+    reachable: boolean
+  }
+}
+
+export const capabilities = writable<CapabilitiesData | null>(null)
+
+export async function fetchCapabilities(): Promise<void> {
+  try {
+    const res = await fetch('/api/capabilities')
+    if (res.ok) {
+      capabilities.set(await res.json())
+    }
+  } catch (_) {
+    // Silently ignore — capabilities will remain null
+  }
+}
+
 // UI state: controls whether the off-canvas sidebar is visible on mobile
 export const isSidebarOpen = writable(false)
 
