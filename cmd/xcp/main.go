@@ -74,6 +74,7 @@ func main() {
 
 	// Auth endpoints (public)
 	authSvc := srv.GetAuthService()
+	defer authSvc.Stop()
 	srv.Handle("/api/auth/login", authSvc.HandleLogin)
 	srv.Handle("/api/auth/logout", authSvc.HandleLogout)
 	srv.Handle("/api/auth/me", authSvc.HandleMe)
@@ -81,9 +82,11 @@ func main() {
 
 	// API handlers
 	api := handlers.NewAPI(cfg, srv)
+	srv.HandleProtected("/api/auth/change-password", api.ChangePassword)
 
 	// Public endpoints
 	srv.Handle("/api/version", api.Version)
+	srv.HandleProtected("/api/capabilities", api.Capabilities)
 
 	// Protected endpoints
 	srv.HandleProtected("/api/config/list", api.ConfigList)
