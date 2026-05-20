@@ -83,7 +83,7 @@ func (s *SubscriptionService) save() error {
 	if err != nil {
 		return err
 	}
-	return utils.AtomicWriteFile(path, data, 0644)
+	return utils.AtomicWriteFile(path, data, 0600)
 }
 
 func (s *SubscriptionService) List() []Subscription {
@@ -97,7 +97,8 @@ func (s *SubscriptionService) Get(id string) *Subscription {
 	defer s.mu.RUnlock()
 	for i := range s.subscriptions {
 		if s.subscriptions[i].ID == id {
-			return &s.subscriptions[i]
+			copy := s.subscriptions[i]
+			return &copy
 		}
 	}
 	return nil
@@ -348,7 +349,7 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 		return err
 	}
 
-	return utils.AtomicWriteFile(path, data, 0644)
+	return utils.AtomicWriteFile(path, data, 0600)
 }
 
 // parseShareLink parses various share link formats

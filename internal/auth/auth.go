@@ -30,6 +30,7 @@ type AuthService struct {
 	onPasswordSet    func(string) error
 	maxLoginAttempts int
 	lockoutDuration  time.Duration
+	stopCh           chan struct{}
 }
 
 type Session struct {
@@ -61,7 +62,7 @@ func NewAuthService(passwordHash string, secureCookie bool, maxLoginAttempts int
 		lockoutDuration = 5 * time.Minute
 	}
 
-	return &AuthService{
+	svc := &AuthService{
 		passwordHash:     passwordHash,
 		secureCookie:     secureCookie,
 		sessionSecret:    secret,
@@ -70,6 +71,76 @@ func NewAuthService(passwordHash string, secureCookie bool, maxLoginAttempts int
 		onPasswordSet:    onPasswordSet,
 		maxLoginAttempts: maxLoginAttempts,
 		lockoutDuration:  lockoutDuration,
+		stopCh:           make(chan struct{}),
+	}
+	svc.startCleanup()
+	return svc
+}
+
+// Stop stops background cleanup goroutines
+func (a *AuthService) Stop() {
+	close(a.stopCh)
+}
+
+// ChangePassword validates the current password and replaces it with a new bcrypt hash.
+// Returns bcrypt.ErrMismatchedHashAndPassword if currentPassword is wrong.
+func (a *AuthService) ChangePassword(currentPassword, newPassword string) error {
+	if err := a.VerifyPassword(currentPassword); err != nil {
+		return err
+	}
+	newHash, err := a.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	a.SetPasswordHash(newHash)
+	if a.onPasswordSet != nil {
+		return a.onPasswordSet(newHash)
+	}
+	return nil
+}
+
+func (a *AuthService) startCleanup() {
+	go a.cleanupSessions()
+	go a.cleanupRateLimiter()
+}
+
+func (a *AuthService) cleanupSessions() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now()
+			a.mu.Lock()
+			for k, s := range a.sessions {
+				if now.After(s.ExpiresAt) {
+					delete(a.sessions, k)
+				}
+			}
+			a.mu.Unlock()
+		case <-a.stopCh:
+			return
+		}
+	}
+}
+
+func (a *AuthService) cleanupRateLimiter() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now()
+			a.rateLimiter.mu.Lock()
+			for k, v := range a.rateLimiter.attempts {
+				if v.Count == 0 && now.Sub(v.LastAttempt) > a.lockoutDuration*2 {
+					delete(a.rateLimiter.attempts, k)
+				}
+			}
+			a.rateLimiter.mu.Unlock()
+		case <-a.stopCh:
+			return
+		}
 	}
 }
 
@@ -281,7 +352,7 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		Value:    session.Token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   a.secureCookie,
+		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteStrictMode,
 		Expires:  session.ExpiresAt,
 	})

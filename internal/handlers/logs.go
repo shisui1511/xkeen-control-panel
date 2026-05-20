@@ -14,7 +14,7 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
-			return true // allow non-browser clients
+			return false // reject requests without Origin header
 		}
 		u, err := url.Parse(origin)
 		if err != nil {

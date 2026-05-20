@@ -19,6 +19,15 @@ func (a *API) MihomoStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
+	// Whitelist allowed HTTP methods
+	switch r.Method {
+	case http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete, http.MethodPatch:
+		// allowed
+	default:
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	target, err := url.Parse(a.cfg.MihomoAPIURL)
 	if err != nil {
 		a.errorResponse(w, a.t(r, "mihomo.api_error"), http.StatusInternalServerError)
