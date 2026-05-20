@@ -596,3 +596,36 @@ func TestSubscriptionScheduler_FrozenClock(t *testing.T) {
 		t.Errorf("expected 1 refresh call, got %d", got)
 	}
 }
+
+// TestSubscriptionGet_ReturnsCopy (T006): modifying the returned copy must not affect the original.
+func TestSubscriptionGet_ReturnsCopy(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, "/opt/etc/xray")
+
+	sub := Subscription{
+		Name:    "Original",
+		URL:     "https://example.com/sub",
+		Enabled: true,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	id := svc.List()[0].ID
+	got := svc.Get(id)
+	if got == nil {
+		t.Fatal("Get returned nil")
+	}
+
+	// Mutate the returned copy
+	got.Name = "Modified"
+
+	// The original in the service slice must be unchanged
+	original := svc.Get(id)
+	if original == nil {
+		t.Fatal("second Get returned nil")
+	}
+	if original.Name != "Original" {
+		t.Errorf("expected original name 'Original', got %q (mutation leaked)", original.Name)
+	}
+}

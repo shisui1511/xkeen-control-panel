@@ -124,7 +124,7 @@ func (s *TrafficQuotaService) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return utils.AtomicWriteFile(s.storePath(), data, 0644)
+	return utils.AtomicWriteFile(s.storePath(), data, 0600)
 }
 
 // --- CRUD for quotas ---
@@ -250,21 +250,40 @@ func (s *TrafficQuotaService) ClearAlerts() {
 func (s *TrafficQuotaService) collectorLoop() {
 	defer s.wg.Done()
 
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	// Reset daily/weekly/monthly quotas if needed
-	s.checkResets()
-
 	for {
-		select {
-		case <-ticker.C:
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("TrafficQuota: collectorLoop panic: %v — restarting in 5s", r)
+				}
+			}()
+
+			ticker := time.NewTicker(1 * time.Minute)
+			defer ticker.Stop()
+
+			// Reset daily/weekly/monthly quotas if needed
 			s.checkResets()
-			s.collectTraffic()
-			s.checkQuotas()
+
+			for {
+				select {
+				case <-ticker.C:
+					s.checkResets()
+					s.collectTraffic()
+					s.checkQuotas()
+				case <-s.stopCh:
+					return
+				}
+			}
+		}()
+
+		// Check if we should stop before restarting after a panic
+		select {
 		case <-s.stopCh:
 			return
+		default:
 		}
+
+		time.Sleep(5 * time.Second)
 	}
 }
 

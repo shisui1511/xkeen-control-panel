@@ -50,5 +50,7 @@
   "error.unauthorized": "Требуется авторизация",
   "error.forbidden": "Доступ запрещен",
   "error.not_found": "Не найдено",
-  "error.method_not_allowed": "Метод не поддерживается"
+  "error.method_not_allowed": "Метод не поддерживается",
+  "error.invalid_request": "Некорректный запрос",
+  "auth.wrong_password": "Текущий пароль неверен"
 }

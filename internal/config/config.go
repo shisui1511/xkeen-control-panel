@@ -116,7 +116,7 @@ func Load(path string) (*Config, error) {
 func Save(path string, cfg *Config) error {
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	os.MkdirAll(filepath.Dir(path), 0755)
-	return utils.AtomicWriteFile(path, data, 0644)
+	return utils.AtomicWriteFile(path, data, 0600)
 }
 
 func (c *Config) SavePasswordHash(path string, hash string) error {

@@ -128,7 +128,7 @@ func (s *SmartProxyService) saveLocked() error {
 		return err
 	}
 
-	return utils.AtomicWriteFile(s.storePath(), data, 0644)
+	return utils.AtomicWriteFile(s.storePath(), data, 0600)
 }
 
 func (s *SmartProxyService) save() error {
@@ -152,7 +152,8 @@ func (s *SmartProxyService) Get(id string) *Profile {
 	defer s.mu.RUnlock()
 	for i := range s.profiles {
 		if s.profiles[i].ID == id {
-			return &s.profiles[i]
+			copy := s.profiles[i]
+			return &copy
 		}
 	}
 	return nil
@@ -210,19 +211,38 @@ func (s *SmartProxyService) SetEnabled(id string, enabled bool) error {
 func (s *SmartProxyService) schedulerLoop() {
 	defer s.wg.Done()
 
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
-
-	// Run immediately on start
-	s.evaluateProfiles()
-
 	for {
-		select {
-		case <-ticker.C:
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("SmartProxy: schedulerLoop panic: %v — restarting in 5s", r)
+				}
+			}()
+
+			ticker := time.NewTicker(1 * time.Minute)
+			defer ticker.Stop()
+
+			// Run immediately on start
 			s.evaluateProfiles()
+
+			for {
+				select {
+				case <-ticker.C:
+					s.evaluateProfiles()
+				case <-s.stopCh:
+					return
+				}
+			}
+		}()
+
+		// Check if we should stop before restarting after a panic
+		select {
 		case <-s.stopCh:
 			return
+		default:
 		}
+
+		time.Sleep(5 * time.Second)
 	}
 }
 

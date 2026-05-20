@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { t } from './i18n'
+  import { capabilities } from './stores'
 
   interface Proxy {
     name: string
@@ -205,6 +206,14 @@
   <h1>{$t('proxies.title')}</h1>
   <p class="text-secondary mb-3">{$t('proxies.subtitle')}</p>
 
+  {#if $capabilities !== null && !$capabilities.mihomo.reachable}
+    <div class="card" style="text-align: center; padding: 40px 20px;">
+      <div style="font-size: 48px; margin-bottom: 12px;">🔌</div>
+      <h2>{$t('capabilities.mihomo_empty_title')}</h2>
+      <p class="text-secondary">{$t('capabilities.mihomo_empty_desc')}</p>
+    </div>
+  {:else}
+
   {#if error}
     <div class="alert alert-error mb-2">{error}</div>
   {/if}
@@ -323,6 +332,7 @@
       </div>
     {/each}
   </div>
+  {/if}
 </div>
 
 <style>

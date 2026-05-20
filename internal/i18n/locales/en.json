@@ -50,5 +50,7 @@
   "error.unauthorized": "Authorization required",
   "error.forbidden": "Access forbidden",
   "error.not_found": "Not found",
-  "error.method_not_allowed": "Method not allowed"
+  "error.method_not_allowed": "Method not allowed",
+  "error.invalid_request": "Invalid request",
+  "auth.wrong_password": "Current password is incorrect"
 }

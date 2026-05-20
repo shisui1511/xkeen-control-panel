@@ -1,9 +1,13 @@
 package handlers
 
 import (
+	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -242,6 +246,19 @@ func (a *API) performUpdate(channel string) {
 		return
 	}
 
+	// Step 2b: Verify SHA-256 checksum if checksums.txt is available
+	checksumsURL := fmt.Sprintf("%s/%s/checksums.txt", githubDownloadURL, info.LatestVersion)
+	binaryName := fmt.Sprintf("xkeen-control-panel-linux-%s", arch)
+	if err := verifyFileChecksum(tempFile, binaryName, checksumsURL); err != nil {
+		_ = os.Remove(tempFile)
+		setUpdateState(UpdateStatus{
+			Status:    "failed",
+			Message:   "Checksum verification failed: " + err.Error(),
+			Timestamp: time.Now().Unix(),
+		})
+		return
+	}
+
 	if err := os.Chmod(tempFile, 0755); err != nil {
 		setUpdateState(UpdateStatus{
 			Status:    "failed",
@@ -458,4 +475,74 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(out, in)
 	return err
+}
+
+// verifyFileChecksum downloads checksums.txt from the release and verifies the SHA-256
+// of the given filePath against the entry for binaryName.
+// If checksums.txt returns 404, it logs a warning and returns nil (backward compat).
+// If the checksum does not match, returns an error.
+func verifyFileChecksum(filePath, binaryName, checksumsURL string) error {
+	return verifyFileChecksumWithClient(filePath, binaryName, checksumsURL, utils.SafeHTTPClient(30*time.Second))
+}
+
+// verifyFileChecksumWithClient is the testable variant that accepts an explicit *http.Client.
+func verifyFileChecksumWithClient(filePath, binaryName, checksumsURL string, client *http.Client) error {
+	resp, err := client.Get(checksumsURL)
+	if err != nil {
+		log.Printf("Update: could not download checksums.txt: %v — skipping verification", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		log.Printf("Update: checksums.txt not found for this release — skipping verification (backward compat)")
+		return nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Update: checksums.txt HTTP %d — skipping verification", resp.StatusCode)
+		return nil
+	}
+
+	// Parse "sha256sum  filename" lines
+	expectedHash := ""
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		if parts[1] == binaryName || strings.HasSuffix(parts[1], "/"+binaryName) {
+			expectedHash = strings.ToLower(parts[0])
+			break
+		}
+	}
+
+	if expectedHash == "" {
+		log.Printf("Update: no checksum entry found for %s in checksums.txt — skipping verification", binaryName)
+		return nil
+	}
+
+	// Compute SHA-256 of downloaded file
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("open binary for checksum: %w", err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("compute sha256: %w", err)
+	}
+	actualHash := hex.EncodeToString(h.Sum(nil))
+
+	if actualHash != expectedHash {
+		return fmt.Errorf("SHA-256 mismatch: expected %s, got %s", expectedHash, actualHash)
+	}
+
+	log.Printf("Update: SHA-256 checksum verified OK for %s", binaryName)
+	return nil
 }
