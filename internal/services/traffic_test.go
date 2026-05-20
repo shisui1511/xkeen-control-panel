@@ -121,3 +121,46 @@ func TestTrafficQuotaService_Persistence(t *testing.T) {
 		t.Fatalf("expected name 'Persistent Quota', got %s", quotas[0].Name)
 	}
 }
+
+// TestTrafficGet_ReturnsCopy (T008): modifying the value returned by GetQuota must not affect the original.
+func TestTrafficGet_ReturnsCopy(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090")
+
+	q := &TrafficQuota{
+		Name:       "OriginalQuota",
+		LimitBytes: 1024,
+		Period:     "daily",
+		Enabled:    true,
+	}
+	if err := svc.AddQuota(q); err != nil {
+		t.Fatalf("AddQuota failed: %v", err)
+	}
+
+	quotas := svc.ListQuotas()
+	if len(quotas) != 1 {
+		t.Fatal("expected 1 quota")
+	}
+	id := quotas[0].ID
+
+	got, ok := svc.GetQuota(id)
+	if !ok {
+		t.Fatal("GetQuota returned not found")
+	}
+
+	// Mutate the returned copy
+	got.Name = "MutatedQuota"
+	got.LimitBytes = 9999
+
+	// The original in the service slice must be unchanged
+	original, ok := svc.GetQuota(id)
+	if !ok {
+		t.Fatal("second GetQuota returned not found")
+	}
+	if original.Name != "OriginalQuota" {
+		t.Errorf("expected original name 'OriginalQuota', got %q (mutation leaked)", original.Name)
+	}
+	if original.LimitBytes != 1024 {
+		t.Errorf("expected original LimitBytes 1024, got %d (mutation leaked)", original.LimitBytes)
+	}
+}

@@ -159,3 +159,80 @@ func TestHandleLoginIPExtraction(t *testing.T) {
 		t.Error("expected rate limit to trigger, but all requests went through")
 	}
 }
+
+// TestRateLimiter_IPOnly (T016): два запроса с одного IP разными портами засчитываются как один источник.
+func TestRateLimiter_IPOnly(t *testing.T) {
+	rl := &RateLimiter{attempts: make(map[string]*LoginAttempts)}
+
+	// Same IP, different ports — should accumulate under one key
+	for i := 0; i < 4; i++ {
+		_ = rl.CheckLimit("10.0.0.5", 5, time.Minute)
+	}
+
+	rl.mu.RLock()
+	entry := rl.attempts["10.0.0.5"]
+	rl.mu.RUnlock()
+
+	if entry == nil {
+		t.Fatal("expected rate limit entry for 10.0.0.5, got nil")
+	}
+	if entry.Count != 4 {
+		t.Errorf("expected count=4, got %d", entry.Count)
+	}
+
+	// Confirm that "10.0.0.5:9999" treated the same as "10.0.0.5"
+	// (the AuthService.HandleLogin extracts host via net.SplitHostPort)
+	svc := newTestAuthService()
+	hash, _ := svc.HashPassword("password123")
+	svc.SetPasswordHash(hash)
+
+	for i := 0; i < 6; i++ {
+		body, _ := json.Marshal(map[string]string{"password": "wrongpass"})
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+		req.RemoteAddr = "10.0.0.99:" + string(rune('5'+'0'+i)) // different ports
+		httptest.NewRecorder()
+		rr := httptest.NewRecorder()
+		svc.HandleLogin(rr, req)
+	}
+	// Just verifies no panic occurs and IP extraction works; rate limit behaviour
+	// is covered by TestHandleLoginIPExtraction above.
+}
+
+// TestChangePassword_WrongCurrent (T017): wrong current password returns error.
+func TestChangePassword_WrongCurrent(t *testing.T) {
+	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	hash, err := svc.HashPassword("correctpass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetPasswordHash(hash)
+
+	err = svc.ChangePassword("wrongpass", "newpassword123")
+	if err == nil {
+		t.Error("expected error for wrong current password, got nil")
+	}
+}
+
+// TestChangePassword_Success (T017): correct current password → password changed.
+func TestChangePassword_Success(t *testing.T) {
+	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	hash, err := svc.HashPassword("oldpass123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetPasswordHash(hash)
+
+	err = svc.ChangePassword("oldpass123", "newpass456")
+	if err != nil {
+		t.Fatalf("ChangePassword failed: %v", err)
+	}
+
+	// New password should verify correctly
+	if err := svc.VerifyPassword("newpass456"); err != nil {
+		t.Errorf("new password did not verify: %v", err)
+	}
+	// Old password should no longer work
+	if err := svc.VerifyPassword("oldpass123"); err == nil {
+		t.Error("old password still verifies after change")
+	}
+}

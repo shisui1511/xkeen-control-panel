@@ -88,3 +88,28 @@ func TestLoadNonExistent(t *testing.T) {
 		t.Error("Expected error when loading non-existent config")
 	}
 }
+
+// TestConfigSave_FilePermissions verifies that the config file is saved with
+// restricted permissions (0600) so that other users cannot read the password hash.
+func TestConfigSave_FilePermissions(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+
+	cfg := Default()
+	cfg.Auth.PasswordHash = "secret-hash"
+
+	if err := Save(configPath, cfg); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+
+	got := info.Mode().Perm()
+	want := os.FileMode(0600)
+	if got != want {
+		t.Errorf("file permissions: got %04o, want %04o", got, want)
+	}
+}

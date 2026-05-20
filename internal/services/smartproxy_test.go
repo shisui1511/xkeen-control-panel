@@ -132,3 +132,36 @@ func TestSmartProxyService_Persistence(t *testing.T) {
 		t.Fatalf("expected Name 'Persistent Profile', got %s", profiles[0].Name)
 	}
 }
+
+// TestSmartProxyGet_ReturnsCopy (T007): modifying the returned copy must not affect the original.
+func TestSmartProxyGet_ReturnsCopy(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSmartProxyService(tmp, "http://localhost:9090")
+
+	p := Profile{
+		Name:    "OriginalProfile",
+		Enabled: true,
+		Mode:    ModeTimeBased,
+	}
+	if err := svc.Add(&p); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	id := svc.List()[0].ID
+	got := svc.Get(id)
+	if got == nil {
+		t.Fatal("Get returned nil")
+	}
+
+	// Mutate the returned copy
+	got.Name = "MutatedProfile"
+
+	// The original in the service slice must be unchanged
+	original := svc.Get(id)
+	if original == nil {
+		t.Fatal("second Get returned nil")
+	}
+	if original.Name != "OriginalProfile" {
+		t.Errorf("expected original name 'OriginalProfile', got %q (mutation leaked)", original.Name)
+	}
+}
