@@ -3,6 +3,8 @@
   import { slide } from 'svelte/transition'
   import { t } from './i18n'
   import PageHeader from './PageHeader.svelte'
+  import Modal from './components/Modal.svelte'
+  import Icon from './lib/components/Icon.svelte'
 
   export let onSwitchTab: (tab: string) => void = () => {}
 
@@ -96,39 +98,33 @@
 </script>
 
 <!-- Confirmation modal for dangerous commands -->
-{#if confirmPending}
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
-  <div
-    class="confirm-modal-backdrop"
-    on:click|self={cancelConfirm}
-    role="dialog"
-    tabindex="-1"
-    aria-modal="true"
-    aria-label={$t('console.confirm_title')}
-  >
-    <div class="confirm-modal">
-      <h3>⚠️ {$t('console.confirm_title')}</h3>
-      <p>{$t('console.confirm_desc', { name: confirmPending.name })}</p>
-      <div class="confirm-modal-actions">
-        <button
-          class="btn btn-secondary"
-          on:click={cancelConfirm}
-          title={$t('app.cancel')}
-        >
-          {$t('app.cancel')}
-        </button>
-        <button
-          class="btn btn-danger"
-          on:click={confirmExecute}
-          title={$t('app.confirm')}
-        >
-          ⚠️ {$t('app.confirm')}
-        </button>
-      </div>
+<Modal
+  isOpen={confirmPending !== null}
+  title={$t('console.confirm_title')}
+  onclose={cancelConfirm}
+>
+  {#if confirmPending}
+    <p style="margin: 0 0 var(--spacing-6); line-height: 1.5; color: var(--color-text-secondary);">
+      {$t('console.confirm_desc', { name: confirmPending.name })}
+    </p>
+    <div style="display: flex; gap: var(--spacing-3); justify-content: flex-end;">
+      <button
+        class="btn btn-secondary"
+        on:click={cancelConfirm}
+        title={$t('app.cancel')}
+      >
+        {$t('app.cancel')}
+      </button>
+      <button
+        class="btn btn-danger"
+        on:click={confirmExecute}
+        title={$t('app.confirm')}
+      >
+        <Icon name="warning" size={14} /> {$t('app.confirm')}
+      </button>
     </div>
-  </div>
-{/if}
+  {/if}
+</Modal>
 
 <div class="container">
   <PageHeader
@@ -160,7 +156,7 @@
                 title={cmd.description}
               >
                 {#if cmd.dangerous}
-                  <span class="danger-icon" aria-label={$t('console.danger_label')}>⚠️</span>
+                  <span class="danger-icon" aria-label={$t('console.danger_label')}><Icon name="warning" size={14} /></span>
                 {/if}
                 <span class="cmd-name">{cmd.name}</span>
                 <span class="cmd-desc">{cmd.description}</span>
@@ -179,7 +175,7 @@
             class="btn btn-secondary btn-sm"
             on:click={() => { output = '' }}
             title={$t('app.close')}
-          >✕</button>
+          ><Icon name="cross" size={14} /></button>
         {/if}
       </div>
       <pre class="output-box">{output || $t('console.no_output')}</pre>
@@ -195,7 +191,7 @@
               title={entry.command}
             >
               <span class="history-cmd">${entry.command}</span>
-              <span class="history-status">{entry.success ? '✓' : '✗'}</span>
+              <span class="history-status"><Icon name={entry.success ? 'check' : 'cross'} size={12} /></span>
             </button>
           {/each}
         </div>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from '../i18n'
   import { isSidebarOpen } from '../stores'
+  import Icon from '../lib/components/Icon.svelte'
 
   export let currentTab: string = 'dashboard'
   export let onSwitchTab: (tab: string) => void = () => {}
@@ -19,7 +20,7 @@
 </script>
 
 <div class="sidebar-logo">
-  ⚡ XKeen CP
+  <span style="display: inline-flex; align-items: center; gap: 8px;"><Icon name="smartproxy" size={18} /> XKeen CP</span>
 </div>
 
 <nav style="flex: 1; overflow-y: auto; padding: 8px 0;">
@@ -35,7 +36,7 @@
       on:click={() => navigate('dashboard')}
       title={$t('nav.dashboard')}
     >
-      📊 {$t('nav.dashboard')}
+      <Icon name="dashboard" size={16} /> {$t('nav.dashboard')}
     </button>
     <button
       class="nav-item"
@@ -43,7 +44,7 @@
       on:click={() => navigate('services')}
       title={$t('nav.services')}
     >
-      🚀 {$t('nav.services')}
+      <Icon name="services" size={16} /> {$t('nav.services')}
     </button>
     <button
       class="nav-item"
@@ -51,7 +52,7 @@
       on:click={() => navigate('editor')}
       title={$t('nav.editor')}
     >
-      📝 {$t('nav.editor')}
+      <Icon name="editor" size={16} /> {$t('nav.editor')}
     </button>
     <button
       class="nav-item"
@@ -59,7 +60,7 @@
       on:click={() => navigate('settings')}
       title={$t('nav.settings')}
     >
-      ⚙️ {$t('nav.settings')}
+      <Icon name="settings" size={16} /> {$t('nav.settings')}
     </button>
   </details>
 
@@ -75,7 +76,7 @@
       on:click={() => navigate('logs')}
       title={$t('nav.logs')}
     >
-      📋 {$t('nav.logs')}
+      <Icon name="logs" size={16} /> {$t('nav.logs')}
     </button>
     <button
       class="nav-item"
@@ -83,7 +84,7 @@
       on:click={() => navigate('connections')}
       title={$t('nav.connections')}
     >
-      🔗 {$t('nav.connections')}
+      <Icon name="connections" size={16} /> {$t('nav.connections')}
     </button>
     <button
       class="nav-item"
@@ -91,7 +92,7 @@
       on:click={() => navigate('dat')}
       title={$t('nav.dat')}
     >
-      🌍 {$t('nav.dat')}
+      <Icon name="dat" size={16} /> {$t('nav.dat')}
     </button>
     <button
       class="nav-item"
@@ -99,7 +100,7 @@
       on:click={() => navigate('console')}
       title={$t('nav.console')}
     >
-      💻 {$t('nav.console')}
+      <Icon name="console" size={16} /> {$t('nav.console')}
     </button>
   </details>
 
@@ -115,7 +116,7 @@
       on:click={() => navigate('proxies')}
       title={$t('nav.proxies')}
     >
-      🌐 {$t('nav.proxies')}
+      <Icon name="proxies" size={16} /> {$t('nav.proxies')}
     </button>
     <button
       class="nav-item"
@@ -123,7 +124,7 @@
       on:click={() => navigate('rules')}
       title={$t('nav.rules')}
     >
-      📋 {$t('nav.rules')}
+      <Icon name="rules" size={16} /> {$t('nav.rules')}
     </button>
     <button
       class="nav-item"
@@ -131,7 +132,7 @@
       on:click={() => navigate('subscriptions')}
       title={$t('nav.subscriptions')}
     >
-      📡 {$t('nav.subscriptions')}
+      <Icon name="subscriptions" size={16} /> {$t('nav.subscriptions')}
     </button>
     <button
       class="nav-item"
@@ -139,7 +140,7 @@
       on:click={() => navigate('smartproxy')}
       title={$t('nav.smartproxy')}
     >
-      ⚡ {$t('nav.smartproxy')}
+      <Icon name="smartproxy" size={16} /> {$t('nav.smartproxy')}
     </button>
   </details>
 
@@ -155,7 +156,7 @@
       on:click={() => navigate('traffic')}
       title={$t('nav.traffic')}
     >
-      📈 {$t('nav.traffic')}
+      <Icon name="traffic" size={16} /> {$t('nav.traffic')}
     </button>
     <button
       class="nav-item"
@@ -163,7 +164,7 @@
       on:click={() => navigate('trafficquotas')}
       title={$t('nav.trafficquotas')}
     >
-      📊 {$t('nav.trafficquotas')}
+      <Icon name="trafficquotas" size={16} /> {$t('nav.trafficquotas')}
     </button>
     <button
       class="nav-item"
@@ -171,7 +172,7 @@
       on:click={() => navigate('network')}
       title={$t('nav.network')}
     >
-      🌐 {$t('nav.network')}
+      <Icon name="network" size={16} /> {$t('nav.network')}
     </button>
   </details>
 </nav>
@@ -179,7 +180,7 @@
 <div style="border-top: 1px solid var(--border); padding: 0.5rem 0;">
   {#if pwaInstallPrompt}
     <button class="nav-item" on:click={onInstallPWA} title={$t('nav.install_pwa')}>
-      📲 {$t('nav.install_pwa')}
+      <Icon name="pwa" size={16} /> {$t('nav.install_pwa')}
     </button>
   {/if}
   <button
@@ -187,7 +188,7 @@
     on:click={onToggleTheme}
     title={theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
   >
-    {theme === 'dark' ? '☀️' : '🌙'}
+    <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
     {theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
   </button>
   <button
@@ -196,6 +197,7 @@
     disabled={loading}
     title={$t('auth.logout')}
   >
-    🚪 {loading ? $t('auth.logging_out') : $t('auth.logout')}
+    <Icon name="logout" size={16} />
+    {loading ? $t('auth.logging_out') : $t('auth.logout')}
   </button>
 </div>

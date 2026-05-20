@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { t, setLang, currentLang, getAvailableLangs, type Lang } from './i18n'
+  import Icon from './lib/components/Icon.svelte'
 
   let version = '...'
   let langs = getAvailableLangs()
@@ -192,10 +193,10 @@
   <div class="card mb-2">
     <h2>{$t('settings.security')}</h2>
     <ul style="list-style: none; padding-left: 0;">
-      <li class="mb-1">✅ {$t('settings.auth_bcrypt')}</li>
-      <li class="mb-1">✅ {$t('settings.csrf')}</li>
-      <li class="mb-1">✅ {$t('settings.rate_limit')}</li>
-      <li class="mb-1">✅ {$t('settings.security_headers')}</li>
+      <li class="mb-1"><Icon name="check" size={14} /> {$t('settings.auth_bcrypt')}</li>
+      <li class="mb-1"><Icon name="check" size={14} /> {$t('settings.csrf')}</li>
+      <li class="mb-1"><Icon name="check" size={14} /> {$t('settings.rate_limit')}</li>
+      <li class="mb-1"><Icon name="check" size={14} /> {$t('settings.security_headers')}</li>
     </ul>
   </div>
 

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { t } from './i18n'
   import PageHeader from './PageHeader.svelte'
+  import Icon from './lib/components/Icon.svelte'
 
   export let onSwitchTab: (tab: string) => void = () => {}
 
@@ -92,11 +93,11 @@
       <div class="title-group">
         <h2>{$t('dat.database_files')}</h2>
         <button class="btn btn-primary ml-2" on:click={updateAll} disabled={globalUpdating || loading}>
-          {globalUpdating ? '⏳ ' + $t('app.loading') : '📥 ' + $t('dat.update_all')}
+          {#if globalUpdating}<Icon name="refresh" size={14} /> {$t('app.loading')}{:else}<Icon name="download" size={14} /> {$t('dat.update_all')}{/if}
         </button>
       </div>
       <button class="btn btn-secondary" on:click={fetchFiles} disabled={loading}>
-        🔄 {$t('app.refresh')}
+        <Icon name="refresh" size={14} /> {$t('app.refresh')}
       </button>
     </div>
 
@@ -110,7 +111,7 @@
           <div class="file-item" class:is-symlink={file.is_symlink}>
             <div class="file-info">
               <div class="file-name">
-                <span class="icon">{file.is_symlink ? '🔗' : '📄'}</span>
+                <span class="icon"><Icon name={file.is_symlink ? 'chevron-right' : 'editor'} size={14} /></span>
                 {file.name}
                 {#if file.is_symlink}
                   <span class="symlink-target">→ {file.symlink_to}</span>

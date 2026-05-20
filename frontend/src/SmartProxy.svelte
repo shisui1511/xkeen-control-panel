@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { t } from './i18n'
   import PageHeader from './PageHeader.svelte'
+  import Icon from './lib/components/Icon.svelte'
 
   export let onSwitchTab: (tab: string) => void = () => {}
 
@@ -270,7 +271,7 @@
                 {#if p.mode === 'auto-failover'}
                   <span class="detail">{p.group_name} → {p.proxy_name} ({$t('smartproxy.fallback_label')}: {p.fallback_proxy || 'DIRECT'})</span>
                   {#if p.current_failures && p.current_failures > 0}
-                    <span class="detail alert">⚠️ {$t('smartproxy.failures_label')}: {p.current_failures}</span>
+                    <span class="detail alert"><Icon name="warning" size={14} /> {$t('smartproxy.failures_label')}: {p.current_failures}</span>
                   {/if}
                   {#if p.current_proxy}
                     <span class="detail active-proxy">→ {p.current_proxy}</span>
@@ -290,8 +291,8 @@
               </div>
             </div>
             <div class="profile-actions">
-              <button class="btn-icon" on:click={() => startEdit(p)} title={$t('app.edit')}>✏️</button>
-              <button class="btn-icon" on:click={() => deleteProfile(p.id)} title={$t('app.delete')}>🗑️</button>
+              <button class="btn-icon" on:click={() => startEdit(p)} title={$t('app.edit')}><Icon name="edit" size={14} /></button>
+              <button class="btn-icon" on:click={() => deleteProfile(p.id)} title={$t('app.delete')}><Icon name="delete" size={14} /></button>
             </div>
           </div>
         {/each}
