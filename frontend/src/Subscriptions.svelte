@@ -3,6 +3,7 @@
   import { t } from './i18n'
   import { showConfirm } from './stores'
   import PageHeader from './PageHeader.svelte'
+  import Icon from './lib/components/Icon.svelte'
 
   export let onSwitchTab: (tab: string) => void = () => {}
 
@@ -182,7 +183,7 @@
   >
     <div slot="actions" style="display: flex; gap: 0.5rem;">
       <button class="btn btn-secondary" on:click={refreshAll} disabled={loading}>
-        {loading ? $t('app.loading') : '🔄 ' + $t('subscr.refresh_all')}
+        {#if loading}{$t('app.loading')}{:else}<Icon name="refresh" size={14} /> {$t('subscr.refresh_all')}{/if}
       </button>
       <button class="btn btn-primary" on:click={openAddModal}>
         + {$t('subscr.add')}
@@ -208,13 +209,13 @@
             </div>
             <div class="sub-actions">
               <button class="btn-icon" on:click={() => refreshSubscription(sub.id)} disabled={refreshLoading[sub.id]} title={$t('subscr.refresh')}>
-                {refreshLoading[sub.id] ? '⏳' : '🔄'}
+                <Icon name="refresh" size={14} />
               </button>
               <button class="btn-icon" on:click={() => openEditModal(sub)} title={$t('app.edit')}>
-                ✏️
+                <Icon name="edit" size={14} />
               </button>
               <button class="btn-icon" on:click={() => deleteSubscription(sub.id)} title={$t('app.delete')}>
-                🗑️
+                <Icon name="delete" size={14} />
               </button>
             </div>
           </div>

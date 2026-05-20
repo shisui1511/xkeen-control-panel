@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { t } from './i18n'
   import { showToast } from './stores'
+  import Skeleton from './components/Skeleton.svelte'
 
   interface Kernel {
     name: string
@@ -218,13 +219,13 @@
 
       <div class="actions">
         <button class="btn btn-primary" on:click={() => controlService('start')} disabled={actionLoading['xkeen-start']}>
-          {actionLoading['xkeen-start'] ? $t('svc.starting') : '▶ ' + $t('app.start')}
+          {actionLoading['xkeen-start'] ? $t('svc.starting') : $t('app.start')}
         </button>
         <button class="btn btn-secondary" on:click={() => controlService('stop')} disabled={actionLoading['xkeen-stop']}>
-          {actionLoading['xkeen-stop'] ? $t('svc.stopping') : '⏹ ' + $t('app.stop')}
+          {actionLoading['xkeen-stop'] ? $t('svc.stopping') : $t('app.stop')}
         </button>
         <button class="btn btn-secondary" on:click={() => controlService('restart')} disabled={actionLoading['xkeen-restart']}>
-          {actionLoading['xkeen-restart'] ? $t('svc.restarting') : '🔄 ' + $t('app.restart')}
+          {actionLoading['xkeen-restart'] ? $t('svc.restarting') : $t('app.restart')}
         </button>
       </div>
     </div>
@@ -273,11 +274,22 @@
             <div class="status-msg">{xray.message || xray.status}</div>
           {/if}
         </div>
+      {:else}
+        <div class="kernel-details mb-2">
+          <div class="detail-row">
+            <Skeleton type="text-line" width="100px" />
+            <Skeleton type="text-line" width="60px" />
+          </div>
+          <div class="detail-row">
+            <Skeleton type="text-line" width="80px" />
+            <Skeleton type="text-line" width="90px" />
+          </div>
+        </div>
       {/if}
 
       <div class="actions">
         <button class="btn btn-icon-small" on:click={() => checkKernelUpdate('xray')} title={$t('kernels.check_update')} disabled={xray?.status !== 'idle'}>
-          {xray?.status === 'checking' ? '...' : '🔄'}
+          {xray?.status === 'checking' ? '...' : $t('app.refresh')}
         </button>
       </div>
     </div>
@@ -332,11 +344,22 @@
             <div class="status-msg">{mihomo.message || mihomo.status}</div>
           {/if}
         </div>
+      {:else}
+        <div class="kernel-details mb-2">
+          <div class="detail-row">
+            <Skeleton type="text-line" width="100px" />
+            <Skeleton type="text-line" width="60px" />
+          </div>
+          <div class="detail-row">
+            <Skeleton type="text-line" width="80px" />
+            <Skeleton type="text-line" width="90px" />
+          </div>
+        </div>
       {/if}
 
       <div class="actions">
         <button class="btn btn-icon-small" on:click={() => checkKernelUpdate('mihomo')} title={$t('kernels.check_update')} disabled={mihomo?.status !== 'idle'}>
-          {mihomo?.status === 'checking' ? '...' : '🔄'}
+          {mihomo?.status === 'checking' ? '...' : $t('app.refresh')}
         </button>
       </div>
     </div>

@@ -60,7 +60,7 @@
 
 <div class="center-container">
   <div class="card" style="width: 100%; max-width: 400px;">
-    <h1 class="text-center">🔐 {$t('auth.setup_title')}</h1>
+    <h1 class="text-center">{$t('auth.setup_title')}</h1>
     <p class="text-center text-secondary mb-3">
       {$t('auth.setup_desc')}
     </p>

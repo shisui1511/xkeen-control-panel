@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from './i18n'
+  import Icon from './lib/components/Icon.svelte'
 
   export let items: { label: string; tab?: string }[] = []
   export let onNavigate: (tab: string) => void = () => {}
@@ -7,7 +8,7 @@
 
 <nav class="breadcrumbs">
   <button class="breadcrumb-home" on:click={() => onNavigate('dashboard')}>
-    🏠 {$t('nav.dashboard')}
+    <Icon name="dashboard" size={14} /> {$t('nav.dashboard')}
   </button>
   {#each items as item, i}
     <span class="breadcrumb-separator">/</span>

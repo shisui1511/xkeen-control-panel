@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { t } from './i18n'
   import PageHeader from './PageHeader.svelte'
+  import Icon from './lib/components/Icon.svelte'
 
   export let onSwitchTab: (tab: string) => void = () => {}
 
@@ -161,7 +162,7 @@
   {#if publicIP}
     <div class="card mb-2">
       <div style="display: flex; align-items: center; gap: 0.5rem;">
-        <span>🌍</span>
+        <Icon name="network" size={14} />
         <span>{$t('net.your_ip', { ip: publicIP })}</span>
       </div>
     </div>
@@ -170,16 +171,16 @@
   <div class="card mb-2">
     <div class="tool-tabs">
       <button class="tool-tab" class:active={activeTool === 'ping'} on:click={() => { activeTool = 'ping'; result = null; }} title={$t('net.tab_ping')}>
-        📡 {$t('net.tab_ping')}
+        <Icon name="network" size={14} /> {$t('net.tab_ping')}
       </button>
       <button class="tool-tab" class:active={activeTool === 'traceroute'} on:click={() => { activeTool = 'traceroute'; result = null; }} title={$t('net.tab_traceroute')}>
-        🔍 {$t('net.tab_traceroute')}
+        <Icon name="chevron-right" size={14} /> {$t('net.tab_traceroute')}
       </button>
       <button class="tool-tab" class:active={activeTool === 'dns'} on:click={() => { activeTool = 'dns'; result = null; }} title={$t('net.tab_dns')}>
-        🌐 {$t('net.tab_dns')}
+        <Icon name="info" size={14} /> {$t('net.tab_dns')}
       </button>
       <button class="tool-tab" class:active={activeTool === 'http'} on:click={() => { activeTool = 'http'; result = null; }} title={$t('net.tab_http')}>
-        🚀 {$t('net.tab_http')}
+        <Icon name="play" size={14} /> {$t('net.tab_http')}
       </button>
     </div>
 

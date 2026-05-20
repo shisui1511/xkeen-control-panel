@@ -2,6 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte'
   import { t } from './i18n'
   import { showToast } from './stores'
+  import Icon from './lib/components/Icon.svelte'
   import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine } from '@codemirror/view'
   import { EditorState } from '@codemirror/state'
   import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -291,7 +292,7 @@
   }
 
   async function restoreBackup(backupPath: string) {
-    if (!confirm($t('editor.backup_restored').replace('✓ ', ''))) return
+    if (!confirm($t('editor.restore_confirm'))) return
     
     try {
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`)
@@ -423,7 +424,7 @@
             fixesApplied++
           }
           if (!fixed.includes('proxy-groups:')) {
-            fixed = fixed + '\nproxy-groups:\n  - name: 🚀 Выбор прокси\n    type: select\n    proxies:\n      - DIRECT\n'
+            fixed = fixed + '\nproxy-groups:\n  - name: Выбор прокси\n    type: select\n    proxies:\n      - DIRECT\n'
             fixesApplied++
           }
         }
@@ -622,13 +623,13 @@
             {$t('editor.expert')}
           </label>
           <button on:click={applyQuickFixes} class="btn-secondary" title="Apply common fixes">
-            🔧 {$t('editor.quick_fix')}
+            <Icon name="settings" size={14} /> {$t('editor.quick_fix')}
           </button>
           <button on:click={() => { showTemplatesModal = true; loadTemplates() }} class="btn-secondary" title="Apply configuration templates">
-            📂 {$t('editor.templates')}
+            <Icon name="editor" size={14} /> {$t('editor.templates')}
           </button>
           <button on:click={() => showGeneratorModal = true} class="btn-secondary" title="Generate outbound config">
-            ✨ {$t('editor.generator')}
+            <Icon name="add" size={14} /> {$t('editor.generator')}
           </button>
           <button on:click={() => { showRenameModal = true; renameTarget = selectedFile.split('/').pop() || '' }} class="btn-secondary">
             {$t('app.rename')}
@@ -699,7 +700,7 @@
     <div class="modal templates-modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
       <div class="modal-header">
         <h3>{$t('editor.templates')}</h3>
-        <button class="btn-close" on:click={() => showTemplatesModal = false}>✕</button>
+        <button class="btn-close" on:click={() => showTemplatesModal = false}><Icon name="cross" size={14} /></button>
       </div>
       <p class="text-secondary mb-2">{$t('editor.templates_desc')}</p>
       
@@ -725,7 +726,7 @@
     <div class="modal generator-modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
       <div class="modal-header">
         <h3>{$t('editor.generator')}</h3>
-        <button class="btn-close" on:click={() => showGeneratorModal = false}>✕</button>
+        <button class="btn-close" on:click={() => showGeneratorModal = false}><Icon name="cross" size={14} /></button>
       </div>
       
       <div class="form-group mb-2">
@@ -751,7 +752,7 @@
         <label for="gen-uuid">{genProtocol === 'vless' ? 'UUID' : 'Password'}</label>
         <div class="input-group">
           <input id="gen-uuid" type="text" bind:value={genUUID} class="input" />
-          <button class="btn btn-secondary" on:click={() => genUUID = crypto.randomUUID()}>🎲</button>
+          <button class="btn btn-secondary" on:click={() => genUUID = crypto.randomUUID()} title={$t('editor.generate_uuid')}><Icon name="refresh" size={14} /></button>
         </div>
       </div>
 

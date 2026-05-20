@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { t } from './i18n'
   import PageHeader from './PageHeader.svelte'
+  import Icon from './lib/components/Icon.svelte'
 
   export let onSwitchTab: (tab: string) => void = () => {}
 
@@ -349,8 +350,8 @@
             </div>
             <div class="quota-actions">
               <button class="btn-icon" on:click={() => resetQuota(q.id)} title={$t('trafficquotas.reset')}>↺</button>
-              <button class="btn-icon" on:click={() => startEdit(q)} title={$t('app.edit')}>✏️</button>
-              <button class="btn-icon" on:click={() => deleteQuota(q.id)} title={$t('app.delete')}>🗑️</button>
+              <button class="btn-icon" on:click={() => startEdit(q)} title={$t('app.edit')}><Icon name="edit" size={14} /></button>
+              <button class="btn-icon" on:click={() => deleteQuota(q.id)} title={$t('app.delete')}><Icon name="delete" size={14} /></button>
             </div>
           </div>
         {/each}
