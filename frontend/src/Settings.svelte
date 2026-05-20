@@ -61,7 +61,11 @@
   async function installUpdate(channel: string = 'stable') {
     updateInstalling = true
     try {
-      const res = await fetch(`/api/update/install?channel=${channel}`, { method: 'POST' })
+      const csrfToken = localStorage.getItem('csrf_token')
+      const res = await fetch(`/api/update/install?channel=${channel}`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      })
       if (res.ok) {
         startStatusPolling()
       }
@@ -72,7 +76,11 @@
 
   async function rollbackUpdate() {
     try {
-      const res = await fetch('/api/update/rollback')
+      const csrfToken = localStorage.getItem('csrf_token')
+      const res = await fetch('/api/update/rollback', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      })
       if (res.ok) {
         startStatusPolling()
       }

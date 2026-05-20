@@ -140,12 +140,16 @@
   }
 
   onMount(() => {
-    fetchConnections()
-    refreshInterval = setInterval(fetchConnections, 3000)
+    // Не запускать polling если Mihomo недоступен
+    if ($capabilities === null || $capabilities.mihomo.reachable) {
+      fetchConnections()
+      refreshInterval = setInterval(fetchConnections, 3000)
+    }
   })
 
   onDestroy(() => {
     clearInterval(refreshInterval)
+    if (loadTimeoutId) clearTimeout(loadTimeoutId)
   })
 </script>
 

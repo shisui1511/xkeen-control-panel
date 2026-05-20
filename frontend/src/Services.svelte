@@ -23,6 +23,7 @@
   let actionLoading: Record<string, boolean> = {}
   
   let kernels: Kernel[] = []
+  let kernelsLoaded = false
   let statusIntervals: Record<string, ReturnType<typeof setInterval>> = {}
 
   async function fetchStatus() {
@@ -45,7 +46,7 @@
       if (res.ok) {
         const envelope = await res.json()
         // KernelList uses JSONSuccess envelope: {success, data: [...]}
-        const list = Array.isArray(envelope) ? envelope : (envelope.data ?? envelope)
+        const list = Array.isArray(envelope) ? envelope : (envelope.data ?? [])
         kernels = list
         // Start polling for kernels that are not idle
         kernels.forEach((k: typeof kernels[0]) => {
@@ -55,6 +56,9 @@
         })
       }
     } catch (e) {}
+    finally {
+      kernelsLoaded = true
+    }
   }
 
   async function controlService(action: string) {
@@ -108,23 +112,32 @@
 
   async function checkKernelUpdate(name: string) {
     try {
-      await fetch(`/api/kernels/${name}/check`, { method: 'POST' })
+      const csrfToken = localStorage.getItem('csrf_token')
+      await fetch(`/api/kernels/${name}/check`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      })
       startPolling(name)
     } catch (e) {}
   }
 
   async function installKernel(name: string) {
     try {
-      await fetch(`/api/kernels/${name}/install`, { method: 'POST' })
+      const csrfToken = localStorage.getItem('csrf_token')
+      await fetch(`/api/kernels/${name}/install`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      })
       startPolling(name)
     } catch (e) {}
   }
 
   async function setKernelChannel(name: string, channel: string) {
     try {
+      const csrfToken = localStorage.getItem('csrf_token')
       await fetch(`/api/kernels/${name}/channel`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ channel })
       })
       await fetchKernels()
@@ -274,7 +287,7 @@
             <div class="status-msg">{xray.message || xray.status}</div>
           {/if}
         </div>
-      {:else}
+      {:else if !kernelsLoaded}
         <div class="kernel-details mb-2">
           <div class="detail-row">
             <Skeleton type="text-line" width="100px" />
@@ -285,6 +298,8 @@
             <Skeleton type="text-line" width="90px" />
           </div>
         </div>
+      {:else}
+        <p class="text-secondary">{$t('kernels.not_installed')}</p>
       {/if}
 
       <div class="actions">
@@ -344,7 +359,7 @@
             <div class="status-msg">{mihomo.message || mihomo.status}</div>
           {/if}
         </div>
-      {:else}
+      {:else if !kernelsLoaded}
         <div class="kernel-details mb-2">
           <div class="detail-row">
             <Skeleton type="text-line" width="100px" />
@@ -355,6 +370,8 @@
             <Skeleton type="text-line" width="90px" />
           </div>
         </div>
+      {:else}
+        <p class="text-secondary">{$t('kernels.not_installed')}</p>
       {/if}
 
       <div class="actions">

@@ -40,7 +40,9 @@
     try {
       const res = await fetch('/api/subscriptions')
       if (res.ok) {
-        subscriptions = await res.json()
+        const envelope = await res.json()
+        // API может вернуть plain array или JSONSuccess envelope {success, data: [...]}
+        subscriptions = Array.isArray(envelope) ? envelope : (envelope.data ?? [])
       }
     } catch (e) {
       // ignore

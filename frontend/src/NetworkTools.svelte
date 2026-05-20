@@ -49,9 +49,10 @@
     }
     loading = true
     try {
+      const csrfToken = localStorage.getItem('csrf_token')
       const res = await fetch('/api/network/ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ host, count })
       })
       result = await res.json()
@@ -70,9 +71,10 @@
     }
     loading = true
     try {
+      const csrfToken = localStorage.getItem('csrf_token')
       const res = await fetch('/api/network/traceroute', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ host, max_hops: maxHops })
       })
       result = await res.json()
@@ -91,9 +93,10 @@
     }
     loading = true
     try {
+      const csrfToken = localStorage.getItem('csrf_token')
       const res = await fetch('/api/network/dns', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ host, record_type: recordType })
       })
       result = await res.json()
@@ -112,9 +115,10 @@
     }
     loading = true
     try {
+      const csrfToken = localStorage.getItem('csrf_token')
       const res = await fetch('/api/network/http', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ url, timeout })
       })
       result = await res.json()

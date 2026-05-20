@@ -26,6 +26,10 @@
       
       authenticated = data.authenticated || false
       setupRequired = data.setup_required || false
+      // Сохранить CSRF-токен при автологине через checkAuth (при перезагрузке страницы)
+      if (data.csrf_token) {
+        localStorage.setItem('csrf_token', data.csrf_token)
+      }
     } catch (e: any) {
       authenticated = false
       setupRequired = false
