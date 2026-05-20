@@ -224,12 +224,15 @@
         ]
       })
       
-      // Set selectedFile first so Svelte renders editorContainer in the DOM
-      selectedFile = path
       originalContent = content
       isDirty = false
 
-      // Wait for Svelte to render the editorContainer div
+      // Сначала снять loading, потом установить selectedFile —
+      // это заставляет Svelte отрендерить editorContainer ДО инициализации EditorView
+      loading = false
+      selectedFile = path
+
+      // Ждём рендера editorContainer в DOM
       await tick()
 
       if (editorView) {
@@ -244,7 +247,6 @@
       await loadBackups(path)
     } catch (e: any) {
       showToast('error', $t('editor.file_load_error') + ': ' + (e?.message || e))
-    } finally {
       loading = false
     }
   }
