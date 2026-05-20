@@ -6,8 +6,14 @@ import (
 	"net/url"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
+)
+
+const (
+	wsPingInterval = 30 * time.Second
+	wsReadDeadline = 60 * time.Second
 )
 
 var upgrader = websocket.Upgrader{
@@ -31,12 +37,39 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// Set initial read deadline; pong handler will extend it on every pong.
+	conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
+		return nil
+	})
+
 	sources := a.cfg.LogSources
 	if len(sources) == 0 {
 		sources = []string{a.cfg.LogPath}
 	}
 
 	ctx := r.Context()
+
+	// Ping goroutine: sends a ping every wsPingInterval and closes conn on failure.
+	stopPing := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(wsPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					return
+				}
+			case <-stopPing:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	defer close(stopPing)
 
 	var cmd *exec.Cmd
 	if len(sources) == 1 {

@@ -1,14 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 )
 
 func (a *API) KernelList(w http.ResponseWriter, r *http.Request) {
-
-	a.jsonResponse(w, a.kernelSvc.List())
+	JSONSuccess(w, a.kernelSvc.List())
 }
 
 func (a *API) KernelCheck(w http.ResponseWriter, r *http.Request) {
@@ -22,14 +22,14 @@ func (a *API) KernelCheck(w http.ResponseWriter, r *http.Request) {
 
 	k := a.kernelSvc.Get(name)
 	if k == nil {
-		a.errorResponse(w, "Kernel not found", http.StatusNotFound)
+		JSONError(w, http.StatusNotFound, "Kernel not found")
 		return
 	}
 
 	// Run check in background so response is immediate
-	go a.kernelSvc.CheckLatest(name)
+	go a.kernelSvc.CheckLatest(context.Background(), name)
 
-	a.jsonResponse(w, map[string]string{"status": "checking"})
+	JSONSuccess(w, map[string]string{"status": "checking"})
 }
 
 func (a *API) KernelInstall(w http.ResponseWriter, r *http.Request) {
@@ -43,14 +43,14 @@ func (a *API) KernelInstall(w http.ResponseWriter, r *http.Request) {
 
 	k := a.kernelSvc.Get(name)
 	if k == nil {
-		a.errorResponse(w, "Kernel not found", http.StatusNotFound)
+		JSONError(w, http.StatusNotFound, "Kernel not found")
 		return
 	}
 
 	// Reject concurrent install requests: if this kernel is already downloading or installing,
 	// return HTTP 409 Conflict immediately.
 	if k.Status == "downloading" || k.Status == "installing" {
-		a.errorResponse(w, "install already in progress", http.StatusConflict)
+		JSONError(w, http.StatusConflict, "install already in progress")
 		return
 	}
 
@@ -59,7 +59,7 @@ func (a *API) KernelInstall(w http.ResponseWriter, r *http.Request) {
 		_ = a.kernelSvc.Install(name)
 	}()
 
-	a.jsonResponse(w, map[string]string{"status": "downloading"})
+	JSONSuccess(w, map[string]string{"status": "downloading"})
 }
 
 func (a *API) KernelStatus(w http.ResponseWriter, r *http.Request) {
@@ -69,11 +69,11 @@ func (a *API) KernelStatus(w http.ResponseWriter, r *http.Request) {
 
 	k := a.kernelSvc.Get(name)
 	if k == nil {
-		a.errorResponse(w, "Kernel not found", http.StatusNotFound)
+		JSONError(w, http.StatusNotFound, "Kernel not found")
 		return
 	}
 
-	a.jsonResponse(w, k)
+	JSONSuccess(w, k)
 }
 
 func (a *API) KernelChannel(w http.ResponseWriter, r *http.Request) {
@@ -89,14 +89,14 @@ func (a *API) KernelChannel(w http.ResponseWriter, r *http.Request) {
 		Channel string `json:"channel"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if !a.kernelSvc.SetChannel(name, req.Channel) {
-		a.errorResponse(w, "Kernel not found", http.StatusNotFound)
+		JSONError(w, http.StatusNotFound, "Kernel not found")
 		return
 	}
 
-	a.jsonResponse(w, map[string]string{"channel": req.Channel})
+	JSONSuccess(w, map[string]string{"channel": req.Channel})
 }
