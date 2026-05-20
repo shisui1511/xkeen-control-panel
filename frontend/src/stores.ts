@@ -21,7 +21,10 @@ export async function fetchCapabilities(): Promise<void> {
   try {
     const res = await fetch('/api/capabilities')
     if (res.ok) {
-      capabilities.set(await res.json())
+      const envelope = await res.json()
+      // Capabilities uses JSONSuccess envelope: {success, data: {...}}
+      const data: CapabilitiesData = envelope.data ?? envelope
+      capabilities.set(data)
     }
   } catch (_) {
     // Silently ignore — capabilities will remain null

@@ -90,7 +90,9 @@
       try {
         const kernelsRes = await fetch('/api/kernels')
         if (kernelsRes.ok) {
-          const kernels = await kernelsRes.json()
+          const kernelsEnvelope = await kernelsRes.json()
+          // KernelList uses JSONSuccess envelope: {success, data: [...]}
+          const kernels = Array.isArray(kernelsEnvelope) ? kernelsEnvelope : (kernelsEnvelope.data ?? kernelsEnvelope)
           for (const k of kernels) {
             if (k.name === 'xray') {
               xrayVer = k.current_version || ''

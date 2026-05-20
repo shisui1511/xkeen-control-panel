@@ -46,7 +46,7 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	// Probe Mihomo API with a short timeout
 	resp.Mihomo.Reachable = probeMihomoReachable(a.cfg.MihomoAPIURL)
 
-	a.jsonResponse(w, resp)
+	JSONSuccess(w, resp)
 }
 
 // probeMihomoReachable attempts GET <mihomoURL>/version with a 3-second timeout.
