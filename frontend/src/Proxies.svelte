@@ -41,14 +41,28 @@
   let selectedGroup: ProxyGroup | null = null
   let showObservatory = false
 
+  function getLastDelay(proxy: Proxy): number | undefined {
+    if (proxy.history && proxy.history.length > 0) {
+      return proxy.history[proxy.history.length - 1].delay
+    }
+    return proxy.delay
+  }
+
+  function isProxyAlive(proxy: Proxy): boolean {
+    if (proxy.history && proxy.history.length > 0) {
+      return proxy.history[proxy.history.length - 1].delay > 0
+    }
+    return proxy.alive ?? false
+  }
+
   function computeStats(): ObservatoryStats {
     const proxyList = Object.values(proxies).filter(p => p.type !== 'Selector' && p.type !== 'URLTest' && p.type !== 'Fallback' && p.type !== 'LoadBalance')
     const total = proxyList.length
-    const healthy = proxyList.filter(p => p.alive && (p.delay || 0) < 300).length
-    const degraded = proxyList.filter(p => p.alive && (p.delay || 0) >= 300).length
-    const down = proxyList.filter(p => !p.alive).length
+    const healthy = proxyList.filter(p => isProxyAlive(p) && (getLastDelay(p) || 0) < 300).length
+    const degraded = proxyList.filter(p => isProxyAlive(p) && (getLastDelay(p) || 0) >= 300).length
+    const down = proxyList.filter(p => !isProxyAlive(p)).length
     const avg = proxyList.length > 0
-      ? proxyList.reduce((sum, p) => sum + (p.delay || 0), 0) / proxyList.length
+      ? proxyList.reduce((sum, p) => sum + (getLastDelay(p) || 0), 0) / proxyList.length
       : 0
     return { totalProxies: total, healthyProxies: healthy, degradedProxies: degraded, downProxies: down, avgLatency: Math.round(avg) }
   }
@@ -108,10 +122,22 @@
     error = ''
     try {
       const csrfToken = localStorage.getItem('csrf_token')
-      await fetch('/api/mihomo/proxy/group/UrlTest/delay?url=http://www.gstatic.com/generate_204&timeout=5000', {
-        method: 'GET',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
+      // Dynamically find URLTest groups instead of hardcoding 'UrlTest'
+      const urlTestGroups = groups.filter(g => g.type === 'URLTest')
+      if (urlTestGroups.length > 0) {
+        await Promise.all(urlTestGroups.map(g =>
+          fetch(`/api/mihomo/proxy/group/${encodeURIComponent(g.name)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`, {
+            method: 'GET',
+            headers: { 'X-CSRF-Token': csrfToken || '' }
+          })
+        ))
+      } else {
+        // Fallback: test all proxies via bulk endpoint
+        await fetch('/api/mihomo/proxy/proxies/delay?url=http://www.gstatic.com/generate_204&timeout=5000', {
+          method: 'GET',
+          headers: { 'X-CSRF-Token': csrfToken || '' }
+        })
+      }
       setTimeout(async () => {
         await fetchProxies()
         testingLatency = false
@@ -165,8 +191,8 @@
   function getHealthStatus(proxyName: string): 'healthy' | 'degraded' | 'down' {
     const proxy = proxies[proxyName]
     if (!proxy) return 'down'
-    if (!proxy.alive) return 'down'
-    if ((proxy.delay || 0) >= 300) return 'degraded'
+    if (!isProxyAlive(proxy)) return 'down'
+    if ((getLastDelay(proxy) || 0) >= 300) return 'degraded'
     return 'healthy'
   }
 

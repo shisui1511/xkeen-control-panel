@@ -42,9 +42,12 @@
     try {
       const res = await fetch('/api/kernels')
       if (res.ok) {
-        kernels = await res.json()
+        const envelope = await res.json()
+        // KernelList uses JSONSuccess envelope: {success, data: [...]}
+        const list = Array.isArray(envelope) ? envelope : (envelope.data ?? envelope)
+        kernels = list
         // Start polling for kernels that are not idle
-        kernels.forEach(k => {
+        kernels.forEach((k: typeof kernels[0]) => {
           if (k.status !== 'idle' && !statusIntervals[k.name]) {
             startPolling(k.name)
           }
@@ -131,7 +134,9 @@
     try {
       const res = await fetch(`/api/kernels/${name}/status`)
       if (res.ok) {
-        const data = await res.json()
+        const envelope = await res.json()
+        // KernelStatus uses JSONSuccess envelope: {success, data: {...}}
+        const data = envelope.data ?? envelope
         const idx = kernels.findIndex(k => k.name === name)
         if (idx >= 0) {
           kernels[idx] = { ...kernels[idx], ...data }
@@ -163,7 +168,8 @@
   $: activeKernel = xray?.process_status === 'running' ? 'xray'
       : mihomo?.process_status === 'running' ? 'mihomo'
       : 'unknown'
-  $: isRunning = xkeenStatus.includes('running') || xkeenStatus.includes('работает') || xkeenStatus.includes('активен')
+  // Use boolean process_status from kernel API instead of fragile string matching on i18n status text
+  $: isRunning = xray?.process_status === 'running' || mihomo?.process_status === 'running'
 
   onMount(() => {
     fetchStatus()
@@ -336,18 +342,11 @@
     </div>
   </div>
 
-  <div class="card mt-2">
-    <h3>{$t('svc.refresh_status')}</h3>
-    <button class="btn btn-secondary" on:click={() => { fetchStatus(); fetchKernels(); }} disabled={loading}>
-      {loading ? $t('app.loading') : '🔄 ' + $t('app.refresh')}
-    </button>
-  </div>
 </div>
 
 <style>
   .main-control {
     grid-column: 1 / -1;
-    border-left: 4px solid var(--primary);
   }
 
   .kernel-selector {
