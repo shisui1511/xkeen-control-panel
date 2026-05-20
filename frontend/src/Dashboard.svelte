@@ -6,6 +6,10 @@
   import Sidebar from './components/Sidebar.svelte'
   import Toast from './components/Toast.svelte'
   import ConfirmDialog from './components/ConfirmDialog.svelte'
+  import Card from './components/Card.svelte'
+  import Button from './components/Button.svelte'
+  import Icon from './lib/components/Icon.svelte'
+  import Skeleton from './components/Skeleton.svelte'
   import Editor from './Editor.svelte'
   import Logs from './Logs.svelte'
   import Services from './Services.svelte'
@@ -244,7 +248,7 @@
         <rect y="16.5" width="22" height="2.5" rx="1.25" fill="currentColor"/>
       </svg>
     </button>
-    <span style="font-weight: 600; font-size: 16px;">⚡ XKeen CP</span>
+    <span style="font-weight: 600; font-size: 16px;">XKeen CP</span>
     <span style="width: 34px;"></span>
   </header>
 
@@ -284,7 +288,7 @@
     <!-- Mihomo offline warning banner -->
     {#if $capabilities !== null && !$capabilities.mihomo.reachable}
       <div class="alert alert-warning" style="margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px; font-size: 13px;">
-        ⚠️ <strong>{$t('capabilities.mihomo_offline')}</strong> — {$t('capabilities.mihomo_offline_desc')}
+        <Icon name="warning" size={14} /> <strong>{$t('capabilities.mihomo_offline')}</strong> — {$t('capabilities.mihomo_offline_desc')}
       </div>
     {/if}
 
@@ -294,108 +298,116 @@
         <p class="text-secondary mb-3">{$t('dash.welcome')}</p>
 
         <!-- Live Service Status card -->
-        <div class="card mb-2">
-          <h2>{$t('dash.service_status')}</h2>
-          {#if statusLoading}
-            <p class="text-secondary">{$t('app.loading')}</p>
-          {:else if statusError}
-            <div class="status-error-row">
-              <span>⚠️ {$t('dash.status_error')}</span>
-              <button
-                class="btn btn-secondary"
-                style="padding: 4px 12px; font-size: 12px;"
-                on:click={fetchLiveStatus}
-                title={$t('app.refresh')}
-              >
-                ↺ {$t('app.refresh')}
-              </button>
-            </div>
-          {:else}
-            <div class="status-badges-row">
-              <div class="status-badge-item">
-                <span class="status-dot {statusColor(serviceStatus.xkeen)}"></span>
-                <span class="status-badge-label">XKeen</span>
-                <span class="status-badge-value status-{statusColor(serviceStatus.xkeen)}">
-                  {serviceStatus.xkeen === 'running' ? $t('app.running') : $t('app.stop')}
-                </span>
+        <div style="margin-bottom: var(--spacing-2);">
+          <Card title={$t('dash.service_status')}>
+            {#if statusLoading}
+              <div class="status-badges-row">
+                <Skeleton type="rect" width="120px" height="34px" />
+                <Skeleton type="rect" width="160px" height="34px" />
+                <Skeleton type="rect" width="160px" height="34px" />
+                <Skeleton type="rect" width="130px" height="34px" />
               </div>
-              <div class="status-badge-item">
-                <span class="status-dot {statusColor(serviceStatus.xray)}"></span>
-                <span class="status-badge-label">Xray</span>
-                <span class="status-badge-value status-{statusColor(serviceStatus.xray)}">
-                  {$t('kernel.status.' + (serviceStatus.xray || 'unknown'))}
-                  {#if serviceStatus.xrayVersion && serviceStatus.xray !== 'not_installed'}
-                    <span class="version-badge">{serviceStatus.xrayVersion}</span>
-                  {/if}
-                </span>
+            {:else if statusError}
+              <div class="status-error-row">
+                <span><Icon name="warning" size={14} /> {$t('dash.status_error')}</span>
+                <Button
+                  variant="secondary"
+                  onclick={fetchLiveStatus}
+                  title={$t('app.refresh')}
+                >
+                  ↺ {$t('app.refresh')}
+                </Button>
               </div>
-              <div class="status-badge-item">
-                <span class="status-dot {statusColor(serviceStatus.mihomo)}"></span>
-                <span class="status-badge-label">Mihomo</span>
-                <span class="status-badge-value status-{statusColor(serviceStatus.mihomo)}">
-                  {$t('kernel.status.' + (serviceStatus.mihomo || 'unknown'))}
-                  {#if serviceStatus.mihomoVersion && serviceStatus.mihomo !== 'not_installed'}
-                    <span class="version-badge">{serviceStatus.mihomoVersion}</span>
-                  {/if}
-                </span>
+            {:else}
+              <div class="status-badges-row">
+                <div class="status-badge-item">
+                  <span class="status-dot {statusColor(serviceStatus.xkeen)}"></span>
+                  <span class="status-badge-label">XKeen</span>
+                  <span class="status-badge-value status-{statusColor(serviceStatus.xkeen)}">
+                    {serviceStatus.xkeen === 'running' ? $t('app.running') : $t('app.stop')}
+                  </span>
+                </div>
+                <div class="status-badge-item">
+                  <span class="status-dot {statusColor(serviceStatus.xray)}"></span>
+                  <span class="status-badge-label">Xray</span>
+                  <span class="status-badge-value status-{statusColor(serviceStatus.xray)}">
+                    {$t('kernel.status.' + (serviceStatus.xray || 'unknown'))}
+                    {#if serviceStatus.xrayVersion && serviceStatus.xray !== 'not_installed'}
+                      <span class="version-badge">{serviceStatus.xrayVersion}</span>
+                    {/if}
+                  </span>
+                </div>
+                <div class="status-badge-item">
+                  <span class="status-dot {statusColor(serviceStatus.mihomo)}"></span>
+                  <span class="status-badge-label">Mihomo</span>
+                  <span class="status-badge-value status-{statusColor(serviceStatus.mihomo)}">
+                    {$t('kernel.status.' + (serviceStatus.mihomo || 'unknown'))}
+                    {#if serviceStatus.mihomoVersion && serviceStatus.mihomo !== 'not_installed'}
+                      <span class="version-badge">{serviceStatus.mihomoVersion}</span>
+                    {/if}
+                  </span>
+                </div>
+                <div class="status-badge-item">
+                  <span class="status-dot {serviceStatus.connections > 0 ? 'success' : 'warning'}"></span>
+                  <span class="status-badge-label">{$t('dash.connections')}</span>
+                  <span class="status-badge-value">{serviceStatus.connections}</span>
+                </div>
               </div>
-              <div class="status-badge-item">
-                <span class="status-dot {serviceStatus.connections > 0 ? 'success' : 'warning'}"></span>
-                <span class="status-badge-label">{$t('dash.connections')}</span>
-                <span class="status-badge-value">{serviceStatus.connections}</span>
-              </div>
-            </div>
-          {/if}
+            {/if}
+          </Card>
         </div>
 
-        <div class="card mb-2">
-          <h2>{$t('dash.system_info')}</h2>
-          <p><strong>{$t('app.version')}:</strong> {version}</p>
+        <div style="margin-bottom: var(--spacing-2);">
+          <Card title={$t('dash.system_info')}>
+            <p><strong>{$t('app.version')}:</strong> {version}</p>
+          </Card>
         </div>
 
         {#if systemStats}
-          <div class="card mb-2">
-            <h2>{$t('dash.system_stats')}</h2>
-            <div class="stats-grid">
-              <div class="stat-box">
-                <div class="stat-label">{$t('dash.ram')}</div>
-                <div class="stat-value">{formatBytes(systemStats.memory.used)} / {formatBytes(systemStats.memory.total)}</div>
-                <div class="stat-bar">
-                  <div class="stat-bar-fill" style="width: {(systemStats.memory.used / systemStats.memory.total * 100).toFixed(1)}%"></div>
+          <div style="margin-bottom: var(--spacing-2);">
+            <Card title={$t('dash.system_stats')}>
+              <div class="stats-grid">
+                <div class="stat-box">
+                  <div class="stat-label">{$t('dash.ram')}</div>
+                  <div class="stat-value">{formatBytes(systemStats.memory.used)} / {formatBytes(systemStats.memory.total)}</div>
+                  <div class="stat-bar">
+                    <div class="stat-bar-fill" style="width: {(systemStats.memory.used / systemStats.memory.total * 100).toFixed(1)}%"></div>
+                  </div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-label">{$t('dash.load')}</div>
+                  <div class="stat-value">{systemStats.load[0].toFixed(2)}</div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-label">{$t('dash.uptime')}</div>
+                  <div class="stat-value">{systemStats.uptime.days}d {systemStats.uptime.hours}h {systemStats.uptime.minutes}m</div>
+                </div>
+                <div class="stat-box">
+                  <div class="stat-label">{$t('dash.goroutines')}</div>
+                  <div class="stat-value">{systemStats.go_runtime.goroutines}</div>
                 </div>
               </div>
-              <div class="stat-box">
-                <div class="stat-label">{$t('dash.load')}</div>
-                <div class="stat-value">{systemStats.load[0].toFixed(2)}</div>
-              </div>
-              <div class="stat-box">
-                <div class="stat-label">{$t('dash.uptime')}</div>
-                <div class="stat-value">{systemStats.uptime.days}d {systemStats.uptime.hours}h {systemStats.uptime.minutes}m</div>
-              </div>
-              <div class="stat-box">
-                <div class="stat-label">{$t('dash.goroutines')}</div>
-                <div class="stat-value">{systemStats.go_runtime.goroutines}</div>
-              </div>
-            </div>
+            </Card>
           </div>
         {/if}
 
-        <div class="card mb-2">
-          <h2>{$t('dash.quick_actions')}</h2>
-          <div class="quick-actions">
-            <button class="btn btn-secondary" on:click={() => switchTab('proxies')} title={$t('nav.proxies')}>
-              🌐 {$t('nav.proxies')}
-            </button>
-            <button class="btn btn-secondary" on:click={() => switchTab('subscriptions')} title={$t('nav.subscriptions')}>
-              📡 {$t('nav.subscriptions')}
-            </button>
-            <button class="btn btn-secondary" on:click={() => switchTab('editor')} title={$t('nav.editor')}>
-              📝 {$t('nav.editor')}
-            </button>
-            <button class="btn btn-secondary" on:click={() => switchTab('logs')} title={$t('nav.logs')}>
-              📋 {$t('nav.logs')}
-            </button>
-          </div>
+        <div style="margin-bottom: var(--spacing-2);">
+          <Card title={$t('dash.quick_actions')}>
+            <div class="quick-actions">
+              <Button variant="secondary" onclick={() => switchTab('proxies')} title={$t('nav.proxies')}>
+                <Icon name="proxies" size={16} /> {$t('nav.proxies')}
+              </Button>
+              <Button variant="secondary" onclick={() => switchTab('subscriptions')} title={$t('nav.subscriptions')}>
+                <Icon name="subscriptions" size={16} /> {$t('nav.subscriptions')}
+              </Button>
+              <Button variant="secondary" onclick={() => switchTab('editor')} title={$t('nav.editor')}>
+                <Icon name="editor" size={16} /> {$t('nav.editor')}
+              </Button>
+              <Button variant="secondary" onclick={() => switchTab('logs')} title={$t('nav.logs')}>
+                <Icon name="logs" size={16} /> {$t('nav.logs')}
+              </Button>
+            </div>
+          </Card>
         </div>
       </div>
     {:else if currentTab === 'editor'}

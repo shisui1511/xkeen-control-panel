@@ -2,6 +2,8 @@
   import { onMount } from 'svelte'
   import { t } from './i18n'
   import { capabilities } from './stores'
+  import EmptyState from './components/EmptyState.svelte'
+  import Icon from './lib/components/Icon.svelte'
 
   interface Rule {
     type: string
@@ -75,11 +77,10 @@
   <p class="text-secondary mb-3">{$t('rules.subtitle')}</p>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
-    <div class="card" style="text-align: center; padding: 40px 20px;">
-      <div style="font-size: 48px; margin-bottom: 12px;">🔌</div>
-      <h2>{$t('capabilities.mihomo_empty_title')}</h2>
-      <p class="text-secondary">{$t('capabilities.mihomo_empty_desc')}</p>
-    </div>
+    <EmptyState
+      title={$t('ds.empty.mihomo_offline_title')}
+      description={$t('ds.empty.mihomo_offline_desc')}
+    />
   {:else}
 
   {#if error}
@@ -102,7 +103,8 @@
       </select>
     </div>
     <button class="btn btn-secondary" on:click={fetchRules} disabled={loading}>
-      {loading ? $t('app.loading') : '🔄 ' + $t('app.refresh')}
+      <Icon name="refresh" size={14} />
+      {loading ? $t('app.loading') : $t('app.refresh')}
     </button>
   </div>
 

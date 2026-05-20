@@ -1,7 +1,11 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { t } from './i18n'
-  import { capabilities } from './stores'
+  import { capabilities, toastStore } from './stores'
+  import Skeleton from './components/Skeleton.svelte'
+  import EmptyState from './components/EmptyState.svelte'
+  import PlayIcon from './lib/components/icons/Play.svelte'
+  import Icon from './lib/components/Icon.svelte'
 
   interface Connection {
     id: string
@@ -25,6 +29,8 @@
   let connections: Connection[] = []
   let loading = false
   let error = ''
+  let loadTimedOut = false
+  let loadTimeoutId: ReturnType<typeof setTimeout> | null = null
   let refreshInterval: ReturnType<typeof setInterval>
   let autoRefresh = true
 
@@ -37,7 +43,15 @@
   async function fetchConnections() {
     loading = true
     error = ''
-    
+    loadTimedOut = false
+    if (loadTimeoutId) clearTimeout(loadTimeoutId)
+    loadTimeoutId = setTimeout(() => {
+      if (loading) {
+        loading = false
+        loadTimedOut = true
+        error = $t('ds.empty.load_timeout')
+      }
+    }, 10000)
     try {
       const res = await fetch('/api/mihomo/proxy/connections')
       if (!res.ok) throw new Error('Failed to load connections')
@@ -47,6 +61,7 @@
     } catch (e: any) {
       error = e.message
     } finally {
+      if (loadTimeoutId) { clearTimeout(loadTimeoutId); loadTimeoutId = null }
       loading = false
     }
   }
@@ -102,6 +117,28 @@
     }
   }
 
+  let mihomoLaunching = false
+
+  async function launchMihomo() {
+    mihomoLaunching = true
+    try {
+      const csrfToken = localStorage.getItem('csrf_token')
+      const res = await fetch('/api/mihomo/control', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({ action: 'start' })
+      })
+      if (!res.ok) throw new Error('Failed to start Mihomo')
+      setTimeout(() => fetchConnections(), 1500)
+    } catch (e: any) {
+      toastStore.update(items => [...items, { id: Date.now(), type: 'error', message: e.message }])
+      mihomoLaunching = false
+    }
+  }
+
   onMount(() => {
     fetchConnections()
     refreshInterval = setInterval(fetchConnections, 3000)
@@ -117,16 +154,25 @@
   <p class="text-secondary mb-3">{$t('conn.active')}</p>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
-    <div class="card" style="text-align: center; padding: 40px 20px;">
-      <div style="font-size: 48px; margin-bottom: 12px;">🔌</div>
-      <h2>{$t('capabilities.mihomo_empty_title')}</h2>
-      <p class="text-secondary">{$t('capabilities.mihomo_empty_desc')}</p>
-    </div>
+    <EmptyState
+      title={$t('ds.empty.mihomo_offline_title')}
+      description={$t('ds.empty.mihomo_offline_desc')}
+      icon={PlayIcon}
+      ctaText={mihomoLaunching ? $t('ds.empty.mihomo_offline_loading') : $t('ds.empty.mihomo_offline_cta')}
+      ctaLoading={mihomoLaunching}
+      oncta={launchMihomo}
+    />
   {:else}
 
   {#if error}
-    <div class="alert alert-error mb-2">{error}</div>
-  {/if}
+    <EmptyState
+      title={$t('ds.empty.error_title')}
+      description={error}
+      icon="warning"
+      ctaText={$t('app.refresh')}
+      oncta={fetchConnections}
+    />
+  {:else}
 
   <div class="toolbar mb-2">
     <div class="filters">
@@ -137,10 +183,11 @@
     </div>
     <div class="actions">
       <button class="btn btn-secondary" on:click={fetchConnections} disabled={loading}>
-        {loading ? $t('app.loading') : '🔄 ' + $t('app.refresh')}
+        <Icon name="refresh" size={14} />
+        {loading ? $t('app.loading') : $t('app.refresh')}
       </button>
       <button class="btn btn-icon" class:active={autoRefresh} on:click={toggleAutoRefresh} title={$t('conn.autorefresh')}>
-        {autoRefresh ? '⏸' : '▶'}
+        {#if autoRefresh}<Icon name="pause" size={14} />{:else}<Icon name="play" size={14} />{/if}
       </button>
     </div>
   </div>
@@ -164,47 +211,81 @@
         </tr>
       </thead>
       <tbody>
-        {#each getFilteredConnections() as conn}
-          <tr>
-            <td>
-              <div class="cell-source">
-                <span class="network-badge">{conn.metadata.network}</span>
-                {conn.metadata.sourceIP}:{conn.metadata.sourcePort}
-              </div>
-            </td>
-            <td>
-              <div class="cell-dest">
-                <div class="host">{conn.metadata.host || conn.metadata.destinationIP}</div>
-                <div class="port">:{conn.metadata.destinationPort}</div>
-              </div>
-            </td>
-            <td>
-              <span class="rule-badge">{conn.rule}</span>
-              {#if conn.rulePayload}
-                <span class="rule-payload">{conn.rulePayload}</span>
-              {/if}
-            </td>
-            <td>
-              <span class="proxy-name">{getProxyName(conn)}</span>
-            </td>
-            <td class="bytes">{formatBytes(conn.upload)}</td>
-            <td class="bytes">{formatBytes(conn.download)}</td>
-            <td>
-              <button class="btn-close" on:click={() => closeConnection(conn.id)} title={$t('app.close')}>
-                ✕
-              </button>
-            </td>
-          </tr>
+        {#if loading && connections.length === 0}
+          {#each Array(5) as _}
+            <tr>
+              <td>
+                <div class="cell-source">
+                  <Skeleton type="text-line" width="60px" />
+                  <Skeleton type="text-line" width="100px" />
+                </div>
+              </td>
+              <td>
+                <div class="cell-dest">
+                  <Skeleton type="text-line" width="140px" />
+                </div>
+              </td>
+              <td>
+                <Skeleton type="text-line" width="80px" />
+              </td>
+              <td>
+                <Skeleton type="text-line" width="70px" />
+              </td>
+              <td class="bytes">
+                <Skeleton type="text-line" width="50px" />
+              </td>
+              <td class="bytes">
+                <Skeleton type="text-line" width="50px" />
+              </td>
+              <td></td>
+            </tr>
+          {/each}
         {:else}
-          <tr>
-            <td colspan="7" class="empty-cell">
-              {$t('conn.no_connections')}
-            </td>
-          </tr>
-        {/each}
+          {#each getFilteredConnections() as conn}
+            <tr>
+              <td>
+                <div class="cell-source">
+                  <span class="network-badge">{conn.metadata.network}</span>
+                  {conn.metadata.sourceIP}:{conn.metadata.sourcePort}
+                </div>
+              </td>
+              <td>
+                <div class="cell-dest">
+                  <div class="host">{conn.metadata.host || conn.metadata.destinationIP}</div>
+                  <div class="port">:{conn.metadata.destinationPort}</div>
+                </div>
+              </td>
+              <td>
+                <span class="rule-badge">{conn.rule}</span>
+                {#if conn.rulePayload}
+                  <span class="rule-payload">{conn.rulePayload}</span>
+                {/if}
+              </td>
+              <td>
+                <span class="proxy-name">{getProxyName(conn)}</span>
+              </td>
+              <td class="bytes">{formatBytes(conn.upload)}</td>
+              <td class="bytes">{formatBytes(conn.download)}</td>
+              <td>
+                <button class="btn-close" on:click={() => closeConnection(conn.id)} title={$t('app.close')}>
+                  <Icon name="close" size={12} />
+                </button>
+              </td>
+            </tr>
+          {:else}
+            <tr>
+              <td colspan="7" class="empty-cell">
+                {$t('conn.no_connections')}
+              </td>
+            </tr>
+          {/each}
+        {/if}
       </tbody>
     </table>
   </div>
+
+  {/if}
+
   {/if}
 </div>
 

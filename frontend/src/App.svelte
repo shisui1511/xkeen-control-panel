@@ -49,10 +49,10 @@
 {:else if authError}
   <div class="center-container">
     <div class="card">
-      <h1 class="text-center">⚠️ {$t('app.conn_error')}</h1>
+      <h1 class="text-center">{$t('app.conn_error')}</h1>
       <p class="text-center text-secondary mb-3">{authError}</p>
       <p class="text-center text-secondary">{$t('app.conn_error_desc')}</p>
-      <button class="btn btn-primary" style="width: 100%; margin-top: 1rem;" on:click={() => location.reload()}>
+      <button class="btn btn-primary" style="width: 100%; margin-top: 1rem;" onclick={() => location.reload()}>
         {$t('app.reload')}
       </button>
     </div>

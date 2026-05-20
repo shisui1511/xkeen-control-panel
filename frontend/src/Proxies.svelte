@@ -1,7 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { t } from './i18n'
-  import { capabilities } from './stores'
+  import { capabilities, toastStore } from './stores'
+  import Skeleton from './components/Skeleton.svelte'
+  import EmptyState from './components/EmptyState.svelte'
+  import PlayIcon from './lib/components/icons/Play.svelte'
+  import Icon from './lib/components/Icon.svelte'
 
   interface Proxy {
     name: string
@@ -36,10 +40,12 @@
   let proxies: Record<string, Proxy> = {}
   let loading = false
   let error = ''
+  let loadTimedOut = false
   let testingLatency = false
   let testingProxy = ''
   let selectedGroup: ProxyGroup | null = null
   let showObservatory = false
+  let loadTimeoutId: ReturnType<typeof setTimeout> | null = null
 
   function getLastDelay(proxy: Proxy): number | undefined {
     if (proxy.history && proxy.history.length > 0) {
@@ -70,6 +76,15 @@
   async function fetchProxies() {
     loading = true
     error = ''
+    loadTimedOut = false
+    if (loadTimeoutId) clearTimeout(loadTimeoutId)
+    loadTimeoutId = setTimeout(() => {
+      if (loading) {
+        loading = false
+        loadTimedOut = true
+        error = $t('ds.empty.load_timeout')
+      }
+    }, 10000)
     try {
       const res = await fetch('/api/mihomo/proxy/proxies')
       if (!res.ok) throw new Error($t('proxies.load_error'))
@@ -95,6 +110,7 @@
     } catch (e: any) {
       error = e.message
     } finally {
+      if (loadTimeoutId) { clearTimeout(loadTimeoutId); loadTimeoutId = null }
       loading = false
     }
   }
@@ -198,9 +214,9 @@
 
   function getHealthLabel(status: string): string {
     const labels: Record<string, string> = {
-      healthy: '✅',
-      degraded: '⚠️',
-      down: '❌'
+      healthy: '●',
+      degraded: '▲',
+      down: 'x'
     }
     return labels[status] || ''
   }
@@ -221,6 +237,29 @@
     }).join(' ')
   }
 
+  let mihomoLaunching = false
+
+  async function launchMihomo() {
+    mihomoLaunching = true
+    try {
+      const csrfToken = localStorage.getItem('csrf_token')
+      const res = await fetch('/api/mihomo/control', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({ action: 'start' })
+      })
+      if (!res.ok) throw new Error('Failed to start Mihomo')
+      // Auto-refresh after successful start
+      setTimeout(() => fetchProxies(), 1500)
+    } catch (e: any) {
+      toastStore.update(items => [...items, { id: Date.now(), type: 'error', message: e.message }])
+      mihomoLaunching = false
+    }
+  }
+
   onMount(() => {
     fetchProxies()
     const interval = setInterval(fetchProxies, 10000)
@@ -233,26 +272,36 @@
   <p class="text-secondary mb-3">{$t('proxies.subtitle')}</p>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
-    <div class="card" style="text-align: center; padding: 40px 20px;">
-      <div style="font-size: 48px; margin-bottom: 12px;">🔌</div>
-      <h2>{$t('capabilities.mihomo_empty_title')}</h2>
-      <p class="text-secondary">{$t('capabilities.mihomo_empty_desc')}</p>
-    </div>
+    <EmptyState
+      title={$t('ds.empty.mihomo_offline_title')}
+      description={$t('ds.empty.mihomo_offline_desc')}
+      icon={PlayIcon}
+      ctaText={mihomoLaunching ? $t('ds.empty.mihomo_offline_loading') : $t('ds.empty.mihomo_offline_cta')}
+      ctaLoading={mihomoLaunching}
+      oncta={launchMihomo}
+    />
   {:else}
 
   {#if error}
-    <div class="alert alert-error mb-2">{error}</div>
-  {/if}
+    <EmptyState
+      title={$t('ds.empty.error_title')}
+      description={error}
+      icon="warning"
+      ctaText={$t('app.refresh')}
+      oncta={fetchProxies}
+    />
+  {:else}
 
   <div class="toolbar mb-2">
     <button class="btn btn-secondary" on:click={fetchProxies} disabled={loading}>
-      {loading ? $t('app.loading') : '🔄 ' + $t('app.refresh')}
+      <Icon name="refresh" size={14} />
+      {loading ? $t('app.loading') : $t('app.refresh')}
     </button>
     <button class="btn btn-primary" on:click={testLatency} disabled={testingLatency}>
-      {testingLatency ? $t('proxies.testing') : '⚡ ' + $t('proxies.test_latency')}
+      {testingLatency ? $t('proxies.testing') : $t('proxies.test_latency')}
     </button>
     <button class="btn btn-secondary" on:click={() => showObservatory = !showObservatory}>
-      📊 {$t('proxies.observatory')}
+      {$t('proxies.observatory')}
     </button>
   </div>
 
@@ -285,79 +334,104 @@
     </div>
   {/if}
 
-  {#if groups.length === 0 && !loading}
+  {#if loading && groups.length === 0}
+    <div class="groups-grid">
+      {#each Array(4) as _}
+        <div class="card group-card">
+          <div class="group-header" style="border-bottom: 1px solid var(--color-border-subtle); margin-bottom: 1rem; padding-bottom: 0.75rem;">
+            <div>
+              <Skeleton type="text-line" width="140px" />
+              <Skeleton type="text-line" width="80px" />
+            </div>
+          </div>
+          <div class="proxy-list">
+            {#each Array(3) as _}
+              <div class="proxy-item" style="border: 1px solid var(--color-border-subtle); padding: 8px; justify-content: space-between; display: flex; align-items: center;">
+                <Skeleton type="text-line" width="100px" />
+                <Skeleton type="text-line" width="40px" />
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/each}
+    </div>
+  {:else if groups.length === 0 && !loading}
     <div class="card">
       <p class="text-secondary">{$t('proxies.no_proxies')}</p>
     </div>
   {/if}
 
-  <div class="groups-grid">
-    {#each groups as group}
-      <div class="card group-card">
-        <div class="group-header">
-          <div>
-            <h3>{group.name}</h3>
-            <span class="group-type">{getGroupTypeLabel(group.type)}</span>
-            {#if group.type === 'Fallback'}
-              <span class="fallback-badge">{$t('proxies.fallback_pool')}</span>
-            {/if}
-          </div>
-          <div class="group-delay">
-            {#if group.delay}
-              <span class="delay-badge">{formatDelay(group.delay)}</span>
-            {/if}
-          </div>
-        </div>
-
-        <div class="proxy-list">
-          {#each group.all as proxyName}
-            {@const delay = getProxyDelay(proxyName)}
-            {@const isActive = group.now === proxyName}
-            {@const health = getHealthStatus(proxyName)}
-            {@const proxy = proxies[proxyName]}
-            
-            <div 
-              class="proxy-item" 
-              class:active={isActive}
-              role="button"
-              tabindex="0"
-              on:click={() => group.type === 'Selector' && selectProxy(group.name, proxyName)}
-              on:keydown={(e) => e.key === 'Enter' && group.type === 'Selector' && selectProxy(group.name, proxyName)}
-            >
-              <div class="proxy-info">
-                <span class="proxy-name">{proxyName}</span>
-                <span class="health-badge" class:healthy={health === 'healthy'} class:degraded={health === 'degraded'} class:down={health === 'down'}>
-                  {getHealthLabel(health)}
-                </span>
-              </div>
-              <div class="proxy-metrics">
-                {#if proxy?.history && proxy.history.length > 1}
-                  <svg class="sparkline" viewBox="0 0 100 24" preserveAspectRatio="none">
-                    <path d={getSparklinePath(proxy.history)} fill="none" stroke="currentColor" stroke-width="1.5" />
-                  </svg>
-                {/if}
-                <span class="proxy-delay">{formatDelay(delay)}</span>
-                <button 
-                  class="btn-icon latency-btn" 
-                  on:click|stopPropagation={() => testProxyLatency(proxyName)}
-                  disabled={testingProxy === proxyName}
-                  title={$t('proxies.test_single')}
-                >
-                  {testingProxy === proxyName ? '⏳' : '⚡'}
-                </button>
-              </div>
+  {#if groups.length > 0}
+    <div class="groups-grid">
+      {#each groups as group}
+        <div class="card group-card">
+          <div class="group-header">
+            <div>
+              <h3>{group.name}</h3>
+              <span class="group-type">{getGroupTypeLabel(group.type)}</span>
+              {#if group.type === 'Fallback'}
+                <span class="fallback-badge">{$t('proxies.fallback_pool')}</span>
+              {/if}
             </div>
-          {/each}
-        </div>
-
-        {#if group.type === 'Fallback'}
-          <div class="fallback-info">
-            <p class="text-secondary">{$t('proxies.fallback_order')}: {group.all.join(' → ')}</p>
+            <div class="group-delay">
+              {#if group.delay}
+                <span class="delay-badge">{formatDelay(group.delay)}</span>
+              {/if}
+            </div>
           </div>
-        {/if}
-      </div>
-    {/each}
-  </div>
+
+          <div class="proxy-list">
+            {#each group.all as proxyName}
+              {@const delay = getProxyDelay(proxyName)}
+              {@const isActive = group.now === proxyName}
+              {@const health = getHealthStatus(proxyName)}
+              {@const proxy = proxies[proxyName]}
+              
+              <div 
+                class="proxy-item" 
+                class:active={isActive}
+                role="button"
+                tabindex="0"
+                on:click={() => group.type === 'Selector' && selectProxy(group.name, proxyName)}
+                on:keydown={(e) => e.key === 'Enter' && group.type === 'Selector' && selectProxy(group.name, proxyName)}
+              >
+                <div class="proxy-info">
+                  <span class="proxy-name">{proxyName}</span>
+                  <span class="health-badge" class:healthy={health === 'healthy'} class:degraded={health === 'degraded'} class:down={health === 'down'}>
+                    {getHealthLabel(health)}
+                  </span>
+                </div>
+                <div class="proxy-metrics">
+                  {#if proxy?.history && proxy.history.length > 1}
+                    <svg class="sparkline" viewBox="0 0 100 24" preserveAspectRatio="none">
+                      <path d={getSparklinePath(proxy.history)} fill="none" stroke="currentColor" stroke-width="1.5" />
+                    </svg>
+                  {/if}
+                  <span class="proxy-delay">{formatDelay(delay)}</span>
+                  <button 
+                    class="btn-icon latency-btn" 
+                    on:click|stopPropagation={() => testProxyLatency(proxyName)}
+                    disabled={testingProxy === proxyName}
+                    title={$t('proxies.test_single')}
+                  >
+                    {testingProxy === proxyName ? '…' : '→'}
+                  </button>
+                </div>
+              </div>
+            {/each}
+          </div>
+
+          {#if group.type === 'Fallback'}
+            <div class="fallback-info">
+              <p class="text-secondary">{$t('proxies.fallback_order')}: {group.all.join(' → ')}</p>
+            </div>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  {/if}
+  {/if}
+
   {/if}
 </div>
 

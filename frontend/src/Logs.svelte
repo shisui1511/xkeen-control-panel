@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { t } from './i18n'
+  import Icon from './lib/components/Icon.svelte'
+  import EmptyState from './components/EmptyState.svelte'
 
   interface LogEntry {
     text: string
@@ -173,19 +175,19 @@
       />
       
       <button on:click={togglePause} class="btn-icon" title={paused ? $t('logs.resume') : $t('logs.pause')}>
-        {paused ? '▶' : '⏸'}
+        {#if paused}<Icon name="play" size={14} />{:else}<Icon name="pause" size={14} />{/if}
       </button>
       
       <button on:click={toggleAutoScroll} class="btn-icon" class:active={autoScroll} title={$t('logs.autoscroll')}>
-        ⬇
+        <Icon name="arrow-down" size={14} />
       </button>
       
       <button on:click={clearLogs} class="btn-icon" title={$t('logs.clear')}>
-        🗑
+        <Icon name="trash" size={14} />
       </button>
       
       <button on:click={exportLogs} class="btn-icon" title={$t('logs.export')}>
-        📥
+        <Icon name="download" size={14} />
       </button>
       
       {#if connected}
@@ -208,9 +210,11 @@
     {/each}
     
     {#if getFilteredLogs().length === 0}
-      <div class="empty-state">
-        {filter || sourceFilter ? $t('logs.no_filtered_logs') : $t('logs.no_logs')}
-      </div>
+      <EmptyState
+        title={filter || sourceFilter ? $t('logs.no_filtered_logs') : $t('logs.no_logs')}
+        description={connected ? $t('logs.waiting') : $t('logs.connect_hint')}
+        icon="logs"
+      />
     {/if}
   </div>
 </div>
