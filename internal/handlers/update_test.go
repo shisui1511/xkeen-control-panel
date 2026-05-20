@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 )
 
 // plainHTTPClient returns a standard http.Client without SSRF protection,
@@ -124,5 +126,21 @@ func TestSHA256Verification_404(t *testing.T) {
 
 	if err := verifyFileChecksumWithClient(binPath, "xkeen-control-panel", ts.URL, plainHTTPClient()); err != nil {
 		t.Fatalf("expected nil for 404 checksums (backward compat), got: %v", err)
+	}
+}
+
+// TestUpdateRollback_MethodNotAllowed verifies that UpdateRollback rejects non-POST requests.
+func TestUpdateRollback_MethodNotAllowed(t *testing.T) {
+	api := &API{cfg: &config.Config{DataDir: t.TempDir()}}
+
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			req := httptest.NewRequest(method, "/api/update/rollback", nil)
+			rr := httptest.NewRecorder()
+			api.UpdateRollback(rr, req)
+			if rr.Code != http.StatusMethodNotAllowed {
+				t.Errorf("method %s: expected 405, got %d", method, rr.Code)
+			}
+		})
 	}
 }

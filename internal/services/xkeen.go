@@ -50,6 +50,8 @@ func (s *XKeenService) SwitchKernel(name string) (string, error) {
 }
 
 func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (string, error) {
+	// INVARIANT: no shell interpreter — exec.Command receives the binary path directly,
+	// never via "sh -c", so action cannot trigger shell injection.
 	cmd := exec.Command(s.BinaryPath, action)
 	var out bytes.Buffer
 	cmd.Stdout = &out

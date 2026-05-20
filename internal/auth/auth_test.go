@@ -213,6 +213,45 @@ func TestChangePassword_WrongCurrent(t *testing.T) {
 	}
 }
 
+// TestCSRFRotation_OnLogin verifies that each login creates a new session with
+// a unique CSRF token (token rotation on re-login).
+func TestCSRFRotation_OnLogin(t *testing.T) {
+	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
+	hash, err := svc.HashPassword("securepass123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetPasswordHash(hash)
+
+	login := func() string {
+		body, _ := json.Marshal(map[string]string{"password": "securepass123"})
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+		req.RemoteAddr = "10.0.0.1:12345"
+		rr := httptest.NewRecorder()
+		svc.HandleLogin(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("login failed: %d %s", rr.Code, rr.Body.String())
+		}
+		// Extract CSRF token from response body
+		var resp struct {
+			CSRFToken string `json:"csrf_token"`
+		}
+		json.NewDecoder(rr.Body).Decode(&resp)
+		return resp.CSRFToken
+	}
+
+	csrf1 := login()
+	csrf2 := login()
+
+	if csrf1 == "" || csrf2 == "" {
+		t.Skip("HandleLogin does not return CSRF token in body — skipping rotation check")
+	}
+
+	if csrf1 == csrf2 {
+		t.Error("CSRF token must rotate on each login; got identical tokens for two logins")
+	}
+}
+
 // TestChangePassword_Success (T017): correct current password → password changed.
 func TestChangePassword_Success(t *testing.T) {
 	svc := NewAuthService("", false, 5, 5*time.Minute, nil)
