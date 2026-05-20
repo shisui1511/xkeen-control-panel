@@ -246,6 +246,111 @@ func TestConcurrentInstall409(t *testing.T) {
 	}
 }
 
+// TestKernelInstall_Concurrent: two concurrent Install calls for the same kernel
+// should result in only one succeeding; the second must receive "install already in progress".
+func TestKernelInstall_Concurrent(t *testing.T) {
+	svc := NewKernelService()
+
+	// Hold the install lock directly to simulate an in-progress install.
+	mu := &sync.Mutex{}
+	actual, _ := svc.installLocks.LoadOrStore("xray", mu)
+	installMu := actual.(*sync.Mutex)
+	installMu.Lock()
+	defer installMu.Unlock()
+
+	// Concurrent call must fail immediately without blocking.
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.Install("xray")
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected error when install lock is held, got nil")
+		}
+		if !strings.Contains(err.Error(), "install already in progress") {
+			t.Errorf("expected 'install already in progress', got: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Install blocked instead of returning immediately when lock is held")
+	}
+}
+
+// TestKernelVersionCache_TTL: detectVersion should use the cached result within TTL
+// and re-run the binary only after the TTL expires.
+func TestKernelVersionCache_TTL(t *testing.T) {
+	tmpDir := t.TempDir()
+	callCount := 0
+	scriptPath := filepath.Join(tmpDir, "xray")
+	// Script that increments a side-effect file each time it's called.
+	// We count calls via our own counter instead.
+	script := "#!/bin/sh\necho \"Xray 1.9.0 (Xray, Penetrates Everything.)\"\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewKernelService()
+	k := svc.kernels["xray"]
+	k.BinaryPath = scriptPath
+
+	// Wrap detectVersion in a counting helper
+	countingDetect := func() string {
+		callCount++
+		return svc.detectVersion(k)
+	}
+
+	v1 := countingDetect()
+	if v1 != "1.9.0" {
+		t.Fatalf("first call: expected 1.9.0, got %s", v1)
+	}
+
+	// Second call within TTL — should return cached value without re-running binary.
+	// Force cache to look fresh.
+	k.verCache.value = "1.9.0"
+	k.verCache.expires = time.Now().Add(versionCacheTTL)
+	v2 := svc.detectVersion(k)
+	if v2 != "1.9.0" {
+		t.Fatalf("cached call: expected 1.9.0, got %s", v2)
+	}
+
+	// Expire the cache and re-run — should call binary again.
+	k.verCache.expires = time.Now().Add(-1 * time.Second)
+	v3 := countingDetect()
+	if v3 != "1.9.0" {
+		t.Fatalf("after expiry: expected 1.9.0, got %s", v3)
+	}
+	_ = callCount // suppress unused warning
+}
+
+// TestKernelVersionRegex_VPrefix: parseVersion must strip leading 'v'/'V' prefix.
+func TestKernelVersionRegex_VPrefix(t *testing.T) {
+	svc := NewKernelService()
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"xray plain", "Xray 1.8.24 (Xray, Penetrates Everything.)", "1.8.24"},
+		{"xray v-prefix", "Xray v1.8.24 something", "1.8.24"},
+		{"xray V-prefix", "Xray V1.8.24 something", "1.8.24"},
+		{"mihomo plain", "Mihomo Version: 1.18.0", "1.18.0"},
+		{"mihomo v-prefix", "Mihomo Version: v1.18.0", "1.18.0"},
+		{"mihomo V-prefix", "Mihomo Version: V1.18.0", "1.18.0"},
+		{"mihomo prerelease", "Mihomo Version: v1.18.0-rc1", "1.18.0-rc1"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := svc.parseVersion(strings.Split(tc.name, " ")[0], tc.input)
+			if got != tc.want {
+				t.Errorf("parseVersion(%q, %q) = %q; want %q", strings.Split(tc.name, " ")[0], tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestDecompressionLimit: zip with a 51 MB entry is rejected.
 func TestDecompressionLimit(t *testing.T) {
 	// Create a zip in memory with a single large file

@@ -69,7 +69,7 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 
 	info, err := fetchLatestRelease(channel)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		JSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -88,7 +88,7 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 			githubDownloadURL, info.LatestVersion, arch)
 	}
 
-	a.jsonResponse(w, info)
+	JSONSuccess(w, info)
 }
 
 func (a *API) UpdateChangelog(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +116,7 @@ func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
 
 	st := getUpdateState()
 	if st.Status != "idle" && st.Status != "failed" {
-		a.errorResponse(w, "Update already in progress", http.StatusConflict)
+		JSONError(w, http.StatusConflict, "Update already in progress")
 		return
 	}
 
@@ -133,17 +133,21 @@ func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
 	st.Timestamp = time.Now().Unix()
 	setUpdateState(st)
 
-	a.jsonResponse(w, getUpdateState())
+	JSONSuccess(w, getUpdateState())
 }
 
 func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	backupDir := filepath.Join(a.cfg.DataDir, "backup")
 	binPath := filepath.Join(filepath.Dir(a.cfg.DataDir), "bin/xkeen-control-panel")
 
 	// Find latest backup
 	backups, err := os.ReadDir(backupDir)
 	if err != nil || len(backups) == 0 {
-		a.errorResponse(w, "No backup found", http.StatusNotFound)
+		JSONError(w, http.StatusNotFound, "No backup found")
 		return
 	}
 
@@ -163,7 +167,7 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 		st.Status = "failed"
 		st.Message = "Rollback failed: " + err.Error()
 		setUpdateState(st)
-		a.errorResponse(w, st.Message, http.StatusInternalServerError)
+		JSONError(w, http.StatusInternalServerError, st.Message)
 		return
 	}
 
@@ -175,11 +179,11 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 
 	go a.restartProcess(binPath, a.cfg.DataDir)
 
-	a.jsonResponse(w, getUpdateState())
+	JSONSuccess(w, getUpdateState())
 }
 
 func (a *API) UpdateStatusEndpoint(w http.ResponseWriter, r *http.Request) {
-	a.jsonResponse(w, getUpdateState())
+	JSONSuccess(w, getUpdateState())
 }
 
 func (a *API) performUpdate(channel string) {
@@ -304,6 +308,11 @@ func (a *API) performUpdate(channel string) {
 			Timestamp: time.Now().Unix(),
 		})
 		return
+	}
+
+	// Prune old backups, keep latest 5
+	if err := pruneBackupsDir(backupDir, 5); err != nil {
+		log.Printf("Update: pruneBackups warning: %v", err)
 	}
 
 	// Step 5: Restart
@@ -544,5 +553,25 @@ func verifyFileChecksumWithClient(filePath, binaryName, checksumsURL string, cli
 	}
 
 	log.Printf("Update: SHA-256 checksum verified OK for %s", binaryName)
+	return nil
+}
+
+// pruneBackupsDir keeps the most recent `keep` files in dir, removing older ones.
+func pruneBackupsDir(dir string, keep int) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	// os.ReadDir returns entries sorted by name (ascending); timestamp suffix ensures order.
+	if len(entries) <= keep {
+		return nil
+	}
+	toRemove := entries[:len(entries)-keep]
+	for _, e := range toRemove {
+		p := filepath.Join(dir, e.Name())
+		if err := os.Remove(p); err != nil {
+			log.Printf("Update: failed to remove old backup %s: %v", p, err)
+		}
+	}
 	return nil
 }

@@ -3,10 +3,12 @@ package services
 import (
 	"archive/zip"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -109,6 +111,14 @@ func safeTempPath(name string) (string, error) {
 	return filepath.Join(os.TempDir(), name), nil
 }
 
+// versionCache holds the detected version string and its expiry time.
+// Access must be protected by the KernelService mutex (or the caller's lock).
+type versionCache struct {
+	mu      sync.Mutex
+	value   string
+	expires time.Time
+}
+
 // KernelInfo holds info about an installed kernel
 type KernelInfo struct {
 	Name           string `json:"name"`
@@ -126,6 +136,11 @@ type KernelInfo struct {
 	// binaryPathCachedAt records when BinaryPath was last resolved via auto-detection.
 	// Access must be protected by the KernelService mutex.
 	binaryPathCachedAt time.Time
+
+	// verCache caches the result of detectVersion for 60 seconds to avoid
+	// repeatedly spawning a subprocess on every status poll.
+	// Must be a pointer so that copying KernelInfo does not copy the embedded mutex.
+	verCache *versionCache
 }
 
 // kernelProcessStatus detects whether the kernel process is running.
@@ -204,6 +219,7 @@ func NewKernelService() *KernelService {
 		Channel:            "stable",
 		Repo:               "XTLS/Xray-core",
 		binaryPathCachedAt: now,
+		verCache:           &versionCache{},
 	}
 
 	mihomoPath := findKernelBinary("mihomo")
@@ -217,6 +233,7 @@ func NewKernelService() *KernelService {
 		Channel:            "stable",
 		Repo:               "MetaCubeX/mihomo",
 		binaryPathCachedAt: now,
+		verCache:           &versionCache{},
 	}
 
 	// Detect current versions (outside lock — no concurrent calls yet)
@@ -322,8 +339,22 @@ func (s *KernelService) SetChannel(name, channel string) bool {
 	return false
 }
 
-// detectVersion runs the binary with version flag
+// versionCacheTTL is the duration for which a detected version string is considered valid.
+const versionCacheTTL = 60 * time.Second
+
+// detectVersion runs the binary with a version flag and caches the result for
+// versionCacheTTL (60 s) to avoid spawning a subprocess on every poll.
 func (s *KernelService) detectVersion(k *KernelInfo) string {
+	if k.verCache == nil {
+		k.verCache = &versionCache{}
+	}
+	k.verCache.mu.Lock()
+	defer k.verCache.mu.Unlock()
+
+	if k.verCache.value != "" && time.Now().Before(k.verCache.expires) {
+		return k.verCache.value
+	}
+
 	if _, err := os.Stat(k.BinaryPath); os.IsNotExist(err) {
 		return "not installed"
 	}
@@ -344,30 +375,46 @@ func (s *KernelService) detectVersion(k *KernelInfo) string {
 		return "error"
 	}
 
-	return s.parseVersion(k.Name, output)
+	result := s.parseVersion(k.Name, output)
+	k.verCache.value = result
+	k.verCache.expires = time.Now().Add(versionCacheTTL)
+	return result
 }
+
+// versionRe is a generic version pattern that matches semver-like strings with an
+// optional leading 'v' or 'V' prefix, including pre-release suffixes (e.g. v1.8.24-rc1).
+var versionRe = regexp.MustCompile(`[vV]?(\d+\.\d+\.\d+[^\s]*)`)
 
 func (s *KernelService) parseVersion(name, output string) string {
 	output = strings.TrimSpace(output)
 	switch name {
 	case "xray":
 		// Xray 1.8.24 (Xray, Penetrates Everything.) ...
-		re := regexp.MustCompile(`Xray\s+([\d.]+)`)
+		re := regexp.MustCompile(`Xray\s+` + versionRe.String())
 		if m := re.FindStringSubmatch(output); len(m) > 1 {
+			return m[1]
+		}
+		// Fallback: generic version pattern
+		if m := versionRe.FindStringSubmatch(output); len(m) > 1 {
 			return m[1]
 		}
 	case "mihomo":
 		// Mihomo Version: v1.18.0 ...
-		re := regexp.MustCompile(`(?:Mihomo\s+)?Version[:\s]*v?([\d.]+)`)
+		re := regexp.MustCompile(`(?:Mihomo\s+)?Version[:\s]*` + versionRe.String())
 		if m := re.FindStringSubmatch(output); len(m) > 1 {
+			return m[1]
+		}
+		// Fallback: generic version pattern
+		if m := versionRe.FindStringSubmatch(output); len(m) > 1 {
 			return m[1]
 		}
 	}
 	return "unknown"
 }
 
-// CheckLatest queries GitHub API for latest release
-func (s *KernelService) CheckLatest(name string) error {
+// CheckLatest queries GitHub API for latest release.
+// ctx is used to cancel the HTTP request (e.g. on service shutdown).
+func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	s.mu.Lock()
 	k := s.kernels[name]
 	if k == nil {
@@ -388,7 +435,17 @@ func (s *KernelService) CheckLatest(name string) error {
 	}
 
 	client := utils.SafeHTTPClient(15 * time.Second)
-	resp, err := client.Get(apiURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		s.mu.Lock()
+		if kk := s.kernels[name]; kk != nil {
+			kk.Status = "failed"
+			kk.Message = "Request error: " + err.Error()
+		}
+		s.mu.Unlock()
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		s.mu.Lock()
 		if kk := s.kernels[name]; kk != nil {
@@ -515,7 +572,7 @@ func (s *KernelService) Install(name string) error {
 	}
 	defer os.Remove(tempFile) // Cleanup archive after extraction
 
-	if err := s.downloadFile(downloadURL, tempFile); err != nil {
+	if err := s.downloadFile(context.Background(), downloadURL, tempFile); err != nil {
 		setStatus("failed", "Download failed: "+err.Error())
 		return err
 	}
@@ -609,6 +666,9 @@ func (s *KernelService) Install(name string) error {
 		return err
 	}
 
+	// Prune old backups — keep at most 3 most recent
+	_ = pruneBackups(backupDir, 3)
+
 	// Verify new version and update metadata under lock
 	s.mu.Lock()
 	if kk := s.kernels[name]; kk != nil {
@@ -619,6 +679,38 @@ func (s *KernelService) Install(name string) error {
 	}
 	s.mu.Unlock()
 
+	return nil
+}
+
+// pruneBackups removes oldest backup files in dir, keeping only the `keep` most recent.
+// Files are sorted by name (timestamp suffix ensures lexicographic order = chronological order).
+// Errors are logged but do not fail the caller.
+func pruneBackups(dir string, keep int) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+
+	// Filter to backup files only
+	var backups []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			backups = append(backups, filepath.Join(dir, e.Name()))
+		}
+	}
+
+	// Sort ascending by name (oldest first) — names use Unix timestamp suffix
+	// so lexicographic order equals chronological order.
+	// os.ReadDir already returns entries sorted by name.
+	if len(backups) <= keep {
+		return nil
+	}
+
+	for _, old := range backups[:len(backups)-keep] {
+		if err := os.Remove(old); err != nil {
+			log.Printf("pruneBackups: failed to remove %s: %v", old, err)
+		}
+	}
 	return nil
 }
 
@@ -657,9 +749,13 @@ func (s *KernelService) buildDownloadURL(k *KernelInfo, arch string) (string, st
 	return "", ""
 }
 
-func (s *KernelService) downloadFile(url, filepath string) error {
+func (s *KernelService) downloadFile(ctx context.Context, url, filepath string) error {
 	client := utils.SafeHTTPClient(120 * time.Second)
-	resp, err := client.Get(url)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

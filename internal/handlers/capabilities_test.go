@@ -28,9 +28,20 @@ func TestCapabilities_MihomoOffline(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
+	var envelope APIResponse
+	if err := json.NewDecoder(rr.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if !envelope.Success {
+		t.Fatalf("expected success=true, got false: %v", envelope.Error)
+	}
+	data, err := json.Marshal(envelope.Data)
+	if err != nil {
+		t.Fatalf("marshal data: %v", err)
+	}
 	var resp CapabilitiesResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatalf("decode capabilities data: %v", err)
 	}
 
 	if resp.Mihomo.Reachable {
@@ -61,9 +72,20 @@ func TestCapabilities_MihomoOnline(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
+	var envelope APIResponse
+	if err := json.NewDecoder(rr.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode envelope: %v", err)
+	}
+	if !envelope.Success {
+		t.Fatalf("expected success=true, got false: %v", envelope.Error)
+	}
+	data, err := json.Marshal(envelope.Data)
+	if err != nil {
+		t.Fatalf("marshal data: %v", err)
+	}
 	var resp CapabilitiesResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatalf("decode capabilities data: %v", err)
 	}
 
 	if !resp.Mihomo.Reachable {

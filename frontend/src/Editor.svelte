@@ -117,7 +117,7 @@
     loadFiles()
   }
 
-  function getSchemaExtensions(path: string) {
+  function getSchemaExtensions(path: string, expert: boolean = false) {
     if (!schemaEnabled) return []
 
     const isYaml = path.endsWith('.yaml') || path.endsWith('.yml')
@@ -134,6 +134,15 @@
     if (!schema) return []
 
     if (isJson) {
+      // In expert mode, skip strict schema linting but keep autocomplete and hover
+      if (expert) {
+        return [
+          linter(jsonParseLinter(), { delay: 300 }),
+          jsonLanguage.data.of({ autocomplete: jsonCompletion() }),
+          hoverTooltip(jsonSchemaHover()),
+          stateExtensions(schema)
+        ]
+      }
       return [
         linter(jsonParseLinter(), { delay: 300 }),
         linter(jsonSchemaLinter(), { needsRefresh: handleRefresh }),
@@ -144,6 +153,14 @@
     }
 
     if (isYaml) {
+      // In expert mode, skip strict schema linting but keep autocomplete and hover
+      if (expert) {
+        return [
+          yamlLanguage.data.of({ autocomplete: yamlCompletion() }),
+          hoverTooltip(yamlSchemaHover()),
+          stateExtensions(schema)
+        ]
+      }
       return [
         linter(yamlSchemaLinter(), { needsRefresh: handleRefresh }),
         yamlLanguage.data.of({ autocomplete: yamlCompletion() }),
@@ -169,7 +186,7 @@
       const content = await res.text()
       
       const lang = path.endsWith('.yaml') || path.endsWith('.yml') ? yaml() : json()
-      const schemaExts = getSchemaExtensions(path)
+      const schemaExts = getSchemaExtensions(path, expertMode)
       
       const state = EditorState.create({
         doc: content,
@@ -380,7 +397,7 @@
 
   function toggleExpertMode() {
     expertMode = !expertMode
-    // Expert mode currently just disables schema validation visual noise
+    // Expert mode disables strict schema validation to reduce visual noise for advanced edits
     if (selectedFile) {
       loadFile(selectedFile)
     }

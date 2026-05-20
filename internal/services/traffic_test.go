@@ -164,3 +164,71 @@ func TestTrafficGet_ReturnsCopy(t *testing.T) {
 		t.Errorf("expected original LimitBytes 1024, got %d (mutation leaked)", original.LimitBytes)
 	}
 }
+
+// TestSaveLocked_Throttle verifies that saveLocked(false) skips disk writes
+// when called within saveLockThrottle, and saveLocked(true) always writes.
+func TestSaveLocked_Throttle(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090")
+
+	// Force-save sets lastSave.
+	svc.mu.Lock()
+	err := svc.saveLocked(true)
+	svc.mu.Unlock()
+	if err != nil {
+		t.Fatalf("first force save failed: %v", err)
+	}
+
+	// Immediately after, throttled save should be a no-op (returns nil, no write).
+	svc.mu.Lock()
+	lastSave := svc.lastSave
+	err = svc.saveLocked(false)
+	svc.mu.Unlock()
+	if err != nil {
+		t.Fatalf("throttled save returned error: %v", err)
+	}
+	// lastSave should not have advanced (throttle skipped the write).
+	svc.mu.RLock()
+	newLastSave := svc.lastSave
+	svc.mu.RUnlock()
+	if newLastSave.After(lastSave) {
+		t.Error("throttled save should not advance lastSave within throttle window")
+	}
+
+	// Force-save always advances lastSave.
+	svc.mu.Lock()
+	err = svc.saveLocked(true)
+	svc.mu.Unlock()
+	if err != nil {
+		t.Fatalf("second force save failed: %v", err)
+	}
+	svc.mu.RLock()
+	afterForce := svc.lastSave
+	svc.mu.RUnlock()
+	if !afterForce.After(lastSave) {
+		t.Error("force save should advance lastSave")
+	}
+}
+
+// TestSaveLocked_ThrottleExpiry verifies that saveLocked(false) writes after the
+// throttle window expires.
+func TestSaveLocked_ThrottleExpiry(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090")
+
+	// Set lastSave far in the past to simulate an expired throttle.
+	svc.mu.Lock()
+	svc.lastSave = time.Now().Add(-saveLockThrottle - time.Second)
+	err := svc.saveLocked(false)
+	svc.mu.Unlock()
+	if err != nil {
+		t.Fatalf("save after throttle expiry failed: %v", err)
+	}
+	// lastSave should now be fresh.
+	svc.mu.RLock()
+	elapsed := time.Since(svc.lastSave)
+	svc.mu.RUnlock()
+	if elapsed > time.Second {
+		t.Errorf("expected lastSave to be recent after throttle expiry, elapsed=%v", elapsed)
+	}
+}

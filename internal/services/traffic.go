@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -50,6 +51,10 @@ type TrafficStore struct {
 	ProxyStats map[string]*ProxyTraffic `json:"proxy_stats"`
 }
 
+// saveLockThrottle is the minimum interval between background/periodic saves
+// (CRUD-triggered saves always use force=true and bypass throttling).
+const saveLockThrottle = 5 * time.Second
+
 // TrafficQuotaService manages traffic accounting and quotas
 type TrafficQuotaService struct {
 	dataDir    string
@@ -61,6 +66,7 @@ type TrafficQuotaService struct {
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
 	httpClient *http.Client
+	lastSave   time.Time // time of last successful disk write (protected by mu)
 
 	// connectionTracker maps connection ID -> last seen {upload, download}
 	connectionTracker sync.Map
@@ -113,8 +119,15 @@ func (s *TrafficQuotaService) load() {
 	s.mu.Unlock()
 }
 
-// saveLocked writes state to disk. Caller MUST hold s.mu.
-func (s *TrafficQuotaService) saveLocked() error {
+// saveLocked writes state to disk. Caller MUST hold s.mu (write lock).
+// If force is false the write is skipped when a previous write happened
+// within saveLockThrottle — suitable for high-frequency periodic saves.
+// Pass force=true for CRUD operations (quota add/update/delete/reset)
+// so user changes are always persisted immediately.
+func (s *TrafficQuotaService) saveLocked(force bool) error {
+	if !force && !s.lastSave.IsZero() && time.Since(s.lastSave) < saveLockThrottle {
+		return nil
+	}
 	store := TrafficStore{
 		Quotas:     s.quotas,
 		ProxyStats: s.proxyStats,
@@ -124,7 +137,11 @@ func (s *TrafficQuotaService) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return utils.AtomicWriteFile(s.storePath(), data, 0600)
+	if err := utils.AtomicWriteFile(s.storePath(), data, 0600); err != nil {
+		return err
+	}
+	s.lastSave = time.Now()
+	return nil
 }
 
 // --- CRUD for quotas ---
@@ -156,7 +173,7 @@ func (s *TrafficQuotaService) AddQuota(q *TrafficQuota) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.quotas = append(s.quotas, *q)
-	return s.saveLocked()
+	return s.saveLocked(true)
 }
 
 func (s *TrafficQuotaService) UpdateQuota(id string, q *TrafficQuota) error {
@@ -166,7 +183,7 @@ func (s *TrafficQuotaService) UpdateQuota(id string, q *TrafficQuota) error {
 		if s.quotas[i].ID == id {
 			s.quotas[i] = *q
 			s.quotas[i].ID = id
-			return s.saveLocked()
+			return s.saveLocked(true)
 		}
 	}
 	return fmt.Errorf("quota not found")
@@ -178,7 +195,7 @@ func (s *TrafficQuotaService) DeleteQuota(id string) error {
 	for i, q := range s.quotas {
 		if q.ID == id {
 			s.quotas = append(s.quotas[:i], s.quotas[i+1:]...)
-			return s.saveLocked()
+			return s.saveLocked(true)
 		}
 	}
 	return fmt.Errorf("quota not found")
@@ -190,7 +207,7 @@ func (s *TrafficQuotaService) SetQuotaEnabled(id string, enabled bool) error {
 	for i := range s.quotas {
 		if s.quotas[i].ID == id {
 			s.quotas[i].Enabled = enabled
-			return s.saveLocked()
+			return s.saveLocked(true)
 		}
 	}
 	return fmt.Errorf("quota not found")
@@ -203,7 +220,7 @@ func (s *TrafficQuotaService) ResetQuota(id string) error {
 		if s.quotas[i].ID == id {
 			s.quotas[i].CurrentBytes = 0
 			s.quotas[i].LastReset = time.Now().Unix()
-			return s.saveLocked()
+			return s.saveLocked(true)
 		}
 	}
 	return fmt.Errorf("quota not found")
@@ -318,7 +335,8 @@ func (s *TrafficQuotaService) checkResets() {
 	}
 
 	if changed {
-		_ = s.saveLocked()
+		// Background periodic save — use force=false to throttle disk I/O.
+		_ = s.saveLocked(false)
 	}
 }
 
@@ -331,7 +349,24 @@ type connStats struct {
 }
 
 func (s *TrafficQuotaService) collectTraffic() {
-	resp, err := s.httpClient.Get(s.mihomoURL + "/connections")
+	// Use a context tied to the service stop channel so the HTTP request is
+	// cancelled immediately when the service shuts down.
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-s.stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.mihomoURL+"/connections", nil)
+	if err != nil {
+		log.Printf("TrafficQuota: failed to create request: %v", err)
+		return
+	}
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		log.Printf("TrafficQuota: failed to fetch connections: %v", err)
 		return
@@ -415,7 +450,8 @@ func (s *TrafficQuotaService) collectTraffic() {
 		return true
 	})
 
-	if err := s.saveLocked(); err != nil {
+	// Background periodic save — use force=false to throttle disk I/O.
+	if err := s.saveLocked(false); err != nil {
 		log.Printf("TrafficQuota: failed to save stats: %v", err)
 	}
 }

@@ -18,6 +18,7 @@
   let totalDown = 0
   let sessionUp = 0
   let sessionDown = 0
+  let lastTickTime = 0
 
   function formatSpeed(bytesPerSecond: number): string {
     if (bytesPerSecond === 0) return '0 B/s'
@@ -117,6 +118,7 @@
     
     es.onopen = () => {
       connected = true
+      lastTickTime = 0
     }
     
     es.onmessage = (event) => {
@@ -132,10 +134,18 @@
           trafficData = trafficData.slice(-maxPoints)
         }
         
-        totalUp = data.up || 0
-        totalDown = data.down || 0
-        sessionUp += totalUp
-        sessionDown += totalDown
+        const now = Date.now()
+        const upSpeed = data.up || 0
+        const downSpeed = data.down || 0
+        totalUp = upSpeed
+        totalDown = downSpeed
+        // Accumulate bytes: speed (bytes/s) × elapsed time (seconds)
+        if (lastTickTime > 0) {
+          const elapsedSec = (now - lastTickTime) / 1000
+          sessionUp += upSpeed * elapsedSec
+          sessionDown += downSpeed * elapsedSec
+        }
+        lastTickTime = now
         
         drawChart()
       } catch (e) {

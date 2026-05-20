@@ -32,7 +32,9 @@
     try {
       const res = await fetch(`/api/update/check?channel=${channel}`)
       if (res.ok) {
-        updateInfo = await res.json()
+        const envelope = await res.json()
+        // UpdateCheck uses JSONSuccess envelope: {success, data: {...}}
+        updateInfo = envelope.data ?? envelope
         if (updateInfo?.has_update && updateInfo?.latest_version) {
           await fetchChangelog(updateInfo.latest_version)
         }
@@ -82,7 +84,9 @@
     try {
       const res = await fetch('/api/update/status')
       if (res.ok) {
-        updateStatus = await res.json()
+        const envelope = await res.json()
+        // UpdateStatusEndpoint uses JSONSuccess envelope: {success, data: {...}}
+        updateStatus = envelope.data ?? envelope
         if (updateStatus?.status === 'done' || updateStatus?.status === 'failed') {
           updateInstalling = false
           clearInterval(statusInterval)
