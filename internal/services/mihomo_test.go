@@ -64,3 +64,95 @@ func TestMihomoService_Status_Running(t *testing.T) {
 		t.Fatalf("expected 'running', got %s", status)
 	}
 }
+
+func TestMihomoService_ParseConfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		yaml       string
+		wantCtrl   string
+		wantSecret string
+		wantErr    bool
+	}{
+		{
+			name: "standard config with double quotes",
+			yaml: `
+port: 7890
+socks-port: 7891
+external-controller: 127.0.0.1:9090
+secret: "my-secret-token"
+`,
+			wantCtrl:   "127.0.0.1:9090",
+			wantSecret: "my-secret-token",
+		},
+		{
+			name: "single quotes and comments",
+			yaml: `
+# This is a comment
+external-controller: '127.0.0.1:9095' # api port
+secret: 'another_secret' # token here
+`,
+			wantCtrl:   "127.0.0.1:9095",
+			wantSecret: "another_secret",
+		},
+		{
+			name: "commented out keys",
+			yaml: `
+# external-controller: 127.0.0.1:9090
+# secret: secret
+external-controller: 127.0.0.1:9091
+secret: real_secret
+`,
+			wantCtrl:   "127.0.0.1:9091",
+			wantSecret: "real_secret",
+		},
+		{
+			name: "external-controller-secret key",
+			yaml: `
+external-controller: 127.0.0.1:9092
+external-controller-secret: super_secret
+`,
+			wantCtrl:   "127.0.0.1:9092",
+			wantSecret: "super_secret",
+		},
+		{
+			name: "missing keys",
+			yaml: `
+port: 7890
+`,
+			wantCtrl:   "",
+			wantSecret: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+			err := os.WriteFile(configPath, []byte(tt.yaml), 0644)
+			if err != nil {
+				t.Fatalf("failed to write config.yaml: %v", err)
+			}
+
+			svc := NewMihomoService("", "", tmpDir)
+			ctrl, secret, err := svc.ParseConfig()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if ctrl != tt.wantCtrl {
+				t.Errorf("ParseConfig() ctrl = %q, want %q", ctrl, tt.wantCtrl)
+			}
+			if secret != tt.wantSecret {
+				t.Errorf("ParseConfig() secret = %q, want %q", secret, tt.wantSecret)
+			}
+		})
+	}
+
+	t.Run("missing file", func(t *testing.T) {
+		svc := NewMihomoService("", "", "/nonexistent/dir")
+		_, _, err := svc.ParseConfig()
+		if err == nil {
+			t.Error("expected error for nonexistent file, got nil")
+		}
+	})
+}

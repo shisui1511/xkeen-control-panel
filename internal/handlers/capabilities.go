@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -18,9 +19,13 @@ type KernelCapability struct {
 	Channel   string `json:"channel,omitempty"`
 }
 
-// MihomoCapability describes live connectivity to the Mihomo API.
+// MihomoCapability describes live connectivity and status of the Mihomo API.
 type MihomoCapability struct {
-	Reachable bool `json:"reachable"`
+	ProcessRunning   bool   `json:"process_running"`
+	APIReachable     bool   `json:"api_reachable"`
+	APIAuthenticated bool   `json:"api_authenticated"`
+	Reachable        bool   `json:"reachable"` // backward compatibility
+	DiscoveredSecret string `json:"discovered_secret,omitempty"`
 }
 
 // Capabilities handles GET /api/capabilities.
@@ -43,19 +48,67 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Probe Mihomo API with a short timeout
-	resp.Mihomo.Reachable = probeMihomoReachable(a.cfg.MihomoAPIURL)
+	var running bool
+	if a.mihomoSvc != nil {
+		if status, err := a.mihomoSvc.Status(); err == nil {
+			running = strings.Contains(status, "running")
+		}
+	}
+
+	var discoveredSecret string
+	secret := a.cfg.MihomoSecret
+	if secret == "" && a.mihomoSvc != nil {
+		if _, parsedSecret, err := a.mihomoSvc.ParseConfig(); err == nil && parsedSecret != "" {
+			secret = parsedSecret
+			discoveredSecret = maskSecret(parsedSecret)
+		}
+	} else if secret != "" {
+		discoveredSecret = maskSecret(secret)
+	}
+
+	reachable, authenticated := probeMihomoAPI(a.cfg.MihomoAPIURL, secret)
+
+	resp.Mihomo.ProcessRunning = running
+	resp.Mihomo.APIReachable = reachable
+	resp.Mihomo.APIAuthenticated = authenticated
+	resp.Mihomo.Reachable = reachable
+	resp.Mihomo.DiscoveredSecret = discoveredSecret
 
 	JSONSuccess(w, resp)
 }
 
-// probeMihomoReachable attempts GET <mihomoURL>/version with a 3-second timeout.
-func probeMihomoReachable(mihomoURL string) bool {
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(mihomoURL + "/version")
-	if err != nil {
-		return false
+func maskSecret(s string) string {
+	if s == "" {
+		return ""
 	}
-	_ = resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	if len(s) <= 4 {
+		return "****"
+	}
+	return s[:2] + "****" + s[len(s)-2:]
+}
+
+// probeMihomoAPI attempts GET <mihomoURL>/version with a 3-second timeout and proper secret token.
+func probeMihomoAPI(mihomoURL string, secret string) (reachable bool, authenticated bool) {
+	req, err := http.NewRequest(http.MethodGet, mihomoURL+"/version", nil)
+	if err != nil {
+		return false, false
+	}
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return true, true
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		return true, false
+	}
+	return true, false
 }
