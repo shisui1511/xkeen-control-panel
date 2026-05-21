@@ -100,3 +100,7 @@ func (a *API) KernelChannel(w http.ResponseWriter, r *http.Request) {
 
 	JSONSuccess(w, map[string]string{"channel": req.Channel})
 }
+
+func (a *API) KernelDebug(w http.ResponseWriter, r *http.Request) {
+	JSONSuccess(w, a.kernelSvc.GetDebugInfo())
+}

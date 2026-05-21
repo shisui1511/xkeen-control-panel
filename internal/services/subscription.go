@@ -35,6 +35,8 @@ type Subscription struct {
 	FilterName      string `json:"filter_name,omitempty"`
 	FilterType      string `json:"filter_type,omitempty"`
 	FilterTransport string `json:"filter_transport,omitempty"`
+
+	ProxyCount int `json:"proxy_count"`
 }
 
 // Outbound represents a parsed proxy outbound
@@ -89,7 +91,12 @@ func (s *SubscriptionService) save() error {
 func (s *SubscriptionService) List() []Subscription {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.subscriptions
+	res := make([]Subscription, len(s.subscriptions))
+	for i := range s.subscriptions {
+		res[i] = s.subscriptions[i]
+		res[i].ProxyCount = s.getProxyCount(&res[i])
+	}
+	return res
 }
 
 func (s *SubscriptionService) Get(id string) *Subscription {
@@ -98,10 +105,24 @@ func (s *SubscriptionService) Get(id string) *Subscription {
 	for i := range s.subscriptions {
 		if s.subscriptions[i].ID == id {
 			copy := s.subscriptions[i]
+			copy.ProxyCount = s.getProxyCount(&copy)
 			return &copy
 		}
 	}
 	return nil
+}
+
+func (s *SubscriptionService) getProxyCount(sub *Subscription) int {
+	path := s.getFragmentPath(sub)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	var outbounds []Outbound
+	if err := json.Unmarshal(data, &outbounds); err != nil {
+		return 0
+	}
+	return len(outbounds)
 }
 
 func (s *SubscriptionService) Add(sub *Subscription) error {

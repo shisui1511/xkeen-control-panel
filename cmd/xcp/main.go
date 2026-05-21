@@ -20,7 +20,7 @@ import (
 
 var (
 	Version    = "dev"
-	configPath = flag.String("config", "/opt/etc/xkeen-control-panel/config.json", "Path to config file")
+	configPath = flag.String("config", "/opt/etc/xcp/config.json", "Path to config file")
 )
 
 func main() {
@@ -96,9 +96,11 @@ func main() {
 	srv.HandleProtected("/api/config/create", api.ConfigCreate)
 	srv.HandleProtected("/api/config/delete", api.ConfigDelete)
 	srv.HandleProtected("/api/config/rename", api.ConfigRename)
+	srv.HandleProtected("/api/config/validate", api.ConfigValidate)
 	srv.HandleProtected("/api/service/status", api.ServiceStatus)
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
 	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
+	srv.HandleProtected("/api/logs/download", api.LogsDownload)
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
@@ -194,6 +196,7 @@ func main() {
 	kernelSvc := services.NewKernelService()
 	api.SetKernelService(kernelSvc)
 	srv.HandleProtected("/api/kernels", api.KernelList)
+	srv.HandleProtected("/api/kernels/debug", api.KernelDebug)
 	srv.HandleProtected("/api/kernels/{name}/check", api.KernelCheck)
 	srv.HandleProtected("/api/kernels/{name}/install", api.KernelInstall)
 	srv.HandleProtected("/api/kernels/{name}/status", api.KernelStatus)

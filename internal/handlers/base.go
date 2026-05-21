@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/i18n"
@@ -12,20 +14,23 @@ import (
 )
 
 type API struct {
-	cfg             *config.Config
-	srv             *server.Server
-	xkeenSvc        *services.XKeenService
-	mihomoSvc       *services.MihomoService
-	configSvc       *services.ConfigService
-	subscriptionSvc *services.SubscriptionService
-	kernelSvc       *services.KernelService
-	networkSvc      *services.NetworkToolsService
-	smartProxySvc   *services.SmartProxyService
-	trafficQuotaSvc *services.TrafficQuotaService
-	datSvc          *services.DATManagerService
-	consoleSvc      *services.ConsoleService
-	templateSvc     *services.TemplateService
-	pathVal         *utils.PathValidator
+	cfg                 *config.Config
+	srv                 *server.Server
+	xkeenSvc            *services.XKeenService
+	mihomoSvc           *services.MihomoService
+	configSvc           *services.ConfigService
+	subscriptionSvc     *services.SubscriptionService
+	kernelSvc           *services.KernelService
+	networkSvc          *services.NetworkToolsService
+	smartProxySvc       *services.SmartProxyService
+	trafficQuotaSvc     *services.TrafficQuotaService
+	datSvc              *services.DATManagerService
+	consoleSvc          *services.ConsoleService
+	templateSvc         *services.TemplateService
+	pathVal             *utils.PathValidator
+	configValCache      bool
+	configValCacheTime  time.Time
+	configValCacheMutex sync.Mutex
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {

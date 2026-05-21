@@ -210,6 +210,7 @@ func NewKernelService() *KernelService {
 	// Register known kernels with auto-detected binary paths
 	xrayPath := findKernelBinary("xray")
 	if xrayPath == "" {
+		log.Printf("WARNING: failed to auto-detect Xray binary. Checked paths: %s", strings.Join(xrayProbePaths, ", "))
 		xrayPath = "/opt/bin/xray" // fallback default for display
 	}
 	svc.kernels["xray"] = &KernelInfo{
@@ -224,6 +225,7 @@ func NewKernelService() *KernelService {
 
 	mihomoPath := findKernelBinary("mihomo")
 	if mihomoPath == "" {
+		log.Printf("WARNING: failed to auto-detect Mihomo binary. Checked paths: %s", strings.Join(mihomoProbePaths, ", "))
 		mihomoPath = "/opt/bin/mihomo" // fallback default for display
 	}
 	svc.kernels["mihomo"] = &KernelInfo{
@@ -843,4 +845,46 @@ func (s *KernelService) extractGz(gzPath string) (string, error) {
 
 	_, err = io.Copy(out, io.LimitReader(gr, maxKernelExtractBytes))
 	return outPath, err
+}
+
+type KernelPathDebug struct {
+	Path       string `json:"path"`
+	Exists     bool   `json:"exists"`
+	Executable bool   `json:"executable"`
+	Error      string `json:"error,omitempty"`
+}
+
+type KernelDebugInfo struct {
+	XrayPaths   []KernelPathDebug `json:"xray_paths"`
+	MihomoPaths []KernelPathDebug `json:"mihomo_paths"`
+}
+
+func (s *KernelService) GetDebugInfo() KernelDebugInfo {
+	var info KernelDebugInfo
+	for _, p := range xrayProbePaths {
+		info.XrayPaths = append(info.XrayPaths, s.checkPathDebug(p))
+	}
+	for _, p := range mihomoProbePaths {
+		info.MihomoPaths = append(info.MihomoPaths, s.checkPathDebug(p))
+	}
+	return info
+}
+
+func (s *KernelService) checkPathDebug(p string) KernelPathDebug {
+	fi, err := s.statFunc(p)
+	if err != nil {
+		return KernelPathDebug{
+			Path:       p,
+			Exists:     false,
+			Executable: false,
+			Error:      err.Error(),
+		}
+	}
+	// is executable?
+	isExec := !fi.IsDir() && (fi.Mode()&0111 != 0)
+	return KernelPathDebug{
+		Path:       p,
+		Exists:     true,
+		Executable: isExec,
+	}
 }

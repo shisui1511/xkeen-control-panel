@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -107,4 +109,26 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+}
+
+func (a *API) LogsDownload(w http.ResponseWriter, r *http.Request) {
+	if a.cfg.LogPath == "" {
+		a.errorResponse(w, "Log path is not configured", http.StatusBadRequest)
+		return
+	}
+
+	cleanPath, err := a.pathVal.Validate(a.cfg.LogPath)
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusForbidden)
+		return
+	}
+
+	if _, err := os.Stat(cleanPath); os.IsNotExist(err) {
+		a.errorResponse(w, "Log file does not exist", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(cleanPath))
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	http.ServeFile(w, r, cleanPath)
 }

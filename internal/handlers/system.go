@@ -2,11 +2,16 @@ package handlers
 
 import (
 	"bufio"
+	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type SystemStats struct {
@@ -28,6 +33,13 @@ type SystemStats struct {
 		HeapSys    uint64 `json:"heap_sys"`
 		NumGC      uint32 `json:"num_gc"`
 	} `json:"go_runtime"`
+	RouterModel    string   `json:"router_model"`
+	Hostname       string   `json:"hostname"`
+	WANStatus      string   `json:"wan_status"`
+	DefaultGateway string   `json:"default_gateway"`
+	DNSServers     []string `json:"dns_servers"`
+	DNSResolving   bool     `json:"dns_resolving"`
+	InvalidConfig  bool     `json:"invalid_config"`
 }
 
 func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
@@ -86,5 +98,148 @@ func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
 	stats.GoRuntime.HeapSys = m.HeapSys
 	stats.GoRuntime.NumGC = m.NumGC
 
+	// Router telemetry and network diagnostic fields
+	stats.RouterModel = getRouterModel()
+	stats.Hostname, _ = os.Hostname()
+	stats.WANStatus, stats.DefaultGateway = getWANStats()
+	stats.DNSServers = getDNSServers()
+	stats.DNSResolving = testDNSResolving()
+	stats.InvalidConfig = a.checkActiveConfigsInvalid()
+
 	a.jsonResponse(w, stats)
+}
+
+func getRouterModel() string {
+	for _, path := range []string{"/proc/device-tree/model", "/sys/firmware/devicetree/base/model"} {
+		if data, err := os.ReadFile(path); err == nil {
+			return strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", ""))
+		}
+	}
+	return "Keenetic Router"
+}
+
+func getWANStats() (string, string) {
+	file, err := os.Open("/proc/net/route")
+	if err != nil {
+		return "offline", ""
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	if scanner.Scan() {
+		_ = scanner.Text() // skip header
+	}
+
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 3 {
+			continue
+		}
+		dest := fields[1]
+		gatewayHex := fields[2]
+		iface := fields[0]
+
+		if dest == "00000000" {
+			ip, err := parseHexIP(gatewayHex)
+			if err == nil {
+				// If gateway is 0.0.0.0, we just return the interface name
+				if ip == "0.0.0.0" {
+					return "online", iface
+				}
+				return "online", fmt.Sprintf("%s (%s)", ip, iface)
+			}
+			return "online", iface
+		}
+	}
+	return "offline", ""
+}
+
+func parseHexIP(hexStr string) (string, error) {
+	if len(hexStr) != 8 {
+		return "", fmt.Errorf("invalid hex IP length")
+	}
+	val, err := strconv.ParseUint(hexStr, 16, 32)
+	if err != nil {
+		return "", err
+	}
+
+	b0 := byte(val & 0xff)
+	b1 := byte((val >> 8) & 0xff)
+	b2 := byte((val >> 16) & 0xff)
+	b3 := byte((val >> 24) & 0xff)
+
+	return fmt.Sprintf("%d.%d.%d.%d", b0, b1, b2, b3), nil
+}
+
+func getDNSServers() []string {
+	var dns []string
+	paths := []string{"/etc/resolv.conf", "/opt/etc/resolv.conf"}
+	for _, path := range paths {
+		if file, err := os.Open(path); err == nil {
+			scanner := bufio.NewScanner(file)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if strings.HasPrefix(line, "nameserver ") {
+					fields := strings.Fields(line)
+					if len(fields) >= 2 {
+						dns = append(dns, fields[1])
+					}
+				}
+			}
+			file.Close()
+			if len(dns) > 0 {
+				break
+			}
+		}
+	}
+	return dns
+}
+
+func testDNSResolving() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	r := &net.Resolver{}
+	addrs, err := r.LookupHost(ctx, "cloudflare.com")
+	return err == nil && len(addrs) > 0
+}
+
+func (a *API) checkActiveConfigsInvalid() bool {
+	a.configValCacheMutex.Lock()
+	defer a.configValCacheMutex.Unlock()
+
+	// Cache validation status for 30 seconds to avoid high CPU load
+	if time.Since(a.configValCacheTime) < 30*time.Second {
+		return a.configValCache
+	}
+
+	invalid := false
+
+	// Check Xray configuration
+	xrayBin := a.getBinaryPath("xray")
+	if xrayBin != "" {
+		if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
+			cmd := exec.Command(xrayBin, "-test", "-confdir", a.cfg.XRayConfigDir)
+			if err := cmd.Run(); err != nil {
+				invalid = true
+			}
+		}
+	}
+
+	// Check Mihomo configuration if Xray is valid (or if we need to check both)
+	if !invalid {
+		mihomoBin := a.getBinaryPath("mihomo")
+		if mihomoBin != "" {
+			if _, err := os.Stat(a.cfg.MihomoConfigDir); err == nil {
+				cmd := exec.Command(mihomoBin, "-t", "-d", a.cfg.MihomoConfigDir)
+				if err := cmd.Run(); err != nil {
+					invalid = true
+				}
+			}
+		}
+	}
+
+	a.configValCache = invalid
+	a.configValCacheTime = time.Now()
+	return invalid
 }

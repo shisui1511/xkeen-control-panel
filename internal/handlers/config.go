@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
@@ -190,4 +193,168 @@ func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write([]byte("OK"))
+}
+
+type ConfigValidateRequest struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
+type ConfigValidateResponse struct {
+	Valid bool   `json:"valid"`
+	Error string `json:"error"`
+}
+
+func (a *API) getBinaryPath(name string) string {
+	if a.kernelSvc != nil {
+		if k := a.kernelSvc.Get(name); k != nil && k.BinaryPath != "" {
+			if _, err := os.Stat(k.BinaryPath); err == nil {
+				return k.BinaryPath
+			}
+		}
+	}
+
+	var fallback string
+	if name == "xray" {
+		fallback = "/opt/bin/xray"
+	} else if name == "mihomo" {
+		fallback = a.cfg.MihomoBinary
+		if fallback == "" {
+			fallback = "/opt/sbin/mihomo"
+		}
+	}
+
+	if p, err := exec.LookPath(name); err == nil {
+		return p
+	}
+	if _, err := os.Stat(fallback); err == nil {
+		return fallback
+	}
+	return ""
+}
+
+func copyDirConfigs(srcDir, dstDir string, targetFilename string, newContent string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return os.WriteFile(filepath.Join(dstDir, targetFilename), []byte(newContent), 0644)
+		}
+		return err
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := filepath.Ext(entry.Name())
+		if ext != ".json" && ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+
+		srcFile := filepath.Join(srcDir, entry.Name())
+		dstFile := filepath.Join(dstDir, entry.Name())
+
+		if entry.Name() == targetFilename {
+			if err := os.WriteFile(dstFile, []byte(newContent), 0644); err != nil {
+				return err
+			}
+		} else {
+			data, err := os.ReadFile(srcFile)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(dstFile, data, 0644); err != nil {
+				return err
+			}
+		}
+	}
+
+	targetPath := filepath.Join(dstDir, targetFilename)
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		if err := os.WriteFile(targetPath, []byte(newContent), 0644); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ConfigValidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.errorResponse(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		a.errorResponse(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	cleanPath, err := a.pathVal.Validate(req.Path)
+	if err != nil {
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	var kernelType string
+	filename := filepath.Base(cleanPath)
+	ext := filepath.Ext(cleanPath)
+
+	if strings.Contains(cleanPath, "xray") || ext == ".json" {
+		kernelType = "xray"
+	} else if strings.Contains(cleanPath, "mihomo") || ext == ".yaml" || ext == ".yml" {
+		kernelType = "mihomo"
+	} else {
+		kernelType = "xray"
+	}
+
+	binaryPath := a.getBinaryPath(kernelType)
+	if binaryPath == "" {
+		a.jsonResponse(w, ConfigValidateResponse{
+			Valid: false,
+			Error: "validator binary for " + kernelType + " not found on the system",
+		})
+		return
+	}
+
+	tempDir, err := os.MkdirTemp("", "xcp-val-*")
+	if err != nil {
+		a.errorResponse(w, "failed to create validation temp dir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer os.RemoveAll(tempDir)
+
+	origDir := filepath.Dir(cleanPath)
+	if err := copyDirConfigs(origDir, tempDir, filename, req.Content); err != nil {
+		a.errorResponse(w, "failed to prepare validation files: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var cmd *exec.Cmd
+	if kernelType == "xray" {
+		cmd = exec.Command(binaryPath, "-test", "-confdir", tempDir)
+	} else {
+		cmd = exec.Command(binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, filename))
+	}
+
+	out, err := cmd.CombinedOutput()
+	outputStr := string(out)
+
+	if err != nil {
+		a.jsonResponse(w, ConfigValidateResponse{
+			Valid: false,
+			Error: strings.TrimSpace(outputStr),
+		})
+		return
+	}
+
+	a.jsonResponse(w, ConfigValidateResponse{
+		Valid: true,
+	})
 }
