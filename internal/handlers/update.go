@@ -84,8 +84,8 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 		if arch == "mipsle" || arch == "mipsel" {
 			arch = "mipsle"
 		}
-		info.DownloadURL = fmt.Sprintf("%s/%s/xkeen-control-panel-linux-%s",
-			githubDownloadURL, info.LatestVersion, arch)
+		info.DownloadURL = fmt.Sprintf("%s/v%s/xcp_v%s_%s",
+			githubDownloadURL, info.LatestVersion, info.LatestVersion, arch)
 	}
 
 	JSONSuccess(w, info)
@@ -142,7 +142,14 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	backupDir := filepath.Join(a.cfg.DataDir, "backup")
-	binPath := filepath.Join(filepath.Dir(a.cfg.DataDir), "bin/xkeen-control-panel")
+	binPath := "/opt/sbin/xcp"
+	if exe, err := os.Executable(); err == nil {
+		if realPath, err := filepath.EvalSymlinks(exe); err == nil {
+			binPath = realPath
+		} else {
+			binPath = exe
+		}
+	}
 
 	// Find latest backup
 	backups, err := os.ReadDir(backupDir)
@@ -237,10 +244,10 @@ func (a *API) performUpdate(channel string) {
 		arch = "mipsle"
 	}
 
-	downloadURL := fmt.Sprintf("%s/%s/xkeen-control-panel-linux-%s",
-		githubDownloadURL, info.LatestVersion, arch)
+	downloadURL := fmt.Sprintf("%s/v%s/xcp_v%s_%s",
+		githubDownloadURL, info.LatestVersion, info.LatestVersion, arch)
 
-	tempFile := filepath.Join(os.TempDir(), "xkeen-control-panel.new")
+	tempFile := filepath.Join(os.TempDir(), "xcp.new")
 	if err := downloadFile(downloadURL, tempFile); err != nil {
 		setUpdateState(UpdateStatus{
 			Status:    "failed",
@@ -251,8 +258,8 @@ func (a *API) performUpdate(channel string) {
 	}
 
 	// Step 2b: Verify SHA-256 checksum if checksums.txt is available
-	checksumsURL := fmt.Sprintf("%s/%s/checksums.txt", githubDownloadURL, info.LatestVersion)
-	binaryName := fmt.Sprintf("xkeen-control-panel-linux-%s", arch)
+	checksumsURL := fmt.Sprintf("%s/v%s/checksums.txt", githubDownloadURL, info.LatestVersion)
+	binaryName := fmt.Sprintf("xcp_v%s_%s", info.LatestVersion, arch)
 	if err := verifyFileChecksum(tempFile, binaryName, checksumsURL); err != nil {
 		_ = os.Remove(tempFile)
 		setUpdateState(UpdateStatus{
@@ -279,11 +286,18 @@ func (a *API) performUpdate(channel string) {
 		Message:  "Creating backup...",
 	})
 
-	binPath := filepath.Join(filepath.Dir(a.cfg.DataDir), "bin/xkeen-control-panel")
+	binPath := "/opt/sbin/xcp"
+	if exe, err := os.Executable(); err == nil {
+		if realPath, err := filepath.EvalSymlinks(exe); err == nil {
+			binPath = realPath
+		} else {
+			binPath = exe
+		}
+	}
 	backupDir := filepath.Join(a.cfg.DataDir, "backup")
 	os.MkdirAll(backupDir, 0755)
 
-	backupPath := filepath.Join(backupDir, fmt.Sprintf("xkeen-control-panel.bak.%d", time.Now().Unix()))
+	backupPath := filepath.Join(backupDir, fmt.Sprintf("xcp.bak.%d", time.Now().Unix()))
 	if err := copyFile(binPath, backupPath); err != nil {
 		setUpdateState(UpdateStatus{
 			Status:    "failed",
