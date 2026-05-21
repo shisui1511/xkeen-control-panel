@@ -2,6 +2,18 @@
   import { onMount, onDestroy } from 'svelte'
   import { t, setLang, currentLang, getAvailableLangs, type Lang } from './i18n'
   import Icon from './lib/components/Icon.svelte'
+  import { capabilities, fetchCapabilities } from './stores'
+
+  let checkingConnection = false
+
+  async function recheckConnection() {
+    checkingConnection = true
+    try {
+      await fetchCapabilities()
+    } finally {
+      checkingConnection = false
+    }
+  }
 
   let version = '...'
   let langs = getAvailableLangs()
@@ -114,6 +126,7 @@
 
   onMount(() => {
     fetchVersion()
+    fetchCapabilities()
   })
 
   onDestroy(() => {
@@ -195,6 +208,53 @@
           {$t('settings.rollback')}
         </button>
       {/if}
+    </div>
+  </div>
+
+  <div class="card mb-2">
+    <h2>{$t('settings.mihomo_api')}</h2>
+    <div class="setting-row">
+      <span class="setting-label">{$t('settings.mihomo_status')}</span>
+      <span class="setting-value">
+        {#if $capabilities?.mihomo.process_running}
+          <span style="color: var(--success, #2ecc71)">● {$t('settings.mihomo_running')}</span>
+        {:else}
+          <span style="color: var(--danger, #e74c3c)">○ {$t('settings.mihomo_stopped')}</span>
+        {/if}
+      </span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">{$t('settings.mihomo_api_reachable')}</span>
+      <span class="setting-value">
+        {#if $capabilities?.mihomo.api_reachable}
+          <span style="color: var(--success, #2ecc71)">{$t('settings.mihomo_yes')}</span>
+        {:else}
+          <span style="color: var(--danger, #e74c3c)">{$t('settings.mihomo_no')}</span>
+        {/if}
+      </span>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">{$t('settings.mihomo_api_auth')}</span>
+      <span class="setting-value">
+        {#if $capabilities?.mihomo.api_authenticated}
+          <span style="color: var(--success, #2ecc71)">{$t('settings.mihomo_yes')}</span>
+        {:else if $capabilities?.mihomo.api_reachable}
+          <span style="color: var(--danger, #e74c3c)">{$t('settings.mihomo_auth_error')}</span>
+        {:else}
+          <span style="color: var(--fg-secondary)">—</span>
+        {/if}
+      </span>
+    </div>
+    {#if $capabilities?.mihomo.discovered_secret}
+      <div class="setting-row">
+        <span class="setting-label">{$t('settings.mihomo_secret_discovered')}</span>
+        <span class="setting-value" style="font-family: monospace;">{$capabilities.mihomo.discovered_secret}</span>
+      </div>
+    {/if}
+    <div class="update-actions">
+      <button class="btn btn-secondary" on:click={recheckConnection} disabled={checkingConnection} title={$t('settings.recheck_title')}>
+        {checkingConnection ? $t('settings.checking') : $t('settings.recheck_btn')}
+      </button>
     </div>
   </div>
 
