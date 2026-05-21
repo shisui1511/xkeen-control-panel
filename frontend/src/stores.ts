@@ -12,6 +12,10 @@ export interface CapabilitiesData {
   kernels: Record<string, KernelCapability>
   mihomo: {
     reachable: boolean
+    process_running: boolean
+    api_reachable: boolean
+    api_authenticated: boolean
+    discovered_secret?: string
   }
 }
 

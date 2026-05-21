@@ -141,7 +141,11 @@
   <div class="console-layout">
     <div class="commands-panel">
       {#each categories as category}
-        <details class="category-details" open>
+        <details
+          class="category-details"
+          open={localStorage.getItem('console.cat.' + category.name) !== 'false'}
+          on:toggle={(e) => localStorage.setItem('console.cat.' + category.name, String(e.currentTarget.open))}
+        >
           <summary class="category-title" title={$t('console.cat_' + category.name) || category.name}>
             {$t('console.cat_' + category.name) || category.name}
             <span class="cat-arrow">▶</span>
