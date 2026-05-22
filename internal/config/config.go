@@ -9,6 +9,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
+// Config represents the main application configuration structure.
 type Config struct {
 	Port            int         `json:"port"`
 	XRayConfigDir   string      `json:"xray_config_dir"`
@@ -26,6 +27,7 @@ type Config struct {
 	MihomoSecret    string      `json:"mihomo_secret"`
 }
 
+// AuthConfig represents the configuration settings for authentication and session management.
 type AuthConfig struct {
 	PasswordHash     string `json:"password_hash"`
 	SessionTimeout   int    `json:"session_timeout_hours"`
@@ -34,6 +36,7 @@ type AuthConfig struct {
 	SecureCookie     bool   `json:"secure_cookie"`
 }
 
+// HTTPSConfig represents the settings for enabling/configuring HTTPS on the control panel.
 type HTTPSConfig struct {
 	Enabled  bool   `json:"enabled"`
 	CertPath string `json:"cert_path"`
@@ -59,6 +62,7 @@ func findXKeen() string {
 	return "/opt/sbin/xkeen" // fallback
 }
 
+// Default returns the default configuration for the application.
 func Default() *Config {
 	return &Config{
 		Port:            8090,
@@ -95,6 +99,7 @@ func Default() *Config {
 	}
 }
 
+// Load reads and parses the configuration file from the given path.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -114,6 +119,7 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// Save writes the given configuration to the specified path atomically.
 func Save(path string, cfg *Config) error {
 	data, _ := json.MarshalIndent(cfg, "", "  ")
 	os.MkdirAll(filepath.Dir(path), 0755)
