@@ -31,7 +31,7 @@
     {placeholder}
     {disabled}
     {oninput}
-    aria-invalid={!!error ? 'true' : 'false'}
+    aria-invalid={error ? 'true' : 'false'}
     aria-describedby={error ? `${id}-error` : undefined}
   />
   {#if error}

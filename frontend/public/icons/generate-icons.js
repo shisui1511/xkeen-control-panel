@@ -6,6 +6,6 @@
 const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
 console.log('Icon generator requires sharp package: npm install sharp');
 console.log('Or use online generator: https://favicon.io/icon-generator');
-sizes.forEach(size => {
+sizes.forEach((size) => {
   console.log(`Need icon: icons/icon-${size}x${size}.png`);
 });

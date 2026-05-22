@@ -18,11 +18,7 @@
   });
 </script>
 
-<div
-  class="skeleton skeleton-{type}"
-  style={styleString}
-  aria-hidden="true"
-></div>
+<div class="skeleton skeleton-{type}" style={styleString} aria-hidden="true"></div>
 
 <style>
   .skeleton {

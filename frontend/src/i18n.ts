@@ -1,7 +1,7 @@
-import { writable, derived } from 'svelte/store'
+import { writable, derived } from 'svelte/store';
 
 // Available languages
-export type Lang = 'ru' | 'en'
+export type Lang = 'ru' | 'en';
 
 // Translation dictionaries
 const translations: Record<Lang, Record<string, string>> = {
@@ -110,13 +110,16 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.total_proxies': 'Всего прокси в подписках',
     'dash.problems_panel': 'Панель проблем',
     'dash.problems.invalid_config_title': 'Ошибка конфигурации',
-    'dash.problems.invalid_config_desc': 'В активной конфигурации Xray или Mihomo обнаружена синтаксическая ошибка. Пожалуйста, проверьте конфигурационные файлы в редакторе.',
+    'dash.problems.invalid_config_desc':
+      'В активной конфигурации Xray или Mihomo обнаружена синтаксическая ошибка. Пожалуйста, проверьте конфигурационные файлы в редакторе.',
     'dash.problems.invalid_config_cta': 'Перейти в Редактор',
     'dash.problems.mihomo_api_title': 'API Mihomo недоступен',
-    'dash.problems.mihomo_api_desc': 'Панель управления не может подключиться к Mihomo API. Прокси-сервисы могут работать некорректно.',
+    'dash.problems.mihomo_api_desc':
+      'Панель управления не может подключиться к Mihomo API. Прокси-сервисы могут работать некорректно.',
     'dash.problems.mihomo_api_cta': 'Настроить API',
     'dash.problems.kernel_missing_title': 'Прокси ядра не установлены',
-    'dash.problems.kernel_missing_desc': 'Ни одно ядро (Xray или Mihomo) не установлено. Пожалуйста, установите ядро в разделе управления сервисами.',
+    'dash.problems.kernel_missing_desc':
+      'Ни одно ядро (Xray или Mihomo) не установлено. Пожалуйста, установите ядро в разделе управления сервисами.',
     'dash.problems.kernel_missing_cta': 'Установить ядро',
 
     // Editor
@@ -352,16 +355,19 @@ const translations: Record<Lang, Record<string, string>> = {
     'console.cat_system': 'Система',
     'console.load_error': 'Ошибка загрузки команд',
     'console.confirm_title': 'Опасное действие',
-    'console.confirm_desc': 'Вы уверены, что хотите выполнить команду "{name}"? Это действие нельзя отменить.',
+    'console.confirm_desc':
+      'Вы уверены, что хотите выполнить команду "{name}"? Это действие нельзя отменить.',
     'console.danger_label': 'Опасная команда',
-    'status': 'Статус',
+    status: 'Статус',
     'xkeen.h': 'Справка XKeen',
 
     // Editor Extras
     'editor.back_to_dashboard': 'Вернуться на Dashboard',
     'editor.templates': 'Шаблоны',
-    'editor.templates_desc': 'Выберите готовый шаблон для быстрой настройки. Внимание: текущий контент будет заменен!',
-    'editor.confirm_template': 'Вы уверены, что хотите применить этот шаблон? Текущее содержимое файла будет заменено.',
+    'editor.templates_desc':
+      'Выберите готовый шаблон для быстрой настройки. Внимание: текущий контент будет заменен!',
+    'editor.confirm_template':
+      'Вы уверены, что хотите применить этот шаблон? Текущее содержимое файла будет заменено.',
     'editor.generator': 'Генератор',
     'editor.protocol': 'Протокол',
     'editor.address': 'Адрес',
@@ -378,7 +384,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'conn.total': 'Всего: {count}',
     'conn.shown': 'Показано: {count}',
     'conn.no_connections': 'Активных подключений не найдено',
-    
+
     // Network Tools
     'net.title': 'Сетевые инструменты',
     'net.subtitle': 'Ping, traceroute, DNS lookup, HTTP test',
@@ -522,13 +528,16 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // Capabilities
     'capabilities.mihomo_offline': 'Mihomo API недоступен',
-    'capabilities.mihomo_offline_desc': 'Прокси, подключения и правила недоступны. Запустите Mihomo или проверьте настройки.',
+    'capabilities.mihomo_offline_desc':
+      'Прокси, подключения и правила недоступны. Запустите Mihomo или проверьте настройки.',
     'capabilities.mihomo_empty_title': 'Mihomo недоступен',
-    'capabilities.mihomo_empty_desc': 'API Mihomo не отвечает. Перейдите в раздел «Сервисы» для запуска Mihomo.',
+    'capabilities.mihomo_empty_desc':
+      'API Mihomo не отвечает. Перейдите в раздел «Сервисы» для запуска Mihomo.',
 
     // Design System / Empty States
     'ds.empty.mihomo_offline_title': 'Ядро Mihomo остановлено',
-    'ds.empty.mihomo_offline_desc': 'Для просмотра этой страницы необходимо запустить сервис Mihomo.',
+    'ds.empty.mihomo_offline_desc':
+      'Для просмотра этой страницы необходимо запустить сервис Mihomo.',
     'ds.empty.mihomo_offline_cta': 'Запустить Mihomo',
     'ds.empty.mihomo_offline_loading': 'Запуск службы...',
     'ds.empty.no_data_title': 'Данные отсутствуют',
@@ -538,7 +547,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'ds.empty.logs_empty_title': 'Логи отсутствуют',
     'ds.empty.logs_empty_desc': 'Лог-файл пуст или еще не заполнен записями.',
     'ds.empty.error_title': 'Ошибка загрузки',
-    'ds.empty.load_timeout': 'Превышено время ожидания ответа. Проверьте, что Mihomo запущен и доступен.',
+    'ds.empty.load_timeout':
+      'Превышено время ожидания ответа. Проверьте, что Mihomo запущен и доступен.'
   },
   en: {
     // Common
@@ -648,13 +658,16 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.total_proxies': 'Total Proxies in Subscriptions',
     'dash.problems_panel': 'Problems Panel',
     'dash.problems.invalid_config_title': 'Configuration Error',
-    'dash.problems.invalid_config_desc': 'A syntax error has been detected in the active Xray or Mihomo configuration. Please check configuration files in the editor.',
+    'dash.problems.invalid_config_desc':
+      'A syntax error has been detected in the active Xray or Mihomo configuration. Please check configuration files in the editor.',
     'dash.problems.invalid_config_cta': 'Go to Editor',
     'dash.problems.mihomo_api_title': 'Mihomo API Unavailable',
-    'dash.problems.mihomo_api_desc': 'The control panel cannot connect to Mihomo API. Proxy services might not work correctly.',
+    'dash.problems.mihomo_api_desc':
+      'The control panel cannot connect to Mihomo API. Proxy services might not work correctly.',
     'dash.problems.mihomo_api_cta': 'Configure API',
     'dash.problems.kernel_missing_title': 'Proxy Kernels Not Installed',
-    'dash.problems.kernel_missing_desc': 'No kernels (Xray or Mihomo) are currently installed. Please install a kernel in the services management section.',
+    'dash.problems.kernel_missing_desc':
+      'No kernels (Xray or Mihomo) are currently installed. Please install a kernel in the services management section.',
     'dash.problems.kernel_missing_cta': 'Install Kernel',
 
     // Editor
@@ -664,7 +677,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.backups': 'Backups',
     'editor.select_file': 'Select a file to edit',
     'editor.file_saved': 'File saved',
-    'editor.backup_restored': 'Backup restored (don\'t forget to save)',
+    'editor.backup_restored': "Backup restored (don't forget to save)",
     'editor.restore_confirm': 'Restore backup? Remember to save after restoring.',
     'editor.generate_uuid': 'Generate UUID',
     'editor.create_file': 'Create file',
@@ -888,14 +901,16 @@ const translations: Record<Lang, Record<string, string>> = {
     'console.confirm_title': 'Dangerous Action',
     'console.confirm_desc': 'Are you sure you want to run "{name}"? This action cannot be undone.',
     'console.danger_label': 'Dangerous command',
-    'status': 'Status',
+    status: 'Status',
     'xkeen.h': 'XKeen Help',
 
     // Editor Extras
     'editor.back_to_dashboard': 'Back to Dashboard',
     'editor.templates': 'Templates',
-    'editor.templates_desc': 'Select a pre-made template for quick setup. Warning: current content will be replaced!',
-    'editor.confirm_template': 'Are you sure you want to apply this template? Current file content will be replaced.',
+    'editor.templates_desc':
+      'Select a pre-made template for quick setup. Warning: current content will be replaced!',
+    'editor.confirm_template':
+      'Are you sure you want to apply this template? Current file content will be replaced.',
     'editor.generator': 'Generator',
     'editor.protocol': 'Protocol',
     'editor.address': 'Address',
@@ -1056,9 +1071,11 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // Capabilities
     'capabilities.mihomo_offline': 'Mihomo API unavailable',
-    'capabilities.mihomo_offline_desc': 'Proxies, connections and rules are unavailable. Start Mihomo or check settings.',
+    'capabilities.mihomo_offline_desc':
+      'Proxies, connections and rules are unavailable. Start Mihomo or check settings.',
     'capabilities.mihomo_empty_title': 'Mihomo unavailable',
-    'capabilities.mihomo_empty_desc': 'Mihomo API is not responding. Go to Services to start Mihomo.',
+    'capabilities.mihomo_empty_desc':
+      'Mihomo API is not responding. Go to Services to start Mihomo.',
 
     // Design System / Empty States
     'ds.empty.mihomo_offline_title': 'Mihomo Core Offline',
@@ -1072,49 +1089,49 @@ const translations: Record<Lang, Record<string, string>> = {
     'ds.empty.logs_empty_title': 'No Logs Available',
     'ds.empty.logs_empty_desc': 'Log file is empty or has not been populated yet.',
     'ds.empty.error_title': 'Loading Error',
-    'ds.empty.load_timeout': 'Request timed out. Check that Mihomo is running and reachable.',
+    'ds.empty.load_timeout': 'Request timed out. Check that Mihomo is running and reachable.'
   }
-}
+};
 
 // Detect browser language
 function detectLanguage(): Lang {
-  let saved: Lang | null = null
+  let saved: Lang | null = null;
   try {
-    saved = localStorage.getItem('lang') as Lang
+    saved = localStorage.getItem('lang') as Lang;
   } catch (e) {
     // localStorage may be unavailable
   }
-  if (saved && translations[saved]) return saved
-  
-  const browserLang = navigator.language.split('-')[0]
-  if (browserLang === 'ru') return 'ru'
-  return 'en'
+  if (saved && translations[saved]) return saved;
+
+  const browserLang = navigator.language.split('-')[0];
+  if (browserLang === 'ru') return 'ru';
+  return 'en';
 }
 
 // Create stores
-export const currentLang = writable<Lang>(detectLanguage())
+export const currentLang = writable<Lang>(detectLanguage());
 
 // Derived store for translations
-export const t = derived(currentLang, $lang => {
+export const t = derived(currentLang, ($lang) => {
   return (key: string, params?: Record<string, string | number>): string => {
-    const dict = translations[$lang] || translations.en
-    let text = dict[key] || key
-    
+    const dict = translations[$lang] || translations.en;
+    let text = dict[key] || key;
+
     if (params) {
       Object.entries(params).forEach(([k, v]) => {
-        text = text.replace(new RegExp(`{${k}}`, 'g'), String(v))
-      })
+        text = text.replace(new RegExp(`{${k}}`, 'g'), String(v));
+      });
     }
-    
-    return text
-  }
-})
+
+    return text;
+  };
+});
 
 // Switch language
 export function setLang(lang: Lang) {
-  currentLang.set(lang)
+  currentLang.set(lang);
   try {
-    localStorage.setItem('lang', lang)
+    localStorage.setItem('lang', lang);
   } catch (e) {
     // localStorage may be unavailable
   }
@@ -1125,5 +1142,5 @@ export function getAvailableLangs(): { code: Lang; name: string }[] {
   return [
     { code: 'ru', name: 'Русский' },
     { code: 'en', name: 'English' }
-  ]
+  ];
 }

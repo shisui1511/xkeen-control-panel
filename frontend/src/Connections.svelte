@@ -1,128 +1,137 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte'
-  import { t } from './i18n'
-  import { capabilities, toastStore } from './stores'
-  import Skeleton from './components/Skeleton.svelte'
-  import EmptyState from './components/EmptyState.svelte'
-  import PlayIcon from './lib/components/icons/Play.svelte'
-  import Icon from './lib/components/Icon.svelte'
+  import { onMount, onDestroy } from 'svelte';
+  import { t } from './i18n';
+  import { capabilities, toastStore } from './stores';
+  import Skeleton from './components/Skeleton.svelte';
+  import EmptyState from './components/EmptyState.svelte';
+  import PlayIcon from './lib/components/icons/Play.svelte';
+  import WarningIcon from './lib/components/icons/Warning.svelte';
+  import Icon from './lib/components/Icon.svelte';
 
   interface Connection {
-    id: string
+    id: string;
     metadata: {
-      network: string
-      type: string
-      sourceIP: string
-      destinationIP: string
-      sourcePort: string
-      destinationPort: string
-      host: string
-    }
-    upload: number
-    download: number
-    start: string
-    chains: string[]
-    rule: string
-    rulePayload: string
+      network: string;
+      type: string;
+      sourceIP: string;
+      destinationIP: string;
+      sourcePort: string;
+      destinationPort: string;
+      host: string;
+    };
+    upload: number;
+    download: number;
+    start: string;
+    chains: string[];
+    rule: string;
+    rulePayload: string;
   }
 
-  let connections: Connection[] = []
-  let loading = false
-  let error = ''
-  let loadTimedOut = false
-  let loadTimeoutId: ReturnType<typeof setTimeout> | null = null
-  let refreshInterval: ReturnType<typeof setInterval>
-  let autoRefresh = true
+  let connections: Connection[] = [];
+  let loading = false;
+  let error = '';
+  let loadTimedOut = false;
+  let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let refreshInterval: ReturnType<typeof setInterval>;
+  let autoRefresh = true;
 
   // Filters
-  let filterSource = ''
-  let filterDest = ''
-  let filterRule = ''
-  let filterProxy = ''
+  let filterSource = '';
+  let filterDest = '';
+  let filterRule = '';
+  let filterProxy = '';
 
   async function fetchConnections() {
-    loading = true
-    error = ''
-    loadTimedOut = false
-    if (loadTimeoutId) clearTimeout(loadTimeoutId)
+    loading = true;
+    error = '';
+    loadTimedOut = false;
+    if (loadTimeoutId) clearTimeout(loadTimeoutId);
     loadTimeoutId = setTimeout(() => {
       if (loading) {
-        loading = false
-        loadTimedOut = true
-        error = $t('ds.empty.load_timeout')
+        loading = false;
+        loadTimedOut = true;
+        error = $t('ds.empty.load_timeout');
       }
-    }, 10000)
+    }, 10000);
     try {
-      const res = await fetch('/api/mihomo/proxy/connections')
-      if (!res.ok) throw new Error('Failed to load connections')
-      
-      const data = await res.json()
-      connections = data.connections || []
+      const res = await fetch('/api/mihomo/proxy/connections');
+      if (!res.ok) throw new Error('Failed to load connections');
+
+      const data = await res.json();
+      connections = data.connections || [];
     } catch (e: any) {
-      error = e.message
+      error = e.message;
     } finally {
-      if (loadTimeoutId) { clearTimeout(loadTimeoutId); loadTimeoutId = null }
-      loading = false
+      if (loadTimeoutId) {
+        clearTimeout(loadTimeoutId);
+        loadTimeoutId = null;
+      }
+      loading = false;
     }
   }
 
   async function closeConnection(id: string) {
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch(`/api/mihomo/proxy/connections/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
-      
-      if (!res.ok) throw new Error('Failed to close connection')
-      
-      await fetchConnections()
+      });
+
+      if (!res.ok) throw new Error('Failed to close connection');
+
+      await fetchConnections();
     } catch (e: any) {
-      error = e.message
+      error = e.message;
     }
   }
 
   function getProxyName(conn: Connection): string {
-    if (!conn.chains || conn.chains.length === 0) return 'DIRECT'
-    return conn.chains[conn.chains.length - 1]
+    if (!conn.chains || conn.chains.length === 0) return 'DIRECT';
+    return conn.chains[conn.chains.length - 1];
   }
 
   function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
   function getFilteredConnections(): Connection[] {
-    return connections.filter(conn => {
-      if (filterSource && !conn.metadata.sourceIP.includes(filterSource)) return false
-      if (filterDest && !conn.metadata.host.includes(filterDest) && !conn.metadata.destinationIP.includes(filterDest)) return false
-      if (filterRule && !conn.rule.toLowerCase().includes(filterRule.toLowerCase())) return false
+    return connections.filter((conn) => {
+      if (filterSource && !conn.metadata.sourceIP.includes(filterSource)) return false;
+      if (
+        filterDest &&
+        !conn.metadata.host.includes(filterDest) &&
+        !conn.metadata.destinationIP.includes(filterDest)
+      )
+        return false;
+      if (filterRule && !conn.rule.toLowerCase().includes(filterRule.toLowerCase())) return false;
       if (filterProxy) {
-        const proxy = getProxyName(conn).toLowerCase()
-        if (!proxy.includes(filterProxy.toLowerCase())) return false
+        const proxy = getProxyName(conn).toLowerCase();
+        if (!proxy.includes(filterProxy.toLowerCase())) return false;
       }
-      return true
-    })
+      return true;
+    });
   }
 
   function toggleAutoRefresh() {
-    autoRefresh = !autoRefresh
+    autoRefresh = !autoRefresh;
     if (autoRefresh) {
-      refreshInterval = setInterval(fetchConnections, 3000)
+      refreshInterval = setInterval(fetchConnections, 3000);
     } else {
-      clearInterval(refreshInterval)
+      clearInterval(refreshInterval);
     }
   }
 
-  let mihomoLaunching = false
+  let mihomoLaunching = false;
 
   async function launchMihomo() {
-    mihomoLaunching = true
+    mihomoLaunching = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch('/api/mihomo/control', {
         method: 'POST',
         headers: {
@@ -130,27 +139,30 @@
           'X-CSRF-Token': csrfToken || ''
         },
         body: JSON.stringify({ action: 'start' })
-      })
-      if (!res.ok) throw new Error('Failed to start Mihomo')
-      setTimeout(() => fetchConnections(), 1500)
+      });
+      if (!res.ok) throw new Error('Failed to start Mihomo');
+      setTimeout(() => fetchConnections(), 1500);
     } catch (e: any) {
-      toastStore.update(items => [...items, { id: Date.now(), type: 'error', message: e.message }])
-      mihomoLaunching = false
+      toastStore.update((items) => [
+        ...items,
+        { id: Date.now(), type: 'error', message: e.message }
+      ]);
+      mihomoLaunching = false;
     }
   }
 
   onMount(() => {
     // Не запускать polling если Mihomo недоступен
     if ($capabilities === null || $capabilities.mihomo.reachable) {
-      fetchConnections()
-      refreshInterval = setInterval(fetchConnections, 3000)
+      fetchConnections();
+      refreshInterval = setInterval(fetchConnections, 3000);
     }
-  })
+  });
 
   onDestroy(() => {
-    clearInterval(refreshInterval)
-    if (loadTimeoutId) clearTimeout(loadTimeoutId)
-  })
+    clearInterval(refreshInterval);
+    if (loadTimeoutId) clearTimeout(loadTimeoutId);
+  });
 </script>
 
 <div class="container">
@@ -162,134 +174,159 @@
       title={$t('ds.empty.mihomo_offline_title')}
       description={$t('ds.empty.mihomo_offline_desc')}
       icon={PlayIcon}
-      ctaText={mihomoLaunching ? $t('ds.empty.mihomo_offline_loading') : $t('ds.empty.mihomo_offline_cta')}
+      ctaText={mihomoLaunching
+        ? $t('ds.empty.mihomo_offline_loading')
+        : $t('ds.empty.mihomo_offline_cta')}
       ctaLoading={mihomoLaunching}
       oncta={launchMihomo}
     />
-  {:else}
-
-  {#if error}
+  {:else if error}
     <EmptyState
       title={$t('ds.empty.error_title')}
       description={error}
-      icon="warning"
+      icon={WarningIcon}
       ctaText={$t('app.refresh')}
       oncta={fetchConnections}
     />
   {:else}
-
-  <div class="toolbar mb-2">
-    <div class="filters">
-      <input type="text" placeholder={$t('conn.source')} bind:value={filterSource} class="filter-input" />
-      <input type="text" placeholder={$t('conn.destination')} bind:value={filterDest} class="filter-input" />
-      <input type="text" placeholder={$t('conn.rule')} bind:value={filterRule} class="filter-input" />
-      <input type="text" placeholder={$t('conn.proxy')} bind:value={filterProxy} class="filter-input" />
+    <div class="toolbar mb-2">
+      <div class="filters">
+        <input
+          type="text"
+          placeholder={$t('conn.source')}
+          bind:value={filterSource}
+          class="filter-input"
+        />
+        <input
+          type="text"
+          placeholder={$t('conn.destination')}
+          bind:value={filterDest}
+          class="filter-input"
+        />
+        <input
+          type="text"
+          placeholder={$t('conn.rule')}
+          bind:value={filterRule}
+          class="filter-input"
+        />
+        <input
+          type="text"
+          placeholder={$t('conn.proxy')}
+          bind:value={filterProxy}
+          class="filter-input"
+        />
+      </div>
+      <div class="actions">
+        <button class="btn btn-secondary" on:click={fetchConnections} disabled={loading}>
+          <Icon name="refresh" size={14} />
+          {loading ? $t('app.loading') : $t('app.refresh')}
+        </button>
+        <button
+          class="btn btn-icon"
+          class:active={autoRefresh}
+          on:click={toggleAutoRefresh}
+          title={$t('conn.autorefresh')}
+        >
+          {#if autoRefresh}<Icon name="pause" size={14} />{:else}<Icon name="play" size={14} />{/if}
+        </button>
+      </div>
     </div>
-    <div class="actions">
-      <button class="btn btn-secondary" on:click={fetchConnections} disabled={loading}>
-        <Icon name="refresh" size={14} />
-        {loading ? $t('app.loading') : $t('app.refresh')}
-      </button>
-      <button class="btn btn-icon" class:active={autoRefresh} on:click={toggleAutoRefresh} title={$t('conn.autorefresh')}>
-        {#if autoRefresh}<Icon name="pause" size={14} />{:else}<Icon name="play" size={14} />{/if}
-      </button>
+
+    <div class="stats mb-2">
+      <span class="stat">{$t('conn.total', { count: connections.length })}</span>
+      <span class="stat">{$t('conn.shown', { count: getFilteredConnections().length })}</span>
     </div>
-  </div>
 
-  <div class="stats mb-2">
-    <span class="stat">{$t('conn.total', { count: connections.length })}</span>
-    <span class="stat">{$t('conn.shown', { count: getFilteredConnections().length })}</span>
-  </div>
-
-  <div class="table-container">
-    <table class="connections-table">
-      <thead>
-        <tr>
-          <th>{$t('conn.source')}</th>
-          <th>{$t('conn.destination')}</th>
-          <th>{$t('conn.rule')}</th>
-          <th>{$t('conn.proxy')}</th>
-          <th>{$t('traffic.upload')}</th>
-          <th>{$t('traffic.download')}</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {#if loading && connections.length === 0}
-          {#each Array(5) as _}
-            <tr>
-              <td>
-                <div class="cell-source">
-                  <Skeleton type="text-line" width="60px" />
-                  <Skeleton type="text-line" width="100px" />
-                </div>
-              </td>
-              <td>
-                <div class="cell-dest">
-                  <Skeleton type="text-line" width="140px" />
-                </div>
-              </td>
-              <td>
-                <Skeleton type="text-line" width="80px" />
-              </td>
-              <td>
-                <Skeleton type="text-line" width="70px" />
-              </td>
-              <td class="bytes">
-                <Skeleton type="text-line" width="50px" />
-              </td>
-              <td class="bytes">
-                <Skeleton type="text-line" width="50px" />
-              </td>
-              <td></td>
-            </tr>
-          {/each}
-        {:else}
-          {#each getFilteredConnections() as conn}
-            <tr>
-              <td>
-                <div class="cell-source">
-                  <span class="network-badge">{conn.metadata.network}</span>
-                  {conn.metadata.sourceIP}:{conn.metadata.sourcePort}
-                </div>
-              </td>
-              <td>
-                <div class="cell-dest">
-                  <div class="host">{conn.metadata.host || conn.metadata.destinationIP}</div>
-                  <div class="port">:{conn.metadata.destinationPort}</div>
-                </div>
-              </td>
-              <td>
-                <span class="rule-badge">{conn.rule}</span>
-                {#if conn.rulePayload}
-                  <span class="rule-payload">{conn.rulePayload}</span>
-                {/if}
-              </td>
-              <td>
-                <span class="proxy-name">{getProxyName(conn)}</span>
-              </td>
-              <td class="bytes">{formatBytes(conn.upload)}</td>
-              <td class="bytes">{formatBytes(conn.download)}</td>
-              <td>
-                <button class="btn-close" on:click={() => closeConnection(conn.id)} title={$t('app.close')}>
-                  <Icon name="close" size={12} />
-                </button>
-              </td>
-            </tr>
+    <div class="table-container">
+      <table class="connections-table">
+        <thead>
+          <tr>
+            <th>{$t('conn.source')}</th>
+            <th>{$t('conn.destination')}</th>
+            <th>{$t('conn.rule')}</th>
+            <th>{$t('conn.proxy')}</th>
+            <th>{$t('traffic.upload')}</th>
+            <th>{$t('traffic.download')}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {#if loading && connections.length === 0}
+            {#each Array(5) as _}
+              <tr>
+                <td>
+                  <div class="cell-source">
+                    <Skeleton type="text-line" width="60px" />
+                    <Skeleton type="text-line" width="100px" />
+                  </div>
+                </td>
+                <td>
+                  <div class="cell-dest">
+                    <Skeleton type="text-line" width="140px" />
+                  </div>
+                </td>
+                <td>
+                  <Skeleton type="text-line" width="80px" />
+                </td>
+                <td>
+                  <Skeleton type="text-line" width="70px" />
+                </td>
+                <td class="bytes">
+                  <Skeleton type="text-line" width="50px" />
+                </td>
+                <td class="bytes">
+                  <Skeleton type="text-line" width="50px" />
+                </td>
+                <td></td>
+              </tr>
+            {/each}
           {:else}
-            <tr>
-              <td colspan="7" class="empty-cell">
-                {$t('conn.no_connections')}
-              </td>
-            </tr>
-          {/each}
-        {/if}
-      </tbody>
-    </table>
-  </div>
-
-  {/if}
-
+            {#each getFilteredConnections() as conn}
+              <tr>
+                <td>
+                  <div class="cell-source">
+                    <span class="network-badge">{conn.metadata.network}</span>
+                    {conn.metadata.sourceIP}:{conn.metadata.sourcePort}
+                  </div>
+                </td>
+                <td>
+                  <div class="cell-dest">
+                    <div class="host">{conn.metadata.host || conn.metadata.destinationIP}</div>
+                    <div class="port">:{conn.metadata.destinationPort}</div>
+                  </div>
+                </td>
+                <td>
+                  <span class="rule-badge">{conn.rule}</span>
+                  {#if conn.rulePayload}
+                    <span class="rule-payload">{conn.rulePayload}</span>
+                  {/if}
+                </td>
+                <td>
+                  <span class="proxy-name">{getProxyName(conn)}</span>
+                </td>
+                <td class="bytes">{formatBytes(conn.upload)}</td>
+                <td class="bytes">{formatBytes(conn.download)}</td>
+                <td>
+                  <button
+                    class="btn-close"
+                    on:click={() => closeConnection(conn.id)}
+                    title={$t('app.close')}
+                  >
+                    <Icon name="close" size={12} />
+                  </button>
+                </td>
+              </tr>
+            {:else}
+              <tr>
+                <td colspan="7" class="empty-cell">
+                  {$t('conn.no_connections')}
+                </td>
+              </tr>
+            {/each}
+          {/if}
+        </tbody>
+      </table>
+    </div>
   {/if}
 </div>
 
@@ -369,7 +406,7 @@
 
   .connections-table td {
     padding: 0.75rem;
-    border-bottom: 1px solid var(--border-light, rgba(0,0,0,0.05));
+    border-bottom: 1px solid var(--border-light, rgba(0, 0, 0, 0.05));
     vertical-align: top;
   }
 

@@ -1,69 +1,77 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte'
-  import { t, setLang, currentLang, getAvailableLangs, type Lang } from './i18n'
-  import Icon from './lib/components/Icon.svelte'
-  import { capabilities, fetchCapabilities } from './stores'
+  import { onMount, onDestroy } from 'svelte';
+  import { t, setLang, currentLang, getAvailableLangs, type Lang } from './i18n';
+  import Icon from './lib/components/Icon.svelte';
+  import { capabilities, fetchCapabilities } from './stores';
 
-  let checkingConnection = false
+  export let onSwitchTab: (tab: string) => void = () => {};
+
+  let checkingConnection = false;
 
   async function recheckConnection() {
-    checkingConnection = true
+    checkingConnection = true;
     try {
-      await fetchCapabilities()
+      await fetchCapabilities();
     } finally {
-      checkingConnection = false
+      checkingConnection = false;
     }
   }
 
-  let version = '...'
-  let langs = getAvailableLangs()
+  let version = '...';
+  let langs = getAvailableLangs();
 
   // Update state
-  let updateInfo: { current_version: string; latest_version: string; has_update: boolean; channel: string; changelog?: string } | null = null
-  let updateStatus: { status: string; message: string; progress: number } | null = null
-  let updateChecking = false
-  let updateInstalling = false
-  let statusInterval: ReturnType<typeof setInterval>
+  let updateInfo: {
+    current_version: string;
+    latest_version: string;
+    has_update: boolean;
+    channel: string;
+    changelog?: string;
+  } | null = null;
+  let updateStatus: { status: string; message: string; progress: number } | null = null;
+  let updateChecking = false;
+  let updateInstalling = false;
+  let statusInterval: ReturnType<typeof setInterval>;
 
   async function fetchVersion() {
     try {
-      const res = await fetch('/api/version')
-      const data = await res.json()
-      version = data.version
+      const res = await fetch('/api/version');
+      const data = await res.json();
+      version = data.version;
     } catch (e) {
-      version = $t('app.unavailable')
+      version = $t('app.unavailable');
     }
   }
 
   function handleLangChange(e: Event) {
-    const select = e.target as HTMLSelectElement
-    setLang(select.value as Lang)
+    const select = e.target as HTMLSelectElement;
+    setLang(select.value as Lang);
   }
 
   async function checkUpdate(channel: string = 'stable') {
-    updateChecking = true
+    updateChecking = true;
     try {
-      const res = await fetch(`/api/update/check?channel=${channel}`)
+      const res = await fetch(`/api/update/check?channel=${channel}`);
       if (res.ok) {
-        const envelope = await res.json()
+        const envelope = await res.json();
         // UpdateCheck uses JSONSuccess envelope: {success, data: {...}}
-        updateInfo = envelope.data ?? envelope
+        updateInfo = envelope.data ?? envelope;
         if (updateInfo?.has_update && updateInfo?.latest_version) {
-          await fetchChangelog(updateInfo.latest_version)
+          await fetchChangelog(updateInfo.latest_version);
         }
       }
     } catch (e) {
       // ignore
     } finally {
-      updateChecking = false
+      updateChecking = false;
     }
   }
 
   async function fetchChangelog(version: string) {
     try {
-      const res = await fetch(`/api/update/changelog?version=${version}`)
+      const res = await fetch(`/api/update/changelog?version=${version}`);
       if (res.ok && updateInfo) {
-        updateInfo.changelog = await res.text()
+        updateInfo.changelog = await res.text();
       }
     } catch (e) {
       // ignore
@@ -71,30 +79,30 @@
   }
 
   async function installUpdate(channel: string = 'stable') {
-    updateInstalling = true
+    updateInstalling = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch(`/api/update/install?channel=${channel}`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
+      });
       if (res.ok) {
-        startStatusPolling()
+        startStatusPolling();
       }
     } catch (e) {
-      updateInstalling = false
+      updateInstalling = false;
     }
   }
 
   async function rollbackUpdate() {
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch('/api/update/rollback', {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
+      });
       if (res.ok) {
-        startStatusPolling()
+        startStatusPolling();
       }
     } catch (e) {
       // ignore
@@ -103,35 +111,35 @@
 
   async function fetchStatus() {
     try {
-      const res = await fetch('/api/update/status')
+      const res = await fetch('/api/update/status');
       if (res.ok) {
-        const envelope = await res.json()
+        const envelope = await res.json();
         // UpdateStatusEndpoint uses JSONSuccess envelope: {success, data: {...}}
-        updateStatus = envelope.data ?? envelope
+        updateStatus = envelope.data ?? envelope;
         if (updateStatus?.status === 'done' || updateStatus?.status === 'failed') {
-          updateInstalling = false
-          clearInterval(statusInterval)
+          updateInstalling = false;
+          clearInterval(statusInterval);
         }
       }
     } catch (e) {
-      clearInterval(statusInterval)
-      updateInstalling = false
+      clearInterval(statusInterval);
+      updateInstalling = false;
     }
   }
 
   function startStatusPolling() {
-    fetchStatus()
-    statusInterval = setInterval(fetchStatus, 2000)
+    fetchStatus();
+    statusInterval = setInterval(fetchStatus, 2000);
   }
 
   onMount(() => {
-    fetchVersion()
-    fetchCapabilities()
-  })
+    fetchVersion();
+    fetchCapabilities();
+  });
 
   onDestroy(() => {
-    if (statusInterval) clearInterval(statusInterval)
-  })
+    if (statusInterval) clearInterval(statusInterval);
+  });
 </script>
 
 <div class="container">
@@ -195,11 +203,19 @@
     {/if}
 
     <div class="update-actions">
-      <button class="btn btn-secondary" on:click={() => checkUpdate('stable')} disabled={updateChecking || updateInstalling}>
+      <button
+        class="btn btn-secondary"
+        on:click={() => checkUpdate('stable')}
+        disabled={updateChecking || updateInstalling}
+      >
         {updateChecking ? $t('settings.checking') : $t('settings.check_update')}
       </button>
       {#if updateInfo?.has_update}
-        <button class="btn btn-primary" on:click={() => installUpdate('stable')} disabled={updateInstalling}>
+        <button
+          class="btn btn-primary"
+          on:click={() => installUpdate('stable')}
+          disabled={updateInstalling}
+        >
           {updateInstalling ? $t('settings.installing') : $t('settings.install_update')}
         </button>
       {/if}
@@ -248,11 +264,18 @@
     {#if $capabilities?.mihomo.discovered_secret}
       <div class="setting-row">
         <span class="setting-label">{$t('settings.mihomo_secret_discovered')}</span>
-        <span class="setting-value" style="font-family: monospace;">{$capabilities.mihomo.discovered_secret}</span>
+        <span class="setting-value" style="font-family: monospace;"
+          >{$capabilities.mihomo.discovered_secret}</span
+        >
       </div>
     {/if}
     <div class="update-actions">
-      <button class="btn btn-secondary" on:click={recheckConnection} disabled={checkingConnection} title={$t('settings.recheck_title')}>
+      <button
+        class="btn btn-secondary"
+        on:click={recheckConnection}
+        disabled={checkingConnection}
+        title={$t('settings.recheck_title')}
+      >
         {checkingConnection ? $t('settings.checking') : $t('settings.recheck_btn')}
       </button>
     </div>
@@ -267,8 +290,6 @@
       <li class="mb-1"><Icon name="check" size={14} /> {$t('settings.security_headers')}</li>
     </ul>
   </div>
-
-
 </div>
 
 <style>

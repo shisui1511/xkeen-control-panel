@@ -1,45 +1,52 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { fade } from 'svelte/transition'
-  import { t, setLang } from './i18n'
-  import { isSidebarOpen, capabilities, fetchCapabilities } from './stores'
-  import Sidebar from './components/Sidebar.svelte'
-  import Toast from './components/Toast.svelte'
-  import ConfirmDialog from './components/ConfirmDialog.svelte'
-  import Card from './components/Card.svelte'
-  import Button from './components/Button.svelte'
-  import Icon from './lib/components/Icon.svelte'
-  import Skeleton from './components/Skeleton.svelte'
-  import Editor from './Editor.svelte'
-  import Logs from './Logs.svelte'
-  import Services from './Services.svelte'
-  import Settings from './Settings.svelte'
-  import Proxies from './Proxies.svelte'
-  import Connections from './Connections.svelte'
-  import Rules from './Rules.svelte'
-  import Traffic from './Traffic.svelte'
-  import Subscriptions from './Subscriptions.svelte'
-  import NetworkTools from './NetworkTools.svelte'
-  import SmartProxy from './SmartProxy.svelte'
-  import TrafficQuotas from './TrafficQuotas.svelte'
-  import DATManager from './DATManager.svelte'
-  import Console from './Console.svelte'
+  import { onMount } from 'svelte';
+  import { fade } from 'svelte/transition';
+  import { t, setLang } from './i18n';
+  import { isSidebarOpen, capabilities, fetchCapabilities } from './stores';
+  import Sidebar from './components/Sidebar.svelte';
+  import Toast from './components/Toast.svelte';
+  import ConfirmDialog from './components/ConfirmDialog.svelte';
+  import Card from './components/Card.svelte';
+  import Button from './components/Button.svelte';
+  import Icon from './lib/components/Icon.svelte';
+  import Skeleton from './components/Skeleton.svelte';
+  import Editor from './Editor.svelte';
+  import Logs from './Logs.svelte';
+  import Services from './Services.svelte';
+  import Settings from './Settings.svelte';
+  import Proxies from './Proxies.svelte';
+  import Connections from './Connections.svelte';
+  import Rules from './Rules.svelte';
+  import Traffic from './Traffic.svelte';
+  import Subscriptions from './Subscriptions.svelte';
+  import NetworkTools from './NetworkTools.svelte';
+  import SmartProxy from './SmartProxy.svelte';
+  import TrafficQuotas from './TrafficQuotas.svelte';
+  import DATManager from './DATManager.svelte';
+  import Console from './Console.svelte';
 
-  let version = $t('app.loading')
-  let loading = false
-  let currentTab = 'dashboard'
-  const mihomoDependentTabs = ['proxies', 'connections', 'rules', 'traffic', 'smartproxy', 'trafficquotas']
-  let theme = document.documentElement.getAttribute('data-theme') || 'light'
-  let pwaInstallPrompt: any = null
+  let version = $t('app.loading');
+  let loading = false;
+  let currentTab = 'dashboard';
+  const mihomoDependentTabs = [
+    'proxies',
+    'connections',
+    'rules',
+    'traffic',
+    'smartproxy',
+    'trafficquotas'
+  ];
+  let theme = document.documentElement.getAttribute('data-theme') || 'light';
+  let pwaInstallPrompt: any = null;
 
   // Dashboard live monitoring state
   interface ServiceStatus {
-    xkeen: string
-    xray: string
-    mihomo: string
-    connections: number
-    xrayVersion: string
-    mihomoVersion: string
+    xkeen: string;
+    xray: string;
+    mihomo: string;
+    connections: number;
+    xrayVersion: string;
+    mihomoVersion: string;
   }
 
   let serviceStatus: ServiceStatus = {
@@ -49,93 +56,93 @@
     connections: 0,
     xrayVersion: '',
     mihomoVersion: ''
-  }
-  let statusError = false
-  let statusLoading = true
+  };
+  let statusError = false;
+  let statusLoading = true;
 
   interface SystemStats {
-    memory: { total: number; used: number; free: number }
-    load: [number, number, number]
-    uptime: { seconds: number; days: number; hours: number; minutes: number }
-    go_runtime: { goroutines: number; heap_alloc: number; heap_sys: number; num_gc: number }
-    router_model: string
-    hostname: string
-    wan_status: string
-    default_gateway: string
-    dns_servers: string[]
-    dns_resolving: boolean
-    invalid_config: boolean
+    memory: { total: number; used: number; free: number };
+    load: [number, number, number];
+    uptime: { seconds: number; days: number; hours: number; minutes: number };
+    go_runtime: { goroutines: number; heap_alloc: number; heap_sys: number; num_gc: number };
+    router_model: string;
+    hostname: string;
+    wan_status: string;
+    default_gateway: string;
+    dns_servers: string[];
+    dns_resolving: boolean;
+    invalid_config: boolean;
   }
 
-  let systemStats: SystemStats | null = null
-  let activeSubscriptionsCount = 0
-  let totalProxiesCount = 0
+  let systemStats: SystemStats | null = null;
+  let activeSubscriptionsCount = 0;
+  let totalProxiesCount = 0;
 
   async function fetchSubscriptionSummary() {
     try {
-      const res = await fetch('/api/subscriptions')
+      const res = await fetch('/api/subscriptions');
       if (res.ok) {
-        const envelope = await res.json()
-        const subs = Array.isArray(envelope) ? envelope : (envelope.data ?? [])
-        activeSubscriptionsCount = subs.filter((s: any) => s.enabled).length
-        totalProxiesCount = subs.reduce((acc: number, s: any) => acc + (s.proxy_count || 0), 0)
+        const envelope = await res.json();
+        const subs = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
+        activeSubscriptionsCount = subs.filter((s: any) => s.enabled).length;
+        totalProxiesCount = subs.reduce((acc: number, s: any) => acc + (s.proxy_count || 0), 0);
       }
     } catch (_) {}
   }
 
   async function fetchLiveStatus() {
-    statusError = false
+    statusError = false;
     try {
       const [svcRes, mihomoRes] = await Promise.allSettled([
         fetch('/api/service/status'),
         fetch('/api/mihomo/status')
-      ])
+      ]);
 
-      const svcText = svcRes.status === 'fulfilled' && svcRes.value.ok
-        ? await svcRes.value.text()
-        : ''
-      const mihomoText = mihomoRes.status === 'fulfilled' && mihomoRes.value.ok
-        ? await mihomoRes.value.text()
-        : ''
+      const svcText =
+        svcRes.status === 'fulfilled' && svcRes.value.ok ? await svcRes.value.text() : '';
+      const mihomoText =
+        mihomoRes.status === 'fulfilled' && mihomoRes.value.ok ? await mihomoRes.value.text() : '';
 
       // Try to get connection count from mihomo
-      let connCount = 0
+      let connCount = 0;
       try {
-        const connRes = await fetch('/api/mihomo/proxy/connections?limit=1')
+        const connRes = await fetch('/api/mihomo/proxy/connections?limit=1');
         if (connRes.ok) {
-          const connData = await connRes.json()
-          connCount = connData?.connections?.length ?? 0
+          const connData = await connRes.json();
+          connCount = connData?.connections?.length ?? 0;
         }
       } catch (_) {}
 
       // Get kernel versions and process_status from /api/kernels
-      let xrayVer = ''
-      let mihomoVer = ''
-      let xrayProcessStatus = 'unknown'
-      let mihomoProcessStatus = 'unknown'
+      let xrayVer = '';
+      let mihomoVer = '';
+      let xrayProcessStatus = 'unknown';
+      let mihomoProcessStatus = 'unknown';
       try {
-        const kernelsRes = await fetch('/api/kernels')
+        const kernelsRes = await fetch('/api/kernels');
         if (kernelsRes.ok) {
-          const kernelsEnvelope = await kernelsRes.json()
+          const kernelsEnvelope = await kernelsRes.json();
           // KernelList uses JSONSuccess envelope: {success, data: [...]}
-          const kernels = Array.isArray(kernelsEnvelope) ? kernelsEnvelope : (kernelsEnvelope.data ?? kernelsEnvelope)
+          const kernels = Array.isArray(kernelsEnvelope)
+            ? kernelsEnvelope
+            : (kernelsEnvelope.data ?? kernelsEnvelope);
           for (const k of kernels) {
             if (k.name === 'xray') {
-              xrayVer = k.current_version || ''
-              xrayProcessStatus = k.process_status || 'unknown'
+              xrayVer = k.current_version || '';
+              xrayProcessStatus = k.process_status || 'unknown';
             }
             if (k.name === 'mihomo') {
-              mihomoVer = k.current_version || ''
-              mihomoProcessStatus = k.process_status || 'unknown'
+              mihomoVer = k.current_version || '';
+              mihomoProcessStatus = k.process_status || 'unknown';
             }
           }
         } else {
-          xrayProcessStatus = 'error'
-          mihomoProcessStatus = 'error'
+          xrayProcessStatus = 'error';
+          mihomoProcessStatus = 'error';
         }
       } catch (_) {
-        xrayProcessStatus = 'error'
-        mihomoProcessStatus = 'error'
+        xrayProcessStatus = 'error';
+        mihomoProcessStatus = 'error';
       }
 
       serviceStatus = {
@@ -145,20 +152,20 @@
         connections: connCount,
         xrayVersion: xrayVer,
         mihomoVersion: mihomoVer
-      }
+      };
     } catch (_) {
-      statusError = true
-      serviceStatus = { ...serviceStatus, xray: 'error', mihomo: 'error' }
+      statusError = true;
+      serviceStatus = { ...serviceStatus, xray: 'error', mihomo: 'error' };
     } finally {
-      statusLoading = false
+      statusLoading = false;
     }
   }
 
   async function fetchSystemStats() {
     try {
-      const res = await fetch('/api/system/stats')
+      const res = await fetch('/api/system/stats');
       if (res.ok) {
-        systemStats = await res.json()
+        systemStats = await res.json();
       }
     } catch (e) {
       // ignore
@@ -166,96 +173,96 @@
   }
 
   function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B'
-    const k = 1024
-    const sizes = ['B', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
   function toggleTheme() {
-    theme = theme === 'dark' ? 'light' : 'dark'
-    document.documentElement.setAttribute('data-theme', theme)
-    localStorage.setItem('theme', theme)
+    theme = theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
   }
 
   async function fetchVersion() {
     try {
-      const res = await fetch('/api/version')
-      const data = await res.json()
-      version = data.version
+      const res = await fetch('/api/version');
+      const data = await res.json();
+      version = data.version;
     } catch (e) {
-      version = $t('app.error')
+      version = $t('app.error');
     }
   }
 
   async function handleLogout() {
-    loading = true
+    loading = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       await fetch('/api/auth/logout', {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
-      localStorage.removeItem('csrf_token')
-      window.location.href = '/'
+      });
+      localStorage.removeItem('csrf_token');
+      window.location.href = '/';
     } catch (e) {
-      console.error('Logout error:', e)
+      console.error('Logout error:', e);
     } finally {
-      loading = false
+      loading = false;
     }
   }
 
   function switchTab(tab: string) {
-    currentTab = tab
+    currentTab = tab;
   }
 
   function toggleSidebar() {
-    isSidebarOpen.update(v => !v)
+    isSidebarOpen.update((v) => !v);
   }
 
   function closeSidebar() {
-    isSidebarOpen.set(false)
+    isSidebarOpen.set(false);
   }
 
   async function installPWA() {
-    if (!pwaInstallPrompt) return
-    pwaInstallPrompt.prompt()
-    const { outcome } = await pwaInstallPrompt.userChoice
+    if (!pwaInstallPrompt) return;
+    pwaInstallPrompt.prompt();
+    const { outcome } = await pwaInstallPrompt.userChoice;
     if (outcome === 'accepted') {
-      pwaInstallPrompt = null
+      pwaInstallPrompt = null;
     }
   }
 
   function statusColor(status: string): string {
-    if (status === 'running') return 'success'
-    if (status === 'stopped' || status === 'not_installed') return 'error'
-    if (status === 'error') return 'error'
-    if (status === 'loading') return 'warning'
-    return 'warning' // unknown
+    if (status === 'running') return 'success';
+    if (status === 'stopped' || status === 'not_installed') return 'error';
+    if (status === 'error') return 'error';
+    if (status === 'loading') return 'warning';
+    return 'warning'; // unknown
   }
 
   onMount(() => {
-    fetchVersion()
-    fetchLiveStatus()
-    fetchSystemStats()
-    fetchCapabilities()
-    fetchSubscriptionSummary()
-    const statusInterval = setInterval(fetchLiveStatus, 10000)
-    const statsInterval = setInterval(fetchSystemStats, 5000)
-    const capInterval = setInterval(fetchCapabilities, 30000)
-    const subsInterval = setInterval(fetchSubscriptionSummary, 30000)
+    fetchVersion();
+    fetchLiveStatus();
+    fetchSystemStats();
+    fetchCapabilities();
+    fetchSubscriptionSummary();
+    const statusInterval = setInterval(fetchLiveStatus, 10000);
+    const statsInterval = setInterval(fetchSystemStats, 5000);
+    const capInterval = setInterval(fetchCapabilities, 30000);
+    const subsInterval = setInterval(fetchSubscriptionSummary, 30000);
     window.addEventListener('beforeinstallprompt', (e: Event) => {
-      e.preventDefault()
-      pwaInstallPrompt = e
-    })
+      e.preventDefault();
+      pwaInstallPrompt = e;
+    });
     return () => {
-      clearInterval(statusInterval)
-      clearInterval(statsInterval)
-      clearInterval(capInterval)
-      clearInterval(subsInterval)
-    }
-  })
+      clearInterval(statusInterval);
+      clearInterval(statsInterval);
+      clearInterval(capInterval);
+      clearInterval(subsInterval);
+    };
+  });
 </script>
 
 <div class="dashboard-layout">
@@ -268,9 +275,9 @@
       title={$t('nav.open_menu')}
     >
       <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
-        <rect y="3" width="22" height="2.5" rx="1.25" fill="currentColor"/>
-        <rect y="9.75" width="22" height="2.5" rx="1.25" fill="currentColor"/>
-        <rect y="16.5" width="22" height="2.5" rx="1.25" fill="currentColor"/>
+        <rect y="3" width="22" height="2.5" rx="1.25" fill="currentColor" />
+        <rect y="9.75" width="22" height="2.5" rx="1.25" fill="currentColor" />
+        <rect y="16.5" width="22" height="2.5" rx="1.25" fill="currentColor" />
       </svg>
     </button>
     <span style="font-weight: 600; font-size: 16px;">XKeen CP</span>
@@ -312,8 +319,13 @@
   <div class="main-content">
     <!-- Mihomo offline warning banner -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
-      <div class="alert alert-warning" style="margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px; font-size: 13px;">
-        <Icon name="warning" size={14} /> <strong>{$t('capabilities.mihomo_offline')}</strong> — {$t('capabilities.mihomo_offline_desc')}
+      <div
+        class="alert alert-warning"
+        style="margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px; font-size: 13px;"
+      >
+        <Icon name="warning" size={14} /> <strong>{$t('capabilities.mihomo_offline')}</strong> — {$t(
+          'capabilities.mihomo_offline_desc'
+        )}
       </div>
     {/if}
 
@@ -328,12 +340,21 @@
             <Card title={$t('dash.problems_panel')}>
               <div style="display: flex; flex-direction: column; gap: var(--spacing-3);">
                 {#if systemStats && systemStats.invalid_config}
-                  <div class="alert alert-error" style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-                    <div style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;">
-                      <Icon name="warning" size={16} style="margin-top: 2px;" />
+                  <div
+                    class="alert alert-error"
+                    style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;"
+                  >
+                    <div
+                      style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;"
+                    >
+                      <span style="margin-top: 2px; display: inline-flex;"
+                        ><Icon name="warning" size={16} /></span
+                      >
                       <div>
                         <strong>{$t('dash.problems.invalid_config_title')}</strong>
-                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">{$t('dash.problems.invalid_config_desc')}</div>
+                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">
+                          {$t('dash.problems.invalid_config_desc')}
+                        </div>
                       </div>
                     </div>
                     <Button variant="secondary" onclick={() => switchTab('editor')}>
@@ -343,12 +364,21 @@
                 {/if}
 
                 {#if $capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running}
-                  <div class="alert alert-warning" style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-                    <div style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;">
-                      <Icon name="warning" size={16} style="margin-top: 2px;" />
+                  <div
+                    class="alert alert-warning"
+                    style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;"
+                  >
+                    <div
+                      style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;"
+                    >
+                      <span style="margin-top: 2px; display: inline-flex;"
+                        ><Icon name="warning" size={16} /></span
+                      >
                       <div>
                         <strong>{$t('dash.problems.mihomo_api_title')}</strong>
-                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">{$t('dash.problems.mihomo_api_desc')}</div>
+                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">
+                          {$t('dash.problems.mihomo_api_desc')}
+                        </div>
                       </div>
                     </div>
                     <Button variant="secondary" onclick={() => switchTab('settings')}>
@@ -358,12 +388,21 @@
                 {/if}
 
                 {#if $capabilities !== null && !$capabilities.kernels.xray.installed && !$capabilities.kernels.mihomo.installed}
-                  <div class="alert alert-error" style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-                    <div style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;">
-                      <Icon name="warning" size={16} style="margin-top: 2px;" />
+                  <div
+                    class="alert alert-error"
+                    style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;"
+                  >
+                    <div
+                      style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;"
+                    >
+                      <span style="margin-top: 2px; display: inline-flex;"
+                        ><Icon name="warning" size={16} /></span
+                      >
                       <div>
                         <strong>{$t('dash.problems.kernel_missing_title')}</strong>
-                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">{$t('dash.problems.kernel_missing_desc')}</div>
+                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">
+                          {$t('dash.problems.kernel_missing_desc')}
+                        </div>
                       </div>
                     </div>
                     <Button variant="secondary" onclick={() => switchTab('services')}>
@@ -389,11 +428,7 @@
             {:else if statusError}
               <div class="status-error-row">
                 <span><Icon name="warning" size={14} /> {$t('dash.status_error')}</span>
-                <Button
-                  variant="secondary"
-                  onclick={fetchLiveStatus}
-                  title={$t('app.refresh')}
-                >
+                <Button variant="secondary" onclick={fetchLiveStatus} title={$t('app.refresh')}>
                   ↺ {$t('app.refresh')}
                 </Button>
               </div>
@@ -427,7 +462,8 @@
                   </span>
                 </div>
                 <div class="status-badge-item">
-                  <span class="status-dot {serviceStatus.connections > 0 ? 'success' : 'warning'}"></span>
+                  <span class="status-dot {serviceStatus.connections > 0 ? 'success' : 'warning'}"
+                  ></span>
                   <span class="status-badge-label">{$t('dash.connections')}</span>
                   <span class="status-badge-value">{serviceStatus.connections}</span>
                 </div>
@@ -440,14 +476,20 @@
         <div class="stats-grid" style="margin-bottom: var(--spacing-4);">
           <!-- Router Info -->
           <Card title={$t('dash.router_info')}>
-            <div style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;">
+            <div
+              style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;"
+            >
               <div>
                 <span class="text-secondary">{$t('dash.router_model')}:</span>
-                <span style="font-weight: 500; margin-left: 4px;">{systemStats?.router_model || '—'}</span>
+                <span style="font-weight: 500; margin-left: 4px;"
+                  >{systemStats?.router_model || '—'}</span
+                >
               </div>
               <div>
                 <span class="text-secondary">{$t('dash.router_hostname')}:</span>
-                <span style="font-weight: 500; margin-left: 4px;">{systemStats?.hostname || '—'}</span>
+                <span style="font-weight: 500; margin-left: 4px;"
+                  >{systemStats?.hostname || '—'}</span
+                >
               </div>
               <div>
                 <span class="text-secondary">{$t('dash.dns_servers')}:</span>
@@ -460,21 +502,35 @@
 
           <!-- Network Diagnostics -->
           <Card title={$t('dash.network_diagnostics')}>
-            <div style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;">
+            <div
+              style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;"
+            >
               <div>
                 <span class="text-secondary">{$t('dash.wan_status')}:</span>
-                <span style="font-weight: 500; margin-left: 4px;" class={systemStats?.wan_status === 'online' ? 'status-success' : 'status-error'}>
-                  {systemStats?.wan_status === 'online' ? $t('dash.wan_online') : $t('dash.wan_offline')}
+                <span
+                  style="font-weight: 500; margin-left: 4px;"
+                  class={systemStats?.wan_status === 'online' ? 'status-success' : 'status-error'}
+                >
+                  {systemStats?.wan_status === 'online'
+                    ? $t('dash.wan_online')
+                    : $t('dash.wan_offline')}
                 </span>
               </div>
               <div>
                 <span class="text-secondary">{$t('dash.default_gateway')}:</span>
-                <span style="font-weight: 500; margin-left: 4px; font-family: monospace;">{systemStats?.default_gateway || '—'}</span>
+                <span style="font-weight: 500; margin-left: 4px; font-family: monospace;"
+                  >{systemStats?.default_gateway || '—'}</span
+                >
               </div>
               <div>
                 <span class="text-secondary">{$t('dash.dns_resolving')}:</span>
-                <span style="font-weight: 500; margin-left: 4px;" class={systemStats?.dns_resolving ? 'status-success' : 'status-error'}>
-                  {systemStats?.dns_resolving ? $t('dash.dns_resolving_ok') : $t('dash.dns_resolving_fail')}
+                <span
+                  style="font-weight: 500; margin-left: 4px;"
+                  class={systemStats?.dns_resolving ? 'status-success' : 'status-error'}
+                >
+                  {systemStats?.dns_resolving
+                    ? $t('dash.dns_resolving_ok')
+                    : $t('dash.dns_resolving_fail')}
                 </span>
               </div>
             </div>
@@ -482,7 +538,9 @@
 
           <!-- Subscriptions Summary -->
           <Card title={$t('dash.subscriptions_summary')}>
-            <div style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;">
+            <div
+              style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;"
+            >
               <div>
                 <span class="text-secondary">{$t('dash.active_subscriptions')}:</span>
                 <span style="font-weight: 500; margin-left: 4px;">{activeSubscriptionsCount}</span>
@@ -501,9 +559,17 @@
               <div class="stats-grid">
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.ram')}</div>
-                  <div class="stat-value">{formatBytes(systemStats.memory.used)} / {formatBytes(systemStats.memory.total)}</div>
+                  <div class="stat-value">
+                    {formatBytes(systemStats.memory.used)} / {formatBytes(systemStats.memory.total)}
+                  </div>
                   <div class="stat-bar">
-                    <div class="stat-bar-fill" style="width: {(systemStats.memory.used / systemStats.memory.total * 100).toFixed(1)}%"></div>
+                    <div
+                      class="stat-bar-fill"
+                      style="width: {(
+                        (systemStats.memory.used / systemStats.memory.total) *
+                        100
+                      ).toFixed(1)}%"
+                    ></div>
                   </div>
                 </div>
                 <div class="stat-box">
@@ -512,7 +578,10 @@
                 </div>
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.uptime')}</div>
-                  <div class="stat-value">{systemStats.uptime.days}d {systemStats.uptime.hours}h {systemStats.uptime.minutes}m</div>
+                  <div class="stat-value">
+                    {systemStats.uptime.days}d {systemStats.uptime.hours}h {systemStats.uptime
+                      .minutes}m
+                  </div>
                 </div>
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.goroutines')}</div>
@@ -532,17 +601,33 @@
         <div style="margin-bottom: var(--spacing-2);">
           <Card title={$t('dash.quick_actions')}>
             <div class="quick-actions">
-              <Button variant="secondary" onclick={() => switchTab('proxies')} title={$t('nav.proxies')}>
-                <Icon name="proxies" size={16} /> {$t('nav.proxies')}
+              <Button
+                variant="secondary"
+                onclick={() => switchTab('proxies')}
+                title={$t('nav.proxies')}
+              >
+                <Icon name="proxies" size={16} />
+                {$t('nav.proxies')}
               </Button>
-              <Button variant="secondary" onclick={() => switchTab('subscriptions')} title={$t('nav.subscriptions')}>
-                <Icon name="subscriptions" size={16} /> {$t('nav.subscriptions')}
+              <Button
+                variant="secondary"
+                onclick={() => switchTab('subscriptions')}
+                title={$t('nav.subscriptions')}
+              >
+                <Icon name="subscriptions" size={16} />
+                {$t('nav.subscriptions')}
               </Button>
-              <Button variant="secondary" onclick={() => switchTab('editor')} title={$t('nav.editor')}>
-                <Icon name="editor" size={16} /> {$t('nav.editor')}
+              <Button
+                variant="secondary"
+                onclick={() => switchTab('editor')}
+                title={$t('nav.editor')}
+              >
+                <Icon name="editor" size={16} />
+                {$t('nav.editor')}
               </Button>
               <Button variant="secondary" onclick={() => switchTab('logs')} title={$t('nav.logs')}>
-                <Icon name="logs" size={16} /> {$t('nav.logs')}
+                <Icon name="logs" size={16} />
+                {$t('nav.logs')}
               </Button>
             </div>
           </Card>

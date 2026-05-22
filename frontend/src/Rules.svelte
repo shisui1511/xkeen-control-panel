@@ -1,75 +1,75 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { t } from './i18n'
-  import { capabilities } from './stores'
-  import EmptyState from './components/EmptyState.svelte'
-  import Icon from './lib/components/Icon.svelte'
+  import { onMount } from 'svelte';
+  import { t } from './i18n';
+  import { capabilities } from './stores';
+  import EmptyState from './components/EmptyState.svelte';
+  import Icon from './lib/components/Icon.svelte';
 
   interface Rule {
-    type: string
-    payload: string
-    proxy: string
+    type: string;
+    payload: string;
+    proxy: string;
   }
 
-  let rules: Rule[] = []
-  let loading = false
-  let error = ''
-  let searchQuery = ''
-  let typeFilter = ''
+  let rules: Rule[] = [];
+  let loading = false;
+  let error = '';
+  let searchQuery = '';
+  let typeFilter = '';
 
   async function fetchRules() {
-    loading = true
-    error = ''
-    
+    loading = true;
+    error = '';
+
     try {
-      const res = await fetch('/api/mihomo/proxy/rules')
-      if (!res.ok) throw new Error('Failed to load rules')
-      
-      const data = await res.json()
-      rules = data.rules || []
+      const res = await fetch('/api/mihomo/proxy/rules');
+      if (!res.ok) throw new Error('Failed to load rules');
+
+      const data = await res.json();
+      rules = data.rules || [];
     } catch (e: any) {
-      error = e.message
+      error = e.message;
     } finally {
-      loading = false
+      loading = false;
     }
   }
 
   function getFilteredRules(): Rule[] {
-    return rules.filter(rule => {
+    return rules.filter((rule) => {
       if (searchQuery) {
-        const q = searchQuery.toLowerCase()
-        if (!rule.payload.toLowerCase().includes(q) && 
-            !rule.proxy.toLowerCase().includes(q)) return false
+        const q = searchQuery.toLowerCase();
+        if (!rule.payload.toLowerCase().includes(q) && !rule.proxy.toLowerCase().includes(q))
+          return false;
       }
-      if (typeFilter && rule.type !== typeFilter) return false
-      return true
-    })
+      if (typeFilter && rule.type !== typeFilter) return false;
+      return true;
+    });
   }
 
   function getUniqueTypes(): string[] {
-    const types = new Set(rules.map(r => r.type))
-    return Array.from(types).sort()
+    const types = new Set(rules.map((r) => r.type));
+    return Array.from(types).sort();
   }
 
   function getRuleColor(type: string): string {
     const colors: Record<string, string> = {
-      'DOMAIN': '#58a6ff',
+      DOMAIN: '#58a6ff',
       'DOMAIN-SUFFIX': '#a371f7',
       'DOMAIN-KEYWORD': '#3fb950',
       'IP-CIDR': '#d29922',
       'IP-CIDR6': '#d29922',
-      'GEOIP': '#f85149',
+      GEOIP: '#f85149',
       'SRC-IP-CIDR': '#ff7b72',
       'DST-PORT': '#79c0ff',
       'SRC-PORT': '#79c0ff',
-      'MATCH': '#ff7b72'
-    }
-    return colors[type] || 'var(--text-secondary)'
+      MATCH: '#ff7b72'
+    };
+    return colors[type] || 'var(--text-secondary)';
   }
 
   onMount(() => {
-    fetchRules()
-  })
+    fetchRules();
+  });
 </script>
 
 <div class="container">
@@ -82,69 +82,73 @@
       description={$t('ds.empty.mihomo_offline_desc')}
     />
   {:else}
+    {#if error}
+      <div class="alert alert-error mb-2">{error}</div>
+    {/if}
 
-  {#if error}
-    <div class="alert alert-error mb-2">{error}</div>
-  {/if}
-
-  <div class="toolbar mb-2">
-    <div class="filters">
-      <input 
-        type="text" 
-        placeholder={$t('rules.search')} 
-        bind:value={searchQuery}
-        class="filter-input"
-      />
-      <select bind:value={typeFilter} class="filter-select">
-        <option value="">{$t('rules.all_types')}</option>
-        {#each getUniqueTypes() as type}
-          <option value={type}>{type}</option>
-        {/each}
-      </select>
+    <div class="toolbar mb-2">
+      <div class="filters">
+        <input
+          type="text"
+          placeholder={$t('rules.search')}
+          bind:value={searchQuery}
+          class="filter-input"
+        />
+        <select bind:value={typeFilter} class="filter-select">
+          <option value="">{$t('rules.all_types')}</option>
+          {#each getUniqueTypes() as type}
+            <option value={type}>{type}</option>
+          {/each}
+        </select>
+      </div>
+      <button class="btn btn-secondary" on:click={fetchRules} disabled={loading}>
+        <Icon name="refresh" size={14} />
+        {loading ? $t('app.loading') : $t('app.refresh')}
+      </button>
     </div>
-    <button class="btn btn-secondary" on:click={fetchRules} disabled={loading}>
-      <Icon name="refresh" size={14} />
-      {loading ? $t('app.loading') : $t('app.refresh')}
-    </button>
-  </div>
 
-  <div class="stats mb-2">
-    <span class="stat">{$t('rules.total', { count: rules.length })}</span>
-    <span class="stat">{$t('rules.shown', { count: getFilteredRules().length })}</span>
-  </div>
+    <div class="stats mb-2">
+      <span class="stat">{$t('rules.total', { count: rules.length })}</span>
+      <span class="stat">{$t('rules.shown', { count: getFilteredRules().length })}</span>
+    </div>
 
-  <div class="table-container">
-    <table class="rules-table">
-      <thead>
-        <tr>
-          <th>{$t('rules.type_col')}</th>
-          <th>Payload</th>
-          <th>{$t('conn.proxy')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each getFilteredRules() as rule}
+    <div class="table-container">
+      <table class="rules-table">
+        <thead>
           <tr>
-            <td>
-              <span class="type-badge" style="background: {getRuleColor(rule.type)}20; color: {getRuleColor(rule.type)}; border-color: {getRuleColor(rule.type)}40">
-                {rule.type}
-              </span>
-            </td>
-            <td class="payload">{rule.payload}</td>
-            <td>
-              <span class="proxy-name">{rule.proxy}</span>
-            </td>
+            <th>{$t('rules.type_col')}</th>
+            <th>Payload</th>
+            <th>{$t('conn.proxy')}</th>
           </tr>
-        {:else}
-          <tr>
-            <td colspan="3" class="empty-cell">
-              {$t('rules.no_rules')}
-            </td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-  </div>
+        </thead>
+        <tbody>
+          {#each getFilteredRules() as rule}
+            <tr>
+              <td>
+                <span
+                  class="type-badge"
+                  style="background: {getRuleColor(rule.type)}20; color: {getRuleColor(
+                    rule.type
+                  )}; border-color: {getRuleColor(rule.type)}40"
+                >
+                  {rule.type}
+                </span>
+              </td>
+              <td class="payload">{rule.payload}</td>
+              <td>
+                <span class="proxy-name">{rule.proxy}</span>
+              </td>
+            </tr>
+          {:else}
+            <tr>
+              <td colspan="3" class="empty-cell">
+                {$t('rules.no_rules')}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {/if}
 </div>
 
@@ -213,7 +217,7 @@
 
   .rules-table td {
     padding: 0.75rem;
-    border-bottom: 1px solid var(--border-light, rgba(0,0,0,0.05));
+    border-bottom: 1px solid var(--border-light, rgba(0, 0, 0, 0.05));
   }
 
   .rules-table tr:hover {

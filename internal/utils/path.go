@@ -6,14 +6,17 @@ import (
 	"strings"
 )
 
+// PathValidator validates file paths against allowed root directories to prevent path traversal attacks.
 type PathValidator struct {
 	AllowedRoots []string
 }
 
+// NewPathValidator creates a new PathValidator instance with the specified allowed root paths.
 func NewPathValidator(roots []string) *PathValidator {
 	return &PathValidator{AllowedRoots: roots}
 }
 
+// Validate resolves symlinks and cleans the input path, checking if it resides within the allowed roots.
 func (v *PathValidator) Validate(path string) (string, error) {
 	cleanPath := filepath.Clean(path)
 

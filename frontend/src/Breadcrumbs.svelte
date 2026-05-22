@@ -1,19 +1,20 @@
 <script lang="ts">
-  import { t } from './i18n'
-  import Icon from './lib/components/Icon.svelte'
+  import { t } from './i18n';
+  import Icon from './lib/components/Icon.svelte';
 
-  export let items: { label: string; tab?: string }[] = []
-  export let onNavigate: (tab: string) => void = () => {}
+  export let items: { label: string; tab?: string }[] = [];
+  export let onNavigate: (tab: string) => void = () => {};
 </script>
 
 <nav class="breadcrumbs">
   <button class="breadcrumb-home" on:click={() => onNavigate('dashboard')}>
-    <Icon name="dashboard" size={14} /> {$t('nav.dashboard')}
+    <Icon name="dashboard" size={14} />
+    {$t('nav.dashboard')}
   </button>
   {#each items as item, i}
     <span class="breadcrumb-separator">/</span>
     {#if item.tab && i < items.length - 1}
-      <button class="breadcrumb-link" on:click={() => onNavigate(item.tab)}>
+      <button class="breadcrumb-link" on:click={() => item.tab && onNavigate(item.tab)}>
         {item.label}
       </button>
     {:else}

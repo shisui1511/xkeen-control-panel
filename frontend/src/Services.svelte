@@ -1,216 +1,229 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte'
-  import { t } from './i18n'
-  import { showToast, fetchCapabilities } from './stores'
-  import Skeleton from './components/Skeleton.svelte'
+  import { onMount, onDestroy } from 'svelte';
+  import { t } from './i18n';
+  import { showToast, fetchCapabilities } from './stores';
+  import Skeleton from './components/Skeleton.svelte';
+
+  export let onSwitchTab: (tab: string) => void = () => {};
 
   interface Kernel {
-    name: string
-    display_name: string
-    binary_path: string
-    current_version: string
-    latest_version: string
-    has_update: boolean
-    channel: string
-    status: string
-    process_status: string
-    message: string
+    name: string;
+    display_name: string;
+    binary_path: string;
+    current_version: string;
+    latest_version: string;
+    has_update: boolean;
+    channel: string;
+    status: string;
+    process_status: string;
+    message: string;
   }
 
-  let xkeenStatus = ''
-  let mihomoStatus = ''
-  let loading = false
-  let actionLoading: Record<string, boolean> = {}
-  
-  let kernels: Kernel[] = []
-  let kernelsLoaded = false
-  let statusIntervals: Record<string, ReturnType<typeof setInterval>> = {}
+  let xkeenStatus = '';
+  let mihomoStatus = '';
+  let loading = false;
+  let actionLoading: Record<string, boolean> = {};
+
+  let kernels: Kernel[] = [];
+  let kernelsLoaded = false;
+  let statusIntervals: Record<string, ReturnType<typeof setInterval>> = {};
 
   async function fetchStatus() {
     try {
       const [xkeenRes, mihomoRes] = await Promise.all([
         fetch('/api/service/status'),
         fetch('/api/mihomo/status')
-      ])
-      xkeenStatus = xkeenRes.ok ? await xkeenRes.text() : $t('app.error')
-      mihomoStatus = mihomoRes.ok ? await mihomoRes.text() : $t('app.error')
+      ]);
+      xkeenStatus = xkeenRes.ok ? await xkeenRes.text() : $t('app.error');
+      mihomoStatus = mihomoRes.ok ? await mihomoRes.text() : $t('app.error');
     } catch (e) {
-      xkeenStatus = $t('app.unavailable')
-      mihomoStatus = $t('app.unavailable')
+      xkeenStatus = $t('app.unavailable');
+      mihomoStatus = $t('app.unavailable');
     }
   }
 
   async function fetchKernels() {
     try {
-      const res = await fetch('/api/kernels')
+      const res = await fetch('/api/kernels');
       if (res.ok) {
-        const envelope = await res.json()
+        const envelope = await res.json();
         // KernelList uses JSONSuccess envelope: {success, data: [...]}
-        const list = Array.isArray(envelope) ? envelope : (envelope.data ?? [])
-        kernels = list
+        const list = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
+        kernels = list;
         // Start polling for kernels that are not idle
-        kernels.forEach((k: typeof kernels[0]) => {
+        kernels.forEach((k: (typeof kernels)[0]) => {
           if (k.status !== 'idle' && !statusIntervals[k.name]) {
-            startPolling(k.name)
+            startPolling(k.name);
           }
-        })
+        });
       }
-    } catch (e) {}
-    finally {
-      kernelsLoaded = true
+    } catch (e) {
+    } finally {
+      kernelsLoaded = true;
     }
   }
 
   async function controlService(action: string) {
-    const key = `xkeen-${action}`
-    actionLoading[key] = true
-    
+    const key = `xkeen-${action}`;
+    actionLoading[key] = true;
+
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch(`/api/service/control?action=${action}`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
-      
-      const text = await res.text()
-      if (!res.ok) throw new Error(text)
-      
-      await fetchStatus()
-      await fetchCapabilities()
+      });
+
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+
+      await fetchStatus();
+      await fetchCapabilities();
     } catch (e: any) {
-      showToast('error', `${$t('svc.action_error')}: ${e.message}`)
+      showToast('error', `${$t('svc.action_error')}: ${e.message}`);
     } finally {
-      actionLoading[key] = false
+      actionLoading[key] = false;
     }
   }
 
-  let switchingKernel = false
+  let switchingKernel = false;
 
   async function switchKernel(kernel: string) {
-    switchingKernel = true
-    const key = `switch-${kernel}`
-    actionLoading[key] = true
-    
+    switchingKernel = true;
+    const key = `switch-${kernel}`;
+    actionLoading[key] = true;
+
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch(`/api/service/control?action=switch_kernel&kernel=${kernel}`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
-      
-      const text = await res.text()
-      if (!res.ok) throw new Error(text)
-      
-      await fetchStatus()
-      await fetchKernels()
-      await fetchCapabilities()
+      });
+
+      const text = await res.text();
+      if (!res.ok) throw new Error(text);
+
+      await fetchStatus();
+      await fetchKernels();
+      await fetchCapabilities();
     } catch (e: any) {
-      showToast('error', `${$t('svc.action_error')}: ${e.message}`)
+      showToast('error', `${$t('svc.action_error')}: ${e.message}`);
     } finally {
-      actionLoading[key] = false
-      switchingKernel = false
+      actionLoading[key] = false;
+      switchingKernel = false;
     }
   }
 
   async function checkKernelUpdate(name: string) {
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       await fetch(`/api/kernels/${name}/check`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
-      startPolling(name)
+      });
+      startPolling(name);
     } catch (e) {}
   }
 
   async function installKernel(name: string) {
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       await fetch(`/api/kernels/${name}/install`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
-      startPolling(name)
+      });
+      startPolling(name);
     } catch (e) {}
   }
 
   async function setKernelChannel(name: string, channel: string) {
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       await fetch(`/api/kernels/${name}/channel`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ channel })
-      })
-      await fetchKernels()
+      });
+      await fetchKernels();
     } catch (e) {}
   }
 
   async function fetchKernelStatus(name: string) {
     try {
-      const res = await fetch(`/api/kernels/${name}/status`)
+      const res = await fetch(`/api/kernels/${name}/status`);
       if (res.ok) {
-        const envelope = await res.json()
+        const envelope = await res.json();
         // KernelStatus uses JSONSuccess envelope: {success, data: {...}}
-        const data = envelope.data ?? envelope
-        const idx = kernels.findIndex(k => k.name === name)
+        const data = envelope.data ?? envelope;
+        const idx = kernels.findIndex((k) => k.name === name);
         if (idx >= 0) {
-          kernels[idx] = { ...kernels[idx], ...data }
-          kernels = [...kernels]
+          kernels[idx] = { ...kernels[idx], ...data };
+          kernels = [...kernels];
         }
         if (data.status === 'idle' || data.status === 'done' || data.status === 'failed') {
-          clearInterval(statusIntervals[name])
-          delete statusIntervals[name]
+          clearInterval(statusIntervals[name]);
+          delete statusIntervals[name];
         }
       }
     } catch (e) {
-      clearInterval(statusIntervals[name])
-      delete statusIntervals[name]
+      clearInterval(statusIntervals[name]);
+      delete statusIntervals[name];
     }
   }
 
   function startPolling(name: string) {
-    if (statusIntervals[name]) clearInterval(statusIntervals[name])
-    fetchKernelStatus(name)
-    statusIntervals[name] = setInterval(() => fetchKernelStatus(name), 2000)
+    if (statusIntervals[name]) clearInterval(statusIntervals[name]);
+    fetchKernelStatus(name);
+    statusIntervals[name] = setInterval(() => fetchKernelStatus(name), 2000);
   }
 
   function getKernel(name: string) {
-    return kernels.find(k => k.name === name)
+    return kernels.find((k) => k.name === name);
   }
 
-  let selectedKernel = ''
+  let selectedKernel = '';
 
-  $: xray = getKernel('xray')
-  $: mihomo = getKernel('mihomo')
-  $: activeKernel = xray?.process_status === 'running' ? 'xray'
-      : mihomo?.process_status === 'running' ? 'mihomo'
-      : 'unknown'
+  $: xray = getKernel('xray');
+  $: mihomo = getKernel('mihomo');
+  $: activeKernel =
+    xray?.process_status === 'running'
+      ? 'xray'
+      : mihomo?.process_status === 'running'
+        ? 'mihomo'
+        : 'unknown';
 
   $: if (activeKernel !== 'unknown') {
-    selectedKernel = activeKernel
+    selectedKernel = activeKernel;
   } else if (kernelsLoaded && !selectedKernel) {
-    const xrayInstalled = xray && xray.current_version && xray.current_version !== 'not installed' && xray.current_version !== 'error'
-    const mihomoInstalled = mihomo && mihomo.current_version && mihomo.current_version !== 'not installed' && mihomo.current_version !== 'error'
+    const xrayInstalled =
+      xray &&
+      xray.current_version &&
+      xray.current_version !== 'not installed' &&
+      xray.current_version !== 'error';
+    const mihomoInstalled =
+      mihomo &&
+      mihomo.current_version &&
+      mihomo.current_version !== 'not installed' &&
+      mihomo.current_version !== 'error';
     if (mihomoInstalled && !xrayInstalled) {
-      selectedKernel = 'mihomo'
+      selectedKernel = 'mihomo';
     } else {
-      selectedKernel = 'xray'
+      selectedKernel = 'xray';
     }
   }
 
   // Use boolean process_status from kernel API instead of fragile string matching on i18n status text
-  $: isRunning = xray?.process_status === 'running' || mihomo?.process_status === 'running'
+  $: isRunning = xray?.process_status === 'running' || mihomo?.process_status === 'running';
 
   onMount(() => {
-    fetchStatus()
-    fetchKernels()
-    const interval = setInterval(fetchStatus, 10000)
+    fetchStatus();
+    fetchKernels();
+    const interval = setInterval(fetchStatus, 10000);
     return () => {
-      clearInterval(interval)
-      Object.values(statusIntervals).forEach(clearInterval)
-    }
-  })
+      clearInterval(interval);
+      Object.values(statusIntervals).forEach(clearInterval);
+    };
+  });
 </script>
 
 <div class="container">
@@ -229,7 +242,7 @@
           {xkeenStatus || $t('app.loading')}
         </span>
       </div>
-      
+
       <div class="kernel-selector mb-2">
         <label for="kernel-select" class="text-secondary mr-2">{$t('svc.active_kernel')}:</label>
         <select
@@ -237,10 +250,10 @@
           title={$t('svc.kernel_switch')}
           value={selectedKernel}
           on:change={(e) => {
-            const val = e.currentTarget.value
+            const val = e.currentTarget.value;
             if (val) {
-              selectedKernel = val
-              switchKernel(val)
+              selectedKernel = val;
+              switchKernel(val);
             }
           }}
           disabled={switchingKernel}
@@ -254,13 +267,25 @@
       </div>
 
       <div class="actions">
-        <button class="btn btn-primary" on:click={() => controlService('start')} disabled={actionLoading['xkeen-start']}>
+        <button
+          class="btn btn-primary"
+          on:click={() => controlService('start')}
+          disabled={actionLoading['xkeen-start']}
+        >
           {actionLoading['xkeen-start'] ? $t('svc.starting') : $t('app.start')}
         </button>
-        <button class="btn btn-secondary" on:click={() => controlService('stop')} disabled={actionLoading['xkeen-stop']}>
+        <button
+          class="btn btn-secondary"
+          on:click={() => controlService('stop')}
+          disabled={actionLoading['xkeen-stop']}
+        >
           {actionLoading['xkeen-stop'] ? $t('svc.stopping') : $t('app.stop')}
         </button>
-        <button class="btn btn-secondary" on:click={() => controlService('restart')} disabled={actionLoading['xkeen-restart']}>
+        <button
+          class="btn btn-secondary"
+          on:click={() => controlService('restart')}
+          disabled={actionLoading['xkeen-restart']}
+        >
           {actionLoading['xkeen-restart'] ? $t('svc.restarting') : $t('app.restart')}
         </button>
       </div>
@@ -282,7 +307,7 @@
         {/if}
       </div>
       <p class="text-secondary mb-2">{$t('svc.xray_desc')}</p>
-      
+
       {#if xray}
         <div class="kernel-details mb-2">
           {#if xray.current_version && xray.current_version !== 'not installed'}
@@ -293,7 +318,11 @@
           {/if}
           <div class="detail-row">
             <span>{$t('kernels.channel')}:</span>
-            <select class="small-select" value={xray.channel} on:change={(e) => setKernelChannel('xray', e.currentTarget.value)}>
+            <select
+              class="small-select"
+              value={xray.channel}
+              on:change={(e) => setKernelChannel('xray', e.currentTarget.value)}
+            >
               <option value="stable">{$t('svc.channel_stable')}</option>
               <option value="preview">{$t('svc.channel_preview')}</option>
             </select>
@@ -301,8 +330,14 @@
           {#if xray.latest_version && xray.has_update}
             <div class="detail-row update-available">
               <span>{$t('kernels.latest')}: v{xray.latest_version}</span>
-              <button class="btn-link" on:click={() => installKernel('xray')} disabled={xray.status !== 'idle'}>
-                {xray.status === 'downloading' || xray.status === 'installing' ? $t('kernels.installing') : $t('kernels.install')}
+              <button
+                class="btn-link"
+                on:click={() => installKernel('xray')}
+                disabled={xray.status !== 'idle'}
+              >
+                {xray.status === 'downloading' || xray.status === 'installing'
+                  ? $t('kernels.installing')
+                  : $t('kernels.install')}
               </button>
             </div>
           {/if}
@@ -326,7 +361,12 @@
       {/if}
 
       <div class="actions">
-        <button class="btn btn-icon-small" on:click={() => checkKernelUpdate('xray')} title={$t('kernels.check_update')} disabled={xray?.status !== 'idle'}>
+        <button
+          class="btn btn-icon-small"
+          on:click={() => checkKernelUpdate('xray')}
+          title={$t('kernels.check_update')}
+          disabled={xray?.status !== 'idle'}
+        >
           {xray?.status === 'checking' ? '...' : $t('app.refresh')}
         </button>
       </div>
@@ -365,7 +405,11 @@
           </div>
           <div class="detail-row">
             <span>{$t('kernels.channel')}:</span>
-            <select class="small-select" value={mihomo.channel} on:change={(e) => setKernelChannel('mihomo', e.currentTarget.value)}>
+            <select
+              class="small-select"
+              value={mihomo.channel}
+              on:change={(e) => setKernelChannel('mihomo', e.currentTarget.value)}
+            >
               <option value="stable">{$t('svc.channel_stable')}</option>
               <option value="preview">{$t('svc.channel_preview')}</option>
             </select>
@@ -373,8 +417,14 @@
           {#if mihomo.latest_version && mihomo.has_update}
             <div class="detail-row update-available">
               <span>{$t('kernels.latest')}: v{mihomo.latest_version}</span>
-              <button class="btn-link" on:click={() => installKernel('mihomo')} disabled={mihomo.status !== 'idle'}>
-                {mihomo.status === 'downloading' || mihomo.status === 'installing' ? $t('kernels.installing') : $t('kernels.install')}
+              <button
+                class="btn-link"
+                on:click={() => installKernel('mihomo')}
+                disabled={mihomo.status !== 'idle'}
+              >
+                {mihomo.status === 'downloading' || mihomo.status === 'installing'
+                  ? $t('kernels.installing')
+                  : $t('kernels.install')}
               </button>
             </div>
           {/if}
@@ -398,13 +448,17 @@
       {/if}
 
       <div class="actions">
-        <button class="btn btn-icon-small" on:click={() => checkKernelUpdate('mihomo')} title={$t('kernels.check_update')} disabled={mihomo?.status !== 'idle'}>
+        <button
+          class="btn btn-icon-small"
+          on:click={() => checkKernelUpdate('mihomo')}
+          title={$t('kernels.check_update')}
+          disabled={mihomo?.status !== 'idle'}
+        >
           {mihomo?.status === 'checking' ? '...' : $t('app.refresh')}
         </button>
       </div>
     </div>
   </div>
-
 </div>
 
 <style>

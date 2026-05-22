@@ -28,12 +28,7 @@
   <h2 class="empty-state__title">{title}</h2>
   <p class="empty-state__description">{description}</p>
   {#if ctaText && oncta}
-    <Button
-      variant="primary"
-      loading={ctaLoading}
-      title={ctaText}
-      onclick={oncta}
-    >
+    <Button variant="primary" loading={ctaLoading} title={ctaText} onclick={oncta}>
       {ctaText}
     </Button>
   {/if}

@@ -1,41 +1,41 @@
 <script lang="ts">
-  import { t } from './i18n'
+  import { t } from './i18n';
 
-  let password = ''
-  let confirmPassword = ''
-  let error = ''
-  let loading = false
+  let password = '';
+  let confirmPassword = '';
+  let error = '';
+  let loading = false;
 
   async function handleSetup() {
-    error = ''
+    error = '';
 
     if (!password || !confirmPassword) {
-      error = $t('auth.fill_all')
-      return
+      error = $t('auth.fill_all');
+      return;
     }
 
     if (password.length < 8) {
-      error = $t('auth.password_short')
-      return
+      error = $t('auth.password_short');
+      return;
     }
 
     if (password !== confirmPassword) {
-      error = $t('auth.password_mismatch')
-      return
+      error = $t('auth.password_mismatch');
+      return;
     }
 
-    loading = true
+    loading = true;
 
     try {
       const res = await fetch('/api/auth/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password })
-      })
+      });
 
       if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || $t('auth.setup_error'))
+        const text = await res.text();
+        throw new Error(text || $t('auth.setup_error'));
       }
 
       // После успешной установки — автоматический вход
@@ -43,17 +43,17 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password })
-      })
+      });
 
       if (loginRes.ok) {
-        const data = await loginRes.json()
-        localStorage.setItem('csrf_token', data.csrf_token)
-        window.location.href = '/'
+        const data = await loginRes.json();
+        localStorage.setItem('csrf_token', data.csrf_token);
+        window.location.href = '/';
       }
     } catch (e: any) {
-      error = e.message
+      error = e.message;
     } finally {
-      loading = false
+      loading = false;
     }
   }
 </script>
@@ -93,12 +93,7 @@
       />
     </div>
 
-    <button
-      class="btn btn-primary"
-      style="width: 100%;"
-      on:click={handleSetup}
-      disabled={loading}
-    >
+    <button class="btn btn-primary" style="width: 100%;" on:click={handleSetup} disabled={loading}>
       {loading ? $t('auth.setting_up') : $t('auth.setup_btn')}
     </button>
   </div>

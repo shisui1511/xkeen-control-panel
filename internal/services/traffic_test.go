@@ -151,6 +151,9 @@ func TestTrafficGet_ReturnsCopy(t *testing.T) {
 	// Mutate the returned copy
 	got.Name = "MutatedQuota"
 	got.LimitBytes = 9999
+	if got.Name != "MutatedQuota" || got.LimitBytes != 9999 {
+		t.Fatal("failed to mutate local copy")
+	}
 
 	// The original in the service slice must be unchanged
 	original, ok := svc.GetQuota(id)

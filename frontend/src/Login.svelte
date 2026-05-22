@@ -1,46 +1,46 @@
 <script lang="ts">
-  import { t } from './i18n'
+  import { t } from './i18n';
 
-  let password = ''
-  let error = ''
-  let loading = false
+  let password = '';
+  let error = '';
+  let loading = false;
 
   async function handleLogin() {
     if (!password) {
-      error = $t('auth.enter_password')
-      return
+      error = $t('auth.enter_password');
+      return;
     }
 
-    loading = true
-    error = ''
+    loading = true;
+    error = '';
 
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password })
-      })
+      });
 
       if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || $t('auth.login_error'))
+        const text = await res.text();
+        throw new Error(text || $t('auth.login_error'));
       }
 
-      const data = await res.json()
-      localStorage.setItem('csrf_token', data.csrf_token)
-      
+      const data = await res.json();
+      localStorage.setItem('csrf_token', data.csrf_token);
+
       // Redirect to dashboard
-      window.location.href = '/'
+      window.location.href = '/';
     } catch (e: any) {
-      error = e.message
+      error = e.message;
     } finally {
-      loading = false
+      loading = false;
     }
   }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
-      handleLogin()
+      handleLogin();
     }
   }
 </script>
@@ -67,12 +67,7 @@
       />
     </div>
 
-    <button
-      class="btn btn-primary"
-      style="width: 100%;"
-      on:click={handleLogin}
-      disabled={loading}
-    >
+    <button class="btn btn-primary" style="width: 100%;" on:click={handleLogin} disabled={loading}>
       {loading ? $t('auth.logging_in') : $t('auth.login_btn')}
     </button>
   </div>
