@@ -50,25 +50,17 @@ jobs:
           GOTOOLCHAIN: local
         run: go mod download
 
-      - name: Run go fmt
-        run: |
-          if [ -n "$(gofmt -l .)" ]; then
-            echo "Go code is not formatted:"
-            gofmt -d .
-            exit 1
-          fi
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64
+          working-directory: .
+          args: --timeout=5m
 
-      - name: Run go vet
-        run: go vet ./...
-
-      - name: Check goimports
-        run: |
-          go install golang.org/x/tools/cmd/goimports@v0.24.0
-          if [ -n "$($(go env GOPATH)/bin/goimports -l .)" ]; then
-            echo "Imports are not formatted:"
-            $(go env GOPATH)/bin/goimports -d .
-            exit 1
-          fi
+      - name: Run govulncheck
+        uses: golang/govulncheck-action@v1
+        with:
+          go-version-file: go.mod
 
   # Job 2: Тестирование Go кода
   test-go:
@@ -132,15 +124,27 @@ jobs:
           cd frontend
           npm ci
 
-      - name: Check TypeScript
+      - name: Check Formatting
         run: |
           cd frontend
-          npx tsc --noEmit
+          npm run format:check
+
+      - name: Lint Svelte & TypeScript
+        run: |
+          cd frontend
+          npm run lint
 
       - name: Build frontend
         run: |
           cd frontend
           npm run build
+
+      - name: Report bundle size
+        uses: preactjs/compressed-size-action@v2
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          pattern: "frontend/dist/assets/*.{js,css}"
+          strip-hash: "-[a-zA-Z0-9_-]{8}"
 
   # Job 4: Тестирование Frontend (E2E)
   test-frontend:
@@ -210,7 +214,7 @@ jobs:
   # Job 5: Проверка сборки
   build-check:
     name: Build Check
-    needs: [lint-go, test-go, lint-frontend, test-frontend]
+    needs: [lint-go, test-go, lint-frontend, test-frontend, check-rules]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -263,3 +267,24 @@ jobs:
           if [ $SIZE_MB -gt 50 ]; then
             echo "::warning::Binary size is larger than 50MB: ${SIZE_MB}MB"
           fi
+
+  # Job 6: Проверка правил коммитов и синхронизации локализации
+  check-rules:
+    name: Verify Commits & i18n
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Check i18n translations
+        run: node scripts/check-i18n.js
+
+      - name: Check commit messages
+        run: |
+          node scripts/check-commits.js ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
