@@ -249,6 +249,7 @@ jobs:
 
           # Создаём новый release
           gh release create "${VERSION}" \
+            --target "${GITHUB_SHA}" \
             --title "${VERSION} (build ${COMMIT_COUNT})" \
             --notes-file /tmp/release-notes.md \
             --prerelease \
@@ -300,6 +301,7 @@ jobs:
           EOF
 
           gh release create "${VERSION}" \
+            --target "${GITHUB_SHA}" \
             --title "${VERSION}" \
             --notes-file /tmp/release-notes.md \
             artifacts/xcp_arm64/xcp_${VERSION}_arm64 \
