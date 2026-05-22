@@ -83,25 +83,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Build frontend
-        run: |
-          cd frontend
-          npm ci
-          npm run build
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: "1.25"
-          cache: false
-
       - name: Calculate version
         id: version
         run: |
@@ -152,6 +133,31 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "is_stable=${IS_STABLE}" >> $GITHUB_OUTPUT
           echo "Version: ${VERSION} (stable=${IS_STABLE})"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Update frontend package version
+        run: |
+          cd frontend
+          VERSION_CLEAN=$(echo "${{ steps.version.outputs.version }}" | sed 's/^v//')
+          npm version $VERSION_CLEAN --no-git-tag-version --allow-same-version
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: false
 
       - name: Build binary
         env:
@@ -337,8 +343,11 @@ jobs:
           git rm -rf . 2>/dev/null || true
           mkdir -p bin
           cp artifacts/xcp_arm64/xcp_${VERSION}_arm64 bin/
+          cp artifacts/xcp_arm64/xcp_${VERSION}_arm64.sha256 bin/
           cp artifacts/xcp_mipsle/xcp_${VERSION}_mipsle bin/
+          cp artifacts/xcp_mipsle/xcp_${VERSION}_mipsle.sha256 bin/
           cp artifacts/xcp_mips/xcp_${VERSION}_mips bin/
+          cp artifacts/xcp_mips/xcp_${VERSION}_mips.sha256 bin/
           
           git add bin/
           git commit -m "${VERSION}" || true
