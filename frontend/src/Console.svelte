@@ -1,58 +1,58 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { slide } from 'svelte/transition'
-  import { t } from './i18n'
-  import PageHeader from './PageHeader.svelte'
-  import Modal from './components/Modal.svelte'
-  import Icon from './lib/components/Icon.svelte'
+  import { onMount } from 'svelte';
+  import { slide } from 'svelte/transition';
+  import { t } from './i18n';
+  import PageHeader from './PageHeader.svelte';
+  import Modal from './components/Modal.svelte';
+  import Icon from './lib/components/Icon.svelte';
 
-  export let onSwitchTab: (tab: string) => void = () => {}
+  export let onSwitchTab: (tab: string) => void = () => {};
 
   interface CommandDef {
-    name: string
-    description: string
-    command: string
-    dangerous: boolean
+    name: string;
+    description: string;
+    command: string;
+    dangerous: boolean;
   }
 
   interface CommandCategory {
-    name: string
-    commands: CommandDef[]
+    name: string;
+    commands: CommandDef[];
   }
 
   interface CommandResult {
-    success: boolean
-    output: string
-    error: string
+    success: boolean;
+    output: string;
+    error: string;
   }
 
-  let categories: CommandCategory[] = []
-  let loading = false
-  let error = ''
-  let executing = ''
-  let output = ''
-  let history: { command: string; output: string; success: boolean }[] = []
+  let categories: CommandCategory[] = [];
+  let loading = false;
+  let error = '';
+  let executing = '';
+  let output = '';
+  let history: { command: string; output: string; success: boolean }[] = [];
 
   // Confirmation modal state
-  let confirmPending: CommandDef | null = null
+  let confirmPending: CommandDef | null = null;
 
   async function fetchCommands() {
     try {
-      const res = await fetch('/api/console/commands')
-      if (!res.ok) throw new Error($t('console.load_error'))
-      categories = await res.json()
+      const res = await fetch('/api/console/commands');
+      if (!res.ok) throw new Error($t('console.load_error'));
+      categories = await res.json();
     } catch (e: any) {
-      error = e.message
+      error = e.message;
     }
   }
 
   async function executeCommand(command: string) {
-    executing = command
-    output = ''
-    error = ''
-    confirmPending = null
+    executing = command;
+    output = '';
+    error = '';
+    confirmPending = null;
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch('/api/console/execute', {
         method: 'POST',
         headers: {
@@ -60,67 +60,56 @@
           'X-CSRF-Token': csrfToken || ''
         },
         body: JSON.stringify({ command })
-      })
-      const result: CommandResult = await res.json()
-      output = result.output || result.error
-      history.unshift({ command, output, success: result.success })
-      if (history.length > 20) history = history.slice(0, 20)
+      });
+      const result: CommandResult = await res.json();
+      output = result.output || result.error;
+      history.unshift({ command, output, success: result.success });
+      if (history.length > 20) history = history.slice(0, 20);
       if (!result.success) {
-        error = result.error || $t('app.error')
+        error = result.error || $t('app.error');
       }
     } catch (e: any) {
-      error = e.message
-      output = e.message
+      error = e.message;
+      output = e.message;
     } finally {
-      executing = ''
+      executing = '';
     }
   }
 
   function handleCommandClick(cmd: CommandDef) {
     if (cmd.dangerous) {
-      confirmPending = cmd
+      confirmPending = cmd;
     } else {
-      executeCommand(cmd.command)
+      executeCommand(cmd.command);
     }
   }
 
   function cancelConfirm() {
-    confirmPending = null
+    confirmPending = null;
   }
 
   function confirmExecute() {
     if (confirmPending) {
-      executeCommand(confirmPending.command)
+      executeCommand(confirmPending.command);
     }
   }
 
-  onMount(fetchCommands)
+  onMount(fetchCommands);
 </script>
 
 <!-- Confirmation modal for dangerous commands -->
-<Modal
-  isOpen={confirmPending !== null}
-  title={$t('console.confirm_title')}
-  onclose={cancelConfirm}
->
+<Modal isOpen={confirmPending !== null} title={$t('console.confirm_title')} onclose={cancelConfirm}>
   {#if confirmPending}
     <p style="margin: 0 0 var(--spacing-6); line-height: 1.5; color: var(--color-text-secondary);">
       {$t('console.confirm_desc', { name: confirmPending.name })}
     </p>
     <div style="display: flex; gap: var(--spacing-3); justify-content: flex-end;">
-      <button
-        class="btn btn-secondary"
-        on:click={cancelConfirm}
-        title={$t('app.cancel')}
-      >
+      <button class="btn btn-secondary" on:click={cancelConfirm} title={$t('app.cancel')}>
         {$t('app.cancel')}
       </button>
-      <button
-        class="btn btn-danger"
-        on:click={confirmExecute}
-        title={$t('app.confirm')}
-      >
-        <Icon name="warning" size={14} /> {$t('app.confirm')}
+      <button class="btn btn-danger" on:click={confirmExecute} title={$t('app.confirm')}>
+        <Icon name="warning" size={14} />
+        {$t('app.confirm')}
       </button>
     </div>
   {/if}
@@ -144,9 +133,13 @@
         <details
           class="category-details"
           open={localStorage.getItem('console.cat.' + category.name) !== 'false'}
-          on:toggle={(e) => localStorage.setItem('console.cat.' + category.name, String(e.currentTarget.open))}
+          on:toggle={(e) =>
+            localStorage.setItem('console.cat.' + category.name, String(e.currentTarget.open))}
         >
-          <summary class="category-title" title={$t('console.cat_' + category.name) || category.name}>
+          <summary
+            class="category-title"
+            title={$t('console.cat_' + category.name) || category.name}
+          >
             {$t('console.cat_' + category.name) || category.name}
             <span class="cat-arrow">▶</span>
           </summary>
@@ -160,7 +153,9 @@
                 title={cmd.description}
               >
                 {#if cmd.dangerous}
-                  <span class="danger-icon" aria-label={$t('console.danger_label')}><Icon name="warning" size={14} /></span>
+                  <span class="danger-icon" aria-label={$t('console.danger_label')}
+                    ><Icon name="warning" size={14} /></span
+                  >
                 {/if}
                 <span class="cmd-name">{cmd.name}</span>
                 <span class="cmd-desc">{cmd.description}</span>
@@ -177,9 +172,11 @@
         {#if output}
           <button
             class="btn btn-secondary btn-sm"
-            on:click={() => { output = '' }}
-            title={$t('app.close')}
-          ><Icon name="cross" size={14} /></button>
+            on:click={() => {
+              output = '';
+            }}
+            title={$t('app.close')}><Icon name="cross" size={14} /></button
+          >
         {/if}
       </div>
       <pre class="output-box">{output || $t('console.no_output')}</pre>
@@ -191,11 +188,15 @@
             <button
               class="history-item"
               class:error={!entry.success}
-              on:click={() => { output = entry.output }}
+              on:click={() => {
+                output = entry.output;
+              }}
               title={entry.command}
             >
               <span class="history-cmd">${entry.command}</span>
-              <span class="history-status"><Icon name={entry.success ? 'check' : 'cross'} size={12} /></span>
+              <span class="history-status"
+                ><Icon name={entry.success ? 'check' : 'cross'} size={12} /></span
+              >
             </button>
           {/each}
         </div>

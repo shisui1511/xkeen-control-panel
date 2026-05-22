@@ -14,19 +14,13 @@
     variant?: 'primary' | 'secondary' | 'danger';
     disabled?: boolean;
     loading?: boolean;
-    title: string;
+    title?: string;
     onclick?: (event: MouseEvent) => void;
     children?: Snippet;
   }>();
 </script>
 
-<button
-  {type}
-  class="btn btn-{variant}"
-  disabled={disabled || loading}
-  {title}
-  {onclick}
->
+<button {type} class="btn btn-{variant}" disabled={disabled || loading} {title} {onclick}>
   {#if loading}
     <span class="spinner" aria-hidden="true"></span>
     <span class="sr-only">Loading...</span>
@@ -46,7 +40,10 @@
     font-size: var(--font-size-sm);
     font-weight: 500;
     cursor: pointer;
-    transition: background-color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+    transition:
+      background-color var(--transition-fast),
+      border-color var(--transition-fast),
+      opacity var(--transition-fast);
     border: 1px solid transparent;
     outline: none;
   }

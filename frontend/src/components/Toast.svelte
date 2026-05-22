@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { toastStore, type ToastItem } from '../stores'
-  import Icon from '../lib/components/Icon.svelte'
+  import { toastStore, type ToastItem } from '../stores';
+  import Icon from '../lib/components/Icon.svelte';
 
   function dismiss(id: number) {
-    toastStore.update(items => items.filter(t => t.id !== id))
+    toastStore.update((items) => items.filter((t) => t.id !== id));
   }
 
   function getIconName(type: ToastItem['type']): string {
@@ -21,7 +21,9 @@
           <Icon name={getIconName(toast.type)} size={16} />
         </span>
         <span class="toast__message">{toast.message}</span>
-        <button class="toast__close" on:click={() => dismiss(toast.id)} aria-label="Dismiss">&times;</button>
+        <button class="toast__close" on:click={() => dismiss(toast.id)} aria-label="Dismiss"
+          >&times;</button
+        >
       </div>
     {/each}
   </div>
@@ -75,9 +77,15 @@
     margin-top: 2px;
   }
 
-  .toast--success .toast__icon { color: var(--success); }
-  .toast--error .toast__icon { color: var(--danger); }
-  .toast--info .toast__icon { color: var(--primary); }
+  .toast--success .toast__icon {
+    color: var(--success);
+  }
+  .toast--error .toast__icon {
+    color: var(--danger);
+  }
+  .toast--info .toast__icon {
+    color: var(--primary);
+  }
 
   .toast__message {
     flex: 1;
@@ -97,7 +105,9 @@
     padding: 0;
     margin-top: -2px;
     opacity: 0.7;
-    transition: opacity var(--transition-fast), color var(--transition-fast);
+    transition:
+      opacity var(--transition-fast),
+      color var(--transition-fast);
   }
 
   .toast__close:hover {
@@ -106,7 +116,13 @@
   }
 
   @keyframes toast-in {
-    from { opacity: 0; transform: translateX(1rem); }
-    to   { opacity: 1; transform: translateX(0); }
+    from {
+      opacity: 0;
+      transform: translateX(1rem);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 </style>

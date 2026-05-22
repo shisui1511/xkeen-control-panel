@@ -1,90 +1,90 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { t } from './i18n'
-  import { showConfirm } from './stores'
-  import PageHeader from './PageHeader.svelte'
-  import Icon from './lib/components/Icon.svelte'
+  import { onMount } from 'svelte';
+  import { t } from './i18n';
+  import { showConfirm } from './stores';
+  import PageHeader from './PageHeader.svelte';
+  import Icon from './lib/components/Icon.svelte';
 
-  export let onSwitchTab: (tab: string) => void = () => {}
+  export let onSwitchTab: (tab: string) => void = () => {};
 
   interface Subscription {
-    id: string
-    name: string
-    url: string
-    tag_prefix: string
-    interval: number
-    last_update: string
-    enabled: boolean
-    filter_name?: string
-    filter_type?: string
-    filter_transport?: string
+    id: string;
+    name: string;
+    url: string;
+    tag_prefix: string;
+    interval: number;
+    last_update: string;
+    enabled: boolean;
+    filter_name?: string;
+    filter_type?: string;
+    filter_transport?: string;
   }
 
-  let subscriptions: Subscription[] = []
-  let loading = false
-  let refreshLoading: Record<string, boolean> = {}
-  let showAddModal = false
-  let editingSub: Subscription | null = null
+  let subscriptions: Subscription[] = [];
+  let loading = false;
+  let refreshLoading: Record<string, boolean> = {};
+  let showAddModal = false;
+  let editingSub: Subscription | null = null;
 
   // Form fields
-  let formName = ''
-  let formURL = ''
-  let formTagPrefix = ''
-  let formInterval = 24
-  let formFilterName = ''
-  let formFilterType = ''
-  let formEnabled = true
+  let formName = '';
+  let formURL = '';
+  let formTagPrefix = '';
+  let formInterval = 24;
+  let formFilterName = '';
+  let formFilterType = '';
+  let formEnabled = true;
 
   async function loadSubscriptions() {
-    loading = true
+    loading = true;
     try {
-      const res = await fetch('/api/subscriptions')
+      const res = await fetch('/api/subscriptions');
       if (res.ok) {
-        const envelope = await res.json()
+        const envelope = await res.json();
         // API может вернуть plain array или JSONSuccess envelope {success, data: [...]}
-        subscriptions = Array.isArray(envelope) ? envelope : (envelope.data ?? [])
+        subscriptions = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
       }
     } catch (e) {
       // ignore
     } finally {
-      loading = false
+      loading = false;
     }
   }
 
   async function refreshSubscription(id: string) {
-    refreshLoading[id] = true
+    refreshLoading[id] = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       await fetch(`/api/subscriptions/refresh?id=${id}`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
-      await loadSubscriptions()
+      });
+      await loadSubscriptions();
     } catch (e) {
       // ignore
     } finally {
-      refreshLoading[id] = false
+      refreshLoading[id] = false;
     }
   }
 
   async function refreshAll() {
-    loading = true
+    loading = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       await fetch('/api/subscriptions/refresh-all', {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
-      await loadSubscriptions()
+      });
+      await loadSubscriptions();
     } catch (e) {
       // ignore
     } finally {
-      loading = false
+      loading = false;
     }
   }
 
   async function saveSubscription() {
-    const csrfToken = localStorage.getItem('csrf_token')
+    const csrfToken = localStorage.getItem('csrf_token');
     const sub = {
       name: formName,
       url: formURL,
@@ -92,8 +92,8 @@
       interval: formInterval,
       enabled: formEnabled,
       filter_name: formFilterName || undefined,
-      filter_type: formFilterType || undefined,
-    }
+      filter_type: formFilterType || undefined
+    };
 
     try {
       if (editingSub) {
@@ -104,7 +104,7 @@
             'X-CSRF-Token': csrfToken || ''
           },
           body: JSON.stringify(sub)
-        })
+        });
       } else {
         await fetch('/api/subscriptions/add', {
           method: 'POST',
@@ -113,67 +113,67 @@
             'X-CSRF-Token': csrfToken || ''
           },
           body: JSON.stringify(sub)
-        })
+        });
       }
-      closeModal()
-      await loadSubscriptions()
+      closeModal();
+      await loadSubscriptions();
     } catch (e) {
       // ignore
     }
   }
 
   async function deleteSubscription(id: string) {
-    if (!await showConfirm($t('app.confirm'), $t('subscr.delete_confirm'))) return
+    if (!(await showConfirm($t('app.confirm'), $t('subscr.delete_confirm')))) return;
     try {
-      const csrfToken = localStorage.getItem('csrf_token')
+      const csrfToken = localStorage.getItem('csrf_token');
       await fetch(`/api/subscriptions/delete?id=${id}`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
-      await loadSubscriptions()
+      });
+      await loadSubscriptions();
     } catch (e) {
       // ignore
     }
   }
 
   function openAddModal() {
-    editingSub = null
-    formName = ''
-    formURL = ''
-    formTagPrefix = ''
-    formInterval = 24
-    formFilterName = ''
-    formFilterType = ''
-    formEnabled = true
-    showAddModal = true
+    editingSub = null;
+    formName = '';
+    formURL = '';
+    formTagPrefix = '';
+    formInterval = 24;
+    formFilterName = '';
+    formFilterType = '';
+    formEnabled = true;
+    showAddModal = true;
   }
 
   function openEditModal(sub: Subscription) {
-    editingSub = sub
-    formName = sub.name
-    formURL = sub.url
-    formTagPrefix = sub.tag_prefix
-    formInterval = sub.interval
-    formFilterName = sub.filter_name || ''
-    formFilterType = sub.filter_type || ''
-    formEnabled = sub.enabled
-    showAddModal = true
+    editingSub = sub;
+    formName = sub.name;
+    formURL = sub.url;
+    formTagPrefix = sub.tag_prefix;
+    formInterval = sub.interval;
+    formFilterName = sub.filter_name || '';
+    formFilterType = sub.filter_type || '';
+    formEnabled = sub.enabled;
+    showAddModal = true;
   }
 
   function closeModal() {
-    showAddModal = false
-    editingSub = null
+    showAddModal = false;
+    editingSub = null;
   }
 
   function formatDate(dateStr: string): string {
-    if (!dateStr) return '—'
-    const d = new Date(dateStr)
-    return d.toLocaleString()
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    return d.toLocaleString();
   }
 
   onMount(() => {
-    loadSubscriptions()
-  })
+    loadSubscriptions();
+  });
 </script>
 
 <div class="container">
@@ -185,7 +185,8 @@
   >
     <div slot="actions" style="display: flex; gap: 0.5rem;">
       <button class="btn btn-secondary" on:click={refreshAll} disabled={loading}>
-        {#if loading}{$t('app.loading')}{:else}<Icon name="refresh" size={14} /> {$t('subscr.refresh_all')}{/if}
+        {#if loading}{$t('app.loading')}{:else}<Icon name="refresh" size={14} />
+          {$t('subscr.refresh_all')}{/if}
       </button>
       <button class="btn btn-primary" on:click={openAddModal}>
         + {$t('subscr.add')}
@@ -210,13 +211,22 @@
               <h3 style="margin: 0;">{sub.name}</h3>
             </div>
             <div class="sub-actions">
-              <button class="btn-icon" on:click={() => refreshSubscription(sub.id)} disabled={refreshLoading[sub.id]} title={$t('subscr.refresh')}>
+              <button
+                class="btn-icon"
+                on:click={() => refreshSubscription(sub.id)}
+                disabled={refreshLoading[sub.id]}
+                title={$t('subscr.refresh')}
+              >
                 <Icon name="refresh" size={14} />
               </button>
               <button class="btn-icon" on:click={() => openEditModal(sub)} title={$t('app.edit')}>
                 <Icon name="edit" size={14} />
               </button>
-              <button class="btn-icon" on:click={() => deleteSubscription(sub.id)} title={$t('app.delete')}>
+              <button
+                class="btn-icon"
+                on:click={() => deleteSubscription(sub.id)}
+                title={$t('app.delete')}
+              >
                 <Icon name="delete" size={14} />
               </button>
             </div>
@@ -248,7 +258,8 @@
                 <span class="sub-label">{$t('subscr.filters')}</span>
                 <span class="sub-value">
                   {#if sub.filter_name}{$t('subscr.filter_name')}: {sub.filter_name}{/if}
-                  {#if sub.filter_type} {$t('subscr.filter_type')}: {sub.filter_type}{/if}
+                  {#if sub.filter_type}
+                    {$t('subscr.filter_type')}: {sub.filter_type}{/if}
                 </span>
               </div>
             {/if}
@@ -260,38 +271,81 @@
 </div>
 
 {#if showAddModal}
-  <div class="modal-overlay" role="button" tabindex="0" on:click={closeModal} on:keydown={(e) => e.key === 'Escape' && closeModal()}>
+  <div
+    class="modal-overlay"
+    role="button"
+    tabindex="0"
+    on:click={closeModal}
+    on:keydown={(e) => e.key === 'Escape' && closeModal()}
+  >
     <div class="modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
       <h3>{editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}</h3>
 
       <div class="form-group">
         <label for="form-name" class="form-label">{$t('subscr.name')}</label>
-        <input id="form-name" type="text" class="input" bind:value={formName} placeholder={$t('subscr.name_placeholder')} />
+        <input
+          id="form-name"
+          type="text"
+          class="input"
+          bind:value={formName}
+          placeholder={$t('subscr.name_placeholder')}
+        />
       </div>
 
       <div class="form-group">
         <label for="form-url" class="form-label">{$t('subscr.url')}</label>
-        <input id="form-url" type="text" class="input" bind:value={formURL} placeholder="https://..." />
+        <input
+          id="form-url"
+          type="text"
+          class="input"
+          bind:value={formURL}
+          placeholder="https://..."
+        />
       </div>
 
       <div class="form-group">
         <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
-        <input id="form-tag-prefix" type="text" class="input" bind:value={formTagPrefix} placeholder={$t('subscr.tag_prefix_placeholder')} />
+        <input
+          id="form-tag-prefix"
+          type="text"
+          class="input"
+          bind:value={formTagPrefix}
+          placeholder={$t('subscr.tag_prefix_placeholder')}
+        />
       </div>
 
       <div class="form-group">
         <label for="form-interval" class="form-label">{$t('subscr.interval')}</label>
-        <input id="form-interval" type="number" class="input" bind:value={formInterval} min="1" max="168" />
+        <input
+          id="form-interval"
+          type="number"
+          class="input"
+          bind:value={formInterval}
+          min="1"
+          max="168"
+        />
       </div>
 
       <div class="form-group">
         <label for="form-filter-name" class="form-label">{$t('subscr.filter_name')}</label>
-        <input id="form-filter-name" type="text" class="input" bind:value={formFilterName} placeholder={$t('subscr.filter_placeholder')} />
+        <input
+          id="form-filter-name"
+          type="text"
+          class="input"
+          bind:value={formFilterName}
+          placeholder={$t('subscr.filter_placeholder')}
+        />
       </div>
 
       <div class="form-group">
         <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
-        <input id="form-filter-type" type="text" class="input" bind:value={formFilterType} placeholder="vmess, vless, trojan..." />
+        <input
+          id="form-filter-type"
+          type="text"
+          class="input"
+          bind:value={formFilterType}
+          placeholder="vmess, vless, trojan..."
+        />
       </div>
 
       <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem;">
@@ -384,7 +438,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0,0,0,0.5);
+    background: rgba(0, 0, 0, 0.5);
     display: flex;
     align-items: center;
     justify-content: center;

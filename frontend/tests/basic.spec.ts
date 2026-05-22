@@ -12,7 +12,5 @@ test('shows auth form', async ({ page }) => {
   // Button text depends on whether setup is required or login is shown
   // Setup: "Установить пароль" / "Set Password"
   // Login: "Войти" / "Login"
-  await expect(
-    page.locator('button.btn-primary')
-  ).toBeVisible();
+  await expect(page.locator('button.btn-primary')).toBeVisible();
 });

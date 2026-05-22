@@ -1,5 +1,9 @@
 <script lang="ts">
-  let { size = 16, color = 'currentColor', class: className = '' } = $props<{
+  let {
+    size = 16,
+    color = 'currentColor',
+    class: className = ''
+  } = $props<{
     size?: number;
     color?: string;
     class?: string;

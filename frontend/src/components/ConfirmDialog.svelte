@@ -1,28 +1,24 @@
 <script lang="ts">
-  import { confirmStore } from '../stores'
-  import Modal from './Modal.svelte'
-  import Button from './Button.svelte'
+  import { confirmStore } from '../stores';
+  import Modal from './Modal.svelte';
+  import Button from './Button.svelte';
 
   function confirm() {
     if ($confirmStore) {
-      $confirmStore.resolve(true)
-      confirmStore.set(null)
+      $confirmStore.resolve(true);
+      confirmStore.set(null);
     }
   }
 
   function cancel() {
     if ($confirmStore) {
-      $confirmStore.resolve(false)
-      confirmStore.set(null)
+      $confirmStore.resolve(false);
+      confirmStore.set(null);
     }
   }
 </script>
 
-<Modal
-  isOpen={$confirmStore !== null}
-  title={$confirmStore?.title || ''}
-  onclose={cancel}
->
+<Modal isOpen={$confirmStore !== null} title={$confirmStore?.title || ''} onclose={cancel}>
   {#if $confirmStore}
     <p class="dialog-message">{$confirmStore.message}</p>
     <div class="dialog-actions">

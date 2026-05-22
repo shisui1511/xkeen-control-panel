@@ -1,143 +1,143 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte'
-  import { t } from './i18n'
-  import Icon from './lib/components/Icon.svelte'
-  import EmptyState from './components/EmptyState.svelte'
+  import { onMount, onDestroy } from 'svelte';
+  import { t } from './i18n';
+  import Icon from './lib/components/Icon.svelte';
+  import EmptyState from './components/EmptyState.svelte';
 
   interface LogEntry {
-    text: string
-    source: string
-    raw: string
+    text: string;
+    source: string;
+    raw: string;
   }
 
-  let logs: LogEntry[] = []
-  let ws: WebSocket | null = null
-  let connected = false
-  let paused = false
-  let filter = ''
-  let sourceFilter = ''
-  let autoScroll = true
-  let logContainer: HTMLDivElement
-  let availableSources: string[] = []
+  let logs: LogEntry[] = [];
+  let ws: WebSocket | null = null;
+  let connected = false;
+  let paused = false;
+  let filter = '';
+  let sourceFilter = '';
+  let autoScroll = true;
+  let logContainer: HTMLDivElement;
+  let availableSources: string[] = [];
 
   function parseLogLine(raw: string): LogEntry {
     // Better regex for Xray/Mihomo: 2024/05/13 03:22:12 [Info] ... or [Source] ...
-    const match = raw.match(/^(?:\d{4}\/\d{2}\/\d{2}\s\d{2}:\d{2}:\d{2}\s)?\[([^\]]+)\]\s*(.*)$/)
+    const match = raw.match(/^(?:\d{4}\/\d{2}\/\d{2}\s\d{2}:\d{2}:\d{2}\s)?\[([^\]]+)\]\s*(.*)$/);
     if (match) {
-      return { source: match[1], text: match[2], raw }
+      return { source: match[1], text: match[2], raw };
     }
-    return { source: '', text: raw, raw }
+    return { source: '', text: raw, raw };
   }
 
   function updateSources() {
-    const sources = new Set<string>()
+    const sources = new Set<string>();
     for (const log of logs) {
-      if (log.source) sources.add(log.source)
+      if (log.source) sources.add(log.source);
     }
-    availableSources = Array.from(sources).sort()
+    availableSources = Array.from(sources).sort();
   }
 
   function connect() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/api/logs/ws`
-    
-    ws = new WebSocket(wsUrl)
-    
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/logs/ws`;
+
+    ws = new WebSocket(wsUrl);
+
     ws.onopen = () => {
-      connected = true
-      const msg = $t('logs.connected')
-      logs = [...logs, { text: msg, source: '', raw: msg }]
-    }
-    
+      connected = true;
+      const msg = $t('logs.connected');
+      logs = [...logs, { text: msg, source: '', raw: msg }];
+    };
+
     ws.onmessage = (event) => {
       if (!paused) {
-        const entry = parseLogLine(event.data)
-        logs = [...logs, entry].slice(-1000)
-        updateSources()
-        
+        const entry = parseLogLine(event.data);
+        logs = [...logs, entry].slice(-1000);
+        updateSources();
+
         if (autoScroll && logContainer) {
           setTimeout(() => {
-            logContainer.scrollTop = logContainer.scrollHeight
-          }, 10)
+            logContainer.scrollTop = logContainer.scrollHeight;
+          }, 10);
         }
       }
-    }
-    
+    };
+
     ws.onerror = () => {
-      connected = false
-      const msg = $t('logs.connection_error')
-      logs = [...logs, { text: msg, source: '', raw: msg }]
-    }
-    
+      connected = false;
+      const msg = $t('logs.connection_error');
+      logs = [...logs, { text: msg, source: '', raw: msg }];
+    };
+
     ws.onclose = () => {
-      connected = false
-      const msg = $t('logs.disconnected')
-      logs = [...logs, { text: msg, source: '', raw: msg }]
-      
+      connected = false;
+      const msg = $t('logs.disconnected');
+      logs = [...logs, { text: msg, source: '', raw: msg }];
+
       // Auto-reconnect after 3 seconds
       if (!paused) {
-        setTimeout(connect, 3000)
+        setTimeout(connect, 3000);
       }
-    }
+    };
   }
 
   function disconnect() {
     if (ws) {
-      ws.close()
-      ws = null
+      ws.close();
+      ws = null;
     }
   }
 
   function clearLogs() {
-    logs = []
-    availableSources = []
+    logs = [];
+    availableSources = [];
   }
 
   function exportLogs() {
-    const a = document.createElement('a')
-    a.href = '/api/logs/download'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    const a = document.createElement('a');
+    a.href = '/api/logs/download';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
 
   function togglePause() {
-    paused = !paused
+    paused = !paused;
   }
 
   function toggleAutoScroll() {
-    autoScroll = !autoScroll
+    autoScroll = !autoScroll;
   }
 
   function getFilteredLogs(): LogEntry[] {
-    let result = logs
+    let result = logs;
     if (filter) {
-      const lowerFilter = filter.toLowerCase()
-      result = result.filter(log => log.raw.toLowerCase().includes(lowerFilter))
+      const lowerFilter = filter.toLowerCase();
+      result = result.filter((log) => log.raw.toLowerCase().includes(lowerFilter));
     }
     if (sourceFilter) {
-      result = result.filter(log => log.source === sourceFilter)
+      result = result.filter((log) => log.source === sourceFilter);
     }
-    return result
+    return result;
   }
 
   function getSourceColor(source: string): string {
-    if (!source) return 'var(--text-secondary)'
-    const colors = ['#58a6ff', '#a371f7', '#3fb950', '#d29922', '#f85149']
-    let hash = 0
+    if (!source) return 'var(--text-secondary)';
+    const colors = ['#58a6ff', '#a371f7', '#3fb950', '#d29922', '#f85149'];
+    let hash = 0;
     for (let i = 0; i < source.length; i++) {
-      hash = source.charCodeAt(i) + ((hash << 5) - hash)
+      hash = source.charCodeAt(i) + ((hash << 5) - hash);
     }
-    return colors[Math.abs(hash) % colors.length]
+    return colors[Math.abs(hash) % colors.length];
   }
 
   onMount(() => {
-    connect()
-  })
+    connect();
+  });
 
   onDestroy(() => {
-    disconnect()
-  })
+    disconnect();
+  });
 </script>
 
 <div class="logs-page">
@@ -148,10 +148,12 @@
         {connected ? $t('logs.status_connected') : $t('logs.status_disconnected')}
       </span>
       {#if availableSources.length > 0}
-        <span class="source-count">{$t('logs.source_count', { count: availableSources.length })}</span>
+        <span class="source-count"
+          >{$t('logs.source_count', { count: availableSources.length })}</span
+        >
       {/if}
     </div>
-    
+
     <div class="toolbar-right">
       {#if availableSources.length > 0}
         <select bind:value={sourceFilter} class="source-select" title={$t('logs.source')}>
@@ -162,29 +164,33 @@
         </select>
       {/if}
 
-      <input 
-        type="text" 
-        placeholder={$t('logs.filter')} 
-        bind:value={filter}
-        class="filter-input"
-      />
-      
-      <button on:click={togglePause} class="btn-icon" title={paused ? $t('logs.resume') : $t('logs.pause')}>
+      <input type="text" placeholder={$t('logs.filter')} bind:value={filter} class="filter-input" />
+
+      <button
+        on:click={togglePause}
+        class="btn-icon"
+        title={paused ? $t('logs.resume') : $t('logs.pause')}
+      >
         {#if paused}<Icon name="play" size={14} />{:else}<Icon name="pause" size={14} />{/if}
       </button>
-      
-      <button on:click={toggleAutoScroll} class="btn-icon" class:active={autoScroll} title={$t('logs.autoscroll')}>
+
+      <button
+        on:click={toggleAutoScroll}
+        class="btn-icon"
+        class:active={autoScroll}
+        title={$t('logs.autoscroll')}
+      >
         <Icon name="arrow-down" size={14} />
       </button>
-      
+
       <button on:click={clearLogs} class="btn-icon" title={$t('logs.clear')}>
         <Icon name="trash" size={14} />
       </button>
-      
+
       <button on:click={exportLogs} class="btn-icon" title={$t('logs.export')}>
         <Icon name="download" size={14} />
       </button>
-      
+
       {#if connected}
         <button on:click={disconnect} class="btn-small btn-danger">{$t('logs.disconnect')}</button>
       {:else}
@@ -194,9 +200,16 @@
   </div>
 
   {#if !connected}
-    <div class="alert alert-danger" style="margin: 1rem 1rem 0; padding: 10px 14px; border-radius: 8px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border);">
+    <div
+      class="alert alert-danger"
+      style="margin: 1rem 1rem 0; padding: 10px 14px; border-radius: 8px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border);"
+    >
       <span><strong>{$t('logs.disconnected_title')}</strong> — {$t('logs.disconnected_desc')}</span>
-      <button on:click={connect} class="btn-small btn-primary" style="padding: 4px 8px; font-size: 12px;">
+      <button
+        on:click={connect}
+        class="btn-small btn-primary"
+        style="padding: 4px 8px; font-size: 12px;"
+      >
         {$t('logs.reconnect')}
       </button>
     </div>
@@ -212,11 +225,19 @@
         <span class="log-text">{log.text}</span>
       </div>
     {/each}
-    
+
     {#if getFilteredLogs().length === 0}
       <EmptyState
-        title={!connected ? $t('logs.disconnected_title') : (filter || sourceFilter ? $t('logs.no_filtered_logs') : $t('logs.no_logs'))}
-        description={!connected ? $t('logs.disconnected_desc') : (connected ? $t('logs.waiting') : $t('logs.connect_hint'))}
+        title={!connected
+          ? $t('logs.disconnected_title')
+          : filter || sourceFilter
+            ? $t('logs.no_filtered_logs')
+            : $t('logs.no_logs')}
+        description={!connected
+          ? $t('logs.disconnected_desc')
+          : connected
+            ? $t('logs.waiting')
+            : $t('logs.connect_hint')}
         ctaText={!connected ? $t('logs.reconnect') : ''}
         oncta={connect}
       />
@@ -357,7 +378,7 @@
     display: flex;
     gap: 1rem;
     padding: 0.25rem 0;
-    border-bottom: 1px solid var(--border-light, rgba(0,0,0,0.05));
+    border-bottom: 1px solid var(--border-light, rgba(0, 0, 0, 0.05));
     align-items: flex-start;
   }
 
@@ -375,7 +396,7 @@
     flex-shrink: 0;
     font-size: 0.75rem;
     padding: 0.125rem 0.375rem;
-    background: rgba(0,0,0,0.05);
+    background: rgba(0, 0, 0, 0.05);
     border-radius: 3px;
     text-align: center;
   }

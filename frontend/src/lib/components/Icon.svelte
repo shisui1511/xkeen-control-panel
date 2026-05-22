@@ -34,7 +34,12 @@
   import Trash from './icons/Trash.svelte';
   import ArrowDown from './icons/ArrowDown.svelte';
 
-  let { name, size = 16, color = 'currentColor', class: className = '' } = $props<{
+  let {
+    name,
+    size = 16,
+    color = 'currentColor',
+    class: className = ''
+  } = $props<{
     name: string;
     size?: number;
     color?: string;

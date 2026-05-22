@@ -83,7 +83,18 @@
     },
     "global-client-fingerprint": {
       "type": "string",
-      "enum": ["chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "none"],
+      "enum": [
+        "chrome",
+        "firefox",
+        "safari",
+        "ios",
+        "android",
+        "edge",
+        "360",
+        "qq",
+        "random",
+        "none"
+      ],
       "description": "Global TLS fingerprint"
     },
     "profile": {
@@ -193,7 +204,20 @@
           "name": { "type": "string" },
           "type": {
             "type": "string",
-            "enum": ["ss", "ssr", "vmess", "vless", "trojan", " hysteria", "hysteria2", "tuic", "wireguard", "socks5", "http", "snell"]
+            "enum": [
+              "ss",
+              "ssr",
+              "vmess",
+              "vless",
+              "trojan",
+              " hysteria",
+              "hysteria2",
+              "tuic",
+              "wireguard",
+              "socks5",
+              "http",
+              "snell"
+            ]
           },
           "server": { "type": "string" },
           "port": { "type": "integer" },

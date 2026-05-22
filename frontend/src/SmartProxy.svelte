@@ -1,160 +1,160 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { t } from './i18n'
-  import PageHeader from './PageHeader.svelte'
-  import Icon from './lib/components/Icon.svelte'
+  import { onMount } from 'svelte';
+  import { t } from './i18n';
+  import PageHeader from './PageHeader.svelte';
+  import Icon from './lib/components/Icon.svelte';
 
-  export let onSwitchTab: (tab: string) => void = () => {}
+  export let onSwitchTab: (tab: string) => void = () => {};
 
   interface Profile {
-    id: string
-    name: string
-    enabled: boolean
-    mode: string
-    days_of_week: number[]
-    start_time: string
-    end_time: string
-    group_name: string
-    proxy_name: string
-    latency_threshold?: number
-    consecutive_failures?: number
-    fallback_proxy?: string
-    round_robin_proxies?: string[]
-    current_proxy?: string
-    current_failures?: number
-    last_applied: number
-    apply_count: number
+    id: string;
+    name: string;
+    enabled: boolean;
+    mode: string;
+    days_of_week: number[];
+    start_time: string;
+    end_time: string;
+    group_name: string;
+    proxy_name: string;
+    latency_threshold?: number;
+    consecutive_failures?: number;
+    fallback_proxy?: string;
+    round_robin_proxies?: string[];
+    current_proxy?: string;
+    current_failures?: number;
+    last_applied: number;
+    apply_count: number;
   }
 
   interface Status {
-    active: Profile[]
-    next: Profile[]
-    time: string
-    day: number
+    active: Profile[];
+    next: Profile[];
+    time: string;
+    day: number;
   }
 
-  let profiles: Profile[] = []
-  let status: Status | null = null
-  let loading = false
-  let error = ''
+  let profiles: Profile[] = [];
+  let status: Status | null = null;
+  let loading = false;
+  let error = '';
 
   // Form state
-  let showForm = false
-  let editingProfile: Profile | null = null
-  let formName = ''
-  let formEnabled = true
-  let formMode = 'time-based'
-  let formDays: number[] = [1, 2, 3, 4, 5]
-  let formStartTime = '09:00'
-  let formEndTime = '18:00'
-  let formGroupName = ''
-  let formProxyName = ''
-  let formLatencyThreshold = 500
-  let formConsecutiveFailures = 3
-  let formFallbackProxy = ''
-  let formRoundRobinProxies = ''
+  let showForm = false;
+  let editingProfile: Profile | null = null;
+  let formName = '';
+  let formEnabled = true;
+  let formMode = 'time-based';
+  let formDays: number[] = [1, 2, 3, 4, 5];
+  let formStartTime = '09:00';
+  let formEndTime = '18:00';
+  let formGroupName = '';
+  let formProxyName = '';
+  let formLatencyThreshold = 500;
+  let formConsecutiveFailures = 3;
+  let formFallbackProxy = '';
+  let formRoundRobinProxies = '';
 
-  $: dayNames = $t('smartproxy.days').split(',')
-  const allDays = [0, 1, 2, 3, 4, 5, 6]
+  $: dayNames = $t('smartproxy.days').split(',');
+  const allDays = [0, 1, 2, 3, 4, 5, 6];
 
   $: modes = [
     { value: 'time-based', label: $t('smartproxy.mode_time') },
     { value: 'auto-failover', label: $t('smartproxy.mode_failover') },
     { value: 'round-robin', label: $t('smartproxy.mode_roundrobin') }
-  ]
+  ];
 
   async function fetchProfiles() {
-    loading = true
+    loading = true;
     try {
-      const res = await fetch('/api/smart-proxy/profiles')
-      if (res.ok) profiles = await res.json()
+      const res = await fetch('/api/smart-proxy/profiles');
+      if (res.ok) profiles = await res.json();
     } catch (e: any) {
-      error = e.message
+      error = e.message;
     } finally {
-      loading = false
+      loading = false;
     }
   }
 
   async function fetchStatus() {
     try {
-      const res = await fetch('/api/smart-proxy/status')
-      if (res.ok) status = await res.json()
+      const res = await fetch('/api/smart-proxy/status');
+      if (res.ok) status = await res.json();
     } catch (e) {
       // ignore
     }
   }
 
   function startCreate() {
-    showForm = true
-    editingProfile = null
-    formName = ''
-    formEnabled = true
-    formMode = 'time-based'
-    formDays = [1, 2, 3, 4, 5]
-    formStartTime = '09:00'
-    formEndTime = '18:00'
-    formGroupName = ''
-    formProxyName = ''
-    formLatencyThreshold = 500
-    formConsecutiveFailures = 3
-    formFallbackProxy = ''
-    formRoundRobinProxies = ''
+    showForm = true;
+    editingProfile = null;
+    formName = '';
+    formEnabled = true;
+    formMode = 'time-based';
+    formDays = [1, 2, 3, 4, 5];
+    formStartTime = '09:00';
+    formEndTime = '18:00';
+    formGroupName = '';
+    formProxyName = '';
+    formLatencyThreshold = 500;
+    formConsecutiveFailures = 3;
+    formFallbackProxy = '';
+    formRoundRobinProxies = '';
   }
 
   function startEdit(p: Profile) {
-    editingProfile = p
-    formName = p.name
-    formEnabled = p.enabled
-    formMode = p.mode || 'time-based'
-    formDays = [...(p.days_of_week || [])]
-    formStartTime = p.start_time || '09:00'
-    formEndTime = p.end_time || '18:00'
-    formGroupName = p.group_name
-    formProxyName = p.proxy_name
-    formLatencyThreshold = p.latency_threshold || 500
-    formConsecutiveFailures = p.consecutive_failures || 3
-    formFallbackProxy = p.fallback_proxy || ''
-    formRoundRobinProxies = p.round_robin_proxies ? p.round_robin_proxies.join('\n') : ''
+    editingProfile = p;
+    formName = p.name;
+    formEnabled = p.enabled;
+    formMode = p.mode || 'time-based';
+    formDays = [...(p.days_of_week || [])];
+    formStartTime = p.start_time || '09:00';
+    formEndTime = p.end_time || '18:00';
+    formGroupName = p.group_name;
+    formProxyName = p.proxy_name;
+    formLatencyThreshold = p.latency_threshold || 500;
+    formConsecutiveFailures = p.consecutive_failures || 3;
+    formFallbackProxy = p.fallback_proxy || '';
+    formRoundRobinProxies = p.round_robin_proxies ? p.round_robin_proxies.join('\n') : '';
   }
 
   function cancelEdit() {
-    showForm = false
-    editingProfile = null
+    showForm = false;
+    editingProfile = null;
   }
 
   function toggleDay(day: number) {
     if (formDays.includes(day)) {
-      formDays = formDays.filter(d => d !== day)
+      formDays = formDays.filter((d) => d !== day);
     } else {
-      formDays = [...formDays, day].sort()
+      formDays = [...formDays, day].sort();
     }
   }
 
   async function saveProfile() {
-    const csrfToken = localStorage.getItem('csrf_token')
+    const csrfToken = localStorage.getItem('csrf_token');
     const payload: any = {
       name: formName,
       enabled: formEnabled,
       mode: formMode,
       group_name: formGroupName,
       proxy_name: formProxyName
-    }
+    };
 
     if (formMode === 'time-based') {
-      payload.days_of_week = formDays
-      payload.start_time = formStartTime
-      payload.end_time = formEndTime
+      payload.days_of_week = formDays;
+      payload.start_time = formStartTime;
+      payload.end_time = formEndTime;
     } else if (formMode === 'auto-failover') {
-      payload.latency_threshold = formLatencyThreshold
-      payload.consecutive_failures = formConsecutiveFailures
-      payload.fallback_proxy = formFallbackProxy
+      payload.latency_threshold = formLatencyThreshold;
+      payload.consecutive_failures = formConsecutiveFailures;
+      payload.fallback_proxy = formFallbackProxy;
     } else if (formMode === 'round-robin') {
-      payload.round_robin_proxies = formRoundRobinProxies.split('\n').filter(s => s.trim())
+      payload.round_robin_proxies = formRoundRobinProxies.split('\n').filter((s) => s.trim());
     }
 
     const url = editingProfile
       ? `/api/smart-proxy/profiles/update?id=${editingProfile.id}`
-      : '/api/smart-proxy/profiles/add'
+      : '/api/smart-proxy/profiles/add';
 
     try {
       const res = await fetch(url, {
@@ -164,56 +164,59 @@
           'X-CSRF-Token': csrfToken || ''
         },
         body: JSON.stringify(payload)
-      })
+      });
 
-      if (!res.ok) throw new Error('Failed to save')
+      if (!res.ok) throw new Error('Failed to save');
 
-      showForm = false
-      editingProfile = null
-      await fetchProfiles()
-      await fetchStatus()
+      showForm = false;
+      editingProfile = null;
+      await fetchProfiles();
+      await fetchStatus();
     } catch (e: any) {
-      error = e.message
+      error = e.message;
     }
   }
 
   async function deleteProfile(id: string) {
-    if (!confirm($t('app.delete') + '?')) return
-    const csrfToken = localStorage.getItem('csrf_token')
+    if (!confirm($t('app.delete') + '?')) return;
+    const csrfToken = localStorage.getItem('csrf_token');
     try {
       const res = await fetch(`/api/smart-proxy/profiles/delete?id=${id}`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
-      if (!res.ok) throw new Error('Failed to delete')
-      await fetchProfiles()
-      await fetchStatus()
+      });
+      if (!res.ok) throw new Error('Failed to delete');
+      await fetchProfiles();
+      await fetchStatus();
     } catch (e: any) {
-      error = e.message
+      error = e.message;
     }
   }
 
   async function toggleEnabled(p: Profile) {
-    const csrfToken = localStorage.getItem('csrf_token')
+    const csrfToken = localStorage.getItem('csrf_token');
     try {
-      const res = await fetch(`/api/smart-proxy/profiles/enabled?id=${p.id}&enabled=${!p.enabled}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
-      })
-      if (!res.ok) throw new Error('Failed to toggle')
-      await fetchProfiles()
-      await fetchStatus()
+      const res = await fetch(
+        `/api/smart-proxy/profiles/enabled?id=${p.id}&enabled=${!p.enabled}`,
+        {
+          method: 'POST',
+          headers: { 'X-CSRF-Token': csrfToken || '' }
+        }
+      );
+      if (!res.ok) throw new Error('Failed to toggle');
+      await fetchProfiles();
+      await fetchStatus();
     } catch (e: any) {
-      error = e.message
+      error = e.message;
     }
   }
 
   onMount(() => {
-    fetchProfiles()
-    fetchStatus()
-    const interval = setInterval(fetchStatus, 30000)
-    return () => clearInterval(interval)
-  })
+    fetchProfiles();
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 30000);
+    return () => clearInterval(interval);
+  });
 </script>
 
 <div class="container">
@@ -232,7 +235,9 @@
   {#if status}
     <div class="card mb-2">
       <h2>{$t('smartproxy.current_status')}</h2>
-      <p class="text-secondary">{$t('smartproxy.time')}: {status.time}, {$t('smartproxy.day')}: {dayNames[status.day]}</p>
+      <p class="text-secondary">
+        {$t('smartproxy.time')}: {status.time}, {$t('smartproxy.day')}: {dayNames[status.day]}
+      </p>
       {#if status.active.length > 0}
         <div class="active-profiles">
           {#each status.active as p}
@@ -257,7 +262,10 @@
     {:else}
       <div class="profile-list">
         {#each profiles as p}
-          <div class="profile-item" class:active={p.enabled && status?.active.some(a => a.id === p.id)}>
+          <div
+            class="profile-item"
+            class:active={p.enabled && status?.active.some((a) => a.id === p.id)}
+          >
             <div class="profile-main">
               <div class="profile-header">
                 <span class="profile-name">{p.name}</span>
@@ -267,32 +275,56 @@
                 </label>
               </div>
               <div class="profile-details">
-                <span class="detail mode-badge">{p.mode === 'time-based' ? $t('smartproxy.mode_time') : p.mode === 'auto-failover' ? $t('smartproxy.mode_failover') : p.mode === 'round-robin' ? $t('smartproxy.mode_roundrobin') : p.mode || $t('smartproxy.mode_time')}</span>
+                <span class="detail mode-badge"
+                  >{p.mode === 'time-based'
+                    ? $t('smartproxy.mode_time')
+                    : p.mode === 'auto-failover'
+                      ? $t('smartproxy.mode_failover')
+                      : p.mode === 'round-robin'
+                        ? $t('smartproxy.mode_roundrobin')
+                        : p.mode || $t('smartproxy.mode_time')}</span
+                >
                 {#if p.mode === 'auto-failover'}
-                  <span class="detail">{p.group_name} → {p.proxy_name} ({$t('smartproxy.fallback_label')}: {p.fallback_proxy || 'DIRECT'})</span>
+                  <span class="detail"
+                    >{p.group_name} → {p.proxy_name} ({$t('smartproxy.fallback_label')}: {p.fallback_proxy ||
+                      'DIRECT'})</span
+                  >
                   {#if p.current_failures && p.current_failures > 0}
-                    <span class="detail alert"><Icon name="warning" size={14} /> {$t('smartproxy.failures_label')}: {p.current_failures}</span>
+                    <span class="detail alert"
+                      ><Icon name="warning" size={14} />
+                      {$t('smartproxy.failures_label')}: {p.current_failures}</span
+                    >
                   {/if}
                   {#if p.current_proxy}
                     <span class="detail active-proxy">→ {p.current_proxy}</span>
                   {/if}
                 {:else if p.mode === 'round-robin'}
-                  <span class="detail">{p.group_name} → {$t('smartproxy.mode_roundrobin')} ({p.round_robin_proxies?.length || 0} {$t('smartproxy.proxies_label')})</span>
+                  <span class="detail"
+                    >{p.group_name} → {$t('smartproxy.mode_roundrobin')} ({p.round_robin_proxies
+                      ?.length || 0}
+                    {$t('smartproxy.proxies_label')})</span
+                  >
                 {:else}
                   <span class="detail">
-                    {p.days_of_week?.map(d => dayNames[d]).join(', ')}
+                    {p.days_of_week?.map((d) => dayNames[d]).join(', ')}
                   </span>
                   <span class="detail">{p.start_time} – {p.end_time}</span>
                   <span class="detail">{p.group_name} → {p.proxy_name}</span>
                 {/if}
                 {#if p.apply_count > 0}
-                  <span class="detail">{$t('smartproxy.applied_count', { count: p.apply_count })}</span>
+                  <span class="detail"
+                    >{$t('smartproxy.applied_count', { count: p.apply_count })}</span
+                  >
                 {/if}
               </div>
             </div>
             <div class="profile-actions">
-              <button class="btn-icon" on:click={() => startEdit(p)} title={$t('app.edit')}><Icon name="edit" size={14} /></button>
-              <button class="btn-icon" on:click={() => deleteProfile(p.id)} title={$t('app.delete')}><Icon name="delete" size={14} /></button>
+              <button class="btn-icon" on:click={() => startEdit(p)} title={$t('app.edit')}
+                ><Icon name="edit" size={14} /></button
+              >
+              <button class="btn-icon" on:click={() => deleteProfile(p.id)} title={$t('app.delete')}
+                ><Icon name="delete" size={14} /></button
+              >
             </div>
           </div>
         {/each}
@@ -305,84 +337,128 @@
     <div class="card">
       <h2>{editingProfile ? $t('smartproxy.edit_profile') : $t('smartproxy.new_profile')}</h2>
 
-        <div class="form-group">
-          <label for="sp-name">{$t('smartproxy.name')}</label>
-          <input id="sp-name" type="text" class="input" bind:value={formName} placeholder={$t('smartproxy.name_placeholder')} />
-        </div>
-
-        <div class="form-group">
-          <label for="sp-mode">{$t('smartproxy.mode')}</label>
-          <select id="sp-mode" class="input" bind:value={formMode}>
-            {#each modes as m}
-              <option value={m.value}>{m.label}</option>
-            {/each}
-          </select>
-        </div>
-
-        {#if formMode === 'time-based'}
-          <div class="form-group">
-            <label for="sp-days">{$t('smartproxy.days_of_week')}</label>
-            <div class="day-selector" id="sp-days">
-              {#each allDays as day}
-                <button
-                  class="day-btn"
-                  class:selected={formDays.includes(day)}
-                  on:click={() => toggleDay(day)}
-                >
-                  {dayNames[day]}
-                </button>
-              {/each}
-            </div>
-          </div>
-
-          <div class="form-row">
-            <div class="form-group">
-              <label for="sp-start">{$t('smartproxy.from')}</label>
-              <input id="sp-start" type="time" class="input" bind:value={formStartTime} />
-            </div>
-            <div class="form-group">
-              <label for="sp-end">{$t('smartproxy.to')}</label>
-              <input id="sp-end" type="time" class="input" bind:value={formEndTime} />
-            </div>
-          </div>
-        {:else if formMode === 'auto-failover'}
-          <div class="form-row">
-            <div class="form-group">
-              <label for="sp-threshold">{$t('smartproxy.latency_threshold')} (ms)</label>
-              <input id="sp-threshold" type="number" class="input" bind:value={formLatencyThreshold} min="50" max="5000" />
-            </div>
-            <div class="form-group">
-              <label for="sp-failures">{$t('smartproxy.consecutive_failures')}</label>
-              <input id="sp-failures" type="number" class="input" bind:value={formConsecutiveFailures} min="1" max="10" />
-            </div>
-          </div>
-          <div class="form-group">
-            <label for="sp-fallback">{$t('smartproxy.fallback_proxy')}</label>
-            <input id="sp-fallback" type="text" class="input" bind:value={formFallbackProxy} placeholder="DIRECT" />
-          </div>
-        {:else if formMode === 'round-robin'}
-          <div class="form-group">
-            <label for="sp-rr">{$t('smartproxy.round_robin_proxies')}</label>
-            <textarea id="sp-rr" class="input" bind:value={formRoundRobinProxies} rows="4" placeholder="proxy1&#10;proxy2&#10;proxy3"></textarea>
-            <p class="hint">{$t('smartproxy.round_robin_hint')}</p>
-          </div>
-        {/if}
-
-        <div class="form-group">
-          <label for="sp-group">{$t('smartproxy.proxy_group')}</label>
-          <input id="sp-group" type="text" class="input" bind:value={formGroupName} placeholder={$t('smartproxy.proxy_group_placeholder')} />
-        </div>
-
-        <div class="form-group">
-          <label for="sp-proxy">{$t('smartproxy.proxy')}</label>
-          <input id="sp-proxy" type="text" class="input" bind:value={formProxyName} placeholder={$t('smartproxy.proxy_placeholder')} />
-        </div>
-
-        <div class="form-actions">
-          <button class="btn btn-secondary" on:click={cancelEdit}>{$t('app.cancel')}</button>
-          <button class="btn btn-primary" on:click={saveProfile}>{$t('app.save')}</button>
-        </div>
+      <div class="form-group">
+        <label for="sp-name">{$t('smartproxy.name')}</label>
+        <input
+          id="sp-name"
+          type="text"
+          class="input"
+          bind:value={formName}
+          placeholder={$t('smartproxy.name_placeholder')}
+        />
       </div>
+
+      <div class="form-group">
+        <label for="sp-mode">{$t('smartproxy.mode')}</label>
+        <select id="sp-mode" class="input" bind:value={formMode}>
+          {#each modes as m}
+            <option value={m.value}>{m.label}</option>
+          {/each}
+        </select>
+      </div>
+
+      {#if formMode === 'time-based'}
+        <div class="form-group">
+          <label for="sp-days">{$t('smartproxy.days_of_week')}</label>
+          <div class="day-selector" id="sp-days">
+            {#each allDays as day}
+              <button
+                class="day-btn"
+                class:selected={formDays.includes(day)}
+                on:click={() => toggleDay(day)}
+              >
+                {dayNames[day]}
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sp-start">{$t('smartproxy.from')}</label>
+            <input id="sp-start" type="time" class="input" bind:value={formStartTime} />
+          </div>
+          <div class="form-group">
+            <label for="sp-end">{$t('smartproxy.to')}</label>
+            <input id="sp-end" type="time" class="input" bind:value={formEndTime} />
+          </div>
+        </div>
+      {:else if formMode === 'auto-failover'}
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sp-threshold">{$t('smartproxy.latency_threshold')} (ms)</label>
+            <input
+              id="sp-threshold"
+              type="number"
+              class="input"
+              bind:value={formLatencyThreshold}
+              min="50"
+              max="5000"
+            />
+          </div>
+          <div class="form-group">
+            <label for="sp-failures">{$t('smartproxy.consecutive_failures')}</label>
+            <input
+              id="sp-failures"
+              type="number"
+              class="input"
+              bind:value={formConsecutiveFailures}
+              min="1"
+              max="10"
+            />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="sp-fallback">{$t('smartproxy.fallback_proxy')}</label>
+          <input
+            id="sp-fallback"
+            type="text"
+            class="input"
+            bind:value={formFallbackProxy}
+            placeholder="DIRECT"
+          />
+        </div>
+      {:else if formMode === 'round-robin'}
+        <div class="form-group">
+          <label for="sp-rr">{$t('smartproxy.round_robin_proxies')}</label>
+          <textarea
+            id="sp-rr"
+            class="input"
+            bind:value={formRoundRobinProxies}
+            rows="4"
+            placeholder="proxy1&#10;proxy2&#10;proxy3"
+          ></textarea>
+          <p class="hint">{$t('smartproxy.round_robin_hint')}</p>
+        </div>
+      {/if}
+
+      <div class="form-group">
+        <label for="sp-group">{$t('smartproxy.proxy_group')}</label>
+        <input
+          id="sp-group"
+          type="text"
+          class="input"
+          bind:value={formGroupName}
+          placeholder={$t('smartproxy.proxy_group_placeholder')}
+        />
+      </div>
+
+      <div class="form-group">
+        <label for="sp-proxy">{$t('smartproxy.proxy')}</label>
+        <input
+          id="sp-proxy"
+          type="text"
+          class="input"
+          bind:value={formProxyName}
+          placeholder={$t('smartproxy.proxy_placeholder')}
+        />
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-secondary" on:click={cancelEdit}>{$t('app.cancel')}</button>
+        <button class="btn btn-primary" on:click={saveProfile}>{$t('app.save')}</button>
+      </div>
+    </div>
   {/if}
 </div>
 
@@ -561,19 +637,19 @@
     right: 0;
     bottom: 0;
     background-color: var(--border);
-    transition: .3s;
+    transition: 0.3s;
     border-radius: 20px;
   }
 
   .toggle-slider:before {
     position: absolute;
-    content: "";
+    content: '';
     height: 14px;
     width: 14px;
     left: 3px;
     bottom: 3px;
     background-color: white;
-    transition: .3s;
+    transition: 0.3s;
     border-radius: 50%;
   }
 
