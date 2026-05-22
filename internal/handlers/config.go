@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -233,7 +235,32 @@ func (a *API) getBinaryPath(name string) string {
 	return ""
 }
 
-func copyDirConfigs(srcDir, dstDir string, targetFilename string, newContent string) error {
+func copyDirConfigs(srcDir, dstDir string, targetFilename string, newContent string, allowedRoots []string) error {
+	// Sanitize and validate targetFilename
+	targetFilename = filepath.Base(targetFilename)
+	matched, err := regexp.MatchString(`^[a-zA-Z0-9_\-\.]+$`, targetFilename)
+	if err != nil || !matched {
+		return errors.New("invalid target filename")
+	}
+
+	// Sanitize and validate srcDir
+	srcDir = filepath.Clean(srcDir)
+	if strings.Contains(srcDir, "..") {
+		return errors.New("path traversal detected in source directory")
+	}
+
+	var srcDirAllowed bool
+	for _, root := range allowedRoots {
+		cleanRoot := filepath.Clean(root)
+		if srcDir == cleanRoot || strings.HasPrefix(srcDir, cleanRoot+string(filepath.Separator)) {
+			srcDirAllowed = true
+			break
+		}
+	}
+	if !srcDirAllowed {
+		return errors.New("source directory is not within allowed roots")
+	}
+
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -302,6 +329,20 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Explicit inline validation for CodeQL path sanitization
+	var pathAllowed bool
+	for _, root := range a.cfg.AllowedRoots {
+		cleanRoot := filepath.Clean(root)
+		if cleanPath == cleanRoot || strings.HasPrefix(cleanPath, cleanRoot+string(filepath.Separator)) {
+			pathAllowed = true
+			break
+		}
+	}
+	if !pathAllowed {
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
 	var kernelType string
 	filename := filepath.Base(cleanPath)
 	ext := filepath.Ext(cleanPath)
@@ -331,7 +372,7 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 	defer os.RemoveAll(tempDir)
 
 	origDir := filepath.Dir(cleanPath)
-	if err := copyDirConfigs(origDir, tempDir, filename, req.Content); err != nil {
+	if err := copyDirConfigs(origDir, tempDir, filename, req.Content, a.cfg.AllowedRoots); err != nil {
 		a.errorResponse(w, "failed to prepare validation files: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
