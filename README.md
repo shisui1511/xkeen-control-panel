@@ -1,5 +1,9 @@
 # XKeen Control Panel
 
+[![Build and Release](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/build.yml/badge.svg)](https://github.com/shisui1511/xkeen-control-panel/actions/workflows/build.yml)
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/shisui1511/xkeen-control-panel)](https://github.com/shisui1511/xkeen-control-panel/releases)
+[![GitHub license](https://img.shields.io/github/license/shisui1511/xkeen-control-panel)](https://github.com/shisui1511/xkeen-control-panel/blob/main/LICENSE)
+
 Веб-панель для управления XKeen/Mihomo на роутерах Keenetic/Netcraze.
 
 - **Go backend** — статический бинарник, 5-10 MB RAM
@@ -30,30 +34,30 @@ curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/s
 
 
 ```bash
-# 1. Скачать бинарник (замените {VERSION} на актуальную версию, например v0.4.0)
+# 1. Скачать бинарник (замените {VERSION} на актуальную версию)
 # ARM64 (KN-1810, KN-1910, KN-1010)
-curl -fL -o /opt/bin/xkeen-control-panel \
+curl -fL -o /opt/sbin/xcp \
   "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xcp_{VERSION}_arm64"
 
 # MIPSLE (KN-1912, KN-2410)
-curl -fL -o /opt/bin/xkeen-control-panel \
+curl -fL -o /opt/sbin/xcp \
   "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xcp_{VERSION}_mipsle"
 
-chmod +x /opt/bin/xkeen-control-panel
+chmod +x /opt/sbin/xcp
 
 # 2. Создать конфиг
-mkdir -p /opt/etc/xkeen-control-panel
-cat > /opt/etc/xkeen-control-panel/config.json <<EOF
+mkdir -p /opt/etc/xcp
+cat > /opt/etc/xcp/config.json <<EOF
 {
   "port": 8090,
   "xray_config_dir": "/opt/etc/xray/configs",
   "mihomo_config_dir": "/opt/etc/mihomo",
-  "data_dir": "/opt/etc/xkeen-control-panel"
+  "data_dir": "/opt/etc/xcp"
 }
 EOF
 
 # 3. Запустить
-/opt/bin/xkeen-control-panel -config /opt/etc/xkeen-control-panel/config.json
+/opt/sbin/xcp -config /opt/etc/xcp/config.json
 ```
 
 ### После установки
@@ -107,15 +111,15 @@ curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/s
 }
 ```
 
-При `enabled: true` и пустых путях сертификат генерируется автоматически в `/opt/etc/xkeen-control-panel/ssl/`.
+При `enabled: true` и пустых путях сертификат генерируется автоматически в `/opt/etc/xcp/ssl/`.
 
 ### Ручная генерация сертификата
 
 ```bash
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout /opt/etc/xkeen-control-panel/ssl/key.pem \
-  -out /opt/etc/xkeen-control-panel/ssl/cert.pem \
-  -subj "/CN=xkeen-control-panel" \
+  -keyout /opt/etc/xcp/ssl/key.pem \
+  -out /opt/etc/xcp/ssl/cert.pem \
+  -subj "/CN=xcp" \
   -addext "subjectAltName=IP:192.168.1.1"
 ```
 
@@ -134,22 +138,30 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 
 ```bash
 /opt/etc/init.d/S99xcp stop
-rm -f /opt/bin/xkeen-control-panel
+rm -f /opt/sbin/xcp
 rm -f /opt/etc/init.d/S99xcp
-rm -rf /opt/etc/xkeen-control-panel   # удалить конфиги (опционально)
+rm -rf /opt/etc/xcp   # удалить конфиги (опционально)
 ```
 
 ## Совместимость
 
-| Архитектура | Минимум RAM | Примеры | Бинарник | Статус |
-|-------------|-------------|---------|----------|--------|
-| **ARM64** | 128 MB | Extra III, Peak, Titan, Giga, Ultra | `xkeen-control-panel-arm64` | ✅ |
-| **MIPSLE** | 128 MB | Viva, Duo, Skipper | `xkeen-control-panel-mipsle` | ✅ |
-| **MIPS** | 64 MB* | Старые модели | `xkeen-control-panel-mips` | ⚠️ |
+| Архитектура | Требования к RAM | Имя бинарника | Статус поддержки |
+|-------------|------------------|---------------|-------------------|
+| **ARM64 (aarch64)** | >= 128 MB | `xcp_{VERSION}_arm64` | ✅ Полная |
+| **MIPSLE (mipsel)** | >= 128 MB | `xcp_{VERSION}_mipsle` | ✅ Полная |
+| **MIPS (mips)** | >= 64 MB* | `xcp_{VERSION}_mips` | ⚠️ Экспериментальная |
 
-> *Модели с 64 MB RAM могут не тянуть Entware + XKeen одновременно. Рекомендуется 128 MB+.
+> *Модели с 64 MB RAM могут испытывать нехватку памяти при одновременной работе Entware, XKeen/Mihomo и веб-панели. Рекомендуется использовать роутеры с >= 128 MB RAM.
 
-Панель работает alongside других XKeen-UI и zashboard — разные порты, нет конфликтов.
+### Список совместимых моделей Keenetic
+
+| Архитектура | Совместимые модели роутеров |
+|-------------|----------------------------|
+| **ARM64 (aarch64)** | Peak (KN-2710), Ultra/Titan (KN-1811/KN-1812), Giga (KN-1012), Hopper (KN-3811), Hopper SE (KN-3812), Hopper 4G+ (KN-2312), Hero 5G (KN-4110) |
+| **MIPSLE (mipsel)** | Giga/Hero (KN-1010/KN-1011), Ultra (KN-1810), Viva/Skipper (KN-1910/KN-1912/KN-1913), Giant (KN-2610), Hero 4G (KN-2310/KN-2311), Hopper (KN-3810), Skipper 4G (KN-2910), Launcher DSL (KN-2012), Speedster DSL (KN-2113), Hopper DSL (KN-3611), 4G (KN-1212), Extra/Carrier (KN-1711/KN-1713) |
+| **MIPS (mips)** | Ultra SE/Peak DSL (KN-2510), Giga SE/Hero DSL (KN-2410), DSL/Omni DSL (KN-2010), Skipper DSL (KN-2112), Duo/Extra DSL (KN-2110), Hopper DSL (KN-3610) |
+
+Панель работает совместно с другими инструментами (XKeen-UI, zashboard) на разных портах без каких-либо конфликтов.
 
 ## Разработка
 
