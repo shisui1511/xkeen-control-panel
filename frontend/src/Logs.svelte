@@ -94,16 +94,11 @@
   }
 
   function exportLogs() {
-    const content = logs.map(l => l.raw).join('\n')
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url
-    a.download = `xkeen_logs_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`
+    a.href = '/api/logs/download'
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    URL.revokeObjectURL(url)
   }
 
   function togglePause() {
@@ -198,6 +193,15 @@
     </div>
   </div>
 
+  {#if !connected}
+    <div class="alert alert-danger" style="margin: 1rem 1rem 0; padding: 10px 14px; border-radius: 8px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border);">
+      <span><strong>{$t('logs.disconnected_title')}</strong> — {$t('logs.disconnected_desc')}</span>
+      <button on:click={connect} class="btn-small btn-primary" style="padding: 4px 8px; font-size: 12px;">
+        {$t('logs.reconnect')}
+      </button>
+    </div>
+  {/if}
+
   <div class="log-container" bind:this={logContainer}>
     {#each getFilteredLogs() as log, i}
       <div class="log-line">
@@ -211,9 +215,10 @@
     
     {#if getFilteredLogs().length === 0}
       <EmptyState
-        title={filter || sourceFilter ? $t('logs.no_filtered_logs') : $t('logs.no_logs')}
-        description={connected ? $t('logs.waiting') : $t('logs.connect_hint')}
-        icon="logs"
+        title={!connected ? $t('logs.disconnected_title') : (filter || sourceFilter ? $t('logs.no_filtered_logs') : $t('logs.no_logs'))}
+        description={!connected ? $t('logs.disconnected_desc') : (connected ? $t('logs.waiting') : $t('logs.connect_hint'))}
+        ctaText={!connected ? $t('logs.reconnect') : ''}
+        oncta={connect}
       />
     {/if}
   </div>
@@ -223,7 +228,9 @@
   .logs-page {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    /* hot-fix layout, требует визуального ревью Claude Design */
+    min-height: 0;
+    flex: 1;
     background: var(--bg);
   }
 

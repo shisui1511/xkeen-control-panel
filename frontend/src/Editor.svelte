@@ -83,6 +83,29 @@
   let originalContent = ''
   let isDirty = false
 
+  // Draft state tracking
+  let hasDraft = false
+  let draftContent = ''
+
+  function restoreDraft() {
+    if (!editorView || !draftContent) return
+    editorView.dispatch({
+      changes: { from: 0, to: editorView.state.doc.length, insert: draftContent }
+    })
+    isDirty = true
+    hasDraft = false
+    showToast('success', $t('editor.draft_restored') || 'Draft restored')
+  }
+
+  function discardDraft() {
+    if (selectedFile) {
+      localStorage.removeItem('editor.draft.' + selectedFile)
+      hasDraft = false
+      draftContent = ''
+      showToast('info', $t('editor.draft_discarded') || 'Draft discarded')
+    }
+  }
+
   function checkDirty(): boolean {
     if (!editorView) return false
     return editorView.state.doc.toString() !== originalContent
@@ -220,12 +243,35 @@
           ]),
           lang,
           EditorView.lineWrapping,
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              const currentContent = update.state.doc.toString()
+              isDirty = currentContent !== originalContent
+              if (selectedFile) {
+                if (isDirty) {
+                  localStorage.setItem(`editor.draft.${selectedFile}`, currentContent)
+                } else {
+                  localStorage.removeItem(`editor.draft.${selectedFile}`)
+                }
+              }
+            }
+          }),
           ...schemaExts
         ]
       })
       
       originalContent = content
       isDirty = false
+
+      // Check draft
+      const draft = localStorage.getItem(`editor.draft.${path}`)
+      if (draft && draft !== content) {
+        hasDraft = true
+        draftContent = draft
+      } else {
+        hasDraft = false
+        draftContent = ''
+      }
 
       // Сначала снять loading, потом установить selectedFile —
       // это заставляет Svelte отрендерить editorContainer ДО инициализации EditorView
@@ -262,10 +308,151 @@
     }
   }
 
-  async function saveFile() {
+  let showSaveConfirmModal = false
+  let validationResult: { valid: boolean; error: string } | null = null
+  let validationLoading = false
+  let diffChanges: any[] = []
+
+  interface DiffChange {
+    type: 'added' | 'removed' | 'unchanged';
+    value: string;
+  }
+
+  interface DiffGroup {
+    type: 'added' | 'removed' | 'unchanged' | 'collapsed';
+    lines: string[];
+  }
+
+  function getDiff(oldStr: string, newStr: string): DiffChange[] {
+    const oldLines = oldStr.split('\n')
+    const newLines = newStr.split('\n')
+    
+    const m = oldLines.length
+    const n = newLines.length
+    
+    if (m + n > 2000) {
+      return [
+        { type: 'removed', value: 'File is too large for visual diff. Old version content hidden.' },
+        { type: 'added', value: 'File is too large for visual diff. New version content will be saved.' }
+      ]
+    }
+    
+    const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
+    
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (oldLines[i - 1] === newLines[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1] + 1
+        } else {
+          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
+        }
+      }
+    }
+    
+    const diff: DiffChange[] = []
+    let i = m, j = n
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+        diff.unshift({ type: 'unchanged', value: oldLines[i - 1] })
+        i--
+        j--
+      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+        diff.unshift({ type: 'added', value: newLines[j - 1] })
+        j--
+      } else if (i > 0 && (j === 0 || dp[i - 1][j] > dp[i][j - 1])) {
+        diff.unshift({ type: 'removed', value: oldLines[i - 1] })
+        i--
+      }
+    }
+    return diff
+  }
+
+  function getDiffGroups(oldStr: string, newStr: string): DiffGroup[] {
+    const changes = getDiff(oldStr, newStr)
+    const groups: DiffGroup[] = []
+    
+    let currentType = changes[0]?.type
+    let currentLines: string[] = []
+    
+    for (const change of changes) {
+      if (change.type === currentType) {
+        currentLines.push(change.value)
+      } else {
+        if (currentLines.length > 0) {
+          groups.push({ type: currentType, lines: currentLines })
+        }
+        currentType = change.type
+        currentLines = [change.value]
+      }
+    }
+    if (currentLines.length > 0) {
+      groups.push({ type: currentType, lines: currentLines })
+    }
+    
+    const processedGroups: DiffGroup[] = []
+    for (const g of groups) {
+      if (g.type === 'unchanged' && g.lines.length > 10) {
+        const head = g.lines.slice(0, 3)
+        const tail = g.lines.slice(-3)
+        const collapsedCount = g.lines.length - 6
+        
+        processedGroups.push({ type: 'unchanged', lines: head })
+        processedGroups.push({ type: 'collapsed', lines: [`... (${collapsedCount} lines hidden) ...`] })
+        processedGroups.push({ type: 'unchanged', lines: tail })
+      } else {
+        processedGroups.push(g)
+      }
+    }
+    
+    return processedGroups
+  }
+
+  async function checkBeforeSave() {
+    if (!selectedFile || !editorView) return
+    const content = editorView.state.doc.toString()
+
+    diffChanges = getDiff(originalContent, content)
+
+    if (diffChanges.filter(c => c.type !== 'unchanged').length === 0) {
+      showToast('info', $t('editor.no_changes') || 'No changes to save')
+      return
+    }
+
+    showSaveConfirmModal = true
+    validationLoading = true
+    validationResult = null
+
+    try {
+      const csrfToken = localStorage.getItem('csrf_token')
+      const res = await fetch('/api/config/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({
+          path: selectedFile,
+          content: content
+        })
+      })
+      if (res.ok) {
+        validationResult = await res.json()
+      } else {
+        const text = await res.text()
+        validationResult = { valid: false, error: text || 'Validation endpoint failed' }
+      }
+    } catch (e: any) {
+      validationResult = { valid: false, error: e.message }
+    } finally {
+      validationLoading = false
+    }
+  }
+
+  async function confirmSave() {
     if (!selectedFile || !editorView) return
     
     saving = true
+    showSaveConfirmModal = false
     
     try {
       const content = editorView.state.doc.toString()
@@ -283,10 +470,13 @@
       if (!res.ok) throw new Error('Failed to save file')
       
       showToast('success', $t('editor.file_saved'))
-      originalContent = editorView.state.doc.toString()
+      originalContent = content
       isDirty = false
+      localStorage.removeItem(`editor.draft.${selectedFile}`)
+      hasDraft = false
+      draftContent = ''
       await loadBackups(selectedFile)
-    } catch (e) {
+    } catch (e: any) {
       showToast('error', $t('editor.save_error') + ': ' + e.message)
     } finally {
       saving = false
@@ -480,21 +670,32 @@
   async function applyTemplate(template: Template) {
     if (!editorView) return
     if (isDirty && !confirmUnsaved()) return
-    if (!confirm($t('editor.confirm_template'))) return
+    if (!confirm($t('editor.confirm_template') || 'Apply this template? Current unsaved changes will be lost.')) return
     
+    const backupContent = editorView.state.doc.toString()
+    loading = true
     try {
       const res = await fetch(`/api/templates/fetch?url=${encodeURIComponent(template.url)}`)
-      if (!res.ok) throw new Error('Failed to fetch template')
+      if (!res.ok) throw new Error(await res.text() || 'Failed to fetch template')
       const data = await res.json()
+      
+      if (!data.content) throw new Error('Template is empty')
       
       editorView.dispatch({
         changes: { from: 0, to: editorView.state.doc.length, insert: data.content }
       })
       isDirty = true
       showTemplatesModal = false
-      showToast('success', 'Template applied')
+      showToast('success', $t('editor.template_applied') || 'Template applied successfully')
     } catch (e: any) {
-      alert('Error: ' + (e?.message || e))
+      showToast('error', ($t('editor.template_error') || 'Failed to apply template') + ': ' + e.message)
+      if (editorView) {
+        editorView.dispatch({
+          changes: { from: 0, to: editorView.state.doc.length, insert: backupContent }
+        })
+      }
+    } finally {
+      loading = false
     }
   }
 
@@ -606,8 +807,19 @@
 
   <div class="editor-main">
     <div class="toolbar">
-      <div class="toolbar-left">
+      <div class="toolbar-left" style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
         <span class="file-name">{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span>
+        {#if hasDraft}
+          <div style="display: flex; align-items: center; gap: 8px; background: rgba(255, 152, 0, 0.15); border: 1px solid rgba(255, 152, 0, 0.3); padding: 4px 8px; border-radius: 4px; font-size: 12px; color: #ff9800;">
+            <span>{$t('editor.has_draft') || 'Unsaved draft available'}</span>
+            <button on:click={restoreDraft} style="padding: 2px 6px; font-size: 11px; background: #ff9800; color: white; border: none; border-radius: 3px; cursor: pointer;">
+              {$t('editor.restore_draft') || 'Restore'}
+            </button>
+            <button on:click={discardDraft} style="padding: 2px 6px; font-size: 11px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 3px; cursor: pointer;">
+              {$t('editor.discard_draft') || 'Discard'}
+            </button>
+          </div>
+        {/if}
         {#if selectedFile}
           <button on:click={deleteFile} class="btn-danger">
             {$t('app.delete')}
@@ -637,7 +849,7 @@
             {$t('app.rename')}
           </button>
         {/if}
-        <button on:click={saveFile} disabled={!selectedFile || saving} class="btn-primary">
+        <button on:click={checkBeforeSave} disabled={!selectedFile || saving} class="btn-primary">
           {saving ? $t('app.loading') : $t('app.save')}
         </button>
       </div>
@@ -790,10 +1002,96 @@
   </div>
 {/if}
 
+{#if showSaveConfirmModal}
+  <div class="modal-overlay" role="button" tabindex="0" on:click={() => showSaveConfirmModal = false} on:keydown={(e) => e.key === 'Escape' && (showSaveConfirmModal = false)}>
+    <div class="modal" style="max-width: 700px; width: 90%; display: flex; flex-direction: column; max-height: 85vh;" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
+      <div class="modal-header">
+        <h3>{$t('editor.confirm_save_title') || 'Confirm Save'}</h3>
+        <button class="btn-close" on:click={() => showSaveConfirmModal = false} aria-label="Close modal">
+          <Icon name="cross" size={14} />
+        </button>
+      </div>
+
+      <!-- Validation status -->
+      <div style="margin-bottom: 1rem; padding: 0.75rem; border-radius: 4px; font-size: 13px; display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--border);">
+        {#if validationLoading}
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <svg width="16" height="16" viewBox="0 0 38 38" stroke="var(--primary)" style="display: inline-block;">
+              <g fill="none" fill-rule="evenodd">
+                <g transform="translate(1 1)" stroke-width="2">
+                  <circle stroke-opacity=".5" cx="18" cy="18" r="18"/>
+                  <path d="M36 18c0-9.94-8.06-18-18-18">
+                    <animateTransform
+                      attributeName="transform"
+                      type="rotate"
+                      from="0 18 18"
+                      to="360 18 18"
+                      dur="1s"
+                      repeatCount="indefinite"/>
+                  </path>
+                </g>
+              </g>
+            </svg>
+            <span>{$t('editor.validating') || 'Validating configuration...'}</span>
+          </div>
+        {:else if validationResult}
+          {#if validationResult.valid}
+            <div style="color: var(--success); display: flex; align-items: center; gap: 6px;">
+              <span style="font-weight: bold; font-size: 16px;">✓</span>
+              <span>{$t('editor.validation_valid') || 'Configuration is valid.'}</span>
+            </div>
+          {:else}
+            <div style="color: var(--danger); display: flex; flex-direction: column; gap: 4px; width: 100%;">
+              <div style="display: flex; align-items: center; gap: 6px; font-weight: bold;">
+                <span style="font-size: 16px;">✗</span>
+                <span>{$t('editor.validation_invalid') || 'Configuration is invalid:'}</span>
+              </div>
+              <pre style="margin: 4px 0 0 0; white-space: pre-wrap; font-family: monospace; font-size: 12px; background: rgba(220, 53, 69, 0.08); padding: 6px; border-radius: 3px; max-height: 120px; overflow-y: auto; border: 1px solid rgba(220, 53, 69, 0.15);">{validationResult.error}</pre>
+            </div>
+          {/if}
+        {/if}
+      </div>
+
+      <!-- Diff Preview -->
+      <div style="flex: 1; overflow-y: auto; background: var(--bg-page, #f8f9fa); border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; font-family: monospace; font-size: 12px; line-height: 1.5; max-height: 400px; display: flex; flex-direction: column;">
+        <h4 style="margin: 0 0 0.5rem 0; font-size: 13px; color: var(--text-secondary);">{$t('editor.diff_preview') || 'Changes Preview:'}</h4>
+        <div style="flex: 1; overflow-y: auto;">
+          {#each getDiffGroups(originalContent, editorView ? editorView.state.doc.toString() : '') as group}
+            {#if group.type === 'added'}
+              {#each group.lines as line}
+                <div style="background: rgba(40, 167, 69, 0.15); color: #28a745; padding: 1px 4px; border-left: 3px solid #28a745; white-space: pre-wrap;">+ {line}</div>
+              {/each}
+            {:else if group.type === 'removed'}
+              {#each group.lines as line}
+                <div style="background: rgba(220, 53, 69, 0.15); color: #dc3545; padding: 1px 4px; border-left: 3px solid #dc3545; white-space: pre-wrap;">- {line}</div>
+              {/each}
+            {:else if group.type === 'collapsed'}
+              <div style="color: var(--text-secondary); padding: 4px; text-align: center; border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border); margin: 4px 0; background: var(--bg); font-style: italic;">{group.lines[0]}</div>
+            {:else}
+              {#each group.lines as line}
+                <div style="color: var(--text-secondary); padding: 1px 4px; border-left: 3px solid transparent; white-space: pre-wrap;">  {line}</div>
+              {/each}
+            {/if}
+          {/each}
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top: 1.25rem;">
+        <button on:click={() => showSaveConfirmModal = false} class="btn btn-secondary">{$t('app.cancel')}</button>
+        <button on:click={confirmSave} class="btn btn-primary" disabled={saving || (validationResult && !validationResult.valid && !expertMode)}>
+          {saving ? $t('app.loading') : $t('app.save')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   .editor-page {
     display: flex;
-    height: 100vh;
+    /* hot-fix layout, требует визуального ревью Claude Design */
+    min-height: 0;
+    flex: 1;
     background: var(--bg);
   }
 

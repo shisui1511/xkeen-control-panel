@@ -629,3 +629,46 @@ func TestSubscriptionGet_ReturnsCopy(t *testing.T) {
 		t.Errorf("expected original name 'Original', got %q (mutation leaked)", original.Name)
 	}
 }
+
+func TestSubscriptionProxyCount(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp)
+
+	sub := Subscription{
+		Name:    "Proxy Count Test",
+		URL:     "https://example.com/sub",
+		Enabled: true,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	id := svc.List()[0].ID
+
+	// Before refresh (no fragment file)
+	got := svc.Get(id)
+	if got.ProxyCount != 0 {
+		t.Errorf("expected ProxyCount 0, got %d", got.ProxyCount)
+	}
+
+	// Create fragment file manually to simulate refresh
+	path := svc.getFragmentPath(got)
+	outbounds := []Outbound{
+		{Tag: "proxy1", Protocol: "vmess"},
+		{Tag: "proxy2", Protocol: "vless"},
+	}
+	if err := svc.writeFragment(path, outbounds, got); err != nil {
+		t.Fatalf("writeFragment failed: %v", err)
+	}
+
+	// Read again
+	got = svc.Get(id)
+	if got.ProxyCount != 2 {
+		t.Errorf("expected ProxyCount 2, got %d", got.ProxyCount)
+	}
+
+	subs := svc.List()
+	if subs[0].ProxyCount != 2 {
+		t.Errorf("expected ProxyCount 2 in List(), got %d", subs[0].ProxyCount)
+	}
+}

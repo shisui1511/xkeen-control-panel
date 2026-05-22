@@ -48,8 +48,12 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, a.t(r, "mihomo.not_running")+": "+err.Error(), http.StatusBadGateway)
 	}
 
-	// T033: forward MihomoSecret as Authorization header if configured
 	secret := a.cfg.MihomoSecret
+	if secret == "" {
+		if _, parsedSecret, err := a.mihomoSvc.ParseConfig(); err == nil && parsedSecret != "" {
+			secret = parsedSecret
+		}
+	}
 	proxy.Director = func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host

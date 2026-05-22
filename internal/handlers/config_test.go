@@ -144,3 +144,36 @@ func TestAuthMiddleware_Unauthenticated(t *testing.T) {
 		t.Errorf("handler returned 500, indicating a misconfiguration: %s", rr.Body.String())
 	}
 }
+
+func TestConfigValidation(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	// Invalid request with empty path
+	req := httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"path":"","content":""}`))
+	rr := httptest.NewRecorder()
+	api.ConfigValidate(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty path, got %d", rr.Code)
+	}
+
+	// Path outside allowed roots
+	req = httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"path":"/etc/passwd","content":"test"}`))
+	rr = httptest.NewRecorder()
+	api.ConfigValidate(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for path outside allowed roots, got %d", rr.Code)
+	}
+
+	// Binary not found scenario
+	jsonPath := filepath.Join(tmpDir, "config.json")
+	req = httptest.NewRequest(http.MethodPost, "/api/config/validate", strings.NewReader(`{"path":"`+jsonPath+`","content":"{}"}`))
+	rr = httptest.NewRecorder()
+	api.ConfigValidate(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200 for normal check, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "validator binary for xray not found") {
+		t.Errorf("expected 'validator binary not found' error, got %s", rr.Body.String())
+	}
+}

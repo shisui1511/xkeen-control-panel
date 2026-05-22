@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import { t } from './i18n'
-  import { showToast } from './stores'
+  import { showToast, fetchCapabilities } from './stores'
   import Skeleton from './components/Skeleton.svelte'
 
   interface Kernel {
@@ -76,6 +76,7 @@
       if (!res.ok) throw new Error(text)
       
       await fetchStatus()
+      await fetchCapabilities()
     } catch (e: any) {
       showToast('error', `${$t('svc.action_error')}: ${e.message}`)
     } finally {
@@ -102,6 +103,7 @@
       
       await fetchStatus()
       await fetchKernels()
+      await fetchCapabilities()
     } catch (e: any) {
       showToast('error', `${$t('svc.action_error')}: ${e.message}`)
     } finally {
@@ -177,11 +179,26 @@
     return kernels.find(k => k.name === name)
   }
 
+  let selectedKernel = ''
+
   $: xray = getKernel('xray')
   $: mihomo = getKernel('mihomo')
   $: activeKernel = xray?.process_status === 'running' ? 'xray'
       : mihomo?.process_status === 'running' ? 'mihomo'
       : 'unknown'
+
+  $: if (activeKernel !== 'unknown') {
+    selectedKernel = activeKernel
+  } else if (kernelsLoaded && !selectedKernel) {
+    const xrayInstalled = xray && xray.current_version && xray.current_version !== 'not installed' && xray.current_version !== 'error'
+    const mihomoInstalled = mihomo && mihomo.current_version && mihomo.current_version !== 'not installed' && mihomo.current_version !== 'error'
+    if (mihomoInstalled && !xrayInstalled) {
+      selectedKernel = 'mihomo'
+    } else {
+      selectedKernel = 'xray'
+    }
+  }
+
   // Use boolean process_status from kernel API instead of fragile string matching on i18n status text
   $: isRunning = xray?.process_status === 'running' || mihomo?.process_status === 'running'
 
@@ -218,8 +235,14 @@
         <select
           id="kernel-select"
           title={$t('svc.kernel_switch')}
-          value={activeKernel === 'unknown' ? '' : activeKernel}
-          on:change={(e) => e.currentTarget.value && switchKernel(e.currentTarget.value)}
+          value={selectedKernel}
+          on:change={(e) => {
+            const val = e.currentTarget.value
+            if (val) {
+              selectedKernel = val
+              switchKernel(val)
+            }
+          }}
           disabled={switchingKernel}
         >
           <option value="xray">{$t('svc.xray')}</option>

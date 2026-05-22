@@ -28,6 +28,7 @@
   let version = $t('app.loading')
   let loading = false
   let currentTab = 'dashboard'
+  const mihomoDependentTabs = ['proxies', 'connections', 'rules', 'traffic', 'smartproxy', 'trafficquotas']
   let theme = document.documentElement.getAttribute('data-theme') || 'light'
   let pwaInstallPrompt: any = null
 
@@ -55,11 +56,32 @@
   interface SystemStats {
     memory: { total: number; used: number; free: number }
     load: [number, number, number]
-    uptime: { days: number; hours: number; minutes: number }
+    uptime: { seconds: number; days: number; hours: number; minutes: number }
     go_runtime: { goroutines: number; heap_alloc: number; heap_sys: number; num_gc: number }
+    router_model: string
+    hostname: string
+    wan_status: string
+    default_gateway: string
+    dns_servers: string[]
+    dns_resolving: boolean
+    invalid_config: boolean
   }
 
   let systemStats: SystemStats | null = null
+  let activeSubscriptionsCount = 0
+  let totalProxiesCount = 0
+
+  async function fetchSubscriptionSummary() {
+    try {
+      const res = await fetch('/api/subscriptions')
+      if (res.ok) {
+        const envelope = await res.json()
+        const subs = Array.isArray(envelope) ? envelope : (envelope.data ?? [])
+        activeSubscriptionsCount = subs.filter((s: any) => s.enabled).length
+        totalProxiesCount = subs.reduce((acc: number, s: any) => acc + (s.proxy_count || 0), 0)
+      }
+    } catch (_) {}
+  }
 
   async function fetchLiveStatus() {
     statusError = false
@@ -218,9 +240,11 @@
     fetchLiveStatus()
     fetchSystemStats()
     fetchCapabilities()
+    fetchSubscriptionSummary()
     const statusInterval = setInterval(fetchLiveStatus, 10000)
     const statsInterval = setInterval(fetchSystemStats, 5000)
     const capInterval = setInterval(fetchCapabilities, 30000)
+    const subsInterval = setInterval(fetchSubscriptionSummary, 30000)
     window.addEventListener('beforeinstallprompt', (e: Event) => {
       e.preventDefault()
       pwaInstallPrompt = e
@@ -229,6 +253,7 @@
       clearInterval(statusInterval)
       clearInterval(statsInterval)
       clearInterval(capInterval)
+      clearInterval(subsInterval)
     }
   })
 </script>
@@ -286,7 +311,7 @@
   <!-- Main content area -->
   <div class="main-content">
     <!-- Mihomo offline warning banner -->
-    {#if $capabilities !== null && !$capabilities.mihomo.reachable}
+    {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
       <div class="alert alert-warning" style="margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px; font-size: 13px;">
         <Icon name="warning" size={14} /> <strong>{$t('capabilities.mihomo_offline')}</strong> — {$t('capabilities.mihomo_offline_desc')}
       </div>
@@ -294,11 +319,65 @@
 
     {#if currentTab === 'dashboard'}
       <div class="container" transition:fade={{ duration: 150 }}>
-        <h1>{$t('nav.dashboard')}</h1>
+        <h1>{$t('nav.monitoring')}</h1>
         <p class="text-secondary mb-3">{$t('dash.welcome')}</p>
 
+        <!-- Problems Panel -->
+        {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running) || ($capabilities !== null && !$capabilities.kernels.xray.installed && !$capabilities.kernels.mihomo.installed)}
+          <div style="margin-bottom: var(--spacing-4);">
+            <Card title={$t('dash.problems_panel')}>
+              <div style="display: flex; flex-direction: column; gap: var(--spacing-3);">
+                {#if systemStats && systemStats.invalid_config}
+                  <div class="alert alert-error" style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                    <div style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;">
+                      <Icon name="warning" size={16} style="margin-top: 2px;" />
+                      <div>
+                        <strong>{$t('dash.problems.invalid_config_title')}</strong>
+                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">{$t('dash.problems.invalid_config_desc')}</div>
+                      </div>
+                    </div>
+                    <Button variant="secondary" onclick={() => switchTab('editor')}>
+                      {$t('dash.problems.invalid_config_cta')}
+                    </Button>
+                  </div>
+                {/if}
+
+                {#if $capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running}
+                  <div class="alert alert-warning" style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                    <div style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;">
+                      <Icon name="warning" size={16} style="margin-top: 2px;" />
+                      <div>
+                        <strong>{$t('dash.problems.mihomo_api_title')}</strong>
+                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">{$t('dash.problems.mihomo_api_desc')}</div>
+                      </div>
+                    </div>
+                    <Button variant="secondary" onclick={() => switchTab('settings')}>
+                      {$t('dash.problems.mihomo_api_cta')}
+                    </Button>
+                  </div>
+                {/if}
+
+                {#if $capabilities !== null && !$capabilities.kernels.xray.installed && !$capabilities.kernels.mihomo.installed}
+                  <div class="alert alert-error" style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                    <div style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;">
+                      <Icon name="warning" size={16} style="margin-top: 2px;" />
+                      <div>
+                        <strong>{$t('dash.problems.kernel_missing_title')}</strong>
+                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">{$t('dash.problems.kernel_missing_desc')}</div>
+                      </div>
+                    </div>
+                    <Button variant="secondary" onclick={() => switchTab('services')}>
+                      {$t('dash.problems.kernel_missing_cta')}
+                    </Button>
+                  </div>
+                {/if}
+              </div>
+            </Card>
+          </div>
+        {/if}
+
         <!-- Live Service Status card -->
-        <div style="margin-bottom: var(--spacing-2);">
+        <div style="margin-bottom: var(--spacing-4);">
           <Card title={$t('dash.service_status')}>
             {#if statusLoading}
               <div class="status-badges-row">
@@ -357,14 +436,67 @@
           </Card>
         </div>
 
-        <div style="margin-bottom: var(--spacing-2);">
-          <Card title={$t('dash.system_info')}>
-            <p><strong>{$t('app.version')}:</strong> {version}</p>
+        <!-- Router Info, Network, Subscriptions Grid -->
+        <div class="stats-grid" style="margin-bottom: var(--spacing-4);">
+          <!-- Router Info -->
+          <Card title={$t('dash.router_info')}>
+            <div style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;">
+              <div>
+                <span class="text-secondary">{$t('dash.router_model')}:</span>
+                <span style="font-weight: 500; margin-left: 4px;">{systemStats?.router_model || '—'}</span>
+              </div>
+              <div>
+                <span class="text-secondary">{$t('dash.router_hostname')}:</span>
+                <span style="font-weight: 500; margin-left: 4px;">{systemStats?.hostname || '—'}</span>
+              </div>
+              <div>
+                <span class="text-secondary">{$t('dash.dns_servers')}:</span>
+                <span style="font-weight: 500; margin-left: 4px; font-family: monospace;">
+                  {systemStats?.dns_servers?.join(', ') || '—'}
+                </span>
+              </div>
+            </div>
+          </Card>
+
+          <!-- Network Diagnostics -->
+          <Card title={$t('dash.network_diagnostics')}>
+            <div style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;">
+              <div>
+                <span class="text-secondary">{$t('dash.wan_status')}:</span>
+                <span style="font-weight: 500; margin-left: 4px;" class={systemStats?.wan_status === 'online' ? 'status-success' : 'status-error'}>
+                  {systemStats?.wan_status === 'online' ? $t('dash.wan_online') : $t('dash.wan_offline')}
+                </span>
+              </div>
+              <div>
+                <span class="text-secondary">{$t('dash.default_gateway')}:</span>
+                <span style="font-weight: 500; margin-left: 4px; font-family: monospace;">{systemStats?.default_gateway || '—'}</span>
+              </div>
+              <div>
+                <span class="text-secondary">{$t('dash.dns_resolving')}:</span>
+                <span style="font-weight: 500; margin-left: 4px;" class={systemStats?.dns_resolving ? 'status-success' : 'status-error'}>
+                  {systemStats?.dns_resolving ? $t('dash.dns_resolving_ok') : $t('dash.dns_resolving_fail')}
+                </span>
+              </div>
+            </div>
+          </Card>
+
+          <!-- Subscriptions Summary -->
+          <Card title={$t('dash.subscriptions_summary')}>
+            <div style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;">
+              <div>
+                <span class="text-secondary">{$t('dash.active_subscriptions')}:</span>
+                <span style="font-weight: 500; margin-left: 4px;">{activeSubscriptionsCount}</span>
+              </div>
+              <div>
+                <span class="text-secondary">{$t('dash.total_proxies')}:</span>
+                <span style="font-weight: 500; margin-left: 4px;">{totalProxiesCount}</span>
+              </div>
+            </div>
           </Card>
         </div>
 
         {#if systemStats}
-          <div style="margin-bottom: var(--spacing-2);">
+          <div style="margin-bottom: var(--spacing-4);">
             <Card title={$t('dash.system_stats')}>
               <div class="stats-grid">
                 <div class="stat-box">
@@ -390,6 +522,12 @@
             </Card>
           </div>
         {/if}
+
+        <div style="margin-bottom: var(--spacing-4);">
+          <Card title={$t('dash.system_info')}>
+            <p style="margin: 0;"><strong>{$t('app.version')}:</strong> {version}</p>
+          </Card>
+        </div>
 
         <div style="margin-bottom: var(--spacing-2);">
           <Card title={$t('dash.quick_actions')}>
