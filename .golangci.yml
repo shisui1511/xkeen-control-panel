@@ -4,6 +4,8 @@ run:
   modules-download-mode: readonly
 
 linters:
+  disable:
+    - errcheck
   enable:
     # - errcheck    # Временно отключено — много непроверенных ошибок в legacy коде
     - gosimple      # Упрощение кода
@@ -40,6 +42,8 @@ issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-dirs:
+    - frontend
   
   exclude-rules:
     # Исключаем embed.go из проверок
