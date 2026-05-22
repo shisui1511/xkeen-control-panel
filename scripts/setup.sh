@@ -448,6 +448,17 @@ do_migration() {
   rm -f "$old_bin_1" "$old_bin_2"
 }
 
+# Определение протокола панели (http или https) на основе конфига
+get_proto() {
+  local proto="http"
+  if [ -f "$INSTALL_DIR/config.json" ]; then
+    if sed -n '/"https":/,/}/p' "$INSTALL_DIR/config.json" 2>/dev/null | grep -q '"enabled":[[:space:]]*true'; then
+      proto="https"
+    fi
+  fi
+  echo "$proto"
+}
+
 # Опрос API для проверки доступности
 poll_api() {
   local port
@@ -455,14 +466,16 @@ poll_api() {
   local https_url
   local count
   local max_tries
+  local proto
   
   port="$1"
+  proto=$(get_proto)
   url="http://127.0.0.1:${port}/api/auth/me"
   https_url="https://127.0.0.1:${port}/api/auth/me"
   count=1
   max_tries=3
   
-  info "Проверяем доступность API по адресу $url..."
+  info "Проверяем доступность API по адресу ${proto}://127.0.0.1:${port}/api/auth/me..."
   
   while [ $count -le $max_tries ]; do
     if curl -k -fsL "$url" >/dev/null 2>&1 || wget --no-check-certificate -qO- "$url" >/dev/null 2>&1; then
@@ -611,6 +624,7 @@ do_install() {
   fi
 
   create_config "$chosen_port"
+  echo "$CHANNEL" > "$INSTALL_DIR/channel"
   
   install_binary
   local install_status=$?
@@ -636,7 +650,7 @@ do_install() {
   printf "${GREEN}  Установка завершена!${NC}\n"
   printf "${GREEN}${BOLD}========================================${NC}\n"
   printf "  Версия:  %s\n" "$(get_version)"
-  printf "  Веб-UI:  http://%s:%s\n" "$_ip" "$chosen_port"
+  printf "  Веб-UI:  %s://%s:%s\n" "$(get_proto)" "$_ip" "$chosen_port"
   printf "  Конфиг:  %s/config.json\n" "$INSTALL_DIR"
   printf "\n  Управление:\n"
   printf "    %s start    — запуск\n" "$INIT_SCRIPT"
@@ -660,6 +674,7 @@ do_update() {
   log_install "Starting update from $old_version, channel: $CHANNEL"
 
   detect_arch
+  echo "$CHANNEL" > "$INSTALL_DIR/channel"
   
   cp "$BIN_PATH" "${BIN_PATH}.bak"
   log_install "Created backup of current binary at ${BIN_PATH}.bak"
@@ -835,9 +850,11 @@ show_manager_menu() {
   local cur_version
   local port
   local channel_label
-  local service_status
+  local status_text
+  local status_color
   local _ip
   local address
+  local proto
   
   cur_version=$(get_version)
   port=$(grep -o '"port":[[:space:]]*[0-9]*' "$INSTALL_DIR/config.json" 2>/dev/null | grep -o '[0-9]*' || echo "$DEFAULT_PORT")
@@ -846,24 +863,27 @@ show_manager_menu() {
     channel_label="Pre-release (тестовый)"
   fi
   
-  service_status="${RED}остановлен${NC}"
+  status_text="остановлен"
+  status_color="$RED"
   if pgrep -x "$BINARY" >/dev/null 2>&1; then
-    service_status="${GREEN}активен${NC}"
+    status_text="активен"
+    status_color="$GREEN"
   fi
   
+  proto=$(get_proto)
   _ip=$(ip -4 a s br0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p')
   _ip=${_ip:-"192.168.1.1"}
-  address="http://${_ip}:${port}"
+  address="${proto}://${_ip}:${port}"
 
   print_banner
   printf "┌────────────────────────────────────────────────────────┐\n"
   printf "│             XKeen Control Panel Manager                │\n"
-  printf "├────────────────────────────────────────────────────────┤\n"
-  printf "│  Версия:   %-53s │\n" "$cur_version ($service_status)"
-  printf "│  Порт:     %-43s │\n" "$port"
-  printf "│  Канал:    %-43s │\n" "$channel_label"
-  printf "│  Адрес:    %-43s │\n" "$address"
-  printf "└────────────────────────────────────────────────────────┘\n\n"
+  printf "└────────────────────────────────────────────────────────┘\n"
+  printf "  Версия:   ${CYAN}%s${NC} (${status_color}%s${NC})\n" "$cur_version" "$status_text"
+  printf "  Порт:     %s\n" "$port"
+  printf "  Канал:    %s\n" "$channel_label"
+  printf "  Адрес:    ${CYAN}%s${NC}\n" "$address"
+  printf "──────────────────────────────────────────────────────────\n\n"
   
   printf "Доступные действия по управлению:\n"
   printf "  ${BOLD}1)${NC} Проверить и установить обновления\n"
@@ -878,14 +898,17 @@ show_manager_menu() {
 # Подменю управления службой
 manage_service_menu() {
   local choice
-  local status_label
+  local status_text
+  local status_color
   while true; do
     print_banner
-    status_label="${RED}остановлен${NC}"
+    status_text="остановлен"
+    status_color="$RED"
     if pgrep -x "$BINARY" >/dev/null 2>&1; then
-      status_label="${GREEN}активен${NC}"
+      status_text="активен"
+      status_color="$GREEN"
     fi
-    printf "Управление службой XKeen Control Panel (статус: %s)\n\n" "$status_label"
+    printf "Управление службой XKeen Control Panel (статус: ${status_color}%s${NC})\n\n" "$status_text"
     printf "  1) Запустить службу\n"
     printf "  2) Остановить службу\n"
     printf "  3) Перезапустить службу\n"
@@ -911,6 +934,8 @@ switch_channel() {
     CHANNEL="stable"
     ok "Канал переключен на Stable (стабильные сборки)"
   fi
+  mkdir -p "$INSTALL_DIR"
+  echo "$CHANNEL" > "$INSTALL_DIR/channel"
 }
 
 status_service() {
@@ -1000,8 +1025,16 @@ INTERACTIVE="true"
 CHANNEL="stable"
 ARG_PORT=""
 
+# Считываем сохраненный канал обновлений, если файл существует
+if [ -f "$INSTALL_DIR/channel" ]; then
+  CHANNEL=$(cat "$INSTALL_DIR/channel" | tr -d '[:space:]')
+fi
+
 # Считываем аргументы
 parse_args "$@"
+
+# Автоопределение архитектуры роутера
+detect_arch
 
 # Автоопределение возможности интерактива
 if [ "$INTERACTIVE" = "true" ]; then
