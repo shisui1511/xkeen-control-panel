@@ -10,6 +10,7 @@
     "checkJs": true,
     "isolatedModules": true,
     "strict": true,
+    "useUnknownInCatchVariables": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true

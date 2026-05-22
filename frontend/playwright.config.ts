@@ -9,13 +9,13 @@ export default defineConfig({
   reporter: 'html',
   use: {
     baseURL: 'http://localhost:5173',
-    trace: 'on-first-retry',
+    trace: 'on-first-retry'
   },
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
+      use: { ...devices['Desktop Chrome'] }
+    }
   ],
   webServer: [
     {
@@ -24,5 +24,5 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       cwd: './'
     }
-  ],
+  ]
 });
