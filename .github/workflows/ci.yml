@@ -62,6 +62,7 @@ jobs:
         uses: golang/govulncheck-action@v1
         with:
           go-version-file: go.mod
+          repo-checkout: false
 
   # Job 2: Тестирование Go кода
   test-go:
