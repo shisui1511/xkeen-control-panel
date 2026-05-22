@@ -11,6 +11,7 @@ import (
 //go:embed locales/*.json
 var localesFS embed.FS
 
+// I18n provides translation and localization support.
 type I18n struct {
 	translations map[string]map[string]string
 	defaultLang  string
@@ -22,6 +23,7 @@ func init() {
 	defaultI18n = New("en")
 }
 
+// New creates a new I18n instance with the specified default language and loads all locale JSON files.
 func New(defaultLang string) *I18n {
 	i := &I18n{
 		translations: make(map[string]map[string]string),
@@ -56,6 +58,7 @@ func New(defaultLang string) *I18n {
 	return i
 }
 
+// T translates the key into the specified language, falling back to the default language or key itself.
 func (i *I18n) T(lang, key string) string {
 	if dict, ok := i.translations[lang]; ok {
 		if val, ok := dict[key]; ok {
@@ -71,7 +74,7 @@ func (i *I18n) T(lang, key string) string {
 	return key
 }
 
-// Get language from request: query param ?lang=ru → cookie → Accept-Language header → default
+// GetLang gets the language from request query parameters, cookies, Accept-Language header, or falls back to default.
 func (i *I18n) GetLang(r *http.Request) string {
 	// 1. Query parameter
 	if lang := r.URL.Query().Get("lang"); lang != "" {
@@ -109,10 +112,12 @@ func (i *I18n) hasLang(lang string) bool {
 
 // Global functions using default instance
 
+// T is a global helper that translates the key using the default I18n instance.
 func T(lang, key string) string {
 	return defaultI18n.T(lang, key)
 }
 
+// GetLang is a global helper that retrieves the language from the request using the default I18n instance.
 func GetLang(r *http.Request) string {
 	return defaultI18n.GetLang(r)
 }

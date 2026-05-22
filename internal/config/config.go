@@ -126,6 +126,7 @@ func Save(path string, cfg *Config) error {
 	return utils.AtomicWriteFile(path, data, 0600)
 }
 
+// SavePasswordHash updates the password hash in the configuration and saves it to the specified path.
 func (c *Config) SavePasswordHash(path string, hash string) error {
 	c.Auth.PasswordHash = hash
 	return Save(path, c)
