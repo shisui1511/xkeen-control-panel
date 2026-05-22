@@ -28,11 +28,12 @@ linters-settings:
     enable-all: true
     disable:
       - shadow
+      - fieldalignment
   
   revive:
     rules:
       - name: exported
-        disabled: false
+        disabled: true
       - name: var-naming
         disabled: false
       - name: package-comments

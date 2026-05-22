@@ -6,6 +6,7 @@ import (
 )
 
 // WebFS embeds the static frontend assets from frontend/dist directory.
+//
 //go:embed frontend/dist
 var WebFS embed.FS
 
