@@ -407,7 +407,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'trafficquotas.period_monthly': 'Ежемесячно',
 
     // Rules
-    'rules.title': 'Правила',
+    'rules.title': 'Правила маршрутизации',
     'rules.subtitle': 'Активные правила маршрутизации',
     'rules.search': 'Поиск по правилам...',
     'rules.all_types': 'Все типы',
@@ -482,7 +482,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'app.generate': 'Сгенерировать',
 
     // Connections
-    'conn.title': 'Подключения',
+    'conn.title': 'Активные подключения',
     'conn.active': 'Активные сессии в реальном времени',
     'conn.source': 'Источник',
     'conn.destination': 'Назначение',
@@ -579,7 +579,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.realtime_label': 'обновление в реальном времени',
 
     // Proxies
-    'proxies.title': 'Прокси',
+    'proxies.title': 'Прокси и группы',
     'proxies.subtitle': 'Управление прокси-группами и проверка задержки',
     'proxies.testing': 'Тестирование...',
     'proxies.test_latency': 'Тест задержки',
@@ -1088,7 +1088,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'trafficquotas.period_monthly': 'Monthly',
 
     // Rules
-    'rules.title': 'Rules',
+    'rules.title': 'Routing Rules',
     'rules.subtitle': 'Active routing rules',
     'rules.search': 'Search rules...',
     'rules.all_types': 'All types',
@@ -1162,7 +1162,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'app.generate': 'Generate',
 
     // Connections
-    'conn.title': 'Connections',
+    'conn.title': 'Active Connections',
     'conn.active': 'Active real-time sessions',
     'conn.source': 'Source',
     'conn.destination': 'Destination',
@@ -1259,7 +1259,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.realtime_label': 'live update',
 
     // Proxies
-    'proxies.title': 'Proxies',
+    'proxies.title': 'Proxies & Groups',
     'proxies.subtitle': 'Proxy group management and latency testing',
     'proxies.testing': 'Testing...',
     'proxies.test_latency': 'Test Latency',

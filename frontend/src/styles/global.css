@@ -727,8 +727,7 @@ h2.card-title {
   gap: .5rem;
   margin-bottom: .75rem;
   font-size: 11px;
-  letter-spacing: .18em;
-  text-transform: uppercase;
+  letter-spacing: .06em;
   color: var(--fg-dim);
   font-weight: 600;
 }
