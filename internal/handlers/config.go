@@ -106,6 +106,9 @@ func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if backups == nil {
+		backups = []string{}
+	}
 
 	a.jsonResponse(w, backups)
 }
