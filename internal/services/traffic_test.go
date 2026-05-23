@@ -7,7 +7,7 @@ import (
 
 func TestTrafficQuotaService_New(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewTrafficQuotaService(tmp, "http://localhost:9090")
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 	if svc == nil {
 		t.Fatal("expected non-nil service")
 	}
@@ -15,7 +15,7 @@ func TestTrafficQuotaService_New(t *testing.T) {
 
 func TestTrafficQuotaService_Add(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewTrafficQuotaService(tmp, "http://localhost:9090")
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
 	q := &TrafficQuota{
 		Name:       "Test Quota",
@@ -43,7 +43,7 @@ func TestTrafficQuotaService_Add(t *testing.T) {
 
 func TestTrafficQuotaService_Delete(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewTrafficQuotaService(tmp, "http://localhost:9090")
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
 	err := svc.AddQuota(&TrafficQuota{Name: "To Delete", LimitBytes: 1024, Period: "daily"})
 	if err != nil {
@@ -106,13 +106,13 @@ func TestTrafficQuotaService_CheckResets_YearBoundary(t *testing.T) {
 func TestTrafficQuotaService_Persistence(t *testing.T) {
 	tmp := t.TempDir()
 
-	svc1 := NewTrafficQuotaService(tmp, "http://localhost:9090")
+	svc1 := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 	err := svc1.AddQuota(&TrafficQuota{Name: "Persistent Quota", LimitBytes: 2048, Period: "monthly"})
 	if err != nil {
 		t.Fatalf("AddQuota failed: %v", err)
 	}
 
-	svc2 := NewTrafficQuotaService(tmp, "http://localhost:9090")
+	svc2 := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 	quotas := svc2.ListQuotas()
 	if len(quotas) != 1 {
 		t.Fatalf("expected 1 quota after reload, got %d", len(quotas))
@@ -125,7 +125,7 @@ func TestTrafficQuotaService_Persistence(t *testing.T) {
 // TestTrafficGet_ReturnsCopy (T008): modifying the value returned by GetQuota must not affect the original.
 func TestTrafficGet_ReturnsCopy(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewTrafficQuotaService(tmp, "http://localhost:9090")
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
 	q := &TrafficQuota{
 		Name:       "OriginalQuota",
@@ -172,7 +172,7 @@ func TestTrafficGet_ReturnsCopy(t *testing.T) {
 // when called within saveLockThrottle, and saveLocked(true) always writes.
 func TestSaveLocked_Throttle(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewTrafficQuotaService(tmp, "http://localhost:9090")
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
 	// Force-save sets lastSave.
 	svc.mu.Lock()
@@ -217,7 +217,7 @@ func TestSaveLocked_Throttle(t *testing.T) {
 // throttle window expires.
 func TestSaveLocked_ThrottleExpiry(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewTrafficQuotaService(tmp, "http://localhost:9090")
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
 	// Set lastSave far in the past to simulate an expired throttle.
 	svc.mu.Lock()

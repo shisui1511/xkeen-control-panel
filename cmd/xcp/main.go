@@ -161,7 +161,7 @@ func main() {
 	api.SetSmartProxyService(smartProxySvc)
 	defer smartProxySvc.Stop()
 
-	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL)
+	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL, cfg.MihomoSecret)
 	trafficQuotaSvc.Start()
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
