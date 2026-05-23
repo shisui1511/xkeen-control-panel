@@ -55,6 +55,9 @@ type TrafficStore struct {
 // (CRUD-triggered saves always use force=true and bypass throttling).
 const saveLockThrottle = 5 * time.Second
 
+// maxTrafficFileSize is the rotation threshold for traffic.json.
+const maxTrafficFileSize = 5 * 1024 * 1024 // 5 MB
+
 // TrafficQuotaService manages traffic accounting and quotas
 type TrafficQuotaService struct {
 	dataDir    string
@@ -141,7 +144,37 @@ func (s *TrafficQuotaService) saveLocked(force bool) error {
 		return err
 	}
 	s.lastSave = time.Now()
+	s.rotateIfNeeded()
 	return nil
+}
+
+// rotateIfNeeded renames traffic.json to a timestamped .bak when it exceeds
+// maxTrafficFileSize and purges orphaned proxyStats entries to reclaim space.
+// Caller MUST hold s.mu (write lock).
+func (s *TrafficQuotaService) rotateIfNeeded() {
+	info, err := os.Stat(s.storePath())
+	if err != nil || info.Size() < maxTrafficFileSize {
+		return
+	}
+	bakPath := fmt.Sprintf("%s.%s.bak", s.storePath(), time.Now().Format("20060102-150405"))
+	if err := os.Rename(s.storePath(), bakPath); err != nil {
+		log.Printf("traffic: rotate failed: %v", err)
+		return
+	}
+	log.Printf("traffic: traffic.json exceeded 5 MB, rotated → %s", bakPath)
+
+	// Keep only proxyStats entries referenced by active quotas.
+	active := make(map[string]bool)
+	for _, q := range s.quotas {
+		if q.TargetType == "proxy" && q.TargetID != "" {
+			active[q.TargetID] = true
+		}
+	}
+	for name := range s.proxyStats {
+		if !active[name] {
+			delete(s.proxyStats, name)
+		}
+	}
 }
 
 // --- CRUD for quotas ---
