@@ -40,6 +40,7 @@ func main() {
 	if err != nil {
 		log.Printf("Failed to load config: %v. Creating default...", err)
 		cfg = config.Default()
+		cfg.ConfigPath = *configPath
 		if err := os.MkdirAll(filepath.Dir(*configPath), 0755); err == nil {
 			_ = config.Save(*configPath, cfg)
 		}
@@ -64,7 +65,7 @@ func main() {
 			KeyPath:  cfg.HTTPS.KeyPath,
 		},
 		SavePasswordHash: func(hash string) error {
-			return cfg.SavePasswordHash(*configPath, hash)
+			return cfg.SavePasswordHash(cfg.ConfigPath, hash)
 		},
 	}
 

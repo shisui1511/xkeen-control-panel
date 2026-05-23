@@ -25,6 +25,7 @@ type Config struct {
 	Auth            AuthConfig  `json:"auth"`
 	HTTPS           HTTPSConfig `json:"https"`
 	MihomoSecret    string      `json:"mihomo_secret"`
+	ConfigPath      string      `json:"-"`
 }
 
 // AuthConfig represents the configuration settings for authentication and session management.
@@ -64,7 +65,7 @@ func findXKeen() string {
 
 // Default returns the default configuration for the application.
 func Default() *Config {
-	return &Config{
+	return &Config {
 		Port:            8090,
 		XRayConfigDir:   "/opt/etc/xray/configs",
 		XKeenBinary:     findXKeen(),
@@ -109,6 +110,7 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	cfg.ConfigPath = path
 	if len(cfg.LogSources) == 0 {
 		if cfg.LogPath != "" {
 			cfg.LogSources = []string{cfg.LogPath}
