@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { t, setLang, currentLang, getAvailableLangs, type Lang } from './i18n';
   import Icon from './lib/components/Icon.svelte';
-  import { capabilities, fetchCapabilities } from './stores';
+  import { capabilities, fetchCapabilities, showToast } from './stores';
 
   export let onSwitchTab: (tab: string) => void = () => {};
 
@@ -19,6 +19,192 @@
 
   let version = '...';
   let langs = getAvailableLangs();
+  let activeTab: 'general' | 'security' | 'connection' | 'backups' | 'update' | 'about' = 'general';
+
+  // Backups state variables
+  let configFiles: string[] = [];
+  let selectedFile = '';
+  let backups: string[] = [];
+  let loadingBackups = false;
+
+  async function loadConfigFiles() {
+    try {
+      const xrayRes = await fetch('/api/config/list?dir=/opt/etc/xray/configs');
+      const mihomoRes = await fetch('/api/config/list?dir=/opt/etc/mihomo');
+      
+      let files: string[] = [];
+      if (xrayRes.ok) {
+        const data = await xrayRes.json();
+        files = [...files, ...data];
+      }
+      if (mihomoRes.ok) {
+        const data = await mihomoRes.json();
+        files = [...files, ...data];
+      }
+      
+      files.push('/opt/etc/xcp/config.json');
+      
+      configFiles = Array.from(new Set(files)).sort();
+      if (configFiles.length > 0 && !selectedFile) {
+        selectedFile = configFiles[0];
+        fetchBackups();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function fetchBackups() {
+    if (!selectedFile) return;
+    loadingBackups = true;
+    try {
+      const res = await fetch(`/api/config/backups?path=${encodeURIComponent(selectedFile)}`);
+      if (res.ok) {
+        backups = await res.json();
+      } else {
+        backups = [];
+      }
+    } catch (e) {
+      backups = [];
+    } finally {
+      loadingBackups = false;
+    }
+  }
+
+  async function restoreBackup(backupPath: string) {
+    if (!confirm($t('settings.backup_restore_confirm'))) return;
+    try {
+      const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
+      if (!readRes.ok) {
+        const txt = await readRes.text();
+        showToast('error', `Ошибка чтения бэкапа: ${txt}`);
+        return;
+      }
+      const data = await readRes.text();
+      
+      const csrfToken = localStorage.getItem('csrf_token');
+      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: data
+      });
+      if (saveRes.ok) {
+        showToast('success', $t('settings.backup_restore_success'));
+        fetchBackups();
+      } else {
+        const txt = await saveRes.text();
+        showToast('error', `Ошибка восстановления: ${txt}`);
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+    }
+  }
+
+  async function deleteBackup(backupPath: string) {
+    if (!confirm($t('settings.backup_delete_confirm'))) return;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch(`/api/config/delete?path=${encodeURIComponent(backupPath)}`, {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken || ''
+        }
+      });
+      if (res.ok) {
+        showToast('success', $t('settings.backup_delete_success'));
+        fetchBackups();
+      } else {
+        const txt = await res.text();
+        showToast('error', `Ошибка удаления: ${txt}`);
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+    }
+  }
+
+  $: if (activeTab === 'backups') {
+    loadConfigFiles();
+  }
+
+  // Appearance & Behavior settings (persisted in localStorage)
+  let selectedTheme: 'light' | 'dark' | 'auto' = 'auto';
+  let timezone = 'UTC';
+  let animationsEnabled = true;
+  let autoRefresh = true;
+  let confirmDangerous = true;
+  let notificationSound = false;
+
+  function loadAppearanceSettings() {
+    try {
+      const saved = localStorage.getItem('theme') || '';
+      selectedTheme = (saved === 'light' || saved === 'dark') ? saved : 'auto';
+      timezone = localStorage.getItem('timezone') || 'UTC';
+      animationsEnabled = localStorage.getItem('animations') !== 'false';
+      autoRefresh = localStorage.getItem('autoRefresh') !== 'false';
+      confirmDangerous = localStorage.getItem('confirmDangerous') !== 'false';
+      notificationSound = localStorage.getItem('notificationSound') === 'true';
+    } catch {}
+  }
+
+  function setTheme(t: 'light' | 'dark' | 'auto') {
+    selectedTheme = t;
+    try {
+      if (t === 'auto') {
+        localStorage.removeItem('theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+      } else {
+        localStorage.setItem('theme', t);
+        document.documentElement.setAttribute('data-theme', t);
+      }
+    } catch {}
+  }
+
+  function saveSetting(key: string, value: string) {
+    try { localStorage.setItem(key, value); } catch {}
+  }
+
+  // Change password
+  let currentPassword = '';
+  let newPassword = '';
+  let confirmPassword = '';
+  let passwordChanging = false;
+  let passwordError = '';
+  let passwordSuccess = false;
+
+  async function changePassword() {
+    passwordError = '';
+    passwordSuccess = false;
+    if (newPassword !== confirmPassword) {
+      passwordError = $t('settings.password_mismatch');
+      return;
+    }
+    passwordChanging = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+      });
+      if (res.ok) {
+        passwordSuccess = true;
+        currentPassword = '';
+        newPassword = '';
+        confirmPassword = '';
+      } else {
+        const text = await res.text();
+        passwordError = text || $t('settings.password_error');
+      }
+    } catch (e: any) {
+      passwordError = e.message;
+    } finally {
+      passwordChanging = false;
+    }
+  }
 
   // Update state
   let updateInfo: {
@@ -135,6 +321,7 @@
   onMount(() => {
     fetchVersion();
     fetchCapabilities();
+    loadAppearanceSettings();
   });
 
   onDestroy(() => {
@@ -143,54 +330,194 @@
 </script>
 
 <div class="container">
-  <h1>{$t('settings.title')}</h1>
-  <p class="text-secondary mb-3">{$t('settings.subtitle')}</p>
-
-  <div class="card mb-2">
-    <h2>{$t('settings.about')}</h2>
-    <div class="setting-row">
-      <span class="setting-label">{$t('settings.version')}</span>
-      <span class="setting-value">{version}</span>
-    </div>
-    <div class="setting-row">
-      <span class="setting-label">{$t('settings.frontend')}</span>
-      <span class="setting-value">Svelte 5 + TypeScript + Vite</span>
-    </div>
-    <div class="setting-row">
-      <span class="setting-label">{$t('settings.backend')}</span>
-      <span class="setting-value">Go + net/http</span>
+  <!-- page-head -->
+  <div class="page-head">
+    <div>
+      <div class="crumbs">{$t('nav.group_core')} <span class="crumb-sep">/</span> {$t('settings.h1')}</div>
+      <h1>{$t('settings.h1')}</h1>
+      <p class="sub">{$t('settings.h1_sub')}</p>
     </div>
   </div>
 
-  <div class="card mb-2">
-    <h2>{$t('settings.language')}</h2>
-    <div class="setting-row">
-      <span class="setting-label">{$t('settings.language')}</span>
-      <select class="input" value={$currentLang} on:change={handleLangChange}>
-        {#each langs as lang}
-          <option value={lang.code}>{lang.name}</option>
-        {/each}
-      </select>
-    </div>
+  <!-- tab nav -->
+  <div class="settings-tabs">
+    <button class="stab" class:active={activeTab === 'general'} on:click={() => activeTab = 'general'}>{$t('settings.tab_general')}</button>
+    <button class="stab" class:active={activeTab === 'security'} on:click={() => activeTab = 'security'}>{$t('settings.tab_security')}</button>
+    <button class="stab" class:active={activeTab === 'connection'} on:click={() => activeTab = 'connection'}>{$t('settings.tab_connection')}</button>
+    <button class="stab" class:active={activeTab === 'backups'} on:click={() => activeTab = 'backups'}>{$t('settings.tab_backups')}</button>
+    <button class="stab" class:active={activeTab === 'update'} on:click={() => activeTab = 'update'}>{$t('settings.tab_update')}</button>
+    <button class="stab" class:active={activeTab === 'about'} on:click={() => activeTab = 'about'}>{$t('settings.tab_about')}</button>
   </div>
 
+  <!-- General tab -->
+  {#if activeTab === 'general'}
   <div class="card mb-2">
-    <h2>{$t('settings.update')}</h2>
-    <div class="setting-row">
-      <span class="setting-label">{$t('settings.current_version')}</span>
-      <span class="setting-value">{version}</span>
-    </div>
-
-    {#if updateInfo?.has_update}
-      <div class="setting-row">
-        <span class="setting-label">{$t('settings.available_version')}</span>
-        <span class="setting-value" style="color: var(--primary)">{updateInfo.latest_version}</span>
+    <div class="card-label">{$t('settings.section_locale')}</div>
+    <div class="field-group">
+      <div class="field-row">
+        <span class="field-row-name">{$t('settings.language')}</span>
+        <select class="field-select" value={$currentLang} on:change={handleLangChange} title={$t('settings.language')}>
+          {#each langs as lang}
+            <option value={lang.code}>{lang.name}</option>
+          {/each}
+        </select>
       </div>
-      {#if updateInfo.changelog}
-        <div class="changelog-box">
-          <pre>{updateInfo.changelog}</pre>
+      <div class="field-row">
+        <div>
+          <span class="field-row-name">{$t('settings.timezone')}</span>
+          <div class="field-row-desc">{$t('settings.timezone_desc')}</div>
+        </div>
+        <select class="field-select" bind:value={timezone} on:change={() => saveSetting('timezone', timezone)} title={$t('settings.timezone')}>
+          <option value="UTC">UTC</option>
+          <option value="Europe/Moscow">Europe/Moscow (UTC+3)</option>
+          <option value="Europe/London">Europe/London</option>
+          <option value="Europe/Berlin">Europe/Berlin</option>
+          <option value="America/New_York">America/New_York</option>
+          <option value="America/Los_Angeles">America/Los_Angeles</option>
+          <option value="Asia/Tokyo">Asia/Tokyo</option>
+          <option value="Asia/Shanghai">Asia/Shanghai</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-2">
+    <div class="card-label">{$t('settings.section_appearance')}</div>
+    <div class="field-group">
+      <div class="field-row">
+        <div>
+          <span class="field-row-name">{$t('settings.theme')}</span>
+          <div class="field-row-desc">{$t('settings.theme_desc')}</div>
+        </div>
+        <div class="seg-btn">
+          <button class="seg-opt" class:seg-active={selectedTheme === 'light'} on:click={() => setTheme('light')}>{$t('settings.theme_light_btn')}</button>
+          <button class="seg-opt" class:seg-active={selectedTheme === 'dark'} on:click={() => setTheme('dark')}>{$t('settings.theme_dark_btn')}</button>
+          <button class="seg-opt" class:seg-active={selectedTheme === 'auto'} on:click={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button>
+        </div>
+      </div>
+      <div class="field-row">
+        <div>
+          <span class="field-row-name">{$t('settings.animations')}</span>
+          <div class="field-row-desc">{$t('settings.animations_desc')}</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" bind:checked={animationsEnabled} on:change={() => saveSetting('animations', String(animationsEnabled))} />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-2">
+    <div class="card-label">{$t('settings.section_behavior')}</div>
+    <div class="field-group">
+      <div class="field-row">
+        <div>
+          <span class="field-row-name">{$t('settings.auto_refresh')}</span>
+          <div class="field-row-desc">{$t('settings.auto_refresh_desc')}</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" bind:checked={autoRefresh} on:change={() => saveSetting('autoRefresh', String(autoRefresh))} />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      <div class="field-row">
+        <div>
+          <span class="field-row-name">{$t('settings.confirm_dangerous')}</span>
+          <div class="field-row-desc">{$t('settings.confirm_dangerous_desc')}</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" bind:checked={confirmDangerous} on:change={() => saveSetting('confirmDangerous', String(confirmDangerous))} />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+      <div class="field-row">
+        <div>
+          <span class="field-row-name">{$t('settings.notification_sound')}</span>
+          <div class="field-row-desc">{$t('settings.notification_sound_desc')}</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" bind:checked={notificationSound} on:change={() => saveSetting('notificationSound', String(notificationSound))} />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+    </div>
+  </div>
+  {/if}
+
+  <!-- Backups tab -->
+  {#if activeTab === 'backups'}
+  <div class="card settings-card" style="margin-bottom:18px;padding:0;">
+    <div class="field-group">
+      <div class="field-group-head">{$t('settings.tab_backups')}</div>
+      <div class="field-row">
+        <div>
+          <div class="lbl">{$t('settings.backup_file')}</div>
+          <div class="desc">{$t('settings.backups_desc')}</div>
+        </div>
+        <div class="ctrl">
+          <select class="input" style="min-width: 250px;" bind:value={selectedFile} on:change={fetchBackups} title={$t('settings.backup_file')}>
+            {#each configFiles as file}
+              <option value={file}>{file}</option>
+            {:else}
+              <option value="">Нет доступных файлов</option>
+            {/each}
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:0;">
+    <h2 class="card-title" style="margin:0;padding:14px 20px;">{$t('settings.tab_backups')}</h2>
+    <div class="field-group" style="border:0;">
+      {#if loadingBackups}
+        <div style="padding:20px;text-align:center;color:var(--fg-dim);">{$t('app.loading')}</div>
+      {:else if backups.length === 0}
+        <div style="padding:20px;text-align:center;color:var(--fg-dim);">Резервные копии отсутствуют</div>
+      {:else}
+        {#each backups as backup}
+          <div class="field-row">
+            <div>
+              <div class="lbl mono">{backup.split('/').pop()}</div>
+              <div class="desc mono" style="font-size: 11px; color: var(--fg-dim);">{backup}</div>
+            </div>
+            <div class="ctrl">
+              <button class="btn btn-secondary" on:click={() => restoreBackup(backup)} title="Восстановить">
+                Восстановить
+              </button>
+              <button class="btn btn-danger" on:click={() => deleteBackup(backup)} title="Удалить">
+                Удалить
+              </button>
+            </div>
+          </div>
+        {/each}
+      {/if}
+    </div>
+  </div>
+  {/if}
+
+  <!-- Update tab -->
+  {#if activeTab === 'update'}
+  <div class="card mb-2">
+    <div class="card-label">{$t('settings.update')}</div>
+    <div class="field-group">
+      <div class="field-row">
+        <span class="field-row-name">{$t('settings.current_version')}</span>
+        <span class="field-row-val mono">{version}</span>
+      </div>
+      {#if updateInfo?.has_update}
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.available_version')}</span>
+          <span class="field-row-val" style="color: var(--accent)">{updateInfo.latest_version}</span>
         </div>
       {/if}
+    </div>
+
+    {#if updateInfo?.changelog}
+      <div class="changelog-box">
+        <pre>{updateInfo.changelog}</pre>
+      </div>
     {/if}
 
     {#if updateStatus && updateStatus.status !== 'idle'}
@@ -202,122 +529,342 @@
       </div>
     {/if}
 
-    <div class="update-actions">
-      <button
-        class="btn btn-secondary"
-        on:click={() => checkUpdate('stable')}
-        disabled={updateChecking || updateInstalling}
-      >
+    <div class="card-actions">
+      <button class="btn btn-secondary" on:click={() => checkUpdate('stable')} disabled={updateChecking || updateInstalling} title={$t('settings.check_update')}>
         {updateChecking ? $t('settings.checking') : $t('settings.check_update')}
       </button>
       {#if updateInfo?.has_update}
-        <button
-          class="btn btn-primary"
-          on:click={() => installUpdate('stable')}
-          disabled={updateInstalling}
-        >
+        <button class="btn btn-primary" on:click={() => installUpdate('stable')} disabled={updateInstalling} title={$t('settings.install_update')}>
           {updateInstalling ? $t('settings.installing') : $t('settings.install_update')}
         </button>
       {/if}
       {#if updateStatus?.status === 'failed'}
-        <button class="btn btn-danger" on:click={rollbackUpdate}>
+        <button class="btn btn-danger" on:click={rollbackUpdate} title={$t('settings.rollback')}>
           {$t('settings.rollback')}
         </button>
       {/if}
     </div>
   </div>
+  {/if}
 
+  <!-- Connection tab -->
+  {#if activeTab === 'connection'}
   <div class="card mb-2">
-    <h2>{$t('settings.mihomo_api')}</h2>
-    <div class="setting-row">
-      <span class="setting-label">{$t('settings.mihomo_status')}</span>
-      <span class="setting-value">
-        {#if $capabilities?.mihomo.process_running}
-          <span style="color: var(--success, #2ecc71)">● {$t('settings.mihomo_running')}</span>
-        {:else}
-          <span style="color: var(--danger, #e74c3c)">○ {$t('settings.mihomo_stopped')}</span>
-        {/if}
-      </span>
-    </div>
-    <div class="setting-row">
-      <span class="setting-label">{$t('settings.mihomo_api_reachable')}</span>
-      <span class="setting-value">
-        {#if $capabilities?.mihomo.api_reachable}
-          <span style="color: var(--success, #2ecc71)">{$t('settings.mihomo_yes')}</span>
-        {:else}
-          <span style="color: var(--danger, #e74c3c)">{$t('settings.mihomo_no')}</span>
-        {/if}
-      </span>
-    </div>
-    <div class="setting-row">
-      <span class="setting-label">{$t('settings.mihomo_api_auth')}</span>
-      <span class="setting-value">
-        {#if $capabilities?.mihomo.api_authenticated}
-          <span style="color: var(--success, #2ecc71)">{$t('settings.mihomo_yes')}</span>
-        {:else if $capabilities?.mihomo.api_reachable}
-          <span style="color: var(--danger, #e74c3c)">{$t('settings.mihomo_auth_error')}</span>
-        {:else}
-          <span style="color: var(--fg-secondary)">—</span>
-        {/if}
-      </span>
-    </div>
-    {#if $capabilities?.mihomo.discovered_secret}
-      <div class="setting-row">
-        <span class="setting-label">{$t('settings.mihomo_secret_discovered')}</span>
-        <span class="setting-value" style="font-family: monospace;"
-          >{$capabilities.mihomo.discovered_secret}</span
-        >
+    <div class="card-label">{$t('settings.mihomo_api')}</div>
+    <div class="field-group">
+      <div class="field-row">
+        <span class="field-row-name">{$t('settings.mihomo_status')}</span>
+        <span class="field-row-val">
+          {#if $capabilities?.mihomo.process_running}
+            <span class="status-ok">● {$t('settings.mihomo_running')}</span>
+          {:else}
+            <span class="status-err">○ {$t('settings.mihomo_stopped')}</span>
+          {/if}
+        </span>
       </div>
-    {/if}
-    <div class="update-actions">
-      <button
-        class="btn btn-secondary"
-        on:click={recheckConnection}
-        disabled={checkingConnection}
-        title={$t('settings.recheck_title')}
-      >
+      <div class="field-row">
+        <span class="field-row-name">{$t('settings.mihomo_api_reachable')}</span>
+        <span class="field-row-val">
+          {#if $capabilities?.mihomo.api_reachable}
+            <span class="status-ok">{$t('settings.mihomo_yes')}</span>
+          {:else}
+            <span class="status-err">{$t('settings.mihomo_no')}</span>
+          {/if}
+        </span>
+      </div>
+      <div class="field-row">
+        <span class="field-row-name">{$t('settings.mihomo_api_auth')}</span>
+        <span class="field-row-val">
+          {#if $capabilities?.mihomo.api_authenticated}
+            <span class="status-ok">{$t('settings.mihomo_yes')}</span>
+          {:else if $capabilities?.mihomo.api_reachable}
+            <span class="status-err">{$t('settings.mihomo_auth_error')}</span>
+          {:else}
+            <span style="color: var(--fg-secondary)">—</span>
+          {/if}
+        </span>
+      </div>
+      {#if $capabilities?.mihomo.discovered_secret}
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.mihomo_secret_discovered')}</span>
+          <span class="field-row-val mono">{$capabilities.mihomo.discovered_secret}</span>
+        </div>
+      {/if}
+    </div>
+    <div class="card-actions">
+      <button class="btn btn-secondary" on:click={recheckConnection} disabled={checkingConnection} title={$t('settings.recheck_title')}>
         {checkingConnection ? $t('settings.checking') : $t('settings.recheck_btn')}
+      </button>
+    </div>
+  </div>
+  {/if}
+
+  <!-- Security tab -->
+  {#if activeTab === 'security'}
+  <div class="card mb-2">
+    <div class="card-label">{$t('settings.change_password')}</div>
+    <div class="field-group">
+      <div class="field-row">
+        <label class="field-row-name" for="curr-pwd">{$t('settings.current_password')}</label>
+        <input id="curr-pwd" type="password" class="field-input" bind:value={currentPassword} placeholder="••••••••" />
+      </div>
+      <div class="field-row">
+        <label class="field-row-name" for="new-pwd">{$t('settings.new_password')}</label>
+        <input id="new-pwd" type="password" class="field-input" bind:value={newPassword} placeholder="••••••••" />
+      </div>
+      <div class="field-row">
+        <label class="field-row-name" for="conf-pwd">{$t('settings.confirm_password')}</label>
+        <input id="conf-pwd" type="password" class="field-input" bind:value={confirmPassword} placeholder="••••••••" />
+      </div>
+    </div>
+    {#if passwordError}
+      <div class="field-error">{passwordError}</div>
+    {/if}
+    {#if passwordSuccess}
+      <div class="field-success">{$t('settings.password_changed')}</div>
+    {/if}
+    <div class="card-actions">
+      <button class="btn btn-primary" on:click={changePassword} disabled={passwordChanging || !currentPassword || !newPassword || !confirmPassword} title={$t('settings.save_password')}>
+        {passwordChanging ? $t('app.loading') : $t('settings.save_password')}
       </button>
     </div>
   </div>
 
   <div class="card mb-2">
-    <h2>{$t('settings.security')}</h2>
-    <ul style="list-style: none; padding-left: 0;">
-      <li class="mb-1"><Icon name="check" size={14} /> {$t('settings.auth_bcrypt')}</li>
-      <li class="mb-1"><Icon name="check" size={14} /> {$t('settings.csrf')}</li>
-      <li class="mb-1"><Icon name="check" size={14} /> {$t('settings.rate_limit')}</li>
-      <li class="mb-1"><Icon name="check" size={14} /> {$t('settings.security_headers')}</li>
-    </ul>
+    <div class="card-label">{$t('settings.security')}</div>
+    <div class="field-group">
+      <div class="field-row-info"><Icon name="check" size={14} /><span>{$t('settings.auth_bcrypt')}</span></div>
+      <div class="field-row-info"><Icon name="check" size={14} /><span>{$t('settings.csrf')}</span></div>
+      <div class="field-row-info"><Icon name="check" size={14} /><span>{$t('settings.rate_limit')}</span></div>
+      <div class="field-row-info"><Icon name="check" size={14} /><span>{$t('settings.security_headers')}</span></div>
+    </div>
   </div>
+  {/if}
+
+  <!-- About tab -->
+  {#if activeTab === 'about'}
+  <div class="card mb-2">
+    <div class="card-label">{$t('settings.about')}</div>
+    <div class="field-group">
+      <div class="field-row">
+        <span class="field-row-name">{$t('settings.version')}</span>
+        <span class="field-row-val mono">{version}</span>
+      </div>
+      <div class="field-row">
+        <span class="field-row-name">{$t('settings.frontend')}</span>
+        <span class="field-row-val mono">Svelte 5 + TypeScript + Vite</span>
+      </div>
+      <div class="field-row">
+        <span class="field-row-name">{$t('settings.backend')}</span>
+        <span class="field-row-val mono">Go + net/http</span>
+      </div>
+    </div>
+  </div>
+  {/if}
 </div>
 
 <style>
-  .setting-row {
+  .page-head {
     display: flex;
+    align-items: flex-start;
     justify-content: space-between;
-    padding: 0.75rem 0;
-    border-bottom: 1px solid var(--border-light);
+    margin-bottom: 20px;
+    gap: 16px;
   }
 
-  .setting-row:last-child {
+  .page-head h1 {
+    margin: 4px 0 6px;
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  .page-head .sub {
+    margin: 0;
+    color: var(--fg-secondary);
+    font-size: 13px;
+  }
+
+  .crumbs {
+    font-size: 12px;
+    color: var(--fg-dim);
+    margin-bottom: 2px;
+  }
+
+  .crumb-sep {
+    color: var(--fg-faint);
+    margin: 0 6px;
+  }
+
+  /* tab nav */
+  .settings-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+
+  .stab {
+    padding: 8px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--fg-secondary);
+    cursor: pointer;
+    border-radius: 4px 4px 0 0;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .stab:hover {
+    color: var(--fg-primary);
+  }
+
+  .stab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
+  /* card label */
+  .card-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+    margin-bottom: 14px;
+  }
+
+  /* field-group / field-row */
+  .field-group {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    gap: 16px;
+  }
+
+  .field-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  .field-row:first-child {
+    padding-top: 0;
+  }
+
+  .field-row-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--fg-primary);
+    flex-shrink: 0;
+  }
+
+  .field-row-val {
+    font-size: 13px;
+    color: var(--fg-secondary);
+    text-align: right;
+  }
+
+  .field-row-val.mono {
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+  }
+
+  .mono {
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+  }
+
+  .field-select {
+    font-size: 13px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-card);
+    color: var(--fg-primary);
+    cursor: pointer;
+    min-width: 120px;
+  }
+
+  .field-input {
+    font-size: 13px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-deep, var(--bg));
+    color: var(--fg-primary);
+    min-width: 180px;
+  }
+
+  .field-input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  .field-row-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    font-size: 13px;
+    color: var(--fg-secondary);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .field-row-info:last-child {
     border-bottom: none;
   }
 
-  .setting-label {
-    color: var(--fg-secondary);
+  .card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+    flex-wrap: wrap;
   }
 
-  .setting-value {
-    font-weight: 500;
+  .status-ok {
+    color: #10b981;
+  }
+
+  .status-err {
+    color: #ef4444;
+  }
+
+  .field-error {
+    margin-top: 8px;
+    font-size: 13px;
+    color: #ef4444;
+    padding: 6px 10px;
+    background: rgba(239,68,68,0.08);
+    border-radius: 6px;
+    border: 1px solid rgba(239,68,68,0.25);
+  }
+
+  .field-success {
+    margin-top: 8px;
+    font-size: 13px;
+    color: #10b981;
+    padding: 6px 10px;
+    background: rgba(16,185,129,0.08);
+    border-radius: 6px;
+    border: 1px solid rgba(16,185,129,0.25);
   }
 
   .changelog-box {
-    margin: 0.75rem 0;
-    padding: 0.75rem;
-    background: var(--bg);
+    margin: 12px 0;
+    padding: 10px;
+    background: var(--bg-deep, var(--bg));
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: 6px;
     max-height: 200px;
     overflow-y: auto;
   }
@@ -326,38 +873,120 @@
     margin: 0;
     white-space: pre-wrap;
     word-wrap: break-word;
-    font-size: 0.8rem;
+    font-size: 12px;
     color: var(--fg-secondary);
   }
 
-  .update-actions {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 0.75rem;
-    flex-wrap: wrap;
-  }
-
   .update-progress {
-    margin: 0.75rem 0;
+    margin: 10px 0;
   }
 
   .progress-bar {
-    height: 8px;
+    height: 6px;
     background: var(--border);
     border-radius: 4px;
     overflow: hidden;
-    margin-bottom: 0.5rem;
+    margin-bottom: 6px;
   }
 
   .progress-fill {
     height: 100%;
-    background: var(--primary);
+    background: var(--accent);
     border-radius: 4px;
     transition: width 0.3s ease;
   }
 
   .progress-text {
-    font-size: 0.8rem;
+    font-size: 12px;
     color: var(--fg-secondary);
+  }
+
+  .mb-2 {
+    margin-bottom: 12px;
+  }
+
+  .field-row-desc {
+    font-size: 12px;
+    color: var(--fg-dim);
+    margin-top: 2px;
+  }
+
+  /* Segmented button */
+  .seg-btn {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .seg-opt {
+    padding: 5px 12px;
+    font-size: 13px;
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--border);
+    color: var(--fg-secondary);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .seg-opt:last-child {
+    border-right: none;
+  }
+
+  .seg-opt:hover {
+    background: var(--bg-hover, rgba(0,0,0,0.04));
+  }
+
+  .seg-opt.seg-active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  /* Toggle switch */
+  .toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .toggle input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .toggle-track {
+    width: 36px;
+    height: 20px;
+    background: var(--border);
+    border-radius: 10px;
+    transition: background 0.2s;
+    position: relative;
+    display: block;
+  }
+
+  .toggle input:checked ~ .toggle-track {
+    background: var(--accent);
+  }
+
+  .toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+
+  .toggle input:checked ~ .toggle-track .toggle-thumb {
+    transform: translateX(16px);
   }
 </style>

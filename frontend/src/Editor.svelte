@@ -73,6 +73,14 @@
   const mihomoDir = '/opt/etc/mihomo';
   let currentDir = xrayDir;
 
+  // Dual-panel sidebar file lists
+  let xrayFiles: string[] = [];
+  let mihomoFiles: string[] = [];
+
+  // Status bar cursor position
+  let cursorLine = 1;
+  let cursorCol = 1;
+
   // Schema assist mode
   let schemaEnabled = true;
   let expertMode = false;
@@ -138,9 +146,13 @@
   async function loadFiles(dir?: string) {
     if (dir) currentDir = dir;
     try {
-      const res = await fetch(`/api/config/list?dir=${encodeURIComponent(currentDir)}`);
-      if (!res.ok) throw new Error('Failed to load files');
-      files = await res.json();
+      const [xRes, mRes] = await Promise.all([
+        fetch(`/api/config/list?dir=${encodeURIComponent(xrayDir)}`),
+        fetch(`/api/config/list?dir=${encodeURIComponent(mihomoDir)}`)
+      ]);
+      xrayFiles = xRes.ok ? await xRes.json() : [];
+      mihomoFiles = mRes.ok ? await mRes.json() : [];
+      files = [...xrayFiles, ...mihomoFiles];
     } catch (e: any) {
       showToast('error', $t('editor.load_error') + ': ' + e.message);
     }
@@ -274,6 +286,12 @@
                 }
               }
             }
+            if (update.selectionSet || update.docChanged) {
+              const pos = update.state.selection.main.head;
+              const line = update.state.doc.lineAt(pos);
+              cursorLine = line.number;
+              cursorCol = pos - line.from + 1;
+            }
           }),
           ...schemaExts
         ]
@@ -292,8 +310,7 @@
         draftContent = '';
       }
 
-      // Сначала снять loading, потом установить selectedFile —
-      // это заставляет Svelte отрендерить editorContainer ДО инициализации EditorView
+      // Снять loading и установить selectedFile — Svelte отрендерит editorContainer
       loading = false;
       selectedFile = path;
 
@@ -301,7 +318,17 @@
       await tick();
 
       if (editorView) {
-        editorView.setState(state);
+        if (editorView.dom.isConnected) {
+          // Same container — just swap state
+          editorView.setState(state);
+        } else {
+          // Container was recreated (was destroyed while loading=true) — remount
+          editorView.destroy();
+          editorView = null;
+          if (editorContainer) {
+            editorView = new EditorView({ state, parent: editorContainer });
+          }
+        }
       } else if (editorContainer) {
         editorView = new EditorView({
           state,
@@ -331,6 +358,17 @@
   let validationResult: { valid: boolean; error: string } | null = null;
   let validationLoading = false;
   let diffChanges: any[] = [];
+
+  // Kebab menu for destructive actions (Delete)
+  let showKebabMenu = false;
+  function toggleKebab(e: MouseEvent) {
+    e.stopPropagation();
+    showKebabMenu = !showKebabMenu;
+    if (showKebabMenu) {
+      const close = () => { showKebabMenu = false; window.removeEventListener('click', close); };
+      setTimeout(() => window.addEventListener('click', close), 0);
+    }
+  }
 
   interface DiffChange {
     type: 'added' | 'removed' | 'unchanged';
@@ -800,6 +838,19 @@
     showGeneratorModal = false;
   }
 
+  // Reactive file info
+  $: fileSize = formatBytes(originalContent ? new Blob([originalContent]).size : 0);
+  $: fileType = selectedFile ? (selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml') ? 'YAML' : 'JSON') : '';
+  $: fileLineEndings = originalContent?.includes('\r\n') ? 'CRLF' : 'LF';
+
+  function formatBytes(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
   onMount(() => {
     loadFiles();
     loadTemplates();
@@ -812,185 +863,225 @@
   });
 </script>
 
-<div class="editor-page">
-  <div class="sidebar">
-    <div class="sidebar-header">
-      <div style="display: flex; align-items: center; gap: 0.5rem;">
-        <button
-          class="btn-icon-small"
-          on:click={() => onSwitchTab('dashboard')}
-          title={$t('editor.back_to_dashboard')}
-        >
-          ←
-        </button>
-        <h3>{$t('editor.configs')}</h3>
-      </div>
+<div class="container">
+  <div class="page-head">
+    <div>
+      <div class="crumbs">{$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('editor.h1')}</div>
+      <h1>{$t('editor.h1')}</h1>
+      <p class="sub">{$t('editor.h1_sub')}</p>
+    </div>
+    <div class="ph-actions">
       <button
-        class="btn-icon-small"
-        on:click={() => {
-          showCreateModal = true;
-          newFileName = '';
-        }}
+        class="btn btn-primary"
+        on:click={() => { showCreateModal = true; newFileName = ''; }}
         title={$t('editor.create_file')}
       >
-        +
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        {$t('editor.new_file')}
       </button>
     </div>
-
-    <div class="dir-toggle">
-      <button class:active={currentDir === xrayDir} on:click={() => switchDir(xrayDir)}>Xray</button
-      >
-      <button class:active={currentDir === mihomoDir} on:click={() => switchDir(mihomoDir)}
-        >Mihomo</button
-      >
-    </div>
-    <div class="file-list">
-      {#each files as file}
-        <button
-          class="file-item"
-          class:active={file === selectedFile}
-          on:click={() => loadFile(file)}
-        >
-          {file.split('/').pop()}
-        </button>
-      {/each}
-    </div>
-
-    {#if backups.length > 0}
-      <h3>{$t('editor.backups')}</h3>
-      <div class="backup-list">
-        {#each backups as backup}
-          <button class="backup-item" on:click={() => restoreBackup(backup)}>
-            {backup.split('.backup-')[1] || backup}
-          </button>
-        {/each}
-      </div>
-    {/if}
   </div>
 
-  <div class="editor-main">
-    <div class="toolbar">
-      <div
-        class="toolbar-left"
-        style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;"
-      >
-        <span class="file-name"
-          >{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span
-        >
-        {#if hasDraft}
-          <div
-            style="display: flex; align-items: center; gap: 8px; background: rgba(255, 152, 0, 0.15); border: 1px solid rgba(255, 152, 0, 0.3); padding: 4px 8px; border-radius: 4px; font-size: 12px; color: #ff9800;"
-          >
-            <span>{$t('editor.has_draft') || 'Unsaved draft available'}</span>
+  <div class="editor-grid">
+    <div>
+      <!-- Xray Section -->
+      <div class="editor-files" style="margin-bottom:12px;">
+        <div class="editor-files-head" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Xray</span>
+          <span style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;">{xrayDir}</span>
+        </div>
+        <div class="file-list">
+          {#each xrayFiles as file}
+            {@const name = file.split('/').pop()}
             <button
-              on:click={restoreDraft}
-              style="padding: 2px 6px; font-size: 11px; background: #ff9800; color: white; border: none; border-radius: 3px; cursor: pointer;"
+              class="file-row"
+              class:active={file === selectedFile}
+              on:click={() => loadFile(file)}
             >
-              {$t('editor.restore_draft') || 'Restore'}
+              <span class="fr-name">{name}</span>
+              {#if file === selectedFile}
+                <span class="fr-meta">{fileSize}</span>
+              {/if}
             </button>
+          {:else}
+            <span class="sb-empty" style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;">—</span>
+          {/each}
+        </div>
+      </div>
+
+      <!-- Mihomo Section -->
+      <div class="editor-files">
+        <div class="editor-files-head" style="display:flex;align-items:center;justify-content:space-between;">
+          <span>Mihomo</span>
+          <span style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;">{mihomoDir}</span>
+        </div>
+        <div class="file-list">
+          {#each mihomoFiles as file}
+            {@const name = file.split('/').pop()}
             <button
-              on:click={discardDraft}
-              style="padding: 2px 6px; font-size: 11px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 3px; cursor: pointer;"
+              class="file-row"
+              class:active={file === selectedFile}
+              on:click={() => loadFile(file)}
             >
-              {$t('editor.discard_draft') || 'Discard'}
+              <span class="fr-name">{name}</span>
+              {#if file === selectedFile}
+                <span class="fr-meta">{fileSize}</span>
+              {/if}
+            </button>
+          {:else}
+            <span class="sb-empty" style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;">—</span>
+          {/each}
+        </div>
+      </div>
+
+      <!-- Backups Section -->
+      {#if backups.length > 0}
+        <div class="editor-files" style="margin-top:12px;">
+          <div class="editor-files-head">
+            <span>{$t('editor.backups')}</span>
+          </div>
+          <div class="file-list">
+            {#each backups as backup}
+              <button class="file-row" on:click={() => restoreBackup(backup)}>
+                <span class="fr-name">{backup.split('.backup-')[1] || backup}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
+    </div>
+
+    <!-- Main Editor Card -->
+    <div class="editor-main-card">
+      <div class="editor-toolbar">
+        <span class="file-name">{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span>
+        {#if selectedFile}
+          <span class="file-meta" style="margin-left:8px;">{fileSize} · {fileType} · UTF‑8 · {fileLineEndings}</span>
+        {/if}
+
+        {#if hasDraft}
+          <div class="editor-draft-bar" style="margin-left: 12px; display: inline-flex; align-items: center; gap: 6px;">
+            <span>{$t('editor.has_draft') || 'Есть черновик'}</span>
+            <button on:click={restoreDraft} class="btn btn-sm btn-warning">
+              {$t('editor.restore_draft') || 'Восстановить'}
+            </button>
+            <button on:click={discardDraft} class="btn btn-sm btn-secondary" style="padding: 2px 8px;">
+              {$t('editor.discard_draft') || 'Сбросить'}
             </button>
           </div>
         {/if}
-        {#if selectedFile}
-          <button on:click={deleteFile} class="btn-danger">
-            {$t('app.delete')}
-          </button>
-        {/if}
-      </div>
-      <div class="toolbar-actions">
-        {#if selectedFile}
-          <label
-            class="toggle-label"
-            for="schema-toggle"
-            title="Enable schema validation, autocomplete and hover tooltips"
-          >
-            <input
-              id="schema-toggle"
-              type="checkbox"
-              bind:checked={schemaEnabled}
-              on:change={toggleSchema}
-            />
-            {$t('editor.schema')}
-          </label>
-          <label
-            class="toggle-label"
-            for="expert-toggle"
-            title="Expert mode: full schema assist / Beginner: simplified"
-          >
-            <input
-              id="expert-toggle"
-              type="checkbox"
-              bind:checked={expertMode}
-              on:change={toggleExpertMode}
-            />
-            {$t('editor.expert')}
-          </label>
-          <button on:click={applyQuickFixes} class="btn-secondary" title="Apply common fixes">
-            <Icon name="settings" size={14} />
-            {$t('editor.quick_fix')}
-          </button>
-          <button
-            on:click={() => {
-              showTemplatesModal = true;
-              loadTemplates();
-            }}
-            class="btn-secondary"
-            title="Apply configuration templates"
-          >
-            <Icon name="editor" size={14} />
-            {$t('editor.templates')}
-          </button>
-          <button
-            on:click={() => (showGeneratorModal = true)}
-            class="btn-secondary"
-            title="Generate outbound config"
-          >
-            <Icon name="add" size={14} />
-            {$t('editor.generator')}
-          </button>
-          <button
-            on:click={() => {
-              showRenameModal = true;
-              renameTarget = selectedFile.split('/').pop() || '';
-            }}
-            class="btn-secondary"
-          >
-            {$t('app.rename')}
-          </button>
-        {/if}
-        <button on:click={checkBeforeSave} disabled={!selectedFile || saving} class="btn-primary">
-          {saving ? $t('app.loading') : $t('app.save')}
-        </button>
-      </div>
-    </div>
 
-    {#if loading}
-      <div class="loading">{$t('app.loading')}</div>
-    {:else if !selectedFile}
-      <div class="empty-state">
-        <p>{$t('editor.select_file')}</p>
+        <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+          {#if selectedFile}
+            <label class="toggle-label" for="schema-toggle" title="Enable schema validation, autocomplete and hover tooltips">
+              <label class="toggle-switch">
+                <input
+                  id="schema-toggle"
+                  type="checkbox"
+                  bind:checked={schemaEnabled}
+                  on:change={toggleSchema}
+                />
+                <span class="toggle-slider"></span>
+              </label>
+              {$t('editor.schema')}
+            </label>
+
+            <label class="toggle-label" for="expert-toggle" title="Expert mode: full schema assist / Beginner: simplified">
+              <label class="toggle-switch">
+                <input
+                  id="expert-toggle"
+                  type="checkbox"
+                  bind:checked={expertMode}
+                  on:change={toggleExpertMode}
+                />
+                <span class="toggle-slider"></span>
+              </label>
+              {$t('editor.expert')}
+            </label>
+
+            <!-- Kebab actions -->
+            <div class="kebab-wrap">
+              <button class="btn btn-secondary" style="padding:6px 10px;" on:click={toggleKebab} title="Дополнительные действия" aria-label="Дополнительные действия">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>
+                </svg>
+              </button>
+              {#if showKebabMenu}
+                <!-- svelte-ignore a11y-click-events-have-key-events -->
+                <!-- svelte-ignore a11y-no-static-element-interactions -->
+                <div class="kebab-dropdown" style="right:0;top:calc(100% + 4px);" on:click|stopPropagation>
+                  <button class="kebab-item" on:click={() => { showKebabMenu = false; applyQuickFixes(); }}>
+                    <Icon name="settings" size={14} />
+                    {$t('editor.quick_fix')}
+                  </button>
+                  <button class="kebab-item" on:click={() => { showKebabMenu = false; showTemplatesModal = true; loadTemplates(); }}>
+                    <Icon name="editor" size={14} />
+                    {$t('editor.templates')}
+                  </button>
+                  <button class="kebab-item" on:click={() => { showKebabMenu = false; showGeneratorModal = true; }}>
+                    <Icon name="add" size={14} />
+                    {$t('editor.generator')}
+                  </button>
+                  <button class="kebab-item" on:click={() => { showKebabMenu = false; showRenameModal = true; renameTarget = selectedFile.split('/').pop() || ''; }}>
+                    {$t('app.rename')}
+                  </button>
+                  <div class="kebab-divider"></div>
+                  <button class="kebab-item danger" on:click={() => { showKebabMenu = false; deleteFile(); }}>
+                    <Icon name="trash" size={14} />
+                    {$t('app.delete')}
+                  </button>
+                </div>
+              {/if}
+            </div>
+
+            <button on:click={checkBeforeSave} disabled={saving} class="btn btn-primary" style="padding: 6px 14px;">
+              {saving ? $t('app.loading') : $t('app.save')}
+            </button>
+          {/if}
+        </span>
       </div>
-    {:else}
-      <div class="editor-container" bind:this={editorContainer}></div>
-    {/if}
+
+      {#if loading}
+        <div class="loading" style="min-height: 420px; display: grid; place-items: center;">
+          <div class="spinner"></div>
+        </div>
+      {:else if !selectedFile}
+        <div class="empty-state" style="min-height: 420px; display: grid; place-items: center; color: var(--fg-dim);">
+          <p>{$t('editor.select_file')}</p>
+        </div>
+      {:else}
+        <div class="editor-pane" style="display: block; padding: 0;">
+          <div class="editor-container" bind:this={editorContainer} style="height: 520px;"></div>
+        </div>
+      {/if}
+
+      <!-- Status Bar -->
+      {#if selectedFile}
+        <div style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:14px;font-family:var(--font-family-mono);font-size:11px;color:var(--fg-dim);">
+          <span class:status-dirty={isDirty}>
+            <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
+            {isDirty ? ($t('editor.unsaved') || 'Изменён') : ($t('editor.saved') || 'Сохранён')}
+          </span>
+          <span>schema: {selectedFile.includes('xray') ? 'xray@latest' : 'mihomo@latest'}</span>
+          <span>{cursorLine}:{cursorCol}</span>
+          <span style="margin-left:auto;">Ctrl+S — сохранить · Ctrl+Z — отменить</span>
+        </div>
+      {/if}
+    </div>
   </div>
 </div>
 
+<!-- Modals with Hopper styles -->
 {#if showCreateModal}
   <div
-    class="modal-overlay"
+    class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
     on:click={() => (showCreateModal = false)}
     on:keydown={(e) => e.key === 'Escape' && (showCreateModal = false)}
   >
-    <div class="modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
-      <h3>{$t('editor.create_file')}</h3>
+    <div class="confirm-modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
+      <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">{$t('editor.create_file')}</h3>
       <label for="new-file-name" class="sr-only">{$t('editor.file_name')}</label>
       <input
         id="new-file-name"
@@ -998,13 +1089,16 @@
         bind:value={newFileName}
         placeholder={$t('editor.file_name')}
         class="input"
+        style="margin-bottom: 16px;"
         on:keydown={(e) => e.key === 'Enter' && createFile()}
       />
-      <div class="modal-actions">
-        <button on:click={() => (showCreateModal = false)} class="btn btn-secondary"
-          >{$t('app.cancel')}</button
-        >
-        <button on:click={createFile} class="btn btn-primary">{$t('app.create')}</button>
+      <div class="confirm-modal-actions">
+        <button on:click={() => (showCreateModal = false)} class="btn btn-secondary">
+          {$t('app.cancel')}
+        </button>
+        <button on:click={createFile} class="btn btn-primary">
+          {$t('app.create')}
+        </button>
       </div>
     </div>
   </div>
@@ -1012,14 +1106,14 @@
 
 {#if showRenameModal}
   <div
-    class="modal-overlay"
+    class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
     on:click={() => (showRenameModal = false)}
     on:keydown={(e) => e.key === 'Escape' && (showRenameModal = false)}
   >
-    <div class="modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
-      <h3>{$t('editor.rename_file')}</h3>
+    <div class="confirm-modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
+      <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">{$t('editor.rename_file')}</h3>
       <label for="rename-target" class="sr-only">{$t('editor.new_name')}</label>
       <input
         id="rename-target"
@@ -1027,13 +1121,16 @@
         bind:value={renameTarget}
         placeholder={$t('editor.new_name')}
         class="input"
+        style="margin-bottom: 16px;"
         on:keydown={(e) => e.key === 'Enter' && renameFile()}
       />
-      <div class="modal-actions">
-        <button on:click={() => (showRenameModal = false)} class="btn btn-secondary"
-          >{$t('app.cancel')}</button
-        >
-        <button on:click={renameFile} class="btn btn-primary">{$t('app.rename')}</button>
+      <div class="confirm-modal-actions">
+        <button on:click={() => (showRenameModal = false)} class="btn btn-secondary">
+          {$t('app.cancel')}
+        </button>
+        <button on:click={renameFile} class="btn btn-primary">
+          {$t('app.rename')}
+        </button>
       </div>
     </div>
   </div>
@@ -1041,25 +1138,26 @@
 
 {#if showTemplatesModal}
   <div
-    class="modal-overlay"
+    class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
     on:click={() => (showTemplatesModal = false)}
     on:keydown={(e) => e.key === 'Escape' && (showTemplatesModal = false)}
   >
     <div
-      class="modal templates-modal"
+      class="confirm-modal"
+      style="max-width: 600px;"
       role="presentation"
       on:click|stopPropagation
       on:keydown|stopPropagation
     >
       <div class="modal-header">
-        <h3>{$t('editor.templates')}</h3>
-        <button class="btn-close" on:click={() => (showTemplatesModal = false)}
-          ><Icon name="cross" size={14} /></button
-        >
+        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">{$t('editor.templates')}</h3>
+        <button class="btn-close" on:click={() => (showTemplatesModal = false)}>
+          <Icon name="cross" size={14} />
+        </button>
       </div>
-      <p class="text-secondary mb-2">{$t('editor.templates_desc')}</p>
+      <p style="margin: 8px 0 16px; color: var(--fg-dim); font-size: 13px;">{$t('editor.templates_desc')}</p>
 
       <div class="template-list">
         {#each templates as template}
@@ -1071,7 +1169,7 @@
             <span class="template-type">{template.type}</span>
           </button>
         {:else}
-          <p class="text-center p-3">{$t('editor.no_templates')}</p>
+          <p class="text-center p-3" style="color: var(--fg-dim);">{$t('editor.no_templates')}</p>
         {/each}
       </div>
     </div>
@@ -1080,36 +1178,37 @@
 
 {#if showGeneratorModal}
   <div
-    class="modal-overlay"
+    class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
     on:click={() => (showGeneratorModal = false)}
     on:keydown={(e) => e.key === 'Escape' && (showGeneratorModal = false)}
   >
     <div
-      class="modal generator-modal"
+      class="confirm-modal"
+      style="max-width: 500px;"
       role="presentation"
       on:click|stopPropagation
       on:keydown|stopPropagation
     >
       <div class="modal-header">
-        <h3>{$t('editor.generator')}</h3>
-        <button class="btn-close" on:click={() => (showGeneratorModal = false)}
-          ><Icon name="cross" size={14} /></button
-        >
+        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">{$t('editor.generator')}</h3>
+        <button class="btn-close" on:click={() => (showGeneratorModal = false)}>
+          <Icon name="cross" size={14} />
+        </button>
       </div>
 
-      <div class="form-group mb-2">
-        <label for="gen-protocol">{$t('editor.protocol')}</label>
-        <select id="gen-protocol" bind:value={genProtocol} class="input">
+      <div class="form-group" style="margin-bottom: 12px; margin-top: 12px;">
+        <label for="gen-protocol" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">{$t('editor.protocol')}</label>
+        <select id="gen-protocol" bind:value={genProtocol} class="input" style="width: 100%;">
           <option value="vless">VLESS</option>
           <option value="shadowsocks">Shadowsocks</option>
         </select>
       </div>
 
-      <div class="form-grid">
+      <div class="form-grid" style="margin-bottom: 12px; display: grid; grid-template-columns: 2fr 1fr; gap: 12px;">
         <div class="form-group">
-          <label for="gen-address">{$t('editor.address')}</label>
+          <label for="gen-address" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">{$t('editor.address')}</label>
           <input
             id="gen-address"
             type="text"
@@ -1119,26 +1218,29 @@
           />
         </div>
         <div class="form-group">
-          <label for="gen-port">{$t('editor.port')}</label>
+          <label for="gen-port" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">{$t('editor.port')}</label>
           <input id="gen-port" type="number" bind:value={genPort} class="input" />
         </div>
       </div>
 
-      <div class="form-group mt-2">
-        <label for="gen-uuid">{genProtocol === 'vless' ? 'UUID' : 'Password'}</label>
-        <div class="input-group">
-          <input id="gen-uuid" type="text" bind:value={genUUID} class="input" />
+      <div class="form-group" style="margin-bottom: 12px;">
+        <label for="gen-uuid" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">{genProtocol === 'vless' ? 'UUID' : 'Password'}</label>
+        <div class="input-group" style="display: flex; gap: 8px;">
+          <input id="gen-uuid" type="text" bind:value={genUUID} class="input" style="flex: 1;" />
           <button
             class="btn btn-secondary"
+            style="padding: 0 12px;"
             on:click={() => (genUUID = crypto.randomUUID())}
-            title={$t('editor.generate_uuid')}><Icon name="refresh" size={14} /></button
+            title={$t('editor.generate_uuid')}
           >
+            <Icon name="refresh" size={14} />
+          </button>
         </div>
       </div>
 
       {#if genProtocol === 'vless'}
-        <div class="form-group mt-2">
-          <label for="gen-sni">SNI</label>
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label for="gen-sni" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">SNI</label>
           <input
             id="gen-sni"
             type="text"
@@ -1148,10 +1250,10 @@
           />
         </div>
 
-        <div class="form-grid mt-2">
+        <div class="form-grid" style="margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
           <div class="form-group">
-            <label for="gen-security">Security</label>
-            <select id="gen-security" bind:value={genSecurity} class="input">
+            <label for="gen-security" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">Security</label>
+            <select id="gen-security" bind:value={genSecurity} class="input" style="width: 100%;">
               <option value="reality">Reality</option>
               <option value="tls">TLS</option>
               <option value="none">None</option>
@@ -1159,7 +1261,7 @@
           </div>
           {#if genSecurity === 'reality'}
             <div class="form-group">
-              <label for="gen-shortid">Short ID</label>
+              <label for="gen-shortid" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">Short ID</label>
               <input
                 id="gen-shortid"
                 type="text"
@@ -1172,11 +1274,13 @@
         </div>
       {/if}
 
-      <div class="modal-actions mt-3">
-        <button on:click={() => (showGeneratorModal = false)} class="btn btn-secondary"
-          >{$t('app.cancel')}</button
-        >
-        <button on:click={generateOutbound} class="btn btn-primary">{$t('app.generate')}</button>
+      <div class="confirm-modal-actions">
+        <button on:click={() => (showGeneratorModal = false)} class="btn btn-secondary">
+          {$t('app.cancel')}
+        </button>
+        <button on:click={generateOutbound} class="btn btn-primary">
+          {$t('app.generate')}
+        </button>
       </div>
     </div>
   </div>
@@ -1184,21 +1288,21 @@
 
 {#if showSaveConfirmModal}
   <div
-    class="modal-overlay"
+    class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
     on:click={() => (showSaveConfirmModal = false)}
     on:keydown={(e) => e.key === 'Escape' && (showSaveConfirmModal = false)}
   >
     <div
-      class="modal"
+      class="confirm-modal"
       style="max-width: 700px; width: 90%; display: flex; flex-direction: column; max-height: 85vh;"
       role="presentation"
       on:click|stopPropagation
       on:keydown|stopPropagation
     >
       <div class="modal-header">
-        <h3>{$t('editor.confirm_save_title') || 'Confirm Save'}</h3>
+        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">{$t('editor.confirm_save_title') || 'Confirm Save'}</h3>
         <button
           class="btn-close"
           on:click={() => (showSaveConfirmModal = false)}
@@ -1209,105 +1313,67 @@
       </div>
 
       <!-- Validation status -->
-      <div
-        style="margin-bottom: 1rem; padding: 0.75rem; border-radius: 4px; font-size: 13px; display: flex; align-items: center; gap: 8px; background: var(--bg); border: 1px solid var(--border);"
-      >
-        {#if validationLoading}
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 38 38"
-              stroke="var(--primary)"
-              style="display: inline-block;"
-            >
-              <g fill="none" fill-rule="evenodd">
-                <g transform="translate(1 1)" stroke-width="2">
-                  <circle stroke-opacity=".5" cx="18" cy="18" r="18" />
-                  <path d="M36 18c0-9.94-8.06-18-18-18">
-                    <animateTransform
-                      attributeName="transform"
-                      type="rotate"
-                      from="0 18 18"
-                      to="360 18 18"
-                      dur="1s"
-                      repeatCount="indefinite"
-                    />
-                  </path>
-                </g>
+      {#if validationLoading}
+        <div class="validation-result validation-loading" style="margin-top: 12px;">
+          <svg width="16" height="16" viewBox="0 0 38 38" stroke="var(--accent)" style="flex-shrink:0">
+            <g fill="none" fill-rule="evenodd">
+              <g transform="translate(1 1)" stroke-width="2">
+                <circle stroke-opacity=".5" cx="18" cy="18" r="18" />
+                <path d="M36 18c0-9.94-8.06-18-18-18">
+                  <animateTransform attributeName="transform" type="rotate" from="0 18 18" to="360 18 18" dur="1s" repeatCount="indefinite" />
+                </path>
               </g>
-            </svg>
-            <span>{$t('editor.validating') || 'Validating configuration...'}</span>
+            </g>
+          </svg>
+          <span>{$t('editor.validating') || 'Проверка конфигурации...'}</span>
+        </div>
+      {:else if validationResult}
+        {#if validationResult.valid}
+          <div class="validation-result validation-ok" style="margin-top: 12px;">
+            <span class="v-icon">✓</span>
+            <span>{$t('editor.validation_valid') || 'Конфигурация корректна.'}</span>
           </div>
-        {:else if validationResult}
-          {#if validationResult.valid}
-            <div style="color: var(--success); display: flex; align-items: center; gap: 6px;">
-              <span style="font-weight: bold; font-size: 16px;">✓</span>
-              <span>{$t('editor.validation_valid') || 'Configuration is valid.'}</span>
+        {:else}
+          <div class="validation-result validation-err" style="margin-top: 12px;">
+            <div class="validation-err-head">
+              <span class="v-icon">✗</span>
+              <span>{$t('editor.validation_invalid') || 'Конфигурация содержит ошибки:'}</span>
             </div>
-          {:else}
-            <div
-              style="color: var(--danger); display: flex; flex-direction: column; gap: 4px; width: 100%;"
-            >
-              <div style="display: flex; align-items: center; gap: 6px; font-weight: bold;">
-                <span style="font-size: 16px;">✗</span>
-                <span>{$t('editor.validation_invalid') || 'Configuration is invalid:'}</span>
-              </div>
-              <pre
-                style="margin: 4px 0 0 0; white-space: pre-wrap; font-family: monospace; font-size: 12px; background: rgba(220, 53, 69, 0.08); padding: 6px; border-radius: 3px; max-height: 120px; overflow-y: auto; border: 1px solid rgba(220, 53, 69, 0.15);">{validationResult.error}</pre>
-            </div>
-          {/if}
+            <pre>{validationResult.error}</pre>
+          </div>
         {/if}
-      </div>
+      {/if}
 
       <!-- Diff Preview -->
-      <div
-        style="flex: 1; overflow-y: auto; background: var(--bg-page, #f8f9fa); border: 1px solid var(--border); border-radius: 4px; padding: 0.5rem; font-family: monospace; font-size: 12px; line-height: 1.5; max-height: 400px; display: flex; flex-direction: column;"
-      >
-        <h4 style="margin: 0 0 0.5rem 0; font-size: 13px; color: var(--text-secondary);">
-          {$t('editor.diff_preview') || 'Changes Preview:'}
-        </h4>
-        <div style="flex: 1; overflow-y: auto;">
+      <div class="diff-preview" style="margin-top: 12px;">
+        <div class="diff-preview-title">
+          {$t('editor.diff_preview') || 'Предпросмотр изменений'}
+        </div>
+        <div class="diff-preview-body">
           {#each getDiffGroups(originalContent, editorView ? editorView.state.doc.toString() : '') as group}
             {#if group.type === 'added'}
               {#each group.lines as line}
-                <div
-                  style="background: rgba(40, 167, 69, 0.15); color: #28a745; padding: 1px 4px; border-left: 3px solid #28a745; white-space: pre-wrap;"
-                >
-                  + {line}
-                </div>
+                <div class="diff-line diff-line-added">+ {line}</div>
               {/each}
             {:else if group.type === 'removed'}
               {#each group.lines as line}
-                <div
-                  style="background: rgba(220, 53, 69, 0.15); color: #dc3545; padding: 1px 4px; border-left: 3px solid #dc3545; white-space: pre-wrap;"
-                >
-                  - {line}
-                </div>
+                <div class="diff-line diff-line-removed">- {line}</div>
               {/each}
             {:else if group.type === 'collapsed'}
-              <div
-                style="color: var(--text-secondary); padding: 4px; text-align: center; border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border); margin: 4px 0; background: var(--bg); font-style: italic;"
-              >
-                {group.lines[0]}
-              </div>
+              <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
             {:else}
               {#each group.lines as line}
-                <div
-                  style="color: var(--text-secondary); padding: 1px 4px; border-left: 3px solid transparent; white-space: pre-wrap;"
-                >
-                  {line}
-                </div>
+                <div class="diff-line diff-line-unchanged">{line}</div>
               {/each}
             {/if}
           {/each}
         </div>
       </div>
 
-      <div class="modal-actions" style="margin-top: 1.25rem;">
-        <button on:click={() => (showSaveConfirmModal = false)} class="btn btn-secondary"
-          >{$t('app.cancel')}</button
-        >
+      <div class="confirm-modal-actions" style="margin-top: 16px;">
+        <button on:click={() => (showSaveConfirmModal = false)} class="btn btn-secondary">
+          {$t('app.cancel')}
+        </button>
         <button
           on:click={confirmSave}
           class="btn btn-primary"
@@ -1321,271 +1387,29 @@
 {/if}
 
 <style>
-  .editor-page {
-    display: flex;
-    /* hot-fix layout, требует визуального ревью Claude Design */
-    min-height: 0;
-    flex: 1;
-    background: var(--bg);
-  }
-
-  .sidebar {
-    width: 250px;
-    background: var(--card-bg);
-    border-right: 1px solid var(--border);
-    padding: 1rem;
-    overflow-y: auto;
-  }
-
-  .sidebar-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-  }
-
-  .sidebar h3 {
-    margin: 0;
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-  }
-
-  .dir-toggle {
-    display: flex;
-    gap: 0.25rem;
-    padding: 0.5rem;
-    background: var(--bg);
-    border-radius: var(--radius);
-    margin: 0.5rem 0 1rem 0;
-  }
-
-  .dir-toggle button {
-    flex: 1;
-    padding: 0.4rem;
-    border: none;
-    background: transparent;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    cursor: pointer;
-    color: var(--text-secondary);
-    transition: all 0.2s;
-  }
-
-  .dir-toggle button:hover {
-    background: var(--hover);
-  }
-
-  .dir-toggle button.active {
-    background: var(--card-bg);
-    color: var(--primary);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  }
-
-  .file-list,
-  .backup-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    margin-bottom: 1.5rem;
-  }
-
-  .file-item,
-  .backup-item {
-    padding: 0.5rem;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    text-align: left;
-    cursor: pointer;
-    color: var(--text);
-    font-size: 0.875rem;
-    transition: background 0.2s;
-  }
-
-  .file-item:hover,
-  .backup-item:hover {
-    background: var(--hover);
-  }
-
-  .file-item.active {
-    background: var(--primary);
-    color: white;
-  }
-
-  .backup-item {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-  }
-
-  .editor-main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.75rem 1rem;
-    background: var(--card-bg);
-    border-bottom: 1px solid var(--border);
-  }
-
-  .toolbar-left {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
-
-  .file-name {
-    font-weight: 500;
-    color: var(--text);
-  }
-
-  .toolbar-actions {
-    display: flex;
-    gap: 0.5rem;
-  }
-
-  .toolbar-actions button {
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.875rem;
-    transition: opacity 0.2s;
-  }
-
-  .toolbar-actions button:hover:not(:disabled) {
-    opacity: 0.9;
-  }
-
-  .toolbar-actions button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .btn-primary {
-    background: var(--primary);
-    color: white;
-  }
-
-  .btn-secondary {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text);
-  }
-
-  .btn-danger {
-    background: var(--danger);
-    color: white;
-  }
-
-  .btn-icon-small {
-    padding: 0.25rem 0.5rem;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 1rem;
-    color: var(--text);
-  }
-
-  .toggle-label {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .toggle-label input[type='checkbox'] {
-    cursor: pointer;
-  }
-
-  .loading,
-  .empty-state {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: var(--text-secondary);
-  }
-
-  .editor-container {
-    flex: 1;
-    overflow: auto;
-  }
-
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-
-  .modal {
-    background: var(--card-bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 1.5rem;
-    width: 100%;
-    max-width: 400px;
-    box-shadow: var(--shadow);
-  }
-
-  .modal h3 {
-    margin: 0 0 1rem 0;
-  }
-
-  .modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    margin-top: 1rem;
-  }
-
-  .input {
-    width: 100%;
-    padding: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    color: var(--text);
-    font-size: 0.875rem;
-  }
-
+  /* hot-fix layout, требует визуального ревью Claude Design */
   :global(.cm-editor) {
-    height: 100%;
-    font-size: 14px;
+    height: 100% !important;
+    font-size: 13.5px;
+    background: #050d16 !important;
   }
-
   :global(.cm-scroller) {
-    overflow: auto;
+    overflow: auto !important;
   }
-  .templates-modal {
-    max-width: 600px;
-    width: 90%;
+  :global(.cm-gutter) {
+    background: #050d16 !important;
+    border-right: 1px solid #0e2034 !important;
+    color: var(--fg-faint) !important;
+  }
+  :global(.cm-content) {
+    font-family: var(--font-family-mono) !important;
   }
 
   .template-list {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    max-height: 400px;
+    gap: 8px;
+    max-height: 360px;
     overflow-y: auto;
   }
 
@@ -1593,98 +1417,235 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.75rem;
-    background: var(--bg);
+    padding: 12px;
+    background: var(--bg-deep);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-md);
     cursor: pointer;
     text-align: left;
     transition: all 0.2s;
+    width: 100%;
+    color: var(--fg-primary);
   }
 
   .template-item:hover {
-    border-color: var(--primary);
+    border-color: var(--accent);
     background: var(--hover);
   }
 
   .template-info {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 4px;
   }
 
   .template-name {
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 13px;
+    color: var(--fg-primary);
   }
 
   .template-desc {
-    font-size: 0.8rem;
-    color: var(--text-secondary);
+    font-size: 11.5px;
+    color: var(--fg-dim);
   }
 
   .template-type {
-    font-size: 0.7rem;
+    font-size: 10px;
     text-transform: uppercase;
-    background: var(--bg-page);
-    padding: 0.1rem 0.4rem;
+    background: var(--bg-card);
+    padding: 2px 6px;
     border-radius: 4px;
     border: 1px solid var(--border);
+    color: var(--fg-dim);
+    font-family: var(--font-family-mono);
   }
 
   .modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1rem;
   }
 
   .btn-close {
     background: none;
     border: none;
-    font-size: 1.2rem;
     cursor: pointer;
-    color: var(--text-secondary);
-  }
-
-  .p-3 {
-    padding: 1rem;
-  }
-
-  .text-center {
-    text-align: center;
-  }
-  .generator-modal {
-    max-width: 500px;
-  }
-
-  .form-grid {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
-    gap: 1rem;
-  }
-
-  .input-group {
+    color: var(--fg-dim);
     display: flex;
-    gap: 0.5rem;
+    align-items: center;
+    padding: 4px;
+    border-radius: 4px;
+  }
+  .btn-close:hover {
+    background: var(--hover);
+    color: var(--fg-primary);
   }
 
-  .sr-only {
+  /* status bar */
+  .status-dirty {
+    color: var(--warning) !important;
+  }
+
+  /* kebab menu */
+  .kebab-wrap {
+    position: relative;
+    display: inline-block;
+  }
+
+  .kebab-dropdown {
     position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
+    right: 0;
+    top: calc(100% + 4px);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    min-width: 180px;
+    z-index: 100;
     overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border-width: 0;
+    padding: 4px;
   }
 
-  .mt-3 {
-    margin-top: 1.5rem;
+  .kebab-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12.5px;
+    color: var(--fg-primary);
+    text-align: left;
+    transition: background 0.15s;
   }
-  .mb-2 {
-    margin-bottom: 1rem;
+
+  .kebab-item:hover {
+    background: var(--hover);
+  }
+
+  .kebab-item.danger {
+    color: var(--danger);
+  }
+
+  .kebab-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 0;
+  }
+
+  /* validation / diff */
+  .validation-result {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 12.5px;
+  }
+
+  .validation-loading {
+    background: rgba(41,194,240,0.08);
+    color: var(--accent);
+    border: 1px solid rgba(41,194,240,0.2);
+  }
+
+  .validation-ok {
+    background: rgba(16,185,129,0.08);
+    color: var(--success);
+    border: 1px solid rgba(16,185,129,0.2);
+  }
+
+  .v-icon {
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .validation-err {
+    background: rgba(239,68,68,0.08);
+    color: var(--danger);
+    border: 1px solid rgba(239,68,68,0.2);
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .validation-err pre {
+    margin: 6px 0 0;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--fg-dim);
+    font-family: var(--font-family-mono);
+    width: 100%;
+  }
+
+  .diff-preview {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .diff-preview-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+    flex-shrink: 0;
+  }
+
+  .diff-preview-body {
+    flex: 1;
+    overflow-y: auto;
+    background: #050d16;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px;
+    font-family: var(--font-family-mono);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .diff-line {
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .diff-line-added {
+    color: #a3e9b6;
+    background: rgba(163,233,182,0.04);
+  }
+
+  .diff-line-removed {
+    color: #f87171;
+    background: rgba(248,113,113,0.04);
+  }
+
+  .diff-line-collapsed {
+    color: var(--fg-faint);
+    font-style: italic;
+  }
+
+  .diff-line-unchanged {
+    color: var(--fg-secondary);
+  }
+
+  .spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
 </style>
