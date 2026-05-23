@@ -116,8 +116,15 @@
         body: JSON.stringify({ action: 'start' })
       });
       if (!res.ok) throw new Error('Failed to start Mihomo');
-      setTimeout(async () => { await fetchCapabilities(); fetchRules(); mihomoLaunching = false; }, 1500);
-      setTimeout(async () => { await fetchCapabilities(); fetchRules(); }, 4000);
+      setTimeout(async () => {
+        await fetchCapabilities();
+        fetchRules();
+        mihomoLaunching = false;
+      }, 1500);
+      setTimeout(async () => {
+        await fetchCapabilities();
+        fetchRules();
+      }, 4000);
     } catch (e: any) {
       showToast('error', e.message);
       mihomoLaunching = false;
@@ -134,13 +141,24 @@
 <div class="container">
   <div class="page-head">
     <div>
-      <div class="crumbs">{$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('nav.rules')}</div>
+      <div class="crumbs">
+        {$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.rules')}
+      </div>
       <h1>{$t('rules.title')}</h1>
       <p class="sub">{$t('rules.subtitle')}</p>
     </div>
     <div class="ph-actions">
       <button class="btn btn-secondary" on:click={goToAddRule}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M12 5v14M5 12h14"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
+        >
         {$t('rules.add')}
       </button>
       <button class="btn btn-primary" on:click={applyRules} disabled={applying}>
@@ -148,7 +166,15 @@
           <span class="spinner" style="margin-right: 6px;">...</span>
           {$t('app.loading')}
         {:else}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+          >
           {$t('rules.apply')}
         {/if}
       </button>
@@ -201,7 +227,9 @@
 
     <div class="stats mb-2">
       <span class="stat"><b>{rules.length}</b> {$currentLang === 'ru' ? 'всего' : 'total'}</span>
-      <span class="stat"><b>{getFilteredRules().length}</b> {$currentLang === 'ru' ? 'показано' : 'shown'}</span>
+      <span class="stat"
+        ><b>{getFilteredRules().length}</b> {$currentLang === 'ru' ? 'показано' : 'shown'}</span
+      >
     </div>
 
     <div class="table-container">
@@ -232,7 +260,11 @@
             </tr>
           {:else}
             <tr>
-              <td colspan="4" class="empty-cell" style="text-align: center; padding: 2rem; color: var(--fg-dim);">
+              <td
+                colspan="4"
+                class="empty-cell"
+                style="text-align: center; padding: 2rem; color: var(--fg-dim);"
+              >
                 {$t('rules.no_rules')}
               </td>
             </tr>

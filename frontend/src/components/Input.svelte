@@ -32,7 +32,7 @@
     {placeholder}
     {disabled}
     {oninput}
-    aria-invalid={!!error ? 'true' : 'false'}
+    aria-invalid={error ? 'true' : 'false'}
     aria-describedby={error ? `${id}-error` : undefined}
   />
   {#if error}
@@ -43,7 +43,7 @@
 <style>
   .input-error {
     border-color: var(--danger) !important;
-    box-shadow: 0 0 0 3px rgba(239,91,107,.18) !important;
+    box-shadow: 0 0 0 3px rgba(239, 91, 107, 0.18) !important;
   }
   .error-text {
     display: block;

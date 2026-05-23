@@ -136,11 +136,11 @@
     }
 
     const points = trafficData;
-    const maxVal = Math.max(...points.map(p => Math.max(p.up, p.down))) || 1024;
+    const maxVal = Math.max(...points.map((p) => Math.max(p.up, p.down))) || 1024;
     const width = 1000;
     const height = 240;
     const step = width / (maxPoints - 1);
-    
+
     // Offset x to draw from right to left if points are less than maxPoints
     const startIdx = maxPoints - points.length;
     const getX = (idx: number) => (startIdx + idx) * step;
@@ -175,8 +175,8 @@
       return { uLine: '', uArea: '', dLine: '', dArea: '' };
     }
 
-    const maxUp = Math.max(...points.map(p => p.up)) || 1;
-    const maxDown = Math.max(...points.map(p => p.down)) || 1;
+    const maxUp = Math.max(...points.map((p) => p.up)) || 1;
+    const maxDown = Math.max(...points.map((p) => p.down)) || 1;
     const width = 200;
     const height = 42;
     const step = width / 19; // 20 points, 19 steps
@@ -204,12 +204,16 @@
 <div class="container">
   <div class="page-head">
     <div>
-      <div class="crumbs">{$currentLang === 'ru' ? 'Инструменты' : 'Tools'} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('traffic.title')}</div>
+      <div class="crumbs">
+        {$currentLang === 'ru' ? 'Инструменты' : 'Tools'}
+        <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('traffic.title')}
+      </div>
       <h1>{$t('traffic.title')}</h1>
       <p class="sub">{$t('traffic.realtime')}</p>
     </div>
     <div class="ph-actions">
-      <span class="status-indicator" class:connected={connected}>
+      <span class="status-indicator" class:connected>
         {connected ? 'live' : 'offline'}
       </span>
     </div>
@@ -221,18 +225,21 @@
       <div class="stat-card-content">
         <div class="stat-label">Upload</div>
         <div class="stat-value upload-color">{formatSpeed(totalUp)}</div>
-        <div class="stat-session">Σ {$currentLang === 'ru' ? 'сессии' : 'session'} {formatBytes(sessionUp)}</div>
+        <div class="stat-session">
+          Σ {$currentLang === 'ru' ? 'сессии' : 'session'}
+          {formatBytes(sessionUp)}
+        </div>
       </div>
       {#if trafficData.length >= 2}
         <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
           <defs>
             <linearGradient id="sg-upload" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="var(--success)" stop-opacity="0.4"/>
-              <stop offset="100%" stop-color="var(--success)" stop-opacity="0"/>
+              <stop offset="0%" stop-color="var(--success)" stop-opacity="0.4" />
+              <stop offset="100%" stop-color="var(--success)" stop-opacity="0" />
             </linearGradient>
           </defs>
-          <path d={sparklines.uArea} fill="url(#sg-upload)"/>
-          <path d={sparklines.uLine} fill="none" stroke="var(--success)" stroke-width="1.5"/>
+          <path d={sparklines.uArea} fill="url(#sg-upload)" />
+          <path d={sparklines.uLine} fill="none" stroke="var(--success)" stroke-width="1.5" />
         </svg>
       {/if}
     </div>
@@ -242,25 +249,30 @@
       <div class="stat-card-content">
         <div class="stat-label">Download</div>
         <div class="stat-value download-color">{formatSpeed(totalDown)}</div>
-        <div class="stat-session">Σ {$currentLang === 'ru' ? 'сессии' : 'session'} {formatBytes(sessionDown)}</div>
+        <div class="stat-session">
+          Σ {$currentLang === 'ru' ? 'сессии' : 'session'}
+          {formatBytes(sessionDown)}
+        </div>
       </div>
       {#if trafficData.length >= 2}
         <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
           <defs>
             <linearGradient id="sg-download" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4"/>
-              <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+              <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4" />
+              <stop offset="100%" stop-color="var(--accent)" stop-opacity="0" />
             </linearGradient>
           </defs>
-          <path d={sparklines.dArea} fill="url(#sg-download)"/>
-          <path d={sparklines.dLine} fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+          <path d={sparklines.dArea} fill="url(#sg-download)" />
+          <path d={sparklines.dLine} fill="none" stroke="var(--accent)" stroke-width="1.5" />
         </svg>
       {/if}
     </div>
 
     <!-- Active Connections Card -->
     <div class="card stat-card-normal">
-      <div class="stat-label">{$currentLang === 'ru' ? 'Активные соединения' : 'Active Connections'}</div>
+      <div class="stat-label">
+        {$currentLang === 'ru' ? 'Активные соединения' : 'Active Connections'}
+      </div>
       <div class="stat-value active-connections-color">{activeConnectionsCount}</div>
       <div class="stat-session">{tcpConnectionsCount} TCP · {udpConnectionsCount} UDP</div>
     </div>
@@ -275,7 +287,7 @@
         {$currentLang === 'ru' ? 'последняя минута · 1 точка/с' : 'last minute · 1 point/s'}
       </span>
     </div>
-    
+
     <div class="chart-area-wrapper">
       {#if trafficData.length < 2}
         <div class="chart-empty">
@@ -293,31 +305,52 @@
           <svg viewBox="0 0 1000 240" preserveAspectRatio="none" style="width: 100%; height: 100%;">
             <defs>
               <linearGradient id="cg-download-main" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25"/>
-                <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+                <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25" />
+                <stop offset="100%" stop-color="var(--accent)" stop-opacity="0" />
               </linearGradient>
               <linearGradient id="cg-upload-main" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="var(--success)" stop-opacity="0.15"/>
-                <stop offset="100%" stop-color="var(--success)" stop-opacity="0"/>
+                <stop offset="0%" stop-color="var(--success)" stop-opacity="0.15" />
+                <stop offset="100%" stop-color="var(--success)" stop-opacity="0" />
               </linearGradient>
             </defs>
             <!-- Grid Lines -->
-            <line x1="0" y1="60" x2="1000" y2="60" stroke="rgba(255,255,255,.03)" stroke-dasharray="4"/>
-            <line x1="0" y1="120" x2="1000" y2="120" stroke="rgba(255,255,255,.03)" stroke-dasharray="4"/>
-            <line x1="0" y1="180" x2="1000" y2="180" stroke="rgba(255,255,255,.03)" stroke-dasharray="4"/>
-            
+            <line
+              x1="0"
+              y1="60"
+              x2="1000"
+              y2="60"
+              stroke="rgba(255,255,255,.03)"
+              stroke-dasharray="4"
+            />
+            <line
+              x1="0"
+              y1="120"
+              x2="1000"
+              y2="120"
+              stroke="rgba(255,255,255,.03)"
+              stroke-dasharray="4"
+            />
+            <line
+              x1="0"
+              y1="180"
+              x2="1000"
+              y2="180"
+              stroke="rgba(255,255,255,.03)"
+              stroke-dasharray="4"
+            />
+
             <!-- Download Path -->
-            <path d={chartData.dArea} fill="url(#cg-download-main)"/>
-            <path d={chartData.dLine} fill="none" stroke="var(--accent)" stroke-width="2"/>
-            
+            <path d={chartData.dArea} fill="url(#cg-download-main)" />
+            <path d={chartData.dLine} fill="none" stroke="var(--accent)" stroke-width="2" />
+
             <!-- Upload Path -->
-            <path d={chartData.uArea} fill="url(#cg-upload-main)"/>
-            <path d={chartData.uLine} fill="none" stroke="var(--success)" stroke-width="2"/>
+            <path d={chartData.uArea} fill="url(#cg-upload-main)" />
+            <path d={chartData.uLine} fill="none" stroke="var(--success)" stroke-width="2" />
           </svg>
         </div>
       {/if}
     </div>
-    
+
     <div class="chart-x">
       <span>60 {$currentLang === 'ru' ? 'сек назад' : 'sec ago'}</span>
       <span>-45 {$currentLang === 'ru' ? 'сек' : 'sec'}</span>

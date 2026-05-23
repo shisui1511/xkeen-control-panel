@@ -69,7 +69,20 @@
     if (!source && tags.length > 0) {
       for (const tag of tags) {
         const lowerTag = tag.toLowerCase();
-        if (!['info', 'inf', 'information', 'warning', 'warn', 'wrn', 'error', 'err', 'debug', 'dbg'].includes(lowerTag)) {
+        if (
+          ![
+            'info',
+            'inf',
+            'information',
+            'warning',
+            'warn',
+            'wrn',
+            'error',
+            'err',
+            'debug',
+            'dbg'
+          ].includes(lowerTag)
+        ) {
           source = tag;
           break;
         }
@@ -210,16 +223,21 @@
   <!-- page-head -->
   <div class="page-head">
     <div>
-      <div class="crumbs">{$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('nav.logs')}</div>
+      <div class="crumbs">
+        {$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.logs')}
+      </div>
       <h1>{$t('logs.h1')}</h1>
       <p class="sub">{$t('logs.h1_sub')}</p>
     </div>
     <div class="ph-actions">
-      <span class="status-indicator" class:connected={connected}>
+      <span class="status-indicator" class:connected>
         {connected ? $t('logs.status_connected') : $t('logs.status_disconnected')}
       </span>
       {#if !connected}
-        <button on:click={connect} class="btn btn-primary" title={$t('logs.connect')}>{$t('logs.connect')}</button>
+        <button on:click={connect} class="btn btn-primary" title={$t('logs.connect')}
+          >{$t('logs.connect')}</button
+        >
       {/if}
     </div>
   </div>
@@ -228,26 +246,81 @@
     <!-- filter toolbar -->
     <div class="toolbar">
       <div class="toolbar-left">
-        <button class="btn btn-secondary" on:click={togglePause} title={paused ? $t('logs.resume') : $t('logs.pause')}>
+        <button
+          class="btn btn-secondary"
+          on:click={togglePause}
+          title={paused ? $t('logs.resume') : $t('logs.pause')}
+        >
           {#if paused}
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>{$t('logs.resume')}
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right: 6px;"><polygon points="5 3 19 12 5 21 5 3" /></svg
+            >{$t('logs.resume')}
           {:else}
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>{$t('logs.pause')}
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right: 6px;"
+              ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
+                x="14"
+                y="5"
+                width="4"
+                height="14"
+                rx="1"
+              /></svg
+            >{$t('logs.pause')}
           {/if}
         </button>
-        
+
         <button class="btn btn-secondary" on:click={clearLogs} title={$t('logs.clear')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>{$t('logs.clear')}
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right: 6px;"
+            ><polyline points="3 6 5 6 21 6" /><path
+              d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
+            /></svg
+          >{$t('logs.clear')}
         </button>
 
         <button class="btn btn-secondary" on:click={exportLogs} title={$t('logs.export')}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>{$t('logs.export')}
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right: 6px;"
+            ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+              points="7 10 12 15 17 10"
+            /><line x1="12" y1="15" x2="12" y2="3" /></svg
+          >{$t('logs.export')}
         </button>
       </div>
 
       <div class="filters" style="flex:1;margin-left:14px;">
-        <input type="text" class="filter-input" placeholder={$t('logs.filter')} bind:value={filter} style="flex:1;" />
-        
+        <input
+          type="text"
+          class="filter-input"
+          placeholder={$t('logs.filter')}
+          bind:value={filter}
+          style="flex:1;"
+        />
+
         <select bind:value={sourceFilter} class="source-select">
           <option value="">{$t('logs.all_sources')}</option>
           {#each availableSources as source}
@@ -266,7 +339,7 @@
 
       <label class="toggle-label" style="margin-left:auto;">
         <label class="toggle-switch">
-          <input type="checkbox" bind:checked={autoScroll}>
+          <input type="checkbox" bind:checked={autoScroll} />
           <span class="toggle-slider"></span>
         </label>
         {$t('logs.autoscroll')}
@@ -278,7 +351,9 @@
         class="alert alert-danger"
         style="margin: 0; padding: 10px 14px; border-radius: var(--radius-md); font-size: 13px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border);"
       >
-        <span><strong>{$t('logs.disconnected_title')}</strong> — {$t('logs.disconnected_desc')}</span>
+        <span
+          ><strong>{$t('logs.disconnected_title')}</strong> — {$t('logs.disconnected_desc')}</span
+        >
         <button
           on:click={connect}
           class="btn btn-secondary btn-small"
@@ -319,8 +394,18 @@
     </div>
 
     <div class="stats">
-      <span class="stat"><b>{logs.length}</b> {$t('logs.buffer_count', { count: logs.length }).replace(String(logs.length), '').trim()}</span>
-      <span class="stat"><b>{availableSources.length}</b> {$t('logs.source_count', { count: availableSources.length }).replace(String(availableSources.length), '').trim()}</span>
+      <span class="stat"
+        ><b>{logs.length}</b>
+        {$t('logs.buffer_count', { count: logs.length })
+          .replace(String(logs.length), '')
+          .trim()}</span
+      >
+      <span class="stat"
+        ><b>{availableSources.length}</b>
+        {$t('logs.source_count', { count: availableSources.length })
+          .replace(String(availableSources.length), '')
+          .trim()}</span
+      >
       <span class="stat">{$t('logs.realtime_label')}</span>
     </div>
   </div>

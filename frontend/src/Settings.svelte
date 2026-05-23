@@ -42,7 +42,7 @@
   async function fetchSnapshots() {
     try {
       const res = await fetch('/api/snapshots/list');
-      if (res.ok) snapshots = await res.json() ?? [];
+      if (res.ok) snapshots = (await res.json()) ?? [];
     } catch (_) {}
   }
 
@@ -119,7 +119,7 @@
     try {
       const xrayRes = await fetch('/api/config/list?dir=/opt/etc/xray/configs');
       const mihomoRes = await fetch('/api/config/list?dir=/opt/etc/mihomo');
-      
+
       let files: string[] = [];
       if (xrayRes.ok) {
         const data = await xrayRes.json();
@@ -129,9 +129,9 @@
         const data = await mihomoRes.json();
         files = [...files, ...data];
       }
-      
+
       files.push('/opt/etc/xcp/config.json');
-      
+
       configFiles = Array.from(new Set(files)).sort();
       if (configFiles.length > 0 && !selectedFile) {
         selectedFile = configFiles[0];
@@ -169,7 +169,7 @@
         return;
       }
       const data = await readRes.text();
-      
+
       const csrfToken = localStorage.getItem('csrf_token');
       const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
         method: 'POST',
@@ -229,7 +229,7 @@
   function loadAppearanceSettings() {
     try {
       const saved = localStorage.getItem('theme') || '';
-      selectedTheme = (saved === 'light' || saved === 'dark') ? saved : 'auto';
+      selectedTheme = saved === 'light' || saved === 'dark' ? saved : 'auto';
       timezone = localStorage.getItem('timezone') || 'UTC';
       animationsEnabled = localStorage.getItem('animations') !== 'false';
       autoRefresh = localStorage.getItem('autoRefresh') !== 'false';
@@ -253,7 +253,9 @@
   }
 
   function saveSetting(key: string, value: string) {
-    try { localStorage.setItem(key, value); } catch {}
+    try {
+      localStorage.setItem(key, value);
+    } catch {}
   }
 
   // Change password
@@ -422,7 +424,10 @@
   <!-- page-head -->
   <div class="page-head">
     <div>
-      <div class="crumbs">{$t('nav.group_core')} <span class="crumb-sep">/</span> {$t('settings.h1')}</div>
+      <div class="crumbs">
+        {$t('nav.group_core')} <span class="crumb-sep">/</span>
+        {$t('settings.h1')}
+      </div>
       <h1>{$t('settings.h1')}</h1>
       <p class="sub">{$t('settings.h1_sub')}</p>
     </div>
@@ -430,371 +435,511 @@
 
   <!-- tab nav -->
   <div class="settings-tabs">
-    <button class="stab" class:active={activeTab === 'general'} on:click={() => activeTab = 'general'}>{$t('settings.tab_general')}</button>
-    <button class="stab" class:active={activeTab === 'security'} on:click={() => activeTab = 'security'}>{$t('settings.tab_security')}</button>
-    <button class="stab" class:active={activeTab === 'connection'} on:click={() => activeTab = 'connection'}>{$t('settings.tab_connection')}</button>
-    <button class="stab" class:active={activeTab === 'backups'} on:click={() => activeTab = 'backups'}>{$t('settings.tab_backups')}</button>
-    <button class="stab" class:active={activeTab === 'update'} on:click={() => activeTab = 'update'}>{$t('settings.tab_update')}</button>
-    <button class="stab" class:active={activeTab === 'about'} on:click={() => activeTab = 'about'}>{$t('settings.tab_about')}</button>
+    <button
+      class="stab"
+      class:active={activeTab === 'general'}
+      on:click={() => (activeTab = 'general')}>{$t('settings.tab_general')}</button
+    >
+    <button
+      class="stab"
+      class:active={activeTab === 'security'}
+      on:click={() => (activeTab = 'security')}>{$t('settings.tab_security')}</button
+    >
+    <button
+      class="stab"
+      class:active={activeTab === 'connection'}
+      on:click={() => (activeTab = 'connection')}>{$t('settings.tab_connection')}</button
+    >
+    <button
+      class="stab"
+      class:active={activeTab === 'backups'}
+      on:click={() => (activeTab = 'backups')}>{$t('settings.tab_backups')}</button
+    >
+    <button
+      class="stab"
+      class:active={activeTab === 'update'}
+      on:click={() => (activeTab = 'update')}>{$t('settings.tab_update')}</button
+    >
+    <button class="stab" class:active={activeTab === 'about'} on:click={() => (activeTab = 'about')}
+      >{$t('settings.tab_about')}</button
+    >
   </div>
 
   <!-- General tab -->
   {#if activeTab === 'general'}
-  <div class="card mb-2">
-    <div class="card-label">{$t('settings.section_locale')}</div>
-    <div class="field-group">
-      <div class="field-row">
-        <span class="field-row-name">{$t('settings.language')}</span>
-        <select class="field-select" value={$currentLang} on:change={handleLangChange} title={$t('settings.language')}>
-          {#each langs as lang}
-            <option value={lang.code}>{lang.name}</option>
-          {/each}
-        </select>
-      </div>
-      <div class="field-row">
-        <div>
-          <span class="field-row-name">{$t('settings.timezone')}</span>
-          <div class="field-row-desc">{$t('settings.timezone_desc')}</div>
-        </div>
-        <select class="field-select" bind:value={timezone} on:change={() => saveSetting('timezone', timezone)} title={$t('settings.timezone')}>
-          <option value="UTC">UTC</option>
-          <option value="Europe/Moscow">Europe/Moscow (UTC+3)</option>
-          <option value="Europe/London">Europe/London</option>
-          <option value="Europe/Berlin">Europe/Berlin</option>
-          <option value="America/New_York">America/New_York</option>
-          <option value="America/Los_Angeles">America/Los_Angeles</option>
-          <option value="Asia/Tokyo">Asia/Tokyo</option>
-          <option value="Asia/Shanghai">Asia/Shanghai</option>
-        </select>
-      </div>
-    </div>
-  </div>
-
-  <div class="card mb-2">
-    <div class="card-label">{$t('settings.section_appearance')}</div>
-    <div class="field-group">
-      <div class="field-row">
-        <div>
-          <span class="field-row-name">{$t('settings.theme')}</span>
-          <div class="field-row-desc">{$t('settings.theme_desc')}</div>
-        </div>
-        <div class="seg-btn">
-          <button class="seg-opt" class:seg-active={selectedTheme === 'light'} on:click={() => setTheme('light')}>{$t('settings.theme_light_btn')}</button>
-          <button class="seg-opt" class:seg-active={selectedTheme === 'dark'} on:click={() => setTheme('dark')}>{$t('settings.theme_dark_btn')}</button>
-          <button class="seg-opt" class:seg-active={selectedTheme === 'auto'} on:click={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button>
-        </div>
-      </div>
-      <div class="field-row">
-        <div>
-          <span class="field-row-name">{$t('settings.animations')}</span>
-          <div class="field-row-desc">{$t('settings.animations_desc')}</div>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" bind:checked={animationsEnabled} on:change={() => saveSetting('animations', String(animationsEnabled))} />
-          <span class="toggle-track"><span class="toggle-thumb"></span></span>
-        </label>
-      </div>
-    </div>
-  </div>
-
-  <div class="card mb-2">
-    <div class="card-label">{$t('settings.section_behavior')}</div>
-    <div class="field-group">
-      <div class="field-row">
-        <div>
-          <span class="field-row-name">{$t('settings.auto_refresh')}</span>
-          <div class="field-row-desc">{$t('settings.auto_refresh_desc')}</div>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" bind:checked={autoRefresh} on:change={() => saveSetting('autoRefresh', String(autoRefresh))} />
-          <span class="toggle-track"><span class="toggle-thumb"></span></span>
-        </label>
-      </div>
-      <div class="field-row">
-        <div>
-          <span class="field-row-name">{$t('settings.confirm_dangerous')}</span>
-          <div class="field-row-desc">{$t('settings.confirm_dangerous_desc')}</div>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" bind:checked={confirmDangerous} on:change={() => saveSetting('confirmDangerous', String(confirmDangerous))} />
-          <span class="toggle-track"><span class="toggle-thumb"></span></span>
-        </label>
-      </div>
-      <div class="field-row">
-        <div>
-          <span class="field-row-name">{$t('settings.notification_sound')}</span>
-          <div class="field-row-desc">{$t('settings.notification_sound_desc')}</div>
-        </div>
-        <label class="toggle">
-          <input type="checkbox" bind:checked={notificationSound} on:change={() => saveSetting('notificationSound', String(notificationSound))} />
-          <span class="toggle-track"><span class="toggle-thumb"></span></span>
-        </label>
-      </div>
-    </div>
-  </div>
-  {/if}
-
-  <!-- Backups tab -->
-  {#if activeTab === 'backups'}
-  <div class="card settings-card" style="margin-bottom:18px;padding:0;">
-    <div class="field-group">
-      <div class="field-group-head">{$t('settings.tab_backups')}</div>
-      <div class="field-row">
-        <div>
-          <div class="lbl">{$t('settings.backup_file')}</div>
-          <div class="desc">{$t('settings.backups_desc')}</div>
-        </div>
-        <div class="ctrl">
-          <select class="input" style="min-width: 250px;" bind:value={selectedFile} on:change={fetchBackups} title={$t('settings.backup_file')}>
-            {#each configFiles as file}
-              <option value={file}>{file}</option>
-            {:else}
-              <option value="">Нет доступных файлов</option>
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.section_locale')}</div>
+      <div class="field-group">
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.language')}</span>
+          <select
+            class="field-select"
+            value={$currentLang}
+            on:change={handleLangChange}
+            title={$t('settings.language')}
+          >
+            {#each langs as lang}
+              <option value={lang.code}>{lang.name}</option>
             {/each}
+          </select>
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.timezone')}</span>
+            <div class="field-row-desc">{$t('settings.timezone_desc')}</div>
+          </div>
+          <select
+            class="field-select"
+            bind:value={timezone}
+            on:change={() => saveSetting('timezone', timezone)}
+            title={$t('settings.timezone')}
+          >
+            <option value="UTC">UTC</option>
+            <option value="Europe/Moscow">Europe/Moscow (UTC+3)</option>
+            <option value="Europe/London">Europe/London</option>
+            <option value="Europe/Berlin">Europe/Berlin</option>
+            <option value="America/New_York">America/New_York</option>
+            <option value="America/Los_Angeles">America/Los_Angeles</option>
+            <option value="Asia/Tokyo">Asia/Tokyo</option>
+            <option value="Asia/Shanghai">Asia/Shanghai</option>
           </select>
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="card" style="padding:0;">
-    <h2 class="card-title" style="margin:0;padding:14px 20px;">{$t('settings.tab_backups')}</h2>
-    <div class="field-group" style="border:0;">
-      {#if loadingBackups}
-        <div style="padding:20px;text-align:center;color:var(--fg-dim);">{$t('app.loading')}</div>
-      {:else if backups.length === 0}
-        <div style="padding:20px;text-align:center;color:var(--fg-dim);">Резервные копии отсутствуют</div>
-      {:else}
-        {#each backups as backup}
-          <div class="field-row">
-            <div>
-              <div class="lbl mono">{backup.split('/').pop()}</div>
-              <div class="desc mono" style="font-size: 11px; color: var(--fg-dim);">{backup}</div>
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.section_appearance')}</div>
+      <div class="field-group">
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.theme')}</span>
+            <div class="field-row-desc">{$t('settings.theme_desc')}</div>
+          </div>
+          <div class="seg-btn">
+            <button
+              class="seg-opt"
+              class:seg-active={selectedTheme === 'light'}
+              on:click={() => setTheme('light')}>{$t('settings.theme_light_btn')}</button
+            >
+            <button
+              class="seg-opt"
+              class:seg-active={selectedTheme === 'dark'}
+              on:click={() => setTheme('dark')}>{$t('settings.theme_dark_btn')}</button
+            >
+            <button
+              class="seg-opt"
+              class:seg-active={selectedTheme === 'auto'}
+              on:click={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button
+            >
+          </div>
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.animations')}</span>
+            <div class="field-row-desc">{$t('settings.animations_desc')}</div>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              bind:checked={animationsEnabled}
+              on:change={() => saveSetting('animations', String(animationsEnabled))}
+            />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.section_behavior')}</div>
+      <div class="field-group">
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.auto_refresh')}</span>
+            <div class="field-row-desc">{$t('settings.auto_refresh_desc')}</div>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              bind:checked={autoRefresh}
+              on:change={() => saveSetting('autoRefresh', String(autoRefresh))}
+            />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          </label>
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.confirm_dangerous')}</span>
+            <div class="field-row-desc">{$t('settings.confirm_dangerous_desc')}</div>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              bind:checked={confirmDangerous}
+              on:change={() => saveSetting('confirmDangerous', String(confirmDangerous))}
+            />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          </label>
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.notification_sound')}</span>
+            <div class="field-row-desc">{$t('settings.notification_sound_desc')}</div>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              bind:checked={notificationSound}
+              on:change={() => saveSetting('notificationSound', String(notificationSound))}
+            />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          </label>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Backups tab -->
+  {#if activeTab === 'backups'}
+    <div class="card settings-card" style="margin-bottom:18px;padding:0;">
+      <div class="field-group">
+        <div class="field-group-head">{$t('settings.tab_backups')}</div>
+        <div class="field-row">
+          <div>
+            <div class="lbl">{$t('settings.backup_file')}</div>
+            <div class="desc">{$t('settings.backups_desc')}</div>
+          </div>
+          <div class="ctrl">
+            <select
+              class="input"
+              style="min-width: 250px;"
+              bind:value={selectedFile}
+              on:change={fetchBackups}
+              title={$t('settings.backup_file')}
+            >
+              {#each configFiles as file}
+                <option value={file}>{file}</option>
+              {:else}
+                <option value="">Нет доступных файлов</option>
+              {/each}
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="padding:0;">
+      <h2 class="card-title" style="margin:0;padding:14px 20px;">{$t('settings.tab_backups')}</h2>
+      <div class="field-group" style="border:0;">
+        {#if loadingBackups}
+          <div style="padding:20px;text-align:center;color:var(--fg-dim);">{$t('app.loading')}</div>
+        {:else if backups.length === 0}
+          <div style="padding:20px;text-align:center;color:var(--fg-dim);">
+            Резервные копии отсутствуют
+          </div>
+        {:else}
+          {#each backups as backup}
+            <div class="field-row">
+              <div>
+                <div class="lbl mono">{backup.split('/').pop()}</div>
+                <div class="desc mono" style="font-size: 11px; color: var(--fg-dim);">{backup}</div>
+              </div>
+              <div class="ctrl">
+                <button
+                  class="btn btn-secondary"
+                  on:click={() => restoreBackup(backup)}
+                  title="Восстановить"
+                >
+                  Восстановить
+                </button>
+                <button
+                  class="btn btn-danger"
+                  on:click={() => deleteBackup(backup)}
+                  title="Удалить"
+                >
+                  Удалить
+                </button>
+              </div>
             </div>
-            <div class="ctrl">
-              <button class="btn btn-secondary" on:click={() => restoreBackup(backup)} title="Восстановить">
-                Восстановить
+          {/each}
+        {/if}
+      </div>
+    </div>
+  {/if}
+
+  <!-- Config Snapshots section (inside backups tab) -->
+  {#if activeTab === 'backups'}
+    <div class="card" style="margin-top:16px;">
+      <div
+        class="card-title-row"
+        style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;"
+      >
+        <h2 class="card-title" style="margin:0;">{$t('settings.snapshots_title')}</h2>
+      </div>
+      <div
+        class="field-row"
+        style="border-bottom:1px solid var(--border-light);padding-bottom:12px;margin-bottom:12px;"
+      >
+        <input
+          class="input"
+          style="flex:1;margin-right:8px;"
+          type="text"
+          placeholder={$t('settings.snapshot_label_placeholder')}
+          bind:value={snapshotLabel}
+        />
+        <button class="btn btn-primary" on:click={createSnapshot} disabled={creatingSnapshot}>
+          {creatingSnapshot ? $t('app.loading') : $t('settings.snapshot_create_btn')}
+        </button>
+      </div>
+      {#if snapshots.length === 0}
+        <div style="color:var(--fg-secondary);font-size:13px;text-align:center;padding:12px 0;">
+          {$t('settings.snapshots_empty')}
+        </div>
+      {:else}
+        {#each snapshots as snap}
+          <div class="field-row snapshot-row">
+            <div>
+              <div class="lbl mono">{snap.label || snap.id}</div>
+              <div class="desc" style="font-size:11px;">
+                {new Date(snap.created_at * 1000).toLocaleString()} · {formatSnapshotSize(
+                  snap.size_bytes
+                )}
+              </div>
+            </div>
+            <div class="ctrl" style="gap:6px;">
+              <a class="btn btn-secondary" href="/api/snapshots/{snap.id}/download" download>
+                {$t('settings.snapshot_download_btn')}
+              </a>
+              <button
+                class="btn btn-secondary"
+                on:click={() => restoreSnapshot(snap.id)}
+                disabled={restoringSnapshot === snap.id}
+              >
+                {restoringSnapshot === snap.id
+                  ? $t('app.loading')
+                  : $t('settings.snapshot_restore_btn')}
               </button>
-              <button class="btn btn-danger" on:click={() => deleteBackup(backup)} title="Удалить">
-                Удалить
+              <button class="btn btn-danger" on:click={() => deleteSnapshot(snap.id)}>
+                {$t('settings.snapshot_delete_btn')}
               </button>
             </div>
           </div>
         {/each}
       {/if}
     </div>
-  </div>
-  {/if}
-
-  <!-- Config Snapshots section (inside backups tab) -->
-  {#if activeTab === 'backups'}
-  <div class="card" style="margin-top:16px;">
-    <div class="card-title-row" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-      <h2 class="card-title" style="margin:0;">{$t('settings.snapshots_title')}</h2>
-    </div>
-    <div class="field-row" style="border-bottom:1px solid var(--border-light);padding-bottom:12px;margin-bottom:12px;">
-      <input
-        class="input"
-        style="flex:1;margin-right:8px;"
-        type="text"
-        placeholder={$t('settings.snapshot_label_placeholder')}
-        bind:value={snapshotLabel}
-      />
-      <button class="btn btn-primary" on:click={createSnapshot} disabled={creatingSnapshot}>
-        {creatingSnapshot ? $t('app.loading') : $t('settings.snapshot_create_btn')}
-      </button>
-    </div>
-    {#if snapshots.length === 0}
-      <div style="color:var(--fg-secondary);font-size:13px;text-align:center;padding:12px 0;">{$t('settings.snapshots_empty')}</div>
-    {:else}
-      {#each snapshots as snap}
-        <div class="field-row snapshot-row">
-          <div>
-            <div class="lbl mono">{snap.label || snap.id}</div>
-            <div class="desc" style="font-size:11px;">
-              {new Date(snap.created_at * 1000).toLocaleString()} · {formatSnapshotSize(snap.size_bytes)}
-            </div>
-          </div>
-          <div class="ctrl" style="gap:6px;">
-            <a class="btn btn-secondary" href="/api/snapshots/{snap.id}/download" download>
-              {$t('settings.snapshot_download_btn')}
-            </a>
-            <button class="btn btn-secondary" on:click={() => restoreSnapshot(snap.id)} disabled={restoringSnapshot === snap.id}>
-              {restoringSnapshot === snap.id ? $t('app.loading') : $t('settings.snapshot_restore_btn')}
-            </button>
-            <button class="btn btn-danger" on:click={() => deleteSnapshot(snap.id)}>
-              {$t('settings.snapshot_delete_btn')}
-            </button>
-          </div>
-        </div>
-      {/each}
-    {/if}
-  </div>
   {/if}
 
   <!-- Update tab -->
   {#if activeTab === 'update'}
-  <div class="card mb-2">
-    <div class="card-label">{$t('settings.update')}</div>
-    <div class="field-group">
-      <div class="field-row">
-        <span class="field-row-name">{$t('settings.current_version')}</span>
-        <span class="field-row-val mono">{version}</span>
-      </div>
-      {#if updateInfo?.has_update}
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.update')}</div>
+      <div class="field-group">
         <div class="field-row">
-          <span class="field-row-name">{$t('settings.available_version')}</span>
-          <span class="field-row-val" style="color: var(--accent)">{updateInfo.latest_version}</span>
+          <span class="field-row-name">{$t('settings.current_version')}</span>
+          <span class="field-row-val mono">{version}</span>
+        </div>
+        {#if updateInfo?.has_update}
+          <div class="field-row">
+            <span class="field-row-name">{$t('settings.available_version')}</span>
+            <span class="field-row-val" style="color: var(--accent)"
+              >{updateInfo.latest_version}</span
+            >
+          </div>
+        {/if}
+      </div>
+
+      {#if updateInfo?.changelog}
+        <div class="changelog-box">
+          <pre>{updateInfo.changelog}</pre>
         </div>
       {/if}
-    </div>
 
-    {#if updateInfo?.changelog}
-      <div class="changelog-box">
-        <pre>{updateInfo.changelog}</pre>
-      </div>
-    {/if}
-
-    {#if updateStatus && updateStatus.status !== 'idle'}
-      <div class="update-progress">
-        <div class="progress-bar">
-          <div class="progress-fill" style="width: {updateStatus.progress}%"></div>
+      {#if updateStatus && updateStatus.status !== 'idle'}
+        <div class="update-progress">
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: {updateStatus.progress}%"></div>
+          </div>
+          <span class="progress-text">{updateStatus.message}</span>
         </div>
-        <span class="progress-text">{updateStatus.message}</span>
-      </div>
-    {/if}
+      {/if}
 
-    <div class="card-actions">
-      <button class="btn btn-secondary" on:click={() => checkUpdate('stable')} disabled={updateChecking || updateInstalling} title={$t('settings.check_update')}>
-        {updateChecking ? $t('settings.checking') : $t('settings.check_update')}
-      </button>
-      {#if updateInfo?.has_update}
-        <button class="btn btn-primary" on:click={() => installUpdate('stable')} disabled={updateInstalling} title={$t('settings.install_update')}>
-          {updateInstalling ? $t('settings.installing') : $t('settings.install_update')}
+      <div class="card-actions">
+        <button
+          class="btn btn-secondary"
+          on:click={() => checkUpdate('stable')}
+          disabled={updateChecking || updateInstalling}
+          title={$t('settings.check_update')}
+        >
+          {updateChecking ? $t('settings.checking') : $t('settings.check_update')}
         </button>
-      {/if}
-      {#if updateStatus?.status === 'failed'}
-        <button class="btn btn-danger" on:click={rollbackUpdate} title={$t('settings.rollback')}>
-          {$t('settings.rollback')}
-        </button>
-      {/if}
+        {#if updateInfo?.has_update}
+          <button
+            class="btn btn-primary"
+            on:click={() => installUpdate('stable')}
+            disabled={updateInstalling}
+            title={$t('settings.install_update')}
+          >
+            {updateInstalling ? $t('settings.installing') : $t('settings.install_update')}
+          </button>
+        {/if}
+        {#if updateStatus?.status === 'failed'}
+          <button class="btn btn-danger" on:click={rollbackUpdate} title={$t('settings.rollback')}>
+            {$t('settings.rollback')}
+          </button>
+        {/if}
+      </div>
     </div>
-  </div>
   {/if}
 
   <!-- Connection tab -->
   {#if activeTab === 'connection'}
-  <div class="card mb-2">
-    <div class="card-label">{$t('settings.mihomo_api')}</div>
-    <div class="field-group">
-      <div class="field-row">
-        <span class="field-row-name">{$t('settings.mihomo_status')}</span>
-        <span class="field-row-val">
-          {#if $capabilities?.mihomo.process_running}
-            <span class="status-ok">● {$t('settings.mihomo_running')}</span>
-          {:else}
-            <span class="status-err">○ {$t('settings.mihomo_stopped')}</span>
-          {/if}
-        </span>
-      </div>
-      <div class="field-row">
-        <span class="field-row-name">{$t('settings.mihomo_api_reachable')}</span>
-        <span class="field-row-val">
-          {#if $capabilities?.mihomo.api_reachable}
-            <span class="status-ok">{$t('settings.mihomo_yes')}</span>
-          {:else}
-            <span class="status-err">{$t('settings.mihomo_no')}</span>
-          {/if}
-        </span>
-      </div>
-      <div class="field-row">
-        <span class="field-row-name">{$t('settings.mihomo_api_auth')}</span>
-        <span class="field-row-val">
-          {#if $capabilities?.mihomo.api_authenticated}
-            <span class="status-ok">{$t('settings.mihomo_yes')}</span>
-          {:else if $capabilities?.mihomo.api_reachable}
-            <span class="status-err">{$t('settings.mihomo_auth_error')}</span>
-          {:else}
-            <span style="color: var(--fg-secondary)">—</span>
-          {/if}
-        </span>
-      </div>
-      {#if $capabilities?.mihomo.discovered_secret}
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.mihomo_api')}</div>
+      <div class="field-group">
         <div class="field-row">
-          <span class="field-row-name">{$t('settings.mihomo_secret_discovered')}</span>
-          <span class="field-row-val mono">{$capabilities.mihomo.discovered_secret}</span>
+          <span class="field-row-name">{$t('settings.mihomo_status')}</span>
+          <span class="field-row-val">
+            {#if $capabilities?.mihomo.process_running}
+              <span class="status-ok">● {$t('settings.mihomo_running')}</span>
+            {:else}
+              <span class="status-err">○ {$t('settings.mihomo_stopped')}</span>
+            {/if}
+          </span>
         </div>
-      {/if}
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.mihomo_api_reachable')}</span>
+          <span class="field-row-val">
+            {#if $capabilities?.mihomo.api_reachable}
+              <span class="status-ok">{$t('settings.mihomo_yes')}</span>
+            {:else}
+              <span class="status-err">{$t('settings.mihomo_no')}</span>
+            {/if}
+          </span>
+        </div>
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.mihomo_api_auth')}</span>
+          <span class="field-row-val">
+            {#if $capabilities?.mihomo.api_authenticated}
+              <span class="status-ok">{$t('settings.mihomo_yes')}</span>
+            {:else if $capabilities?.mihomo.api_reachable}
+              <span class="status-err">{$t('settings.mihomo_auth_error')}</span>
+            {:else}
+              <span style="color: var(--fg-secondary)">—</span>
+            {/if}
+          </span>
+        </div>
+        {#if $capabilities?.mihomo.discovered_secret}
+          <div class="field-row">
+            <span class="field-row-name">{$t('settings.mihomo_secret_discovered')}</span>
+            <span class="field-row-val mono">{$capabilities.mihomo.discovered_secret}</span>
+          </div>
+        {/if}
+      </div>
+      <div class="card-actions">
+        <button
+          class="btn btn-secondary"
+          on:click={recheckConnection}
+          disabled={checkingConnection}
+          title={$t('settings.recheck_title')}
+        >
+          {checkingConnection ? $t('settings.checking') : $t('settings.recheck_btn')}
+        </button>
+      </div>
     </div>
-    <div class="card-actions">
-      <button class="btn btn-secondary" on:click={recheckConnection} disabled={checkingConnection} title={$t('settings.recheck_title')}>
-        {checkingConnection ? $t('settings.checking') : $t('settings.recheck_btn')}
-      </button>
-    </div>
-  </div>
   {/if}
 
   <!-- Security tab -->
   {#if activeTab === 'security'}
-  <div class="card mb-2">
-    <div class="card-label">{$t('settings.change_password')}</div>
-    <div class="field-group">
-      <div class="field-row">
-        <label class="field-row-name" for="curr-pwd">{$t('settings.current_password')}</label>
-        <input id="curr-pwd" type="password" class="field-input" bind:value={currentPassword} placeholder="••••••••" />
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.change_password')}</div>
+      <div class="field-group">
+        <div class="field-row">
+          <label class="field-row-name" for="curr-pwd">{$t('settings.current_password')}</label>
+          <input
+            id="curr-pwd"
+            type="password"
+            class="field-input"
+            bind:value={currentPassword}
+            placeholder="••••••••"
+          />
+        </div>
+        <div class="field-row">
+          <label class="field-row-name" for="new-pwd">{$t('settings.new_password')}</label>
+          <input
+            id="new-pwd"
+            type="password"
+            class="field-input"
+            bind:value={newPassword}
+            placeholder="••••••••"
+          />
+        </div>
+        <div class="field-row">
+          <label class="field-row-name" for="conf-pwd">{$t('settings.confirm_password')}</label>
+          <input
+            id="conf-pwd"
+            type="password"
+            class="field-input"
+            bind:value={confirmPassword}
+            placeholder="••••••••"
+          />
+        </div>
       </div>
-      <div class="field-row">
-        <label class="field-row-name" for="new-pwd">{$t('settings.new_password')}</label>
-        <input id="new-pwd" type="password" class="field-input" bind:value={newPassword} placeholder="••••••••" />
-      </div>
-      <div class="field-row">
-        <label class="field-row-name" for="conf-pwd">{$t('settings.confirm_password')}</label>
-        <input id="conf-pwd" type="password" class="field-input" bind:value={confirmPassword} placeholder="••••••••" />
+      {#if passwordError}
+        <div class="field-error">{passwordError}</div>
+      {/if}
+      {#if passwordSuccess}
+        <div class="field-success">{$t('settings.password_changed')}</div>
+      {/if}
+      <div class="card-actions">
+        <button
+          class="btn btn-primary"
+          on:click={changePassword}
+          disabled={passwordChanging || !currentPassword || !newPassword || !confirmPassword}
+          title={$t('settings.save_password')}
+        >
+          {passwordChanging ? $t('app.loading') : $t('settings.save_password')}
+        </button>
       </div>
     </div>
-    {#if passwordError}
-      <div class="field-error">{passwordError}</div>
-    {/if}
-    {#if passwordSuccess}
-      <div class="field-success">{$t('settings.password_changed')}</div>
-    {/if}
-    <div class="card-actions">
-      <button class="btn btn-primary" on:click={changePassword} disabled={passwordChanging || !currentPassword || !newPassword || !confirmPassword} title={$t('settings.save_password')}>
-        {passwordChanging ? $t('app.loading') : $t('settings.save_password')}
-      </button>
-    </div>
-  </div>
 
-  <div class="card mb-2">
-    <div class="card-label">{$t('settings.security')}</div>
-    <div class="field-group">
-      <div class="field-row-info"><Icon name="check" size={14} /><span>{$t('settings.auth_bcrypt')}</span></div>
-      <div class="field-row-info"><Icon name="check" size={14} /><span>{$t('settings.csrf')}</span></div>
-      <div class="field-row-info"><Icon name="check" size={14} /><span>{$t('settings.rate_limit')}</span></div>
-      <div class="field-row-info"><Icon name="check" size={14} /><span>{$t('settings.security_headers')}</span></div>
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.security')}</div>
+      <div class="field-group">
+        <div class="field-row-info">
+          <Icon name="check" size={14} /><span>{$t('settings.auth_bcrypt')}</span>
+        </div>
+        <div class="field-row-info">
+          <Icon name="check" size={14} /><span>{$t('settings.csrf')}</span>
+        </div>
+        <div class="field-row-info">
+          <Icon name="check" size={14} /><span>{$t('settings.rate_limit')}</span>
+        </div>
+        <div class="field-row-info">
+          <Icon name="check" size={14} /><span>{$t('settings.security_headers')}</span>
+        </div>
+      </div>
     </div>
-  </div>
   {/if}
 
   <!-- About tab -->
   {#if activeTab === 'about'}
-  <div class="card mb-2">
-    <div class="card-label">{$t('settings.about')}</div>
-    <div class="field-group">
-      <div class="field-row">
-        <span class="field-row-name">{$t('settings.version')}</span>
-        <span class="field-row-val mono">{version}</span>
-      </div>
-      <div class="field-row">
-        <span class="field-row-name">{$t('settings.frontend')}</span>
-        <span class="field-row-val mono">Svelte 5 + TypeScript + Vite</span>
-      </div>
-      <div class="field-row">
-        <span class="field-row-name">{$t('settings.backend')}</span>
-        <span class="field-row-val mono">Go + net/http</span>
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.about')}</div>
+      <div class="field-group">
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.version')}</span>
+          <span class="field-row-val mono">{version}</span>
+        </div>
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.frontend')}</span>
+          <span class="field-row-val mono">Svelte 5 + TypeScript + Vite</span>
+        </div>
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.backend')}</span>
+          <span class="field-row-val mono">Go + net/http</span>
+        </div>
       </div>
     </div>
-  </div>
   {/if}
 </div>
 
@@ -850,7 +995,9 @@
     color: var(--fg-secondary);
     cursor: pointer;
     border-radius: 4px 4px 0 0;
-    transition: color 0.15s, border-color 0.15s;
+    transition:
+      color 0.15s,
+      border-color 0.15s;
   }
 
   .stab:hover {
@@ -979,9 +1126,9 @@
     font-size: 13px;
     color: #ef4444;
     padding: 6px 10px;
-    background: rgba(239,68,68,0.08);
+    background: rgba(239, 68, 68, 0.08);
     border-radius: 6px;
-    border: 1px solid rgba(239,68,68,0.25);
+    border: 1px solid rgba(239, 68, 68, 0.25);
   }
 
   .field-success {
@@ -989,9 +1136,9 @@
     font-size: 13px;
     color: #10b981;
     padding: 6px 10px;
-    background: rgba(16,185,129,0.08);
+    background: rgba(16, 185, 129, 0.08);
     border-radius: 6px;
-    border: 1px solid rgba(16,185,129,0.25);
+    border: 1px solid rgba(16, 185, 129, 0.25);
   }
 
   .changelog-box {
@@ -1063,7 +1210,9 @@
     border-right: 1px solid var(--border);
     color: var(--fg-secondary);
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition:
+      background 0.15s,
+      color 0.15s;
   }
 
   .seg-opt:last-child {
@@ -1071,7 +1220,7 @@
   }
 
   .seg-opt:hover {
-    background: var(--bg-hover, rgba(0,0,0,0.04));
+    background: var(--bg-hover, rgba(0, 0, 0, 0.04));
   }
 
   .seg-opt.seg-active {
@@ -1118,7 +1267,7 @@
     background: #fff;
     border-radius: 50%;
     transition: transform 0.2s;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   }
 
   .toggle input:checked ~ .toggle-track .toggle-thumb {

@@ -28,14 +28,17 @@
   <h2 class="empty-state__title">{title}</h2>
   <p class="empty-state__description">{description}</p>
   {#if ctaText && oncta}
-    <Button variant="primary" loading={ctaLoading} title={ctaText} onclick={oncta}>{ctaText}</Button>
+    <Button variant="primary" loading={ctaLoading} title={ctaText} onclick={oncta}>{ctaText}</Button
+    >
   {/if}
 </div>
 
 <style>
   .empty-state {
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     text-align: center;
     padding: 40px 24px;
     background: var(--bg-card);
@@ -44,9 +47,11 @@
     gap: 10px;
   }
   .empty-state__icon {
-    width: 64px; height: 64px;
+    width: 64px;
+    height: 64px;
     border-radius: 50%;
-    display: grid; place-items: center;
+    display: grid;
+    place-items: center;
     color: var(--accent);
     background: var(--accent-soft);
     border: 1px solid var(--accent-line);

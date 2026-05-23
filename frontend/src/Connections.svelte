@@ -177,8 +177,15 @@
         body: JSON.stringify({ action: 'start' })
       });
       if (!res.ok) throw new Error('Failed to start Mihomo');
-      setTimeout(async () => { await fetchCapabilities(); fetchConnections(); mihomoLaunching = false; }, 1500);
-      setTimeout(async () => { await fetchCapabilities(); fetchConnections(); }, 4000);
+      setTimeout(async () => {
+        await fetchCapabilities();
+        fetchConnections();
+        mihomoLaunching = false;
+      }, 1500);
+      setTimeout(async () => {
+        await fetchCapabilities();
+        fetchConnections();
+      }, 4000);
     } catch (e: any) {
       showToast('error', e.message);
       mihomoLaunching = false;
@@ -205,22 +212,45 @@
 <div class="container">
   <div class="page-head">
     <div>
-      <div class="crumbs">{$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('conn.title')}</div>
+      <div class="crumbs">
+        {$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('conn.title')}
+      </div>
       <h1>{$t('conn.title')}</h1>
       <p class="sub">{$t('conn.active')}</p>
     </div>
     <div class="ph-actions">
-      <label class="toggle-label" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-secondary); cursor: pointer; user-select: none;">
-        <label class="toggle-switch" style="position: relative; display: inline-block; width: 36px; height: 20px;">
-          <input type="checkbox" checked={autoRefresh} on:change={toggleAutoRefresh} style="opacity: 0; width: 0; height: 0;">
-          <span class="toggle-slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border); transition: .2s; border-radius: 20px;"></span>
+      <label
+        class="toggle-label"
+        style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-secondary); cursor: pointer; user-select: none;"
+      >
+        <label
+          class="toggle-switch"
+          style="position: relative; display: inline-block; width: 36px; height: 20px;"
+        >
+          <input
+            type="checkbox"
+            checked={autoRefresh}
+            on:change={toggleAutoRefresh}
+            style="opacity: 0; width: 0; height: 0;"
+          />
+          <span
+            class="toggle-slider"
+            style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border); transition: .2s; border-radius: 20px;"
+          ></span>
         </label>
         {$t('conn.autorefresh')}
       </label>
       <button class="btn btn-secondary" on:click={fetchConnections} disabled={loading}>
-        <Icon name="refresh" size={14} /> {$t('app.refresh')}
+        <Icon name="refresh" size={14} />
+        {$t('app.refresh')}
       </button>
-      <button class="btn btn-secondary" style="color:var(--danger);" on:click={closeAllConnections} disabled={connections.length === 0}>
+      <button
+        class="btn btn-secondary"
+        style="color:var(--danger);"
+        on:click={closeAllConnections}
+        disabled={connections.length === 0}
+      >
         {$t('conn.close_all')}
       </button>
     </div>
@@ -279,24 +309,57 @@
       </div>
     </div>
 
-    <div class="stats mb-2" style="display: flex; gap: 16px; font-size: 13px; color: var(--fg-dim); align-items: center;">
-      <span class="stat"><b>{connections.length}</b> {$t('conn.total', {count: ''}).replace(/:\s*$/, '').trim()}</span>
-      <span class="stat"><b>{filteredConnections.length}</b> {$t('conn.shown', {count: ''}).replace(/:\s*$/, '').trim()}</span>
+    <div
+      class="stats mb-2"
+      style="display: flex; gap: 16px; font-size: 13px; color: var(--fg-dim); align-items: center;"
+    >
+      <span class="stat"
+        ><b>{connections.length}</b>
+        {$t('conn.total', { count: '' }).replace(/:\s*$/, '').trim()}</span
+      >
+      <span class="stat"
+        ><b>{filteredConnections.length}</b>
+        {$t('conn.shown', { count: '' }).replace(/:\s*$/, '').trim()}</span
+      >
       <span class="stat">↑ {formatBytes(totalUpload)}</span>
       <span class="stat">↓ {formatBytes(totalDownload)}</span>
     </div>
 
     <div class="table-container">
-      <table class="connections-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
+      <table
+        class="connections-table"
+        style="width: 100%; border-collapse: collapse; font-size: 13px;"
+      >
         <thead>
           <tr style="border-bottom: 1px solid var(--border);">
-            <th style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">{$t('conn.source')}</th>
-            <th style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">{$t('conn.destination')}</th>
-            <th style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">{$t('conn.rule')}</th>
-            <th style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">{$t('conn.proxy')}</th>
-            <th style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">↑</th>
-            <th style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">↓</th>
-            <th style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">⏱</th>
+            <th
+              style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
+              >{$t('conn.source')}</th
+            >
+            <th
+              style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
+              >{$t('conn.destination')}</th
+            >
+            <th
+              style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
+              >{$t('conn.rule')}</th
+            >
+            <th
+              style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
+              >{$t('conn.proxy')}</th
+            >
+            <th
+              style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
+              >↑</th
+            >
+            <th
+              style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
+              >↓</th
+            >
+            <th
+              style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
+              >⏱</th
+            >
             <th style="width: 40px;"></th>
           </tr>
         </thead>
@@ -308,31 +371,68 @@
                 <td style="padding: 12px 14px;"><Skeleton type="text-line" width="180px" /></td>
                 <td style="padding: 12px 14px;"><Skeleton type="text-line" width="80px" /></td>
                 <td style="padding: 12px 14px;"><Skeleton type="text-line" width="100px" /></td>
-                <td style="padding: 12px 14px; text-align: right;"><Skeleton type="text-line" width="50px" /></td>
-                <td style="padding: 12px 14px; text-align: right;"><Skeleton type="text-line" width="50px" /></td>
-                <td style="padding: 12px 14px; text-align: right;"><Skeleton type="text-line" width="30px" /></td>
+                <td style="padding: 12px 14px; text-align: right;"
+                  ><Skeleton type="text-line" width="50px" /></td
+                >
+                <td style="padding: 12px 14px; text-align: right;"
+                  ><Skeleton type="text-line" width="50px" /></td
+                >
+                <td style="padding: 12px 14px; text-align: right;"
+                  ><Skeleton type="text-line" width="30px" /></td
+                >
                 <td></td>
               </tr>
             {/each}
           {:else}
             {#each filteredConnections as conn (conn.id)}
-              <tr class="conn-row" style="border-bottom: 1px solid var(--border); transition: background 0.15s;">
-                <td class="mono" style="padding: 12px 14px; font-family: var(--font-family-mono, monospace); color: var(--fg-primary);">{conn.metadata.sourceIP}:{conn.metadata.sourcePort}</td>
-                <td class="mono" style="padding: 12px 14px; font-family: var(--font-family-mono, monospace); color: var(--fg-primary); word-break: break-all;">{conn.metadata.host || conn.metadata.destinationIP}:{conn.metadata.destinationPort}</td>
+              <tr
+                class="conn-row"
+                style="border-bottom: 1px solid var(--border); transition: background 0.15s;"
+              >
+                <td
+                  class="mono"
+                  style="padding: 12px 14px; font-family: var(--font-family-mono, monospace); color: var(--fg-primary);"
+                  >{conn.metadata.sourceIP}:{conn.metadata.sourcePort}</td
+                >
+                <td
+                  class="mono"
+                  style="padding: 12px 14px; font-family: var(--font-family-mono, monospace); color: var(--fg-primary); word-break: break-all;"
+                  >{conn.metadata.host || conn.metadata.destinationIP}:{conn.metadata
+                    .destinationPort}</td
+                >
                 <td style="padding: 12px 14px;">
-                  <span class="badge badge-info" style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line);">
+                  <span
+                    class="badge badge-info"
+                    style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line);"
+                  >
                     {conn.rule}
                   </span>
                   {#if conn.rulePayload}
-                    <div style="font-size: 11px; color: var(--fg-dim); margin-top: 3px; font-family: var(--font-family-mono, monospace);">{conn.rulePayload}</div>
+                    <div
+                      style="font-size: 11px; color: var(--fg-dim); margin-top: 3px; font-family: var(--font-family-mono, monospace);"
+                    >
+                      {conn.rulePayload}
+                    </div>
                   {/if}
                 </td>
                 <td class="cell-route" style="padding: 12px 14px; color: var(--fg-primary);">
                   {getChainPath(conn)}
                 </td>
-                <td class="mono" style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--accent);">{formatBytes(conn.upload)}</td>
-                <td class="mono" style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--accent);">{formatBytes(conn.download)}</td>
-                <td class="mono" style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--fg-dim);">{getDuration(conn.start)}</td>
+                <td
+                  class="mono"
+                  style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--accent);"
+                  >{formatBytes(conn.upload)}</td
+                >
+                <td
+                  class="mono"
+                  style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--accent);"
+                  >{formatBytes(conn.download)}</td
+                >
+                <td
+                  class="mono"
+                  style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--fg-dim);"
+                  >{getDuration(conn.start)}</td
+                >
                 <td style="padding: 12px 14px; text-align: center;">
                   <button
                     class="btn btn-secondary btn-close-conn"
@@ -368,18 +468,18 @@
   }
   .toggle-slider::before {
     position: absolute;
-    content: "";
+    content: '';
     height: 16px;
     width: 16px;
     left: 2px;
     bottom: 2px;
     background-color: white;
-    transition: .2s;
+    transition: 0.2s;
     border-radius: 50%;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   }
   .conn-row:hover {
-    background: var(--bg-hover, rgba(255,255,255,0.02));
+    background: var(--bg-hover, rgba(255, 255, 255, 0.02));
   }
   .btn-close-conn:hover {
     background: var(--danger) !important;

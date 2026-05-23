@@ -9,12 +9,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
+
+var snapshotIDRx = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 
 // SnapshotMeta describes a stored config snapshot.
 type SnapshotMeta struct {
@@ -142,11 +145,11 @@ func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
 }
 
 func (s *SnapshotService) metaPath(id string) string {
-	return filepath.Join(s.snapshotsDir(), id+".json")
+	return filepath.Join(s.snapshotsDir(), filepath.Base(filepath.Clean(id))+".json")
 }
 
 func (s *SnapshotService) archivePath(id string) string {
-	return filepath.Join(s.snapshotsDir(), id+".tar.gz")
+	return filepath.Join(s.snapshotsDir(), filepath.Base(filepath.Clean(id))+".tar.gz")
 }
 
 func (s *SnapshotService) saveMeta(id string, meta SnapshotMeta) error {
@@ -190,12 +193,8 @@ func (s *SnapshotService) List() ([]SnapshotMeta, error) {
 // ArchivePath returns the absolute path to the tar.gz for streaming.
 // Returns error if the archive does not exist.
 func (s *SnapshotService) ArchivePath(id string) (string, error) {
-	// Sanitize id: only alphanumeric + dash
-	for _, c := range id {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-			(c >= '0' && c <= '9') || c == '-') {
-			return "", fmt.Errorf("invalid snapshot id")
-		}
+	if !snapshotIDRx.MatchString(id) {
+		return "", fmt.Errorf("invalid snapshot id")
 	}
 	p := s.archivePath(id)
 	if _, err := os.Stat(p); err != nil {
@@ -207,6 +206,9 @@ func (s *SnapshotService) ArchivePath(id string) (string, error) {
 // Restore extracts a snapshot archive back to the original config dirs.
 // Only files whose path prefix matches a known config dir base name are restored.
 func (s *SnapshotService) Restore(id string) error {
+	if !snapshotIDRx.MatchString(id) {
+		return fmt.Errorf("invalid snapshot id")
+	}
 	archPath, err := s.ArchivePath(id)
 	if err != nil {
 		return err
@@ -239,6 +241,10 @@ func (s *SnapshotService) Restore(id string) error {
 		}
 		if err != nil {
 			return err
+		}
+
+		if strings.Contains(hdr.Name, "..") {
+			continue // skip directory traversal entries (Zip Slip prevention)
 		}
 
 		// hdr.Name = "configs/file.json" or "mihomo/config.yaml"
@@ -289,6 +295,13 @@ func (s *SnapshotService) Restore(id string) error {
 
 // Delete removes a snapshot archive and its metadata.
 func (s *SnapshotService) Delete(id string) error {
+	// Sanitize id: only alphanumeric + dash
+	for _, c := range id {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '-') {
+			return fmt.Errorf("invalid snapshot id")
+		}
+	}
 	if _, err := s.ArchivePath(id); err != nil {
 		return err
 	}

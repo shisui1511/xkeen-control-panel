@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { t } from './i18n'
-  import Breadcrumbs from './Breadcrumbs.svelte'
+  import { t } from './i18n';
+  import Breadcrumbs from './Breadcrumbs.svelte';
 
-  export let title: string
-  export let subtitle: string = ''
-  export let breadcrumbs: { label: string; tab?: string }[] = []
-  export let onSwitchTab: (tab: string) => void = () => {}
+  export let title: string;
+  export let subtitle: string = '';
+  export let breadcrumbs: { label: string; tab?: string }[] = [];
+  export let onSwitchTab: (tab: string) => void = () => {};
 </script>
 
 <!-- Styles live in global.css under .page-header / .page-header-content / .page-header-actions -->

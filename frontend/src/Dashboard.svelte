@@ -65,7 +65,15 @@
     memory: { total: number; used: number; free: number };
     load: [number, number, number];
     uptime: { seconds: number; days: number; hours: number; minutes: number };
-    go_runtime: { goroutines: number; heap_alloc: number; heap_sys: number; num_gc: number; go_version: string; gomaxprocs: number; goarch: string };
+    go_runtime: {
+      goroutines: number;
+      heap_alloc: number;
+      heap_sys: number;
+      num_gc: number;
+      go_version: string;
+      gomaxprocs: number;
+      goarch: string;
+    };
     router_model: string;
     hostname: string;
     wan_status: string;
@@ -124,7 +132,12 @@
         const proxies = data.proxies || {};
         const keys = Object.keys(proxies);
         totalProxiesCount = keys.length;
-        activeProxiesCount = keys.filter((k) => proxies[k].alive !== false && proxies[k].type !== 'Selector' && proxies[k].type !== 'URLTest').length;
+        activeProxiesCount = keys.filter(
+          (k) =>
+            proxies[k].alive !== false &&
+            proxies[k].type !== 'Selector' &&
+            proxies[k].type !== 'URLTest'
+        ).length;
       }
     } catch (_) {}
   }
@@ -185,7 +198,10 @@
       }
 
       serviceStatus = {
-        xkeen: (svcText.toLowerCase().includes('running') || svcText.toLowerCase().includes('запущен')) ? 'running' : svcText || 'unknown',
+        xkeen:
+          svcText.toLowerCase().includes('running') || svcText.toLowerCase().includes('запущен')
+            ? 'running'
+            : svcText || 'unknown',
         xray: xrayProcessStatus,
         mihomo: mihomoProcessStatus,
         connections: connCount,
@@ -209,7 +225,7 @@
           loadHistory = [...loadHistory, systemStats.load[0]].slice(-16);
           const d = new Date();
           const p = (n: number) => n.toString().padStart(2, '0');
-          statsLastFetched = `${p(d.getDate())}.${p(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+          statsLastFetched = `${p(d.getDate())}.${p(d.getMonth() + 1)}.${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
         }
       }
     } catch (e) {
@@ -219,11 +235,12 @@
 
   function buildSparklinePath(values: number[]): string {
     if (values.length < 2) return '';
-    const w = 200, h = 42;
+    const w = 200,
+      h = 42;
     const max = Math.max(...values, 0.01);
     const pts = values.map((v, i) => {
       const x = (i / (values.length - 1)) * w;
-      const y = h - 4 - ((v / max) * (h - 10));
+      const y = h - 4 - (v / max) * (h - 10);
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     });
     const line = `M${pts.join(' L')}`;
@@ -349,7 +366,7 @@
       `IP интерфейса: ${systemStats.ip_interface}`,
       `Часовой пояс: ${systemStats.timezone}`,
       `Конфиг: ${systemStats.config_path} (${systemStats.config_lines} строк)`,
-      `Последнее обновление: ${statsLastFetched}`,
+      `Последнее обновление: ${statsLastFetched}`
     ].join('\n');
     try {
       await navigator.clipboard.writeText(lines);
@@ -469,20 +486,25 @@
 
     {#if currentTab === 'dashboard'}
       <div class="container" transition:fade={{ duration: 150 }}>
-
         <!-- Page header -->
         <div class="page-head">
           <div>
-            <div class="crumbs">{$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('nav.monitoring')}</div>
+            <div class="crumbs">
+              {$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+              {$t('nav.monitoring')}
+            </div>
             <h1>{$t('dash.title')}</h1>
             <p class="sub">{$t('dash.welcome')}</p>
           </div>
           <div class="ph-actions">
             <Button variant="secondary" onclick={fetchLiveStatus} title={$t('app.refresh')}>
-              <Icon name="refresh" size={14} /> {$t('app.refresh')}
+              <Icon name="refresh" size={14} />
+              {$t('app.refresh')}
             </Button>
             <Button variant="primary" onclick={restartXkeen} title={$t('dash.restart_xkeen')}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-13h-7z"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+                ><path d="M13 2 4 14h7l-1 8 10-13h-7z" /></svg
+              >
               {$t('dash.restart_xkeen')}
             </Button>
           </div>
@@ -498,7 +520,9 @@
                     <div class="problem-content">
                       <span class="problem-icon"><Icon name="warning" size={16} /></span>
                       <div>
-                        <strong class="problem-title">{$t('dash.problems.invalid_config_title')}</strong>
+                        <strong class="problem-title"
+                          >{$t('dash.problems.invalid_config_title')}</strong
+                        >
                         <div class="problem-desc">{$t('dash.problems.invalid_config_desc')}</div>
                       </div>
                     </div>
@@ -512,7 +536,8 @@
                     <div class="problem-content">
                       <span class="problem-icon"><Icon name="warning" size={16} /></span>
                       <div>
-                        <strong class="problem-title">{$t('dash.problems.mihomo_api_title')}</strong>
+                        <strong class="problem-title">{$t('dash.problems.mihomo_api_title')}</strong
+                        >
                         <div class="problem-desc">{$t('dash.problems.mihomo_api_desc')}</div>
                       </div>
                     </div>
@@ -526,7 +551,9 @@
                     <div class="problem-content">
                       <span class="problem-icon"><Icon name="warning" size={16} /></span>
                       <div>
-                        <strong class="problem-title">{$t('dash.problems.kernel_missing_title')}</strong>
+                        <strong class="problem-title"
+                          >{$t('dash.problems.kernel_missing_title')}</strong
+                        >
                         <div class="problem-desc">{$t('dash.problems.kernel_missing_desc')}</div>
                       </div>
                     </div>
@@ -545,18 +572,52 @@
           <Card title={$t('dash.service_status')}>
             {#snippet actions()}
               <button class="ct-btn" onclick={fetchLiveStatus} title={$t('app.refresh')}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg
+                >
               </button>
-              <button class="ct-btn" onclick={() => switchTab('services')} title={$t('nav.services')}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              <button
+                class="ct-btn"
+                onclick={() => switchTab('services')}
+                title={$t('nav.services')}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline
+                    points="15 3 21 3 21 9"
+                  /><line x1="10" y1="14" x2="21" y2="3" /></svg
+                >
               </button>
             {/snippet}
             {#if statusLoading}
               <div class="status-badges-row">
-                <div class="status-badge-item"><Skeleton type="rect" width="140px" height="34px" /></div>
-                <div class="status-badge-item"><Skeleton type="rect" width="140px" height="34px" /></div>
-                <div class="status-badge-item"><Skeleton type="rect" width="140px" height="34px" /></div>
-                <div class="status-badge-item"><Skeleton type="rect" width="80px" height="34px" /></div>
+                <div class="status-badge-item">
+                  <Skeleton type="rect" width="140px" height="34px" />
+                </div>
+                <div class="status-badge-item">
+                  <Skeleton type="rect" width="140px" height="34px" />
+                </div>
+                <div class="status-badge-item">
+                  <Skeleton type="rect" width="140px" height="34px" />
+                </div>
+                <div class="status-badge-item">
+                  <Skeleton type="rect" width="80px" height="34px" />
+                </div>
               </div>
             {:else if statusError}
               <div class="status-error-row">
@@ -610,7 +671,8 @@
                   </span>
                 </div>
                 <div class="status-badge-item">
-                  <span class="status-dot {serviceStatus.connections > 0 ? 'success' : 'warning'}"></span>
+                  <span class="status-dot {serviceStatus.connections > 0 ? 'success' : 'warning'}"
+                  ></span>
                   <span class="svc-cell-stack">
                     <span class="status-badge-label">{$t('dash.connections')}</span>
                     <span class="lbl">{$t('dash.connections_sub')}</span>
@@ -630,42 +692,80 @@
             <Card title={$t('dash.system_stats')}>
               {#snippet actions()}
                 <button class="ct-btn" onclick={fetchSystemStats} title={$t('app.refresh')}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    ><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg
+                  >
                 </button>
               {/snippet}
               <div class="stats-grid">
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.ram')}</div>
                   <div class="stat-value">
-                    {(systemStats.memory.used / 1024 / 1024).toFixed(2)}<span style="color:var(--fg-secondary);font-size:14px;font-weight:500;margin-left:6px;">МБ</span>
+                    {(systemStats.memory.used / 1024 / 1024).toFixed(2)}<span
+                      style="color:var(--fg-secondary);font-size:14px;font-weight:500;margin-left:6px;"
+                      >МБ</span
+                    >
                   </div>
-                  <div class="res-sub">из {(systemStats.memory.total / 1024 / 1024).toFixed(2)} МБ · {((systemStats.memory.used / systemStats.memory.total) * 100).toFixed(1)}%</div>
+                  <div class="res-sub">
+                    из {(systemStats.memory.total / 1024 / 1024).toFixed(2)} МБ · {(
+                      (systemStats.memory.used / systemStats.memory.total) *
+                      100
+                    ).toFixed(1)}%
+                  </div>
                   <div class="stat-bar">
-                    <div class="stat-bar-fill" style="width: {((systemStats.memory.used / systemStats.memory.total) * 100).toFixed(1)}%"></div>
+                    <div
+                      class="stat-bar-fill"
+                      style="width: {(
+                        (systemStats.memory.used / systemStats.memory.total) *
+                        100
+                      ).toFixed(1)}%"
+                    ></div>
                   </div>
                 </div>
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.load')}</div>
                   <div class="stat-value">{systemStats.load[0].toFixed(2)}</div>
-                  <div class="res-sub">1м {systemStats.load[0].toFixed(2)} · 5м {systemStats.load[1].toFixed(2)} · 15м {systemStats.load[2].toFixed(2)}</div>
+                  <div class="res-sub">
+                    1м {systemStats.load[0].toFixed(2)} · 5м {systemStats.load[1].toFixed(2)} · 15м {systemStats.load[2].toFixed(
+                      2
+                    )}
+                  </div>
                   {#if sparklineData}
                     <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
                       <defs>
                         <linearGradient id="sg1" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stop-color="#29c2f0" stop-opacity=".5"/>
-                          <stop offset="100%" stop-color="#29c2f0" stop-opacity="0"/>
+                          <stop offset="0%" stop-color="#29c2f0" stop-opacity=".5" />
+                          <stop offset="100%" stop-color="#29c2f0" stop-opacity="0" />
                         </linearGradient>
                       </defs>
-                      <path d={sparklineData.fill} fill="url(#sg1)"/>
-                      <path d={sparklineData.line} fill="none" stroke="#29c2f0" stroke-width="1.5"/>
+                      <path d={sparklineData.fill} fill="url(#sg1)" />
+                      <path
+                        d={sparklineData.line}
+                        fill="none"
+                        stroke="#29c2f0"
+                        stroke-width="1.5"
+                      />
                     </svg>
                   {/if}
                 </div>
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.uptime')}</div>
-                  <div class="stat-value">{systemStats.uptime.days}д {systemStats.uptime.hours}ч {systemStats.uptime.minutes}м</div>
+                  <div class="stat-value">
+                    {systemStats.uptime.days}д {systemStats.uptime.hours}ч {systemStats.uptime
+                      .minutes}м
+                  </div>
                   {#if systemStats.boot_time}
-                    <div class="res-sub">{$t('dash.uptime_since', { time: systemStats.boot_time })}</div>
+                    <div class="res-sub">
+                      {$t('dash.uptime_since', { time: systemStats.boot_time })}
+                    </div>
                   {/if}
                   <div class="stats" style="margin-top:10px;">
                     <span class="stat">{$t('dash.uptime_stable')}</span>
@@ -675,11 +775,17 @@
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.goroutines')}</div>
                   <div class="stat-value">{systemStats.go_runtime.goroutines}</div>
-                  <div class="res-sub">heap {(systemStats.go_runtime.heap_alloc / 1024 / 1024).toFixed(1)} МБ · gc {systemStats.go_runtime.num_gc} мс</div>
+                  <div class="res-sub">
+                    heap {(systemStats.go_runtime.heap_alloc / 1024 / 1024).toFixed(1)} МБ · gc {systemStats
+                      .go_runtime.num_gc} мс
+                  </div>
                   {#if systemStats.go_runtime.go_version || systemStats.go_runtime.goarch}
                     <div class="stats" style="margin-top:10px;">
                       {#if systemStats.go_runtime.gomaxprocs}
-                        <span class="stat">{systemStats.go_runtime.gomaxprocs} {systemStats.go_runtime.go_version}</span>
+                        <span class="stat"
+                          >{systemStats.go_runtime.gomaxprocs}
+                          {systemStats.go_runtime.go_version}</span
+                        >
                       {/if}
                       {#if systemStats.go_runtime.goarch}
                         <span class="stat">{systemStats.go_runtime.goarch}</span>
@@ -697,10 +803,32 @@
           <Card title={$t('dash.system_info')}>
             {#snippet actions()}
               <button class="ct-btn" onclick={copySystemInfo} title="Копировать">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><rect x="9" y="9" width="13" height="13" rx="2" /><path
+                    d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
+                  /></svg
+                >
               </button>
               <button class="ct-btn" onclick={fetchSystemStats} title={$t('app.refresh')}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg
+                >
               </button>
             {/snippet}
             <div class="info-rows">
@@ -736,7 +864,9 @@
                 <div class="val">
                   {systemStats?.config_path || '/opt/etc/xkeen/'}
                   {#if systemStats?.config_lines}
-                    <span class="info-badge info-badge-orange">{systemStats.config_lines} строк</span>
+                    <span class="info-badge info-badge-orange"
+                      >{systemStats.config_lines} строк</span
+                    >
                   {/if}
                 </div>
               </div>
@@ -752,46 +882,113 @@
         <div style="margin-bottom: 8px;">
           <Card title={$t('dash.quick_actions')}>
             {#snippet actions()}
-              <button class="ct-btn" onclick={() => { fetchSubscriptionSummary(); fetchProxySummary(); }} title={$t('app.refresh')}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+              <button
+                class="ct-btn"
+                onclick={() => {
+                  fetchSubscriptionSummary();
+                  fetchProxySummary();
+                }}
+                title={$t('app.refresh')}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg
+                >
               </button>
             {/snippet}
             <div class="qa-grid-mini">
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div class="qa-mini" onclick={() => switchTab('proxies')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('proxies')}>
+              <div
+                class="qa-mini"
+                onclick={() => switchTab('proxies')}
+                role="button"
+                tabindex="0"
+                onkeydown={(e) => e.key === 'Enter' && switchTab('proxies')}
+              >
                 <span class="qa-mini-ico"><Icon name="proxies" size={18} /></span>
-                <span><b>{$t('nav.proxies')}</b><span class="s">{totalProxiesCount > 0 ? `${totalProxiesCount} узлов · ${activeProxiesCount} активных` : 'Mihomo узлы и группы'}</span></span>
+                <span
+                  ><b>{$t('nav.proxies')}</b><span class="s"
+                    >{totalProxiesCount > 0
+                      ? `${totalProxiesCount} узлов · ${activeProxiesCount} активных`
+                      : 'Mihomo узлы и группы'}</span
+                  ></span
+                >
               </div>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div class="qa-mini" onclick={() => switchTab('subscriptions')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('subscriptions')}>
+              <div
+                class="qa-mini"
+                onclick={() => switchTab('subscriptions')}
+                role="button"
+                tabindex="0"
+                onkeydown={(e) => e.key === 'Enter' && switchTab('subscriptions')}
+              >
                 <span class="qa-mini-ico"><Icon name="subscriptions" size={18} /></span>
-                <span><b>{$t('nav.subscriptions')}</b><span class="s">{totalSubsCount > 0 ? `${totalSubsCount} источника${subsLastUpdated ? ' · ' + subsLastUpdated : ''}` : 'Подписки на прокси'}</span></span>
+                <span
+                  ><b>{$t('nav.subscriptions')}</b><span class="s"
+                    >{totalSubsCount > 0
+                      ? `${totalSubsCount} источника${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
+                      : 'Подписки на прокси'}</span
+                  ></span
+                >
               </div>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div class="qa-mini" onclick={() => switchTab('editor')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('editor')}>
+              <div
+                class="qa-mini"
+                onclick={() => switchTab('editor')}
+                role="button"
+                tabindex="0"
+                onkeydown={(e) => e.key === 'Enter' && switchTab('editor')}
+              >
                 <span class="qa-mini-ico"><Icon name="editor" size={18} /></span>
                 <span><b>{$t('nav.editor')}</b><span class="s">правка config.yaml</span></span>
               </div>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div class="qa-mini" onclick={() => switchTab('logs')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('logs')}>
+              <div
+                class="qa-mini"
+                onclick={() => switchTab('logs')}
+                role="button"
+                tabindex="0"
+                onkeydown={(e) => e.key === 'Enter' && switchTab('logs')}
+              >
                 <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
-                <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 1000 строк</span></span>
+                <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 1000 строк</span></span
+                >
               </div>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div class="qa-mini" onclick={() => switchTab('dat')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('dat')}>
+              <div
+                class="qa-mini"
+                onclick={() => switchTab('dat')}
+                role="button"
+                tabindex="0"
+                onkeydown={(e) => e.key === 'Enter' && switchTab('dat')}
+              >
                 <span class="qa-mini-ico"><Icon name="dat" size={18} /></span>
                 <span><b>{$t('nav.dat')}</b><span class="s">geoip · geosite · правила</span></span>
               </div>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div class="qa-mini" onclick={() => switchTab('console')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('console')}>
+              <div
+                class="qa-mini"
+                onclick={() => switchTab('console')}
+                role="button"
+                tabindex="0"
+                onkeydown={(e) => e.key === 'Enter' && switchTab('console')}
+              >
                 <span class="qa-mini-ico"><Icon name="console" size={18} /></span>
-                <span><b>{$t('nav.console')}</b><span class="s">shell в окружении XKeen</span></span>
+                <span><b>{$t('nav.console')}</b><span class="s">shell в окружении XKeen</span></span
+                >
               </div>
             </div>
           </Card>
@@ -880,8 +1077,12 @@
     font-size: 13px;
   }
 
-  .status-badge-item:last-child { border-right: 0; }
-  .status-badge-item:nth-last-child(-n+4) { border-bottom: 0; }
+  .status-badge-item:last-child {
+    border-right: 0;
+  }
+  .status-badge-item:nth-last-child(-n + 4) {
+    border-bottom: 0;
+  }
 
   .svc-cell-stack {
     display: flex;
@@ -910,16 +1111,22 @@
     flex-shrink: 0;
   }
 
-  .status-success { color: var(--success); }
-  .status-error   { color: var(--danger); }
-  .status-warning { color: var(--warning); }
+  .status-success {
+    color: var(--success);
+  }
+  .status-error {
+    color: var(--danger);
+  }
+  .status-warning {
+    color: var(--warning);
+  }
 
   .version-badge {
     font-family: var(--font-family-mono);
     font-size: 10px;
     color: var(--fg-dim);
-    letter-spacing: .03em;
-    background: rgba(255,255,255,.04);
+    letter-spacing: 0.03em;
+    background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--border);
     border-radius: 3px;
     padding: 1px 6px;
@@ -949,7 +1156,7 @@
     background: var(--bg-elevated);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all .15s;
+    transition: all 0.15s;
     text-decoration: none;
     color: inherit;
   }
@@ -957,7 +1164,7 @@
   .qa-mini:hover {
     border-color: var(--accent-line);
     transform: translateY(-1px);
-    box-shadow: 0 14px 28px -18px rgba(41,194,240,.45);
+    box-shadow: 0 14px 28px -18px rgba(41, 194, 240, 0.45);
   }
 
   .qa-mini-ico {
@@ -1003,8 +1210,12 @@
     border-right: 1px solid var(--border);
   }
 
-  .info-row:nth-child(2n) { border-right: 0; }
-  .info-row:nth-last-child(-n+2) { border-bottom: 0; }
+  .info-row:nth-child(2n) {
+    border-right: 0;
+  }
+  .info-row:nth-last-child(-n + 2) {
+    border-bottom: 0;
+  }
 
   .info-row .lbl {
     color: var(--fg-secondary);
@@ -1031,7 +1242,7 @@
   .crumbs {
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: .18em;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--fg-dim);
     margin-bottom: 6px;
@@ -1079,7 +1290,7 @@
     margin-left: 6px;
     vertical-align: middle;
     font-family: var(--font-family-mono);
-    letter-spacing: .02em;
+    letter-spacing: 0.02em;
   }
 
   /* "latest" badge — uses accent color vars from design system */
@@ -1091,8 +1302,8 @@
 
   /* config lines badge — warning/orange */
   .info-badge-orange {
-    background: rgba(255, 138, 0, .1);
+    background: rgba(255, 138, 0, 0.1);
     color: var(--warning, #f59e0b);
-    border: 1px solid rgba(255, 138, 0, .2);
+    border: 1px solid rgba(255, 138, 0, 0.2);
   }
 </style>

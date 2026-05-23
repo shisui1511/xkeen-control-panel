@@ -206,7 +206,7 @@
   $: stats = (() => {
     const totalNodes = subscriptions.reduce((sum, s) => sum + (s.proxy_count || 0), 0);
     let minNext = Infinity;
-    subscriptions.forEach(s => {
+    subscriptions.forEach((s) => {
       if (s.enabled && s.last_update && !s.last_update.startsWith('0001')) {
         const next = new Date(s.last_update).getTime() + s.interval * 3600 * 1000;
         const diff = next - Date.now();
@@ -232,36 +232,73 @@
 <div class="container">
   <div class="page-head">
     <div>
-      <div class="crumbs">{$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('nav.subscriptions')}</div>
+      <div class="crumbs">
+        {$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.subscriptions')}
+      </div>
       <h1>{$t('subscr.title')}</h1>
       <p class="sub">{$t('subscr.subtitle')}</p>
     </div>
     <div class="ph-actions">
       <button class="btn btn-secondary" on:click={refreshAll} disabled={loading}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+        >
         {$t('subscr.refresh_all')}
       </button>
       <button class="btn btn-primary" on:click={openAddModal}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M12 5v14M5 12h14"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
+        >
         {$t('subscr.add')}
       </button>
     </div>
   </div>
 
   {#if subscriptions.length === 0}
-    <div class="card text-center" style="padding: 3rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;">
+    <div
+      class="card text-center"
+      style="padding: 3rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;"
+    >
       <p style="color: var(--fg-secondary); margin: 0;">{$t('subscr.empty')}</p>
       <button class="btn btn-primary" on:click={openAddModal}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M12 5v14M5 12h14"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
+        >
         {$t('subscr.add_first')}
       </button>
     </div>
   {:else}
     <div class="stats mb-2">
-      <span class="stat"><b>{stats.total}</b> {$currentLang === 'ru' ? 'подписки' : 'subscriptions'}</span>
-      <span class="stat"><b>{stats.nodes}</b> {$currentLang === 'ru' ? 'узлов суммарно' : 'nodes total'}</span>
+      <span class="stat"
+        ><b>{stats.total}</b> {$currentLang === 'ru' ? 'подписки' : 'subscriptions'}</span
+      >
+      <span class="stat"
+        ><b>{stats.nodes}</b> {$currentLang === 'ru' ? 'узлов суммарно' : 'nodes total'}</span
+      >
       {#if stats.next !== '—'}
-        <span class="stat">{$currentLang === 'ru' ? 'след. обновление через' : 'next update in'} <b>{stats.next}</b></span>
+        <span class="stat"
+          >{$currentLang === 'ru' ? 'след. обновление через' : 'next update in'}
+          <b>{stats.next}</b></span
+        >
       {/if}
     </div>
 
@@ -270,21 +307,47 @@
         <div class="card sub-card">
           <div class="sub-header-row">
             <div class="sub-icon-wrapper">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1.5" fill="currentColor"/></svg>
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                ><path d="M4 11a9 9 0 0 1 9 9" /><path d="M4 4a16 16 0 0 1 16 16" /><circle
+                  cx="5"
+                  cy="19"
+                  r="1.5"
+                  fill="currentColor"
+                /></svg
+              >
             </div>
             <div class="sub-title-wrapper">
               <div class="sub-title-line">
                 {sub.name}
                 {#if sub.enabled}
-                  <span class="status-badge active"><span class="status-dot success" style="margin:0;"></span>{$currentLang === 'ru' ? 'активна' : 'active'}</span>
+                  <span class="status-badge active"
+                    ><span class="status-dot success" style="margin:0;"></span>{$currentLang ===
+                    'ru'
+                      ? 'активна'
+                      : 'active'}</span
+                  >
                 {:else}
-                  <span class="status-badge stopped"><span class="status-dot error" style="margin:0;"></span>{$currentLang === 'ru' ? 'выключена' : 'disabled'}</span>
+                  <span class="status-badge stopped"
+                    ><span class="status-dot error" style="margin:0;"></span>{$currentLang === 'ru'
+                      ? 'выключена'
+                      : 'disabled'}</span
+                  >
                 {/if}
               </div>
               <div class="sub-url-line">{sub.url}</div>
             </div>
             <div class="sub-actions-wrapper">
-              <button class="btn btn-secondary btn-sm" on:click={() => refreshSubscription(sub.id)} disabled={refreshLoading[sub.id]}>
+              <button
+                class="btn btn-secondary btn-sm"
+                on:click={() => refreshSubscription(sub.id)}
+                disabled={refreshLoading[sub.id]}
+              >
                 {#if refreshLoading[sub.id]}
                   <span class="spinner" style="margin-right: 4px;">...</span>
                   {$t('app.loading')}
@@ -292,13 +355,27 @@
                   {$t('subscr.refresh')}
                 {/if}
               </button>
-              
+
               <div class="dropdown-container">
-                <button class="btn btn-secondary action-btn-dots" on:click={() => toggleDropdown(sub.id)}>⋯</button>
+                <button
+                  class="btn btn-secondary action-btn-dots"
+                  on:click={() => toggleDropdown(sub.id)}>⋯</button
+                >
                 {#if activeDropdownId === sub.id}
                   <div class="dropdown-menu">
-                    <button on:click={() => { openEditModal(sub); activeDropdownId = null; }}>{$t('app.edit')}</button>
-                    <button on:click={() => { deleteSubscription(sub.id); activeDropdownId = null; }} class="delete-action">{$t('app.delete')}</button>
+                    <button
+                      on:click={() => {
+                        openEditModal(sub);
+                        activeDropdownId = null;
+                      }}>{$t('app.edit')}</button
+                    >
+                    <button
+                      on:click={() => {
+                        deleteSubscription(sub.id);
+                        activeDropdownId = null;
+                      }}
+                      class="delete-action">{$t('app.delete')}</button
+                    >
                   </div>
                 {/if}
               </div>
@@ -330,7 +407,13 @@
 </div>
 
 {#if showAddModal}
-  <div class="modal-overlay" role="button" tabindex="0" on:click={closeModal} on:keydown={handleKeydown}>
+  <div
+    class="modal-overlay"
+    role="button"
+    tabindex="0"
+    on:click={closeModal}
+    on:keydown={handleKeydown}
+  >
     <div class="modal-card" role="presentation" on:click|stopPropagation>
       <div class="modal-card-header">
         <h2>{editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}</h2>
@@ -371,7 +454,9 @@
         </div>
 
         <div class="form-group">
-          <label for="form-interval" class="form-label">{$t('subscr.interval')} ({$currentLang === 'ru' ? 'часов' : 'hours'})</label>
+          <label for="form-interval" class="form-label"
+            >{$t('subscr.interval')} ({$currentLang === 'ru' ? 'часов' : 'hours'})</label
+          >
           <input
             id="form-interval"
             type="number"
@@ -503,7 +588,7 @@
   .meta-label {
     font-size: 10.5px;
     color: var(--fg-dim);
-    letter-spacing: .18em;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     font-weight: 700;
   }

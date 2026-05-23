@@ -37,7 +37,6 @@ const translations: Record<Lang, Record<string, string>> = {
     'app.reload': 'Обновить',
     'app.ms': 'мс',
 
-
     // Auth
     'auth.login': 'Вход в панель управления',
     'auth.password': 'Пароль',
@@ -289,7 +288,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.snapshot_deleted': 'Снимок удалён',
     'settings.backups_desc': 'Управление резервными копиями файлов конфигурации',
     'settings.backup_file': 'Файл конфигурации',
-    'settings.backup_restore_confirm': 'Вы уверены, что хотите восстановить этот бэкап? Текущий файл будет перезаписан.',
+    'settings.backup_restore_confirm':
+      'Вы уверены, что хотите восстановить этот бэкап? Текущий файл будет перезаписан.',
     'settings.backup_restore_success': 'Конфигурация успешно восстановлена',
     'settings.backup_delete_confirm': 'Вы уверены, что хотите удалить этот бэкап?',
     'settings.backup_delete_success': 'Бэкап удален',
@@ -442,7 +442,6 @@ const translations: Record<Lang, Record<string, string>> = {
     'rules.add_tip': 'Добавление правил осуществляется через редактор конфигурации.',
     'rules.apply_success': 'Служба перезапущена, конфигурация успешно применена',
 
-
     // Traffic
     'traffic.title': 'Трафик',
     'traffic.realtime': 'Трафик в реальном времени',
@@ -570,7 +569,8 @@ const translations: Record<Lang, Record<string, string>> = {
     // Logs
     'logs.title': 'Логи',
     'logs.h1': 'Логи',
-    'logs.h1_sub': 'Поток событий XKeen, Xray и Mihomo через WebSocket. Хранится последние 1000 строк.',
+    'logs.h1_sub':
+      'Поток событий XKeen, Xray и Mihomo через WebSocket. Хранится последние 1000 строк.',
     'logs.unified': 'Unified логи',
     'logs.filter': 'Фильтр',
     'logs.level': 'Уровень',
@@ -626,7 +626,6 @@ const translations: Record<Lang, Record<string, string>> = {
     'proxies.obs_healthy_sub': 'latency < 300 мс',
     'proxies.obs_degraded_sub': '300–800 мс',
     'proxies.obs_unreachable_sub': 'timeout',
-
 
     // Setup script
     'setup.install': 'Установка',
@@ -700,7 +699,8 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // ApiOffline
     'apioffline.title': 'Mihomo API · оффлайн',
-    'apioffline.desc': 'не отвечает. Прокси, подключения и правила недоступны до восстановления связи.',
+    'apioffline.desc':
+      'не отвечает. Прокси, подключения и правила недоступны до восстановления связи.',
     'apioffline.last_seen': 'последний ответ',
     'apioffline.retry_countdown': 'повтор через {countdown}с',
     'apioffline.retry': 'Переподключить',
@@ -740,7 +740,6 @@ const translations: Record<Lang, Record<string, string>> = {
     'app.conn_error_desc': 'Please check your network connection or reload the page.',
     'app.reload': 'Reload',
     'app.ms': 'ms',
-
 
     // Auth
     'auth.login': 'Control Panel Login',
@@ -988,7 +987,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.snapshot_create_btn': 'Create snapshot',
     'settings.snapshot_created': 'Snapshot created',
     'settings.snapshot_restore_btn': 'Restore',
-    'settings.snapshot_restore_confirm': 'Restore this snapshot? Current configs will be overwritten.',
+    'settings.snapshot_restore_confirm':
+      'Restore this snapshot? Current configs will be overwritten.',
     'settings.snapshot_restored': 'Snapshot restored',
     'settings.snapshot_download_btn': 'Download',
     'settings.snapshot_delete_btn': 'Delete',
@@ -996,7 +996,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.snapshot_deleted': 'Snapshot deleted',
     'settings.backups_desc': 'Manage configuration file backups',
     'settings.backup_file': 'Configuration file',
-    'settings.backup_restore_confirm': 'Are you sure you want to restore this backup? The current file will be overwritten.',
+    'settings.backup_restore_confirm':
+      'Are you sure you want to restore this backup? The current file will be overwritten.',
     'settings.backup_restore_success': 'Configuration restored successfully',
     'settings.backup_delete_confirm': 'Are you sure you want to delete this backup?',
     'settings.backup_delete_success': 'Backup deleted',
@@ -1144,7 +1145,6 @@ const translations: Record<Lang, Record<string, string>> = {
     'rules.add': 'Add',
     'rules.add_tip': 'Adding rules is done via the configuration editor.',
     'rules.apply_success': 'Service restarted, configuration successfully applied',
-
 
     // Traffic
     'traffic.title': 'Traffic',
@@ -1329,7 +1329,6 @@ const translations: Record<Lang, Record<string, string>> = {
     'proxies.obs_degraded_sub': '300–800 ms',
     'proxies.obs_unreachable_sub': 'timeout',
 
-
     // Setup script
     'setup.install': 'Install',
     'setup.update': 'Update',
@@ -1400,7 +1399,8 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // ApiOffline
     'apioffline.title': 'Mihomo API · offline',
-    'apioffline.desc': 'is not responding. Proxies, connections, and rules are unavailable until connection is restored.',
+    'apioffline.desc':
+      'is not responding. Proxies, connections, and rules are unavailable until connection is restored.',
     'apioffline.last_seen': 'last response',
     'apioffline.retry_countdown': 'retry in {countdown}s',
     'apioffline.retry': 'Retry',

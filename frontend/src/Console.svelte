@@ -153,6 +153,7 @@
                 title={cmd.description}
               >
                 <div class="cmd-name" class:dangerous-text={cmd.dangerous}>
+                  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                   {@html getCommandSvg(cmd.command)}
                   xkeen {cmd.command}
                 </div>
@@ -167,10 +168,16 @@
     <div>
       <div class="toolbar mb-2">
         <div class="toolbar-left">
-          <span style="font-family:var(--font-family-mono);font-size:13px;color:var(--accent);">root@xkeen ~ #</span>
+          <span style="font-family:var(--font-family-mono);font-size:13px;color:var(--accent);"
+            >root@xkeen ~ #</span
+          >
         </div>
         <div class="toolbar-right">
-          <button class="btn btn-secondary btn-sm" on:click={clearOutput} disabled={!output && !executing}>
+          <button
+            class="btn btn-secondary btn-sm"
+            on:click={clearOutput}
+            disabled={!output && !executing}
+          >
             {$t('console.clear')}
           </button>
           <button class="btn btn-secondary btn-sm" on:click={copyOutput} disabled={!output}>
@@ -178,13 +185,13 @@
           </button>
         </div>
       </div>
-      
+
       <div class="term-output">
         {#if executing}
-          <span class="prompt">root@xkeen:~# xkeen {executing}</span><br>
+          <span class="prompt">root@xkeen:~# xkeen {executing}</span><br />
           <span style="color:var(--fg-dim);">Running...</span>
         {:else if output}
-          <span class="prompt">root@xkeen:~# xkeen {history[0]?.command || ''}</span><br>
+          <span class="prompt">root@xkeen:~# xkeen {history[0]?.command || ''}</span><br />
           {output}
         {:else}
           <span class="prompt">root@xkeen:~# _</span>
@@ -192,7 +199,10 @@
       </div>
 
       {#if history.length > 0}
-        <h4 class="mt-3" style="font-size: 11px; font-weight: 700; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.18em; padding: 0 4px;">
+        <h4
+          class="mt-3"
+          style="font-size: 11px; font-weight: 700; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.18em; padding: 0 4px;"
+        >
           {$t('console.history')}
         </h4>
         <div class="history-list">
@@ -222,7 +232,13 @@
 </div>
 
 {#if confirmPending}
-  <div class="modal-overlay" role="button" tabindex="0" on:click={cancelConfirm} on:keydown={(e) => e.key === 'Escape' && cancelConfirm()}>
+  <div
+    class="modal-overlay"
+    role="button"
+    tabindex="0"
+    on:click={cancelConfirm}
+    on:keydown={(e) => e.key === 'Escape' && cancelConfirm()}
+  >
     <div class="modal-card" role="presentation" on:click|stopPropagation>
       <div class="modal-card-header">
         <h2>{$t('console.confirm_title')}</h2>

@@ -18,13 +18,13 @@ func (a *API) TemplateFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url := r.URL.Query().Get("url")
-	if url == "" {
-		a.errorResponse(w, "URL parameter is required", http.StatusBadRequest)
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		a.errorResponse(w, "Name parameter is required", http.StatusBadRequest)
 		return
 	}
 
-	content, err := a.templateSvc.Fetch(url)
+	content, err := a.templateSvc.FetchByName(name)
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return

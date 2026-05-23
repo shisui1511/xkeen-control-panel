@@ -365,7 +365,10 @@
     e.stopPropagation();
     showKebabMenu = !showKebabMenu;
     if (showKebabMenu) {
-      const close = () => { showKebabMenu = false; window.removeEventListener('click', close); };
+      const close = () => {
+        showKebabMenu = false;
+        window.removeEventListener('click', close);
+      };
       setTimeout(() => window.addEventListener('click', close), 0);
     }
   }
@@ -755,7 +758,7 @@
     const backupContent = editorView.state.doc.toString();
     loading = true;
     try {
-      const res = await fetch(`/api/templates/fetch?url=${encodeURIComponent(template.url)}`);
+      const res = await fetch(`/api/templates/fetch?name=${encodeURIComponent(template.name)}`);
       if (!res.ok) throw new Error((await res.text()) || 'Failed to fetch template');
       const data = await res.json();
 
@@ -840,7 +843,11 @@
 
   // Reactive file info
   $: fileSize = formatBytes(originalContent ? new Blob([originalContent]).size : 0);
-  $: fileType = selectedFile ? (selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml') ? 'YAML' : 'JSON') : '';
+  $: fileType = selectedFile
+    ? selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml')
+      ? 'YAML'
+      : 'JSON'
+    : '';
   $: fileLineEndings = originalContent?.includes('\r\n') ? 'CRLF' : 'LF';
 
   function formatBytes(bytes: number): string {
@@ -866,17 +873,32 @@
 <div class="container">
   <div class="page-head">
     <div>
-      <div class="crumbs">{$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('editor.h1')}</div>
+      <div class="crumbs">
+        {$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('editor.h1')}
+      </div>
       <h1>{$t('editor.h1')}</h1>
       <p class="sub">{$t('editor.h1_sub')}</p>
     </div>
     <div class="ph-actions">
       <button
         class="btn btn-primary"
-        on:click={() => { showCreateModal = true; newFileName = ''; }}
+        on:click={() => {
+          showCreateModal = true;
+          newFileName = '';
+        }}
         title={$t('editor.create_file')}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          ><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg
+        >
         {$t('editor.new_file')}
       </button>
     </div>
@@ -886,9 +908,15 @@
     <div>
       <!-- Xray Section -->
       <div class="editor-files" style="margin-bottom:12px;">
-        <div class="editor-files-head" style="display:flex;align-items:center;justify-content:space-between;">
+        <div
+          class="editor-files-head"
+          style="display:flex;align-items:center;justify-content:space-between;"
+        >
           <span>Xray</span>
-          <span style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;">{xrayDir}</span>
+          <span
+            style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
+            >{xrayDir}</span
+          >
         </div>
         <div class="file-list">
           {#each xrayFiles as file}
@@ -904,16 +932,25 @@
               {/if}
             </button>
           {:else}
-            <span class="sb-empty" style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;">—</span>
+            <span
+              class="sb-empty"
+              style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;">—</span
+            >
           {/each}
         </div>
       </div>
 
       <!-- Mihomo Section -->
       <div class="editor-files">
-        <div class="editor-files-head" style="display:flex;align-items:center;justify-content:space-between;">
+        <div
+          class="editor-files-head"
+          style="display:flex;align-items:center;justify-content:space-between;"
+        >
           <span>Mihomo</span>
-          <span style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;">{mihomoDir}</span>
+          <span
+            style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
+            >{mihomoDir}</span
+          >
         </div>
         <div class="file-list">
           {#each mihomoFiles as file}
@@ -929,7 +966,10 @@
               {/if}
             </button>
           {:else}
-            <span class="sb-empty" style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;">—</span>
+            <span
+              class="sb-empty"
+              style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;">—</span
+            >
           {/each}
         </div>
       </div>
@@ -954,18 +994,29 @@
     <!-- Main Editor Card -->
     <div class="editor-main-card">
       <div class="editor-toolbar">
-        <span class="file-name">{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span>
+        <span class="file-name"
+          >{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span
+        >
         {#if selectedFile}
-          <span class="file-meta" style="margin-left:8px;">{fileSize} · {fileType} · UTF‑8 · {fileLineEndings}</span>
+          <span class="file-meta" style="margin-left:8px;"
+            >{fileSize} · {fileType} · UTF‑8 · {fileLineEndings}</span
+          >
         {/if}
 
         {#if hasDraft}
-          <div class="editor-draft-bar" style="margin-left: 12px; display: inline-flex; align-items: center; gap: 6px;">
+          <div
+            class="editor-draft-bar"
+            style="margin-left: 12px; display: inline-flex; align-items: center; gap: 6px;"
+          >
             <span>{$t('editor.has_draft') || 'Есть черновик'}</span>
             <button on:click={restoreDraft} class="btn btn-sm btn-warning">
               {$t('editor.restore_draft') || 'Восстановить'}
             </button>
-            <button on:click={discardDraft} class="btn btn-sm btn-secondary" style="padding: 2px 8px;">
+            <button
+              on:click={discardDraft}
+              class="btn btn-sm btn-secondary"
+              style="padding: 2px 8px;"
+            >
               {$t('editor.discard_draft') || 'Сбросить'}
             </button>
           </div>
@@ -973,7 +1024,11 @@
 
         <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
           {#if selectedFile}
-            <label class="toggle-label" for="schema-toggle" title="Enable schema validation, autocomplete and hover tooltips">
+            <label
+              class="toggle-label"
+              for="schema-toggle"
+              title="Enable schema validation, autocomplete and hover tooltips"
+            >
               <label class="toggle-switch">
                 <input
                   id="schema-toggle"
@@ -986,7 +1041,11 @@
               {$t('editor.schema')}
             </label>
 
-            <label class="toggle-label" for="expert-toggle" title="Expert mode: full schema assist / Beginner: simplified">
+            <label
+              class="toggle-label"
+              for="expert-toggle"
+              title="Expert mode: full schema assist / Beginner: simplified"
+            >
               <label class="toggle-switch">
                 <input
                   id="expert-toggle"
@@ -1001,32 +1060,78 @@
 
             <!-- Kebab actions -->
             <div class="kebab-wrap">
-              <button class="btn btn-secondary" style="padding:6px 10px;" on:click={toggleKebab} title="Дополнительные действия" aria-label="Дополнительные действия">
+              <button
+                class="btn btn-secondary"
+                style="padding:6px 10px;"
+                on:click={toggleKebab}
+                title="Дополнительные действия"
+                aria-label="Дополнительные действия"
+              >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>
+                  <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle
+                    cx="12"
+                    cy="19"
+                    r="2"
+                  />
                 </svg>
               </button>
               {#if showKebabMenu}
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div class="kebab-dropdown" style="right:0;top:calc(100% + 4px);" on:click|stopPropagation>
-                  <button class="kebab-item" on:click={() => { showKebabMenu = false; applyQuickFixes(); }}>
+                <div
+                  class="kebab-dropdown"
+                  style="right:0;top:calc(100% + 4px);"
+                  on:click|stopPropagation
+                >
+                  <button
+                    class="kebab-item"
+                    on:click={() => {
+                      showKebabMenu = false;
+                      applyQuickFixes();
+                    }}
+                  >
                     <Icon name="settings" size={14} />
                     {$t('editor.quick_fix')}
                   </button>
-                  <button class="kebab-item" on:click={() => { showKebabMenu = false; showTemplatesModal = true; loadTemplates(); }}>
+                  <button
+                    class="kebab-item"
+                    on:click={() => {
+                      showKebabMenu = false;
+                      showTemplatesModal = true;
+                      loadTemplates();
+                    }}
+                  >
                     <Icon name="editor" size={14} />
                     {$t('editor.templates')}
                   </button>
-                  <button class="kebab-item" on:click={() => { showKebabMenu = false; showGeneratorModal = true; }}>
+                  <button
+                    class="kebab-item"
+                    on:click={() => {
+                      showKebabMenu = false;
+                      showGeneratorModal = true;
+                    }}
+                  >
                     <Icon name="add" size={14} />
                     {$t('editor.generator')}
                   </button>
-                  <button class="kebab-item" on:click={() => { showKebabMenu = false; showRenameModal = true; renameTarget = selectedFile.split('/').pop() || ''; }}>
+                  <button
+                    class="kebab-item"
+                    on:click={() => {
+                      showKebabMenu = false;
+                      showRenameModal = true;
+                      renameTarget = selectedFile.split('/').pop() || '';
+                    }}
+                  >
                     {$t('app.rename')}
                   </button>
                   <div class="kebab-divider"></div>
-                  <button class="kebab-item danger" on:click={() => { showKebabMenu = false; deleteFile(); }}>
+                  <button
+                    class="kebab-item danger"
+                    on:click={() => {
+                      showKebabMenu = false;
+                      deleteFile();
+                    }}
+                  >
                     <Icon name="trash" size={14} />
                     {$t('app.delete')}
                   </button>
@@ -1034,7 +1139,12 @@
               {/if}
             </div>
 
-            <button on:click={checkBeforeSave} disabled={saving} class="btn btn-primary" style="padding: 6px 14px;">
+            <button
+              on:click={checkBeforeSave}
+              disabled={saving}
+              class="btn btn-primary"
+              style="padding: 6px 14px;"
+            >
               {saving ? $t('app.loading') : $t('app.save')}
             </button>
           {/if}
@@ -1046,7 +1156,10 @@
           <div class="spinner"></div>
         </div>
       {:else if !selectedFile}
-        <div class="empty-state" style="min-height: 420px; display: grid; place-items: center; color: var(--fg-dim);">
+        <div
+          class="empty-state"
+          style="min-height: 420px; display: grid; place-items: center; color: var(--fg-dim);"
+        >
           <p>{$t('editor.select_file')}</p>
         </div>
       {:else}
@@ -1057,10 +1170,12 @@
 
       <!-- Status Bar -->
       {#if selectedFile}
-        <div style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:14px;font-family:var(--font-family-mono);font-size:11px;color:var(--fg-dim);">
+        <div
+          style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:14px;font-family:var(--font-family-mono);font-size:11px;color:var(--fg-dim);"
+        >
           <span class:status-dirty={isDirty}>
             <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
-            {isDirty ? ($t('editor.unsaved') || 'Изменён') : ($t('editor.saved') || 'Сохранён')}
+            {isDirty ? $t('editor.unsaved') || 'Изменён' : $t('editor.saved') || 'Сохранён'}
           </span>
           <span>schema: {selectedFile.includes('xray') ? 'xray@latest' : 'mihomo@latest'}</span>
           <span>{cursorLine}:{cursorCol}</span>
@@ -1080,8 +1195,15 @@
     on:click={() => (showCreateModal = false)}
     on:keydown={(e) => e.key === 'Escape' && (showCreateModal = false)}
   >
-    <div class="confirm-modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
-      <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">{$t('editor.create_file')}</h3>
+    <div
+      class="confirm-modal"
+      role="presentation"
+      on:click|stopPropagation
+      on:keydown|stopPropagation
+    >
+      <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">
+        {$t('editor.create_file')}
+      </h3>
       <label for="new-file-name" class="sr-only">{$t('editor.file_name')}</label>
       <input
         id="new-file-name"
@@ -1112,8 +1234,15 @@
     on:click={() => (showRenameModal = false)}
     on:keydown={(e) => e.key === 'Escape' && (showRenameModal = false)}
   >
-    <div class="confirm-modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
-      <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">{$t('editor.rename_file')}</h3>
+    <div
+      class="confirm-modal"
+      role="presentation"
+      on:click|stopPropagation
+      on:keydown|stopPropagation
+    >
+      <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">
+        {$t('editor.rename_file')}
+      </h3>
       <label for="rename-target" class="sr-only">{$t('editor.new_name')}</label>
       <input
         id="rename-target"
@@ -1152,12 +1281,16 @@
       on:keydown|stopPropagation
     >
       <div class="modal-header">
-        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">{$t('editor.templates')}</h3>
+        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
+          {$t('editor.templates')}
+        </h3>
         <button class="btn-close" on:click={() => (showTemplatesModal = false)}>
           <Icon name="cross" size={14} />
         </button>
       </div>
-      <p style="margin: 8px 0 16px; color: var(--fg-dim); font-size: 13px;">{$t('editor.templates_desc')}</p>
+      <p style="margin: 8px 0 16px; color: var(--fg-dim); font-size: 13px;">
+        {$t('editor.templates_desc')}
+      </p>
 
       <div class="template-list">
         {#each templates as template}
@@ -1192,23 +1325,36 @@
       on:keydown|stopPropagation
     >
       <div class="modal-header">
-        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">{$t('editor.generator')}</h3>
+        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
+          {$t('editor.generator')}
+        </h3>
         <button class="btn-close" on:click={() => (showGeneratorModal = false)}>
           <Icon name="cross" size={14} />
         </button>
       </div>
 
       <div class="form-group" style="margin-bottom: 12px; margin-top: 12px;">
-        <label for="gen-protocol" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">{$t('editor.protocol')}</label>
+        <label
+          for="gen-protocol"
+          style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+          >{$t('editor.protocol')}</label
+        >
         <select id="gen-protocol" bind:value={genProtocol} class="input" style="width: 100%;">
           <option value="vless">VLESS</option>
           <option value="shadowsocks">Shadowsocks</option>
         </select>
       </div>
 
-      <div class="form-grid" style="margin-bottom: 12px; display: grid; grid-template-columns: 2fr 1fr; gap: 12px;">
+      <div
+        class="form-grid"
+        style="margin-bottom: 12px; display: grid; grid-template-columns: 2fr 1fr; gap: 12px;"
+      >
         <div class="form-group">
-          <label for="gen-address" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">{$t('editor.address')}</label>
+          <label
+            for="gen-address"
+            style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+            >{$t('editor.address')}</label
+          >
           <input
             id="gen-address"
             type="text"
@@ -1218,13 +1364,21 @@
           />
         </div>
         <div class="form-group">
-          <label for="gen-port" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">{$t('editor.port')}</label>
+          <label
+            for="gen-port"
+            style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+            >{$t('editor.port')}</label
+          >
           <input id="gen-port" type="number" bind:value={genPort} class="input" />
         </div>
       </div>
 
       <div class="form-group" style="margin-bottom: 12px;">
-        <label for="gen-uuid" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">{genProtocol === 'vless' ? 'UUID' : 'Password'}</label>
+        <label
+          for="gen-uuid"
+          style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+          >{genProtocol === 'vless' ? 'UUID' : 'Password'}</label
+        >
         <div class="input-group" style="display: flex; gap: 8px;">
           <input id="gen-uuid" type="text" bind:value={genUUID} class="input" style="flex: 1;" />
           <button
@@ -1240,7 +1394,11 @@
 
       {#if genProtocol === 'vless'}
         <div class="form-group" style="margin-bottom: 12px;">
-          <label for="gen-sni" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">SNI</label>
+          <label
+            for="gen-sni"
+            style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+            >SNI</label
+          >
           <input
             id="gen-sni"
             type="text"
@@ -1250,9 +1408,16 @@
           />
         </div>
 
-        <div class="form-grid" style="margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div
+          class="form-grid"
+          style="margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;"
+        >
           <div class="form-group">
-            <label for="gen-security" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">Security</label>
+            <label
+              for="gen-security"
+              style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+              >Security</label
+            >
             <select id="gen-security" bind:value={genSecurity} class="input" style="width: 100%;">
               <option value="reality">Reality</option>
               <option value="tls">TLS</option>
@@ -1261,7 +1426,11 @@
           </div>
           {#if genSecurity === 'reality'}
             <div class="form-group">
-              <label for="gen-shortid" style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;">Short ID</label>
+              <label
+                for="gen-shortid"
+                style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+                >Short ID</label
+              >
               <input
                 id="gen-shortid"
                 type="text"
@@ -1302,7 +1471,9 @@
       on:keydown|stopPropagation
     >
       <div class="modal-header">
-        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">{$t('editor.confirm_save_title') || 'Confirm Save'}</h3>
+        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
+          {$t('editor.confirm_save_title') || 'Confirm Save'}
+        </h3>
         <button
           class="btn-close"
           on:click={() => (showSaveConfirmModal = false)}
@@ -1315,12 +1486,25 @@
       <!-- Validation status -->
       {#if validationLoading}
         <div class="validation-result validation-loading" style="margin-top: 12px;">
-          <svg width="16" height="16" viewBox="0 0 38 38" stroke="var(--accent)" style="flex-shrink:0">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 38 38"
+            stroke="var(--accent)"
+            style="flex-shrink:0"
+          >
             <g fill="none" fill-rule="evenodd">
               <g transform="translate(1 1)" stroke-width="2">
                 <circle stroke-opacity=".5" cx="18" cy="18" r="18" />
                 <path d="M36 18c0-9.94-8.06-18-18-18">
-                  <animateTransform attributeName="transform" type="rotate" from="0 18 18" to="360 18 18" dur="1s" repeatCount="indefinite" />
+                  <animateTransform
+                    attributeName="transform"
+                    type="rotate"
+                    from="0 18 18"
+                    to="360 18 18"
+                    dur="1s"
+                    repeatCount="indefinite"
+                  />
                 </path>
               </g>
             </g>
@@ -1500,7 +1684,7 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     min-width: 180px;
     z-index: 100;
     overflow: hidden;
@@ -1548,15 +1732,15 @@
   }
 
   .validation-loading {
-    background: rgba(41,194,240,0.08);
+    background: rgba(41, 194, 240, 0.08);
     color: var(--accent);
-    border: 1px solid rgba(41,194,240,0.2);
+    border: 1px solid rgba(41, 194, 240, 0.2);
   }
 
   .validation-ok {
-    background: rgba(16,185,129,0.08);
+    background: rgba(16, 185, 129, 0.08);
     color: var(--success);
-    border: 1px solid rgba(16,185,129,0.2);
+    border: 1px solid rgba(16, 185, 129, 0.2);
   }
 
   .v-icon {
@@ -1565,9 +1749,9 @@
   }
 
   .validation-err {
-    background: rgba(239,68,68,0.08);
+    background: rgba(239, 68, 68, 0.08);
     color: var(--danger);
-    border: 1px solid rgba(239,68,68,0.2);
+    border: 1px solid rgba(239, 68, 68, 0.2);
     flex-direction: column;
     width: 100%;
   }
@@ -1619,12 +1803,12 @@
 
   .diff-line-added {
     color: #a3e9b6;
-    background: rgba(163,233,182,0.04);
+    background: rgba(163, 233, 182, 0.04);
   }
 
   .diff-line-removed {
     color: #f87171;
-    background: rgba(248,113,113,0.04);
+    background: rgba(248, 113, 113, 0.04);
   }
 
   .diff-line-collapsed {
@@ -1646,6 +1830,8 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

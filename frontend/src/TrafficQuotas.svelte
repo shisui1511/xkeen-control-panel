@@ -293,7 +293,8 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_tools')} <span class="crumb-separator">/</span> {$t('nav.trafficquotas')}
+        {$t('nav.group_tools')} <span class="crumb-separator">/</span>
+        {$t('nav.trafficquotas')}
       </div>
       <h1>{$t('trafficquotas.title')}</h1>
       <p class="sub">{$t('trafficquotas.subtitle')}</p>
@@ -305,8 +306,16 @@
         </button>
       {/if}
       <button class="btn btn-primary" on:click={startCreate}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
-          <path d="M12 5v14M5 12h14"/>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"
+        >
+          <path d="M12 5v14M5 12h14" />
         </svg>
         {$t('trafficquotas.add_quota')}
       </button>
@@ -361,7 +370,7 @@
   <!-- Quotas Table -->
   <div class="card card-tight mb-3">
     <h2 class="card-title" style="padding: 20px 24px 8px 24px;">{$t('trafficquotas.quotas')}</h2>
-    
+
     {#if quotas.length === 0}
       <div style="padding: 24px; text-align: center; color: var(--fg-faint);">
         {$t('trafficquotas.no_quotas')}
@@ -386,7 +395,10 @@
               <tr>
                 <td><b>{q.name}</b></td>
                 <td>
-                  <span class="status-badge" style="background: rgba(255,255,255,0.05); color: var(--fg-secondary);">
+                  <span
+                    class="status-badge"
+                    style="background: rgba(255,255,255,0.05); color: var(--fg-secondary);"
+                  >
                     {q.target_type === 'global' ? $t('trafficquotas.target_global') : q.target_id}
                   </span>
                 </td>
@@ -426,33 +438,57 @@
                 </td>
                 <td>
                   {#if percent(q) >= 100}
-                    <span class="badge badge-error">{$currentLang === 'ru' ? 'Блокировка' : 'Block'}</span>
+                    <span class="badge badge-error"
+                      >{$currentLang === 'ru' ? 'Блокировка' : 'Block'}</span
+                    >
+                  {:else if percent(q) >= q.alert_threshold}
+                    <span class="badge badge-warning"
+                      >{$currentLang === 'ru' ? 'Предупреждение' : 'Warning'}</span
+                    >
                   {:else}
-                    {#if percent(q) >= q.alert_threshold}
-                      <span class="badge badge-warning">{$currentLang === 'ru' ? 'Предупреждение' : 'Warning'}</span>
-                    {:else}
-                      <span class="badge badge-success">OK</span>
-                    {/if}
+                    <span class="badge badge-success">OK</span>
                   {/if}
                 </td>
                 <td>
                   <div class="actions-wrapper">
-                    <label class="toggle-switch" style="margin-right: 12px;" title="Включить/выключить лимит">
-                      <input type="checkbox" checked={q.enabled} on:change={() => toggleEnabled(q)} />
+                    <label
+                      class="toggle-switch"
+                      style="margin-right: 12px;"
+                      title="Включить/выключить лимит"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={q.enabled}
+                        on:change={() => toggleEnabled(q)}
+                      />
                       <span class="toggle-slider"></span>
                     </label>
-                    
+
                     <div class="dropdown-container">
-                      <button class="btn btn-secondary action-btn-dots" on:click={(e) => toggleDropdown(q.id, e)}>⋯</button>
+                      <button
+                        class="btn btn-secondary action-btn-dots"
+                        on:click={(e) => toggleDropdown(q.id, e)}>⋯</button
+                      >
                       {#if activeDropdownId === q.id}
                         <div class="dropdown-menu">
-                          <button on:click={() => { resetQuota(q.id); activeDropdownId = null; }}>
+                          <button
+                            on:click={() => {
+                              resetQuota(q.id);
+                              activeDropdownId = null;
+                            }}
+                          >
                             {$t('trafficquotas.reset')}
                           </button>
                           <button on:click={() => startEdit(q)}>
                             {$t('app.edit')}
                           </button>
-                          <button on:click={() => { deleteQuota(q.id); activeDropdownId = null; }} class="delete-action">
+                          <button
+                            on:click={() => {
+                              deleteQuota(q.id);
+                              activeDropdownId = null;
+                            }}
+                            class="delete-action"
+                          >
                             {$t('app.delete')}
                           </button>
                         </div>
@@ -471,7 +507,9 @@
   <!-- Proxy Stats (Optional/Additional Info in Hopper Style) -->
   {#if stats && stats.proxies && stats.proxies.length > 0}
     <div class="card card-tight mb-3">
-      <h2 class="card-title" style="padding: 20px 24px 8px 24px;">{$t('trafficquotas.per_proxy')}</h2>
+      <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
+        {$t('trafficquotas.per_proxy')}
+      </h2>
       <div class="table-responsive">
         <table>
           <thead>
@@ -488,7 +526,9 @@
                 <td><b>{p.proxy_name}</b></td>
                 <td class="mono">{formatBytes(p.upload_bytes)}</td>
                 <td class="mono">{formatBytes(p.download_bytes)}</td>
-                <td class="mono" style="color: var(--fg-primary); font-weight: 600;">{formatBytes(p.total_bytes)}</td>
+                <td class="mono" style="color: var(--fg-primary); font-weight: 600;"
+                  >{formatBytes(p.total_bytes)}</td
+                >
               </tr>
             {/each}
           </tbody>
@@ -500,7 +540,13 @@
 
 <!-- Modal Form -->
 {#if showForm}
-  <div class="modal-overlay" role="button" tabindex="0" on:click={cancelEdit} on:keydown={handleKeydown}>
+  <div
+    class="modal-overlay"
+    role="button"
+    tabindex="0"
+    on:click={cancelEdit}
+    on:keydown={handleKeydown}
+  >
     <div class="modal-card" role="presentation" on:click|stopPropagation>
       <div class="modal-card-header">
         <h2>{editingQuota ? $t('trafficquotas.edit_quota') : $t('trafficquotas.new_quota')}</h2>
@@ -571,7 +617,9 @@
         </div>
 
         <div class="form-group">
-          <label for="form-threshold" class="form-label">{$t('trafficquotas.alert_threshold')} (%)</label>
+          <label for="form-threshold" class="form-label"
+            >{$t('trafficquotas.alert_threshold')} (%)</label
+          >
           <input
             id="form-threshold"
             type="number"
@@ -763,7 +811,9 @@
     cursor: pointer;
     border-radius: 4px;
     width: 100%;
-    transition: background 0.2s, color 0.2s;
+    transition:
+      background 0.2s,
+      color 0.2s;
   }
 
   .dropdown-menu button:hover {
@@ -908,20 +958,20 @@
     right: 0;
     bottom: 0;
     background-color: rgba(255, 255, 255, 0.1);
-    transition: .2s;
+    transition: 0.2s;
     border-radius: 9px;
     border: 1px solid var(--border);
   }
 
   .toggle-slider:before {
     position: absolute;
-    content: "";
+    content: '';
     height: 12px;
     width: 12px;
     left: 2px;
     bottom: 2px;
     background-color: var(--fg-secondary);
-    transition: .2s;
+    transition: 0.2s;
     border-radius: 50%;
   }
 
@@ -935,4 +985,3 @@
     background-color: #fff;
   }
 </style>
-

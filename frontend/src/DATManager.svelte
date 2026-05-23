@@ -77,7 +77,7 @@
   $: otherFiles = files.filter((f) => f.type !== 'xray' && f.type !== 'mihomo');
   $: totalSize = files.reduce((sum, f) => sum + f.size, 0);
   $: lastUpdated = files.reduce((max, f) => Math.max(max, f.last_update || 0), 0);
-  $: missingCount = files.filter(f => !f.exists).length;
+  $: missingCount = files.filter((f) => !f.exists).length;
 
   onMount(fetchFiles);
 </script>
@@ -86,27 +86,56 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_services')} <span class="crumb-separator">/</span> {$t('nav.dat')}
+        {$t('nav.group_services')} <span class="crumb-separator">/</span>
+        {$t('nav.dat')}
       </div>
       <h1>{$t('dat.h1')}</h1>
       <p class="sub">{$t('dat.h1_sub')}</p>
     </div>
     <div class="ph-actions">
-      <button class="btn btn-secondary" on:click={fetchFiles} disabled={loading} title={$t('app.refresh')}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;">
-          <polyline points="23 4 23 10 17 10"/>
-          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+      <button
+        class="btn btn-secondary"
+        on:click={fetchFiles}
+        disabled={loading}
+        title={$t('app.refresh')}
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          style="margin-right: 6px;"
+        >
+          <polyline points="23 4 23 10 17 10" />
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
         </svg>
         {$t('app.refresh')}
       </button>
-      <button class="btn btn-primary" on:click={updateAll} disabled={globalUpdating || loading} title={$t('dat.update_all')}>
+      <button
+        class="btn btn-primary"
+        on:click={updateAll}
+        disabled={globalUpdating || loading}
+        title={$t('dat.update_all')}
+      >
         {#if globalUpdating}
           <span class="spinner" style="margin-right: 6px;">...</span>
           {$t('app.loading')}
         {:else}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
-            <polyline points="21 8 21 3 16 3"/>
-            <path d="M3 16v5h5M21 3l-9 9M3 21l9-9"/>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right: 6px;"
+          >
+            <polyline points="21 8 21 3 16 3" />
+            <path d="M3 16v5h5M21 3l-9 9M3 21l9-9" />
           </svg>
           {$t('dat.update_all')}
         {/if}
@@ -122,11 +151,19 @@
   {#if !loading && files.length > 0}
     <div class="stats mb-3">
       <span class="stat"><b>{files.length}</b> {$t('dat.total_files')}</span>
-      <span class="stat"><b>{files.length - missingCount}</b> {$currentLang === 'ru' ? 'актуальных' : 'active'}</span>
+      <span class="stat"
+        ><b>{files.length - missingCount}</b>
+        {$currentLang === 'ru' ? 'актуальных' : 'active'}</span
+      >
       {#if missingCount > 0}
-        <span class="stat" style="color: var(--warning);"><b>{missingCount}</b> {$currentLang === 'ru' ? 'отсутствует' : 'missing'}</span>
+        <span class="stat" style="color: var(--warning);"
+          ><b>{missingCount}</b> {$currentLang === 'ru' ? 'отсутствует' : 'missing'}</span
+        >
       {/if}
-      <span class="stat">{$currentLang === 'ru' ? 'общий размер' : 'total size'} <b>{formatSize(totalSize)}</b></span>
+      <span class="stat"
+        >{$currentLang === 'ru' ? 'общий размер' : 'total size'}
+        <b>{formatSize(totalSize)}</b></span
+      >
     </div>
   {/if}
 
@@ -138,15 +175,37 @@
     <!-- Xray Group -->
     {#if xrayFiles.length > 0}
       <div class="card card-tight mb-3">
-        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">Xray ({xrayFiles[0]?.path || '/opt/etc/xray/datfiles'})</h2>
+        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
+          Xray ({xrayFiles[0]?.path || '/opt/etc/xray/datfiles'})
+        </h2>
         <div class="dat-list">
           {#each xrayFiles as file}
             <div class="dat-row" class:is-symlink={file.is_symlink}>
               <div class="dr-ico" class:warning={!file.exists}>
                 {#if file.is_symlink}
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path
+                      d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+                    /></svg
+                  >
                 {:else}
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><circle cx="12" cy="12" r="10" /><path
+                      d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"
+                    /><path d="M2 12h20" /></svg
+                  >
                 {/if}
               </div>
               <div class="dr-main">
@@ -157,21 +216,34 @@
                   {:else}
                     <span class="badge badge-success">OK</span>
                   {/if}
-                  <span class="badge badge-type">{file.name.split('.').pop()?.toUpperCase() || 'DAT'}</span>
+                  <span class="badge badge-type"
+                    >{file.name.split('.').pop()?.toUpperCase() || 'DAT'}</span
+                  >
                 </div>
                 <div class="dr-meta">
                   {formatSize(file.size)} ·
                   {#if file.is_symlink}
                     {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
                   {/if}
-                  {$t('dat.updated')} {formatDate(file.last_update)}
+                  {$t('dat.updated')}
+                  {formatDate(file.last_update)}
                 </div>
               </div>
               <div class="stat-bar" style="width:120px;">
-                <div class="stat-bar-fill" style="width: {file.exists ? '100%' : '0%'}; background: {file.exists ? 'var(--success)' : 'var(--error)'}"></div>
+                <div
+                  class="stat-bar-fill"
+                  style="width: {file.exists ? '100%' : '0%'}; background: {file.exists
+                    ? 'var(--success)'
+                    : 'var(--error)'}"
+                ></div>
               </div>
               <div class="dr-actions">
-                <button class="btn btn-secondary btn-icon-only" on:click={updateAll} disabled={globalUpdating} title={$t('dat.update_all')}>
+                <button
+                  class="btn btn-secondary btn-icon-only"
+                  on:click={updateAll}
+                  disabled={globalUpdating}
+                  title={$t('dat.update_all')}
+                >
                   ↓
                 </button>
               </div>
@@ -184,15 +256,37 @@
     <!-- Mihomo Group -->
     {#if mihomoFiles.length > 0}
       <div class="card card-tight mb-3">
-        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">Mihomo ({mihomoFiles[0]?.path || '/opt/etc/mihomo'})</h2>
+        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
+          Mihomo ({mihomoFiles[0]?.path || '/opt/etc/mihomo'})
+        </h2>
         <div class="dat-list">
           {#each mihomoFiles as file}
             <div class="dat-row" class:is-symlink={file.is_symlink}>
               <div class="dr-ico" class:warning={!file.exists}>
                 {#if file.is_symlink}
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path
+                      d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+                    /></svg
+                  >
                 {:else}
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><circle cx="12" cy="12" r="10" /><path
+                      d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"
+                    /><path d="M2 12h20" /></svg
+                  >
                 {/if}
               </div>
               <div class="dr-main">
@@ -203,21 +297,34 @@
                   {:else}
                     <span class="badge badge-success">OK</span>
                   {/if}
-                  <span class="badge badge-type">{file.name.split('.').pop()?.toUpperCase() || 'DAT'}</span>
+                  <span class="badge badge-type"
+                    >{file.name.split('.').pop()?.toUpperCase() || 'DAT'}</span
+                  >
                 </div>
                 <div class="dr-meta">
                   {formatSize(file.size)} ·
                   {#if file.is_symlink}
                     {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
                   {/if}
-                  {$t('dat.updated')} {formatDate(file.last_update)}
+                  {$t('dat.updated')}
+                  {formatDate(file.last_update)}
                 </div>
               </div>
               <div class="stat-bar" style="width:120px;">
-                <div class="stat-bar-fill" style="width: {file.exists ? '100%' : '0%'}; background: {file.exists ? 'var(--success)' : 'var(--error)'}"></div>
+                <div
+                  class="stat-bar-fill"
+                  style="width: {file.exists ? '100%' : '0%'}; background: {file.exists
+                    ? 'var(--success)'
+                    : 'var(--error)'}"
+                ></div>
               </div>
               <div class="dr-actions">
-                <button class="btn btn-secondary btn-icon-only" on:click={updateAll} disabled={globalUpdating} title={$t('dat.update_all')}>
+                <button
+                  class="btn btn-secondary btn-icon-only"
+                  on:click={updateAll}
+                  disabled={globalUpdating}
+                  title={$t('dat.update_all')}
+                >
                   ↓
                 </button>
               </div>
@@ -230,12 +337,24 @@
     <!-- Other Files -->
     {#if otherFiles.length > 0}
       <div class="card card-tight mb-3">
-        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">{$currentLang === 'ru' ? 'Прочие файлы' : 'Other files'}</h2>
+        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
+          {$currentLang === 'ru' ? 'Прочие файлы' : 'Other files'}
+        </h2>
         <div class="dat-list">
           {#each otherFiles as file}
             <div class="dat-row" class:is-symlink={file.is_symlink}>
               <div class="dr-ico" class:warning={!file.exists}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  ><circle cx="12" cy="12" r="10" /><path
+                    d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"
+                  /><path d="M2 12h20" /></svg
+                >
               </div>
               <div class="dr-main">
                 <div class="dr-name">
@@ -252,14 +371,25 @@
                   {#if file.is_symlink}
                     {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
                   {/if}
-                  {$t('dat.updated')} {formatDate(file.last_update)}
+                  {$t('dat.updated')}
+                  {formatDate(file.last_update)}
                 </div>
               </div>
               <div class="stat-bar" style="width:120px;">
-                <div class="stat-bar-fill" style="width: {file.exists ? '100%' : '0%'}; background: {file.exists ? 'var(--success)' : 'var(--error)'}"></div>
+                <div
+                  class="stat-bar-fill"
+                  style="width: {file.exists ? '100%' : '0%'}; background: {file.exists
+                    ? 'var(--success)'
+                    : 'var(--error)'}"
+                ></div>
               </div>
               <div class="dr-actions">
-                <button class="btn btn-secondary btn-icon-only" on:click={updateAll} disabled={globalUpdating} title={$t('dat.update_all')}>
+                <button
+                  class="btn btn-secondary btn-icon-only"
+                  on:click={updateAll}
+                  disabled={globalUpdating}
+                  title={$t('dat.update_all')}
+                >
                   ↓
                 </button>
               </div>
@@ -413,7 +543,8 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>
-

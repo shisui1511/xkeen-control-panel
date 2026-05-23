@@ -70,13 +70,17 @@
         p.type !== 'Reject'
     );
     const total = proxyList.length;
-    const healthy = proxyList.filter((p) => isProxyAlive(p) && (getLastDelay(p) || 0) > 0 && (getLastDelay(p) || 0) < 300).length;
+    const healthy = proxyList.filter(
+      (p) => isProxyAlive(p) && (getLastDelay(p) || 0) > 0 && (getLastDelay(p) || 0) < 300
+    ).length;
     const degraded = proxyList.filter(
       (p) => isProxyAlive(p) && (getLastDelay(p) || 0) >= 300 && (getLastDelay(p) || 0) < 800
     ).length;
-    const down = proxyList.filter((p) => !isProxyAlive(p) || (getLastDelay(p) || 0) === 0 || (getLastDelay(p) || 0) >= 800).length;
-    
-    const activeList = proxyList.filter(p => isProxyAlive(p) && (getLastDelay(p) || 0) > 0);
+    const down = proxyList.filter(
+      (p) => !isProxyAlive(p) || (getLastDelay(p) || 0) === 0 || (getLastDelay(p) || 0) >= 800
+    ).length;
+
+    const activeList = proxyList.filter((p) => isProxyAlive(p) && (getLastDelay(p) || 0) > 0);
     const avg =
       activeList.length > 0
         ? activeList.reduce((sum, p) => sum + (getLastDelay(p) || 0), 0) / activeList.length
@@ -233,7 +237,11 @@
   function getLatencyClass(proxyName: string): string {
     const proxy = proxies[proxyName];
     if (!proxy) return 'lat dim';
-    if (['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) || ['Direct', 'Reject', 'Compatible'].includes(proxy.type)) return 'lat dim';
+    if (
+      ['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) ||
+      ['Direct', 'Reject', 'Compatible'].includes(proxy.type)
+    )
+      return 'lat dim';
     const delay = getProxyDelay(proxyName);
     if (delay === undefined || delay === 0 || delay >= 800) return 'lat bad';
     if (delay < 300) return 'lat ok';
@@ -243,7 +251,11 @@
   function getLatencyText(proxyName: string): string {
     const proxy = proxies[proxyName];
     if (!proxy) return '—';
-    if (['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) || ['Direct', 'Reject', 'Compatible'].includes(proxy.type)) return '—';
+    if (
+      ['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) ||
+      ['Direct', 'Reject', 'Compatible'].includes(proxy.type)
+    )
+      return '—';
     const delay = getProxyDelay(proxyName);
     if (delay === undefined || delay === 0 || delay >= 800) return 'timeout';
     return `${delay} ${$t('app.ms')}`;
@@ -264,8 +276,15 @@
         body: JSON.stringify({ action: 'start' })
       });
       if (!res.ok) throw new Error('Failed to start Mihomo');
-      setTimeout(async () => { await fetchCapabilities(); await fetchProxies(); mihomoLaunching = false; }, 1500);
-      setTimeout(async () => { await fetchCapabilities(); await fetchProxies(); }, 4000);
+      setTimeout(async () => {
+        await fetchCapabilities();
+        await fetchProxies();
+        mihomoLaunching = false;
+      }, 1500);
+      setTimeout(async () => {
+        await fetchCapabilities();
+        await fetchProxies();
+      }, 4000);
     } catch (e: any) {
       showToast('error', e.message);
       mihomoLaunching = false;
@@ -282,17 +301,34 @@
 <div class="container">
   <div class="page-head">
     <div>
-      <div class="crumbs">{$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('proxies.title')}</div>
+      <div class="crumbs">
+        {$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('proxies.title')}
+      </div>
       <h1>{$t('proxies.title')}</h1>
       <p class="sub">{$t('proxies.subtitle')}</p>
     </div>
     <div class="ph-actions">
       <button class="btn btn-secondary" on:click={fetchProxies} disabled={loading}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+        >
         {loading ? $t('app.loading') : $t('app.refresh')}
       </button>
       <button class="btn btn-primary" on:click={testLatency} disabled={testingLatency}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          style="margin-right: 6px;"><polygon points="5 3 19 12 5 21 5 3" /></svg
+        >
         {testingLatency ? $t('proxies.testing') : $t('proxies.test_latency')}
       </button>
     </div>
@@ -326,7 +362,7 @@
         <div class="stat-box">
           <div class="stat-label">{$t('proxies.obs_total')}</div>
           <div class="stat-value">{stats.totalProxies}</div>
-          <div class="res-sub">{$t('proxies.obs_total_sub', {groupsCount: groups.length})}</div>
+          <div class="res-sub">{$t('proxies.obs_total_sub', { groupsCount: groups.length })}</div>
         </div>
         <div class="stat-box">
           <div class="stat-label">{$t('proxies.obs_healthy')}</div>
@@ -357,7 +393,10 @@
             </div>
             <div class="gc-body">
               {#each Array(3) as _}
-                <div class="proxy-row" style="display: flex; justify-content: space-between; align-items: center; padding: 11px 18px;">
+                <div
+                  class="proxy-row"
+                  style="display: flex; justify-content: space-between; align-items: center; padding: 11px 18px;"
+                >
                   <Skeleton type="text-line" width="100px" />
                   <Skeleton type="text-line" width="40px" />
                 </div>
@@ -379,10 +418,13 @@
               <span class="type">{getGroupTypeLabel(group.type)}</span>
               {#if group.type !== 'Fallback'}
                 <span style="margin-left:auto;" class="status-badge active">
-                  {$currentLang === 'ru' ? `${group.all.length} узлов` : `${group.all.length} nodes`}
+                  {$currentLang === 'ru'
+                    ? `${group.all.length} узлов`
+                    : `${group.all.length} nodes`}
                 </span>
               {:else}
-                <span style="margin-left:auto;" class="status-badge active">{group.now || '—'}</span>
+                <span style="margin-left:auto;" class="status-badge active">{group.now || '—'}</span
+                >
               {/if}
             </div>
             <div class="gc-body">
@@ -408,7 +450,7 @@
                     <div class="p-name">{proxyName}</div>
                     <div class="p-type">{proxy?.type || 'unknown'}</div>
                   </div>
-                  
+
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <span class={healthClass}>{healthText}</span>
                     {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
@@ -420,9 +462,19 @@
                         style="background: transparent; border: none; padding: 4px; color: var(--fg-dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: color 0.2s;"
                       >
                         {#if testingProxy === proxyName}
-                          <span class="spinner" style="font-size: 10px; font-family: monospace;">...</span>
+                          <span class="spinner" style="font-size: 10px; font-family: monospace;"
+                            >...</span
+                          >
                         {:else}
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity: 0.6;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            style="opacity: 0.6;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
+                          >
                         {/if}
                       </button>
                     {/if}
@@ -486,7 +538,7 @@
     font-size: 11px;
     font-family: var(--font-family-mono);
     text-transform: uppercase;
-    letter-spacing: .1em;
+    letter-spacing: 0.1em;
   }
   .group-card .gc-body {
     padding: 0;
@@ -509,7 +561,7 @@
     background: var(--accent-soft);
   }
   .proxy-row.now::before {
-    content: "→";
+    content: '→';
     color: var(--accent);
     font-weight: 700;
     margin-right: -8px;
@@ -536,18 +588,18 @@
   }
   .lat.ok {
     color: var(--success);
-    border-color: rgba(70, 209, 138, .4);
-    background: rgba(70, 209, 138, .08);
+    border-color: rgba(70, 209, 138, 0.4);
+    background: rgba(70, 209, 138, 0.08);
   }
   .lat.mid {
     color: var(--warning);
-    border-color: rgba(240, 180, 80, .4);
-    background: rgba(240, 180, 80, .08);
+    border-color: rgba(240, 180, 80, 0.4);
+    background: rgba(240, 180, 80, 0.08);
   }
   .lat.bad {
     color: var(--danger);
-    border-color: rgba(239, 91, 107, .4);
-    background: rgba(239, 91, 107, .08);
+    border-color: rgba(239, 91, 107, 0.4);
+    background: rgba(239, 91, 107, 0.08);
   }
   .lat.dim {
     color: var(--fg-dim);

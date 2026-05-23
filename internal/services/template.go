@@ -63,19 +63,19 @@ func (s *TemplateService) List() []Template {
 	return s.templates
 }
 
-func (s *TemplateService) Fetch(urlStr string) (string, error) {
+func (s *TemplateService) FetchByName(name string) (string, error) {
 	s.mu.RLock()
-	allowed := false
+	var urlStr string
 	for _, t := range s.templates {
-		if t.URL == urlStr {
-			allowed = true
+		if t.Name == name {
+			urlStr = t.URL
 			break
 		}
 	}
 	s.mu.RUnlock()
 
-	if !allowed {
-		return "", fmt.Errorf("requested URL is not in the allowed templates list")
+	if urlStr == "" {
+		return "", fmt.Errorf("requested template is not allowed or not found")
 	}
 
 	u, err := url.Parse(urlStr)
@@ -89,7 +89,6 @@ func (s *TemplateService) Fetch(urlStr string) (string, error) {
 	}
 
 	// Redundant check to satisfy CodeQL SSRF analysis.
-	// Actual security is provided by SafeHTTPClient's DialContext to prevent TOCTOU.
 	ips, err := net.LookupIP(host)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve host: %w", err)

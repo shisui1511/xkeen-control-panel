@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+var snapshotIDRx = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 
 // SnapshotRouter dispatches /api/snapshots/{id}/restore|download|delete
 func (a *API) SnapshotRouter(w http.ResponseWriter, r *http.Request) {
@@ -60,6 +63,11 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/snapshots/")
 	id = strings.TrimSuffix(id, "/restore")
 
+	if !snapshotIDRx.MatchString(id) {
+		a.errorResponse(w, "Invalid snapshot ID", http.StatusBadRequest)
+		return
+	}
+
 	if err := a.snapshotSvc.Restore(id); err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -70,6 +78,11 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 func (a *API) SnapshotDownload(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/snapshots/")
 	id = strings.TrimSuffix(id, "/download")
+
+	if !snapshotIDRx.MatchString(id) {
+		a.errorResponse(w, "Invalid snapshot ID", http.StatusBadRequest)
+		return
+	}
 
 	archPath, err := a.snapshotSvc.ArchivePath(id)
 	if err != nil {
@@ -101,6 +114,11 @@ func (a *API) SnapshotDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/snapshots/")
 	id = strings.TrimSuffix(id, "/delete")
+
+	if !snapshotIDRx.MatchString(id) {
+		a.errorResponse(w, "Invalid snapshot ID", http.StatusBadRequest)
+		return
+	}
 
 	if err := a.snapshotSvc.Delete(id); err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)

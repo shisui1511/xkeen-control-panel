@@ -61,20 +61,29 @@
 
 <div class="login-screen">
   <div class="login-card">
-
     <!-- Brand block — same visual DNA as sidebar -->
     <div class="login-brand">
       <span class="brand-mark" aria-hidden="true">
         <!-- Cross-routing X logo: 4 endpoint nodes + crossed paths + central hub -->
         <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle cx="4"  cy="4"  r="1.8" fill="currentColor"/>
-          <circle cx="20" cy="4"  r="1.8" fill="currentColor"/>
-          <circle cx="4"  cy="20" r="1.8" fill="currentColor"/>
-          <circle cx="20" cy="20" r="1.8" fill="currentColor"/>
-          <path d="M5.4 5.4 L18.6 18.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
-          <path d="M18.6 5.4 L5.4 18.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
-          <circle cx="12" cy="12" r="2.8" fill="currentColor"/>
-          <circle cx="12" cy="12" r="1.1" fill="var(--bg-deep, #07182a)"/>
+          <circle cx="4" cy="4" r="1.8" fill="currentColor" />
+          <circle cx="20" cy="4" r="1.8" fill="currentColor" />
+          <circle cx="4" cy="20" r="1.8" fill="currentColor" />
+          <circle cx="20" cy="20" r="1.8" fill="currentColor" />
+          <path
+            d="M5.4 5.4 L18.6 18.6"
+            stroke="currentColor"
+            stroke-width="2.4"
+            stroke-linecap="round"
+          />
+          <path
+            d="M18.6 5.4 L5.4 18.6"
+            stroke="currentColor"
+            stroke-width="2.4"
+            stroke-linecap="round"
+          />
+          <circle cx="12" cy="12" r="2.8" fill="currentColor" />
+          <circle cx="12" cy="12" r="1.1" fill="var(--bg-deep, #07182a)" />
         </svg>
       </span>
       <div class="brand-names">
@@ -114,7 +123,6 @@
       <span>{version}</span>
       <span>{window.location.hostname}</span>
     </div>
-
   </div>
 </div>
 
@@ -126,7 +134,7 @@
     align-items: center;
     justify-content: center;
     background:
-      radial-gradient(ellipse 80% 55% at 50% 20%, rgba(41,194,240,.07), transparent 65%),
+      radial-gradient(ellipse 80% 55% at 50% 20%, rgba(41, 194, 240, 0.07), transparent 65%),
       var(--bg-page);
   }
 
@@ -135,13 +143,13 @@
     width: 100%;
     max-width: 420px;
     background: linear-gradient(180deg, #0d2438 0%, #09192b 100%);
-    border: 1px solid rgba(41,194,240,.14);
+    border: 1px solid rgba(41, 194, 240, 0.14);
     border-radius: var(--radius-lg);
     padding: 38px 36px 32px;
     box-shadow:
-      0 48px 80px -32px rgba(0,0,0,.75),
-      0 0 0 1px rgba(255,255,255,.025) inset,
-      0 0 40px -20px rgba(41,194,240,.15);
+      0 48px 80px -32px rgba(0, 0, 0, 0.75),
+      0 0 0 1px rgba(255, 255, 255, 0.025) inset,
+      0 0 40px -20px rgba(41, 194, 240, 0.15);
   }
 
   /* Brand block */
@@ -154,26 +162,30 @@
   }
 
   .login-brand .brand-mark {
-    width: 58px; height: 58px;
+    width: 58px;
+    height: 58px;
     border-radius: 13px;
-    display: grid; place-items: center;
+    display: grid;
+    place-items: center;
     background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 60%, #0e6f96 100%);
     box-shadow:
-      0 0 0 1px rgba(41,194,240,.3),
-      0 14px 36px -12px rgba(41,194,240,.7);
+      0 0 0 1px rgba(41, 194, 240, 0.3),
+      0 14px 36px -12px rgba(41, 194, 240, 0.7);
     color: #03182a;
   }
 
   .login-brand .brand-names {
-    display: flex; flex-direction: column;
-    align-items: center; gap: 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
   }
 
   /* "XKeen" — mirrors sidebar .b1 */
   .login-brand .b1 {
     font-size: 22px;
     font-weight: 700;
-    letter-spacing: -.01em;
+    letter-spacing: -0.01em;
     color: #fff;
     line-height: 1;
   }
@@ -181,13 +193,13 @@
   .login-brand .b1 .x {
     color: var(--accent);
     font-weight: 800;
-    text-shadow: 0 0 16px rgba(41,194,240,.5);
+    text-shadow: 0 0 16px rgba(41, 194, 240, 0.5);
   }
 
   /* "Control Panel" — mirrors sidebar .b2 */
   .login-brand .b2 {
     font-size: 10px;
-    letter-spacing: .22em;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--fg-dim);
     font-weight: 600;

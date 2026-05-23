@@ -247,13 +247,24 @@
 <div class="container">
   <div class="page-head">
     <div>
-      <div class="crumbs">{$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('nav.smartproxy')}</div>
+      <div class="crumbs">
+        {$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.smartproxy')}
+      </div>
       <h1>{$t('smartproxy.title')}</h1>
       <p class="sub">{$t('smartproxy.subtitle')}</p>
     </div>
     <div class="ph-actions">
       <button class="btn btn-primary" on:click={startCreate}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M12 5v14M5 12h14"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
+        >
         {$t('smartproxy.add')}
       </button>
     </div>
@@ -268,7 +279,9 @@
     <div class="card mb-2" style="padding:18px 22px;">
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
         <span class="status-dot success" style="margin:0;"></span>
-        <div style="font-weight:700;color:var(--fg-primary);">{$t('smartproxy.current_status')}</div>
+        <div style="font-weight:700;color:var(--fg-primary);">
+          {$t('smartproxy.current_status')}
+        </div>
         <div style="color:var(--fg-dim);font-size:12px;font-family:var(--font-family-mono);">
           ({status.time}, {dayNames[status.day]})
         </div>
@@ -289,10 +302,21 @@
 
   <!-- Profile List -->
   {#if profiles.length === 0}
-    <div class="card text-center" style="padding: 3rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;">
+    <div
+      class="card text-center"
+      style="padding: 3rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;"
+    >
       <p style="color: var(--fg-secondary); margin: 0;">{$t('smartproxy.no_profiles')}</p>
       <button class="btn btn-primary" on:click={startCreate}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M12 5v14M5 12h14"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
+        >
         {$t('smartproxy.add')}
       </button>
     </div>
@@ -303,8 +327,12 @@
         <div class="card profile-card" class:active={isActive}>
           <div class="profile-card-header">
             <span class="profile-card-name">{p.name}</span>
-            
-            <span class="badge" class:badge-info={p.mode !== 'auto-failover'} class:badge-warning={p.mode === 'auto-failover'}>
+
+            <span
+              class="badge"
+              class:badge-info={p.mode !== 'auto-failover'}
+              class:badge-warning={p.mode === 'auto-failover'}
+            >
               {p.mode === 'time-based'
                 ? $t('smartproxy.mode_time')
                 : p.mode === 'auto-failover'
@@ -321,11 +349,25 @@
               </label>
 
               <div class="dropdown-container">
-                <button class="btn btn-secondary action-btn-dots" on:click={() => toggleDropdown(p.id)}>⋯</button>
+                <button
+                  class="btn btn-secondary action-btn-dots"
+                  on:click={() => toggleDropdown(p.id)}>⋯</button
+                >
                 {#if activeDropdownId === p.id}
                   <div class="dropdown-menu">
-                    <button on:click={() => { startEdit(p); activeDropdownId = null; }}>{$t('app.edit')}</button>
-                    <button on:click={() => { deleteProfile(p.id); activeDropdownId = null; }} class="delete-action">{$t('app.delete')}</button>
+                    <button
+                      on:click={() => {
+                        startEdit(p);
+                        activeDropdownId = null;
+                      }}>{$t('app.edit')}</button
+                    >
+                    <button
+                      on:click={() => {
+                        deleteProfile(p.id);
+                        activeDropdownId = null;
+                      }}
+                      class="delete-action">{$t('app.delete')}</button
+                    >
                   </div>
                 {/if}
               </div>
@@ -356,22 +398,30 @@
           {:else if p.mode === 'auto-failover'}
             <div class="field-row">
               <div>
-                <div class="lbl">{$t('smartproxy.latency_threshold')} / {$t('smartproxy.consecutive_failures')}</div>
+                <div class="lbl">
+                  {$t('smartproxy.latency_threshold')} / {$t('smartproxy.consecutive_failures')}
+                </div>
                 <div class="desc">
                   {$t('smartproxy.fallback_label')}: {p.fallback_proxy || 'DIRECT'}
                 </div>
               </div>
               <div class="ctrl mono" style="font-size:12px; color:var(--fg-primary);">
-                {p.latency_threshold}ms / {p.consecutive_failures} {$currentLang === 'ru' ? 'раз' : 'times'}
+                {p.latency_threshold}ms / {p.consecutive_failures}
+                {$currentLang === 'ru' ? 'раз' : 'times'}
               </div>
             </div>
 
             {#if p.current_failures && p.current_failures > 0}
               <div class="field-row alert-row">
                 <div>
-                  <div class="lbl" style="color: var(--warning);">{$t('smartproxy.failures_label')}</div>
+                  <div class="lbl" style="color: var(--warning);">
+                    {$t('smartproxy.failures_label')}
+                  </div>
                 </div>
-                <div class="ctrl mono" style="color: var(--warning); font-weight: bold; font-size:12px;">
+                <div
+                  class="ctrl mono"
+                  style="color: var(--warning); font-weight: bold; font-size:12px;"
+                >
                   {p.current_failures} / {p.consecutive_failures}
                 </div>
               </div>
@@ -380,9 +430,15 @@
             <div class="field-row">
               <div>
                 <div class="lbl">{$t('smartproxy.round_robin_proxies')}</div>
-                <div class="desc">{(p.round_robin_proxies || []).length} {$t('smartproxy.proxies_label')}</div>
+                <div class="desc">
+                  {(p.round_robin_proxies || []).length}
+                  {$t('smartproxy.proxies_label')}
+                </div>
               </div>
-              <div class="ctrl mono" style="font-size:11px; max-width: 200px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color:var(--fg-primary);">
+              <div
+                class="ctrl mono"
+                style="font-size:11px; max-width: 200px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color:var(--fg-primary);"
+              >
                 {(p.round_robin_proxies || []).join(', ')}
               </div>
             </div>
@@ -391,7 +447,9 @@
           {#if p.apply_count > 0}
             <div class="field-row">
               <div>
-                <div class="lbl">{$currentLang === 'ru' ? 'Статистика срабатываний' : 'Execution stats'}</div>
+                <div class="lbl">
+                  {$currentLang === 'ru' ? 'Статистика срабатываний' : 'Execution stats'}
+                </div>
               </div>
               <div class="ctrl mono" style="font-size:12px; color:var(--fg-secondary);">
                 {$t('smartproxy.applied_count', { count: p.apply_count })}
@@ -405,7 +463,13 @@
 </div>
 
 {#if showForm}
-  <div class="modal-overlay" role="button" tabindex="0" on:click={cancelEdit} on:keydown={handleKeydown}>
+  <div
+    class="modal-overlay"
+    role="button"
+    tabindex="0"
+    on:click={cancelEdit}
+    on:keydown={handleKeydown}
+  >
     <div class="modal-card" role="presentation" on:click|stopPropagation>
       <div class="modal-card-header">
         <h2>{editingProfile ? $t('smartproxy.edit_profile') : $t('smartproxy.new_profile')}</h2>
@@ -462,7 +526,9 @@
         {:else if formMode === 'auto-failover'}
           <div class="form-row">
             <div class="form-group">
-              <label for="sp-threshold" class="form-label">{$t('smartproxy.latency_threshold')} (ms)</label>
+              <label for="sp-threshold" class="form-label"
+                >{$t('smartproxy.latency_threshold')} (ms)</label
+              >
               <input
                 id="sp-threshold"
                 type="number"
@@ -473,7 +539,9 @@
               />
             </div>
             <div class="form-group">
-              <label for="sp-failures" class="form-label">{$t('smartproxy.consecutive_failures')}</label>
+              <label for="sp-failures" class="form-label"
+                >{$t('smartproxy.consecutive_failures')}</label
+              >
               <input
                 id="sp-failures"
                 type="number"
@@ -536,7 +604,9 @@
             <input type="checkbox" id="sp-enabled" bind:checked={formEnabled} />
             <span class="toggle-slider"></span>
           </label>
-          <label for="sp-enabled" class="checkbox-label">{$currentLang === 'ru' ? 'Активен' : 'Enabled'}</label>
+          <label for="sp-enabled" class="checkbox-label"
+            >{$currentLang === 'ru' ? 'Активен' : 'Enabled'}</label
+          >
         </div>
       </div>
       <div class="modal-card-footer">
