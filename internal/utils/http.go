@@ -22,7 +22,21 @@ func SafeHTTPClient(timeout time.Duration) *http.Client {
 
 				ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 				if err != nil {
-					return nil, err
+					// Fallback to public resolver if system DNS resolution fails
+					r := &net.Resolver{
+						PreferGo: true,
+						Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+							d := net.Dialer{
+								Timeout: 3 * time.Second,
+							}
+							return d.DialContext(ctx, "udp", "1.1.1.1:53")
+						},
+					}
+					var err2 error
+					ips, err2 = r.LookupIP(ctx, "ip", host)
+					if err2 != nil {
+						return nil, fmt.Errorf("DNS lookup failed: system resolver error: %v, fallback resolver error: %v", err, err2)
+					}
 				}
 
 				var chosenIP net.IP
