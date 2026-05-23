@@ -162,6 +162,13 @@ func main() {
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
 
+	// Config Snapshots
+	snapshotSvc := services.NewSnapshotService(cfg.DataDir, []string{cfg.XRayConfigDir, cfg.MihomoConfigDir})
+	api.SetSnapshotService(snapshotSvc)
+	srv.HandleProtected("/api/snapshots/list", api.SnapshotList)
+	srv.HandleProtected("/api/snapshots/create", api.SnapshotCreate)
+	srv.HandleProtected("/api/snapshots/", api.SnapshotRouter)
+
 	// DAT Manager
 	datSvc := services.NewDATManagerService()
 	api.SetDATManagerService(datSvc)

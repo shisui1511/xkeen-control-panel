@@ -27,6 +27,94 @@
   let backups: string[] = [];
   let loadingBackups = false;
 
+  // Snapshots state
+  interface SnapshotMeta {
+    id: string;
+    label: string;
+    created_at: number;
+    size_bytes: number;
+  }
+  let snapshots: SnapshotMeta[] = [];
+  let snapshotLabel = '';
+  let creatingSnapshot = false;
+  let restoringSnapshot = '';
+
+  async function fetchSnapshots() {
+    try {
+      const res = await fetch('/api/snapshots/list');
+      if (res.ok) snapshots = await res.json() ?? [];
+    } catch (_) {}
+  }
+
+  async function createSnapshot() {
+    creatingSnapshot = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/snapshots/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        body: JSON.stringify({ label: snapshotLabel })
+      });
+      if (res.ok) {
+        snapshotLabel = '';
+        showToast('success', $t('settings.snapshot_created'));
+        fetchSnapshots();
+      } else {
+        showToast('error', await res.text());
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+    } finally {
+      creatingSnapshot = false;
+    }
+  }
+
+  async function restoreSnapshot(id: string) {
+    if (!confirm($t('settings.snapshot_restore_confirm'))) return;
+    restoringSnapshot = id;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch(`/api/snapshots/${id}/restore`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (res.ok) {
+        showToast('success', $t('settings.snapshot_restored'));
+      } else {
+        showToast('error', await res.text());
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+    } finally {
+      restoringSnapshot = '';
+    }
+  }
+
+  async function deleteSnapshot(id: string) {
+    if (!confirm($t('settings.snapshot_delete_confirm'))) return;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch(`/api/snapshots/${id}/delete`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (res.ok) {
+        showToast('success', $t('settings.snapshot_deleted'));
+        fetchSnapshots();
+      } else {
+        showToast('error', await res.text());
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+    }
+  }
+
+  function formatSnapshotSize(bytes: number): string {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
   async function loadConfigFiles() {
     try {
       const xrayRes = await fetch('/api/config/list?dir=/opt/etc/xray/configs');
@@ -127,6 +215,7 @@
 
   $: if (activeTab === 'backups') {
     loadConfigFiles();
+    fetchSnapshots();
   }
 
   // Appearance & Behavior settings (persisted in localStorage)
@@ -494,6 +583,52 @@
         {/each}
       {/if}
     </div>
+  </div>
+  {/if}
+
+  <!-- Config Snapshots section (inside backups tab) -->
+  {#if activeTab === 'backups'}
+  <div class="card" style="margin-top:16px;">
+    <div class="card-title-row" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <h2 class="card-title" style="margin:0;">{$t('settings.snapshots_title')}</h2>
+    </div>
+    <div class="field-row" style="border-bottom:1px solid var(--border-light);padding-bottom:12px;margin-bottom:12px;">
+      <input
+        class="input"
+        style="flex:1;margin-right:8px;"
+        type="text"
+        placeholder={$t('settings.snapshot_label_placeholder')}
+        bind:value={snapshotLabel}
+      />
+      <button class="btn btn-primary" on:click={createSnapshot} disabled={creatingSnapshot}>
+        {creatingSnapshot ? $t('app.loading') : $t('settings.snapshot_create_btn')}
+      </button>
+    </div>
+    {#if snapshots.length === 0}
+      <div style="color:var(--fg-secondary);font-size:13px;text-align:center;padding:12px 0;">{$t('settings.snapshots_empty')}</div>
+    {:else}
+      {#each snapshots as snap}
+        <div class="field-row snapshot-row">
+          <div>
+            <div class="lbl mono">{snap.label || snap.id}</div>
+            <div class="desc" style="font-size:11px;">
+              {new Date(snap.created_at * 1000).toLocaleString()} · {formatSnapshotSize(snap.size_bytes)}
+            </div>
+          </div>
+          <div class="ctrl" style="gap:6px;">
+            <a class="btn btn-secondary" href="/api/snapshots/{snap.id}/download" download>
+              {$t('settings.snapshot_download_btn')}
+            </a>
+            <button class="btn btn-secondary" on:click={() => restoreSnapshot(snap.id)} disabled={restoringSnapshot === snap.id}>
+              {restoringSnapshot === snap.id ? $t('app.loading') : $t('settings.snapshot_restore_btn')}
+            </button>
+            <button class="btn btn-danger" on:click={() => deleteSnapshot(snap.id)}>
+              {$t('settings.snapshot_delete_btn')}
+            </button>
+          </div>
+        </div>
+      {/each}
+    {/if}
   </div>
   {/if}
 

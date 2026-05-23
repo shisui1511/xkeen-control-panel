@@ -1,0 +1,110 @@
+package handlers
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// SnapshotRouter dispatches /api/snapshots/{id}/restore|download|delete
+func (a *API) SnapshotRouter(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	switch {
+	case strings.HasSuffix(path, "/restore"):
+		a.SnapshotRestore(w, r)
+	case strings.HasSuffix(path, "/download"):
+		a.SnapshotDownload(w, r)
+	case strings.HasSuffix(path, "/delete"):
+		a.SnapshotDelete(w, r)
+	default:
+		a.errorResponse(w, "not found", http.StatusNotFound)
+	}
+}
+
+func (a *API) SnapshotList(w http.ResponseWriter, r *http.Request) {
+	list, err := a.snapshotSvc.List()
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	a.jsonResponse(w, list)
+}
+
+func (a *API) SnapshotCreate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Label string `json:"label"`
+	}
+	// Ignore decode error — label is optional
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	meta, err := a.snapshotSvc.Create(req.Label)
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	a.jsonResponse(w, meta)
+}
+
+func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/snapshots/")
+	id = strings.TrimSuffix(id, "/restore")
+
+	if err := a.snapshotSvc.Restore(id); err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Write([]byte("OK"))
+}
+
+func (a *API) SnapshotDownload(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/snapshots/")
+	id = strings.TrimSuffix(id, "/download")
+
+	archPath, err := a.snapshotSvc.ArchivePath(id)
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	f, err := os.Open(archPath)
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
+	fi, _ := f.Stat()
+	filename := "snapshot-" + id + ".tar.gz"
+	w.Header().Set("Content-Type", "application/gzip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(filename)+"\"")
+	if fi != nil {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", fi.Size()))
+	}
+	http.ServeContent(w, r, filename, fi.ModTime(), f)
+}
+
+func (a *API) SnapshotDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/snapshots/")
+	id = strings.TrimSuffix(id, "/delete")
+
+	if err := a.snapshotSvc.Delete(id); err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Write([]byte("OK"))
+}
