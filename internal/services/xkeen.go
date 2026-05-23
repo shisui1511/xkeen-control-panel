@@ -72,7 +72,7 @@ func (s *XKeenService) saveRestartLog() {
 	}
 }
 
-func (s *XKeenService) recordAction(action, output string, err error) {
+func (s *XKeenService) RecordAction(action, output string, err error) {
 	exitCode := 0
 	if err != nil {
 		exitCode = 1
@@ -147,19 +147,19 @@ func (s *XKeenService) Status() (string, error) {
 
 func (s *XKeenService) Start() (string, error) {
 	out, err := s.runWithTimeout("-start", 30*time.Second)
-	s.recordAction("start", out, err)
+	s.RecordAction("start", out, err)
 	return out, err
 }
 
 func (s *XKeenService) Stop() (string, error) {
 	out, err := s.runWithTimeout("-stop", 30*time.Second)
-	s.recordAction("stop", out, err)
+	s.RecordAction("stop", out, err)
 	return out, err
 }
 
 func (s *XKeenService) Restart() (string, error) {
 	out, err := s.runWithTimeout("-restart", 45*time.Second)
-	s.recordAction("restart", out, err)
+	s.RecordAction("restart", out, err)
 	return out, err
 }
 
@@ -173,7 +173,7 @@ func (s *XKeenService) SwitchKernel(name string) (string, error) {
 	} else {
 		return "", fmt.Errorf("invalid kernel: %s", name)
 	}
-	s.recordAction("switch_kernel:"+name, out, err)
+	s.RecordAction("switch_kernel:"+name, out, err)
 	return out, err
 }
 
