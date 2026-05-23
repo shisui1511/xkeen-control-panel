@@ -24,6 +24,7 @@ import (
 
 // allowedKernelRoots are the only directories where kernel binaries and backups may live.
 var allowedKernelRoots = []string{
+	"/opt/sbin/",
 	"/opt/bin/",
 	"/opt/etc/",
 	os.TempDir() + "/",
@@ -211,7 +212,7 @@ func NewKernelService() *KernelService {
 	xrayPath := findKernelBinary("xray")
 	if xrayPath == "" {
 		log.Printf("WARNING: failed to auto-detect Xray binary. Checked paths: %s", strings.Join(xrayProbePaths, ", "))
-		xrayPath = "/opt/bin/xray" // fallback default for display
+		xrayPath = "/opt/sbin/xray" // fallback default for display and install
 	}
 	svc.kernels["xray"] = &KernelInfo{
 		Name:               "xray",
@@ -226,7 +227,7 @@ func NewKernelService() *KernelService {
 	mihomoPath := findKernelBinary("mihomo")
 	if mihomoPath == "" {
 		log.Printf("WARNING: failed to auto-detect Mihomo binary. Checked paths: %s", strings.Join(mihomoProbePaths, ", "))
-		mihomoPath = "/opt/bin/mihomo" // fallback default for display
+		mihomoPath = "/opt/sbin/mihomo" // fallback default for display and install
 	}
 	svc.kernels["mihomo"] = &KernelInfo{
 		Name:               "mihomo",
@@ -674,6 +675,10 @@ func (s *KernelService) Install(name string) error {
 	// Verify new version and update metadata under lock
 	s.mu.Lock()
 	if kk := s.kernels[name]; kk != nil {
+		// Reset binary path cache so the next List/Get call re-detects the actual install location
+		kk.binaryPathCachedAt = time.Time{}
+		// Re-resolve path immediately so we report the correct location
+		s.resolveBinaryPath(kk)
 		kk.CurrentVersion = s.detectVersion(kk)
 		kk.HasUpdate = kk.CurrentVersion != latestVersion
 		kk.Status = "done"
