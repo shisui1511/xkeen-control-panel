@@ -32,6 +32,9 @@ type SystemStats struct {
 		HeapAlloc  uint64 `json:"heap_alloc"`
 		HeapSys    uint64 `json:"heap_sys"`
 		NumGC      uint32 `json:"num_gc"`
+		GoVersion  string `json:"go_version"`
+		GOMAXPROCS int    `json:"gomaxprocs"`
+		GOARCH     string `json:"goarch"`
 	} `json:"go_runtime"`
 	RouterModel    string   `json:"router_model"`
 	Hostname       string   `json:"hostname"`
@@ -40,6 +43,14 @@ type SystemStats struct {
 	DNSServers     []string `json:"dns_servers"`
 	DNSResolving   bool     `json:"dns_resolving"`
 	InvalidConfig  bool     `json:"invalid_config"`
+	// New fields for reference-matching System Info card
+	Platform      string `json:"platform"`
+	KernelVersion string `json:"kernel_version"`
+	IPInterface   string `json:"ip_interface"`
+	Timezone      string `json:"timezone"`
+	ConfigPath    string `json:"config_path"`
+	ConfigLines   int    `json:"config_lines"`
+	BootTime      string `json:"boot_time"`
 }
 
 func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
@@ -97,6 +108,9 @@ func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
 	stats.GoRuntime.HeapAlloc = m.HeapAlloc
 	stats.GoRuntime.HeapSys = m.HeapSys
 	stats.GoRuntime.NumGC = m.NumGC
+	stats.GoRuntime.GoVersion = runtime.Version()
+	stats.GoRuntime.GOMAXPROCS = runtime.GOMAXPROCS(0)
+	stats.GoRuntime.GOARCH = runtime.GOARCH
 
 	// Router telemetry and network diagnostic fields
 	stats.RouterModel = getRouterModel()
@@ -105,6 +119,18 @@ func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
 	stats.DNSServers = getDNSServers()
 	stats.DNSResolving = testDNSResolving()
 	stats.InvalidConfig = a.checkActiveConfigsInvalid()
+
+	// Extended system info for reference-matching UI
+	stats.Platform = runtime.GOOS + "/" + runtime.GOARCH
+	stats.KernelVersion = getKernelVersion()
+	stats.IPInterface = getPrimaryLANIP()
+	stats.Timezone = getSystemTimezone()
+	stats.ConfigPath = "/opt/etc/xkeen/"
+	stats.ConfigLines = countDirLines(a.cfg.XRayConfigDir) + countDirLines(a.cfg.MihomoConfigDir)
+	if stats.Uptime.Seconds > 0 {
+		bootTime := time.Now().Add(-time.Duration(stats.Uptime.Seconds) * time.Second)
+		stats.BootTime = bootTime.Format("02.01.06 15:04:05") + " " + getUTCOffset()
+	}
 
 	a.jsonResponse(w, stats)
 }
@@ -242,4 +268,94 @@ func (a *API) checkActiveConfigsInvalid() bool {
 	a.configValCache = invalid
 	a.configValCacheTime = time.Now()
 	return invalid
+}
+
+func getKernelVersion() string {
+	if data, err := os.ReadFile("/proc/version"); err == nil {
+		fields := strings.Fields(string(data))
+		if len(fields) >= 3 {
+			return fields[2]
+		}
+	}
+	return ""
+}
+
+func getPrimaryLANIP() string {
+	// Prefer common Keenetic LAN bridge interface
+	for _, name := range []string{"br0", "br-lan", "eth0"} {
+		if iface, err := net.InterfaceByName(name); err == nil {
+			if addrs, err := iface.Addrs(); err == nil {
+				for _, addr := range addrs {
+					if ipNet, ok := addr.(*net.IPNet); ok && ipNet.IP.To4() != nil && !ipNet.IP.IsLoopback() {
+						return ipNet.IP.String()
+					}
+				}
+			}
+		}
+	}
+	// Fallback: first non-loopback IPv4
+	if ifaces, err := net.Interfaces(); err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+				continue
+			}
+			if addrs, err := iface.Addrs(); err == nil {
+				for _, addr := range addrs {
+					if ipNet, ok := addr.(*net.IPNet); ok && ipNet.IP.To4() != nil {
+						return ipNet.IP.String()
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func getSystemTimezone() string {
+	// /etc/TZ is common on OpenWrt/Keenetic (e.g. "MSK-3")
+	if data, err := os.ReadFile("/etc/TZ"); err == nil {
+		tz := strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", ""))
+		if tz != "" {
+			_, offset := time.Now().Zone()
+			hours := offset / 3600
+			if hours >= 0 {
+				return fmt.Sprintf("%s · UTC+%d", tz, hours)
+			}
+			return fmt.Sprintf("%s · UTC%d", tz, hours)
+		}
+	}
+	name, offset := time.Now().Zone()
+	hours := offset / 3600
+	if hours >= 0 {
+		return fmt.Sprintf("%s · UTC+%d", name, hours)
+	}
+	return fmt.Sprintf("%s · UTC%d", name, hours)
+}
+
+func getUTCOffset() string {
+	_, offset := time.Now().Zone()
+	hours := offset / 3600
+	if hours >= 0 {
+		return fmt.Sprintf("UTC+%d", hours)
+	}
+	return fmt.Sprintf("UTC%d", hours)
+}
+
+func countDirLines(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	total := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(dir + "/" + e.Name())
+		if err != nil {
+			continue
+		}
+		total += strings.Count(string(data), "\n") + 1
+	}
+	return total
 }
