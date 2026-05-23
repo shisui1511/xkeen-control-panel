@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import { t, setLang } from './i18n';
-  import { isSidebarOpen, capabilities, fetchCapabilities } from './stores';
+  import { isSidebarOpen, capabilities, fetchCapabilities, showToast } from './stores';
   import Sidebar from './components/Sidebar.svelte';
   import Toast from './components/Toast.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -24,6 +24,7 @@
   import TrafficQuotas from './TrafficQuotas.svelte';
   import DATManager from './DATManager.svelte';
   import Console from './Console.svelte';
+  import ApiOffline from './components/ApiOffline.svelte';
 
   let version = $t('app.loading');
   let loading = false;
@@ -64,7 +65,7 @@
     memory: { total: number; used: number; free: number };
     load: [number, number, number];
     uptime: { seconds: number; days: number; hours: number; minutes: number };
-    go_runtime: { goroutines: number; heap_alloc: number; heap_sys: number; num_gc: number };
+    go_runtime: { goroutines: number; heap_alloc: number; heap_sys: number; num_gc: number; go_version: string; gomaxprocs: number; goarch: string };
     router_model: string;
     hostname: string;
     wan_status: string;
@@ -72,11 +73,23 @@
     dns_servers: string[];
     dns_resolving: boolean;
     invalid_config: boolean;
+    platform: string;
+    kernel_version: string;
+    ip_interface: string;
+    timezone: string;
+    config_path: string;
+    config_lines: number;
+    boot_time: string;
   }
 
   let systemStats: SystemStats | null = null;
+  let loadHistory: number[] = [];
   let activeSubscriptionsCount = 0;
+  let totalSubsCount = 0;
+  let subsLastUpdated = '';
   let totalProxiesCount = 0;
+  let activeProxiesCount = 0;
+  let statsLastFetched = '';
 
   async function fetchSubscriptionSummary() {
     try {
@@ -85,7 +98,33 @@
         const envelope = await res.json();
         const subs = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
         activeSubscriptionsCount = subs.filter((s: any) => s.enabled).length;
+        totalSubsCount = subs.length;
         totalProxiesCount = subs.reduce((acc: number, s: any) => acc + (s.proxy_count || 0), 0);
+        // Find most recent update
+        const dates = subs.map((s: any) => s.last_updated || s.updated_at || '').filter(Boolean);
+        if (dates.length > 0) {
+          const latest = dates.sort().reverse()[0];
+          const d = new Date(latest);
+          const today = new Date();
+          if (d.toDateString() === today.toDateString()) {
+            subsLastUpdated = 'обновлено сегодня';
+          } else {
+            subsLastUpdated = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  async function fetchProxySummary() {
+    try {
+      const res = await fetch('/api/mihomo/proxy/proxies');
+      if (res.ok) {
+        const data = await res.json();
+        const proxies = data.proxies || {};
+        const keys = Object.keys(proxies);
+        totalProxiesCount = keys.length;
+        activeProxiesCount = keys.filter((k) => proxies[k].alive !== false && proxies[k].type !== 'Selector' && proxies[k].type !== 'URLTest').length;
       }
     } catch (_) {}
   }
@@ -146,7 +185,7 @@
       }
 
       serviceStatus = {
-        xkeen: svcText.toLowerCase().includes('running') ? 'running' : svcText || 'unknown',
+        xkeen: (svcText.toLowerCase().includes('running') || svcText.toLowerCase().includes('запущен')) ? 'running' : svcText || 'unknown',
         xray: xrayProcessStatus,
         mihomo: mihomoProcessStatus,
         connections: connCount,
@@ -166,11 +205,33 @@
       const res = await fetch('/api/system/stats');
       if (res.ok) {
         systemStats = await res.json();
+        if (systemStats) {
+          loadHistory = [...loadHistory, systemStats.load[0]].slice(-16);
+          const d = new Date();
+          const p = (n: number) => n.toString().padStart(2, '0');
+          statsLastFetched = `${p(d.getDate())}.${p(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+        }
       }
     } catch (e) {
       // ignore
     }
   }
+
+  function buildSparklinePath(values: number[]): string {
+    if (values.length < 2) return '';
+    const w = 200, h = 42;
+    const max = Math.max(...values, 0.01);
+    const pts = values.map((v, i) => {
+      const x = (i / (values.length - 1)) * w;
+      const y = h - 4 - ((v / max) * (h - 10));
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    const line = `M${pts.join(' L')}`;
+    const fill = `${line} L${w},${h} L0,${h} Z`;
+    return JSON.stringify({ line, fill });
+  }
+
+  $: sparklineData = loadHistory.length >= 2 ? JSON.parse(buildSparklinePath(loadHistory)) : null;
 
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
@@ -213,8 +274,34 @@
     }
   }
 
+  function getTabFromHash(): string {
+    const hash = window.location.hash;
+    if (hash && hash.startsWith('#/')) {
+      return hash.slice(2);
+    }
+    return 'dashboard';
+  }
+
+  function handleHashChange() {
+    currentTab = getTabFromHash();
+  }
+
+  let isSidebarCollapsed = localStorage.getItem('sidebar.collapsed') === 'true';
+
+  function toggleSidebarCollapse() {
+    isSidebarCollapsed = !isSidebarCollapsed;
+    localStorage.setItem('sidebar.collapsed', String(isSidebarCollapsed));
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      toggleSidebarCollapse();
+    }
+  }
+
   function switchTab(tab: string) {
-    currentTab = tab;
+    window.location.hash = '#/' + tab;
   }
 
   function toggleSidebar() {
@@ -234,6 +321,44 @@
     }
   }
 
+  async function restartXkeen() {
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/service/restart', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (res.ok) {
+        showToast('success', $t('app.restart') + ' XKeen...');
+        setTimeout(fetchLiveStatus, 3000);
+      } else {
+        showToast('error', $t('app.error'));
+      }
+    } catch (_) {
+      showToast('error', $t('app.error'));
+    }
+  }
+
+  async function copySystemInfo() {
+    if (!systemStats) return;
+    const lines = [
+      `Версия XKeen: ${version}`,
+      `Платформа: ${systemStats.platform}`,
+      `Ядро: ${systemStats.kernel_version}`,
+      `Хост: ${systemStats.hostname}`,
+      `IP интерфейса: ${systemStats.ip_interface}`,
+      `Часовой пояс: ${systemStats.timezone}`,
+      `Конфиг: ${systemStats.config_path} (${systemStats.config_lines} строк)`,
+      `Последнее обновление: ${statsLastFetched}`,
+    ].join('\n');
+    try {
+      await navigator.clipboard.writeText(lines);
+      showToast('success', 'Скопировано в буфер обмена');
+    } catch (_) {
+      showToast('error', 'Не удалось скопировать');
+    }
+  }
+
   function statusColor(status: string): string {
     if (status === 'running') return 'success';
     if (status === 'stopped' || status === 'not_installed') return 'error';
@@ -248,9 +373,19 @@
     fetchSystemStats();
     fetchCapabilities();
     fetchSubscriptionSummary();
+    fetchProxySummary();
+
+    currentTab = getTabFromHash();
+    window.addEventListener('hashchange', handleHashChange);
+    if (!window.location.hash) {
+      window.location.hash = '#/' + currentTab;
+    }
+
+    window.addEventListener('keydown', handleKeydown);
+
     const statusInterval = setInterval(fetchLiveStatus, 10000);
     const statsInterval = setInterval(fetchSystemStats, 5000);
-    const capInterval = setInterval(fetchCapabilities, 30000);
+    const capInterval = setInterval(fetchCapabilities, 10000);
     const subsInterval = setInterval(fetchSubscriptionSummary, 30000);
     window.addEventListener('beforeinstallprompt', (e: Event) => {
       e.preventDefault();
@@ -261,16 +396,18 @@
       clearInterval(statsInterval);
       clearInterval(capInterval);
       clearInterval(subsInterval);
+      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('keydown', handleKeydown);
     };
   });
 </script>
 
-<div class="dashboard-layout">
+<div class="dashboard-layout" class:sb-collapsed={isSidebarCollapsed}>
   <!-- Mobile header bar -->
   <header class="mobile-header">
     <button
       class="burger-btn"
-      on:click={toggleSidebar}
+      onclick={toggleSidebar}
       aria-label={$t('nav.open_menu')}
       title={$t('nav.open_menu')}
     >
@@ -290,7 +427,7 @@
   <div
     class="sidebar-overlay"
     class:hidden={!$isSidebarOpen}
-    on:click={closeSidebar}
+    onclick={closeSidebar}
     role="button"
     tabindex="0"
     aria-label={$t('nav.close_menu')}
@@ -312,6 +449,8 @@
       {loading}
       {pwaInstallPrompt}
       onInstallPWA={installPWA}
+      isCollapsed={isSidebarCollapsed}
+      onToggleCollapse={toggleSidebarCollapse}
     />
   </div>
 
@@ -319,42 +458,48 @@
   <div class="main-content">
     <!-- Mihomo offline warning banner -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
-      <div
-        class="alert alert-warning"
-        style="margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px; font-size: 13px;"
-      >
-        <Icon name="warning" size={14} /> <strong>{$t('capabilities.mihomo_offline')}</strong> — {$t(
-          'capabilities.mihomo_offline_desc'
-        )}
+      <div style="margin: 12px 16px 0;">
+        <ApiOffline
+          endpoint={$capabilities.mihomo.discovered_secret ? 'Mihomo API' : '127.0.0.1:9090'}
+          lastSeenSeconds={0}
+          onRetry={fetchCapabilities}
+        />
       </div>
     {/if}
 
     {#if currentTab === 'dashboard'}
       <div class="container" transition:fade={{ duration: 150 }}>
-        <h1>{$t('nav.monitoring')}</h1>
-        <p class="text-secondary mb-3">{$t('dash.welcome')}</p>
 
-        <!-- Problems Panel -->
+        <!-- Page header -->
+        <div class="page-head">
+          <div>
+            <div class="crumbs">{$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('nav.monitoring')}</div>
+            <h1>{$t('dash.title')}</h1>
+            <p class="sub">{$t('dash.welcome')}</p>
+          </div>
+          <div class="ph-actions">
+            <Button variant="secondary" onclick={fetchLiveStatus} title={$t('app.refresh')}>
+              <Icon name="refresh" size={14} /> {$t('app.refresh')}
+            </Button>
+            <Button variant="primary" onclick={restartXkeen} title={$t('dash.restart_xkeen')}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-13h-7z"/></svg>
+              {$t('dash.restart_xkeen')}
+            </Button>
+          </div>
+        </div>
+
+        <!-- Problems Panel (conditional) -->
         {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running) || ($capabilities !== null && !$capabilities.kernels.xray.installed && !$capabilities.kernels.mihomo.installed)}
-          <div style="margin-bottom: var(--spacing-4);">
+          <div style="margin-bottom: 18px;">
             <Card title={$t('dash.problems_panel')}>
-              <div style="display: flex; flex-direction: column; gap: var(--spacing-3);">
+              <div class="problems-list">
                 {#if systemStats && systemStats.invalid_config}
-                  <div
-                    class="alert alert-error"
-                    style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;"
-                  >
-                    <div
-                      style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;"
-                    >
-                      <span style="margin-top: 2px; display: inline-flex;"
-                        ><Icon name="warning" size={16} /></span
-                      >
+                  <div class="problem-item alert-error">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
                       <div>
-                        <strong>{$t('dash.problems.invalid_config_title')}</strong>
-                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">
-                          {$t('dash.problems.invalid_config_desc')}
-                        </div>
+                        <strong class="problem-title">{$t('dash.problems.invalid_config_title')}</strong>
+                        <div class="problem-desc">{$t('dash.problems.invalid_config_desc')}</div>
                       </div>
                     </div>
                     <Button variant="secondary" onclick={() => switchTab('editor')}>
@@ -362,23 +507,13 @@
                     </Button>
                   </div>
                 {/if}
-
                 {#if $capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running}
-                  <div
-                    class="alert alert-warning"
-                    style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;"
-                  >
-                    <div
-                      style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;"
-                    >
-                      <span style="margin-top: 2px; display: inline-flex;"
-                        ><Icon name="warning" size={16} /></span
-                      >
+                  <div class="problem-item alert-warning">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
                       <div>
-                        <strong>{$t('dash.problems.mihomo_api_title')}</strong>
-                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">
-                          {$t('dash.problems.mihomo_api_desc')}
-                        </div>
+                        <strong class="problem-title">{$t('dash.problems.mihomo_api_title')}</strong>
+                        <div class="problem-desc">{$t('dash.problems.mihomo_api_desc')}</div>
                       </div>
                     </div>
                     <Button variant="secondary" onclick={() => switchTab('settings')}>
@@ -386,23 +521,13 @@
                     </Button>
                   </div>
                 {/if}
-
                 {#if $capabilities !== null && !$capabilities.kernels.xray.installed && !$capabilities.kernels.mihomo.installed}
-                  <div
-                    class="alert alert-error"
-                    style="margin: 0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;"
-                  >
-                    <div
-                      style="display: flex; align-items: flex-start; gap: var(--spacing-2); flex: 1;"
-                    >
-                      <span style="margin-top: 2px; display: inline-flex;"
-                        ><Icon name="warning" size={16} /></span
-                      >
+                  <div class="problem-item alert-error">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
                       <div>
-                        <strong>{$t('dash.problems.kernel_missing_title')}</strong>
-                        <div style="font-size: 13px; opacity: 0.9; margin-top: 2px;">
-                          {$t('dash.problems.kernel_missing_desc')}
-                        </div>
+                        <strong class="problem-title">{$t('dash.problems.kernel_missing_title')}</strong>
+                        <div class="problem-desc">{$t('dash.problems.kernel_missing_desc')}</div>
                       </div>
                     </div>
                     <Button variant="secondary" onclick={() => switchTab('services')}>
@@ -416,14 +541,22 @@
         {/if}
 
         <!-- Live Service Status card -->
-        <div style="margin-bottom: var(--spacing-4);">
+        <div style="margin-bottom: 18px;">
           <Card title={$t('dash.service_status')}>
+            {#snippet actions()}
+              <button class="ct-btn" onclick={fetchLiveStatus} title={$t('app.refresh')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+              </button>
+              <button class="ct-btn" onclick={() => switchTab('services')} title={$t('nav.services')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </button>
+            {/snippet}
             {#if statusLoading}
               <div class="status-badges-row">
-                <Skeleton type="rect" width="120px" height="34px" />
-                <Skeleton type="rect" width="160px" height="34px" />
-                <Skeleton type="rect" width="160px" height="34px" />
-                <Skeleton type="rect" width="130px" height="34px" />
+                <div class="status-badge-item"><Skeleton type="rect" width="140px" height="34px" /></div>
+                <div class="status-badge-item"><Skeleton type="rect" width="140px" height="34px" /></div>
+                <div class="status-badge-item"><Skeleton type="rect" width="140px" height="34px" /></div>
+                <div class="status-badge-item"><Skeleton type="rect" width="80px" height="34px" /></div>
               </div>
             {:else if statusError}
               <div class="status-error-row">
@@ -436,16 +569,26 @@
               <div class="status-badges-row">
                 <div class="status-badge-item">
                   <span class="status-dot {statusColor(serviceStatus.xkeen)}"></span>
-                  <span class="status-badge-label">XKeen</span>
-                  <span class="status-badge-value status-{statusColor(serviceStatus.xkeen)}">
-                    {serviceStatus.xkeen === 'running' ? $t('app.running') : $t('app.stop')}
+                  <span class="svc-cell-stack">
+                    <span class="status-badge-label">XKeen</span>
+                    <span class="lbl">{$t('dash.xkeen_sub')}</span>
+                  </span>
+                  <span class="status-badge-value">
+                    <span class="status-{statusColor(serviceStatus.xkeen)}">
+                      {serviceStatus.xkeen === 'running' ? $t('app.running') : $t('app.stop')}
+                    </span>
                   </span>
                 </div>
                 <div class="status-badge-item">
                   <span class="status-dot {statusColor(serviceStatus.xray)}"></span>
-                  <span class="status-badge-label">Xray</span>
-                  <span class="status-badge-value status-{statusColor(serviceStatus.xray)}">
-                    {$t('kernel.status.' + (serviceStatus.xray || 'unknown'))}
+                  <span class="svc-cell-stack">
+                    <span class="status-badge-label">Xray</span>
+                    <span class="lbl">{$t('dash.xray_sub')}</span>
+                  </span>
+                  <span class="status-badge-value">
+                    <span class="status-{statusColor(serviceStatus.xray)}">
+                      {$t('kernel.status.' + (serviceStatus.xray || 'unknown'))}
+                    </span>
                     {#if serviceStatus.xrayVersion && serviceStatus.xray !== 'not_installed'}
                       <span class="version-badge">{serviceStatus.xrayVersion}</span>
                     {/if}
@@ -453,182 +596,203 @@
                 </div>
                 <div class="status-badge-item">
                   <span class="status-dot {statusColor(serviceStatus.mihomo)}"></span>
-                  <span class="status-badge-label">Mihomo</span>
-                  <span class="status-badge-value status-{statusColor(serviceStatus.mihomo)}">
-                    {$t('kernel.status.' + (serviceStatus.mihomo || 'unknown'))}
+                  <span class="svc-cell-stack">
+                    <span class="status-badge-label">Mihomo</span>
+                    <span class="lbl">{$t('dash.mihomo_sub')}</span>
+                  </span>
+                  <span class="status-badge-value">
+                    <span class="status-{statusColor(serviceStatus.mihomo)}">
+                      {$t('kernel.status.' + (serviceStatus.mihomo || 'unknown'))}
+                    </span>
                     {#if serviceStatus.mihomoVersion && serviceStatus.mihomo !== 'not_installed'}
                       <span class="version-badge">{serviceStatus.mihomoVersion}</span>
                     {/if}
                   </span>
                 </div>
                 <div class="status-badge-item">
-                  <span class="status-dot {serviceStatus.connections > 0 ? 'success' : 'warning'}"
-                  ></span>
-                  <span class="status-badge-label">{$t('dash.connections')}</span>
-                  <span class="status-badge-value">{serviceStatus.connections}</span>
+                  <span class="status-dot {serviceStatus.connections > 0 ? 'success' : 'warning'}"></span>
+                  <span class="svc-cell-stack">
+                    <span class="status-badge-label">{$t('dash.connections')}</span>
+                    <span class="lbl">{$t('dash.connections_sub')}</span>
+                  </span>
+                  <span class="status-badge-value mono" style="color:var(--fg-primary);">
+                    {serviceStatus.connections}
+                  </span>
                 </div>
               </div>
             {/if}
           </Card>
         </div>
 
-        <!-- Router Info, Network, Subscriptions Grid -->
-        <div class="stats-grid" style="margin-bottom: var(--spacing-4);">
-          <!-- Router Info -->
-          <Card title={$t('dash.router_info')}>
-            <div
-              style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;"
-            >
-              <div>
-                <span class="text-secondary">{$t('dash.router_model')}:</span>
-                <span style="font-weight: 500; margin-left: 4px;"
-                  >{systemStats?.router_model || '—'}</span
-                >
-              </div>
-              <div>
-                <span class="text-secondary">{$t('dash.router_hostname')}:</span>
-                <span style="font-weight: 500; margin-left: 4px;"
-                  >{systemStats?.hostname || '—'}</span
-                >
-              </div>
-              <div>
-                <span class="text-secondary">{$t('dash.dns_servers')}:</span>
-                <span style="font-weight: 500; margin-left: 4px; font-family: monospace;">
-                  {systemStats?.dns_servers?.join(', ') || '—'}
-                </span>
-              </div>
-            </div>
-          </Card>
-
-          <!-- Network Diagnostics -->
-          <Card title={$t('dash.network_diagnostics')}>
-            <div
-              style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;"
-            >
-              <div>
-                <span class="text-secondary">{$t('dash.wan_status')}:</span>
-                <span
-                  style="font-weight: 500; margin-left: 4px;"
-                  class={systemStats?.wan_status === 'online' ? 'status-success' : 'status-error'}
-                >
-                  {systemStats?.wan_status === 'online'
-                    ? $t('dash.wan_online')
-                    : $t('dash.wan_offline')}
-                </span>
-              </div>
-              <div>
-                <span class="text-secondary">{$t('dash.default_gateway')}:</span>
-                <span style="font-weight: 500; margin-left: 4px; font-family: monospace;"
-                  >{systemStats?.default_gateway || '—'}</span
-                >
-              </div>
-              <div>
-                <span class="text-secondary">{$t('dash.dns_resolving')}:</span>
-                <span
-                  style="font-weight: 500; margin-left: 4px;"
-                  class={systemStats?.dns_resolving ? 'status-success' : 'status-error'}
-                >
-                  {systemStats?.dns_resolving
-                    ? $t('dash.dns_resolving_ok')
-                    : $t('dash.dns_resolving_fail')}
-                </span>
-              </div>
-            </div>
-          </Card>
-
-          <!-- Subscriptions Summary -->
-          <Card title={$t('dash.subscriptions_summary')}>
-            <div
-              style="display: flex; flex-direction: column; gap: var(--spacing-2); font-size: 13px; min-height: 70px;"
-            >
-              <div>
-                <span class="text-secondary">{$t('dash.active_subscriptions')}:</span>
-                <span style="font-weight: 500; margin-left: 4px;">{activeSubscriptionsCount}</span>
-              </div>
-              <div>
-                <span class="text-secondary">{$t('dash.total_proxies')}:</span>
-                <span style="font-weight: 500; margin-left: 4px;">{totalProxiesCount}</span>
-              </div>
-            </div>
-          </Card>
-        </div>
-
+        <!-- System Resources -->
         {#if systemStats}
-          <div style="margin-bottom: var(--spacing-4);">
+          <div style="margin-bottom: 18px;">
             <Card title={$t('dash.system_stats')}>
+              {#snippet actions()}
+                <button class="ct-btn" onclick={fetchSystemStats} title={$t('app.refresh')}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                </button>
+              {/snippet}
               <div class="stats-grid">
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.ram')}</div>
                   <div class="stat-value">
-                    {formatBytes(systemStats.memory.used)} / {formatBytes(systemStats.memory.total)}
+                    {(systemStats.memory.used / 1024 / 1024).toFixed(2)}<span style="color:var(--fg-secondary);font-size:14px;font-weight:500;margin-left:6px;">МБ</span>
                   </div>
+                  <div class="res-sub">из {(systemStats.memory.total / 1024 / 1024).toFixed(2)} МБ · {((systemStats.memory.used / systemStats.memory.total) * 100).toFixed(1)}%</div>
                   <div class="stat-bar">
-                    <div
-                      class="stat-bar-fill"
-                      style="width: {(
-                        (systemStats.memory.used / systemStats.memory.total) *
-                        100
-                      ).toFixed(1)}%"
-                    ></div>
+                    <div class="stat-bar-fill" style="width: {((systemStats.memory.used / systemStats.memory.total) * 100).toFixed(1)}%"></div>
                   </div>
                 </div>
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.load')}</div>
                   <div class="stat-value">{systemStats.load[0].toFixed(2)}</div>
+                  <div class="res-sub">1м {systemStats.load[0].toFixed(2)} · 5м {systemStats.load[1].toFixed(2)} · 15м {systemStats.load[2].toFixed(2)}</div>
+                  {#if sparklineData}
+                    <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
+                      <defs>
+                        <linearGradient id="sg1" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stop-color="#29c2f0" stop-opacity=".5"/>
+                          <stop offset="100%" stop-color="#29c2f0" stop-opacity="0"/>
+                        </linearGradient>
+                      </defs>
+                      <path d={sparklineData.fill} fill="url(#sg1)"/>
+                      <path d={sparklineData.line} fill="none" stroke="#29c2f0" stroke-width="1.5"/>
+                    </svg>
+                  {/if}
                 </div>
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.uptime')}</div>
-                  <div class="stat-value">
-                    {systemStats.uptime.days}d {systemStats.uptime.hours}h {systemStats.uptime
-                      .minutes}m
+                  <div class="stat-value">{systemStats.uptime.days}д {systemStats.uptime.hours}ч {systemStats.uptime.minutes}м</div>
+                  {#if systemStats.boot_time}
+                    <div class="res-sub">{$t('dash.uptime_since', { time: systemStats.boot_time })}</div>
+                  {/if}
+                  <div class="stats" style="margin-top:10px;">
+                    <span class="stat">{$t('dash.uptime_stable')}</span>
+                    <span class="stat">{$t('dash.uptime_restarts')}</span>
                   </div>
                 </div>
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.goroutines')}</div>
                   <div class="stat-value">{systemStats.go_runtime.goroutines}</div>
+                  <div class="res-sub">heap {(systemStats.go_runtime.heap_alloc / 1024 / 1024).toFixed(1)} МБ · gc {systemStats.go_runtime.num_gc} мс</div>
+                  {#if systemStats.go_runtime.go_version || systemStats.go_runtime.goarch}
+                    <div class="stats" style="margin-top:10px;">
+                      {#if systemStats.go_runtime.gomaxprocs}
+                        <span class="stat">{systemStats.go_runtime.gomaxprocs} {systemStats.go_runtime.go_version}</span>
+                      {/if}
+                      {#if systemStats.go_runtime.goarch}
+                        <span class="stat">{systemStats.go_runtime.goarch}</span>
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
               </div>
             </Card>
           </div>
         {/if}
 
-        <div style="margin-bottom: var(--spacing-4);">
+        <!-- System Info -->
+        <div style="margin-bottom: 18px;">
           <Card title={$t('dash.system_info')}>
-            <p style="margin: 0;"><strong>{$t('app.version')}:</strong> {version}</p>
+            {#snippet actions()}
+              <button class="ct-btn" onclick={copySystemInfo} title="Копировать">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+              </button>
+              <button class="ct-btn" onclick={fetchSystemStats} title={$t('app.refresh')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+              </button>
+            {/snippet}
+            <div class="info-rows">
+              <div class="info-row">
+                <div class="lbl">{$t('dash.info_version')}</div>
+                <div class="val">
+                  {version}
+                  <span class="info-badge info-badge-teal">{$t('dash.info_latest')}</span>
+                </div>
+              </div>
+              <div class="info-row">
+                <div class="lbl">{$t('dash.info_platform')}</div>
+                <div class="val">{systemStats?.platform || '—'}</div>
+              </div>
+              <div class="info-row">
+                <div class="lbl">{$t('dash.info_kernel')}</div>
+                <div class="val">{systemStats?.kernel_version || '—'}</div>
+              </div>
+              <div class="info-row">
+                <div class="lbl">{$t('dash.info_host')}</div>
+                <div class="val">{systemStats?.hostname || '—'}</div>
+              </div>
+              <div class="info-row">
+                <div class="lbl">{$t('dash.info_ip')}</div>
+                <div class="val">{systemStats?.ip_interface || '—'}</div>
+              </div>
+              <div class="info-row">
+                <div class="lbl">{$t('dash.info_timezone')}</div>
+                <div class="val">{systemStats?.timezone || '—'}</div>
+              </div>
+              <div class="info-row">
+                <div class="lbl">{$t('dash.info_config')}</div>
+                <div class="val">
+                  {systemStats?.config_path || '/opt/etc/xkeen/'}
+                  {#if systemStats?.config_lines}
+                    <span class="info-badge info-badge-orange">{systemStats.config_lines} строк</span>
+                  {/if}
+                </div>
+              </div>
+              <div class="info-row">
+                <div class="lbl">{$t('dash.info_updated')}</div>
+                <div class="val">{statsLastFetched || '—'}</div>
+              </div>
+            </div>
           </Card>
         </div>
 
-        <div style="margin-bottom: var(--spacing-2);">
+        <!-- Quick Actions -->
+        <div style="margin-bottom: 8px;">
           <Card title={$t('dash.quick_actions')}>
-            <div class="quick-actions">
-              <Button
-                variant="secondary"
-                onclick={() => switchTab('proxies')}
-                title={$t('nav.proxies')}
-              >
-                <Icon name="proxies" size={16} />
-                {$t('nav.proxies')}
-              </Button>
-              <Button
-                variant="secondary"
-                onclick={() => switchTab('subscriptions')}
-                title={$t('nav.subscriptions')}
-              >
-                <Icon name="subscriptions" size={16} />
-                {$t('nav.subscriptions')}
-              </Button>
-              <Button
-                variant="secondary"
-                onclick={() => switchTab('editor')}
-                title={$t('nav.editor')}
-              >
-                <Icon name="editor" size={16} />
-                {$t('nav.editor')}
-              </Button>
-              <Button variant="secondary" onclick={() => switchTab('logs')} title={$t('nav.logs')}>
-                <Icon name="logs" size={16} />
-                {$t('nav.logs')}
-              </Button>
+            {#snippet actions()}
+              <button class="ct-btn" onclick={() => { fetchSubscriptionSummary(); fetchProxySummary(); }} title={$t('app.refresh')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+              </button>
+            {/snippet}
+            <div class="qa-grid-mini">
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <div class="qa-mini" onclick={() => switchTab('proxies')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('proxies')}>
+                <span class="qa-mini-ico"><Icon name="proxies" size={18} /></span>
+                <span><b>{$t('nav.proxies')}</b><span class="s">{totalProxiesCount > 0 ? `${totalProxiesCount} узлов · ${activeProxiesCount} активных` : 'Mihomo узлы и группы'}</span></span>
+              </div>
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <div class="qa-mini" onclick={() => switchTab('subscriptions')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('subscriptions')}>
+                <span class="qa-mini-ico"><Icon name="subscriptions" size={18} /></span>
+                <span><b>{$t('nav.subscriptions')}</b><span class="s">{totalSubsCount > 0 ? `${totalSubsCount} источника${subsLastUpdated ? ' · ' + subsLastUpdated : ''}` : 'Подписки на прокси'}</span></span>
+              </div>
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <div class="qa-mini" onclick={() => switchTab('editor')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('editor')}>
+                <span class="qa-mini-ico"><Icon name="editor" size={18} /></span>
+                <span><b>{$t('nav.editor')}</b><span class="s">правка config.yaml</span></span>
+              </div>
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <div class="qa-mini" onclick={() => switchTab('logs')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('logs')}>
+                <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
+                <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 1000 строк</span></span>
+              </div>
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <div class="qa-mini" onclick={() => switchTab('dat')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('dat')}>
+                <span class="qa-mini-ico"><Icon name="dat" size={18} /></span>
+                <span><b>{$t('nav.dat')}</b><span class="s">geoip · geosite · правила</span></span>
+              </div>
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <div class="qa-mini" onclick={() => switchTab('console')} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && switchTab('console')}>
+                <span class="qa-mini-ico"><Icon name="console" size={18} /></span>
+                <span><b>{$t('nav.console')}</b><span class="s">shell в окружении XKeen</span></span>
+              </div>
             </div>
           </Card>
         </div>
@@ -697,62 +861,68 @@
 <ConfirmDialog />
 
 <style>
-  .quick-actions {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-
-  /* Live status badges */
+  /* Status badges — matches reference: flush grid inside card with dividers */
   .status-badges-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-top: 4px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0;
+    margin: -18px -24px -24px;
+    border-top: 1px solid var(--border);
   }
 
   .status-badge-item {
     display: flex;
     align-items: center;
-    gap: 6px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 12px;
+    gap: 10px;
+    padding: 14px 20px;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
     font-size: 13px;
   }
 
+  .status-badge-item:last-child { border-right: 0; }
+  .status-badge-item:nth-last-child(-n+4) { border-bottom: 0; }
+
+  .svc-cell-stack {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.25;
+  }
+
+  .svc-cell-stack .lbl {
+    font-size: 11.5px;
+    color: var(--fg-dim);
+    margin-top: 2px;
+  }
+
   .status-badge-label {
-    font-weight: 600;
+    font-weight: 700;
     color: var(--fg-primary);
+    font-size: 13px;
   }
 
   .status-badge-value {
-    color: var(--fg-secondary);
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-end;
     gap: 4px;
+    margin-left: auto;
+    flex-shrink: 0;
   }
 
-  .status-success {
-    color: var(--success);
-  }
-
-  .status-error {
-    color: var(--danger);
-  }
-
-  .status-warning {
-    color: var(--warning);
-  }
+  .status-success { color: var(--success); }
+  .status-error   { color: var(--danger); }
+  .status-warning { color: var(--warning); }
 
   .version-badge {
-    font-size: 11px;
-    background: var(--border);
-    border-radius: 4px;
-    padding: 1px 5px;
-    font-family: monospace;
-    color: var(--fg-secondary);
+    font-family: var(--font-family-mono);
+    font-size: 10px;
+    color: var(--fg-dim);
+    letter-spacing: .03em;
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 6px;
   }
 
   .status-error-row {
@@ -760,6 +930,169 @@
     align-items: center;
     gap: 12px;
     color: var(--danger);
-    padding: 8px 0;
+    padding: 14px 20px;
+  }
+
+  /* Quick actions grid */
+  .qa-grid-mini {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .qa-mini {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 14px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all .15s;
+    text-decoration: none;
+    color: inherit;
+  }
+
+  .qa-mini:hover {
+    border-color: var(--accent-line);
+    transform: translateY(-1px);
+    box-shadow: 0 14px 28px -18px rgba(41,194,240,.45);
+  }
+
+  .qa-mini-ico {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent-line);
+    flex: 0 0 36px;
+  }
+
+  .qa-mini b {
+    color: var(--fg-primary);
+    font-weight: 700;
+    font-size: 13.5px;
+    display: block;
+  }
+
+  .qa-mini .s {
+    color: var(--fg-dim);
+    font-size: 11.5px;
+    display: block;
+    margin-top: 2px;
+  }
+
+  /* Info rows */
+  .info-rows {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    margin: -18px -24px -24px;
+    border-top: 1px solid var(--border);
+  }
+
+  .info-row {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    padding: 13px 20px;
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+
+  .info-row:nth-child(2n) { border-right: 0; }
+  .info-row:nth-last-child(-n+2) { border-bottom: 0; }
+
+  .info-row .lbl {
+    color: var(--fg-secondary);
+    font-size: 12.5px;
+    min-width: 130px;
+  }
+
+  .info-row .val {
+    color: var(--fg-primary);
+    font-family: var(--font-family-mono);
+    font-size: 13px;
+  }
+
+  /* Page header — title left, buttons top-right */
+  .page-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .crumbs {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+    margin-bottom: 6px;
+  }
+
+  .sub {
+    color: var(--fg-secondary);
+    font-size: 13px;
+    margin: 4px 0 0;
+  }
+
+  /* Sub-text under stat values */
+  .res-sub {
+    font-size: 11.5px;
+    color: var(--fg-dim);
+    margin-top: 6px;
+    font-family: var(--font-family-mono);
+  }
+
+  /* ph-actions */
+  .ph-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-shrink: 0;
+    padding-top: 4px;
+  }
+
+  /* sparkline */
+  .sparkline {
+    display: block;
+    width: 100%;
+    height: 42px;
+    margin-top: 10px;
+    overflow: visible;
+  }
+
+  /* Info badges inside info-row — match reference .pill */
+  .info-badge {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 3px;
+    margin-left: 6px;
+    vertical-align: middle;
+    font-family: var(--font-family-mono);
+    letter-spacing: .02em;
+  }
+
+  /* "latest" badge — uses accent color vars from design system */
+  .info-badge-teal {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent-line);
+  }
+
+  /* config lines badge — warning/orange */
+  .info-badge-orange {
+    background: rgba(255, 138, 0, .1);
+    color: var(--warning, #f59e0b);
+    border: 1px solid rgba(255, 138, 0, .2);
   }
 </style>
