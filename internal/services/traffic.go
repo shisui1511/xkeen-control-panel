@@ -331,6 +331,22 @@ func (s *TrafficQuotaService) checkResets() {
 			q.CurrentBytes = 0
 			q.LastReset = now.Unix()
 			changed = true
+			// Reset accumulated proxy stats so checkQuotas reads from zero
+			// after the period boundary, not from historical cumulative totals.
+			switch q.TargetType {
+			case "proxy":
+				if stat, ok := s.proxyStats[q.TargetID]; ok {
+					stat.UploadBytes = 0
+					stat.DownloadBytes = 0
+					stat.TotalBytes = 0
+				}
+			case "global":
+				for _, stat := range s.proxyStats {
+					stat.UploadBytes = 0
+					stat.DownloadBytes = 0
+					stat.TotalBytes = 0
+				}
+			}
 		}
 	}
 
