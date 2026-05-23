@@ -523,6 +523,16 @@ func parseShareLink(link string) *Outbound {
 		return parseTUICLink(link)
 	}
 
+	// socks:// or socks5://
+	if strings.HasPrefix(link, "socks://") || strings.HasPrefix(link, "socks5://") {
+		return parseSOCKSLink(link)
+	}
+
+	// http:// proxy (must come after http-based subscription URL check is done)
+	if strings.HasPrefix(link, "http-proxy://") {
+		return parseHTTPProxyLink(link)
+	}
+
 	return nil
 }
 
@@ -982,6 +992,123 @@ func parseSSLink(link string) *Outbound {
 			},
 		},
 	}
+}
+
+func parseSOCKSLink(link string) *Outbound {
+	// socks:// or socks5://user:pass@host:port#tag
+	// Normalise socks5:// to socks:// so url.Parse works uniformly
+	link = strings.Replace(link, "socks5://", "socks://", 1)
+	u, err := url.Parse(link)
+	if err != nil {
+		return nil
+	}
+
+	tag := u.Fragment
+	if tag == "" {
+		tag = u.Hostname()
+	}
+
+	portInt, err := strconv.Atoi(u.Port())
+	if err != nil || portInt < 1 || portInt > 65535 {
+		return nil
+	}
+
+	server := map[string]interface{}{
+		"address": u.Hostname(),
+		"port":    portInt,
+	}
+	if u.User != nil {
+		user := u.User.Username()
+		pass, _ := u.User.Password()
+		if user != "" {
+			server["users"] = []map[string]interface{}{
+				{"user": user, "pass": pass},
+			}
+		}
+	}
+
+	return &Outbound{
+		Tag:      tag,
+		Protocol: "socks",
+		Settings: map[string]interface{}{
+			"servers": []map[string]interface{}{server},
+		},
+	}
+}
+
+// parseHTTPProxyLink parses http-proxy://user:pass@host:port#tag share links.
+// Uses the "http-proxy://" scheme to avoid conflicts with http:// subscription URLs.
+func parseHTTPProxyLink(link string) *Outbound {
+	// Normalise http-proxy:// → http:// so url.Parse can handle it
+	link = strings.Replace(link, "http-proxy://", "http://", 1)
+	u, err := url.Parse(link)
+	if err != nil {
+		return nil
+	}
+
+	tag := u.Fragment
+	if tag == "" {
+		tag = u.Hostname()
+	}
+
+	portInt, err := strconv.Atoi(u.Port())
+	if err != nil || portInt < 1 || portInt > 65535 {
+		return nil
+	}
+
+	server := map[string]interface{}{
+		"address": u.Hostname(),
+		"port":    portInt,
+	}
+	if u.User != nil {
+		user := u.User.Username()
+		pass, _ := u.User.Password()
+		if user != "" {
+			server["users"] = []map[string]interface{}{
+				{"user": user, "pass": pass},
+			}
+		}
+	}
+
+	return &Outbound{
+		Tag:      tag,
+		Protocol: "http",
+		Settings: map[string]interface{}{
+			"servers": []map[string]interface{}{server},
+		},
+	}
+}
+
+// ParseLinksResult holds the result for a single link parse attempt.
+type ParseLinksResult struct {
+	Link    string    `json:"link"`
+	Outbound *Outbound `json:"outbound,omitempty"`
+	Error   string    `json:"error,omitempty"`
+}
+
+// ParseLinks parses a slice of share links and returns results for each.
+// Unsupported or invalid links are reported as errors, not fatal failures.
+func (s *SubscriptionService) ParseLinks(links []string) []ParseLinksResult {
+	results := make([]ParseLinksResult, 0, len(links))
+	for _, link := range links {
+		link = strings.TrimSpace(link)
+		if link == "" {
+			continue
+		}
+		ob := parseShareLink(link)
+		if ob == nil {
+			results = append(results, ParseLinksResult{
+				Link:  link,
+				Error: "unsupported or invalid share link format",
+			})
+		} else {
+			results = append(results, ParseLinksResult{
+				Link:     link,
+				Outbound: ob,
+			})
+		}
+	}
+	return results
 }
 
 // isRefreshDue returns true if a subscription needs to be refreshed.
