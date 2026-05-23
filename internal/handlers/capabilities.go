@@ -28,10 +28,16 @@ type MihomoCapability struct {
 	DiscoveredSecret string `json:"discovered_secret,omitempty"`
 }
 
-// Capabilities handles GET /api/capabilities.
-// This is a protected endpoint: the frontend uses it to conditionally render
-// UI elements based on what the backend can actually do.
 func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
+	a.capsCacheMutex.Lock()
+	if a.capsCache != nil && time.Since(a.capsCacheTime) < 3*time.Second {
+		cached := a.capsCache
+		a.capsCacheMutex.Unlock()
+		JSONSuccess(w, cached)
+		return
+	}
+	a.capsCacheMutex.Unlock()
+
 	resp := CapabilitiesResponse{
 		Kernels: make(map[string]KernelCapability),
 	}
@@ -73,6 +79,11 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	resp.Mihomo.APIAuthenticated = authenticated
 	resp.Mihomo.Reachable = reachable
 	resp.Mihomo.DiscoveredSecret = discoveredSecret
+
+	a.capsCacheMutex.Lock()
+	a.capsCache = resp
+	a.capsCacheTime = time.Now()
+	a.capsCacheMutex.Unlock()
 
 	JSONSuccess(w, resp)
 }

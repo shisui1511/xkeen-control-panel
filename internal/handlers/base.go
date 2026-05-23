@@ -32,6 +32,9 @@ type API struct {
 	configValCache      bool
 	configValCacheTime  time.Time
 	configValCacheMutex sync.Mutex
+	capsCache           interface{}
+	capsCacheTime       time.Time
+	capsCacheMutex      sync.Mutex
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
@@ -79,6 +82,12 @@ func (a *API) SetSubscriptionService(svc *services.SubscriptionService) {
 
 func (a *API) SetNetworkToolsService(svc *services.NetworkToolsService) {
 	a.networkSvc = svc
+}
+
+func (a *API) ClearCapabilitiesCache() {
+	a.capsCacheMutex.Lock()
+	defer a.capsCacheMutex.Unlock()
+	a.capsCache = nil
 }
 
 func (a *API) t(r *http.Request, key string) string {

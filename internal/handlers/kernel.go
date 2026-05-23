@@ -55,8 +55,10 @@ func (a *API) KernelInstall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Run install in background
+	a.ClearCapabilitiesCache()
 	go func() {
 		_ = a.kernelSvc.Install(name)
+		a.ClearCapabilitiesCache()
 	}()
 
 	JSONSuccess(w, map[string]string{"status": "downloading"})
@@ -97,6 +99,7 @@ func (a *API) KernelChannel(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusNotFound, "Kernel not found")
 		return
 	}
+	a.ClearCapabilitiesCache()
 
 	JSONSuccess(w, map[string]string{"channel": req.Channel})
 }
