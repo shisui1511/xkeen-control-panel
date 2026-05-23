@@ -12,7 +12,6 @@ AGENTS.md
 ROADMAP.md
 CLAUDE.md
 GEMINI.md
-PLAN-091.md
 
 .agents
 .specify
@@ -35,3 +34,6 @@ bin/golangci-lint
 # Playwright
 frontend/playwright-report/
 frontend/test-results/
+
+# Redesign folder from external designer
+/frontend-redesign/

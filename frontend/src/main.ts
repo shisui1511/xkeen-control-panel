@@ -1,4 +1,5 @@
 import { mount } from 'svelte';
+import './styles/fonts.css';
 import App from './App.svelte';
 
 function initTheme() {
