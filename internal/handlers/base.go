@@ -25,6 +25,7 @@ type API struct {
 	smartProxySvc       *services.SmartProxyService
 	trafficQuotaSvc     *services.TrafficQuotaService
 	datSvc              *services.DATManagerService
+	snapshotSvc         *services.SnapshotService
 	consoleSvc          *services.ConsoleService
 	templateSvc         *services.TemplateService
 	pathVal             *utils.PathValidator
@@ -37,7 +38,7 @@ func NewAPI(cfg *config.Config, srv *server.Server) *API {
 	return &API{
 		cfg:       cfg,
 		srv:       srv,
-		xkeenSvc:  services.NewXKeenService(cfg.XKeenBinary),
+		xkeenSvc:  services.NewXKeenService(cfg.XKeenBinary, cfg.DataDir),
 		mihomoSvc: services.NewMihomoService(cfg.MihomoBinary, cfg.XKeenBinary, cfg.MihomoConfigDir),
 		configSvc: services.NewConfigService(cfg.XRayConfigDir),
 		pathVal:   utils.NewPathValidator(cfg.AllowedRoots),
@@ -54,6 +55,10 @@ func (a *API) SetTrafficQuotaService(svc *services.TrafficQuotaService) {
 
 func (a *API) SetDATManagerService(svc *services.DATManagerService) {
 	a.datSvc = svc
+}
+
+func (a *API) SetSnapshotService(svc *services.SnapshotService) {
+	a.snapshotSvc = svc
 }
 
 func (a *API) SetConsoleService(svc *services.ConsoleService) {

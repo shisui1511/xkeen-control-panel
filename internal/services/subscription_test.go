@@ -476,10 +476,13 @@ func TestTagDeduplication(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var result []Outbound
-	if err := json.Unmarshal(data, &result); err != nil {
+	var wrapper struct {
+		Outbounds []Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
 		t.Fatal(err)
 	}
+	result := wrapper.Outbounds
 
 	if len(result) != 3 {
 		t.Fatalf("expected 3 outbounds, got %d", len(result))

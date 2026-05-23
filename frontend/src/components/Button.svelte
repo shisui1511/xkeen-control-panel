@@ -33,63 +33,66 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: var(--spacing-2);
-    padding: 8px 16px;
-    border-radius: var(--radius-sm);
+    gap: 8px;
+    padding: 9px 14px;
+    border-radius: var(--radius-md);
     font-family: var(--font-family-sans);
-    font-size: var(--font-size-sm);
-    font-weight: 500;
+    font-size: 13px;
+    font-weight: 600;
     cursor: pointer;
     transition:
       background-color var(--transition-fast),
       border-color var(--transition-fast),
+      color var(--transition-fast),
+      filter var(--transition-fast),
+      box-shadow var(--transition-fast),
       opacity var(--transition-fast);
     border: 1px solid transparent;
     outline: none;
   }
-
   .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
 
   .btn-primary {
-    background-color: var(--color-primary-500);
-    color: #ffffff;
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    color: #03182a;
+    box-shadow: 0 6px 18px -8px var(--accent);
   }
-
   .btn-primary:hover:not(:disabled) {
-    background-color: var(--color-primary-600);
+    filter: brightness(1.07);
+    color: #03182a;
   }
 
   .btn-secondary {
-    background-color: transparent;
-    border-color: var(--color-border-subtle);
-    color: var(--color-text-primary);
+    background: transparent;
+    border-color: var(--border);
+    color: var(--fg-primary);
   }
-
   .btn-secondary:hover:not(:disabled) {
-    background-color: var(--hover);
+    border-color: var(--accent-line);
+    color: var(--accent);
+    background: var(--hover);
   }
 
   .btn-danger {
-    background-color: var(--color-danger);
-    color: #ffffff;
+    background: var(--danger);
+    color: #fff;
   }
-
   .btn-danger:hover:not(:disabled) {
-    opacity: 0.9;
+    opacity: 0.92;
+    color: #fff;
   }
 
   .spinner {
-    width: 14px;
-    height: 14px;
+    width: 13px;
+    height: 13px;
     border: 2px solid currentColor;
     border-top-color: transparent;
     border-radius: 50%;
     animation: spin 1s linear infinite;
   }
-
   .sr-only {
     position: absolute;
     width: 1px;
@@ -101,7 +104,6 @@
     white-space: nowrap;
     border: 0;
   }
-
   @keyframes spin {
     to {
       transform: rotate(360deg);

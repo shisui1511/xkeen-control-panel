@@ -22,15 +22,14 @@
 <div class="empty-state" role="status" aria-label={title}>
   {#if IconComponent}
     <div class="empty-state__icon" aria-hidden="true">
-      <IconComponent size={48} />
+      <IconComponent size={42} />
     </div>
   {/if}
   <h2 class="empty-state__title">{title}</h2>
   <p class="empty-state__description">{description}</p>
   {#if ctaText && oncta}
-    <Button variant="primary" loading={ctaLoading} title={ctaText} onclick={oncta}>
-      {ctaText}
-    </Button>
+    <Button variant="primary" loading={ctaLoading} title={ctaText} onclick={oncta}>{ctaText}</Button
+    >
   {/if}
 </div>
 
@@ -41,34 +40,34 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: var(--spacing-8) var(--spacing-6);
-    background-color: var(--color-bg-surface);
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-sm);
-    gap: var(--spacing-3);
+    padding: 40px 24px;
+    background: var(--bg-card);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-lg);
+    gap: 10px;
   }
-
   .empty-state__icon {
-    color: var(--color-text-secondary);
-    opacity: 0.6;
-    margin-bottom: var(--spacing-2);
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    margin-bottom: 8px;
   }
-
   .empty-state__title {
-    font-family: var(--font-family-sans);
-    font-size: var(--font-size-xl);
-    font-weight: 600;
-    color: var(--color-text-primary);
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--fg-primary);
     margin: 0;
   }
-
   .empty-state__description {
-    font-family: var(--font-family-sans);
-    font-size: var(--font-size-sm);
-    color: var(--color-text-secondary);
+    font-size: 13px;
+    color: var(--fg-secondary);
     line-height: 1.5;
-    max-width: 400px;
+    max-width: 420px;
     margin: 0;
   }
 </style>

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io/fs"
@@ -21,6 +22,7 @@ type Server struct {
 	version     string
 	mux         *http.ServeMux
 	authService *auth.AuthService
+	httpSrv     *http.Server
 }
 
 type Config struct {
@@ -98,6 +100,7 @@ func (s *Server) Start() error {
 	handler = middleware.Logging(handler)
 
 	addr := fmt.Sprintf(":%d", s.cfg.Port)
+	s.httpSrv = &http.Server{Addr: addr, Handler: handler}
 
 	if s.cfg.HTTPS.Enabled {
 		certPath := s.cfg.HTTPS.CertPath
@@ -128,9 +131,18 @@ func (s *Server) Start() error {
 		defer listener.Close()
 
 		log.Printf("Listening HTTPS on port %d", s.cfg.Port)
-		return http.Serve(listener, handler)
+		return s.httpSrv.Serve(listener)
 	}
 
 	log.Printf("Listening HTTP on port %d", s.cfg.Port)
-	return http.ListenAndServe(addr, handler)
+	return s.httpSrv.ListenAndServe()
+}
+
+// Shutdown gracefully stops the HTTP server, waiting up to ctx deadline for
+// active connections to finish.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.httpSrv == nil {
+		return nil
+	}
+	return s.httpSrv.Shutdown(ctx)
 }

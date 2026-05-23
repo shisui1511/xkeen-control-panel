@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t } from './i18n';
-  import PageHeader from './PageHeader.svelte';
+  import { t, currentLang } from './i18n';
   import Icon from './lib/components/Icon.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
@@ -70,185 +69,482 @@
 
   function formatDate(ts: number): string {
     if (!ts) return '-';
-    return new Date(ts * 1000).toLocaleString('ru-RU');
+    return new Date(ts * 1000).toLocaleString($currentLang === 'ru' ? 'ru-RU' : 'en-US');
   }
+
+  $: xrayFiles = files.filter((f) => f.type === 'xray');
+  $: mihomoFiles = files.filter((f) => f.type === 'mihomo');
+  $: otherFiles = files.filter((f) => f.type !== 'xray' && f.type !== 'mihomo');
+  $: totalSize = files.reduce((sum, f) => sum + f.size, 0);
+  $: lastUpdated = files.reduce((max, f) => Math.max(max, f.last_update || 0), 0);
+  $: missingCount = files.filter((f) => !f.exists).length;
 
   onMount(fetchFiles);
 </script>
 
 <div class="container">
-  <PageHeader
-    title={$t('dat.title')}
-    subtitle={$t('dat.subtitle')}
-    breadcrumbs={[{ label: $t('dat.title') }]}
-    {onSwitchTab}
-  />
-
-  {#if error}
-    <div class="alert alert-error mb-2">{error}</div>
-  {/if}
-
-  <div class="card mb-2">
-    <div class="flex-between">
-      <div class="title-group">
-        <h2>{$t('dat.database_files')}</h2>
-        <button
-          class="btn btn-primary ml-2"
-          on:click={updateAll}
-          disabled={globalUpdating || loading}
-        >
-          {#if globalUpdating}<Icon name="refresh" size={14} /> {$t('app.loading')}{:else}<Icon
-              name="download"
-              size={14}
-            />
-            {$t('dat.update_all')}{/if}
-        </button>
+  <div class="page-head">
+    <div>
+      <div class="crumbs">
+        {$t('nav.group_services')} <span class="crumb-separator">/</span>
+        {$t('nav.dat')}
       </div>
-      <button class="btn btn-secondary" on:click={fetchFiles} disabled={loading}>
-        <Icon name="refresh" size={14} />
+      <h1>{$t('dat.h1')}</h1>
+      <p class="sub">{$t('dat.h1_sub')}</p>
+    </div>
+    <div class="ph-actions">
+      <button
+        class="btn btn-secondary"
+        on:click={fetchFiles}
+        disabled={loading}
+        title={$t('app.refresh')}
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          style="margin-right: 6px;"
+        >
+          <polyline points="23 4 23 10 17 10" />
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+        </svg>
         {$t('app.refresh')}
       </button>
+      <button
+        class="btn btn-primary"
+        on:click={updateAll}
+        disabled={globalUpdating || loading}
+        title={$t('dat.update_all')}
+      >
+        {#if globalUpdating}
+          <span class="spinner" style="margin-right: 6px;">...</span>
+          {$t('app.loading')}
+        {:else}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right: 6px;"
+          >
+            <polyline points="21 8 21 3 16 3" />
+            <path d="M3 16v5h5M21 3l-9 9M3 21l9-9" />
+          </svg>
+          {$t('dat.update_all')}
+        {/if}
+      </button>
     </div>
+  </div>
 
-    {#if loading && !globalUpdating}
-      <p class="text-secondary mt-2">{$t('app.loading')}</p>
-    {:else if files.length === 0}
-      <p class="text-secondary mt-2">{$t('dat.no_files')}</p>
-    {:else}
-      <div class="file-list">
-        {#each files as file}
-          <div class="file-item" class:is-symlink={file.is_symlink}>
-            <div class="file-info">
-              <div class="file-name">
-                <span class="icon"
-                  ><Icon name={file.is_symlink ? 'chevron-right' : 'editor'} size={14} /></span
-                >
-                {file.name}
+  {#if error}
+    <div class="alert alert-error mb-3">{error}</div>
+  {/if}
+
+  <!-- Stats -->
+  {#if !loading && files.length > 0}
+    <div class="stats mb-3">
+      <span class="stat"><b>{files.length}</b> {$t('dat.total_files')}</span>
+      <span class="stat"
+        ><b>{files.length - missingCount}</b>
+        {$currentLang === 'ru' ? 'актуальных' : 'active'}</span
+      >
+      {#if missingCount > 0}
+        <span class="stat" style="color: var(--warning);"
+          ><b>{missingCount}</b> {$currentLang === 'ru' ? 'отсутствует' : 'missing'}</span
+        >
+      {/if}
+      <span class="stat"
+        >{$currentLang === 'ru' ? 'общий размер' : 'total size'}
+        <b>{formatSize(totalSize)}</b></span
+      >
+    </div>
+  {/if}
+
+  {#if loading && !globalUpdating && files.length === 0}
+    <p class="text-secondary">{$t('app.loading')}</p>
+  {:else if files.length === 0 && !loading}
+    <p class="text-secondary">{$t('dat.no_files')}</p>
+  {:else}
+    <!-- Xray Group -->
+    {#if xrayFiles.length > 0}
+      <div class="card card-tight mb-3">
+        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
+          Xray ({xrayFiles[0]?.path || '/opt/etc/xray/datfiles'})
+        </h2>
+        <div class="dat-list">
+          {#each xrayFiles as file}
+            <div class="dat-row" class:is-symlink={file.is_symlink}>
+              <div class="dr-ico" class:warning={!file.exists}>
                 {#if file.is_symlink}
-                  <span class="symlink-target">→ {file.symlink_to}</span>
-                {/if}
-                {#if !file.exists}
-                  <span class="badge badge-warning">{$t('dat.not_found')}</span>
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path
+                      d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+                    /></svg
+                  >
                 {:else}
-                  <span class="badge badge-success">OK</span>
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><circle cx="12" cy="12" r="10" /><path
+                      d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"
+                    /><path d="M2 12h20" /></svg
+                  >
                 {/if}
-                <span class="badge badge-type">{file.type}</span>
               </div>
-              <div class="file-details">
-                <span>{file.path}</span>
-                <span>{formatSize(file.size)}</span>
-                <span>{$t('dat.updated')}: {formatDate(file.last_update)}</span>
+              <div class="dr-main">
+                <div class="dr-name">
+                  {file.name}
+                  {#if !file.exists}
+                    <span class="badge badge-error">{$t('dat.not_found')}</span>
+                  {:else}
+                    <span class="badge badge-success">OK</span>
+                  {/if}
+                  <span class="badge badge-type"
+                    >{file.name.split('.').pop()?.toUpperCase() || 'DAT'}</span
+                  >
+                </div>
+                <div class="dr-meta">
+                  {formatSize(file.size)} ·
+                  {#if file.is_symlink}
+                    {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
+                  {/if}
+                  {$t('dat.updated')}
+                  {formatDate(file.last_update)}
+                </div>
+              </div>
+              <div class="stat-bar" style="width:120px;">
+                <div
+                  class="stat-bar-fill"
+                  style="width: {file.exists ? '100%' : '0%'}; background: {file.exists
+                    ? 'var(--success)'
+                    : 'var(--error)'}"
+                ></div>
+              </div>
+              <div class="dr-actions">
+                <button
+                  class="btn btn-secondary btn-icon-only"
+                  on:click={updateAll}
+                  disabled={globalUpdating}
+                  title={$t('dat.update_all')}
+                >
+                  ↓
+                </button>
               </div>
             </div>
-          </div>
-        {/each}
+          {/each}
+        </div>
       </div>
     {/if}
-  </div>
+
+    <!-- Mihomo Group -->
+    {#if mihomoFiles.length > 0}
+      <div class="card card-tight mb-3">
+        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
+          Mihomo ({mihomoFiles[0]?.path || '/opt/etc/mihomo'})
+        </h2>
+        <div class="dat-list">
+          {#each mihomoFiles as file}
+            <div class="dat-row" class:is-symlink={file.is_symlink}>
+              <div class="dr-ico" class:warning={!file.exists}>
+                {#if file.is_symlink}
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path
+                      d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"
+                    /></svg
+                  >
+                {:else}
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><circle cx="12" cy="12" r="10" /><path
+                      d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"
+                    /><path d="M2 12h20" /></svg
+                  >
+                {/if}
+              </div>
+              <div class="dr-main">
+                <div class="dr-name">
+                  {file.name}
+                  {#if !file.exists}
+                    <span class="badge badge-error">{$t('dat.not_found')}</span>
+                  {:else}
+                    <span class="badge badge-success">OK</span>
+                  {/if}
+                  <span class="badge badge-type"
+                    >{file.name.split('.').pop()?.toUpperCase() || 'DAT'}</span
+                  >
+                </div>
+                <div class="dr-meta">
+                  {formatSize(file.size)} ·
+                  {#if file.is_symlink}
+                    {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
+                  {/if}
+                  {$t('dat.updated')}
+                  {formatDate(file.last_update)}
+                </div>
+              </div>
+              <div class="stat-bar" style="width:120px;">
+                <div
+                  class="stat-bar-fill"
+                  style="width: {file.exists ? '100%' : '0%'}; background: {file.exists
+                    ? 'var(--success)'
+                    : 'var(--error)'}"
+                ></div>
+              </div>
+              <div class="dr-actions">
+                <button
+                  class="btn btn-secondary btn-icon-only"
+                  on:click={updateAll}
+                  disabled={globalUpdating}
+                  title={$t('dat.update_all')}
+                >
+                  ↓
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
+    <!-- Other Files -->
+    {#if otherFiles.length > 0}
+      <div class="card card-tight mb-3">
+        <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
+          {$currentLang === 'ru' ? 'Прочие файлы' : 'Other files'}
+        </h2>
+        <div class="dat-list">
+          {#each otherFiles as file}
+            <div class="dat-row" class:is-symlink={file.is_symlink}>
+              <div class="dr-ico" class:warning={!file.exists}>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  ><circle cx="12" cy="12" r="10" /><path
+                    d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"
+                  /><path d="M2 12h20" /></svg
+                >
+              </div>
+              <div class="dr-main">
+                <div class="dr-name">
+                  {file.name}
+                  {#if !file.exists}
+                    <span class="badge badge-error">{$t('dat.not_found')}</span>
+                  {:else}
+                    <span class="badge badge-success">OK</span>
+                  {/if}
+                  <span class="badge badge-type">{file.type?.toUpperCase() || 'DAT'}</span>
+                </div>
+                <div class="dr-meta">
+                  {formatSize(file.size)} · {file.path} ·
+                  {#if file.is_symlink}
+                    {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
+                  {/if}
+                  {$t('dat.updated')}
+                  {formatDate(file.last_update)}
+                </div>
+              </div>
+              <div class="stat-bar" style="width:120px;">
+                <div
+                  class="stat-bar-fill"
+                  style="width: {file.exists ? '100%' : '0%'}; background: {file.exists
+                    ? 'var(--success)'
+                    : 'var(--error)'}"
+                ></div>
+              </div>
+              <div class="dr-actions">
+                <button
+                  class="btn btn-secondary btn-icon-only"
+                  on:click={updateAll}
+                  disabled={globalUpdating}
+                  title={$t('dat.update_all')}
+                >
+                  ↓
+                </button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+  {/if}
 </div>
 
 <style>
-  .flex-between {
+  .crumb-separator {
+    color: var(--fg-faint);
+    margin: 0 6px;
+  }
+
+  .stats {
     display: flex;
-    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--fg-secondary);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border);
+    padding: 10px 16px;
+    border-radius: var(--radius);
+  }
+
+  .stat {
+    display: inline-flex;
     align-items: center;
+    gap: 4px;
   }
 
-  .title-group {
-    display: flex;
-    align-items: center;
+  .stat b {
+    color: var(--fg-primary);
   }
 
-  .ml-2 {
-    margin-left: 1rem;
-  }
-
-  .file-list {
+  .dat-list {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
-    margin-top: 1rem;
   }
 
-  .file-item {
+  .dat-row {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 1rem;
-    border: 1px solid var(--border);
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    gap: 16px;
+  }
+
+  .dat-row:last-child {
+    border-bottom: none;
+  }
+
+  .dat-row.is-symlink {
+    background: rgba(255, 255, 255, 0.01);
+  }
+
+  .dr-ico {
+    width: 32px;
+    height: 32px;
     border-radius: var(--radius);
-    background: var(--bg);
-    transition: transform 0.2s;
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+    background: rgba(59, 130, 246, 0.05);
+    flex-shrink: 0;
   }
 
-  .file-item:hover {
-    border-color: var(--primary);
+  .dr-ico.warning {
+    color: var(--error);
+    background: rgba(239, 68, 68, 0.05);
+    border-color: rgba(239, 68, 68, 0.2);
   }
 
-  .file-item.is-symlink {
-    border-style: dashed;
-    background: rgba(var(--primary-rgb), 0.02);
-  }
-
-  .file-info {
+  .dr-main {
     flex: 1;
     min-width: 0;
   }
 
-  .file-name {
+  .dr-name {
+    font-size: 14px;
     font-weight: 600;
-    margin-bottom: 0.25rem;
+    color: var(--fg-primary);
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 4px;
   }
 
-  .icon {
-    font-size: 1.1rem;
-  }
-
-  .symlink-target {
-    font-weight: 400;
-    color: var(--primary);
-    font-family: monospace;
-    font-size: 0.85rem;
-    background: var(--bg-page);
-    padding: 0.1rem 0.4rem;
+  .dr-name .badge {
+    padding: 2px 6px;
     border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
   }
 
-  .file-details {
-    display: flex;
-    gap: 1rem;
-    font-size: 0.8rem;
-    color: var(--text-secondary);
-  }
-
-  .mt-2 {
-    margin-top: 1rem;
-  }
-
-  .badge {
-    padding: 0.125rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
-  }
-
-  .badge-success {
+  .dr-name .badge-success {
     background: rgba(16, 185, 129, 0.1);
     color: var(--success);
   }
 
-  .badge-warning {
-    background: rgba(255, 193, 7, 0.1);
-    color: var(--warning, #ffc107);
+  .dr-name .badge-error {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--error);
   }
 
-  .badge-type {
-    background: var(--bg-page);
+  .dr-name .badge-type {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--fg-secondary);
     border: 1px solid var(--border);
-    color: var(--text-secondary);
-    text-transform: uppercase;
+  }
+
+  .dr-meta {
+    font-size: 12px;
+    color: var(--fg-secondary);
+  }
+
+  .stat-bar {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 3px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .stat-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+  }
+
+  .dr-actions {
+    flex-shrink: 0;
+  }
+
+  .btn-icon-only {
+    padding: 6px 10px;
+    line-height: 1;
+    font-size: 14px;
+    height: auto;
+  }
+
+  .spinner {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

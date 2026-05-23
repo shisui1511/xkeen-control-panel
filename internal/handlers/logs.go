@@ -51,6 +51,26 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 		sources = []string{a.cfg.LogPath}
 	}
 
+	// Dynamically append other existing standard log files
+	for _, df := range []string{
+		"/opt/var/log/xray/access.log",
+		"/opt/var/log/xray/error.log",
+		"/opt/var/log/xkeen-detached.log",
+	} {
+		already := false
+		for _, s := range sources {
+			if s == df {
+				already = true
+				break
+			}
+		}
+		if !already {
+			if _, err := os.Stat(df); err == nil {
+				sources = append(sources, df)
+			}
+		}
+	}
+
 	ctx := r.Context()
 
 	// Ping goroutine: sends a ping every wsPingInterval and closes conn on failure.
@@ -73,40 +93,102 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 	}()
 	defer close(stopPing)
 
-	var cmd *exec.Cmd
-	if len(sources) == 1 {
-		cmd = exec.CommandContext(ctx, "tail", "-f", sources[0])
-	} else {
-		args := append([]string{"-f"}, sources...)
-		cmd = exec.CommandContext(ctx, "tail", args...)
+	// Validate log sources using pathVal
+	var validSources []string
+	for _, src := range sources {
+		if clean, err := a.pathVal.Validate(src); err == nil {
+			validSources = append(validSources, clean)
+		}
 	}
-	stdout, _ := cmd.StdoutPipe()
-
-	if err := cmd.Start(); err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("Failed to start log stream\n"))
+	if len(validSources) == 0 {
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("[system] No valid log sources configured\n"))
 		return
 	}
-	defer cmd.Process.Kill()
 
-	scanner := bufio.NewScanner(stdout)
-	currentSource := ""
-	for scanner.Scan() {
+	var hasShownWaiting bool
+
+	for {
+		var existingSources []string
+		for _, src := range validSources {
+			if _, err := os.Stat(src); err == nil {
+				existingSources = append(existingSources, src)
+			}
+		}
+
+		if len(existingSources) > 0 {
+			hasShownWaiting = false
+			var cmd *exec.Cmd
+			if len(existingSources) == 1 {
+				cmd = exec.CommandContext(ctx, "tail", "-f", existingSources[0])
+			} else {
+				args := append([]string{"-f"}, existingSources...)
+				cmd = exec.CommandContext(ctx, "tail", args...)
+			}
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(2 * time.Second):
+					continue
+				}
+			}
+
+			if err := cmd.Start(); err != nil {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(2 * time.Second):
+					continue
+				}
+			}
+
+			// Read from tail and send to WS
+			runTailReader := func() error {
+				defer cmd.Process.Kill()
+				scanner := bufio.NewScanner(stdout)
+				currentSource := ""
+				for scanner.Scan() {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+					}
+
+					line := scanner.Text()
+					if strings.HasPrefix(line, "==> ") && strings.HasSuffix(line, " <==") {
+						currentSource = line[4 : len(line)-4]
+						continue
+					}
+					if currentSource != "" && len(existingSources) > 1 {
+						line = "[" + filepath.Base(currentSource) + "] " + line
+					}
+					if err := conn.WriteMessage(websocket.TextMessage, []byte(line+"\n")); err != nil {
+						return err
+					}
+				}
+				return scanner.Err()
+			}
+
+			err = runTailReader()
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+			}
+		} else {
+			if !hasShownWaiting {
+				if err := conn.WriteMessage(websocket.TextMessage, []byte("[system] Waiting for log files to be created...\n")); err != nil {
+					return
+				}
+				hasShownWaiting = true
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			return
-		default:
-		}
-
-		line := scanner.Text()
-		if strings.HasPrefix(line, "==> ") && strings.HasSuffix(line, " <==") {
-			currentSource = line[4 : len(line)-4]
-			continue
-		}
-		if currentSource != "" && len(sources) > 1 {
-			line = "[" + currentSource + "] " + line
-		}
-		if err := conn.WriteMessage(websocket.TextMessage, []byte(line+"\n")); err != nil {
-			break
+		case <-time.After(2 * time.Second):
 		}
 	}
 }

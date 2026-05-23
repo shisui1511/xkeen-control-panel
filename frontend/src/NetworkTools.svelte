@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { slide } from 'svelte/transition';
   import { t } from './i18n';
   import PageHeader from './PageHeader.svelte';
   import Icon from './lib/components/Icon.svelte';
@@ -25,6 +26,13 @@
   let result: ToolResult | null = null;
   let publicIP = '';
 
+  let showSettings: Record<string, boolean> = {
+    ping: false,
+    traceroute: false,
+    dns: false,
+    http: false
+  };
+
   const recordTypes = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT'];
 
   function validateHost(h: string): boolean {
@@ -41,6 +49,10 @@
     }
   }
 
+  function toggleSettings(tool: string) {
+    showSettings[tool] = !showSettings[tool];
+  }
+
   async function runPing() {
     if (!host) return;
     if (!validateHost(host)) {
@@ -48,6 +60,8 @@
       return;
     }
     loading = true;
+    activeTool = 'ping';
+    result = null;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch('/api/network/ping', {
@@ -70,6 +84,8 @@
       return;
     }
     loading = true;
+    activeTool = 'traceroute';
+    result = null;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch('/api/network/traceroute', {
@@ -92,6 +108,8 @@
       return;
     }
     loading = true;
+    activeTool = 'dns';
+    result = null;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch('/api/network/dns', {
@@ -114,6 +132,8 @@
       return;
     }
     loading = true;
+    activeTool = 'http';
+    result = null;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch('/api/network/http', {
@@ -141,17 +161,11 @@
     }
   }
 
-  function runTool() {
-    switch (activeTool) {
-      case 'ping':
-        return runPing();
-      case 'traceroute':
-        return runTraceroute();
-      case 'dns':
-        return runDNS();
-      case 'http':
-        return runHTTP();
-    }
+  function runTool(tool: string) {
+    if (tool === 'ping') runPing();
+    else if (tool === 'traceroute') runTraceroute();
+    else if (tool === 'dns') runDNS();
+    else if (tool === 'http') runHTTP();
   }
 
   onMount(() => {
@@ -163,272 +177,306 @@
   <PageHeader
     title={$t('net.title')}
     subtitle={$t('net.subtitle')}
-    breadcrumbs={[{ label: $t('net.title') }]}
+    breadcrumbs={[{ label: $t('nav.group_tools') }, { label: $t('nav.network') }]}
     {onSwitchTab}
   />
 
   {#if publicIP}
-    <div class="card mb-2">
-      <div style="display: flex; align-items: center; gap: 0.5rem;">
-        <Icon name="network" size={14} />
-        <span>{$t('net.your_ip', { ip: publicIP })}</span>
-      </div>
+    <div
+      class="card mb-3"
+      style="padding: 12px 18px; display: flex; align-items: center; gap: 8px;"
+    >
+      <Icon name="network" size={14} />
+      <span style="font-size: 13.5px; font-weight: 500; color: var(--fg-secondary);">
+        {$t('net.your_ip', { ip: publicIP })}
+      </span>
     </div>
   {/if}
 
-  <div class="card mb-2">
-    <div class="tool-tabs">
-      <button
-        class="tool-tab"
-        class:active={activeTool === 'ping'}
-        on:click={() => {
-          activeTool = 'ping';
-          result = null;
-        }}
-        title={$t('net.tab_ping')}
-      >
-        <Icon name="network" size={14} />
+  <div class="nt-grid mb-3">
+    <!-- Ping -->
+    <div class="nt-card">
+      <h3 style="display:flex;align-items:center;gap:8px;">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /></svg
+        >
         {$t('net.tab_ping')}
-      </button>
-      <button
-        class="tool-tab"
-        class:active={activeTool === 'traceroute'}
-        on:click={() => {
-          activeTool = 'traceroute';
-          result = null;
-        }}
-        title={$t('net.tab_traceroute')}
-      >
-        <Icon name="chevron-right" size={14} />
-        {$t('net.tab_traceroute')}
-      </button>
-      <button
-        class="tool-tab"
-        class:active={activeTool === 'dns'}
-        on:click={() => {
-          activeTool = 'dns';
-          result = null;
-        }}
-        title={$t('net.tab_dns')}
-      >
-        <Icon name="info" size={14} />
-        {$t('net.tab_dns')}
-      </button>
-      <button
-        class="tool-tab"
-        class:active={activeTool === 'http'}
-        on:click={() => {
-          activeTool = 'http';
-          result = null;
-        }}
-        title={$t('net.tab_http')}
-      >
-        <Icon name="play" size={14} />
-        {$t('net.tab_http')}
-      </button>
+      </h3>
+      <div class="form-group" style="margin-bottom:10px;">
+        <input class="input" bind:value={host} placeholder="cloudflare.com" disabled={loading} />
+      </div>
+      {#if showSettings.ping}
+        <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
+          <label for="ping-count" class="lbl">{$t('net.count')}</label>
+          <input
+            id="ping-count"
+            type="number"
+            class="input input-sm"
+            bind:value={count}
+            min="1"
+            max="20"
+          />
+        </div>
+      {/if}
+      <div style="display:flex;gap:8px;margin-top:auto;">
+        <button
+          class="btn btn-primary"
+          style="flex:1;"
+          on:click={() => runTool('ping')}
+          disabled={loading || !host}
+        >
+          {loading && activeTool === 'ping' ? $t('net.running') : $t('net.run')}
+        </button>
+        <button class="btn btn-secondary" on:click={() => toggleSettings('ping')} title="Настройки"
+          >⋯</button
+        >
+      </div>
     </div>
 
-    <div class="tool-form">
-      {#if activeTool === 'ping'}
-        <div class="form-row">
-          <label for="ping-host">{$t('net.host_ip')}:</label>
-          <input
-            id="ping-host"
-            type="text"
-            class="input"
-            bind:value={host}
-            placeholder="google.com"
-          />
-        </div>
-        <div class="form-row">
-          <label for="ping-count">{$t('net.count')}:</label>
-          <input id="ping-count" type="number" class="input" bind:value={count} min="1" max="20" />
-        </div>
-      {:else if activeTool === 'traceroute'}
-        <div class="form-row">
-          <label for="trace-host">{$t('net.host_ip')}:</label>
-          <input
-            id="trace-host"
-            type="text"
-            class="input"
-            bind:value={host}
-            placeholder="google.com"
-          />
-        </div>
-        <div class="form-row">
-          <label for="trace-hops">{$t('net.max_hops')}:</label>
+    <!-- Traceroute -->
+    <div class="nt-card">
+      <h3 style="display:flex;align-items:center;gap:8px;">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg
+        >
+        {$t('net.tab_traceroute')}
+      </h3>
+      <div class="form-group" style="margin-bottom:10px;">
+        <input class="input" bind:value={host} placeholder="github.com" disabled={loading} />
+      </div>
+      {#if showSettings.traceroute}
+        <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
+          <label for="trace-hops" class="lbl">{$t('net.max_hops')}</label>
           <input
             id="trace-hops"
             type="number"
-            class="input"
+            class="input input-sm"
             bind:value={maxHops}
             min="1"
             max="30"
           />
         </div>
-      {:else if activeTool === 'dns'}
-        <div class="form-row">
-          <label for="dns-host">{$t('net.domain')}:</label>
-          <input
-            id="dns-host"
-            type="text"
-            class="input"
-            bind:value={host}
-            placeholder="google.com"
-          />
-        </div>
-        <div class="form-row">
-          <label for="dns-type">{$t('net.record_type')}:</label>
-          <select id="dns-type" class="input" bind:value={recordType}>
+      {/if}
+      <div style="display:flex;gap:8px;margin-top:auto;">
+        <button
+          class="btn btn-primary"
+          style="flex:1;"
+          on:click={() => runTool('traceroute')}
+          disabled={loading || !host}
+        >
+          {loading && activeTool === 'traceroute' ? $t('net.running') : $t('net.run')}
+        </button>
+        <button
+          class="btn btn-secondary"
+          on:click={() => toggleSettings('traceroute')}
+          title="Настройки">⋯</button
+        >
+      </div>
+    </div>
+
+    <!-- DNS lookup -->
+    <div class="nt-card">
+      <h3 style="display:flex;align-items:center;gap:8px;">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"><path d="M4 4h16v16H4zM4 12h16M12 4v16" /></svg
+        >
+        {$t('net.tab_dns')}
+      </h3>
+      <div class="form-group" style="margin-bottom:10px;">
+        <input class="input" bind:value={host} placeholder="api.openai.com" disabled={loading} />
+      </div>
+      {#if showSettings.dns}
+        <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
+          <label for="dns-type" class="lbl">{$t('net.record_type')}</label>
+          <select id="dns-type" class="input input-sm" bind:value={recordType}>
             {#each recordTypes as type}
               <option value={type}>{type}</option>
             {/each}
           </select>
         </div>
-      {:else if activeTool === 'http'}
-        <div class="form-row">
-          <label for="http-url">{$t('net.url')}:</label>
-          <input
-            id="http-url"
-            type="text"
-            class="input"
-            bind:value={url}
-            placeholder="https://google.com"
-          />
-        </div>
-        <div class="form-row">
-          <label for="http-timeout">{$t('net.timeout_sec')}</label>
+      {/if}
+      <div style="display:flex;gap:8px;margin-top:auto;">
+        <button
+          class="btn btn-primary"
+          style="flex:1;"
+          on:click={() => runTool('dns')}
+          disabled={loading || !host}
+        >
+          {loading && activeTool === 'dns' ? $t('net.running') : $t('net.run')}
+        </button>
+        <button class="btn btn-secondary" on:click={() => toggleSettings('dns')} title="Настройки"
+          >⋯</button
+        >
+      </div>
+    </div>
+
+    <!-- HTTP Test -->
+    <div class="nt-card">
+      <h3 style="display:flex;align-items:center;gap:8px;">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          ><circle cx="12" cy="12" r="10" /><path
+            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
+          /><path d="M2 12h20" /></svg
+        >
+        {$t('net.tab_http')}
+      </h3>
+      <div class="form-group" style="margin-bottom:10px;">
+        <input class="input" bind:value={url} placeholder="https://google.com" disabled={loading} />
+      </div>
+      {#if showSettings.http}
+        <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
+          <label for="http-timeout" class="lbl">{$t('net.timeout_sec')}</label>
           <input
             id="http-timeout"
             type="number"
-            class="input"
+            class="input input-sm"
             bind:value={timeout}
             min="1"
             max="60"
           />
         </div>
       {/if}
-
-      <button
-        class="btn btn-primary"
-        on:click={runTool}
-        disabled={loading || (activeTool === 'http' ? !url : !host)}
-      >
-        {loading ? $t('net.running') : $t('net.run')}
-      </button>
+      <div style="display:flex;gap:8px;margin-top:auto;">
+        <button
+          class="btn btn-primary"
+          style="flex:1;"
+          on:click={() => runTool('http')}
+          disabled={loading || !url}
+        >
+          {loading && activeTool === 'http' ? $t('net.running') : $t('net.run')}
+        </button>
+        <button class="btn btn-secondary" on:click={() => toggleSettings('http')} title="Настройки"
+          >⋯</button
+        >
+      </div>
     </div>
   </div>
 
   {#if result}
-    <div class="card">
-      <h3>{$t('net.result')}</h3>
-      {#if result.success}
-        <div class="result-success">{$t('net.success')}</div>
-      {:else}
-        <div class="result-error">
-          {$t('net.error_with_msg', { error: result.error || 'Unknown error' })}
-        </div>
-      {/if}
+    <div class="card card-tight">
+      <h2 class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span
+          >{$t('net.result')} — {activeTool.toUpperCase()}
+          {activeTool === 'http' ? url : host}</span
+        >
+        <span
+          class="badge"
+          class:badge-success={result.success}
+          class:badge-danger={!result.success}
+        >
+          {result.success ? $t('net.success') : $t('app.error')}
+        </span>
+      </h2>
 
-      {#if result.output}
-        <pre class="result-output">{result.output}</pre>
-      {/if}
+      <div class="term-output" style="border:0;border-radius:0;min-height:auto;">
+        {#if result.error}
+          <div class="error-text" style="color:var(--danger);">
+            {$t('net.error_with_msg', { error: result.error })}
+          </div>
+        {/if}
 
-      {#if result.records}
-        <div class="result-records">
+        {#if result.output}
+          {result.output}
+        {/if}
+
+        {#if result.records}
           {#each result.records as record}
-            <div class="record-item">{record}</div>
+            <div>{record}</div>
           {/each}
-        </div>
-      {/if}
+        {/if}
+      </div>
     </div>
   {/if}
 </div>
 
 <style>
-  .tool-tabs {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 0.5rem;
+  .nt-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
   }
 
-  .tool-tab {
-    background: none;
-    border: none;
-    color: var(--fg-secondary);
-    padding: 0.5rem 1rem;
-    cursor: pointer;
-    border-radius: var(--radius);
-    font-size: 0.9rem;
-  }
-
-  .tool-tab:hover {
-    background: var(--bg-hover);
-  }
-
-  .tool-tab.active {
-    background: var(--primary);
-    color: white;
-  }
-
-  .tool-form {
+  .nt-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 18px;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    min-height: 150px;
   }
 
-  .form-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+  .nt-card h3 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--fg-primary);
   }
 
-  .form-row label {
-    min-width: 140px;
-    color: var(--fg-secondary);
-    font-size: 0.9rem;
-  }
-
-  .form-row .input {
-    flex: 1;
-  }
-
-  .result-success {
-    color: var(--success);
-    margin-bottom: 0.5rem;
-  }
-
-  .result-error {
-    color: var(--error);
-    margin-bottom: 0.5rem;
-  }
-
-  .result-output {
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.75rem;
-    margin: 0;
-    font-size: 0.8rem;
-    overflow-x: auto;
-    max-height: 400px;
-    overflow-y: auto;
-  }
-
-  .result-records {
+  .extra-settings {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 4px;
   }
 
-  .record-item {
-    background: var(--bg);
+  .extra-settings .lbl {
+    font-size: 11px;
+    color: var(--fg-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .input-sm {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .term-output {
+    background: #050d16;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.5rem;
-    font-family: monospace;
-    font-size: 0.85rem;
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    font-family: var(--font-family-mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--fg-primary);
+    min-height: 200px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  @media (max-width: 1024px) {
+    .nt-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 600px) {
+    .nt-grid {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

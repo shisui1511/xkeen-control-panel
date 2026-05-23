@@ -42,3 +42,12 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write([]byte(out))
 }
+
+func (a *API) ServiceRestartLog(w http.ResponseWriter, r *http.Request) {
+	entries := a.xkeenSvc.GetRestartLog()
+	// Return newest first
+	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
+		entries[i], entries[j] = entries[j], entries[i]
+	}
+	a.jsonResponse(w, entries)
+}

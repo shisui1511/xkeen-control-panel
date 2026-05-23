@@ -20,6 +20,16 @@ function getCommitMessages(base, head) {
 const base = process.argv[2];
 const head = process.argv[3];
 
+const gitRefRegex = /^[a-zA-Z0-9/._-]+$/;
+if (base && !gitRefRegex.test(base)) {
+  console.error('❌ Ошибка: Неверный формат аргумента base');
+  process.exit(1);
+}
+if (head && !gitRefRegex.test(head)) {
+  console.error('❌ Ошибка: Неверный формат аргумента head');
+  process.exit(1);
+}
+
 const commits = getCommitMessages(base, head);
 
 if (commits.length === 0) {
@@ -53,7 +63,6 @@ commits.forEach((commitContent, idx) => {
     return;
   }
 
-  const type = match[1];
   const description = match[2];
 
   // 2. Проверяем русский язык в описании заголовка

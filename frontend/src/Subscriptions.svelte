@@ -1,9 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t } from './i18n';
+  import { t, currentLang } from './i18n';
   import { showConfirm } from './stores';
-  import PageHeader from './PageHeader.svelte';
-  import Icon from './lib/components/Icon.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
 
@@ -18,6 +16,7 @@
     filter_name?: string;
     filter_type?: string;
     filter_transport?: string;
+    proxy_count?: number;
   }
 
   let subscriptions: Subscription[] = [];
@@ -25,6 +24,7 @@
   let refreshLoading: Record<string, boolean> = {};
   let showAddModal = false;
   let editingSub: Subscription | null = null;
+  let activeDropdownId: string | null = null;
 
   // Form fields
   let formName = '';
@@ -41,7 +41,6 @@
       const res = await fetch('/api/subscriptions');
       if (res.ok) {
         const envelope = await res.json();
-        // API может вернуть plain array или JSONSuccess envelope {success, data: [...]}
         subscriptions = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
       }
     } catch (e) {
@@ -152,7 +151,7 @@
     editingSub = sub;
     formName = sub.name;
     formURL = sub.url;
-    formTagPrefix = sub.tag_prefix;
+    formTagPrefix = sub.tag_prefix || '';
     formInterval = sub.interval;
     formFilterName = sub.filter_name || '';
     formFilterType = sub.filter_type || '';
@@ -166,103 +165,240 @@
   }
 
   function formatDate(dateStr: string): string {
-    if (!dateStr) return '—';
+    if (!dateStr || dateStr.startsWith('0001')) return '—';
     const d = new Date(dateStr);
-    return d.toLocaleString();
+    return d.toLocaleString($currentLang === 'ru' ? 'ru-RU' : 'en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  }
+
+  function toggleDropdown(id: string) {
+    activeDropdownId = activeDropdownId === id ? null : id;
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      closeModal();
+      activeDropdownId = null;
+    }
+  }
+
+  function handleClickOutside(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (!target.closest('.dropdown-container')) {
+      activeDropdownId = null;
+    }
   }
 
   onMount(() => {
     loadSubscriptions();
+    window.addEventListener('click', handleClickOutside);
+    window.addEventListener('keydown', handleKeydown);
+    return () => {
+      window.removeEventListener('click', handleClickOutside);
+      window.removeEventListener('keydown', handleKeydown);
+    };
   });
+
+  $: stats = (() => {
+    const totalNodes = subscriptions.reduce((sum, s) => sum + (s.proxy_count || 0), 0);
+    let minNext = Infinity;
+    subscriptions.forEach((s) => {
+      if (s.enabled && s.last_update && !s.last_update.startsWith('0001')) {
+        const next = new Date(s.last_update).getTime() + s.interval * 3600 * 1000;
+        const diff = next - Date.now();
+        if (diff > 0 && diff < minNext) {
+          minNext = diff;
+        }
+      }
+    });
+    let nextStr = '—';
+    if (minNext !== Infinity) {
+      const diffHours = Math.floor(minNext / (3600 * 1000));
+      const diffMins = Math.floor((minNext % (3600 * 1000)) / (60 * 1000));
+      nextStr = `${diffHours}ч ${diffMins}м`;
+    }
+    return {
+      total: subscriptions.length,
+      nodes: totalNodes,
+      next: nextStr
+    };
+  })();
 </script>
 
 <div class="container">
-  <PageHeader
-    title={$t('subscr.title')}
-    subtitle={$t('subscr.subtitle')}
-    breadcrumbs={[{ label: $t('nav.subscriptions') }]}
-    {onSwitchTab}
-  >
-    <div slot="actions" style="display: flex; gap: 0.5rem;">
+  <div class="page-head">
+    <div>
+      <div class="crumbs">
+        {$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.subscriptions')}
+      </div>
+      <h1>{$t('subscr.title')}</h1>
+      <p class="sub">{$t('subscr.subtitle')}</p>
+    </div>
+    <div class="ph-actions">
       <button class="btn btn-secondary" on:click={refreshAll} disabled={loading}>
-        {#if loading}{$t('app.loading')}{:else}<Icon name="refresh" size={14} />
-          {$t('subscr.refresh_all')}{/if}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+        >
+        {$t('subscr.refresh_all')}
       </button>
       <button class="btn btn-primary" on:click={openAddModal}>
-        + {$t('subscr.add')}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
+        >
+        {$t('subscr.add')}
       </button>
     </div>
-  </PageHeader>
+  </div>
 
   {#if subscriptions.length === 0}
-    <div class="card text-center" style="padding: 3rem;">
-      <p class="text-secondary">{$t('subscr.empty')}</p>
+    <div
+      class="card text-center"
+      style="padding: 3rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;"
+    >
+      <p style="color: var(--fg-secondary); margin: 0;">{$t('subscr.empty')}</p>
       <button class="btn btn-primary" on:click={openAddModal}>
-        + {$t('subscr.add_first')}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
+        >
+        {$t('subscr.add_first')}
       </button>
     </div>
   {:else}
+    <div class="stats mb-2">
+      <span class="stat"
+        ><b>{stats.total}</b> {$currentLang === 'ru' ? 'подписки' : 'subscriptions'}</span
+      >
+      <span class="stat"
+        ><b>{stats.nodes}</b> {$currentLang === 'ru' ? 'узлов суммарно' : 'nodes total'}</span
+      >
+      {#if stats.next !== '—'}
+        <span class="stat"
+          >{$currentLang === 'ru' ? 'след. обновление через' : 'next update in'}
+          <b>{stats.next}</b></span
+        >
+      {/if}
+    </div>
+
     <div class="subscriptions-list">
       {#each subscriptions as sub}
         <div class="card sub-card">
-          <div class="sub-header">
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
-              <span class="sub-status" class:enabled={sub.enabled}></span>
-              <h3 style="margin: 0;">{sub.name}</h3>
+          <div class="sub-header-row">
+            <div class="sub-icon-wrapper">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                ><path d="M4 11a9 9 0 0 1 9 9" /><path d="M4 4a16 16 0 0 1 16 16" /><circle
+                  cx="5"
+                  cy="19"
+                  r="1.5"
+                  fill="currentColor"
+                /></svg
+              >
             </div>
-            <div class="sub-actions">
+            <div class="sub-title-wrapper">
+              <div class="sub-title-line">
+                {sub.name}
+                {#if sub.enabled}
+                  <span class="status-badge active"
+                    ><span class="status-dot success" style="margin:0;"></span>{$currentLang ===
+                    'ru'
+                      ? 'активна'
+                      : 'active'}</span
+                  >
+                {:else}
+                  <span class="status-badge stopped"
+                    ><span class="status-dot error" style="margin:0;"></span>{$currentLang === 'ru'
+                      ? 'выключена'
+                      : 'disabled'}</span
+                  >
+                {/if}
+              </div>
+              <div class="sub-url-line">{sub.url}</div>
+            </div>
+            <div class="sub-actions-wrapper">
               <button
-                class="btn-icon"
+                class="btn btn-secondary btn-sm"
                 on:click={() => refreshSubscription(sub.id)}
                 disabled={refreshLoading[sub.id]}
-                title={$t('subscr.refresh')}
               >
-                <Icon name="refresh" size={14} />
+                {#if refreshLoading[sub.id]}
+                  <span class="spinner" style="margin-right: 4px;">...</span>
+                  {$t('app.loading')}
+                {:else}
+                  {$t('subscr.refresh')}
+                {/if}
               </button>
-              <button class="btn-icon" on:click={() => openEditModal(sub)} title={$t('app.edit')}>
-                <Icon name="edit" size={14} />
-              </button>
-              <button
-                class="btn-icon"
-                on:click={() => deleteSubscription(sub.id)}
-                title={$t('app.delete')}
-              >
-                <Icon name="delete" size={14} />
-              </button>
+
+              <div class="dropdown-container">
+                <button
+                  class="btn btn-secondary action-btn-dots"
+                  on:click={() => toggleDropdown(sub.id)}>⋯</button
+                >
+                {#if activeDropdownId === sub.id}
+                  <div class="dropdown-menu">
+                    <button
+                      on:click={() => {
+                        openEditModal(sub);
+                        activeDropdownId = null;
+                      }}>{$t('app.edit')}</button
+                    >
+                    <button
+                      on:click={() => {
+                        deleteSubscription(sub.id);
+                        activeDropdownId = null;
+                      }}
+                      class="delete-action">{$t('app.delete')}</button
+                    >
+                  </div>
+                {/if}
+              </div>
             </div>
           </div>
 
-          <div class="sub-details">
-            <div class="sub-detail">
-              <span class="sub-label">{$t('subscr.url')}</span>
-              <span class="sub-value">{sub.url}</span>
+          <div class="sub-meta-grid">
+            <div class="meta-column">
+              <div class="meta-label">{$currentLang === 'ru' ? 'УЗЛЫ' : 'NODES'}</div>
+              <div class="meta-value">{sub.proxy_count || 0}</div>
             </div>
-            <div class="sub-detail-row">
-              <div class="sub-detail">
-                <span class="sub-label">{$t('subscr.interval')}</span>
-                <span class="sub-value">{sub.interval}h</span>
-              </div>
-              <div class="sub-detail">
-                <span class="sub-label">{$t('subscr.last_update')}</span>
-                <span class="sub-value">{formatDate(sub.last_update)}</span>
-              </div>
-              {#if sub.tag_prefix}
-                <div class="sub-detail">
-                  <span class="sub-label">{$t('subscr.tag_prefix')}</span>
-                  <span class="sub-value">{sub.tag_prefix}</span>
-                </div>
-              {/if}
+            <div class="meta-column">
+              <div class="meta-label">{$currentLang === 'ru' ? 'ИНТЕРВАЛ' : 'INTERVAL'}</div>
+              <div class="meta-value">{sub.interval}h</div>
             </div>
-            {#if sub.filter_name || sub.filter_type}
-              <div class="sub-detail">
-                <span class="sub-label">{$t('subscr.filters')}</span>
-                <span class="sub-value">
-                  {#if sub.filter_name}{$t('subscr.filter_name')}: {sub.filter_name}{/if}
-                  {#if sub.filter_type}
-                    {$t('subscr.filter_type')}: {sub.filter_type}{/if}
-                </span>
-              </div>
-            {/if}
+            <div class="meta-column">
+              <div class="meta-label">{$currentLang === 'ru' ? 'ПРЕФИКС ТЕГОВ' : 'TAG PREFIX'}</div>
+              <div class="meta-value">{sub.tag_prefix || '—'}</div>
+            </div>
+            <div class="meta-column">
+              <div class="meta-label">{$currentLang === 'ru' ? 'ОБНОВЛЕНО' : 'UPDATED'}</div>
+              <div class="meta-value">{formatDate(sub.last_update)}</div>
+            </div>
           </div>
         </div>
       {/each}
@@ -276,86 +412,94 @@
     role="button"
     tabindex="0"
     on:click={closeModal}
-    on:keydown={(e) => e.key === 'Escape' && closeModal()}
+    on:keydown={handleKeydown}
   >
-    <div class="modal" role="presentation" on:click|stopPropagation on:keydown|stopPropagation>
-      <h3>{editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}</h3>
-
-      <div class="form-group">
-        <label for="form-name" class="form-label">{$t('subscr.name')}</label>
-        <input
-          id="form-name"
-          type="text"
-          class="input"
-          bind:value={formName}
-          placeholder={$t('subscr.name_placeholder')}
-        />
+    <div class="modal-card" role="presentation" on:click|stopPropagation>
+      <div class="modal-card-header">
+        <h2>{editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}</h2>
+        <button class="modal-close-btn" on:click={closeModal}>&times;</button>
       </div>
+      <div class="modal-card-body">
+        <div class="form-group">
+          <label for="form-name" class="form-label">{$t('subscr.name')}</label>
+          <input
+            id="form-name"
+            type="text"
+            class="input"
+            bind:value={formName}
+            placeholder={$t('subscr.name_placeholder')}
+          />
+        </div>
 
-      <div class="form-group">
-        <label for="form-url" class="form-label">{$t('subscr.url')}</label>
-        <input
-          id="form-url"
-          type="text"
-          class="input"
-          bind:value={formURL}
-          placeholder="https://..."
-        />
+        <div class="form-group">
+          <label for="form-url" class="form-label">{$t('subscr.url')}</label>
+          <input
+            id="form-url"
+            type="text"
+            class="input"
+            bind:value={formURL}
+            placeholder="https://..."
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
+          <input
+            id="form-tag-prefix"
+            type="text"
+            class="input"
+            bind:value={formTagPrefix}
+            placeholder={$t('subscr.tag_prefix_placeholder')}
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="form-interval" class="form-label"
+            >{$t('subscr.interval')} ({$currentLang === 'ru' ? 'часов' : 'hours'})</label
+          >
+          <input
+            id="form-interval"
+            type="number"
+            class="input"
+            bind:value={formInterval}
+            min="1"
+            max="168"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="form-filter-name" class="form-label">{$t('subscr.filter_name')}</label>
+          <input
+            id="form-filter-name"
+            type="text"
+            class="input"
+            bind:value={formFilterName}
+            placeholder={$t('subscr.filter_placeholder')}
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
+          <input
+            id="form-filter-type"
+            type="text"
+            class="input"
+            bind:value={formFilterType}
+            placeholder="vmess, vless, trojan..."
+          />
+        </div>
+
+        <div class="form-group-checkbox">
+          <label class="toggle-switch">
+            <input type="checkbox" id="enabled" bind:checked={formEnabled} />
+            <span class="toggle-slider"></span>
+          </label>
+          <label for="enabled" class="checkbox-label">{$t('subscr.enabled')}</label>
+        </div>
       </div>
-
-      <div class="form-group">
-        <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
-        <input
-          id="form-tag-prefix"
-          type="text"
-          class="input"
-          bind:value={formTagPrefix}
-          placeholder={$t('subscr.tag_prefix_placeholder')}
-        />
-      </div>
-
-      <div class="form-group">
-        <label for="form-interval" class="form-label">{$t('subscr.interval')}</label>
-        <input
-          id="form-interval"
-          type="number"
-          class="input"
-          bind:value={formInterval}
-          min="1"
-          max="168"
-        />
-      </div>
-
-      <div class="form-group">
-        <label for="form-filter-name" class="form-label">{$t('subscr.filter_name')}</label>
-        <input
-          id="form-filter-name"
-          type="text"
-          class="input"
-          bind:value={formFilterName}
-          placeholder={$t('subscr.filter_placeholder')}
-        />
-      </div>
-
-      <div class="form-group">
-        <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
-        <input
-          id="form-filter-type"
-          type="text"
-          class="input"
-          bind:value={formFilterType}
-          placeholder="vmess, vless, trojan..."
-        />
-      </div>
-
-      <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem;">
-        <input type="checkbox" id="enabled" bind:checked={formEnabled} />
-        <label for="enabled">{$t('subscr.enabled')}</label>
-      </div>
-
-      <div class="modal-actions">
-        <button on:click={closeModal} class="btn btn-secondary">{$t('app.cancel')}</button>
-        <button on:click={saveSubscription} class="btn btn-primary">{$t('app.save')}</button>
+      <div class="modal-card-footer">
+        <button class="btn btn-secondary" on:click={closeModal}>{$t('app.cancel')}</button>
+        <button class="btn btn-primary" on:click={saveSubscription}>{$t('app.save')}</button>
       </div>
     </div>
   </div>
@@ -363,129 +507,248 @@
 
 <style>
   .subscriptions-list {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
   }
 
   .sub-card {
-    padding: 1rem;
+    padding: 0;
+    overflow: hidden;
   }
 
-  .sub-header {
-    display: flex;
-    justify-content: space-between;
+  .sub-header-row {
+    padding: 18px 22px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 16px;
     align-items: center;
-    margin-bottom: 0.75rem;
   }
 
-  .sub-status {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--danger);
+  .sub-icon-wrapper {
+    width: 42px;
+    height: 42px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent-line);
   }
 
-  .sub-status.enabled {
-    background: var(--success);
-  }
-
-  .sub-actions {
-    display: flex;
-    gap: 0.25rem;
-  }
-
-  .btn-icon {
-    padding: 0.25rem 0.5rem;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.875rem;
-  }
-
-  .sub-details {
+  .sub-title-wrapper {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 4px;
   }
 
-  .sub-detail-row {
+  .sub-title-line {
     display: flex;
-    gap: 1.5rem;
-    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    color: var(--fg-primary);
+    font-size: 14px;
   }
 
-  .sub-detail {
+  .sub-url-line {
+    color: var(--fg-dim);
+    font-size: 12px;
+    font-family: var(--font-family-mono);
+    word-break: break-all;
+  }
+
+  .sub-actions-wrapper {
     display: flex;
-    gap: 0.5rem;
+    align-items: center;
+    gap: 8px;
   }
 
-  .sub-label {
-    font-size: 0.75rem;
-    color: var(--fg-secondary);
+  .btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .sub-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.05);
+  }
+
+  .meta-column {
+    padding: 12px 18px;
+    border-right: 1px solid var(--border);
+  }
+
+  .meta-column:last-child {
+    border-right: none;
+  }
+
+  .meta-label {
+    font-size: 10.5px;
+    color: var(--fg-dim);
+    letter-spacing: 0.18em;
     text-transform: uppercase;
+    font-weight: 700;
   }
 
-  .sub-value {
-    font-size: 0.875rem;
-    font-family: monospace;
+  .meta-value {
+    font-family: var(--font-family-mono);
+    font-size: 14px;
+    color: var(--fg-primary);
+    margin-top: 4px;
   }
 
+  /* Dropdown Styles */
+  .dropdown-container {
+    position: relative;
+    display: inline-block;
+  }
+
+  .action-btn-dots {
+    padding: 6px 10px;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .dropdown-menu {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    margin-top: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+    z-index: 100;
+    min-width: 140px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .dropdown-menu button {
+    background: none;
+    border: none;
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 13px;
+    color: var(--fg-primary);
+    cursor: pointer;
+    width: 100%;
+    transition: background var(--transition-fast);
+  }
+
+  .dropdown-menu button:hover {
+    background: var(--hover);
+  }
+
+  .dropdown-menu button.delete-action {
+    color: var(--danger);
+  }
+
+  .dropdown-menu button.delete-action:hover {
+    background: rgba(235, 94, 85, 0.1);
+  }
+
+  /* Modal Styles */
   .modal-overlay {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    padding: 20px;
   }
 
-  .modal {
-    background: var(--card-bg);
+  .modal-card {
+    background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 1.5rem;
+    border-radius: var(--radius-lg);
     width: 100%;
-    max-width: 500px;
+    max-width: 520px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     max-height: 90vh;
+    animation: modal-anim 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes modal-anim {
+    from {
+      transform: scale(0.95) translateY(10px);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
+  }
+
+  .modal-card-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .modal-card-header h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--fg-primary);
+  }
+
+  .modal-close-btn {
+    background: none;
+    border: none;
+    color: var(--fg-dim);
+    font-size: 24px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px;
+  }
+
+  .modal-close-btn:hover {
+    color: var(--fg-primary);
+  }
+
+  .modal-card-body {
+    padding: 24px;
     overflow-y: auto;
-    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
-  .modal h3 {
-    margin: 0 0 1rem 0;
+  .form-group-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 4px;
   }
 
-  .modal-actions {
+  .checkbox-label {
+    font-size: 13px;
+    color: var(--fg-primary);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .modal-card-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
     display: flex;
     justify-content: flex-end;
-    gap: 0.5rem;
-    margin-top: 1rem;
-  }
-
-  .form-group {
-    margin-bottom: 0.75rem;
-  }
-
-  .form-label {
-    display: block;
-    font-size: 0.875rem;
-    margin-bottom: 0.25rem;
-    color: var(--fg-secondary);
-  }
-
-  .input {
-    width: 100%;
-    padding: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    color: var(--text);
-    font-size: 0.875rem;
+    gap: 12px;
   }
 </style>

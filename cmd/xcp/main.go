@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -99,6 +101,7 @@ func main() {
 	srv.HandleProtected("/api/config/validate", api.ConfigValidate)
 	srv.HandleProtected("/api/service/status", api.ServiceStatus)
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
+	srv.HandleProtected("/api/service/restart-log", api.ServiceRestartLog)
 	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
 	srv.HandleProtected("/api/logs/download", api.LogsDownload)
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
@@ -159,6 +162,13 @@ func main() {
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
 
+	// Config Snapshots
+	snapshotSvc := services.NewSnapshotService(cfg.DataDir, []string{cfg.XRayConfigDir, cfg.MihomoConfigDir})
+	api.SetSnapshotService(snapshotSvc)
+	srv.HandleProtected("/api/snapshots/list", api.SnapshotList)
+	srv.HandleProtected("/api/snapshots/create", api.SnapshotCreate)
+	srv.HandleProtected("/api/snapshots/", api.SnapshotRouter)
+
 	// DAT Manager
 	datSvc := services.NewDATManagerService()
 	api.SetDATManagerService(datSvc)
@@ -202,20 +212,27 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/status", api.KernelStatus)
 	srv.HandleProtected("/api/kernels/{name}/channel", api.KernelChannel)
 
-	// Cancel scheduler on OS signal
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigCh
-		cancelScheduler()
-	}()
-
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {
 		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)
 	}
 
-	if err := srv.Start(); err != nil {
+	// Graceful shutdown on SIGINT/SIGTERM
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		log.Printf("Received signal %s, shutting down...", sig)
+		cancelScheduler()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("Shutdown error: %v", err)
+		}
+	}()
+
+	if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("Server error: %v", err)
 	}
+	log.Println("Server stopped.")
 }
