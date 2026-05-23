@@ -104,6 +104,30 @@ func (a *API) KernelChannel(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, map[string]string{"channel": req.Channel})
 }
 
+func (a *API) KernelRollback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	name := strings.TrimPrefix(r.URL.Path, "/api/kernels/")
+	name = strings.TrimSuffix(name, "/rollback")
+
+	k := a.kernelSvc.Get(name)
+	if k == nil {
+		JSONError(w, http.StatusNotFound, "Kernel not found")
+		return
+	}
+
+	if err := a.kernelSvc.Rollback(name); err != nil {
+		JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	a.ClearCapabilitiesCache()
+
+	JSONSuccess(w, map[string]string{"status": "rolled_back"})
+}
+
 func (a *API) KernelDebug(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, a.kernelSvc.GetDebugInfo())
 }

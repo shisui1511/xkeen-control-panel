@@ -213,6 +213,7 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/install", api.KernelInstall)
 	srv.HandleProtected("/api/kernels/{name}/status", api.KernelStatus)
 	srv.HandleProtected("/api/kernels/{name}/channel", api.KernelChannel)
+	srv.HandleProtected("/api/kernels/{name}/rollback", api.KernelRollback)
 
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {
