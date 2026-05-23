@@ -193,7 +193,7 @@ func main() {
 	srv.HandleProtected("/api/templates/fetch", api.TemplateFetch)
 
 	// Subscriptions + auto-refresh scheduler
-	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir)
+	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
 	api.SetSubscriptionService(subscriptionSvc)
 
 	// Start subscription auto-refresh scheduler. It checks every 15 minutes
