@@ -20,6 +20,7 @@
   }>();
 </script>
 
+<!-- All styling lives in global.css under .form-group / .form-label / .input -->
 <div class="form-group">
   <label class="form-label" for={id}>{label}</label>
   <input
@@ -31,7 +32,7 @@
     {placeholder}
     {disabled}
     {oninput}
-    aria-invalid={error ? 'true' : 'false'}
+    aria-invalid={!!error ? 'true' : 'false'}
     aria-describedby={error ? `${id}-error` : undefined}
   />
   {#if error}
@@ -40,50 +41,14 @@
 </div>
 
 <style>
-  .form-group {
-    margin-bottom: var(--spacing-4);
-  }
-
-  .form-label {
-    display: block;
-    margin-bottom: var(--spacing-2);
-    font-family: var(--font-family-sans);
-    font-size: var(--font-size-sm);
-    font-weight: 500;
-    color: var(--color-text-primary);
-  }
-
-  .input {
-    width: 100%;
-    padding: 8px 12px;
-    border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-family-sans);
-    font-size: var(--font-size-sm);
-    color: var(--color-text-primary);
-    background-color: var(--color-bg-surface);
-    transition: border-color var(--transition-fast);
-    outline: none;
-  }
-
-  .input:focus {
-    border-color: var(--color-primary-500);
-  }
-
-  .input:disabled {
-    opacity: 0.6;
-    background-color: var(--color-bg-canvas);
-    cursor: not-allowed;
-  }
-
   .input-error {
-    border-color: var(--color-danger);
+    border-color: var(--danger) !important;
+    box-shadow: 0 0 0 3px rgba(239,91,107,.18) !important;
   }
-
   .error-text {
     display: block;
-    margin-top: var(--spacing-1);
-    font-size: var(--font-size-xs);
-    color: var(--color-danger);
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: var(--danger);
   }
 </style>

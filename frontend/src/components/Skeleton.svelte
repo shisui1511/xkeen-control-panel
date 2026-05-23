@@ -9,12 +9,11 @@
     height?: string;
   }>();
 
-  // Compute styles dynamically if custom width/height is passed
   let styleString = $derived.by(() => {
-    let styles = [];
-    if (width) styles.push(`width: ${width}`);
-    if (height) styles.push(`height: ${height}`);
-    return styles.join('; ');
+    let s: string[] = [];
+    if (width)  s.push(`width: ${width}`);
+    if (height) s.push(`height: ${height}`);
+    return s.join('; ');
   });
 </script>
 
@@ -22,56 +21,25 @@
 
 <style>
   .skeleton {
-    background-color: var(--color-border-subtle);
-    background-image: linear-gradient(
-      90deg,
-      var(--color-border-subtle) 0px,
-      var(--border-light) 50%,
-      var(--color-border-subtle) 100%
-    );
-    background-size: 200px 100%;
+    background:
+      linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(41,194,240,.08) 50%, rgba(255,255,255,0) 100%),
+      var(--bg-elevated);
+    background-size: 200px 100%, auto;
     background-repeat: no-repeat;
-    animation: shimmer 1.5s infinite linear;
+    animation: shimmer 1.4s infinite linear;
     border-radius: var(--radius-sm);
+    border: 1px solid var(--border-light);
   }
-
-  .skeleton-text-line {
-    height: 1rem;
-    width: 100%;
-    margin-bottom: var(--spacing-2);
-  }
-
-  .skeleton-card {
-    height: 100px;
-    width: 100%;
-    border-radius: var(--radius-md);
-  }
-
-  .skeleton-circle {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-  }
-
-  .skeleton-rect {
-    width: 100%;
-    height: 50px;
-  }
+  .skeleton-text-line { height: 14px; width: 100%; margin-bottom: 8px; }
+  .skeleton-card      { height: 100px; width: 100%; border-radius: var(--radius-md); }
+  .skeleton-circle    { width: 40px; height: 40px; border-radius: 50%; }
+  .skeleton-rect      { width: 100%; height: 50px; }
 
   @keyframes shimmer {
-    0% {
-      background-position: -200px 0;
-    }
-    100% {
-      background-position: calc(200px + 100%) 0;
-    }
+    0%   { background-position: -200px 0, 0 0; }
+    100% { background-position: calc(200px + 100%) 0, 0 0; }
   }
-
   @media (prefers-reduced-motion: reduce) {
-    .skeleton {
-      animation: none !important;
-      background-image: none !important;
-      opacity: 0.7;
-    }
+    .skeleton { animation: none !important; background-image: none !important; opacity: .7; }
   }
 </style>

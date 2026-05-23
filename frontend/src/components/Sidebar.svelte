@@ -1,254 +1,148 @@
 <script lang="ts">
-  import { t } from '../i18n';
-  import { isSidebarOpen } from '../stores';
-  import Icon from '../lib/components/Icon.svelte';
+  import { t } from '../i18n'
+  import { isSidebarOpen } from '../stores'
+  import Icon from '../lib/components/Icon.svelte'
 
-  export let currentTab: string = 'dashboard';
-  export let onSwitchTab: (tab: string) => void = () => {};
-  export let theme: string = 'light';
-  export let onToggleTheme: () => void = () => {};
-  export let onLogout: () => void = () => {};
-  export let loading: boolean = false;
-  export let pwaInstallPrompt: any = null;
-  export let onInstallPWA: () => void = () => {};
+  export let currentTab: string = 'dashboard'
+  export let onSwitchTab: (tab: string) => void = () => {}
+  export let theme: string = 'light'
+  export let onToggleTheme: () => void = () => {}
+  export let onLogout: () => void = () => {}
+  export let loading: boolean = false
+  export let pwaInstallPrompt: any = null
+  export let onInstallPWA: () => void = () => {}
 
   function navigate(tab: string) {
-    onSwitchTab(tab);
-    // Auto-close on mobile after navigation
-    isSidebarOpen.set(false);
-  }
-
-  let groupStates = {
-    core: localStorage.getItem('sidebar.groups.core') !== 'false',
-    services: localStorage.getItem('sidebar.groups.services') !== 'false',
-    proxy: localStorage.getItem('sidebar.groups.proxy') !== 'false',
-    tools: localStorage.getItem('sidebar.groups.tools') !== 'false'
-  };
-
-  function toggleGroup(group: keyof typeof groupStates, open: boolean) {
-    groupStates[group] = open;
-    localStorage.setItem(`sidebar.groups.${group}`, String(open));
-  }
-
-  $: {
-    if (['dashboard', 'services', 'editor', 'settings'].includes(currentTab)) {
-      if (!groupStates.core) toggleGroup('core', true);
-    }
-    if (['logs', 'connections', 'dat', 'console'].includes(currentTab)) {
-      if (!groupStates.services) toggleGroup('services', true);
-    }
-    if (['proxies', 'rules', 'subscriptions', 'smartproxy'].includes(currentTab)) {
-      if (!groupStates.proxy) toggleGroup('proxy', true);
-    }
-    if (['traffic', 'trafficquotas', 'network'].includes(currentTab)) {
-      if (!groupStates.tools) toggleGroup('tools', true);
-    }
+    onSwitchTab(tab)
+    isSidebarOpen.set(false)
   }
 </script>
 
+<!-- Brand block -->
 <div class="sidebar-logo">
-  <span style="display: inline-flex; align-items: center; gap: 8px;"
-    ><Icon name="smartproxy" size={18} /> XKeen CP</span
-  >
+  <span class="brand-mark" aria-hidden="true">
+    <!-- XKeen logo: cross-routing — 4 endpoints, crossed paths, central hub.
+         Reads as both "X" (the X in XKeen) and a proxy-switch diagram. -->
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="4" cy="4" r="1.8" fill="currentColor"/>
+      <circle cx="20" cy="4" r="1.8" fill="currentColor"/>
+      <circle cx="4" cy="20" r="1.8" fill="currentColor"/>
+      <circle cx="20" cy="20" r="1.8" fill="currentColor"/>
+      <path d="M5.4 5.4 L18.6 18.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+      <path d="M18.6 5.4 L5.4 18.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="12" cy="12" r="2.8" fill="currentColor"/>
+      <circle cx="12" cy="12" r="1.1" fill="#0c2237"/>
+    </svg>
+  </span>
+  <span class="brand-text">
+    <span class="b1"><span class="x">X</span>Keen</span>
+    <span class="b2">Control&nbsp;Panel</span>
+  </span>
 </div>
 
-<nav style="flex: 1; overflow-y: auto; padding: 8px 0;">
+<nav style="flex: 1; overflow-y: auto; padding: 4px 0 10px;">
   <!-- Core group -->
-  <details
-    class="nav-group"
-    open={groupStates.core}
-    on:toggle={(e) => toggleGroup('core', e.currentTarget.open)}
-  >
+  <details class="nav-group" open>
     <summary>
-      {$t('nav.group_core')}
+      <span class="group-ttl">
+        <!-- Основное → compass: центр / навигация -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M16.24 7.76 14 14l-6.24 2.24L10 10z" fill="currentColor" stroke="none" opacity=".85"/></svg>
+        {$t('nav.group_core')}
+      </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'dashboard'}
-      on:click={() => navigate('dashboard')}
-      title={$t('nav.monitoring')}
-    >
-      <Icon name="dashboard" size={16} />
-      {$t('nav.monitoring')}
+    <button class="nav-item" class:active={currentTab === 'dashboard'} on:click={() => navigate('dashboard')} title={$t('nav.dashboard')}>
+      <Icon name="dashboard" size={16} /> {$t('nav.dashboard')}
     </button>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'services'}
-      on:click={() => navigate('services')}
-      title={$t('nav.services')}
-    >
-      <Icon name="services" size={16} />
-      {$t('nav.services')}
+    <button class="nav-item" class:active={currentTab === 'services'} on:click={() => navigate('services')} title={$t('nav.services')}>
+      <Icon name="services" size={16} /> {$t('nav.services')}
     </button>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'editor'}
-      on:click={() => navigate('editor')}
-      title={$t('nav.editor')}
-    >
-      <Icon name="editor" size={16} />
-      {$t('nav.editor')}
+    <button class="nav-item" class:active={currentTab === 'editor'} on:click={() => navigate('editor')} title={$t('nav.editor')}>
+      <Icon name="editor" size={16} /> {$t('nav.editor')}
     </button>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'settings'}
-      on:click={() => navigate('settings')}
-      title={$t('nav.settings')}
-    >
-      <Icon name="settings" size={16} />
-      {$t('nav.settings')}
+    <button class="nav-item" class:active={currentTab === 'settings'} on:click={() => navigate('settings')} title={$t('nav.settings')}>
+      <Icon name="settings" size={16} /> {$t('nav.settings')}
     </button>
   </details>
 
   <!-- Services group -->
-  <details
-    class="nav-group"
-    open={groupStates.services}
-    on:toggle={(e) => toggleGroup('services', e.currentTarget.open)}
-  >
+  <details class="nav-group" open>
     <summary>
-      {$t('nav.group_services')}
+      <span class="group-ttl">
+        <!-- Сервисы → server stack -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3.5" width="18" height="6" rx="1.5"/><rect x="3" y="14.5" width="18" height="6" rx="1.5"/><circle cx="7" cy="6.5" r=".9" fill="currentColor" stroke="none"/><circle cx="7" cy="17.5" r=".9" fill="currentColor" stroke="none"/><path d="M11 6.5h7M11 17.5h7"/></svg>
+        {$t('nav.group_services')}
+      </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'logs'}
-      on:click={() => navigate('logs')}
-      title={$t('nav.logs')}
-    >
-      <Icon name="logs" size={16} />
-      {$t('nav.logs')}
+    <button class="nav-item" class:active={currentTab === 'logs'} on:click={() => navigate('logs')} title={$t('nav.logs')}>
+      <Icon name="logs" size={16} /> {$t('nav.logs')}
     </button>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'connections'}
-      on:click={() => navigate('connections')}
-      title={$t('nav.connections')}
-    >
-      <Icon name="connections" size={16} />
-      {$t('nav.connections')}
+    <button class="nav-item" class:active={currentTab === 'connections'} on:click={() => navigate('connections')} title={$t('nav.connections')}>
+      <Icon name="connections" size={16} /> {$t('nav.connections')}
     </button>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'dat'}
-      on:click={() => navigate('dat')}
-      title={$t('nav.dat')}
-    >
-      <Icon name="dat" size={16} />
-      {$t('nav.dat')}
+    <button class="nav-item" class:active={currentTab === 'dat'} on:click={() => navigate('dat')} title={$t('nav.dat')}>
+      <Icon name="dat" size={16} /> {$t('nav.dat')}
     </button>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'console'}
-      on:click={() => navigate('console')}
-      title={$t('nav.console')}
-    >
-      <Icon name="console" size={16} />
-      {$t('nav.console')}
+    <button class="nav-item" class:active={currentTab === 'console'} on:click={() => navigate('console')} title={$t('nav.console')}>
+      <Icon name="console" size={16} /> {$t('nav.console')}
     </button>
   </details>
 
   <!-- Proxy & Rules group -->
-  <details
-    class="nav-group"
-    open={groupStates.proxy}
-    on:toggle={(e) => toggleGroup('proxy', e.currentTarget.open)}
-  >
+  <details class="nav-group" open>
     <summary>
-      {$t('nav.group_proxy')}
+      <span class="group-ttl">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6Z"/>
+        </svg>
+        {$t('nav.group_proxy')}
+      </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'proxies'}
-      on:click={() => navigate('proxies')}
-      title={$t('nav.proxies')}
-    >
-      <Icon name="proxies" size={16} />
-      {$t('nav.proxies')}
+    <button class="nav-item" class:active={currentTab === 'proxies'} on:click={() => navigate('proxies')} title={$t('nav.proxies')}>
+      <Icon name="proxies" size={16} /> {$t('nav.proxies')}
     </button>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'rules'}
-      on:click={() => navigate('rules')}
-      title={$t('nav.rules')}
-    >
-      <Icon name="rules" size={16} />
-      {$t('nav.rules')}
+    <button class="nav-item" class:active={currentTab === 'rules'} on:click={() => navigate('rules')} title={$t('nav.rules')}>
+      <Icon name="rules" size={16} /> {$t('nav.rules')}
     </button>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'subscriptions'}
-      on:click={() => navigate('subscriptions')}
-      title={$t('nav.subscriptions')}
-    >
-      <Icon name="subscriptions" size={16} />
-      {$t('nav.subscriptions')}
+    <button class="nav-item" class:active={currentTab === 'subscriptions'} on:click={() => navigate('subscriptions')} title={$t('nav.subscriptions')}>
+      <Icon name="subscriptions" size={16} /> {$t('nav.subscriptions')}
     </button>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'smartproxy'}
-      on:click={() => navigate('smartproxy')}
-      title={$t('nav.smartproxy')}
-    >
-      <Icon name="smartproxy" size={16} />
-      {$t('nav.smartproxy')}
+    <button class="nav-item" class:active={currentTab === 'smartproxy'} on:click={() => navigate('smartproxy')} title={$t('nav.smartproxy')}>
+      <Icon name="smartproxy" size={16} /> {$t('nav.smartproxy')}
     </button>
   </details>
 
   <!-- Tools group -->
-  <details
-    class="nav-group"
-    open={groupStates.tools}
-    on:toggle={(e) => toggleGroup('tools', e.currentTarget.open)}
-  >
+  <details class="nav-group" open>
     <summary>
-      {$t('nav.group_tools')}
+      <span class="group-ttl">
+        <!-- Инструменты → wrench + screwdriver crossed -->
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-7 7V21h3.3l7-7a4 4 0 0 0 5.4-5.4l-2.3 2.3-2-2 1-1z"/><path d="m17 14 4 4-2 2-4-4"/></svg>
+        {$t('nav.group_tools')}
+      </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'traffic'}
-      on:click={() => navigate('traffic')}
-      title={$t('nav.traffic')}
-    >
-      <Icon name="traffic" size={16} />
-      {$t('nav.traffic')}
+    <button class="nav-item" class:active={currentTab === 'traffic'} on:click={() => navigate('traffic')} title={$t('nav.traffic')}>
+      <Icon name="traffic" size={16} /> {$t('nav.traffic')}
     </button>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'trafficquotas'}
-      on:click={() => navigate('trafficquotas')}
-      title={$t('nav.trafficquotas')}
-    >
-      <Icon name="trafficquotas" size={16} />
-      {$t('nav.trafficquotas')}
+    <button class="nav-item" class:active={currentTab === 'trafficquotas'} on:click={() => navigate('trafficquotas')} title={$t('nav.trafficquotas')}>
+      <Icon name="trafficquotas" size={16} /> {$t('nav.trafficquotas')}
     </button>
-    <button
-      class="nav-item"
-      class:active={currentTab === 'network'}
-      on:click={() => navigate('network')}
-      title={$t('nav.network')}
-    >
-      <Icon name="network" size={16} />
-      {$t('nav.network')}
+    <button class="nav-item" class:active={currentTab === 'network'} on:click={() => navigate('network')} title={$t('nav.network')}>
+      <Icon name="network" size={16} /> {$t('nav.network')}
     </button>
   </details>
 </nav>
 
-<div style="border-top: 1px solid var(--border); padding: 0.5rem 0;">
+<div style="border-top: 1px solid #03101e; padding: 0.5rem 0; background: var(--bg-deep);">
   {#if pwaInstallPrompt}
     <button class="nav-item" on:click={onInstallPWA} title={$t('nav.install_pwa')}>
-      <Icon name="pwa" size={16} />
-      {$t('nav.install_pwa')}
+      <Icon name="pwa" size={16} /> {$t('nav.install_pwa')}
     </button>
   {/if}
-  <button
-    class="nav-item"
-    on:click={onToggleTheme}
-    title={theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
-  >
+  <button class="nav-item" on:click={onToggleTheme} title={theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}>
     <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
     {theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
   </button>
