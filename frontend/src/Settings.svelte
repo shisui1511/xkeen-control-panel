@@ -223,7 +223,7 @@
     try {
       const res = await fetch('/api/version');
       const data = await res.json();
-      version = data.version;
+      version = data.panel_version || data.version;
     } catch (e) {
       version = $t('app.unavailable');
     }
