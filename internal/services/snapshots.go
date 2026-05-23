@@ -26,8 +26,8 @@ type SnapshotMeta struct {
 
 // SnapshotService manages tar.gz snapshots of config directories.
 type SnapshotService struct {
-	dataDir         string
-	configDirs      []string // directories to include in snapshot
+	dataDir    string
+	configDirs []string // directories to include in snapshot
 }
 
 func NewSnapshotService(dataDir string, configDirs []string) *SnapshotService {

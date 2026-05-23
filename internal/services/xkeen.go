@@ -19,7 +19,7 @@ import (
 // RestartLogEntry records one service lifecycle event.
 type RestartLogEntry struct {
 	Timestamp int64  `json:"timestamp"`
-	Action    string `json:"action"`  // "start", "stop", "restart", "switch_kernel"
+	Action    string `json:"action"` // "start", "stop", "restart", "switch_kernel"
 	Success   bool   `json:"success"`
 	ExitCode  int    `json:"exit_code"`
 	Output    string `json:"output"` // last 50 lines of combined stdout+stderr

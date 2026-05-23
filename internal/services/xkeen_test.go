@@ -9,7 +9,8 @@ import (
 )
 
 func TestXKeenService_New(t *testing.T) {
-	svc := NewXKeenService("/opt/bin/xkeen")
+	tmpDir := t.TempDir()
+	svc := NewXKeenService("/opt/bin/xkeen", tmpDir)
 	if svc == nil {
 		t.Fatal("expected non-nil service")
 	}
@@ -23,7 +24,7 @@ func TestXKeenService_Status(t *testing.T) {
 	dummy := filepath.Join(tmpDir, "xkeen")
 	os.WriteFile(dummy, []byte("#!/bin/sh\necho \"Active\"\n"), 0755)
 
-	svc := NewXKeenService(dummy)
+	svc := NewXKeenService(dummy, tmpDir)
 	out, err := svc.Status()
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +39,7 @@ func TestXKeenService_Start(t *testing.T) {
 	dummy := filepath.Join(tmpDir, "xkeen")
 	os.WriteFile(dummy, []byte("#!/bin/sh\necho \"Started\"\n"), 0755)
 
-	svc := NewXKeenService(dummy)
+	svc := NewXKeenService(dummy, tmpDir)
 	out, err := svc.Start()
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +54,7 @@ func TestXKeenService_Stop(t *testing.T) {
 	dummy := filepath.Join(tmpDir, "xkeen")
 	os.WriteFile(dummy, []byte("#!/bin/sh\necho \"Stopped\"\n"), 0755)
 
-	svc := NewXKeenService(dummy)
+	svc := NewXKeenService(dummy, tmpDir)
 	out, err := svc.Stop()
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +69,7 @@ func TestXKeenService_Restart(t *testing.T) {
 	dummy := filepath.Join(tmpDir, "xkeen")
 	os.WriteFile(dummy, []byte("#!/bin/sh\necho \"Restarted\"\n"), 0755)
 
-	svc := NewXKeenService(dummy)
+	svc := NewXKeenService(dummy, tmpDir)
 	out, err := svc.Restart()
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +86,8 @@ func TestXkeenNoShellInjection(t *testing.T) {
 	// a shell interpreter. We build a real XKeenService and inspect the command it
 	// would build via a small wrapper.
 
-	svc := NewXKeenService("/bin/echo") // harmless binary
+	tmpDir := t.TempDir()
+	svc := NewXKeenService("/bin/echo", tmpDir) // harmless binary
 
 	// The runWithTimeout method creates exec.Command(s.BinaryPath, action).
 	// We verify that:
@@ -99,12 +101,12 @@ func TestXkeenNoShellInjection(t *testing.T) {
 	// The functional test below exercises this path with a shell-metacharacter action
 	// and confirms no side-effects.
 
-	tmpDir := t.TempDir()
-	sentinel := filepath.Join(tmpDir, "sentinel")
+	tmpDir2 := t.TempDir()
+	sentinel := filepath.Join(tmpDir2, "sentinel")
 
 	// If shell injection were possible, ";touch sentinel" would create the file.
 	// Since exec.Command passes args directly, this will just fail to find the arg.
-	svc2 := NewXKeenService("/bin/echo")
+	svc2 := NewXKeenService("/bin/echo", tmpDir2)
 	_ = svc2 // suppress unused warning
 
 	// Verify type does not embed shell path
