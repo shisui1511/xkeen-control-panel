@@ -175,6 +175,7 @@ func main() {
 	api.SetDATManagerService(datSvc)
 
 	srv.HandleProtected("/api/dat/list", api.DATList)
+	srv.HandleProtected("/api/dat/tags", api.DATListTags)
 	srv.HandleProtected("/api/dat/update", api.DATUpdate)
 
 	// Xkeen Console

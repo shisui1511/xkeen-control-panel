@@ -12,6 +12,27 @@ func (a *API) DATList(w http.ResponseWriter, r *http.Request) {
 	a.jsonResponse(w, a.datSvc.List())
 }
 
+func (a *API) DATListTags(w http.ResponseWriter, r *http.Request) {
+	if a.datSvc == nil {
+		a.errorResponse(w, "DAT Manager service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		JSONError(w, http.StatusBadRequest, "name parameter is required")
+		return
+	}
+
+	tags, err := a.datSvc.ListTags(name)
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	JSONSuccess(w, tags)
+}
+
 func (a *API) DATUpdate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
