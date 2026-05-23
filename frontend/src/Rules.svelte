@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t } from './i18n';
-  import { capabilities } from './stores';
+  import { t, currentLang } from './i18n';
+  import { capabilities, fetchCapabilities, showToast } from './stores';
   import EmptyState from './components/EmptyState.svelte';
-  import Icon from './lib/components/Icon.svelte';
+  import PlayIcon from './lib/components/icons/Play.svelte';
+  import WarningIcon from './lib/components/icons/Warning.svelte';
 
   interface Rule {
     type: string;
@@ -16,6 +17,8 @@
   let error = '';
   let searchQuery = '';
   let typeFilter = '';
+  let proxyFilter = '';
+  let applying = false;
 
   async function fetchRules() {
     loading = true;
@@ -34,6 +37,31 @@
     }
   }
 
+  async function applyRules() {
+    applying = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/service/control?action=restart', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        }
+      });
+      if (!res.ok) throw new Error('Failed to apply configuration');
+      showToast('success', $t('rules.apply_success'));
+    } catch (e: any) {
+      showToast('error', e.message);
+    } finally {
+      applying = false;
+    }
+  }
+
+  function goToAddRule() {
+    showToast('info', $t('rules.add_tip'));
+    window.location.hash = '#/editor';
+  }
+
   function getFilteredRules(): Rule[] {
     return rules.filter((rule) => {
       if (searchQuery) {
@@ -42,6 +70,7 @@
           return false;
       }
       if (typeFilter && rule.type !== typeFilter) return false;
+      if (proxyFilter && rule.proxy !== proxyFilter) return false;
       return true;
     });
   }
@@ -51,41 +80,101 @@
     return Array.from(types).sort();
   }
 
-  function getRuleColor(type: string): string {
-    const colors: Record<string, string> = {
-      DOMAIN: '#58a6ff',
-      'DOMAIN-SUFFIX': '#a371f7',
-      'DOMAIN-KEYWORD': '#3fb950',
-      'IP-CIDR': '#d29922',
-      'IP-CIDR6': '#d29922',
-      GEOIP: '#f85149',
-      'SRC-IP-CIDR': '#ff7b72',
-      'DST-PORT': '#79c0ff',
-      'SRC-PORT': '#79c0ff',
-      MATCH: '#ff7b72'
-    };
-    return colors[type] || 'var(--text-secondary)';
+  function getUniqueProxies(): string[] {
+    const targets = new Set(rules.map((r) => r.proxy));
+    return Array.from(targets).sort();
+  }
+
+  function getRuleBadgeClass(type: string): string {
+    const typeUpper = type.toUpperCase();
+    if (typeUpper.startsWith('DOMAIN')) return 'badge badge-info';
+    if (typeUpper.startsWith('IP')) return 'badge badge-warning';
+    if (typeUpper === 'GEOIP') return 'badge badge-success';
+    if (typeUpper === 'MATCH') return 'badge badge-danger';
+    return 'badge';
+  }
+
+  function getTargetBadgeClass(proxy: string): string {
+    const proxyUpper = proxy.toUpperCase();
+    if (proxyUpper === 'DIRECT') return 'status-badge active';
+    if (proxyUpper === 'REJECT') return 'status-badge stopped';
+    return 'status-badge';
+  }
+
+  let mihomoLaunching = false;
+
+  async function launchMihomo() {
+    mihomoLaunching = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/mihomo/control', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({ action: 'start' })
+      });
+      if (!res.ok) throw new Error('Failed to start Mihomo');
+      setTimeout(async () => { await fetchCapabilities(); fetchRules(); mihomoLaunching = false; }, 1500);
+      setTimeout(async () => { await fetchCapabilities(); fetchRules(); }, 4000);
+    } catch (e: any) {
+      showToast('error', e.message);
+      mihomoLaunching = false;
+    }
   }
 
   onMount(() => {
-    fetchRules();
+    if ($capabilities === null || $capabilities.mihomo.reachable) {
+      fetchRules();
+    }
   });
 </script>
 
 <div class="container">
-  <h1>{$t('rules.title')}</h1>
-  <p class="text-secondary mb-3">{$t('rules.subtitle')}</p>
+  <div class="page-head">
+    <div>
+      <div class="crumbs">{$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('nav.rules')}</div>
+      <h1>{$t('rules.title')}</h1>
+      <p class="sub">{$t('rules.subtitle')}</p>
+    </div>
+    <div class="ph-actions">
+      <button class="btn btn-secondary" on:click={goToAddRule}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M12 5v14M5 12h14"/></svg>
+        {$t('rules.add')}
+      </button>
+      <button class="btn btn-primary" on:click={applyRules} disabled={applying}>
+        {#if applying}
+          <span class="spinner" style="margin-right: 6px;">...</span>
+          {$t('app.loading')}
+        {:else}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>
+          {$t('rules.apply')}
+        {/if}
+      </button>
+    </div>
+  </div>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
     <EmptyState
       title={$t('ds.empty.mihomo_offline_title')}
       description={$t('ds.empty.mihomo_offline_desc')}
+      icon={PlayIcon}
+      ctaText={mihomoLaunching
+        ? $t('ds.empty.mihomo_offline_loading')
+        : $t('ds.empty.mihomo_offline_cta')}
+      ctaLoading={mihomoLaunching}
+      oncta={launchMihomo}
+    />
+  {:else if error}
+    <EmptyState
+      title={$t('ds.empty.error_title')}
+      description={error}
+      icon={WarningIcon}
+      ctaText={$t('app.refresh')}
+      oncta={fetchRules}
     />
   {:else}
-    {#if error}
-      <div class="alert alert-error mb-2">{error}</div>
-    {/if}
-
     <div class="toolbar mb-2">
       <div class="filters">
         <input
@@ -93,55 +182,57 @@
           placeholder={$t('rules.search')}
           bind:value={searchQuery}
           class="filter-input"
+          style="flex: 1;"
         />
-        <select bind:value={typeFilter} class="filter-select">
+        <select bind:value={typeFilter} class="source-select">
           <option value="">{$t('rules.all_types')}</option>
           {#each getUniqueTypes() as type}
             <option value={type}>{type}</option>
           {/each}
         </select>
+        <select bind:value={proxyFilter} class="source-select">
+          <option value="">{$currentLang === 'ru' ? 'Все таргеты' : 'All targets'}</option>
+          {#each getUniqueProxies() as proxy}
+            <option value={proxy}>{proxy}</option>
+          {/each}
+        </select>
       </div>
-      <button class="btn btn-secondary" on:click={fetchRules} disabled={loading}>
-        <Icon name="refresh" size={14} />
-        {loading ? $t('app.loading') : $t('app.refresh')}
-      </button>
     </div>
 
     <div class="stats mb-2">
-      <span class="stat">{$t('rules.total', { count: rules.length })}</span>
-      <span class="stat">{$t('rules.shown', { count: getFilteredRules().length })}</span>
+      <span class="stat"><b>{rules.length}</b> {$currentLang === 'ru' ? 'всего' : 'total'}</span>
+      <span class="stat"><b>{getFilteredRules().length}</b> {$currentLang === 'ru' ? 'показано' : 'shown'}</span>
     </div>
 
     <div class="table-container">
-      <table class="rules-table">
+      <table>
         <thead>
           <tr>
+            <th style="width:60px;">#</th>
             <th>{$t('rules.type_col')}</th>
             <th>Payload</th>
-            <th>{$t('conn.proxy')}</th>
+            <th>{$t('conn.proxy') || 'Цель'}</th>
           </tr>
         </thead>
         <tbody>
-          {#each getFilteredRules() as rule}
+          {#each getFilteredRules() as rule, i}
             <tr>
+              <td class="mono" style="color:var(--fg-dim);">{String(i + 1).padStart(3, '0')}</td>
               <td>
-                <span
-                  class="type-badge"
-                  style="background: {getRuleColor(rule.type)}20; color: {getRuleColor(
-                    rule.type
-                  )}; border-color: {getRuleColor(rule.type)}40"
-                >
+                <span class={getRuleBadgeClass(rule.type)}>
                   {rule.type}
                 </span>
               </td>
-              <td class="payload">{rule.payload}</td>
+              <td class="mono">{rule.payload}</td>
               <td>
-                <span class="proxy-name">{rule.proxy}</span>
+                <span class={getTargetBadgeClass(rule.proxy)}>
+                  {rule.proxy}
+                </span>
               </td>
             </tr>
           {:else}
             <tr>
-              <td colspan="3" class="empty-cell">
+              <td colspan="4" class="empty-cell" style="text-align: center; padding: 2rem; color: var(--fg-dim);">
                 {$t('rules.no_rules')}
               </td>
             </tr>
@@ -153,98 +244,44 @@
 </div>
 
 <style>
-  .toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
-
-  .filters {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-
-  .filter-input {
-    padding: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    color: var(--text);
-    font-size: 0.875rem;
-    min-width: 200px;
-  }
-
-  .filter-select {
-    padding: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    color: var(--text);
-    font-size: 0.875rem;
-  }
-
-  .stats {
-    display: flex;
-    gap: 1rem;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-  }
-
+  /* Local styles matching redesign spec */
   .table-container {
     overflow-x: auto;
-    background: var(--card-bg);
+    background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
+    border-radius: var(--radius-md);
   }
 
-  .rules-table {
+  table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.875rem;
+    font-size: 13px;
   }
 
-  .rules-table th {
-    padding: 0.75rem;
+  th {
+    padding: 12px 18px;
     text-align: left;
     font-weight: 600;
-    color: var(--text-secondary);
+    color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
-    background: var(--bg);
+    background: rgba(0, 0, 0, 0.1);
   }
 
-  .rules-table td {
-    padding: 0.75rem;
-    border-bottom: 1px solid var(--border-light, rgba(0, 0, 0, 0.05));
+  td {
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--border-light);
+    color: var(--fg-primary);
   }
 
-  .rules-table tr:hover {
+  tr:last-child td {
+    border-bottom: 0;
+  }
+
+  tr:hover td {
     background: var(--hover);
   }
 
-  .type-badge {
-    display: inline-block;
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    border: 1px solid;
-  }
-
-  .payload {
-    font-family: monospace;
-    font-size: 0.8125rem;
-  }
-
-  .proxy-name {
-    font-weight: 500;
-  }
-
-  .empty-cell {
-    text-align: center;
-    color: var(--text-secondary);
-    padding: 2rem;
+  .mono {
+    font-family: var(--font-family-mono);
   }
 </style>

@@ -1,12 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t } from './i18n';
-  import { capabilities, toastStore } from './stores';
+  import { t, currentLang } from './i18n';
+  import { capabilities, fetchCapabilities, showToast } from './stores';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
-  import Icon from './lib/components/Icon.svelte';
 
   interface Proxy {
     name: string;
@@ -44,8 +43,6 @@
   let loadTimedOut = false;
   let testingLatency = false;
   let testingProxy = '';
-  let selectedGroup: ProxyGroup | null = null;
-  let showObservatory = false;
   let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   function getLastDelay(proxy: Proxy): number | undefined {
@@ -68,18 +65,23 @@
         p.type !== 'Selector' &&
         p.type !== 'URLTest' &&
         p.type !== 'Fallback' &&
-        p.type !== 'LoadBalance'
+        p.type !== 'LoadBalance' &&
+        p.type !== 'Direct' &&
+        p.type !== 'Reject'
     );
     const total = proxyList.length;
-    const healthy = proxyList.filter((p) => isProxyAlive(p) && (getLastDelay(p) || 0) < 300).length;
+    const healthy = proxyList.filter((p) => isProxyAlive(p) && (getLastDelay(p) || 0) > 0 && (getLastDelay(p) || 0) < 300).length;
     const degraded = proxyList.filter(
-      (p) => isProxyAlive(p) && (getLastDelay(p) || 0) >= 300
+      (p) => isProxyAlive(p) && (getLastDelay(p) || 0) >= 300 && (getLastDelay(p) || 0) < 800
     ).length;
-    const down = proxyList.filter((p) => !isProxyAlive(p)).length;
+    const down = proxyList.filter((p) => !isProxyAlive(p) || (getLastDelay(p) || 0) === 0 || (getLastDelay(p) || 0) >= 800).length;
+    
+    const activeList = proxyList.filter(p => isProxyAlive(p) && (getLastDelay(p) || 0) > 0);
     const avg =
-      proxyList.length > 0
-        ? proxyList.reduce((sum, p) => sum + (getLastDelay(p) || 0), 0) / proxyList.length
+      activeList.length > 0
+        ? activeList.reduce((sum, p) => sum + (getLastDelay(p) || 0), 0) / activeList.length
         : 0;
+
     return {
       totalProxies: total,
       healthyProxies: healthy,
@@ -119,7 +121,7 @@
           delay: p.history?.[p.history.length - 1]?.delay,
           history: p.history || []
         }));
-      // Also enrich proxies with history
+      // Enrich proxies with history
       Object.keys(proxies).forEach((name) => {
         if (data.proxies[name]?.history) {
           proxies[name].history = data.proxies[name].history;
@@ -150,7 +152,7 @@
       if (!res.ok) throw new Error($t('proxies.select_error'));
       await fetchProxies();
     } catch (e: any) {
-      error = e.message;
+      showToast('error', e.message);
     }
   }
 
@@ -159,7 +161,6 @@
     error = '';
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      // Dynamically find URLTest groups instead of hardcoding 'UrlTest'
       const urlTestGroups = groups.filter((g) => g.type === 'URLTest');
       if (urlTestGroups.length > 0) {
         await Promise.all(
@@ -174,7 +175,6 @@
           )
         );
       } else {
-        // Fallback: test all proxies via bulk endpoint
         await fetch(
           '/api/mihomo/proxy/proxies/delay?url=http://www.gstatic.com/generate_204&timeout=5000',
           {
@@ -188,14 +188,13 @@
         testingLatency = false;
       }, 2000);
     } catch (e: any) {
-      error = e.message;
+      showToast('error', e.message);
       testingLatency = false;
     }
   }
 
   async function testProxyLatency(proxyName: string) {
     testingProxy = proxyName;
-    error = '';
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       await fetch(
@@ -210,65 +209,44 @@
         testingProxy = '';
       }, 1500);
     } catch (e: any) {
-      error = e.message;
+      showToast('error', e.message);
       testingProxy = '';
     }
   }
 
   function getGroupTypeLabel(type: string): string {
     const labels: Record<string, string> = {
-      Selector: 'Select',
-      URLTest: 'URL Test',
+      Selector: 'Selector',
+      URLTest: 'URLTest',
       Fallback: 'Fallback',
-      LoadBalance: 'Load Balance'
+      LoadBalance: 'LoadBalance'
     };
     return labels[type] || type;
   }
 
   function getProxyDelay(proxyName: string): number | undefined {
     const proxy = proxies[proxyName];
-    if (!proxy?.history?.length) return undefined;
-    return proxy.history[proxy.history.length - 1].delay;
+    if (!proxy) return undefined;
+    return getLastDelay(proxy);
   }
 
-  function formatDelay(delay?: number): string {
-    if (delay === undefined || delay === 0) return '-';
-    return `${delay}ms`;
-  }
-
-  function getHealthStatus(proxyName: string): 'healthy' | 'degraded' | 'down' {
+  function getLatencyClass(proxyName: string): string {
     const proxy = proxies[proxyName];
-    if (!proxy) return 'down';
-    if (!isProxyAlive(proxy)) return 'down';
-    if ((getLastDelay(proxy) || 0) >= 300) return 'degraded';
-    return 'healthy';
+    if (!proxy) return 'lat dim';
+    if (['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) || ['Direct', 'Reject', 'Compatible'].includes(proxy.type)) return 'lat dim';
+    const delay = getProxyDelay(proxyName);
+    if (delay === undefined || delay === 0 || delay >= 800) return 'lat bad';
+    if (delay < 300) return 'lat ok';
+    return 'lat mid';
   }
 
-  function getHealthLabel(status: string): string {
-    const labels: Record<string, string> = {
-      healthy: '●',
-      degraded: '▲',
-      down: 'x'
-    };
-    return labels[status] || '';
-  }
-
-  function getSparklinePath(history?: { time: string; delay: number }[]): string {
-    if (!history || history.length < 2) return '';
-    const values = history.map((h) => h.delay || 0);
-    const max = Math.max(...values, 1);
-    const min = Math.min(...values);
-    const range = max - min || 1;
-    const width = 100;
-    const height = 24;
-    const step = width / (values.length - 1);
-    return values
-      .map((v, i) => {
-        const x = i * step;
-        const y = height - ((v - min) / range) * height;
-        return `${i === 0 ? 'M' : 'L'}${x},${y}`;
-      })
-      .join(' ');
+  function getLatencyText(proxyName: string): string {
+    const proxy = proxies[proxyName];
+    if (!proxy) return '—';
+    if (['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) || ['Direct', 'Reject', 'Compatible'].includes(proxy.type)) return '—';
+    const delay = getProxyDelay(proxyName);
+    if (delay === undefined || delay === 0 || delay >= 800) return 'timeout';
+    return `${delay} ${$t('app.ms')}`;
   }
 
   let mihomoLaunching = false;
@@ -286,13 +264,10 @@
         body: JSON.stringify({ action: 'start' })
       });
       if (!res.ok) throw new Error('Failed to start Mihomo');
-      // Auto-refresh after successful start
-      setTimeout(() => fetchProxies(), 1500);
+      setTimeout(async () => { await fetchCapabilities(); await fetchProxies(); mihomoLaunching = false; }, 1500);
+      setTimeout(async () => { await fetchCapabilities(); await fetchProxies(); }, 4000);
     } catch (e: any) {
-      toastStore.update((items) => [
-        ...items,
-        { id: Date.now(), type: 'error', message: e.message }
-      ]);
+      showToast('error', e.message);
       mihomoLaunching = false;
     }
   }
@@ -305,8 +280,23 @@
 </script>
 
 <div class="container">
-  <h1>{$t('proxies.title')}</h1>
-  <p class="text-secondary mb-3">{$t('proxies.subtitle')}</p>
+  <div class="page-head">
+    <div>
+      <div class="crumbs">{$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('proxies.title')}</div>
+      <h1>{$t('proxies.title')}</h1>
+      <p class="sub">{$t('proxies.subtitle')}</p>
+    </div>
+    <div class="ph-actions">
+      <button class="btn btn-secondary" on:click={fetchProxies} disabled={loading}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>
+        {loading ? $t('app.loading') : $t('app.refresh')}
+      </button>
+      <button class="btn btn-primary" on:click={testLatency} disabled={testingLatency}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        {testingLatency ? $t('proxies.testing') : $t('proxies.test_latency')}
+      </button>
+    </div>
+  </div>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
     <EmptyState
@@ -328,67 +318,46 @@
       oncta={fetchProxies}
     />
   {:else}
-    <div class="toolbar mb-2">
-      <button class="btn btn-secondary" on:click={fetchProxies} disabled={loading}>
-        <Icon name="refresh" size={14} />
-        {loading ? $t('app.loading') : $t('app.refresh')}
-      </button>
-      <button class="btn btn-primary" on:click={testLatency} disabled={testingLatency}>
-        {testingLatency ? $t('proxies.testing') : $t('proxies.test_latency')}
-      </button>
-      <button class="btn btn-secondary" on:click={() => (showObservatory = !showObservatory)}>
-        {$t('proxies.observatory')}
-      </button>
-    </div>
-
-    {#if showObservatory}
-      {@const stats = computeStats()}
-      <div class="card mb-2 observatory-panel">
-        <h2>{$t('proxies.observatory_title')}</h2>
-        <div class="stats-grid">
-          <div class="stat-box">
-            <div class="stat-label">{$t('proxies.total')}</div>
-            <div class="stat-value">{stats.totalProxies}</div>
-          </div>
-          <div class="stat-box healthy">
-            <div class="stat-label">{$t('proxies.healthy')}</div>
-            <div class="stat-value">{stats.healthyProxies}</div>
-          </div>
-          <div class="stat-box degraded">
-            <div class="stat-label">{$t('proxies.degraded')}</div>
-            <div class="stat-value">{stats.degradedProxies}</div>
-          </div>
-          <div class="stat-box down">
-            <div class="stat-label">{$t('proxies.down')}</div>
-            <div class="stat-value">{stats.downProxies}</div>
-          </div>
-          <div class="stat-box">
-            <div class="stat-label">{$t('proxies.avg_latency')}</div>
-            <div class="stat-value">{formatDelay(stats.avgLatency)}</div>
-          </div>
+    <!-- Observatory statistics -->
+    {@const stats = computeStats()}
+    <div class="card" style="margin-bottom:18px;">
+      <h2 class="card-title" style="margin-top: 0;">{$t('proxies.observatory_title')}</h2>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-label">{$t('proxies.obs_total')}</div>
+          <div class="stat-value">{stats.totalProxies}</div>
+          <div class="res-sub">{$t('proxies.obs_total_sub', {groupsCount: groups.length})}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">{$t('proxies.obs_healthy')}</div>
+          <div class="stat-value" style="color:var(--success);">{stats.healthyProxies}</div>
+          <div class="res-sub">{$t('proxies.obs_healthy_sub')}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">{$t('proxies.obs_degraded')}</div>
+          <div class="stat-value" style="color:var(--warning);">{stats.degradedProxies}</div>
+          <div class="res-sub">{$t('proxies.obs_degraded_sub')}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">{$t('proxies.obs_unreachable')}</div>
+          <div class="stat-value" style="color:var(--danger);">{stats.downProxies}</div>
+          <div class="res-sub">{$t('proxies.obs_unreachable_sub')}</div>
         </div>
       </div>
-    {/if}
+    </div>
 
+    <!-- Groups Grid -->
     {#if loading && groups.length === 0}
-      <div class="groups-grid">
+      <div class="group-grid">
         {#each Array(4) as _}
-          <div class="card group-card">
-            <div
-              class="group-header"
-              style="border-bottom: 1px solid var(--color-border-subtle); margin-bottom: 1rem; padding-bottom: 0.75rem;"
-            >
-              <div>
-                <Skeleton type="text-line" width="140px" />
-                <Skeleton type="text-line" width="80px" />
-              </div>
+          <div class="group-card">
+            <div class="gc-head">
+              <Skeleton type="text-line" width="120px" />
+              <Skeleton type="text-line" width="60px" style="margin-left: 10px;" />
             </div>
-            <div class="proxy-list">
+            <div class="gc-body">
               {#each Array(3) as _}
-                <div
-                  class="proxy-item"
-                  style="border: 1px solid var(--color-border-subtle); padding: 8px; justify-content: space-between; display: flex; align-items: center;"
-                >
+                <div class="proxy-row" style="display: flex; justify-content: space-between; align-items: center; padding: 11px 18px;">
                   <Skeleton type="text-line" width="100px" />
                   <Skeleton type="text-line" width="40px" />
                 </div>
@@ -401,37 +370,31 @@
       <div class="card">
         <p class="text-secondary">{$t('proxies.no_proxies')}</p>
       </div>
-    {/if}
-
-    {#if groups.length > 0}
-      <div class="groups-grid">
+    {:else}
+      <div class="group-grid">
         {#each groups as group}
-          <div class="card group-card">
-            <div class="group-header">
-              <div>
-                <h3>{group.name}</h3>
-                <span class="group-type">{getGroupTypeLabel(group.type)}</span>
-                {#if group.type === 'Fallback'}
-                  <span class="fallback-badge">{$t('proxies.fallback_pool')}</span>
-                {/if}
-              </div>
-              <div class="group-delay">
-                {#if group.delay}
-                  <span class="delay-badge">{formatDelay(group.delay)}</span>
-                {/if}
-              </div>
+          <div class="group-card">
+            <div class="gc-head">
+              <span class="name">{group.name}</span>
+              <span class="type">{getGroupTypeLabel(group.type)}</span>
+              {#if group.type !== 'Fallback'}
+                <span style="margin-left:auto;" class="status-badge active">
+                  {$currentLang === 'ru' ? `${group.all.length} узлов` : `${group.all.length} nodes`}
+                </span>
+              {:else}
+                <span style="margin-left:auto;" class="status-badge active">{group.now || '—'}</span>
+              {/if}
             </div>
-
-            <div class="proxy-list">
+            <div class="gc-body">
               {#each group.all as proxyName}
-                {@const delay = getProxyDelay(proxyName)}
                 {@const isActive = group.now === proxyName}
-                {@const health = getHealthStatus(proxyName)}
+                {@const healthClass = getLatencyClass(proxyName)}
+                {@const healthText = getLatencyText(proxyName)}
                 {@const proxy = proxies[proxyName]}
 
                 <div
-                  class="proxy-item"
-                  class:active={isActive}
+                  class="proxy-row"
+                  class:now={isActive}
                   role="button"
                   tabindex="0"
                   on:click={() => group.type === 'Selector' && selectProxy(group.name, proxyName)}
@@ -439,50 +402,48 @@
                     e.key === 'Enter' &&
                     group.type === 'Selector' &&
                     selectProxy(group.name, proxyName)}
+                  style={group.type === 'Selector' ? 'cursor: pointer;' : ''}
                 >
-                  <div class="proxy-info">
-                    <span class="proxy-name">{proxyName}</span>
-                    <span
-                      class="health-badge"
-                      class:healthy={health === 'healthy'}
-                      class:degraded={health === 'degraded'}
-                      class:down={health === 'down'}
-                    >
-                      {getHealthLabel(health)}
-                    </span>
+                  <div>
+                    <div class="p-name">{proxyName}</div>
+                    <div class="p-type">{proxy?.type || 'unknown'}</div>
                   </div>
-                  <div class="proxy-metrics">
-                    {#if proxy?.history && proxy.history.length > 1}
-                      <svg class="sparkline" viewBox="0 0 100 24" preserveAspectRatio="none">
-                        <path
-                          d={getSparklinePath(proxy.history)}
-                          fill="none"
-                          stroke="currentColor"
-                          stroke-width="1.5"
-                        />
-                      </svg>
+                  
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class={healthClass}>{healthText}</span>
+                    {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
+                      <button
+                        class="btn-latency-test"
+                        on:click|stopPropagation={() => testProxyLatency(proxyName)}
+                        disabled={testingProxy === proxyName}
+                        title={$t('proxies.test_single')}
+                        style="background: transparent; border: none; padding: 4px; color: var(--fg-dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: color 0.2s;"
+                      >
+                        {#if testingProxy === proxyName}
+                          <span class="spinner" style="font-size: 10px; font-family: monospace;">...</span>
+                        {:else}
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity: 0.6;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                        {/if}
+                      </button>
                     {/if}
-                    <span class="proxy-delay">{formatDelay(delay)}</span>
-                    <button
-                      class="btn-icon latency-btn"
-                      on:click|stopPropagation={() => testProxyLatency(proxyName)}
-                      disabled={testingProxy === proxyName}
-                      title={$t('proxies.test_single')}
-                    >
-                      {testingProxy === proxyName ? '…' : '→'}
-                    </button>
                   </div>
+
+                  {#if group.type === 'Selector'}
+                    <div>
+                      <button
+                        class="btn-select"
+                        style="background: none; border: none; padding: 0 4px; color: var(--accent); cursor: pointer; font-size: 14px;"
+                        on:click|stopPropagation={() => selectProxy(group.name, proxyName)}
+                      >
+                        {isActive ? '●' : '○'}
+                      </button>
+                    </div>
+                  {:else}
+                    <div></div>
+                  {/if}
                 </div>
               {/each}
             </div>
-
-            {#if group.type === 'Fallback'}
-              <div class="fallback-info">
-                <p class="text-secondary">
-                  {$t('proxies.fallback_order')}: {group.all.join(' → ')}
-                </p>
-              </div>
-            {/if}
           </div>
         {/each}
       </div>
@@ -491,188 +452,111 @@
 </div>
 
 <style>
-  .toolbar {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-
-  .observatory-panel .stats-grid {
+  /* proxies: group cards grid */
+  .group-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-    gap: 1rem;
-    margin-top: 0.5rem;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
   }
-
-  .stat-box {
-    padding: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    text-align: center;
+  @media (max-width: 1024px) {
+    .group-grid {
+      grid-template-columns: 1fr;
+    }
   }
-
-  .stat-box.healthy {
-    border-color: var(--success, #28a745);
-    background: var(--success-bg, rgba(40, 167, 69, 0.05));
-  }
-
-  .stat-box.degraded {
-    border-color: var(--warning, #ffc107);
-    background: rgba(255, 193, 7, 0.05);
-  }
-
-  .stat-box.down {
-    border-color: var(--danger, #dc3545);
-    background: rgba(220, 53, 69, 0.05);
-  }
-
-  .stat-label {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    margin-bottom: 0.25rem;
-  }
-
-  .stat-value {
-    font-weight: 600;
-    font-size: 1.25rem;
-  }
-
-  .groups-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-    gap: 1.5rem;
-  }
-
   .group-card {
-    padding: 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
   }
-
-  .group-header {
+  .group-card .gc-head {
+    padding: 14px 18px;
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 1rem;
-    padding-bottom: 0.75rem;
+    align-items: center;
+    gap: 10px;
     border-bottom: 1px solid var(--border);
   }
-
-  .group-header h3 {
-    margin: 0 0 0.25rem 0;
-    font-size: 1rem;
+  .group-card .gc-head .name {
+    font-weight: 700;
+    color: var(--fg-primary);
+    font-size: 14px;
   }
-
-  .group-type {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    background: var(--bg);
-    padding: 0.125rem 0.5rem;
-    border-radius: 4px;
+  .group-card .gc-head .type {
+    color: var(--fg-dim);
+    font-size: 11px;
+    font-family: var(--font-family-mono);
+    text-transform: uppercase;
+    letter-spacing: .1em;
   }
-
-  .fallback-badge {
-    font-size: 0.7rem;
-    color: var(--primary);
-    background: var(--primary-bg, rgba(0, 123, 255, 0.1));
-    padding: 0.125rem 0.5rem;
-    border-radius: 4px;
-    margin-left: 0.5rem;
+  .group-card .gc-body {
+    padding: 0;
   }
-
-  .delay-badge {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--success);
-  }
-
-  .proxy-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .proxy-item {
-    display: flex;
-    justify-content: space-between;
+  .proxy-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 14px;
     align-items: center;
-    padding: 0.5rem 0.75rem;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    font-size: 0.875rem;
-    user-select: none;
+    padding: 11px 18px;
+    border-bottom: 1px solid var(--border-light);
   }
-
-  .proxy-item:hover {
+  .proxy-row:last-child {
+    border-bottom: 0;
+  }
+  .proxy-row:hover {
     background: var(--hover);
   }
-
-  .proxy-item.active {
-    background: var(--primary);
-    color: white;
-    border-color: var(--primary);
+  .proxy-row.now {
+    background: var(--accent-soft);
   }
-
-  .proxy-info {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+  .proxy-row.now::before {
+    content: "→";
+    color: var(--accent);
+    font-weight: 700;
+    margin-right: -8px;
+    grid-column: 1;
+    position: absolute;
+    transform: translateX(-16px);
   }
-
-  .proxy-name {
+  .proxy-row .p-name {
     font-weight: 500;
+    color: var(--fg-primary);
+    font-size: 13px;
   }
-
-  .health-badge {
-    font-size: 0.75rem;
+  .proxy-row .p-type {
+    color: var(--fg-dim);
+    font-size: 11px;
+    font-family: var(--font-family-mono);
   }
-
-  .proxy-metrics {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .sparkline {
-    width: 60px;
-    height: 18px;
-    color: var(--text-secondary);
-  }
-
-  .proxy-item.active .sparkline {
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .proxy-delay {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    min-width: 45px;
-    text-align: right;
-  }
-
-  .proxy-item.active .proxy-delay {
-    color: rgba(255, 255, 255, 0.8);
-  }
-
-  .latency-btn {
-    padding: 0.125rem 0.25rem;
-    font-size: 0.75rem;
-    background: transparent;
-    border: 1px solid var(--border);
+  .lat {
+    font-family: var(--font-family-mono);
+    font-size: 12px;
+    padding: 2px 8px;
     border-radius: 3px;
-    cursor: pointer;
+    border: 1px solid var(--border);
+  }
+  .lat.ok {
+    color: var(--success);
+    border-color: rgba(70, 209, 138, .4);
+    background: rgba(70, 209, 138, .08);
+  }
+  .lat.mid {
+    color: var(--warning);
+    border-color: rgba(240, 180, 80, .4);
+    background: rgba(240, 180, 80, .08);
+  }
+  .lat.bad {
+    color: var(--danger);
+    border-color: rgba(239, 91, 107, .4);
+    background: rgba(239, 91, 107, .08);
+  }
+  .lat.dim {
+    color: var(--fg-dim);
   }
 
-  .proxy-item.active .latency-btn {
-    border-color: rgba(255, 255, 255, 0.4);
-    color: white;
+  .btn-latency-test:hover {
+    color: var(--accent) !important;
   }
-
-  .fallback-info {
-    margin-top: 0.75rem;
-    padding-top: 0.5rem;
-    border-top: 1px solid var(--border-light);
-    font-size: 0.8rem;
+  .btn-latency-test:hover svg {
+    opacity: 1 !important;
   }
 </style>

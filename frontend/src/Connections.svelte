@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t } from './i18n';
-  import { capabilities, toastStore } from './stores';
+  import { capabilities, fetchCapabilities, showToast } from './stores';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
@@ -79,7 +79,24 @@
       });
 
       if (!res.ok) throw new Error('Failed to close connection');
+      showToast('success', $t('conn.close_success'));
+      await fetchConnections();
+    } catch (e: any) {
+      error = e.message;
+    }
+  }
 
+  async function closeAllConnections() {
+    if (!confirm($t('conn.close_all_confirm'))) return;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/mihomo/proxy/connections', {
+        method: 'DELETE',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+
+      if (!res.ok) throw new Error('Failed to close all connections');
+      showToast('success', $t('conn.close_all_success'));
       await fetchConnections();
     } catch (e: any) {
       error = e.message;
@@ -91,12 +108,32 @@
     return conn.chains[conn.chains.length - 1];
   }
 
+  function getChainPath(conn: Connection): string {
+    if (!conn.chains || conn.chains.length === 0) return 'DIRECT';
+    return conn.chains.join(' → ');
+  }
+
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  }
+
+  function getDuration(startStr: string): string {
+    try {
+      const start = new Date(startStr);
+      const diffMs = Date.now() - start.getTime();
+      const diffSec = Math.floor(diffMs / 1000);
+      if (diffSec < 60) return `${diffSec}с`;
+      const diffMin = Math.floor(diffSec / 60);
+      if (diffMin < 60) return `${diffMin}м`;
+      const diffHrs = Math.floor(diffMin / 60);
+      return `${diffHrs}ч ${diffMin % 60}м`;
+    } catch (_) {
+      return '—';
+    }
   }
 
   function getFilteredConnections(): Connection[] {
@@ -141,18 +178,19 @@
         body: JSON.stringify({ action: 'start' })
       });
       if (!res.ok) throw new Error('Failed to start Mihomo');
-      setTimeout(() => fetchConnections(), 1500);
+      setTimeout(async () => { await fetchCapabilities(); fetchConnections(); mihomoLaunching = false; }, 1500);
+      setTimeout(async () => { await fetchCapabilities(); fetchConnections(); }, 4000);
     } catch (e: any) {
-      toastStore.update((items) => [
-        ...items,
-        { id: Date.now(), type: 'error', message: e.message }
-      ]);
+      showToast('error', e.message);
       mihomoLaunching = false;
     }
   }
 
+  $: totalUpload = connections.reduce((acc, c) => acc + c.upload, 0);
+  $: totalDownload = connections.reduce((acc, c) => acc + c.download, 0);
+  $: filteredConnections = getFilteredConnections();
+
   onMount(() => {
-    // Не запускать polling если Mihomo недоступен
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       fetchConnections();
       refreshInterval = setInterval(fetchConnections, 3000);
@@ -166,8 +204,28 @@
 </script>
 
 <div class="container">
-  <h1>{$t('conn.title')}</h1>
-  <p class="text-secondary mb-3">{$t('conn.active')}</p>
+  <div class="page-head">
+    <div>
+      <div class="crumbs">{$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span> {$t('conn.title')}</div>
+      <h1>{$t('conn.title')}</h1>
+      <p class="sub">{$t('conn.active')}</p>
+    </div>
+    <div class="ph-actions">
+      <label class="toggle-label" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-secondary); cursor: pointer; user-select: none;">
+        <label class="toggle-switch" style="position: relative; display: inline-block; width: 36px; height: 20px;">
+          <input type="checkbox" checked={autoRefresh} on:change={toggleAutoRefresh} style="opacity: 0; width: 0; height: 0;">
+          <span class="toggle-slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border); transition: .2s; border-radius: 20px;"></span>
+        </label>
+        {$t('conn.autorefresh')}
+      </label>
+      <button class="btn btn-secondary" on:click={fetchConnections} disabled={loading}>
+        <Icon name="refresh" size={14} /> {$t('app.refresh')}
+      </button>
+      <button class="btn btn-secondary" style="color:var(--danger);" on:click={closeAllConnections} disabled={connections.length === 0}>
+        {$t('conn.close_all')}
+      </button>
+    </div>
+  </div>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
     <EmptyState
@@ -190,135 +248,106 @@
     />
   {:else}
     <div class="toolbar mb-2">
-      <div class="filters">
+      <div class="filters" style="display: flex; gap: 8px; flex-wrap: wrap; width: 100%;">
         <input
           type="text"
-          placeholder={$t('conn.source')}
+          placeholder={$t('conn.source') + ' (IP)...'}
           bind:value={filterSource}
           class="filter-input"
+          style="flex: 1; min-width: 140px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary);"
         />
         <input
           type="text"
-          placeholder={$t('conn.destination')}
+          placeholder={$t('conn.destination') + ' (host / IP)...'}
           bind:value={filterDest}
           class="filter-input"
+          style="flex: 1; min-width: 180px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary);"
         />
         <input
           type="text"
-          placeholder={$t('conn.rule')}
+          placeholder={$t('conn.rule') + '...'}
           bind:value={filterRule}
           class="filter-input"
+          style="flex: 1; min-width: 120px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary);"
         />
         <input
           type="text"
-          placeholder={$t('conn.proxy')}
+          placeholder={$t('conn.proxy') + '...'}
           bind:value={filterProxy}
           class="filter-input"
+          style="flex: 1; min-width: 120px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary);"
         />
-      </div>
-      <div class="actions">
-        <button class="btn btn-secondary" on:click={fetchConnections} disabled={loading}>
-          <Icon name="refresh" size={14} />
-          {loading ? $t('app.loading') : $t('app.refresh')}
-        </button>
-        <button
-          class="btn btn-icon"
-          class:active={autoRefresh}
-          on:click={toggleAutoRefresh}
-          title={$t('conn.autorefresh')}
-        >
-          {#if autoRefresh}<Icon name="pause" size={14} />{:else}<Icon name="play" size={14} />{/if}
-        </button>
       </div>
     </div>
 
-    <div class="stats mb-2">
-      <span class="stat">{$t('conn.total', { count: connections.length })}</span>
-      <span class="stat">{$t('conn.shown', { count: getFilteredConnections().length })}</span>
+    <div class="stats mb-2" style="display: flex; gap: 16px; font-size: 13px; color: var(--fg-dim); align-items: center;">
+      <span class="stat"><b>{connections.length}</b> {$t('conn.total', {count: ''}).replace(/:\s*$/, '').trim()}</span>
+      <span class="stat"><b>{filteredConnections.length}</b> {$t('conn.shown', {count: ''}).replace(/:\s*$/, '').trim()}</span>
+      <span class="stat">↑ {formatBytes(totalUpload)}</span>
+      <span class="stat">↓ {formatBytes(totalDownload)}</span>
     </div>
 
     <div class="table-container">
-      <table class="connections-table">
+      <table class="connections-table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
         <thead>
-          <tr>
-            <th>{$t('conn.source')}</th>
-            <th>{$t('conn.destination')}</th>
-            <th>{$t('conn.rule')}</th>
-            <th>{$t('conn.proxy')}</th>
-            <th>{$t('traffic.upload')}</th>
-            <th>{$t('traffic.download')}</th>
-            <th></th>
+          <tr style="border-bottom: 1px solid var(--border);">
+            <th style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">{$t('conn.source')}</th>
+            <th style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">{$t('conn.destination')}</th>
+            <th style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">{$t('conn.rule')}</th>
+            <th style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">{$t('conn.proxy')}</th>
+            <th style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">↑</th>
+            <th style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">↓</th>
+            <th style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;">⏱</th>
+            <th style="width: 40px;"></th>
           </tr>
         </thead>
         <tbody>
           {#if loading && connections.length === 0}
             {#each Array(5) as _}
-              <tr>
-                <td>
-                  <div class="cell-source">
-                    <Skeleton type="text-line" width="60px" />
-                    <Skeleton type="text-line" width="100px" />
-                  </div>
-                </td>
-                <td>
-                  <div class="cell-dest">
-                    <Skeleton type="text-line" width="140px" />
-                  </div>
-                </td>
-                <td>
-                  <Skeleton type="text-line" width="80px" />
-                </td>
-                <td>
-                  <Skeleton type="text-line" width="70px" />
-                </td>
-                <td class="bytes">
-                  <Skeleton type="text-line" width="50px" />
-                </td>
-                <td class="bytes">
-                  <Skeleton type="text-line" width="50px" />
-                </td>
+              <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 12px 14px;"><Skeleton type="text-line" width="120px" /></td>
+                <td style="padding: 12px 14px;"><Skeleton type="text-line" width="180px" /></td>
+                <td style="padding: 12px 14px;"><Skeleton type="text-line" width="80px" /></td>
+                <td style="padding: 12px 14px;"><Skeleton type="text-line" width="100px" /></td>
+                <td style="padding: 12px 14px; text-align: right;"><Skeleton type="text-line" width="50px" /></td>
+                <td style="padding: 12px 14px; text-align: right;"><Skeleton type="text-line" width="50px" /></td>
+                <td style="padding: 12px 14px; text-align: right;"><Skeleton type="text-line" width="30px" /></td>
                 <td></td>
               </tr>
             {/each}
           {:else}
-            {#each getFilteredConnections() as conn}
-              <tr>
-                <td>
-                  <div class="cell-source">
-                    <span class="network-badge">{conn.metadata.network}</span>
-                    {conn.metadata.sourceIP}:{conn.metadata.sourcePort}
-                  </div>
-                </td>
-                <td>
-                  <div class="cell-dest">
-                    <div class="host">{conn.metadata.host || conn.metadata.destinationIP}</div>
-                    <div class="port">:{conn.metadata.destinationPort}</div>
-                  </div>
-                </td>
-                <td>
-                  <span class="rule-badge">{conn.rule}</span>
+            {#each filteredConnections as conn (conn.id)}
+              <tr class="conn-row" style="border-bottom: 1px solid var(--border); transition: background 0.15s;">
+                <td class="mono" style="padding: 12px 14px; font-family: var(--font-family-mono, monospace); color: var(--fg-primary);">{conn.metadata.sourceIP}:{conn.metadata.sourcePort}</td>
+                <td class="mono" style="padding: 12px 14px; font-family: var(--font-family-mono, monospace); color: var(--fg-primary); word-break: break-all;">{conn.metadata.host || conn.metadata.destinationIP}:{conn.metadata.destinationPort}</td>
+                <td style="padding: 12px 14px;">
+                  <span class="badge badge-info" style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line);">
+                    {conn.rule}
+                  </span>
                   {#if conn.rulePayload}
-                    <span class="rule-payload">{conn.rulePayload}</span>
+                    <div style="font-size: 11px; color: var(--fg-dim); margin-top: 3px; font-family: var(--font-family-mono, monospace);">{conn.rulePayload}</div>
                   {/if}
                 </td>
-                <td>
-                  <span class="proxy-name">{getProxyName(conn)}</span>
+                <td class="cell-route" style="padding: 12px 14px; color: var(--fg-primary);">
+                  {getChainPath(conn)}
                 </td>
-                <td class="bytes">{formatBytes(conn.upload)}</td>
-                <td class="bytes">{formatBytes(conn.download)}</td>
-                <td>
+                <td class="mono" style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--accent);">{formatBytes(conn.upload)}</td>
+                <td class="mono" style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--accent);">{formatBytes(conn.download)}</td>
+                <td class="mono" style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--fg-dim);">{getDuration(conn.start)}</td>
+                <td style="padding: 12px 14px; text-align: center;">
                   <button
-                    class="btn-close"
+                    class="btn btn-secondary btn-close-conn"
+                    style="padding: 4px 8px; color: var(--danger); border-color: transparent;"
                     on:click={() => closeConnection(conn.id)}
                     title={$t('app.close')}
                   >
-                    <Icon name="close" size={12} />
+                    ×
                   </button>
                 </td>
               </tr>
             {:else}
               <tr>
-                <td colspan="7" class="empty-cell">
+                <td colspan="8" style="text-align: center; padding: 30px; color: var(--fg-dim);">
                   {$t('conn.no_connections')}
                 </td>
               </tr>
@@ -331,159 +360,30 @@
 </div>
 
 <style>
-  .toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 1rem;
+  /* Custom slider styles to match global design system */
+  .toggle-switch input:checked + .toggle-slider {
+    background-color: var(--accent) !important;
   }
-
-  .filters {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(16px);
   }
-
-  .actions {
-    display: flex;
-    gap: 0.5rem;
+  .toggle-slider::before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    transition: .2s;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
   }
-
-  .filter-input {
-    padding: 0.5rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    color: var(--text);
-    font-size: 0.875rem;
-    min-width: 120px;
+  .conn-row:hover {
+    background: var(--bg-hover, rgba(255,255,255,0.02));
   }
-
-  .btn-icon {
-    padding: 0.5rem;
-    background: var(--card-bg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    cursor: pointer;
-  }
-
-  .btn-icon.active {
-    background: var(--primary);
-    color: white;
-    border-color: var(--primary);
-  }
-
-  .stats {
-    display: flex;
-    gap: 1rem;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-  }
-
-  .table-container {
-    overflow-x: auto;
-    background: var(--card-bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-  }
-
-  .connections-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.875rem;
-  }
-
-  .connections-table th {
-    padding: 0.75rem;
-    text-align: left;
-    font-weight: 600;
-    color: var(--text-secondary);
-    border-bottom: 1px solid var(--border);
-    background: var(--bg);
-    white-space: nowrap;
-  }
-
-  .connections-table td {
-    padding: 0.75rem;
-    border-bottom: 1px solid var(--border-light, rgba(0, 0, 0, 0.05));
-    vertical-align: top;
-  }
-
-  .connections-table tr:hover {
-    background: var(--hover);
-  }
-
-  .cell-source {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .network-badge {
-    font-size: 0.625rem;
-    text-transform: uppercase;
-    padding: 0.125rem 0.375rem;
-    background: var(--primary);
-    color: white;
-    border-radius: 3px;
-    font-weight: 600;
-  }
-
-  .cell-dest .host {
-    font-weight: 500;
-  }
-
-  .cell-dest .port {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-  }
-
-  .rule-badge {
-    display: inline-block;
-    padding: 0.125rem 0.375rem;
-    background: var(--bg);
-    border-radius: 3px;
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-  }
-
-  .rule-payload {
-    display: block;
-    font-size: 0.75rem;
-    color: var(--text-secondary);
-    margin-top: 0.25rem;
-  }
-
-  .proxy-name {
-    font-weight: 500;
-  }
-
-  .bytes {
-    font-family: monospace;
-    white-space: nowrap;
-    color: var(--text-secondary);
-  }
-
-  .btn-close {
-    padding: 0.25rem 0.5rem;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    cursor: pointer;
-    color: var(--danger);
-    font-size: 0.75rem;
-  }
-
-  .btn-close:hover {
-    background: var(--danger);
-    color: white;
-    border-color: var(--danger);
-  }
-
-  .empty-cell {
-    text-align: center;
-    color: var(--text-secondary);
-    padding: 2rem;
+  .btn-close-conn:hover {
+    background: var(--danger) !important;
+    color: white !important;
   }
 </style>
