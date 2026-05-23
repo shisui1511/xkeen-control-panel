@@ -1,16 +1,17 @@
 package services
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -58,32 +59,40 @@ const saveLockThrottle = 5 * time.Second
 // maxTrafficFileSize is the rotation threshold for traffic.json.
 const maxTrafficFileSize = 5 * 1024 * 1024 // 5 MB
 
+// mihomoConn is a single connection entry from the Mihomo /connections stream.
+type mihomoConn struct {
+	ID       string   `json:"id"`
+	Chains   []string `json:"chains"`
+	Upload   int64    `json:"upload"`
+	Download int64    `json:"download"`
+}
+
 // TrafficQuotaService manages traffic accounting and quotas
 type TrafficQuotaService struct {
 	dataDir    string
 	mihomoURL  string
+	secret     string
 	quotas     []TrafficQuota
 	proxyStats map[string]*ProxyTraffic
 	alerts     []TrafficAlert
 	mu         sync.RWMutex
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
-	httpClient *http.Client
 	lastSave   time.Time // time of last successful disk write (protected by mu)
 
 	// connectionTracker maps connection ID -> last seen {upload, download}
 	connectionTracker sync.Map
 }
 
-func NewTrafficQuotaService(dataDir, mihomoURL string) *TrafficQuotaService {
+func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaService {
 	svc := &TrafficQuotaService{
 		dataDir:    dataDir,
 		mihomoURL:  mihomoURL,
+		secret:     secret,
 		quotas:     []TrafficQuota{},
 		proxyStats: make(map[string]*ProxyTraffic),
 		alerts:     []TrafficAlert{},
 		stopCh:     make(chan struct{}),
-		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 	svc.load()
 	return svc
@@ -297,43 +306,188 @@ func (s *TrafficQuotaService) ClearAlerts() {
 
 // --- Collector ---
 
+// httpToWS converts an http(s):// URL to ws(s)://.
+func httpToWS(rawURL string) string {
+	switch {
+	case strings.HasPrefix(rawURL, "https://"):
+		return "wss://" + rawURL[len("https://"):]
+	case strings.HasPrefix(rawURL, "http://"):
+		return "ws://" + rawURL[len("http://"):]
+	}
+	return rawURL
+}
+
 func (s *TrafficQuotaService) collectorLoop() {
 	defer s.wg.Done()
 
+	// Periodic housekeeping: quota resets and threshold checks.
+	resetTicker := time.NewTicker(1 * time.Minute)
+	defer resetTicker.Stop()
+
+	s.checkResets()
+
+	// WebSocket stream runs in its own goroutine with reconnect logic.
+	s.wg.Add(1)
+	go s.connectionsWSLoop()
+
 	for {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("TrafficQuota: collectorLoop panic: %v — restarting in 5s", r)
-				}
-			}()
-
-			ticker := time.NewTicker(1 * time.Minute)
-			defer ticker.Stop()
-
-			// Reset daily/weekly/monthly quotas if needed
+		select {
+		case <-resetTicker.C:
 			s.checkResets()
+			s.checkQuotas()
+		case <-s.stopCh:
+			return
+		}
+	}
+}
 
-			for {
-				select {
-				case <-ticker.C:
-					s.checkResets()
-					s.collectTraffic()
-					s.checkQuotas()
-				case <-s.stopCh:
-					return
-				}
-			}
-		}()
+// connectionsWSLoop connects to Mihomo's /connections WebSocket endpoint and
+// processes real-time connection snapshots. Reconnects automatically with
+// exponential backoff (5 s → 60 s) when the stream is interrupted.
+func (s *TrafficQuotaService) connectionsWSLoop() {
+	defer s.wg.Done()
 
-		// Check if we should stop before restarting after a panic
+	backoff := 5 * time.Second
+	const maxBackoff = 60 * time.Second
+
+	for {
 		select {
 		case <-s.stopCh:
 			return
 		default:
 		}
 
-		time.Sleep(5 * time.Second)
+		start := time.Now()
+		err := s.streamConnections()
+		if err == nil {
+			// Graceful shutdown via stopCh.
+			return
+		}
+
+		// If the session ran for more than 30 s it was healthy — reset backoff.
+		if time.Since(start) > 30*time.Second {
+			backoff = 5 * time.Second
+		}
+
+		log.Printf("TrafficQuota: WS connections stream ended: %v — retry in %s", err, backoff)
+
+		select {
+		case <-time.After(backoff):
+		case <-s.stopCh:
+			return
+		}
+
+		if backoff < maxBackoff {
+			backoff *= 2
+		}
+	}
+}
+
+// streamConnections opens a single WebSocket session with Mihomo's /connections
+// endpoint and processes every snapshot it receives. Returns nil on graceful
+// shutdown (stopCh closed) and a non-nil error when the connection breaks.
+func (s *TrafficQuotaService) streamConnections() error {
+	wsURL := httpToWS(strings.TrimRight(s.mihomoURL, "/")) + "/connections"
+
+	header := http.Header{}
+	if s.secret != "" {
+		header.Set("Authorization", "Bearer "+s.secret)
+	}
+
+	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	conn, _, err := dialer.Dial(wsURL, header)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", wsURL, err)
+	}
+	defer conn.Close()
+
+	// Close the WebSocket when the service stops so ReadJSON unblocks.
+	go func() {
+		select {
+		case <-s.stopCh:
+			conn.Close()
+		}
+	}()
+
+	log.Printf("TrafficQuota: WebSocket connected to %s", wsURL)
+
+	for {
+		var payload struct {
+			Connections []mihomoConn `json:"connections"`
+		}
+		if err := conn.ReadJSON(&payload); err != nil {
+			select {
+			case <-s.stopCh:
+				return nil // graceful shutdown
+			default:
+				return fmt.Errorf("read: %w", err)
+			}
+		}
+		s.processConnSnapshot(payload.Connections)
+	}
+}
+
+// processConnSnapshot computes per-proxy traffic deltas from a Mihomo
+// connections snapshot and accumulates them into proxyStats.
+func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	activeIDs := make(map[string]bool, len(connections))
+
+	for _, conn := range connections {
+		if len(conn.Chains) == 0 {
+			continue
+		}
+		proxyName := conn.Chains[len(conn.Chains)-1]
+		if proxyName == "" || proxyName == "DIRECT" || proxyName == "REJECT" {
+			continue
+		}
+
+		activeIDs[conn.ID] = true
+
+		var deltaUp, deltaDown int64
+		if val, ok := s.connectionTracker.Load(conn.ID); ok {
+			last := val.(connStats)
+			deltaUp = conn.Upload - last.Upload
+			deltaDown = conn.Download - last.Download
+		} else {
+			// New connection: treat current bytes as the delta.
+			deltaUp = conn.Upload
+			deltaDown = conn.Download
+		}
+
+		if deltaUp < 0 {
+			deltaUp = 0
+		}
+		if deltaDown < 0 {
+			deltaDown = 0
+		}
+
+		if deltaUp > 0 || deltaDown > 0 {
+			stat, ok := s.proxyStats[proxyName]
+			if !ok {
+				stat = &ProxyTraffic{ProxyName: proxyName}
+				s.proxyStats[proxyName] = stat
+			}
+			stat.UploadBytes += deltaUp
+			stat.DownloadBytes += deltaDown
+			stat.TotalBytes = stat.UploadBytes + stat.DownloadBytes
+		}
+
+		s.connectionTracker.Store(conn.ID, connStats{Upload: conn.Upload, Download: conn.Download})
+	}
+
+	// Clean up closed connections from the tracker.
+	s.connectionTracker.Range(func(key, value interface{}) bool {
+		if !activeIDs[key.(string)] {
+			s.connectionTracker.Delete(key)
+		}
+		return true
+	})
+
+	if err := s.saveLocked(false); err != nil {
+		log.Printf("TrafficQuota: failed to save stats: %v", err)
 	}
 }
 
@@ -397,113 +551,6 @@ type connStats struct {
 	Download int64
 }
 
-func (s *TrafficQuotaService) collectTraffic() {
-	// Use a context tied to the service stop channel so the HTTP request is
-	// cancelled immediately when the service shuts down.
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		select {
-		case <-s.stopCh:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.mihomoURL+"/connections", nil)
-	if err != nil {
-		log.Printf("TrafficQuota: failed to create request: %v", err)
-		return
-	}
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		log.Printf("TrafficQuota: failed to fetch connections: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("TrafficQuota: connections API returned %d", resp.StatusCode)
-		return
-	}
-
-	var data struct {
-		Connections []struct {
-			ID       string   `json:"id"`
-			Chains   []string `json:"chains"`
-			Upload   int64    `json:"upload"`
-			Download int64    `json:"download"`
-		} `json:"connections"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		log.Printf("TrafficQuota: failed to decode connections: %v", err)
-		return
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	activeIDs := make(map[string]bool)
-
-	for _, conn := range data.Connections {
-		if len(conn.Chains) == 0 {
-			continue
-		}
-		proxyName := conn.Chains[len(conn.Chains)-1]
-		if proxyName == "" || proxyName == "DIRECT" || proxyName == "REJECT" {
-			continue
-		}
-
-		activeIDs[conn.ID] = true
-
-		var deltaUp, deltaDown int64
-		if val, ok := s.connectionTracker.Load(conn.ID); ok {
-			last := val.(connStats)
-			deltaUp = conn.Upload - last.Upload
-			deltaDown = conn.Download - last.Download
-		} else {
-			// New connection, use current as delta
-			deltaUp = conn.Upload
-			deltaDown = conn.Download
-		}
-
-		// Only add positive deltas (Mihomo stats might reset if reconnected with same ID? unlikely but safe)
-		if deltaUp < 0 {
-			deltaUp = 0
-		}
-		if deltaDown < 0 {
-			deltaDown = 0
-		}
-
-		if deltaUp > 0 || deltaDown > 0 {
-			stat, ok := s.proxyStats[proxyName]
-			if !ok {
-				stat = &ProxyTraffic{ProxyName: proxyName}
-				s.proxyStats[proxyName] = stat
-			}
-			stat.UploadBytes += deltaUp
-			stat.DownloadBytes += deltaDown
-			stat.TotalBytes = stat.UploadBytes + stat.DownloadBytes
-
-			// Update tracker
-			s.connectionTracker.Store(conn.ID, connStats{Upload: conn.Upload, Download: conn.Download})
-		}
-	}
-
-	// Clean up stale connections from tracker
-	s.connectionTracker.Range(func(key, value interface{}) bool {
-		id := key.(string)
-		if !activeIDs[id] {
-			s.connectionTracker.Delete(id)
-		}
-		return true
-	})
-
-	// Background periodic save — use force=false to throttle disk I/O.
-	if err := s.saveLocked(false); err != nil {
-		log.Printf("TrafficQuota: failed to save stats: %v", err)
-	}
-}
 
 func (s *TrafficQuotaService) checkQuotas() {
 	s.mu.Lock()
