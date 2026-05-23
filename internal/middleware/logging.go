@@ -1,7 +1,10 @@
 package middleware
 
 import (
+	"bufio"
+	"errors"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -15,6 +18,14 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := rw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return hijacker.Hijack()
 }
 
 func sanitizeLogInput(s string) string {
