@@ -31,7 +31,13 @@ func (s *XKeenService) GetVersion() string {
 	if output == "" {
 		return "unknown"
 	}
-	return output
+	// "Версия XKeen 2.0 Beta (время сборки: ...) ..."
+	// Extract only the short version: strip "Версия " prefix, then take up to " ("
+	output = strings.TrimPrefix(output, "Версия ")
+	if idx := strings.Index(output, " ("); idx != -1 {
+		output = output[:idx]
+	}
+	return strings.TrimSpace(output)
 }
 
 func (s *XKeenService) Status() (string, error) {
