@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -16,6 +17,21 @@ type XKeenService struct {
 
 func NewXKeenService(binary string) *XKeenService {
 	return &XKeenService{BinaryPath: binary}
+}
+
+func (s *XKeenService) GetVersion() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, s.BinaryPath, "-v")
+	out, err := cmd.Output()
+	if err != nil {
+		return "unknown"
+	}
+	output := strings.TrimSpace(utils.StripANSI(string(out)))
+	if output == "" {
+		return "unknown"
+	}
+	return output
 }
 
 func (s *XKeenService) Status() (string, error) {
