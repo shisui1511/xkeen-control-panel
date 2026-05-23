@@ -287,8 +287,16 @@ func (s *SmartProxyService) evaluateTimeBased(p *Profile) {
 		return
 	}
 
-	// Check time range
-	if currentTime < p.StartTime || currentTime > p.EndTime {
+	// Check time range.
+	// For midnight-crossing ranges (e.g. 22:00–06:00), StartTime > EndTime
+	// so the condition inverts: active if time >= start OR time <= end.
+	var inRange bool
+	if p.StartTime <= p.EndTime {
+		inRange = currentTime >= p.StartTime && currentTime <= p.EndTime
+	} else {
+		inRange = currentTime >= p.StartTime || currentTime <= p.EndTime
+	}
+	if !inRange {
 		return
 	}
 
@@ -324,16 +332,44 @@ func (s *SmartProxyService) testProxyLatency(proxyName string) (int, error) {
 }
 
 func (s *SmartProxyService) evaluateFailover(p *Profile) {
-	// Determine which proxy to test
-	testProxy := p.ProxyName
-	if p.CurrentProxy != "" {
-		testProxy = p.CurrentProxy
+	onFallback := p.CurrentProxy != "" && p.CurrentProxy != p.ProxyName
+
+	if onFallback {
+		// We are on fallback — test PRIMARY to decide if we can recover.
+		primaryDelay, err := s.testProxyLatency(p.ProxyName)
+		if err != nil {
+			primaryDelay = 9999
+		}
+		if primaryDelay <= p.LatencyThreshold {
+			// Primary recovered — switch back.
+			log.Printf("SmartProxy: profile %s primary %s recovered (%dms), switching back from %s",
+				p.Name, p.ProxyName, primaryDelay, p.CurrentProxy)
+			s.mu.Lock()
+			for i := range s.profiles {
+				if s.profiles[i].ID == p.ID {
+					s.profiles[i].CurrentProxy = ""
+					s.profiles[i].CurrentFailures = 0
+					break
+				}
+			}
+			s.mu.Unlock()
+			if err := s.applyProxyToGroup(p.GroupName, p.ProxyName); err != nil {
+				log.Printf("SmartProxy: recovery apply failed: %v", err)
+			} else {
+				s.updateProfileApplied(p.ID)
+			}
+		} else {
+			log.Printf("SmartProxy: profile %s primary %s still down (%dms), staying on fallback %s",
+				p.Name, p.ProxyName, primaryDelay, p.CurrentProxy)
+		}
+		return
 	}
 
-	delay, err := s.testProxyLatency(testProxy)
+	// We are on primary — test it for failures.
+	delay, err := s.testProxyLatency(p.ProxyName)
 	if err != nil {
-		log.Printf("SmartProxy: latency test failed for %s: %v", testProxy, err)
-		delay = 9999 // treat as high latency
+		log.Printf("SmartProxy: latency test failed for %s: %v", p.ProxyName, err)
+		delay = 9999
 	}
 
 	s.mu.Lock()
@@ -345,35 +381,23 @@ func (s *SmartProxyService) evaluateFailover(p *Profile) {
 		if delay > p.LatencyThreshold {
 			s.profiles[i].CurrentFailures++
 			log.Printf("SmartProxy: profile %s proxy %s latency %dms > threshold %dms (failures: %d/%d)",
-				p.Name, testProxy, delay, p.LatencyThreshold, s.profiles[i].CurrentFailures, p.ConsecutiveFailures)
+				p.Name, p.ProxyName, delay, p.LatencyThreshold, s.profiles[i].CurrentFailures, p.ConsecutiveFailures)
 		} else {
 			if s.profiles[i].CurrentFailures > 0 {
-				log.Printf("SmartProxy: profile %s proxy %s latency %dms OK, resetting failures", p.Name, testProxy, delay)
+				log.Printf("SmartProxy: profile %s proxy %s latency %dms OK, resetting failures", p.Name, p.ProxyName, delay)
 			}
 			s.profiles[i].CurrentFailures = 0
 		}
 
-		// Check if we need to failover
-		if s.profiles[i].CurrentFailures >= p.ConsecutiveFailures {
-			// Determine fallback target
-			var target string
-			if s.profiles[i].CurrentProxy == p.ProxyName && p.FallbackProxy != "" {
-				target = p.FallbackProxy
-				log.Printf("SmartProxy: profile %s failing over %s → %s", p.Name, testProxy, target)
-			} else if s.profiles[i].CurrentProxy != "" {
-				// Already on fallback, try DIRECT as emergency
+		if s.profiles[i].CurrentFailures >= p.ConsecutiveFailures && p.ConsecutiveFailures > 0 {
+			target := p.FallbackProxy
+			if target == "" {
 				target = "DIRECT"
-				log.Printf("SmartProxy: profile %s emergency fallback → DIRECT", p.Name)
-			} else {
-				target = p.FallbackProxy
-				log.Printf("SmartProxy: profile %s failing over %s → %s", p.Name, testProxy, target)
 			}
-
+			log.Printf("SmartProxy: profile %s failing over %s → %s", p.Name, p.ProxyName, target)
 			s.profiles[i].CurrentProxy = target
 			s.profiles[i].CurrentFailures = 0
 			s.mu.Unlock()
-
-			// Apply failover
 			if err := s.applyProxyToGroup(p.GroupName, target); err != nil {
 				log.Printf("SmartProxy: failover apply failed: %v", err)
 			} else {
@@ -381,20 +405,6 @@ func (s *SmartProxyService) evaluateFailover(p *Profile) {
 			}
 			return
 		}
-
-		// If latency is OK and we're on fallback, try switching back to primary
-		if s.profiles[i].CurrentProxy != "" && s.profiles[i].CurrentProxy != p.ProxyName && delay <= p.LatencyThreshold {
-			log.Printf("SmartProxy: profile %s recovering %s → %s", p.Name, s.profiles[i].CurrentProxy, p.ProxyName)
-			s.profiles[i].CurrentProxy = ""
-			s.mu.Unlock()
-			if err := s.applyProxyToGroup(p.GroupName, p.ProxyName); err != nil {
-				log.Printf("SmartProxy: recovery apply failed: %v", err)
-			} else {
-				s.updateProfileApplied(p.ID)
-			}
-			return
-		}
-
 		break
 	}
 	s.mu.Unlock()
