@@ -27,6 +27,40 @@
   let kernelsLoaded = false;
   let statusIntervals: Record<string, ReturnType<typeof setInterval>> = {};
 
+  // Restart log
+  interface RestartLogEntry {
+    timestamp: number;
+    action: string;
+    success: boolean;
+    exit_code: number;
+    output: string;
+  }
+  let restartLog: RestartLogEntry[] = [];
+  let restartLogExpanded = false;
+
+  async function fetchRestartLog() {
+    try {
+      const res = await fetch('/api/service/restart-log');
+      if (res.ok) restartLog = await res.json();
+    } catch (_) {}
+  }
+
+  function formatAction(action: string): string {
+    const map: Record<string, string> = {
+      start: $t('svc.log_action_start'),
+      stop: $t('svc.log_action_stop'),
+      restart: $t('svc.log_action_restart'),
+    };
+    if (action.startsWith('switch_kernel:')) {
+      return $t('svc.log_action_switch') + ' ' + action.split(':')[1];
+    }
+    return map[action] ?? action;
+  }
+
+  function formatTs(ts: number): string {
+    return new Date(ts * 1000).toLocaleString();
+  }
+
   // Auto-start toggles (localStorage-persisted until backend API exists)
   let autostartKeenetic = localStorage.getItem('autostart_keenetic') !== 'false';
   let watchdogEnabled = localStorage.getItem('watchdog_enabled') !== 'false';
@@ -87,8 +121,10 @@
       if (!res.ok) throw new Error(text);
       await fetchStatus();
       await fetchCapabilities();
+      fetchRestartLog();
     } catch (e: any) {
       showToast('error', `${$t('svc.action_error')}: ${e.message}`);
+      fetchRestartLog();
     } finally {
       actionLoading[key] = false;
     }
@@ -198,6 +234,7 @@
   onMount(() => {
     fetchStatus();
     fetchKernels();
+    fetchRestartLog();
     const interval = setInterval(fetchStatus, 10000);
     return () => {
       clearInterval(interval);
@@ -523,6 +560,39 @@
       </div>
     </div>
   </div>
+
+  <!-- Restart log card -->
+  {#if restartLog.length > 0}
+  <div class="card">
+    <div class="card-title-row">
+      <h2 class="card-title">{$t('svc.restart_log_title')}</h2>
+      <button class="btn btn-ghost btn-sm" on:click={() => restartLogExpanded = !restartLogExpanded}>
+        {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
+      </button>
+    </div>
+    <div class="restart-log">
+      {#each (restartLogExpanded ? restartLog : restartLog.slice(0, 5)) as entry}
+        <div class="log-entry" class:log-success={entry.success} class:log-fail={!entry.success}>
+          <div class="log-meta">
+            <span class="log-action">{formatAction(entry.action)}</span>
+            <span class="log-badge" class:badge-ok={entry.success} class:badge-err={!entry.success}>
+              {entry.success ? $t('svc.log_ok') : $t('svc.log_fail')}
+            </span>
+            <span class="log-ts">{formatTs(entry.timestamp)}</span>
+          </div>
+          {#if entry.output}
+            <pre class="log-output">{entry.output}</pre>
+          {/if}
+        </div>
+      {/each}
+      {#if !restartLogExpanded && restartLog.length > 5}
+        <div class="log-more" on:click={() => restartLogExpanded = true}>
+          {$t('svc.log_show_more', { count: restartLog.length - 5 })}
+        </div>
+      {/if}
+    </div>
+  </div>
+  {/if}
 </div>
 
 <style>
@@ -629,4 +699,48 @@
     display: flex;
     align-items: center;
   }
+  .card-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .card-title-row .card-title {
+    margin-bottom: 0;
+  }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--fg-secondary); }
+  .btn-ghost:hover { background: var(--bg-hover); }
+  .restart-log { display: flex; flex-direction: column; gap: 6px; }
+  .log-entry {
+    border-radius: 6px;
+    border-left: 3px solid var(--border);
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+  }
+  .log-entry.log-success { border-left-color: var(--success, #22c55e); }
+  .log-entry.log-fail    { border-left-color: var(--danger, #ef4444); }
+  .log-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .log-action { font-weight: 600; font-size: 13px; }
+  .log-ts { color: var(--fg-secondary); font-size: 12px; margin-left: auto; }
+  .log-badge { font-size: 11px; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
+  .badge-ok  { background: rgba(34,197,94,.15);  color: #22c55e; }
+  .badge-err { background: rgba(239,68,68,.15);  color: #ef4444; }
+  .log-output {
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: var(--fg-secondary);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+  .log-more {
+    text-align: center;
+    font-size: 12px;
+    color: var(--accent);
+    cursor: pointer;
+    padding: 4px;
+  }
+  .log-more:hover { text-decoration: underline; }
 </style>

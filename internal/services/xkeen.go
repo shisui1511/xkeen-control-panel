@@ -3,21 +3,114 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-type XKeenService struct {
-	BinaryPath string
+// RestartLogEntry records one service lifecycle event.
+type RestartLogEntry struct {
+	Timestamp int64  `json:"timestamp"`
+	Action    string `json:"action"`  // "start", "stop", "restart", "switch_kernel"
+	Success   bool   `json:"success"`
+	ExitCode  int    `json:"exit_code"`
+	Output    string `json:"output"` // last 50 lines of combined stdout+stderr
 }
 
-func NewXKeenService(binary string) *XKeenService {
-	return &XKeenService{BinaryPath: binary}
+type XKeenService struct {
+	BinaryPath string
+	dataDir    string
+	logMu      sync.Mutex
+	restartLog []RestartLogEntry
 }
+
+func NewXKeenService(binary, dataDir string) *XKeenService {
+	svc := &XKeenService{BinaryPath: binary, dataDir: dataDir}
+	svc.loadRestartLog()
+	return svc
+}
+
+// --- Restart log ---
+
+func (s *XKeenService) restartLogPath() string {
+	return filepath.Join(s.dataDir, "restart_log.json")
+}
+
+func (s *XKeenService) loadRestartLog() {
+	if s.dataDir == "" {
+		return
+	}
+	data, err := os.ReadFile(s.restartLogPath())
+	if err != nil {
+		return
+	}
+	var entries []RestartLogEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return
+	}
+	s.restartLog = entries
+}
+
+func (s *XKeenService) saveRestartLog() {
+	if s.dataDir == "" {
+		return
+	}
+	data, err := json.Marshal(s.restartLog)
+	if err != nil {
+		return
+	}
+	if err := utils.AtomicWriteFile(s.restartLogPath(), data, 0600); err != nil {
+		log.Printf("xkeen: failed to save restart log: %v", err)
+	}
+}
+
+func (s *XKeenService) recordAction(action, output string, err error) {
+	exitCode := 0
+	if err != nil {
+		exitCode = 1
+	}
+	entry := RestartLogEntry{
+		Timestamp: time.Now().Unix(),
+		Action:    action,
+		Success:   err == nil,
+		ExitCode:  exitCode,
+		Output:    lastNLines(output, 50),
+	}
+	s.logMu.Lock()
+	s.restartLog = append(s.restartLog, entry)
+	// Keep only last 100 entries
+	if len(s.restartLog) > 100 {
+		s.restartLog = s.restartLog[len(s.restartLog)-100:]
+	}
+	s.saveRestartLog()
+	s.logMu.Unlock()
+}
+
+func (s *XKeenService) GetRestartLog() []RestartLogEntry {
+	s.logMu.Lock()
+	defer s.logMu.Unlock()
+	result := make([]RestartLogEntry, len(s.restartLog))
+	copy(result, s.restartLog)
+	return result
+}
+
+func lastNLines(s string, n int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) <= n {
+		return strings.TrimSpace(s)
+	}
+	return strings.Join(lines[len(lines)-n:], "\n")
+}
+
+// --- Service control ---
 
 func (s *XKeenService) GetVersion() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -53,24 +146,35 @@ func (s *XKeenService) Status() (string, error) {
 }
 
 func (s *XKeenService) Start() (string, error) {
-	return s.runWithTimeout("-start", 30*time.Second)
+	out, err := s.runWithTimeout("-start", 30*time.Second)
+	s.recordAction("start", out, err)
+	return out, err
 }
 
 func (s *XKeenService) Stop() (string, error) {
-	return s.runWithTimeout("-stop", 30*time.Second)
+	out, err := s.runWithTimeout("-stop", 30*time.Second)
+	s.recordAction("stop", out, err)
+	return out, err
 }
 
 func (s *XKeenService) Restart() (string, error) {
-	return s.runWithTimeout("-restart", 45*time.Second)
+	out, err := s.runWithTimeout("-restart", 45*time.Second)
+	s.recordAction("restart", out, err)
+	return out, err
 }
 
 func (s *XKeenService) SwitchKernel(name string) (string, error) {
+	var out string
+	var err error
 	if name == "xray" {
-		return s.runWithTimeout("-xray", 30*time.Second)
+		out, err = s.runWithTimeout("-xray", 30*time.Second)
 	} else if name == "mihomo" {
-		return s.runWithTimeout("-mihomo", 30*time.Second)
+		out, err = s.runWithTimeout("-mihomo", 30*time.Second)
+	} else {
+		return "", fmt.Errorf("invalid kernel: %s", name)
 	}
-	return "", fmt.Errorf("invalid kernel: %s", name)
+	s.recordAction("switch_kernel:"+name, out, err)
+	return out, err
 }
 
 func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (string, error) {

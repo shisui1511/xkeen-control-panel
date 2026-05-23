@@ -37,7 +37,7 @@ func NewAPI(cfg *config.Config, srv *server.Server) *API {
 	return &API{
 		cfg:       cfg,
 		srv:       srv,
-		xkeenSvc:  services.NewXKeenService(cfg.XKeenBinary),
+		xkeenSvc:  services.NewXKeenService(cfg.XKeenBinary, cfg.DataDir),
 		mihomoSvc: services.NewMihomoService(cfg.MihomoBinary, cfg.XKeenBinary, cfg.MihomoConfigDir),
 		configSvc: services.NewConfigService(cfg.XRayConfigDir),
 		pathVal:   utils.NewPathValidator(cfg.AllowedRoots),

@@ -101,6 +101,7 @@ func main() {
 	srv.HandleProtected("/api/config/validate", api.ConfigValidate)
 	srv.HandleProtected("/api/service/status", api.ServiceStatus)
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
+	srv.HandleProtected("/api/service/restart-log", api.ServiceRestartLog)
 	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
 	srv.HandleProtected("/api/logs/download", api.LogsDownload)
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
