@@ -184,7 +184,7 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 	st.Progress = 90
 	setUpdateState(st)
 
-	go a.restartProcess(binPath, a.cfg.DataDir)
+	go a.restartProcess(binPath, "", a.cfg.DataDir)
 
 	JSONSuccess(w, getUpdateState())
 }
@@ -232,6 +232,16 @@ func (a *API) performUpdate(channel string) {
 		return
 	}
 
+	// Determine binary path early so temp file is on the same filesystem
+	binPath := "/opt/sbin/xcp"
+	if exe, err := os.Executable(); err == nil {
+		if realPath, err := filepath.EvalSymlinks(exe); err == nil {
+			binPath = realPath
+		} else {
+			binPath = exe
+		}
+	}
+
 	// Step 2: Download
 	setUpdateState(UpdateStatus{
 		Status:   "downloading",
@@ -247,7 +257,8 @@ func (a *API) performUpdate(channel string) {
 	downloadURL := fmt.Sprintf("%s/v%s/xcp_v%s_%s",
 		githubDownloadURL, info.LatestVersion, info.LatestVersion, arch)
 
-	tempFile := filepath.Join(os.TempDir(), "xcp.new")
+	// Download to the same directory as the binary to avoid cross-device rename
+	tempFile := filepath.Join(filepath.Dir(binPath), "xcp.new")
 	if err := downloadFile(downloadURL, tempFile); err != nil {
 		setUpdateState(UpdateStatus{
 			Status:    "failed",
@@ -285,17 +296,8 @@ func (a *API) performUpdate(channel string) {
 		Progress: 60,
 		Message:  "Creating backup...",
 	})
-
-	binPath := "/opt/sbin/xcp"
-	if exe, err := os.Executable(); err == nil {
-		if realPath, err := filepath.EvalSymlinks(exe); err == nil {
-			binPath = realPath
-		} else {
-			binPath = exe
-		}
-	}
 	backupDir := filepath.Join(a.cfg.DataDir, "backup")
-	os.MkdirAll(backupDir, 0755)
+	_ = os.MkdirAll(backupDir, 0755)
 
 	backupPath := filepath.Join(backupDir, fmt.Sprintf("xcp.bak.%d", time.Now().Unix()))
 	if err := copyFile(binPath, backupPath); err != nil {
@@ -340,10 +342,10 @@ func (a *API) performUpdate(channel string) {
 	// Give time for response to be sent
 	time.Sleep(500 * time.Millisecond)
 
-	go a.restartProcess(binPath, a.cfg.DataDir)
+	go a.restartProcess(binPath, backupPath, a.cfg.DataDir)
 }
 
-func (a *API) restartProcess(binPath string, dataDir string) {
+func (a *API) restartProcess(binPath string, backupPath string, dataDir string) {
 	// Fork new process
 	configPath := filepath.Join(dataDir, "config.json")
 	cmd := exec.Command(binPath, "-config", configPath)
@@ -392,9 +394,22 @@ func (a *API) restartProcess(binPath string, dataDir string) {
 	}
 
 	// Health check failed - rollback
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+
+	msg := "Проверка работоспособности не удалась."
+	if backupPath != "" {
+		if err := copyFile(backupPath, binPath); err != nil {
+			msg = "Проверка не удалась. Откат завершился ошибкой: " + err.Error()
+		} else {
+			msg = "Проверка не удалась, выполнен авто-откат на резервную копию."
+		}
+	}
+
 	setUpdateState(UpdateStatus{
 		Status:    "failed",
-		Message:   "Health check failed, rollback required",
+		Message:   msg,
 		Timestamp: time.Now().Unix(),
 	})
 }
