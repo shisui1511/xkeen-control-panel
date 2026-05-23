@@ -156,10 +156,9 @@
 
   function toggleAutoRefresh() {
     autoRefresh = !autoRefresh;
+    clearInterval(refreshInterval); // always clear before (re)creating
     if (autoRefresh) {
       refreshInterval = setInterval(fetchConnections, 3000);
-    } else {
-      clearInterval(refreshInterval);
     }
   }
 
