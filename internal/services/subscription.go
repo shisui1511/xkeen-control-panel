@@ -120,7 +120,14 @@ func (s *SubscriptionService) getProxyCount(sub *Subscription) int {
 	}
 	var outbounds []Outbound
 	if err := json.Unmarshal(data, &outbounds); err != nil {
-		return 0
+		var wrapper struct {
+			Outbounds []Outbound `json:"outbounds"`
+		}
+		if err2 := json.Unmarshal(data, &wrapper); err2 == nil {
+			outbounds = wrapper.Outbounds
+		} else {
+			return 0
+		}
 	}
 	return len(outbounds)
 }
@@ -365,7 +372,13 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 		}
 	}
 
-	data, err := json.MarshalIndent(outbounds, "", "  ")
+	wrapper := struct {
+		Outbounds []Outbound `json:"outbounds"`
+	}{
+		Outbounds: outbounds,
+	}
+
+	data, err := json.MarshalIndent(wrapper, "", "  ")
 	if err != nil {
 		return err
 	}
