@@ -409,7 +409,7 @@
             class="sec-tab"
             class:active={activeSection === id}
             on:click={() => {
-              activeSection = id;
+              activeSection = id as typeof activeSection;
               showProxyForm = false;
               showGroupForm = false;
               showRuleForm = false;
