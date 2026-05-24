@@ -489,6 +489,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'console.cat_update': 'Обновление',
     'console.cat_backup': 'Бэкапы',
     'console.cat_system': 'Система',
+    'console.cat_diagnostic': 'Диагностика',
     'console.load_error': 'Ошибка загрузки команд',
     'console.confirm_title': 'Опасное действие',
     'console.confirm_desc':
@@ -1207,6 +1208,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'console.cat_update': 'Update',
     'console.cat_backup': 'Backup',
     'console.cat_system': 'System',
+    'console.cat_diagnostic': 'Diagnostics',
     'console.load_error': 'Failed to load commands',
     'console.confirm_title': 'Dangerous Action',
     'console.confirm_desc': 'Are you sure you want to run "{name}"? This action cannot be undone.',
