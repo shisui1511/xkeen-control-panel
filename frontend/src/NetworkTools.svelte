@@ -179,6 +179,7 @@
     subtitle={$t('net.subtitle')}
     breadcrumbs={[{ label: $t('nav.group_tools') }, { label: $t('nav.network') }]}
     {onSwitchTab}
+    hideHome={true}
   />
 
   {#if publicIP}

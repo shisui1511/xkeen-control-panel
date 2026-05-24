@@ -4,16 +4,21 @@
 
   export let items: { label: string; tab?: string }[] = [];
   export let onNavigate: (tab: string) => void = () => {};
+  export let hideHome: boolean = false;
 </script>
 
 <!-- Visual rules live in global.css under .breadcrumbs etc. -->
 <nav class="breadcrumbs">
-  <button class="breadcrumb-home" on:click={() => onNavigate('dashboard')}>
-    <Icon name="dashboard" size={12} />
-    {$t('nav.dashboard')}
-  </button>
+  {#if !hideHome}
+    <button class="breadcrumb-home" on:click={() => onNavigate('dashboard')}>
+      <Icon name="dashboard" size={12} />
+      {$t('nav.dashboard')}
+    </button>
+  {/if}
   {#each items as item, i}
-    <span class="breadcrumb-separator">/</span>
+    {#if !hideHome || i > 0}
+      <span class="breadcrumb-separator">/</span>
+    {/if}
     {#if item.tab && i < items.length - 1}
       <button class="breadcrumb-link" on:click={() => onNavigate(item.tab || '')}
         >{item.label}</button
