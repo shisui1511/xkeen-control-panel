@@ -175,6 +175,15 @@
     </button>
     <button
       class="nav-item"
+      class:active={currentTab === 'mihomo-gen'}
+      on:click={() => navigate('mihomo-gen')}
+      title="Mihomo Generator"
+    >
+      <Icon name="settings" size={16} />
+      Mihomo Generator
+    </button>
+    <button
+      class="nav-item"
       class:active={currentTab === 'console'}
       on:click={() => navigate('console')}
       title={$t('nav.console')}
