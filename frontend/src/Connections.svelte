@@ -331,115 +331,62 @@
       <span class="stat">↓ {formatBytes(totalDownload)}</span>
     </div>
 
-    <div class="table-container">
-      <table
-        class="connections-table"
-        style="width: 100%; border-collapse: collapse; font-size: 13px;"
-      >
+    <div class="table-container conn-table-container">
+      <table class="connections-table">
         <thead>
-          <tr style="border-bottom: 1px solid var(--border);">
-            <th
-              style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
-              >{$t('conn.source')}</th
-            >
-            <th
-              style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
-              >{$t('conn.destination')}</th
-            >
-            <th
-              style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
-              >{$t('conn.rule')}</th
-            >
-            <th
-              style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
-              >{$t('conn.chain')}</th
-            >
-            <th
-              style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
-              >↑ {$t('conn.upload')}</th
-            >
-            <th
-              style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
-              >↓ {$t('conn.download')}</th
-            >
-            <th
-              style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
-              >⏱ {$t('conn.duration')}</th
-            >
+          <tr>
+            <th class="col-src">{$t('conn.source')}</th>
+            <th>{$t('conn.destination')}</th>
+            <th>{$t('conn.rule')}</th>
+            <th class="col-chain">{$t('conn.chain')}</th>
+            <th class="col-traffic col-upload">↑ {$t('conn.upload')}</th>
+            <th class="col-traffic col-download">↓ {$t('conn.download')}</th>
+            <th class="col-duration">⏱ {$t('conn.duration')}</th>
             <th style="width: 40px;"></th>
           </tr>
         </thead>
         <tbody>
           {#if loading && connections.length === 0}
             {#each Array(5) as _}
-              <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 12px 14px;"><Skeleton type="text-line" width="120px" /></td>
-                <td style="padding: 12px 14px;"><Skeleton type="text-line" width="180px" /></td>
-                <td style="padding: 12px 14px;"><Skeleton type="text-line" width="80px" /></td>
-                <td style="padding: 12px 14px;"><Skeleton type="text-line" width="100px" /></td>
-                <td style="padding: 12px 14px; text-align: right;"
-                  ><Skeleton type="text-line" width="50px" /></td
-                >
-                <td style="padding: 12px 14px; text-align: right;"
-                  ><Skeleton type="text-line" width="50px" /></td
-                >
-                <td style="padding: 12px 14px; text-align: right;"
-                  ><Skeleton type="text-line" width="30px" /></td
-                >
+              <tr>
+                <td class="col-src"><Skeleton type="text-line" width="120px" /></td>
+                <td><Skeleton type="text-line" width="180px" /></td>
+                <td><Skeleton type="text-line" width="80px" /></td>
+                <td class="col-chain"><Skeleton type="text-line" width="100px" /></td>
+                <td class="col-traffic col-upload"><Skeleton type="text-line" width="50px" /></td>
+                <td class="col-traffic col-download"><Skeleton type="text-line" width="50px" /></td>
+                <td class="col-duration"><Skeleton type="text-line" width="30px" /></td>
                 <td></td>
               </tr>
             {/each}
           {:else}
             {#each filteredConnections as conn (conn.id)}
-              <tr
-                class="conn-row"
-                style="border-bottom: 1px solid var(--border); transition: background 0.15s;"
-              >
-                <td
-                  class="mono"
-                  style="padding: 12px 14px; font-family: var(--font-family-mono, monospace); color: var(--fg-primary);"
-                  >{conn.metadata.sourceIP}:{conn.metadata.sourcePort}</td
-                >
-                <td
-                  class="mono"
-                  style="padding: 12px 14px; font-family: var(--font-family-mono, monospace); color: var(--fg-primary); word-break: break-all;"
+              <tr class="conn-row">
+                <td class="mono col-src">{conn.metadata.sourceIP}:{conn.metadata.sourcePort}</td>
+                <td class="mono" style="word-break:break-all;"
                   >{conn.metadata.host || conn.metadata.destinationIP}:{conn.metadata
                     .destinationPort}</td
                 >
-                <td style="padding: 12px 14px;">
-                  <span
-                    class="badge badge-info"
-                    style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line);"
-                  >
+                <td>
+                  <span class="badge badge-info">
                     {conn.rule}
                   </span>
                   {#if conn.rulePayload}
-                    <div
-                      style="font-size: 11px; color: var(--fg-dim); margin-top: 3px; font-family: var(--font-family-mono, monospace);"
-                    >
-                      {conn.rulePayload}
-                    </div>
+                    <div class="rule-payload mono">{conn.rulePayload}</div>
                   {/if}
                 </td>
-                <td class="cell-route" style="padding: 12px 14px; color: var(--fg-primary);">
-                  {getChainPath(conn)}
-                </td>
-                <td
-                  class="mono"
-                  style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--accent);"
+                <td class="col-chain cell-route">{getChainPath(conn)}</td>
+                <td class="mono col-traffic col-upload" style="text-align:right;color:var(--accent);"
                   >{formatBytes(conn.upload)}</td
                 >
                 <td
-                  class="mono"
-                  style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--accent);"
-                  >{formatBytes(conn.download)}</td
+                  class="mono col-traffic col-download"
+                  style="text-align:right;color:var(--accent);">{formatBytes(conn.download)}</td
                 >
-                <td
-                  class="mono"
-                  style="padding: 12px 14px; text-align: right; font-family: var(--font-family-mono, monospace); color: var(--fg-dim);"
+                <td class="mono col-duration" style="text-align:right;color:var(--fg-dim);"
                   >{getDuration(conn.start)}</td
                 >
-                <td style="padding: 12px 14px; text-align: center;">
+                <td style="text-align:center;">
                   <button
                     class="btn btn-secondary btn-close-conn"
                     style="padding: 4px 8px; color: var(--danger); border-color: transparent;"
@@ -484,11 +431,39 @@
     border-radius: 50%;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   }
+  .conn-table-container {
+    overflow-x: auto;
+  }
+  .connections-table {
+    min-width: 700px;
+  }
+  .rule-payload {
+    font-size: 11px;
+    color: var(--fg-dim);
+    margin-top: 3px;
+  }
   .conn-row:hover {
     background: var(--bg-hover, rgba(255, 255, 255, 0.02));
   }
   .btn-close-conn:hover {
     background: var(--danger) !important;
     color: white !important;
+  }
+
+  /* Column priority — hide tier-2/3 columns on mobile */
+  @media (max-width: 640px) {
+    .col-src,
+    .col-traffic,
+    .col-duration {
+      display: none;
+    }
+    .connections-table {
+      min-width: 0;
+    }
+  }
+  @media (max-width: 480px) {
+    .col-chain {
+      display: none;
+    }
   }
 </style>

@@ -298,7 +298,7 @@
       <table>
         <thead>
           <tr>
-            <th style="width:60px;">#</th>
+            <th class="col-num" style="width:60px;">#</th>
             <th>{$t('rules.type_col')}</th>
             <th>Payload</th>
             <th>{$t('rules.target')}</th>
@@ -309,7 +309,7 @@
           {#each getFilteredRules() as rule, i}
             {#if rule.type.toUpperCase() !== 'MATCH'}
               <tr>
-                <td class="mono" style="color:var(--fg-dim);">{String(i + 1).padStart(3, '0')}</td>
+                <td class="mono col-num" style="color:var(--fg-dim);">{String(i + 1).padStart(3, '0')}</td>
                 <td>
                   <span class={getRuleBadgeClass(rule.type)}>
                     {rule.type}
@@ -353,7 +353,7 @@
           {#if getFilteredRules().some((r) => r.type.toUpperCase() === 'MATCH')}
             {#each getFilteredRules().filter((r) => r.type.toUpperCase() === 'MATCH') as rule}
               <tr class="match-fallback-row">
-                <td class="mono" style="color:var(--fg-dim);">—</td>
+                <td class="mono col-num" style="color:var(--fg-dim);">—</td>
                 <td><span class={getRuleBadgeClass(rule.type)}>{rule.type}</span></td>
                 <td class="mono" style="color:var(--fg-dim);">{$t('rules.match_fallback')}</td>
                 <td><span class={getTargetBadgeClass(rule.proxy)}>{rule.proxy}</span></td>
@@ -515,5 +515,42 @@
 
   .dropdown-menu button:hover {
     background: var(--hover);
+  }
+
+  /* Column priority on mobile — hide # index, truncate payload */
+  @media (max-width: 640px) {
+    .col-num {
+      display: none;
+    }
+    .table-container {
+      overflow-x: visible;
+    }
+    table {
+      table-layout: fixed;
+      width: 100%;
+    }
+    th:nth-child(2) {
+      width: 25%;
+    }
+    th:nth-child(3) {
+      width: auto;
+    }
+    th:nth-child(4) {
+      width: 28%;
+    }
+    th:last-child {
+      width: 40px;
+    }
+    td.mono {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 0;
+    }
+    td,
+    th {
+      padding: 10px 10px;
+      font-size: 12px;
+    }
   }
 </style>
