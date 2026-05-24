@@ -1,12 +1,13 @@
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 function getCommitMessages(base, head) {
   try {
     const range = base && head ? `${base}..${head}` : 'origin/main..HEAD';
     console.log(`Получение коммитов для диапазона: ${range}`);
-    
+
     // Получаем заголовки и тело коммитов разделенные специальным маркером
-    const output = execSync(`git log --format="%s%n%b%n---COMMIT_END---" ${range}`, { encoding: 'utf8' });
+    // execFileSync не использует shell, поэтому аргументы передаются напрямую (без инъекций)
+    const output = execFileSync('git', ['log', '--format=%s%n%b%n---COMMIT_END---', range], { encoding: 'utf8' });
     return output
       .split('---COMMIT_END---')
       .map(c => c.trim())
