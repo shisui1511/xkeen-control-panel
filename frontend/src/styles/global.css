@@ -1318,7 +1318,7 @@ pre.code-output {
   padding: 10px 14px;
   border: none;
   border-bottom: 1px solid var(--border-light);
-  background: transparent;
+  background: var(--bg-card);
   width: 100%;
   text-align: left;
   font-family: inherit;
