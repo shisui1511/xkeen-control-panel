@@ -506,7 +506,7 @@
           <div>
             <div class="crumbs">
               {$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
-              {$t('nav.monitoring')}
+              {$t('nav.dashboard')}
             </div>
             <h1>{$t('dash.title')}</h1>
             <p class="sub">{$t('dash.welcome')}</p>

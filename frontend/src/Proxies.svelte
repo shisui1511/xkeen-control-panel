@@ -302,7 +302,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
         {$t('proxies.title')}
       </div>
       <h1>{$t('proxies.title')}</h1>

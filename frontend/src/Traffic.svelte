@@ -205,7 +205,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$currentLang === 'ru' ? 'Инструменты' : 'Tools'}
+        {$t('nav.group_tools')}
         <span style="color:var(--fg-faint);margin:0 6px;">/</span>
         {$t('traffic.title')}
       </div>
