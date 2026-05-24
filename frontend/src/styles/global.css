@@ -564,6 +564,23 @@ h2.card-title {
   opacity: 1;
 }
 
+.nav-item-preview {
+  opacity: 0.6;
+}
+
+.nav-preview-tag {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
 /* Main content */
 .main-content {
   flex: 1;

@@ -312,6 +312,28 @@
       {$t('nav.network')}
     </a>
   </details>
+
+  <!-- Access group -->
+  <details class="nav-group" open>
+    <summary>
+      <span class="group-ttl">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        {$t('nav.group_access')}
+      </span>
+      <span class="nav-group-arrow">▶</span>
+    </summary>
+    <a
+      href="#/settings"
+      class="nav-item nav-item-preview"
+      class:active={currentTab === 'settings'}
+      on:click={() => isSidebarOpen.set(false)}
+      title={$t('nav.settings')}
+    >
+      <Icon name="settings" size={16} />
+      {$t('nav.settings')}
+      <span class="nav-preview-tag">превью</span>
+    </a>
+  </details>
 </nav>
 
 <div style="border-top: 1px solid #03101e; padding: 0.5rem 0; background: var(--bg-deep);">
