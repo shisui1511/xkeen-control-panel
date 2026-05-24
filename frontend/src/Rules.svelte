@@ -136,12 +136,61 @@
     }
   }
 
+  let activeDropdownRule: Rule | null = null;
+
+  function toggleDropdown(event: MouseEvent, rule: Rule) {
+    event.stopPropagation();
+    if (activeDropdownRule === rule) {
+      activeDropdownRule = null;
+    } else {
+      activeDropdownRule = rule;
+    }
+  }
+
+  function closeDropdowns() {
+    activeDropdownRule = null;
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      closeDropdowns();
+    }
+  }
+
+  async function copyToClipboard(text: string, successMsg: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('success', successMsg);
+    } catch (err) {
+      showToast('error', 'Failed to copy');
+    }
+  }
+
+  function copyPayload(rule: Rule) {
+    copyToClipboard(rule.payload, $currentLang === 'ru' ? 'Payload скопирован' : 'Payload copied');
+    closeDropdowns();
+  }
+
+  function copyFullRule(rule: Rule) {
+    const text = rule.type.toUpperCase() === 'MATCH' ? `${rule.type},${rule.proxy}` : `${rule.type},${rule.payload},${rule.proxy}`;
+    copyToClipboard(text, $currentLang === 'ru' ? 'Правило скопировано' : 'Rule copied');
+    closeDropdowns();
+  }
+
+  function editRule(rule: Rule) {
+    showToast('info', $currentLang === 'ru' ? `Найдите файл конфигурации для изменения: ${rule.payload}` : `Find config file to edit: ${rule.payload}`);
+    window.location.hash = '#/editor';
+    closeDropdowns();
+  }
+
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       fetchRules();
     }
   });
 </script>
+
+<svelte:window on:click={closeDropdowns} on:keydown={handleKeydown} />
 
 <div class="container">
   <div class="page-head">
@@ -245,6 +294,7 @@
             <th>{$t('rules.type_col')}</th>
             <th>Payload</th>
             <th>{$t('rules.target')}</th>
+            <th style="width:50px;"></th>
           </tr>
         </thead>
         <tbody>
@@ -263,12 +313,28 @@
                   {rule.proxy}
                 </span>
               </td>
+              <td style="position: relative; text-align: right;">
+                <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
+                {#if activeDropdownRule === rule}
+                  <div class="dropdown-menu">
+                    <button on:click={() => copyPayload(rule)}>
+                      {$currentLang === 'ru' ? 'Копировать payload' : 'Copy payload'}
+                    </button>
+                    <button on:click={() => copyFullRule(rule)}>
+                      {$currentLang === 'ru' ? 'Копировать правило' : 'Copy rule'}
+                    </button>
+                    <button on:click={() => editRule(rule)}>
+                      {$currentLang === 'ru' ? 'Редактировать' : 'Edit'}
+                    </button>
+                  </div>
+                {/if}
+              </td>
             </tr>
             {/if}
           {:else}
             <tr>
               <td
-                colspan="4"
+                colspan="5"
                 class="empty-cell"
                 style="text-align: center; padding: 2rem; color: var(--fg-dim);"
               >
@@ -283,6 +349,22 @@
               <td><span class={getRuleBadgeClass(rule.type)}>{rule.type}</span></td>
               <td class="mono" style="color:var(--fg-dim);">{$t('rules.match_fallback')}</td>
               <td><span class={getTargetBadgeClass(rule.proxy)}>{rule.proxy}</span></td>
+              <td style="position: relative; text-align: right;">
+                <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
+                {#if activeDropdownRule === rule}
+                  <div class="dropdown-menu">
+                    <button on:click={() => copyPayload(rule)}>
+                      {$currentLang === 'ru' ? 'Копировать payload' : 'Copy payload'}
+                    </button>
+                    <button on:click={() => copyFullRule(rule)}>
+                      {$currentLang === 'ru' ? 'Копировать правило' : 'Copy rule'}
+                    </button>
+                    <button on:click={() => editRule(rule)}>
+                      {$currentLang === 'ru' ? 'Редактировать' : 'Edit'}
+                    </button>
+                  </div>
+                {/if}
+              </td>
             </tr>
             {/each}
           {/if}
@@ -380,5 +462,50 @@
     background: rgba(156, 163, 175, 0.04);
     color: var(--fg-dim);
     border-top: 1px solid var(--border);
+  }
+
+  .action-btn {
+    background: none;
+    border: none;
+    color: var(--fg-dim);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+  }
+
+  .action-btn:hover {
+    background: var(--hover);
+    color: var(--fg-primary);
+  }
+
+  .dropdown-menu {
+    position: absolute;
+    right: 18px;
+    top: 36px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 100;
+    min-width: 150px;
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0;
+  }
+
+  .dropdown-menu button {
+    background: none;
+    border: none;
+    color: var(--fg-primary);
+    padding: 8px 12px;
+    text-align: left;
+    font-size: 12px;
+    cursor: pointer;
+    width: 100%;
+  }
+
+  .dropdown-menu button:hover {
+    background: var(--hover);
   }
 </style>
