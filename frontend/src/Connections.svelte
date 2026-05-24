@@ -41,6 +41,9 @@
   let filterRule = '';
   let filterProxy = '';
 
+  $: uniqueRules = [...new Set(connections.map(c => c.rule).filter(Boolean))].sort();
+  $: uniqueChains = [...new Set(connections.map(c => getChainPath(c)).filter(Boolean))].sort();
+
   async function fetchConnections() {
     loading = true;
     error = '';
@@ -145,11 +148,8 @@
         !conn.metadata.destinationIP.includes(filterDest)
       )
         return false;
-      if (filterRule && !conn.rule.toLowerCase().includes(filterRule.toLowerCase())) return false;
-      if (filterProxy) {
-        const proxy = getProxyName(conn).toLowerCase();
-        if (!proxy.includes(filterProxy.toLowerCase())) return false;
-      }
+      if (filterRule && conn.rule !== filterRule) return false;
+      if (filterProxy && getChainPath(conn) !== filterProxy) return false;
       return true;
     });
   }
@@ -292,20 +292,26 @@
           class="filter-input"
           style="flex: 1; min-width: 180px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary);"
         />
-        <input
-          type="text"
-          placeholder={$t('conn.rule') + '...'}
+        <select
           bind:value={filterRule}
           class="filter-input"
-          style="flex: 1; min-width: 120px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary);"
-        />
-        <input
-          type="text"
-          placeholder={$t('conn.proxy') + '...'}
+          style="flex: 1; min-width: 140px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary); font-family: inherit; font-size: 13px;"
+        >
+          <option value="">{$t('conn.all_rules')}</option>
+          {#each uniqueRules as rule}
+            <option value={rule}>{rule}</option>
+          {/each}
+        </select>
+        <select
           bind:value={filterProxy}
           class="filter-input"
-          style="flex: 1; min-width: 120px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary);"
-        />
+          style="flex: 1; min-width: 140px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary); font-family: inherit; font-size: 13px;"
+        >
+          <option value="">{$t('conn.all_chains')}</option>
+          {#each uniqueChains as chain}
+            <option value={chain}>{chain}</option>
+          {/each}
+        </select>
       </div>
     </div>
 
