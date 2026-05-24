@@ -376,8 +376,9 @@
                   {/if}
                 </td>
                 <td class="col-chain cell-route">{getChainPath(conn)}</td>
-                <td class="mono col-traffic col-upload" style="text-align:right;color:var(--accent);"
-                  >{formatBytes(conn.upload)}</td
+                <td
+                  class="mono col-traffic col-upload"
+                  style="text-align:right;color:var(--accent);">{formatBytes(conn.upload)}</td
                 >
                 <td
                   class="mono col-traffic col-download"

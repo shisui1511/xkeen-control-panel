@@ -4,7 +4,7 @@
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/shisui1511/xkeen-control-panel)](https://github.com/shisui1511/xkeen-control-panel/releases)
 [![GitHub license](https://img.shields.io/github/license/shisui1511/xkeen-control-panel)](https://github.com/shisui1511/xkeen-control-panel/blob/main/LICENSE)
 
-Веб-панель для управления XKeen/Mihomo на роутерах Keenetic/Netcraze.
+Веб-панель для управления XKeen на роутерах Keenetic/Netcraze.
 
 - **Go backend** — статический бинарник, 5–10 MB RAM
 - **Svelte 5 frontend** — встроен в бинарник, bundle ~160 KB gzipped

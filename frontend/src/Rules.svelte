@@ -309,7 +309,9 @@
           {#each getFilteredRules() as rule, i}
             {#if rule.type.toUpperCase() !== 'MATCH'}
               <tr>
-                <td class="mono col-num" style="color:var(--fg-dim);">{String(i + 1).padStart(3, '0')}</td>
+                <td class="mono col-num" style="color:var(--fg-dim);"
+                  >{String(i + 1).padStart(3, '0')}</td
+                >
                 <td>
                   <span class={getRuleBadgeClass(rule.type)}>
                     {rule.type}
