@@ -15,7 +15,7 @@
     crosshairCursor,
     highlightActiveLine
   } from '@codemirror/view';
-  import { EditorState } from '@codemirror/state';
+  import { EditorState, Compartment } from '@codemirror/state';
   import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
   import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
   import {
@@ -58,6 +58,7 @@
 
   let editorContainer: HTMLDivElement;
   let editorView: EditorView | null = null;
+  const schemaCompartment = new Compartment();
   interface Template {
     name: string;
     description: string;
@@ -303,7 +304,7 @@
               cursorCol = pos - line.from + 1;
             }
           }),
-          ...schemaExts
+          schemaCompartment.of(schemaExts)
         ]
       });
 
@@ -666,18 +667,21 @@
 
   function toggleSchema() {
     schemaEnabled = !schemaEnabled;
-    if (selectedFile) {
-      // Reload current file to apply/remove schema extensions
-      const content = editorView ? editorView.state.doc.toString() : '';
-      loadFile(selectedFile);
+    if (editorView && selectedFile) {
+      const newExts = getSchemaExtensions(selectedFile, expertMode);
+      editorView.dispatch({
+        effects: schemaCompartment.reconfigure(newExts)
+      });
     }
   }
 
   function toggleExpertMode() {
     expertMode = !expertMode;
-    // Expert mode disables strict schema validation to reduce visual noise for advanced edits
-    if (selectedFile) {
-      loadFile(selectedFile);
+    if (editorView && selectedFile) {
+      const newExts = getSchemaExtensions(selectedFile, expertMode);
+      editorView.dispatch({
+        effects: schemaCompartment.reconfigure(newExts)
+      });
     }
   }
 
