@@ -54,6 +54,10 @@ type SystemStats struct {
 }
 
 func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	stats := SystemStats{}
 
 	// Memory from /proc/meminfo

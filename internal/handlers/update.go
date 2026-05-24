@@ -60,6 +60,10 @@ func setUpdateState(s UpdateStatus) {
 }
 
 func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	channel := r.URL.Query().Get("channel")
 	if channel == "" {
 		channel = "stable"
@@ -190,6 +194,10 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) UpdateStatusEndpoint(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	JSONSuccess(w, getUpdateState())
 }
 

@@ -150,6 +150,10 @@ func (a *API) SmartProxySetEnabled(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) SmartProxyStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	if a.smartProxySvc == nil {
 		a.errorResponse(w, "Smart Proxy service unavailable", http.StatusServiceUnavailable)
 		return

@@ -29,6 +29,10 @@ type MihomoCapability struct {
 }
 
 func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	a.capsCacheMutex.Lock()
 	if a.capsCache != nil && time.Since(a.capsCacheTime) < 3*time.Second {
 		cached := a.capsCache

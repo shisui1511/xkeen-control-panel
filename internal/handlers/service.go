@@ -96,6 +96,10 @@ func (a *API) monitorAndRollbackKernel(name string) {
 }
 
 func (a *API) ServiceRestartLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	entries := a.xkeenSvc.GetRestartLog()
 	// Return newest first
 	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
