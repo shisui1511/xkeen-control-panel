@@ -51,6 +51,9 @@
   import { xraySchema } from './schemas/xray';
   import { mihomoSchema } from './schemas/mihomo';
 
+  // Snippets
+  import { xraySnippetSource, mihomoSnippetSource } from './lib/snippets';
+
   export let onSwitchTab: (tab: string) => void = () => {};
 
   let editorContainer: HTMLDivElement;
@@ -188,12 +191,16 @@
 
     if (!schema) return [];
 
+    const isXray = path.includes('xray') || path.includes('/opt/etc/xray');
+    const snippetSource = isXray ? xraySnippetSource : mihomoSnippetSource;
+
     if (isJson) {
       // In expert mode, skip strict schema linting but keep autocomplete and hover
       if (expert) {
         return [
           linter(jsonParseLinter(), { delay: 300 }),
           jsonLanguage.data.of({ autocomplete: jsonCompletion() }),
+          jsonLanguage.data.of({ autocomplete: snippetSource }),
           hoverTooltip(jsonSchemaHover()),
           stateExtensions(schema)
         ];
@@ -202,6 +209,7 @@
         linter(jsonParseLinter(), { delay: 300 }),
         linter(jsonSchemaLinter(), { needsRefresh: handleRefresh }),
         jsonLanguage.data.of({ autocomplete: jsonCompletion() }),
+        jsonLanguage.data.of({ autocomplete: snippetSource }),
         hoverTooltip(jsonSchemaHover()),
         stateExtensions(schema)
       ];
@@ -212,6 +220,7 @@
       if (expert) {
         return [
           yamlLanguage.data.of({ autocomplete: yamlCompletion() }),
+          yamlLanguage.data.of({ autocomplete: snippetSource }),
           hoverTooltip(yamlSchemaHover()),
           stateExtensions(schema)
         ];
@@ -219,6 +228,7 @@
       return [
         linter(yamlSchemaLinter(), { needsRefresh: handleRefresh }),
         yamlLanguage.data.of({ autocomplete: yamlCompletion() }),
+        yamlLanguage.data.of({ autocomplete: snippetSource }),
         hoverTooltip(yamlSchemaHover()),
         stateExtensions(schema)
       ];
