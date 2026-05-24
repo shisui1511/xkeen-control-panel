@@ -100,6 +100,20 @@ func (s *SubscriptionService) load() {
 		return
 	}
 	json.Unmarshal(data, &s.subscriptions)
+
+	needSave := false
+	for i := range s.subscriptions {
+		if s.subscriptions[i].ID == "" {
+			s.subscriptions[i].ID = fmt.Sprintf("sub_%d_%d", time.Now().Unix(), i)
+			needSave = true
+		}
+	}
+	if needSave {
+		indentData, err := json.MarshalIndent(s.subscriptions, "", "  ")
+		if err == nil {
+			utils.AtomicWriteFile(path, indentData, 0600)
+		}
+	}
 }
 
 func (s *SubscriptionService) save() error {
