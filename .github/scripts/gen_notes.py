@@ -91,7 +91,7 @@ def arch_table(version):
     return "| Архитектура | Модели роутеров | Файл |\n|---|---|---|\n" + "\n".join(rows)
 
 
-def prerelease_notes(version, commit_count, prev_tag, short_sha, full_sha):
+def prerelease_notes(version, commit_count, pr_number, prev_tag, short_sha, full_sha):
     repo = os.environ["GITHUB_REPOSITORY"]
     repo_url = f"https://github.com/{repo}"
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -103,14 +103,20 @@ def prerelease_notes(version, commit_count, prev_tag, short_sha, full_sha):
     stable_note = ""
     if prev_tag:
         stable_note = (
-            f" Последний стабильный: "
+            f" Последний стабильный релиз: "
             f"[**{prev_tag}**]({repo_url}/releases/tag/{prev_tag})"
         )
 
-    return f"""\
-> ⚠️ **Нестабильная сборка** — автоматически собирается при каждом push в `main`.{stable_note}
+    if pr_number:
+        build_info = f"**PR:** [#{pr_number}]({repo_url}/pull/{pr_number})"
+    else:
+        build_info = f"**Сборка:** #{commit_count}"
 
-**Коммит:** [`{short_sha}`]({repo_url}/commit/{full_sha}) · **Сборка:** #{commit_count} · **Дата:** {date_str}
+    return f"""\
+> ⚠️ **Нестабильная сборка** — Не рекомендуется для production-использования!
+> {stable_note}
+
+**Коммит:** [`{short_sha}`]({repo_url}/commit/{full_sha}) · {build_info} · **Дата:** {date_str}
 
 ---
 
@@ -186,13 +192,14 @@ def main():
     full_sha = os.environ.get("GITHUB_SHA", "")
     short_sha = full_sha[:7]
     commit_count = os.environ.get("COMMIT_COUNT", "?")
+    pr_number = os.environ.get("PR_NUMBER", "")
     github_env = os.environ.get("GITHUB_ENV", "")
 
     stable_tags = get_stable_tags()
 
     if mode == "prerelease":
         prev_tag = stable_tags[-1] if stable_tags else ""
-        notes = prerelease_notes(version, commit_count, prev_tag, short_sha, full_sha)
+        notes = prerelease_notes(version, commit_count, pr_number, prev_tag, short_sha, full_sha)
     else:
         # For stable: prev is the tag before current version
         prev_tag = next((t for t in reversed(stable_tags) if t != version), "")
