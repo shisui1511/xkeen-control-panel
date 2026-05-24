@@ -25,6 +25,7 @@ type TrafficQuota struct {
 	Period         string `json:"period"` // "daily", "weekly", "monthly"
 	Enabled        bool   `json:"enabled"`
 	AlertThreshold int    `json:"alert_threshold"` // 0-100, percent
+	Action         string `json:"action"`          // "notify", "throttle", "log_only", "block"
 	CurrentBytes   int64  `json:"current_bytes"`
 	LastReset      int64  `json:"last_reset"`
 }
