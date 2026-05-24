@@ -44,14 +44,18 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 
 	res := make([]ConfigFileInfo, 0, len(files))
 	for _, f := range files {
-		info, err := os.Stat(f)
+		cleanF, err := a.pathVal.Validate(f)
+		if err != nil {
+			continue
+		}
+		info, statErr := os.Stat(cleanF)
 		var size int64
-		if err == nil {
+		if statErr == nil {
 			size = info.Size()
 		}
 		res = append(res, ConfigFileInfo{
-			Name: filepath.Base(f),
-			Path: f,
+			Name: filepath.Base(cleanF),
+			Path: cleanF,
 			Size: size,
 		})
 	}
