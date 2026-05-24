@@ -254,15 +254,15 @@ func TestEvaluateFailover_Recovery(t *testing.T) {
 	svc := NewSmartProxyService(tmp, ts.URL)
 
 	profile := Profile{
-		Name:               "FailoverTest",
-		Enabled:            true,
-		Mode:               ModeFailover,
-		GroupName:          "proxy-group",
-		ProxyName:          "primary",
-		FallbackProxy:      "fallback",
-		LatencyThreshold:   200,
+		Name:                "FailoverTest",
+		Enabled:             true,
+		Mode:                ModeFailover,
+		GroupName:           "proxy-group",
+		ProxyName:           "primary",
+		FallbackProxy:       "fallback",
+		LatencyThreshold:    200,
 		ConsecutiveFailures: 2,
-		CurrentProxy:       "fallback", // simulating we are already on fallback
+		CurrentProxy:        "fallback", // simulating we are already on fallback
 	}
 	if err := svc.Add(&profile); err != nil {
 		t.Fatalf("Add: %v", err)
@@ -305,13 +305,13 @@ func TestEvaluateFailover_Failover(t *testing.T) {
 	svc := NewSmartProxyService(tmp, ts.URL)
 
 	profile := Profile{
-		Name:               "FailoverTrigger",
-		Enabled:            true,
-		Mode:               ModeFailover,
-		GroupName:          "proxy-group",
-		ProxyName:          "primary",
-		FallbackProxy:      "fallback",
-		LatencyThreshold:   200,
+		Name:                "FailoverTrigger",
+		Enabled:             true,
+		Mode:                ModeFailover,
+		GroupName:           "proxy-group",
+		ProxyName:           "primary",
+		FallbackProxy:       "fallback",
+		LatencyThreshold:    200,
 		ConsecutiveFailures: 2,
 	}
 	if err := svc.Add(&profile); err != nil {
