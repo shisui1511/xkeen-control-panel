@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { t, currentLang } from './i18n';
   import Icon from './lib/components/Icon.svelte';
+  import { showToast } from './stores';
 
   export let onSwitchTab: (tab: string) => void = () => {};
 
@@ -14,6 +15,10 @@
     type: string;
     is_symlink: boolean;
     symlink_to?: string;
+    tag_count?: number;
+    record_count?: number;
+    version?: string;
+    info?: string;
   }
 
   interface DATTag {
@@ -25,6 +30,7 @@
   let loading = false;
   let error = '';
   let globalUpdating = false;
+  let rollbacking = false;
 
   // Tag browser state
   let tagDrawer: {
@@ -74,6 +80,29 @@
       error = e.message;
     } finally {
       globalUpdating = false;
+    }
+  }
+
+  async function rollbackAll() {
+    rollbacking = true;
+    error = '';
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/dat/rollback', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text);
+      }
+      showToast('success', $currentLang === 'ru' ? 'Файлы успешно откачены' : 'Files rolled back successfully');
+      await fetchFiles();
+    } catch (e: any) {
+      error = e.message;
+      showToast('error', e.message);
+    } finally {
+      rollbacking = false;
     }
   }
 
@@ -211,9 +240,9 @@
     <div class="ph-actions">
       <button
         class="btn btn-secondary"
-        on:click={fetchFiles}
-        disabled={loading}
-        title={$t('app.refresh')}
+        on:click={rollbackAll}
+        disabled={rollbacking || loading || globalUpdating}
+        title={$currentLang === 'ru' ? 'Откатить DAT-файлы из бэкапа' : 'Rollback DAT files from backup'}
       >
         <svg
           width="14"
@@ -226,10 +255,10 @@
           stroke-linejoin="round"
           style="margin-right: 6px;"
         >
-          <polyline points="23 4 23 10 17 10" />
-          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+          <polyline points="3 7 3 12 8 12" />
+          <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
         </svg>
-        {$t('app.refresh')}
+        {rollbacking ? ($currentLang === 'ru' ? 'Откат...' : 'Rolling...') : ($currentLang === 'ru' ? 'Откатить' : 'Rollback')}
       </button>
       <button
         class="btn btn-primary"
@@ -335,8 +364,19 @@
                   {#if file.is_symlink}
                     {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
                   {/if}
+                  {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
+                    {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
+                  {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
+                    {file.record_count.toLocaleString()} {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                  {/if}
+                  {#if file.info}
+                    {file.info} ·
+                  {/if}
                   {$t('dat.updated')}
                   {formatRelativeDate(file.last_update)}
+                  {#if file.version}
+                    · {file.version}
+                  {/if}
                 </div>
               </div>
               <div class="stat-bar" style="width:120px;">
@@ -438,8 +478,19 @@
                   {#if file.is_symlink}
                     {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
                   {/if}
+                  {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
+                    {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
+                  {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
+                    {file.record_count.toLocaleString()} {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                  {/if}
+                  {#if file.info}
+                    {file.info} ·
+                  {/if}
                   {$t('dat.updated')}
                   {formatRelativeDate(file.last_update)}
+                  {#if file.version}
+                    · {file.version}
+                  {/if}
                 </div>
               </div>
               <div class="stat-bar" style="width:120px;">
@@ -527,8 +578,19 @@
                   {#if file.is_symlink}
                     {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
                   {/if}
+                  {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
+                    {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
+                  {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
+                    {file.record_count.toLocaleString()} {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                  {/if}
+                  {#if file.info}
+                    {file.info} ·
+                  {/if}
                   {$t('dat.updated')}
                   {formatRelativeDate(file.last_update)}
+                  {#if file.version}
+                    · {file.version}
+                  {/if}
                 </div>
               </div>
               <div class="stat-bar" style="width:120px;">

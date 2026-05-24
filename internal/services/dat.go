@@ -18,14 +18,27 @@ import (
 )
 
 type DATFile struct {
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	Size       int64  `json:"size"`
-	LastUpdate int64  `json:"last_update"`
-	Exists     bool   `json:"exists"`
-	Type       string `json:"type"` // "xray" or "mihomo"
-	IsSymlink  bool   `json:"is_symlink"`
-	SymlinkTo  string `json:"symlink_to,omitempty"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Size        int64  `json:"size"`
+	LastUpdate  int64  `json:"last_update"`
+	Exists      bool   `json:"exists"`
+	Type        string `json:"type"` // "xray" or "mihomo"
+	IsSymlink   bool   `json:"is_symlink"`
+	SymlinkTo   string `json:"symlink_to,omitempty"`
+	TagCount    int    `json:"tag_count,omitempty"`
+	RecordCount int    `json:"record_count,omitempty"`
+	Version     string `json:"version,omitempty"`
+	Info        string `json:"info,omitempty"`
+}
+
+type datCacheEntry struct {
+	Size        int64
+	ModTime     int64
+	TagCount    int
+	RecordCount int
+	Version     string
+	Info        string
 }
 
 type DATManagerService struct {
@@ -33,6 +46,8 @@ type DATManagerService struct {
 	mihomoDir  string
 	binaryPath string
 	mu         sync.RWMutex
+	cache      map[string]datCacheEntry
+	cacheMu    sync.Mutex
 }
 
 func NewDATManagerService(dirs ...string) *DATManagerService {
@@ -54,6 +69,7 @@ func NewDATManagerService(dirs ...string) *DATManagerService {
 		xrayDir:    xrayDir,
 		mihomoDir:  mihomoDir,
 		binaryPath: binaryPath,
+		cache:      make(map[string]datCacheEntry),
 	}
 }
 
@@ -97,6 +113,48 @@ func (s *DATManagerService) List() []DATFile {
 					f.LastUpdate = info.ModTime().Unix()
 				}
 
+				// Check cache
+				s.cacheMu.Lock()
+				entry, found := s.cache[match]
+				s.cacheMu.Unlock()
+
+				if !found || entry.Size != f.Size || entry.ModTime != f.LastUpdate {
+					entry = datCacheEntry{
+						Size:    f.Size,
+						ModTime: f.LastUpdate,
+					}
+					// Parse version based on ModTime
+					entry.Version = "v" + time.Unix(f.LastUpdate, 0).UTC().Format("200601")
+
+					if strings.HasSuffix(f.Name, ".dat") {
+						// Extract tags and calculate record count
+						if tags, err := s.ListTags(f.Name); err == nil {
+							entry.TagCount = len(tags)
+							for _, t := range tags {
+								entry.RecordCount += t.Count
+							}
+						}
+					} else if strings.HasSuffix(f.Name, ".mmdb") {
+						lowerName := strings.ToLower(f.Name)
+						if strings.Contains(lowerName, "country") {
+							entry.Info = "MaxMind GeoLite2"
+						} else if strings.Contains(lowerName, "asn") {
+							entry.Info = "IPInfo ASN"
+						} else {
+							entry.Info = "MaxMind DB"
+						}
+					}
+
+					s.cacheMu.Lock()
+					s.cache[match] = entry
+					s.cacheMu.Unlock()
+				}
+
+				f.TagCount = entry.TagCount
+				f.RecordCount = entry.RecordCount
+				f.Version = entry.Version
+				f.Info = entry.Info
+
 				files = append(files, f)
 			}
 		}
@@ -112,10 +170,18 @@ func (s *DATManagerService) Update() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Use xkeen -ug to update DAT files
-	// -u: check for updates
-	// -g: geoip/geosite update
-	// We use both to ensure update
+	// Backup existing files first
+	scanAndBackup := func(dir string, patterns ...string) {
+		for _, pattern := range patterns {
+			matches, _ := filepath.Glob(filepath.Join(dir, pattern))
+			for _, match := range matches {
+				_ = backupFile(match)
+			}
+		}
+	}
+	scanAndBackup(s.xrayDir, "*.dat")
+	scanAndBackup(s.mihomoDir, "*.dat", "*.mmdb")
+
 	cmd := exec.Command(s.binaryPath, "-ug")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -217,6 +283,7 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	}
 
 	// targetAbs is now fully sanitized and restricted to baseDir
+	_ = backupFile(targetAbs)
 	if err := os.Rename(tmpFile, targetAbs); err != nil {
 		os.Remove(tmpFile)
 		return 0, fmt.Errorf("failed to replace file: %w", err)
@@ -407,4 +474,64 @@ func pbSkipField(data []byte, pos int, wireType uint64) (int, error) {
 	default:
 		return len(data), fmt.Errorf("unknown wire type %d", wireType)
 	}
+}
+
+func (s *DATManagerService) Rollback() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Rollback files in xrayDir
+	matches, _ := filepath.Glob(filepath.Join(s.xrayDir, "*.dat"))
+	for _, match := range matches {
+		_ = rollbackFile(match)
+	}
+
+	// Rollback files in mihomoDir
+	matches2, _ := filepath.Glob(filepath.Join(s.mihomoDir, "*.dat"))
+	for _, match := range matches2 {
+		_ = rollbackFile(match)
+	}
+	matches3, _ := filepath.Glob(filepath.Join(s.mihomoDir, "*.mmdb"))
+	for _, match := range matches3 {
+		_ = rollbackFile(match)
+	}
+
+	return nil
+}
+
+func backupFile(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	// Avoid backing up symlinks (only backup regular files)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil
+	}
+
+	src, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.Create(path + ".bak")
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	_, err = io.Copy(dst, src)
+	return err
+}
+
+func rollbackFile(path string) error {
+	bakPath := path + ".bak"
+	if _, err := os.Stat(bakPath); os.IsNotExist(err) {
+		return nil
+	}
+	return os.Rename(bakPath, path)
 }
