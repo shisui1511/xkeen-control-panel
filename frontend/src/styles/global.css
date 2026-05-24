@@ -1476,6 +1476,7 @@ pre.code-output {
   margin: 0 -36px;
   padding-left: 36px;
   padding-right: 36px;
+  z-index: 10;
 }
 .api-offline::before {
   content: '';
