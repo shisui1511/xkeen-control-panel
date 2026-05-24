@@ -1057,3 +1057,67 @@ func (s *KernelService) checkPathDebug(p string) KernelPathDebug {
 		Executable: isExec,
 	}
 }
+
+// FetchBinary downloads the latest version archive for the given kernel,
+// extracts the binary, reads it into memory, and returns the bytes and
+// a safe filename. Nothing on the router filesystem is modified.
+func (s *KernelService) FetchBinary(name string) ([]byte, string, error) {
+	s.mu.RLock()
+	k, ok := s.kernels[name]
+	if !ok {
+		s.mu.RUnlock()
+		return nil, "", fmt.Errorf("kernel not found: %s", name)
+	}
+	if k.LatestVersion == "" {
+		s.mu.RUnlock()
+		return nil, "", fmt.Errorf("latest version unknown for kernel %s; run check first", name)
+	}
+	snap := *k
+	s.mu.RUnlock()
+
+	arch := runtime.GOARCH
+	if arch == "mipsle" || arch == "mipsel" {
+		arch = "mipsle-softfloat"
+	} else if arch == "mips" {
+		arch = "mips-softfloat"
+	}
+
+	downloadURL, filename := s.buildDownloadURL(&snap, arch)
+	if downloadURL == "" {
+		return nil, "", fmt.Errorf("unsupported architecture: %s", arch)
+	}
+
+	tempFile, err := safeTempPath(filename)
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid filename: %w", err)
+	}
+	defer os.Remove(tempFile)
+
+	if err := s.downloadFile(context.Background(), downloadURL, tempFile); err != nil {
+		return nil, "", fmt.Errorf("download failed: %w", err)
+	}
+
+	extractedPath := tempFile
+	if strings.HasSuffix(tempFile, ".zip") {
+		extracted, err := s.extractZip(tempFile, name)
+		if err != nil {
+			return nil, "", fmt.Errorf("extract failed: %w", err)
+		}
+		extractedPath = extracted
+		defer os.Remove(extractedPath)
+	} else if strings.HasSuffix(tempFile, ".gz") {
+		extracted, err := s.extractGz(tempFile)
+		if err != nil {
+			return nil, "", fmt.Errorf("extract failed: %w", err)
+		}
+		extractedPath = extracted
+		defer os.Remove(extractedPath)
+	}
+
+	data, err := os.ReadFile(extractedPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("read binary failed: %w", err)
+	}
+
+	return data, name, nil
+}
