@@ -157,7 +157,7 @@ func TestPortIsInteger(t *testing.T) {
 func TestDownloadAndParseSchemeValidation(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")
-	_, err := svc.downloadAndParse("file:///etc/passwd")
+	_, err := svc.downloadAndParse("file:///etc/passwd", &Subscription{})
 	if err == nil {
 		t.Fatal("expected error for file:// URL, got nil")
 	}
@@ -430,7 +430,7 @@ func TestSubscriptionEntryLimit(t *testing.T) {
 	}))
 	defer ts501.Close()
 
-	_, err := svc.downloadAndParse(ts501.URL)
+	_, err := svc.downloadAndParse(ts501.URL, &Subscription{})
 	if err == nil {
 		t.Error("expected error for 501 entries, got nil")
 	}
@@ -448,7 +448,7 @@ func TestSubscriptionEntryLimit(t *testing.T) {
 	}))
 	defer ts500.Close()
 
-	_, err = svc.downloadAndParse(ts500.URL)
+	_, err = svc.downloadAndParse(ts500.URL, &Subscription{})
 	if err != nil {
 		t.Errorf("expected no error for 500 entries, got: %v", err)
 	}
@@ -518,7 +518,7 @@ func TestDownloadAndParse_NetworkError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, err := svc.downloadAndParse(ts.URL)
+	_, err := svc.downloadAndParse(ts.URL, &Subscription{})
 	if err == nil {
 		t.Error("expected error for connection reset, got nil")
 	}
@@ -930,5 +930,76 @@ func TestMihomoSubscriptionType(t *testing.T) {
 	// ProxyCount should reflect one proxy
 	if got.ProxyCount != 1 {
 		t.Errorf("expected ProxyCount=1, got %d", got.ProxyCount)
+	}
+}
+
+func TestSubscriptionTrafficAndRules(t *testing.T) {
+	// 1. Test parseSubscriptionUserinfo
+	upload, download, total := parseSubscriptionUserinfo("upload=1073741824; download=5368709120; total=107374182400; expire=1700000000")
+	if upload != 1073741824 || download != 5368709120 || total != 107374182400 {
+		t.Errorf("parseSubscriptionUserinfo failed: upload=%d, download=%d, total=%d", upload, download, total)
+	}
+
+	// 2. Test countMihomoRules
+	yaml := `
+port: 7890
+socks-port: 7891
+rules:
+  - DOMAIN-SUFFIX,google.com,PROXY
+  - DOMAIN-KEYWORD,google,PROXY
+  - GEOIP,CN,DIRECT
+  - MATCH,PROXY
+`
+	rulesCount := countMihomoRules(yaml)
+	if rulesCount != 4 {
+		t.Errorf("expected 4 rules, got %d", rulesCount)
+	}
+
+	// Test case where rules is at the end or followed by another block
+	yaml2 := `
+rules:
+  - DOMAIN,example.com,DIRECT
+proxies:
+  - name: proxy
+    type: socks5
+`
+	rulesCount2 := countMihomoRules(yaml2)
+	if rulesCount2 != 1 {
+		t.Errorf("expected 1 rule in yaml2, got %d", rulesCount2)
+	}
+
+	// 3. Test Subscription Refresh with Userinfo header
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	svc.httpClient = http.DefaultClient
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-Userinfo", "upload=100; download=200; total=1000")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("proxies:\n  - name: p1\n    type: ss\nrules:\n  - MATCH,p1"))
+	}))
+	defer ts.Close()
+
+	sub := Subscription{
+		Name:    "Traffic Sub",
+		URL:     ts.URL,
+		Type:    "mihomo",
+		Enabled: true,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatal(err)
+	}
+
+	id := svc.List()[0].ID
+	if err := svc.Refresh(id); err != nil {
+		t.Fatal(err)
+	}
+
+	got := svc.Get(id)
+	if got.Upload != 100 || got.Download != 200 || got.Total != 1000 {
+		t.Errorf("expected traffic values 100, 200, 1000; got %d, %d, %d", got.Upload, got.Download, got.Total)
+	}
+	if got.RuleCount != 1 {
+		t.Errorf("expected RuleCount=1, got %d", got.RuleCount)
 	}
 }
