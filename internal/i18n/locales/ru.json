@@ -27,6 +27,7 @@
   "service.status_stopped": "остановлен",
   "service.action_required": "Укажите действие",
   "service.invalid_action": "Неверное действие",
+  "service.invalid_kernel": "Неверное имя ядра",
 
   "mihomo.not_running": "Mihomo не запущен",
   "mihomo.api_error": "Ошибка API Mihomo",

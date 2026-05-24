@@ -27,6 +27,7 @@
   "service.status_stopped": "stopped",
   "service.action_required": "Action required",
   "service.invalid_action": "Invalid action",
+  "service.invalid_kernel": "Invalid kernel name",
 
   "mihomo.not_running": "Mihomo is not running",
   "mihomo.api_error": "Mihomo API error",

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type ServiceStatusResponse struct {
@@ -77,6 +79,10 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if action == "switch_kernel" {
 		targetKernel = r.URL.Query().Get("kernel")
+		if targetKernel != "xray" && targetKernel != "mihomo" {
+			a.errorResponse(w, a.t(r, "service.invalid_kernel"), http.StatusBadRequest)
+			return
+		}
 	}
 
 	switch action {
@@ -109,6 +115,8 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) monitorAndRollbackKernel(name string) {
+	name = utils.SanitizeLogInput(name)
+
 	// Wait 10 seconds for the kernel to bootstrap and status to settle
 	time.Sleep(10 * time.Second)
 
@@ -117,21 +125,23 @@ func (a *API) monitorAndRollbackKernel(name string) {
 		return
 	}
 
-	if k.ProcessStatus != "running" {
-		log.Printf("Service: kernel %s failed to reach running state, triggering auto-rollback...", name)
+	kernelName := k.Name
 
-		if err := a.kernelSvc.Rollback(name); err != nil {
+	if k.ProcessStatus != "running" {
+		log.Printf("Service: kernel %s failed to reach running state, triggering auto-rollback...", kernelName)
+
+		if err := a.kernelSvc.Rollback(kernelName); err != nil {
 			log.Printf("Service: kernel auto-rollback failed: %v", err)
-			a.xkeenSvc.RecordAction("auto_rollback:"+name, "Откат завершился ошибкой: "+err.Error(), err)
+			a.xkeenSvc.RecordAction("auto_rollback:"+kernelName, "Откат завершился ошибкой: "+err.Error(), err)
 			return
 		}
 
 		// Restart service after rollback
 		out, err := a.xkeenSvc.Restart()
 		if err != nil {
-			a.xkeenSvc.RecordAction("auto_rollback:"+name, "Откат выполнен. Перезапуск XKeen завершился ошибкой: "+err.Error()+"\nВывод:\n"+out, err)
+			a.xkeenSvc.RecordAction("auto_rollback:"+kernelName, "Откат выполнен. Перезапуск XKeen завершился ошибкой: "+err.Error()+"\nВывод:\n"+out, err)
 		} else {
-			a.xkeenSvc.RecordAction("auto_rollback:"+name, "Откат ядра и перезапуск XKeen выполнены успешно.\nВывод:\n"+out, nil)
+			a.xkeenSvc.RecordAction("auto_rollback:"+kernelName, "Откат ядра и перезапуск XKeen выполнены успешно.\nВывод:\n"+out, nil)
 		}
 	}
 }
