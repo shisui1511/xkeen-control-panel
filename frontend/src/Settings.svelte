@@ -19,7 +19,7 @@
 
   let version = '...';
   let langs = getAvailableLangs();
-  let activeTab: 'general' | 'security' | 'connection' | 'backups' | 'update' | 'about' = 'general';
+  let activeTab: 'general' | 'security' | 'connection' | 'backups' | 'about' = 'general';
 
   // Backups state variables
   let configFiles: string[] = [];
@@ -455,11 +455,6 @@
       class:active={activeTab === 'backups'}
       on:click={() => (activeTab = 'backups')}>{$t('settings.tab_backups')}</button
     >
-    <button
-      class="stab"
-      class:active={activeTab === 'update'}
-      on:click={() => (activeTab = 'update')}>{$t('settings.tab_update')}</button
-    >
     <button class="stab" class:active={activeTab === 'about'} on:click={() => (activeTab = 'about')}
       >{$t('settings.tab_about')}</button
     >
@@ -597,6 +592,66 @@
         </div>
       </div>
     </div>
+
+    <!-- Panel self-update (moved from separate tab) -->
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.update')}</div>
+      <div class="field-group">
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.current_version')}</span>
+          <span class="field-row-val mono">{version}</span>
+        </div>
+        {#if updateInfo?.has_update}
+          <div class="field-row">
+            <span class="field-row-name">{$t('settings.available_version')}</span>
+            <span class="field-row-val" style="color: var(--accent)"
+              >{updateInfo.latest_version}</span
+            >
+          </div>
+        {/if}
+      </div>
+
+      {#if updateInfo?.changelog}
+        <div class="changelog-box">
+          <pre>{updateInfo.changelog}</pre>
+        </div>
+      {/if}
+
+      {#if updateStatus && updateStatus.status !== 'idle'}
+        <div class="update-progress">
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: {updateStatus.progress}%"></div>
+          </div>
+          <span class="progress-text">{updateStatus.message}</span>
+        </div>
+      {/if}
+
+      <div class="card-actions">
+        <button
+          class="btn btn-secondary"
+          on:click={() => checkUpdate('stable')}
+          disabled={updateChecking || updateInstalling}
+          title={$t('settings.check_update')}
+        >
+          {updateChecking ? $t('settings.checking') : $t('settings.check_update')}
+        </button>
+        {#if updateInfo?.has_update}
+          <button
+            class="btn btn-primary"
+            on:click={() => installUpdate('stable')}
+            disabled={updateInstalling}
+            title={$t('settings.install_update')}
+          >
+            {updateInstalling ? $t('settings.installing') : $t('settings.install_update')}
+          </button>
+        {/if}
+        {#if updateStatus?.status === 'failed'}
+          <button class="btn btn-danger" on:click={rollbackUpdate} title={$t('settings.rollback')}>
+            {$t('settings.rollback')}
+          </button>
+        {/if}
+      </div>
+    </div>
   {/if}
 
   <!-- Backups tab -->
@@ -729,73 +784,17 @@
     </div>
   {/if}
 
-  <!-- Update tab -->
-  {#if activeTab === 'update'}
-    <div class="card mb-2">
-      <div class="card-label">{$t('settings.update')}</div>
-      <div class="field-group">
-        <div class="field-row">
-          <span class="field-row-name">{$t('settings.current_version')}</span>
-          <span class="field-row-val mono">{version}</span>
-        </div>
-        {#if updateInfo?.has_update}
-          <div class="field-row">
-            <span class="field-row-name">{$t('settings.available_version')}</span>
-            <span class="field-row-val" style="color: var(--accent)"
-              >{updateInfo.latest_version}</span
-            >
-          </div>
-        {/if}
-      </div>
-
-      {#if updateInfo?.changelog}
-        <div class="changelog-box">
-          <pre>{updateInfo.changelog}</pre>
-        </div>
-      {/if}
-
-      {#if updateStatus && updateStatus.status !== 'idle'}
-        <div class="update-progress">
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: {updateStatus.progress}%"></div>
-          </div>
-          <span class="progress-text">{updateStatus.message}</span>
-        </div>
-      {/if}
-
-      <div class="card-actions">
-        <button
-          class="btn btn-secondary"
-          on:click={() => checkUpdate('stable')}
-          disabled={updateChecking || updateInstalling}
-          title={$t('settings.check_update')}
-        >
-          {updateChecking ? $t('settings.checking') : $t('settings.check_update')}
-        </button>
-        {#if updateInfo?.has_update}
-          <button
-            class="btn btn-primary"
-            on:click={() => installUpdate('stable')}
-            disabled={updateInstalling}
-            title={$t('settings.install_update')}
-          >
-            {updateInstalling ? $t('settings.installing') : $t('settings.install_update')}
-          </button>
-        {/if}
-        {#if updateStatus?.status === 'failed'}
-          <button class="btn btn-danger" on:click={rollbackUpdate} title={$t('settings.rollback')}>
-            {$t('settings.rollback')}
-          </button>
-        {/if}
-      </div>
-    </div>
-  {/if}
-
   <!-- Connection tab -->
   {#if activeTab === 'connection'}
     <div class="card mb-2">
       <div class="card-label">{$t('settings.mihomo_api')}</div>
       <div class="field-group">
+        {#if $capabilities?.mihomo.api_url}
+          <div class="field-row">
+            <span class="field-row-name">{$t('settings.mihomo_api_url')}</span>
+            <span class="field-row-val mono">{$capabilities.mihomo.api_url}</span>
+          </div>
+        {/if}
         <div class="field-row">
           <span class="field-row-name">{$t('settings.mihomo_status')}</span>
           <span class="field-row-val">

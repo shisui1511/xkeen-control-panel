@@ -271,8 +271,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.h1_sub': 'Язык интерфейса, безопасность, обновления.',
     'settings.tab_general': 'Общие',
     'settings.tab_security': 'Безопасность',
-    'settings.tab_connection': 'Подключение',
-    'settings.tab_update': 'Обновление',
+    'settings.tab_connection': 'Mihomo API',
     'settings.tab_about': 'О программе',
     'settings.tab_backups': 'Резервные копии',
     'settings.snapshots_title': 'Снимки конфигурации',
@@ -352,6 +351,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.mihomo_auth_error': 'Ошибка (неверный токен)',
     'settings.recheck_btn': 'Проверить подключение',
     'settings.recheck_title': 'Запросить текущий статус API Mihomo',
+    'settings.mihomo_api_url': 'Endpoint API',
     'settings.mihomo_secret_discovered': 'Обнаружен токен',
 
     // Navigation
@@ -979,8 +979,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.h1_sub': 'Interface language, security, updates.',
     'settings.tab_general': 'General',
     'settings.tab_security': 'Security',
-    'settings.tab_connection': 'Connection',
-    'settings.tab_update': 'Update',
+    'settings.tab_connection': 'Mihomo API',
     'settings.tab_about': 'About',
     'settings.tab_backups': 'Backups',
     'settings.snapshots_title': 'Config Snapshots',
@@ -1061,6 +1060,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.mihomo_auth_error': 'Error (invalid token)',
     'settings.recheck_btn': 'Check connection',
     'settings.recheck_title': 'Request current Mihomo API status',
+    'settings.mihomo_api_url': 'API Endpoint',
     'settings.mihomo_secret_discovered': 'Discovered token',
 
     // Navigation
