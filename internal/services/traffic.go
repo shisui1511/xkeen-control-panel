@@ -403,10 +403,8 @@ func (s *TrafficQuotaService) streamConnections() error {
 
 	// Close the WebSocket when the service stops so ReadJSON unblocks.
 	go func() {
-		select {
-		case <-s.stopCh:
-			conn.Close()
-		}
+		<-s.stopCh
+		conn.Close()
 	}()
 
 	log.Printf("TrafficQuota: WebSocket connected to %s", wsURL)
@@ -550,7 +548,6 @@ type connStats struct {
 	Upload   int64
 	Download int64
 }
-
 
 func (s *TrafficQuotaService) checkQuotas() {
 	s.mu.Lock()

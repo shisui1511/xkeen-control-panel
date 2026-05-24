@@ -8,8 +8,8 @@ import (
 )
 
 type SettingsResponse struct {
-	Port  int                 `json:"port"`
-	HTTPS config.HTTPSConfig  `json:"https"`
+	Port  int                `json:"port"`
+	HTTPS config.HTTPSConfig `json:"https"`
 }
 
 func (a *API) SettingsGet(w http.ResponseWriter, r *http.Request) {

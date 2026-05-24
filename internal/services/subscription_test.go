@@ -835,7 +835,7 @@ func TestExponentialBackoff(t *testing.T) {
 		t.Errorf("expected failCount=1, got %d", rs.failCount)
 	}
 	expectedDelay1 := backoffBase
-	actualDelay1 := rs.nextRetry.Sub(time.Now())
+	actualDelay1 := time.Until(rs.nextRetry)
 	if actualDelay1 < expectedDelay1-time.Second || actualDelay1 > expectedDelay1+time.Second {
 		t.Errorf("expected delay ~%v, got %v", expectedDelay1, actualDelay1)
 	}
@@ -848,7 +848,7 @@ func TestExponentialBackoff(t *testing.T) {
 		t.Errorf("expected failCount=2, got %d", rs.failCount)
 	}
 	expectedDelay2 := backoffBase * 2
-	actualDelay2 := rs.nextRetry.Sub(time.Now())
+	actualDelay2 := time.Until(rs.nextRetry)
 	if actualDelay2 < expectedDelay2-time.Second || actualDelay2 > expectedDelay2+time.Second {
 		t.Errorf("expected delay ~%v, got %v", expectedDelay2, actualDelay2)
 	}
@@ -875,7 +875,7 @@ func TestBackoffCap(t *testing.T) {
 		t.Fatal("expected retry state")
 	}
 	rs := val.(*retryState)
-	actualDelay := rs.nextRetry.Sub(time.Now())
+	actualDelay := time.Until(rs.nextRetry)
 	if actualDelay > backoffMax+time.Second {
 		t.Errorf("expected delay capped at %v, got %v", backoffMax, actualDelay)
 	}

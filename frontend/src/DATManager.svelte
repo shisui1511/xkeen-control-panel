@@ -116,9 +116,7 @@
   }
 
   $: filteredTags = tagDrawer.search.trim()
-    ? tagDrawer.tags.filter((t) =>
-        t.tag.toLowerCase().includes(tagDrawer.search.toLowerCase())
-      )
+    ? tagDrawer.tags.filter((t) => t.tag.toLowerCase().includes(tagDrawer.search.toLowerCase()))
     : tagDrawer.tags;
 
   function formatSize(b: number): string {
@@ -308,7 +306,16 @@
                     on:click={() => openTagBrowser(file)}
                     title={$currentLang === 'ru' ? 'Просмотр тегов' : 'Browse tags'}
                   >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:5px"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      style="margin-right:5px"
+                      ><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg
+                    >
                     {$currentLang === 'ru' ? 'Теги' : 'Tags'}
                   </button>
                 {/if}
@@ -399,7 +406,16 @@
                     on:click={() => openTagBrowser(file)}
                     title={$currentLang === 'ru' ? 'Просмотр тегов' : 'Browse tags'}
                   >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:5px"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      style="margin-right:5px"
+                      ><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg
+                    >
                     {$currentLang === 'ru' ? 'Теги' : 'Tags'}
                   </button>
                 {/if}
@@ -493,10 +509,21 @@
     <div class="tag-drawer" on:click|stopPropagation>
       <div class="td-header">
         <div class="td-title">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--primary)"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="color:var(--primary)"
+            ><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg
+          >
           <span>{tagDrawer.file?.name}</span>
           {#if !tagDrawer.loading && tagDrawer.tags.length > 0}
-            <span class="td-count">{tagDrawer.tags.length} {$currentLang === 'ru' ? 'тегов' : 'tags'}</span>
+            <span class="td-count"
+              >{tagDrawer.tags.length} {$currentLang === 'ru' ? 'тегов' : 'tags'}</span
+            >
           {/if}
         </div>
         <button class="td-close" on:click={closeTagBrowser} aria-label="Close">✕</button>
@@ -510,7 +537,15 @@
       </div>
 
       <div class="td-search">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="td-search-ico"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          class="td-search-ico"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg
+        >
         <input
           class="td-search-input"
           type="text"
@@ -519,7 +554,9 @@
           autofocus
         />
         {#if tagDrawer.search}
-          <button class="td-clear" on:click={() => tagDrawer = { ...tagDrawer, search: '' }}>✕</button>
+          <button class="td-clear" on:click={() => (tagDrawer = { ...tagDrawer, search: '' })}
+            >✕</button
+          >
         {/if}
       </div>
 
@@ -552,9 +589,26 @@
                 {/if}
                 <span class="td-tag-copy">
                   {#if isCopied}
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"><polyline points="20 6 9 17 4 12" /></svg
+                    >
                   {:else}
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      ><rect x="9" y="9" width="13" height="13" rx="2" /><path
+                        d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                      /></svg
+                    >
                   {/if}
                 </span>
               </button>
@@ -730,8 +784,12 @@
   }
 
   @keyframes fadeIn {
-    from { opacity: 0; }
-    to   { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 
   .tag-drawer {
@@ -746,8 +804,14 @@
   }
 
   @keyframes slideIn {
-    from { transform: translateX(40px); opacity: 0; }
-    to   { transform: translateX(0);    opacity: 1; }
+    from {
+      transform: translateX(40px);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
   }
 
   .td-header {
@@ -795,7 +859,9 @@
     padding: 4px 6px;
     border-radius: var(--radius-sm);
     line-height: 1;
-    transition: color var(--transition-fast), background var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast);
     flex-shrink: 0;
   }
 
@@ -868,7 +934,9 @@
     transition: color var(--transition-fast);
   }
 
-  .td-clear:hover { color: var(--fg-primary); }
+  .td-clear:hover {
+    color: var(--fg-primary);
+  }
 
   .td-body {
     flex: 1;
@@ -887,7 +955,9 @@
     font-size: 13px;
   }
 
-  .td-state-error { color: var(--error); }
+  .td-state-error {
+    color: var(--error);
+  }
 
   .spinner-circle {
     width: 16px;
@@ -960,6 +1030,8 @@
     flex-shrink: 0;
     display: flex;
     align-items: center;
-    transition: opacity var(--transition-fast), color var(--transition-fast);
+    transition:
+      opacity var(--transition-fast),
+      color var(--transition-fast);
   }
 </style>

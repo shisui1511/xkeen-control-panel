@@ -65,7 +65,7 @@ func findXKeen() string {
 
 // Default returns the default configuration for the application.
 func Default() *Config {
-	return &Config {
+	return &Config{
 		Port:            8090,
 		XRayConfigDir:   "/opt/etc/xray/configs",
 		XKeenBinary:     findXKeen(),

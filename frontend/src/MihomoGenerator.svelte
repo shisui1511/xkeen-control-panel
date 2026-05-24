@@ -6,7 +6,15 @@
 
   type ProxyType = 'vless' | 'hysteria2' | 'tuic' | 'ss' | 'vmess';
   type GroupType = 'select' | 'url-test' | 'fallback' | 'load-balance';
-  type RuleType = 'DOMAIN-SUFFIX' | 'DOMAIN-KEYWORD' | 'DOMAIN' | 'GEOIP' | 'GEOSITE' | 'IP-CIDR' | 'PROCESS-NAME' | 'MATCH';
+  type RuleType =
+    | 'DOMAIN-SUFFIX'
+    | 'DOMAIN-KEYWORD'
+    | 'DOMAIN'
+    | 'GEOIP'
+    | 'GEOSITE'
+    | 'IP-CIDR'
+    | 'PROCESS-NAME'
+    | 'MATCH';
 
   interface Proxy {
     id: string;
@@ -96,18 +104,36 @@
   let np: Omit<Proxy, 'id'> = newProxyDefaults('vless');
   function newProxyDefaults(type: ProxyType): Omit<Proxy, 'id'> {
     return {
-      name: '', type, server: '', port: 443,
-      uuid: crypto.randomUUID(), flow: 'xtls-rprx-vision',
-      publicKey: '', shortId: '', servername: 'www.apple.com',
-      password: '', sni: '', congestion: 'bbr',
-      cipher: 'aes-256-gcm', network: 'ws', wsPath: '/', tls: true,
+      name: '',
+      type,
+      server: '',
+      port: 443,
+      uuid: crypto.randomUUID(),
+      flow: 'xtls-rprx-vision',
+      publicKey: '',
+      shortId: '',
+      servername: 'www.apple.com',
+      password: '',
+      sni: '',
+      congestion: 'bbr',
+      cipher: 'aes-256-gcm',
+      network: 'ws',
+      wsPath: '/',
+      tls: true,
       fingerprint: 'chrome'
     };
   }
-  $: if (np.type) np = { ...newProxyDefaults(np.type), name: np.name, server: np.server, port: np.port };
+  $: if (np.type)
+    np = { ...newProxyDefaults(np.type), name: np.name, server: np.server, port: np.port };
 
   // New group form
-  let ng: Omit<ProxyGroup, 'id'> = { name: '', type: 'select', proxies: [], url: 'https://www.gstatic.com/generate_204', interval: 300 };
+  let ng: Omit<ProxyGroup, 'id'> = {
+    name: '',
+    type: 'select',
+    proxies: [],
+    url: 'https://www.gstatic.com/generate_204',
+    interval: 300
+  };
   let ngProxyInput = '';
 
   // New rule form
@@ -121,19 +147,25 @@
   }
 
   function removeProxy(id: string) {
-    proxies = proxies.filter(p => p.id !== id);
+    proxies = proxies.filter((p) => p.id !== id);
   }
 
   function addGroup() {
     if (!ng.name.trim()) return;
     groups = [...groups, { ...ng, id: crypto.randomUUID(), proxies: [...ng.proxies] }];
     showGroupForm = false;
-    ng = { name: '', type: 'select', proxies: [], url: 'https://www.gstatic.com/generate_204', interval: 300 };
+    ng = {
+      name: '',
+      type: 'select',
+      proxies: [],
+      url: 'https://www.gstatic.com/generate_204',
+      interval: 300
+    };
     ngProxyInput = '';
   }
 
   function removeGroup(id: string) {
-    groups = groups.filter(g => g.id !== id);
+    groups = groups.filter((g) => g.id !== id);
   }
 
   function addRule() {
@@ -144,11 +176,11 @@
   }
 
   function removeRule(id: string) {
-    rules = rules.filter(r => r.id !== id);
+    rules = rules.filter((r) => r.id !== id);
   }
 
   function moveRule(id: string, dir: -1 | 1) {
-    const idx = rules.findIndex(r => r.id === id);
+    const idx = rules.findIndex((r) => r.id === id);
     if (idx < 0) return;
     const next = idx + dir;
     if (next < 0 || next >= rules.length) return;
@@ -299,13 +331,23 @@
 
   const PROXY_TYPES: ProxyType[] = ['vless', 'hysteria2', 'tuic', 'ss', 'vmess'];
   const GROUP_TYPES: GroupType[] = ['select', 'url-test', 'fallback', 'load-balance'];
-  const RULE_TYPES: RuleType[] = ['DOMAIN-SUFFIX', 'DOMAIN-KEYWORD', 'DOMAIN', 'GEOIP', 'GEOSITE', 'IP-CIDR', 'PROCESS-NAME', 'MATCH'];
+  const RULE_TYPES: RuleType[] = [
+    'DOMAIN-SUFFIX',
+    'DOMAIN-KEYWORD',
+    'DOMAIN',
+    'GEOIP',
+    'GEOSITE',
+    'IP-CIDR',
+    'PROCESS-NAME',
+    'MATCH'
+  ];
   const CIPHERS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-poly1305', '2022-blake3-aes-256-gcm'];
 
   $: allProxyNames = [
-    'DIRECT', 'REJECT',
-    ...proxies.map(p => p.name),
-    ...groups.map(g => g.name)
+    'DIRECT',
+    'REJECT',
+    ...proxies.map((p) => p.name),
+    ...groups.map((g) => g.name)
   ];
 </script>
 
@@ -317,15 +359,41 @@
         {ru ? 'Генератор Mihomo' : 'Mihomo Generator'}
       </div>
       <h1>{ru ? 'Визуальный генератор Mihomo' : 'Mihomo Visual Generator'}</h1>
-      <p class="sub">{ru ? 'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.' : 'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.'}</p>
+      <p class="sub">
+        {ru
+          ? 'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.'
+          : 'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.'}
+      </p>
     </div>
     <div class="ph-actions">
       <button class="btn btn-secondary" on:click={openInEditor}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:5px"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right:5px"
+          ><path d="M12 20h9" /><path
+            d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
+          /></svg
+        >
         {ru ? 'Открыть в редакторе' : 'Open in Editor'}
       </button>
       <button class="btn btn-primary" on:click={copyYAML} disabled={!yaml}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:5px"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          style="margin-right:5px"
+          ><rect x="9" y="9" width="13" height="13" rx="2" /><path
+            d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+          /></svg
+        >
         {ru ? 'Копировать YAML' : 'Copy YAML'}
       </button>
     </div>
@@ -340,12 +408,21 @@
           <button
             class="sec-tab"
             class:active={activeSection === id}
-            on:click={() => { activeSection = id; showProxyForm = false; showGroupForm = false; showRuleForm = false; }}
+            on:click={() => {
+              activeSection = id;
+              showProxyForm = false;
+              showGroupForm = false;
+              showRuleForm = false;
+            }}
           >
             {label}
-            {#if id === 'proxies' && proxies.length > 0}<span class="sec-count">{proxies.length}</span>{/if}
-            {#if id === 'groups' && groups.length > 0}<span class="sec-count">{groups.length}</span>{/if}
-            {#if id === 'rules' && rules.length > 0}<span class="sec-count">{rules.length}</span>{/if}
+            {#if id === 'proxies' && proxies.length > 0}<span class="sec-count"
+                >{proxies.length}</span
+              >{/if}
+            {#if id === 'groups' && groups.length > 0}<span class="sec-count">{groups.length}</span
+              >{/if}
+            {#if id === 'rules' && rules.length > 0}<span class="sec-count">{rules.length}</span
+              >{/if}
             {#if id === 'dns' && dns.enabled}<span class="sec-dot"></span>{/if}
             {#if id === 'tun' && tun.enabled}<span class="sec-dot"></span>{/if}
           </button>
@@ -360,7 +437,11 @@
               <span class="item-badge type-{p.type}">{p.type}</span>
               <span class="item-name">{p.name}</span>
               <span class="item-meta">{p.server}:{p.port}</span>
-              <button class="item-del" on:click={() => removeProxy(p.id)} title={ru ? 'Удалить' : 'Remove'}>✕</button>
+              <button
+                class="item-del"
+                on:click={() => removeProxy(p.id)}
+                title={ru ? 'Удалить' : 'Remove'}>✕</button
+              >
             </div>
           {/each}
 
@@ -383,7 +464,13 @@
                 </div>
                 <div class="form-col form-col-sm">
                   <label class="form-label">{ru ? 'Порт' : 'Port'}</label>
-                  <input class="form-input" type="number" bind:value={np.port} min="1" max="65535" />
+                  <input
+                    class="form-input"
+                    type="number"
+                    bind:value={np.port}
+                    min="1"
+                    max="65535"
+                  />
                 </div>
               </div>
 
@@ -392,7 +479,11 @@
                   <label class="form-label">UUID</label>
                   <div class="input-with-btn">
                     <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
-                    <button class="btn-gen" on:click={() => np.uuid = crypto.randomUUID()} title="Generate">⟳</button>
+                    <button
+                      class="btn-gen"
+                      on:click={() => (np.uuid = crypto.randomUUID())}
+                      title="Generate">⟳</button
+                    >
                   </div>
                 </div>
                 <div class="form-row">
@@ -406,7 +497,11 @@
                   </div>
                   <div class="form-col">
                     <label class="form-label">SNI</label>
-                    <input class="form-input" bind:value={np.servername} placeholder="www.apple.com" />
+                    <input
+                      class="form-input"
+                      bind:value={np.servername}
+                      placeholder="www.apple.com"
+                    />
                   </div>
                 </div>
               {:else if np.type === 'hysteria2'}
@@ -423,7 +518,11 @@
                   <label class="form-label">UUID</label>
                   <div class="input-with-btn">
                     <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
-                    <button class="btn-gen" on:click={() => np.uuid = crypto.randomUUID()} title="Generate">⟳</button>
+                    <button
+                      class="btn-gen"
+                      on:click={() => (np.uuid = crypto.randomUUID())}
+                      title="Generate">⟳</button
+                    >
                   </div>
                 </div>
                 <div class="form-row">
@@ -450,7 +549,11 @@
                   <label class="form-label">UUID</label>
                   <div class="input-with-btn">
                     <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
-                    <button class="btn-gen" on:click={() => np.uuid = crypto.randomUUID()} title="Generate">⟳</button>
+                    <button
+                      class="btn-gen"
+                      on:click={() => (np.uuid = crypto.randomUUID())}
+                      title="Generate">⟳</button
+                    >
                   </div>
                 </div>
                 <div class="form-row2">
@@ -482,12 +585,16 @@
               {/if}
 
               <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => showProxyForm = false}>{ru ? 'Отмена' : 'Cancel'}</button>
-                <button class="btn btn-primary" on:click={addProxy}>{ru ? 'Добавить' : 'Add'}</button>
+                <button class="btn btn-secondary" on:click={() => (showProxyForm = false)}
+                  >{ru ? 'Отмена' : 'Cancel'}</button
+                >
+                <button class="btn btn-primary" on:click={addProxy}
+                  >{ru ? 'Добавить' : 'Add'}</button
+                >
               </div>
             </div>
           {:else}
-            <button class="add-btn" on:click={() => showProxyForm = true}>
+            <button class="add-btn" on:click={() => (showProxyForm = true)}>
               + {ru ? 'Добавить прокси' : 'Add proxy'}
             </button>
           {/if}
@@ -524,10 +631,18 @@
                   {#each ng.proxies as p}
                     <span class="tag-pill">
                       {p}
-                      <button class="tag-rm" on:click={() => ng = { ...ng, proxies: ng.proxies.filter(x => x !== p) }}>✕</button>
+                      <button
+                        class="tag-rm"
+                        on:click={() =>
+                          (ng = { ...ng, proxies: ng.proxies.filter((x) => x !== p) })}>✕</button
+                      >
                     </span>
                   {/each}
-                  <select class="form-select-inline" bind:value={ngProxyInput} on:change={addGroupProxy}>
+                  <select
+                    class="form-select-inline"
+                    bind:value={ngProxyInput}
+                    on:change={addGroupProxy}
+                  >
                     <option value="">+ {ru ? 'добавить' : 'add'}...</option>
                     {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
                   </select>
@@ -546,12 +661,16 @@
                 </div>
               {/if}
               <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => showGroupForm = false}>{ru ? 'Отмена' : 'Cancel'}</button>
-                <button class="btn btn-primary" on:click={addGroup}>{ru ? 'Добавить' : 'Add'}</button>
+                <button class="btn btn-secondary" on:click={() => (showGroupForm = false)}
+                  >{ru ? 'Отмена' : 'Cancel'}</button
+                >
+                <button class="btn btn-primary" on:click={addGroup}
+                  >{ru ? 'Добавить' : 'Add'}</button
+                >
               </div>
             </div>
           {:else}
-            <button class="add-btn" on:click={() => showGroupForm = true}>
+            <button class="add-btn" on:click={() => (showGroupForm = true)}>
               + {ru ? 'Добавить группу' : 'Add group'}
             </button>
           {/if}
@@ -564,8 +683,14 @@
           {#each rules as r, i (r.id)}
             <div class="item-row item-row-rule">
               <div class="rule-order">
-                <button class="order-btn" on:click={() => moveRule(r.id, -1)} disabled={i === 0}>▲</button>
-                <button class="order-btn" on:click={() => moveRule(r.id, 1)} disabled={i === rules.length - 1}>▼</button>
+                <button class="order-btn" on:click={() => moveRule(r.id, -1)} disabled={i === 0}
+                  >▲</button
+                >
+                <button
+                  class="order-btn"
+                  on:click={() => moveRule(r.id, 1)}
+                  disabled={i === rules.length - 1}>▼</button
+                >
               </div>
               <span class="item-badge type-rule">{r.type}</span>
               {#if r.type !== 'MATCH'}
@@ -595,17 +720,29 @@
               {#if nr.type !== 'MATCH'}
                 <div class="form-row">
                   <label class="form-label">{ru ? 'Значение' : 'Value'}</label>
-                  <input class="form-input" bind:value={nr.value}
-                    placeholder={nr.type === 'GEOIP' ? 'CN' : nr.type === 'GEOSITE' ? 'google' : nr.type === 'IP-CIDR' ? '192.168.0.0/16' : 'example.com'} />
+                  <input
+                    class="form-input"
+                    bind:value={nr.value}
+                    placeholder={nr.type === 'GEOIP'
+                      ? 'CN'
+                      : nr.type === 'GEOSITE'
+                        ? 'google'
+                        : nr.type === 'IP-CIDR'
+                          ? '192.168.0.0/16'
+                          : 'example.com'}
+                  />
                 </div>
               {/if}
               <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => showRuleForm = false}>{ru ? 'Отмена' : 'Cancel'}</button>
-                <button class="btn btn-primary" on:click={addRule}>{ru ? 'Добавить' : 'Add'}</button>
+                <button class="btn btn-secondary" on:click={() => (showRuleForm = false)}
+                  >{ru ? 'Отмена' : 'Cancel'}</button
+                >
+                <button class="btn btn-primary" on:click={addRule}>{ru ? 'Добавить' : 'Add'}</button
+                >
               </div>
             </div>
           {:else}
-            <button class="add-btn" on:click={() => showRuleForm = true}>
+            <button class="add-btn" on:click={() => (showRuleForm = true)}>
               + {ru ? 'Добавить правило' : 'Add rule'}
             </button>
           {/if}
@@ -637,15 +774,25 @@
             {/if}
             <div class="form-row">
               <label class="form-label">Nameservers</label>
-              <textarea class="form-textarea" bind:value={dns.nameservers} rows="3"
-                on:change={(e) => dns.nameservers = e.currentTarget.value.split('\n').filter(Boolean)}
-              >{dns.nameservers.join('\n')}</textarea>
+              <textarea
+                class="form-textarea"
+                bind:value={dns.nameservers}
+                rows="3"
+                on:change={(e) =>
+                  (dns.nameservers = e.currentTarget.value.split('\n').filter(Boolean))}
+                >{dns.nameservers.join('\n')}</textarea
+              >
             </div>
             <div class="form-row">
               <label class="form-label">Fallback</label>
-              <textarea class="form-textarea" bind:value={dns.fallback} rows="2"
-                on:change={(e) => dns.fallback = e.currentTarget.value.split('\n').filter(Boolean)}
-              >{dns.fallback.join('\n')}</textarea>
+              <textarea
+                class="form-textarea"
+                bind:value={dns.fallback}
+                rows="2"
+                on:change={(e) =>
+                  (dns.fallback = e.currentTarget.value.split('\n').filter(Boolean))}
+                >{dns.fallback.join('\n')}</textarea
+              >
             </div>
           {/if}
         </div>
@@ -683,8 +830,15 @@
             </div>
             <div class="form-row">
               <label class="form-label">DNS hijack</label>
-              <input class="form-input" value={tun.dnsHijack.join(', ')}
-                on:change={(e) => tun.dnsHijack = e.currentTarget.value.split(',').map(s => s.trim()).filter(Boolean)} />
+              <input
+                class="form-input"
+                value={tun.dnsHijack.join(', ')}
+                on:change={(e) =>
+                  (tun.dnsHijack = e.currentTarget.value
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean))}
+              />
             </div>
           {/if}
         </div>
@@ -697,17 +851,33 @@
         <span class="preview-title">YAML {ru ? 'превью' : 'preview'}</span>
         {#if yaml}
           <button class="btn btn-secondary btn-sm" on:click={copyYAML}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              /></svg
+            >
           </button>
         {/if}
       </div>
-      <pre class="yaml-preview">{yaml || (ru ? '# Добавьте элементы слева\n# чтобы сгенерировать YAML' : '# Add elements on the left\n# to generate YAML')}</pre>
+      <pre class="yaml-preview">{yaml ||
+          (ru
+            ? '# Добавьте элементы слева\n# чтобы сгенерировать YAML'
+            : '# Add elements on the left\n# to generate YAML')}</pre>
     </div>
   </div>
 </div>
 
 <style>
-  .crumb-sep { color: var(--fg-faint); margin: 0 6px; }
+  .crumb-sep {
+    color: var(--fg-faint);
+    margin: 0 6px;
+  }
 
   .gen-layout {
     display: grid;
@@ -720,7 +890,7 @@
   .sec-tabs {
     display: flex;
     gap: 2px;
-    background: rgba(255,255,255,0.03);
+    background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 4px;
@@ -741,11 +911,13 @@
     align-items: center;
     justify-content: center;
     gap: 5px;
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast);
   }
 
   .sec-tab.active {
-    background: rgba(255,255,255,0.08);
+    background: rgba(255, 255, 255, 0.08);
     color: var(--fg-primary);
   }
 
@@ -760,7 +932,8 @@
   }
 
   .sec-dot {
-    width: 6px; height: 6px;
+    width: 6px;
+    height: 6px;
     background: var(--success);
     border-radius: 50%;
   }
@@ -782,7 +955,9 @@
     border-radius: var(--radius);
   }
 
-  .item-row-rule { gap: 8px; }
+  .item-row-rule {
+    gap: 8px;
+  }
 
   .item-badge {
     font-size: 10px;
@@ -793,13 +968,35 @@
     flex-shrink: 0;
   }
 
-  .type-vless    { background: rgba(41,194,240,0.15); color: var(--primary); }
-  .type-hysteria2 { background: rgba(70,209,138,0.15); color: var(--success); }
-  .type-tuic     { background: rgba(240,180,80,0.15); color: var(--warning); }
-  .type-ss       { background: rgba(239,91,107,0.15); color: var(--danger); }
-  .type-vmess    { background: rgba(255,255,255,0.08); color: var(--fg-secondary); }
-  .type-group    { background: rgba(139,92,246,0.15); color: #a78bfa; }
-  .type-rule     { background: rgba(255,255,255,0.05); color: var(--fg-dim); font-size: 9px; }
+  .type-vless {
+    background: rgba(41, 194, 240, 0.15);
+    color: var(--primary);
+  }
+  .type-hysteria2 {
+    background: rgba(70, 209, 138, 0.15);
+    color: var(--success);
+  }
+  .type-tuic {
+    background: rgba(240, 180, 80, 0.15);
+    color: var(--warning);
+  }
+  .type-ss {
+    background: rgba(239, 91, 107, 0.15);
+    color: var(--danger);
+  }
+  .type-vmess {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--fg-secondary);
+  }
+  .type-group {
+    background: rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
+  }
+  .type-rule {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--fg-dim);
+    font-size: 9px;
+  }
 
   .item-name {
     flex: 1;
@@ -835,16 +1032,33 @@
     line-height: 1;
   }
 
-  .item-del:hover { color: var(--danger); }
+  .item-del:hover {
+    color: var(--danger);
+  }
 
-  .rule-order { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; }
+  .rule-order {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex-shrink: 0;
+  }
   .order-btn {
-    background: none; border: none; color: var(--fg-faint);
-    font-size: 9px; cursor: pointer; padding: 1px 3px; line-height: 1;
+    background: none;
+    border: none;
+    color: var(--fg-faint);
+    font-size: 9px;
+    cursor: pointer;
+    padding: 1px 3px;
+    line-height: 1;
     transition: color var(--transition-fast);
   }
-  .order-btn:hover:not(:disabled) { color: var(--fg-primary); }
-  .order-btn:disabled { opacity: 0.3; cursor: default; }
+  .order-btn:hover:not(:disabled) {
+    color: var(--fg-primary);
+  }
+  .order-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
 
   /* Form */
   .form-card {
@@ -857,10 +1071,24 @@
     gap: 10px;
   }
 
-  .form-row { display: flex; flex-direction: column; gap: 4px; }
-  .form-row2 { display: flex; gap: 10px; }
-  .form-col { display: flex; flex-direction: column; gap: 4px; flex: 1; }
-  .form-col-sm { flex: 0 0 100px; }
+  .form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .form-row2 {
+    display: flex;
+    gap: 10px;
+  }
+  .form-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+  .form-col-sm {
+    flex: 0 0 100px;
+  }
 
   .form-label {
     font-size: 11px;
@@ -868,7 +1096,8 @@
     font-weight: 500;
   }
 
-  .form-input, .form-select {
+  .form-input,
+  .form-select {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -880,7 +1109,8 @@
     transition: border-color var(--transition-fast);
   }
 
-  .form-input:focus, .form-select:focus {
+  .form-input:focus,
+  .form-select:focus {
     border-color: var(--primary);
   }
 
@@ -898,7 +1128,9 @@
     transition: border-color var(--transition-fast);
   }
 
-  .form-textarea:focus { border-color: var(--primary); }
+  .form-textarea:focus {
+    border-color: var(--primary);
+  }
 
   .form-select-inline {
     background: none;
@@ -917,10 +1149,12 @@
     align-items: center;
   }
 
-  .input-with-btn .form-input { flex: 1; }
+  .input-with-btn .form-input {
+    flex: 1;
+  }
 
   .btn-gen {
-    background: rgba(255,255,255,0.05);
+    background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--border);
     color: var(--fg-secondary);
     border-radius: var(--radius-sm);
@@ -931,7 +1165,10 @@
     flex-shrink: 0;
   }
 
-  .btn-gen:hover { background: rgba(255,255,255,0.1); color: var(--fg-primary); }
+  .btn-gen:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--fg-primary);
+  }
 
   .tag-input-wrap {
     display: flex;
@@ -948,8 +1185,8 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background: rgba(41,194,240,0.12);
-    border: 1px solid rgba(41,194,240,0.25);
+    background: rgba(41, 194, 240, 0.12);
+    border: 1px solid rgba(41, 194, 240, 0.25);
     color: var(--primary);
     font-size: 11px;
     border-radius: 10px;
@@ -957,8 +1194,13 @@
   }
 
   .tag-rm {
-    background: none; border: none; color: inherit;
-    cursor: pointer; font-size: 10px; padding: 0; line-height: 1;
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 10px;
+    padding: 0;
+    line-height: 1;
   }
 
   .form-actions {
@@ -970,20 +1212,23 @@
 
   .add-btn {
     width: 100%;
-    background: rgba(255,255,255,0.02);
+    background: rgba(255, 255, 255, 0.02);
     border: 1px dashed var(--border-strong);
     border-radius: var(--radius);
     color: var(--fg-dim);
     font-size: 13px;
     padding: 12px;
     cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast),
+      border-color var(--transition-fast);
     text-align: center;
   }
 
   .add-btn:hover {
-    background: rgba(41,194,240,0.05);
-    border-color: rgba(41,194,240,0.3);
+    background: rgba(41, 194, 240, 0.05);
+    border-color: rgba(41, 194, 240, 0.3);
     color: var(--primary);
   }
 
@@ -1032,7 +1277,10 @@
     letter-spacing: 0.05em;
   }
 
-  .btn-sm { padding: 4px 8px; font-size: 12px; }
+  .btn-sm {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
 
   .yaml-preview {
     flex: 1;
@@ -1049,7 +1297,12 @@
   }
 
   @media (max-width: 900px) {
-    .gen-layout { grid-template-columns: 1fr; }
-    .gen-right { position: static; max-height: 300px; }
+    .gen-layout {
+      grid-template-columns: 1fr;
+    }
+    .gen-right {
+      position: static;
+      max-height: 300px;
+    }
   }
 </style>

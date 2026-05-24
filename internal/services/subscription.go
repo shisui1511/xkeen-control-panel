@@ -1081,9 +1081,9 @@ func parseHTTPProxyLink(link string) *Outbound {
 
 // ParseLinksResult holds the result for a single link parse attempt.
 type ParseLinksResult struct {
-	Link    string    `json:"link"`
+	Link     string    `json:"link"`
 	Outbound *Outbound `json:"outbound,omitempty"`
-	Error   string    `json:"error,omitempty"`
+	Error    string    `json:"error,omitempty"`
 }
 
 // ParseLinks parses a slice of share links and returns results for each.

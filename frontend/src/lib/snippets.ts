@@ -181,7 +181,12 @@ const xrayOutboundSnippets: Completion[] = [
   "domain": ["\${2:example.com}"],
   "outboundTag": "\${3:proxy}"
 }`,
-    { label: 'routing-rule-domain', detail: 'Xray routing rule (domain)', type: 'keyword', boost: 6 }
+    {
+      label: 'routing-rule-domain',
+      detail: 'Xray routing rule (domain)',
+      type: 'keyword',
+      boost: 6
+    }
   ),
 
   snippetCompletion(
@@ -202,8 +207,13 @@ const xrayOutboundSnippets: Completion[] = [
   "ip": ["geoip:\${3:google}"],
   "outboundTag": "\${4:proxy}"
 }`,
-    { label: 'routing-rule-geo', detail: 'Xray routing rule (geosite + geoip)', type: 'keyword', boost: 6 }
-  ),
+    {
+      label: 'routing-rule-geo',
+      detail: 'Xray routing rule (geosite + geoip)',
+      type: 'keyword',
+      boost: 6
+    }
+  )
 ];
 
 // ── Mihomo YAML proxy snippets ───────────────────────────────────────────────
@@ -287,8 +297,13 @@ const mihomoProxySnippets: Completion[] = [
     - \${2:proxy-name}
   url: https://www.gstatic.com/generate_204
   interval: 300`,
-    { label: 'proxy-group-urltest', detail: 'Mihomo url-test proxy group', type: 'keyword', boost: 6 }
-  ),
+    {
+      label: 'proxy-group-urltest',
+      detail: 'Mihomo url-test proxy group',
+      type: 'keyword',
+      boost: 6
+    }
+  )
 ];
 
 // ── Completion sources ───────────────────────────────────────────────────────
