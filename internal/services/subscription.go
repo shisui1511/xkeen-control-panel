@@ -1297,4 +1297,3 @@ func countMihomoRules(content string) int {
 	}
 	return count
 }
-
