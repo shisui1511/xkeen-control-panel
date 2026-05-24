@@ -213,8 +213,8 @@
       <p class="sub">{$t('traffic.realtime')}</p>
     </div>
     <div class="ph-actions">
-      <span class="status-indicator" class:connected>
-        {connected ? 'live' : 'offline'}
+      <span class="status-indicator" class:connected class:live={connected}>
+        ● {connected ? 'live' : 'offline'}
       </span>
     </div>
   </div>
@@ -540,5 +540,14 @@
     padding: 0 10px 0 80px;
     font-size: 11px;
     color: var(--fg-dim);
+  }
+
+  :global(.status-indicator.live) {
+    color: var(--accent);
+    border-color: rgba(41, 194, 240, 0.4);
+    background: rgba(41, 194, 240, 0.08);
+  }
+  :global(.status-indicator.live::before) {
+    display: none;
   }
 </style>
