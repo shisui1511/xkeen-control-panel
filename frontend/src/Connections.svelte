@@ -41,8 +41,8 @@
   let filterRule = '';
   let filterProxy = '';
 
-  $: uniqueRules = [...new Set(connections.map(c => c.rule).filter(Boolean))].sort();
-  $: uniqueChains = [...new Set(connections.map(c => getChainPath(c)).filter(Boolean))].sort();
+  $: uniqueRules = [...new Set(connections.map((c) => c.rule).filter(Boolean))].sort();
+  $: uniqueChains = [...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort();
 
   async function fetchConnections() {
     loading = true;

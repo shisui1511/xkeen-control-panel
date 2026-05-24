@@ -96,7 +96,10 @@
         const text = await res.text();
         throw new Error(text);
       }
-      showToast('success', $currentLang === 'ru' ? 'Файлы успешно откачены' : 'Files rolled back successfully');
+      showToast(
+        'success',
+        $currentLang === 'ru' ? 'Файлы успешно откачены' : 'Files rolled back successfully'
+      );
       await fetchFiles();
     } catch (e: any) {
       error = e.message;
@@ -181,9 +184,12 @@
 
   function getStatusBadge(file: DATFile): { cls: string; label: string } {
     const s = getFileStatus(file);
-    if (s === 'missing')  return { cls: 'badge badge-error',   label: $currentLang === 'ru' ? 'НЕТ ФАЙЛА' : 'MISSING' };
-    if (s === 'outdated') return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕЛО'  : 'OUTDATED' };
-    if (s === 'warning')  return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕЛО'  : 'OUTDATED' };
+    if (s === 'missing')
+      return { cls: 'badge badge-error', label: $currentLang === 'ru' ? 'НЕТ ФАЙЛА' : 'MISSING' };
+    if (s === 'outdated')
+      return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕЛО' : 'OUTDATED' };
+    if (s === 'warning')
+      return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕЛО' : 'OUTDATED' };
     return { cls: 'badge badge-success', label: 'OK' };
   }
 
@@ -211,9 +217,18 @@
   function formatRelativeDate(ts: number): string {
     if (!ts) return '-';
     const diffSec = Math.floor(Date.now() / 1000 - ts);
-    if (diffSec < 3600) return $currentLang === 'ru' ? `${Math.floor(diffSec / 60)} мин назад` : `${Math.floor(diffSec / 60)} min ago`;
-    if (diffSec < 86400) return $currentLang === 'ru' ? `${Math.floor(diffSec / 3600)} ч назад` : `${Math.floor(diffSec / 3600)} h ago`;
-    if (diffSec < 86400 * 30) return $currentLang === 'ru' ? `${Math.floor(diffSec / 86400)} д назад` : `${Math.floor(diffSec / 86400)} d ago`;
+    if (diffSec < 3600)
+      return $currentLang === 'ru'
+        ? `${Math.floor(diffSec / 60)} мин назад`
+        : `${Math.floor(diffSec / 60)} min ago`;
+    if (diffSec < 86400)
+      return $currentLang === 'ru'
+        ? `${Math.floor(diffSec / 3600)} ч назад`
+        : `${Math.floor(diffSec / 3600)} h ago`;
+    if (diffSec < 86400 * 30)
+      return $currentLang === 'ru'
+        ? `${Math.floor(diffSec / 86400)} д назад`
+        : `${Math.floor(diffSec / 86400)} d ago`;
     return formatDate(ts);
   }
 
@@ -242,7 +257,9 @@
         class="btn btn-secondary"
         on:click={rollbackAll}
         disabled={rollbacking || loading || globalUpdating}
-        title={$currentLang === 'ru' ? 'Откатить DAT-файлы из бэкапа' : 'Rollback DAT files from backup'}
+        title={$currentLang === 'ru'
+          ? 'Откатить DAT-файлы из бэкапа'
+          : 'Rollback DAT files from backup'}
       >
         <svg
           width="14"
@@ -258,7 +275,13 @@
           <polyline points="3 7 3 12 8 12" />
           <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
         </svg>
-        {rollbacking ? ($currentLang === 'ru' ? 'Откат...' : 'Rolling...') : ($currentLang === 'ru' ? 'Откатить' : 'Rollback')}
+        {rollbacking
+          ? $currentLang === 'ru'
+            ? 'Откат...'
+            : 'Rolling...'
+          : $currentLang === 'ru'
+            ? 'Откатить'
+            : 'Rollback'}
       </button>
       <button
         class="btn btn-primary"
@@ -367,7 +390,8 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {file.record_count.toLocaleString()} {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                    {file.record_count.toLocaleString()}
+                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·
@@ -481,7 +505,8 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {file.record_count.toLocaleString()} {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                    {file.record_count.toLocaleString()}
+                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·
@@ -581,7 +606,8 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {file.record_count.toLocaleString()} {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                    {file.record_count.toLocaleString()}
+                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·

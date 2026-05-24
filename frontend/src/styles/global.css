@@ -575,7 +575,7 @@ h2.card-title {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--fg-faint);
-  background: rgba(255,255,255,0.05);
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 1px 4px;

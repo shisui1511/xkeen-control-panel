@@ -162,11 +162,13 @@
             xkeenRaw = parsed.data.raw || '';
           } else {
             xkeenRaw = text;
-            isXkeenRunning = text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
+            isXkeenRunning =
+              text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
           }
         } catch (_) {
           xkeenRaw = text;
-          isXkeenRunning = text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
+          isXkeenRunning =
+            text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
         }
       }
 
@@ -216,7 +218,7 @@
       }
 
       serviceStatus = {
-        xkeen: isXkeenRunning ? 'running' : (xkeenRaw || 'unknown'),
+        xkeen: isXkeenRunning ? 'running' : xkeenRaw || 'unknown',
         xray: xrayProcessStatus,
         mihomo: mihomoProcessStatus,
         connections: connCount,
@@ -370,7 +372,6 @@
       showToast('error', $t('app.error'));
     }
   }
-
 
   function statusColor(status: string): string {
     if (status === 'running') return 'success';

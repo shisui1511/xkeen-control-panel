@@ -264,19 +264,27 @@
 
   function getActionBadgeClass(action?: string): string {
     switch (action) {
-      case 'throttle': return 'badge tq-action-throttle';
-      case 'log_only': return 'badge tq-action-log';
-      case 'block':    return 'badge tq-action-block';
-      default:         return 'badge tq-action-notify';
+      case 'throttle':
+        return 'badge tq-action-throttle';
+      case 'log_only':
+        return 'badge tq-action-log';
+      case 'block':
+        return 'badge tq-action-block';
+      default:
+        return 'badge tq-action-notify';
     }
   }
 
   function getActionLabel(action?: string): string {
     switch (action) {
-      case 'throttle': return $t('trafficquotas.action_throttle');
-      case 'log_only': return $t('trafficquotas.action_log_only');
-      case 'block':    return $t('trafficquotas.action_block');
-      default:         return $t('trafficquotas.action_notify');
+      case 'throttle':
+        return $t('trafficquotas.action_throttle');
+      case 'log_only':
+        return $t('trafficquotas.action_log_only');
+      case 'block':
+        return $t('trafficquotas.action_block');
+      default:
+        return $t('trafficquotas.action_notify');
     }
   }
 
@@ -400,7 +408,9 @@
                 style="width: {totalPct}%"
               ></div>
             </div>
-            <div class="stat-sub">{totalPct.toFixed(1)}% {$currentLang === 'ru' ? 'от лимита' : 'of limit'}</div>
+            <div class="stat-sub">
+              {totalPct.toFixed(1)}% {$currentLang === 'ru' ? 'от лимита' : 'of limit'}
+            </div>
           {/if}
         </div>
         <div class="stat-box">

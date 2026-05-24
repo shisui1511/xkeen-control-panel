@@ -107,7 +107,7 @@
               binaryPath: parsed.data.binary_path || '',
               raw: parsed.data.raw || ''
             };
-            
+
             const lower = xkeenInfo.raw.toLowerCase();
             if (lower.includes('не запущен') || lower.includes('not running')) {
               xkeenStatus = $t('svc.kernel_not_selected');
@@ -122,11 +122,25 @@
         }
       } else {
         xkeenStatus = $t('app.error');
-        xkeenInfo = { isRunning: false, activeKernel: '', pid: 0, uptime: '', binaryPath: '', raw: $t('app.error') };
+        xkeenInfo = {
+          isRunning: false,
+          activeKernel: '',
+          pid: 0,
+          uptime: '',
+          binaryPath: '',
+          raw: $t('app.error')
+        };
       }
     } catch (e) {
       xkeenStatus = $t('app.unavailable');
-      xkeenInfo = { isRunning: false, activeKernel: '', pid: 0, uptime: '', binaryPath: '', raw: $t('app.unavailable') };
+      xkeenInfo = {
+        isRunning: false,
+        activeKernel: '',
+        pid: 0,
+        uptime: '',
+        binaryPath: '',
+        raw: $t('app.unavailable')
+      };
     }
   }
 
@@ -135,7 +149,13 @@
     const isRunning = lower.includes('running') || lower.includes('запущен');
     xkeenInfo = {
       isRunning: isRunning,
-      activeKernel: isRunning ? (lower.includes('xray') ? 'xray' : lower.includes('mihomo') ? 'mihomo' : '') : '',
+      activeKernel: isRunning
+        ? lower.includes('xray')
+          ? 'xray'
+          : lower.includes('mihomo')
+            ? 'mihomo'
+            : ''
+        : '',
       pid: 0,
       uptime: '',
       binaryPath: '',
@@ -382,7 +402,8 @@
         <div class="k-meta">
           {#if isRunning}
             {#if xkeenInfo.pid}
-              PID {xkeenInfo.pid} · uptime {xkeenInfo.uptime || '—'} · {xkeenInfo.binaryPath || '/opt/sbin/xkeen'}
+              PID {xkeenInfo.pid} · uptime {xkeenInfo.uptime || '—'} · {xkeenInfo.binaryPath ||
+                '/opt/sbin/xkeen'}
             {:else if xkeenStatus}
               {xkeenStatus}
             {:else}
@@ -390,7 +411,8 @@
                 · {$t('svc.active_kernel')}: {activeKernel}{/if}
             {/if}
           {:else}
-            {$t('svc.xkeen_module')}{#if xkeenInfo.binaryPath} · {xkeenInfo.binaryPath}{/if}
+            {$t('svc.xkeen_module')}{#if xkeenInfo.binaryPath}
+              · {xkeenInfo.binaryPath}{/if}
           {/if}
         </div>
       </div>
@@ -692,7 +714,8 @@
             <Skeleton type="text-line" width="120px" />
           {:else if mihomo}
             {#if mihomo.process_status === 'running'}
-              API {mihomo.api_addr || '127.0.0.1:9090'} · clash-meta (v{mihomo.current_version}) · uptime {mihomo.uptime || '—'} · {mihomo.binary_path}
+              API {mihomo.api_addr || '127.0.0.1:9090'} · clash-meta (v{mihomo.current_version}) ·
+              uptime {mihomo.uptime || '—'} · {mihomo.binary_path}
             {:else}
               {mihomo.binary_path}
               {#if mihomo.message}

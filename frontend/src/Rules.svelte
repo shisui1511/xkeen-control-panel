@@ -172,13 +172,21 @@
   }
 
   function copyFullRule(rule: Rule) {
-    const text = rule.type.toUpperCase() === 'MATCH' ? `${rule.type},${rule.proxy}` : `${rule.type},${rule.payload},${rule.proxy}`;
+    const text =
+      rule.type.toUpperCase() === 'MATCH'
+        ? `${rule.type},${rule.proxy}`
+        : `${rule.type},${rule.payload},${rule.proxy}`;
     copyToClipboard(text, $currentLang === 'ru' ? 'Правило скопировано' : 'Rule copied');
     closeDropdowns();
   }
 
   function editRule(rule: Rule) {
-    showToast('info', $currentLang === 'ru' ? `Найдите файл конфигурации для изменения: ${rule.payload}` : `Find config file to edit: ${rule.payload}`);
+    showToast(
+      'info',
+      $currentLang === 'ru'
+        ? `Найдите файл конфигурации для изменения: ${rule.payload}`
+        : `Find config file to edit: ${rule.payload}`
+    );
     window.location.hash = '#/editor';
     closeDropdowns();
   }
@@ -300,36 +308,36 @@
         <tbody>
           {#each getFilteredRules() as rule, i}
             {#if rule.type.toUpperCase() !== 'MATCH'}
-            <tr>
-              <td class="mono" style="color:var(--fg-dim);">{String(i + 1).padStart(3, '0')}</td>
-              <td>
-                <span class={getRuleBadgeClass(rule.type)}>
-                  {rule.type}
-                </span>
-              </td>
-              <td class="mono">{rule.payload}</td>
-              <td>
-                <span class={getTargetBadgeClass(rule.proxy)}>
-                  {rule.proxy}
-                </span>
-              </td>
-              <td style="position: relative; text-align: right;">
-                <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
-                {#if activeDropdownRule === rule}
-                  <div class="dropdown-menu">
-                    <button on:click={() => copyPayload(rule)}>
-                      {$currentLang === 'ru' ? 'Копировать payload' : 'Copy payload'}
-                    </button>
-                    <button on:click={() => copyFullRule(rule)}>
-                      {$currentLang === 'ru' ? 'Копировать правило' : 'Copy rule'}
-                    </button>
-                    <button on:click={() => editRule(rule)}>
-                      {$currentLang === 'ru' ? 'Редактировать' : 'Edit'}
-                    </button>
-                  </div>
-                {/if}
-              </td>
-            </tr>
+              <tr>
+                <td class="mono" style="color:var(--fg-dim);">{String(i + 1).padStart(3, '0')}</td>
+                <td>
+                  <span class={getRuleBadgeClass(rule.type)}>
+                    {rule.type}
+                  </span>
+                </td>
+                <td class="mono">{rule.payload}</td>
+                <td>
+                  <span class={getTargetBadgeClass(rule.proxy)}>
+                    {rule.proxy}
+                  </span>
+                </td>
+                <td style="position: relative; text-align: right;">
+                  <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
+                  {#if activeDropdownRule === rule}
+                    <div class="dropdown-menu">
+                      <button on:click={() => copyPayload(rule)}>
+                        {$currentLang === 'ru' ? 'Копировать payload' : 'Copy payload'}
+                      </button>
+                      <button on:click={() => copyFullRule(rule)}>
+                        {$currentLang === 'ru' ? 'Копировать правило' : 'Copy rule'}
+                      </button>
+                      <button on:click={() => editRule(rule)}>
+                        {$currentLang === 'ru' ? 'Редактировать' : 'Edit'}
+                      </button>
+                    </div>
+                  {/if}
+                </td>
+              </tr>
             {/if}
           {:else}
             <tr>
@@ -342,30 +350,30 @@
               </td>
             </tr>
           {/each}
-          {#if getFilteredRules().some(r => r.type.toUpperCase() === 'MATCH')}
-            {#each getFilteredRules().filter(r => r.type.toUpperCase() === 'MATCH') as rule}
-            <tr class="match-fallback-row">
-              <td class="mono" style="color:var(--fg-dim);">—</td>
-              <td><span class={getRuleBadgeClass(rule.type)}>{rule.type}</span></td>
-              <td class="mono" style="color:var(--fg-dim);">{$t('rules.match_fallback')}</td>
-              <td><span class={getTargetBadgeClass(rule.proxy)}>{rule.proxy}</span></td>
-              <td style="position: relative; text-align: right;">
-                <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
-                {#if activeDropdownRule === rule}
-                  <div class="dropdown-menu">
-                    <button on:click={() => copyPayload(rule)}>
-                      {$currentLang === 'ru' ? 'Копировать payload' : 'Copy payload'}
-                    </button>
-                    <button on:click={() => copyFullRule(rule)}>
-                      {$currentLang === 'ru' ? 'Копировать правило' : 'Copy rule'}
-                    </button>
-                    <button on:click={() => editRule(rule)}>
-                      {$currentLang === 'ru' ? 'Редактировать' : 'Edit'}
-                    </button>
-                  </div>
-                {/if}
-              </td>
-            </tr>
+          {#if getFilteredRules().some((r) => r.type.toUpperCase() === 'MATCH')}
+            {#each getFilteredRules().filter((r) => r.type.toUpperCase() === 'MATCH') as rule}
+              <tr class="match-fallback-row">
+                <td class="mono" style="color:var(--fg-dim);">—</td>
+                <td><span class={getRuleBadgeClass(rule.type)}>{rule.type}</span></td>
+                <td class="mono" style="color:var(--fg-dim);">{$t('rules.match_fallback')}</td>
+                <td><span class={getTargetBadgeClass(rule.proxy)}>{rule.proxy}</span></td>
+                <td style="position: relative; text-align: right;">
+                  <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
+                  {#if activeDropdownRule === rule}
+                    <div class="dropdown-menu">
+                      <button on:click={() => copyPayload(rule)}>
+                        {$currentLang === 'ru' ? 'Копировать payload' : 'Copy payload'}
+                      </button>
+                      <button on:click={() => copyFullRule(rule)}>
+                        {$currentLang === 'ru' ? 'Копировать правило' : 'Copy rule'}
+                      </button>
+                      <button on:click={() => editRule(rule)}>
+                        {$currentLang === 'ru' ? 'Редактировать' : 'Edit'}
+                      </button>
+                    </div>
+                  {/if}
+                </td>
+              </tr>
             {/each}
           {/if}
         </tbody>

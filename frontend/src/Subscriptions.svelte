@@ -426,11 +426,13 @@
             </div>
             <div class="meta-column">
               <div class="meta-label">{$currentLang === 'ru' ? 'ПРАВИЛ' : 'RULES'}</div>
-              <div class="meta-value">{sub.type === 'mihomo' ? (sub.rule_count || 0) : '—'}</div>
+              <div class="meta-value">{sub.type === 'mihomo' ? sub.rule_count || 0 : '—'}</div>
             </div>
             <div class="meta-column">
               <div class="meta-label">{$currentLang === 'ru' ? 'ТРАФИК' : 'TRAFFIC'}</div>
-              <div class="meta-value">{formatTrafficUsage(sub.upload, sub.download, sub.total)}</div>
+              <div class="meta-value">
+                {formatTrafficUsage(sub.upload, sub.download, sub.total)}
+              </div>
             </div>
             <div class="meta-column">
               <div class="meta-label">{$currentLang === 'ru' ? 'ОБНОВЛЕНО' : 'UPDATED'}</div>

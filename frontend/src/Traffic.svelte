@@ -31,13 +31,17 @@
   $: connDeltaPerMin = (() => {
     if (connHistory.length < 2) return 0;
     const now = connHistory[connHistory.length - 1];
-    const minuteAgo = connHistory.findLast(h => now.ts - h.ts >= 60000) || connHistory[0];
+    let minuteAgo = connHistory[0];
+    for (let i = connHistory.length - 1; i >= 0; i--) {
+      if (now.ts - connHistory[i].ts >= 60000) {
+        minuteAgo = connHistory[i];
+        break;
+      }
+    }
     return now.count - minuteAgo.count;
   })();
 
-  $: connPeakHour = connHistory.length > 0
-    ? Math.max(...connHistory.map(h => h.count))
-    : 0;
+  $: connPeakHour = connHistory.length > 0 ? Math.max(...connHistory.map((h) => h.count)) : 0;
 
   function formatSpeed(bytesPerSecond: number): string {
     if (bytesPerSecond === 0) return '0 B/s';
@@ -296,8 +300,11 @@
       <div class="stat-session">{tcpConnectionsCount} TCP · {udpConnectionsCount} UDP</div>
       {#if connHistory.length >= 2}
         <div class="stat-session" style="margin-top: 2px; color: var(--fg-dim);">
-          {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$currentLang === 'ru' ? 'мин' : 'min'}
-          · {$currentLang === 'ru' ? 'пик' : 'peak'} {connPeakHour}
+          {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$currentLang === 'ru'
+            ? 'мин'
+            : 'min'}
+          · {$currentLang === 'ru' ? 'пик' : 'peak'}
+          {connPeakHour}
         </div>
       {/if}
     </div>
