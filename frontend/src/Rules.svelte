@@ -87,10 +87,15 @@
 
   function getRuleBadgeClass(type: string): string {
     const typeUpper = type.toUpperCase();
-    if (typeUpper.startsWith('DOMAIN')) return 'badge badge-info';
+    if (typeUpper === 'DOMAIN-SUFFIX') return 'badge rule-type-domain-suffix';
+    if (typeUpper === 'DOMAIN-KEYWORD') return 'badge rule-type-domain-keyword';
+    if (typeUpper.startsWith('DOMAIN')) return 'badge rule-type-domain';
+    if (typeUpper === 'GEOIP') return 'badge rule-type-geoip';
+    if (typeUpper === 'GEOSITE') return 'badge rule-type-geosite';
+    if (typeUpper.startsWith('IP-CIDR')) return 'badge rule-type-ip-cidr';
     if (typeUpper.startsWith('IP')) return 'badge badge-warning';
-    if (typeUpper === 'GEOIP') return 'badge badge-success';
-    if (typeUpper === 'MATCH') return 'badge badge-danger';
+    if (typeUpper === 'PROCESS-NAME') return 'badge rule-type-process';
+    if (typeUpper === 'MATCH') return 'badge rule-type-match';
     return 'badge';
   }
 
@@ -239,11 +244,12 @@
             <th style="width:60px;">#</th>
             <th>{$t('rules.type_col')}</th>
             <th>Payload</th>
-            <th>{$t('conn.proxy') || 'Цель'}</th>
+            <th>{$t('rules.target')}</th>
           </tr>
         </thead>
         <tbody>
           {#each getFilteredRules() as rule, i}
+            {#if rule.type.toUpperCase() !== 'MATCH'}
             <tr>
               <td class="mono" style="color:var(--fg-dim);">{String(i + 1).padStart(3, '0')}</td>
               <td>
@@ -258,6 +264,7 @@
                 </span>
               </td>
             </tr>
+            {/if}
           {:else}
             <tr>
               <td
@@ -269,6 +276,16 @@
               </td>
             </tr>
           {/each}
+          {#if getFilteredRules().some(r => r.type.toUpperCase() === 'MATCH')}
+            {#each getFilteredRules().filter(r => r.type.toUpperCase() === 'MATCH') as rule}
+            <tr class="match-fallback-row">
+              <td class="mono" style="color:var(--fg-dim);">—</td>
+              <td><span class={getRuleBadgeClass(rule.type)}>{rule.type}</span></td>
+              <td class="mono" style="color:var(--fg-dim);">{$t('rules.match_fallback')}</td>
+              <td><span class={getTargetBadgeClass(rule.proxy)}>{rule.proxy}</span></td>
+            </tr>
+            {/each}
+          {/if}
         </tbody>
       </table>
     </div>
@@ -315,5 +332,53 @@
 
   .mono {
     font-family: var(--font-family-mono);
+  }
+
+  /* Rule type colored badges */
+  :global(.rule-type-domain-suffix) {
+    background: rgba(41, 194, 240, 0.12);
+    color: #29c2f0;
+    border: 1px solid rgba(41, 194, 240, 0.25);
+  }
+  :global(.rule-type-domain-keyword) {
+    background: rgba(234, 179, 8, 0.12);
+    color: #eab308;
+    border: 1px solid rgba(234, 179, 8, 0.25);
+  }
+  :global(.rule-type-domain) {
+    background: rgba(41, 194, 240, 0.08);
+    color: #7dd3fc;
+    border: 1px solid rgba(41, 194, 240, 0.18);
+  }
+  :global(.rule-type-geoip) {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+  }
+  :global(.rule-type-geosite) {
+    background: rgba(16, 185, 129, 0.08);
+    color: #6ee7b7;
+    border: 1px solid rgba(16, 185, 129, 0.18);
+  }
+  :global(.rule-type-ip-cidr) {
+    background: rgba(249, 115, 22, 0.12);
+    color: #f97316;
+    border: 1px solid rgba(249, 115, 22, 0.25);
+  }
+  :global(.rule-type-process) {
+    background: rgba(156, 163, 175, 0.12);
+    color: #9ca3af;
+    border: 1px solid rgba(156, 163, 175, 0.25);
+  }
+  :global(.rule-type-match) {
+    background: rgba(156, 163, 175, 0.1);
+    color: #9ca3af;
+    border: 1px solid rgba(156, 163, 175, 0.2);
+  }
+
+  .match-fallback-row td {
+    background: rgba(156, 163, 175, 0.04);
+    color: var(--fg-dim);
+    border-top: 1px solid var(--border);
   }
 </style>
