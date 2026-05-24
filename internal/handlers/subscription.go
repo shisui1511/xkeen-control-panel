@@ -9,6 +9,10 @@ import (
 )
 
 func (a *API) SubscriptionList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 
 	subs := a.subscriptionSvc.List()
 	a.jsonResponse(w, subs)

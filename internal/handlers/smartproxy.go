@@ -8,6 +8,10 @@ import (
 )
 
 func (a *API) SmartProxyList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	if a.smartProxySvc == nil {
 		a.errorResponse(w, "Smart Proxy service unavailable", http.StatusServiceUnavailable)
 		return
@@ -16,6 +20,10 @@ func (a *API) SmartProxyList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) SmartProxyGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	if a.smartProxySvc == nil {
 		a.errorResponse(w, "Smart Proxy service unavailable", http.StatusServiceUnavailable)
 		return

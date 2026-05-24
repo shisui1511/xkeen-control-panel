@@ -7,6 +7,10 @@ import (
 )
 
 func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	out, err := a.xkeenSvc.Status()
 	if err != nil {
 		a.errorResponse(w, out, http.StatusInternalServerError)

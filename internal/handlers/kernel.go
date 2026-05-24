@@ -8,6 +8,10 @@ import (
 )
 
 func (a *API) KernelList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	JSONSuccess(w, a.kernelSvc.List())
 }
 
@@ -65,6 +69,10 @@ func (a *API) KernelInstall(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) KernelStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 
 	name := strings.TrimPrefix(r.URL.Path, "/api/kernels/")
 	name = strings.TrimSuffix(name, "/status")

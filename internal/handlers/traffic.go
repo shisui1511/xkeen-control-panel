@@ -8,6 +8,10 @@ import (
 )
 
 func (a *API) TrafficQuotaList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	if a.trafficQuotaSvc == nil {
 		a.errorResponse(w, "Traffic Quota service unavailable", http.StatusServiceUnavailable)
 		return
@@ -16,6 +20,10 @@ func (a *API) TrafficQuotaList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) TrafficQuotaGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	if a.trafficQuotaSvc == nil {
 		a.errorResponse(w, "Traffic Quota service unavailable", http.StatusServiceUnavailable)
 		return
@@ -175,6 +183,10 @@ func (a *API) TrafficQuotaReset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) TrafficStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	if a.trafficQuotaSvc == nil {
 		a.errorResponse(w, "Traffic Quota service unavailable", http.StatusServiceUnavailable)
 		return
@@ -183,6 +195,10 @@ func (a *API) TrafficStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) TrafficAlerts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	if a.trafficQuotaSvc == nil {
 		a.errorResponse(w, "Traffic Quota service unavailable", http.StatusServiceUnavailable)
 		return
