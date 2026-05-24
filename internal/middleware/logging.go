@@ -6,8 +6,9 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"strings"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type responseWriter struct {
@@ -29,9 +30,7 @@ func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 func sanitizeLogInput(s string) string {
-	s = strings.ReplaceAll(s, "\n", "")
-	s = strings.ReplaceAll(s, "\r", "")
-	return s
+	return utils.SanitizeLogInput(s)
 }
 
 // Logging is an HTTP middleware that logs request method, URL path, response status code, and duration.

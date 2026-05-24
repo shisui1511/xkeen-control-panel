@@ -18,21 +18,42 @@ func NewPathValidator(roots []string) *PathValidator {
 
 // Validate resolves symlinks and cleans the input path, checking if it resides within the allowed roots.
 func (v *PathValidator) Validate(path string) (string, error) {
-	cleanPath := filepath.Clean(path)
+	if path == "" {
+		return "", errors.New("path traversal detected or path not allowed")
+	}
 
-	// Resolve symlinks on the parent directory.
-	// We use the parent so that new (not-yet-existing) files can still be validated.
-	parentDir := filepath.Dir(cleanPath)
-	resolvedParent, err := filepath.EvalSymlinks(parentDir)
+	cleanPath := filepath.Clean(path)
+	absPath, err := filepath.Abs(cleanPath)
 	if err != nil {
 		return "", errors.New("path traversal detected or path not allowed")
 	}
-	// Reconstruct the full path with the resolved parent and the original base name.
-	resolved := filepath.Join(resolvedParent, filepath.Base(cleanPath))
+
+	// Resolve symlinks for the target path. If it does not exist, resolve the parent directory.
+	var resolved string
+	if rp, err := filepath.EvalSymlinks(absPath); err == nil {
+		resolved = rp
+	} else {
+		parentDir := filepath.Dir(absPath)
+		resolvedParent, err := filepath.EvalSymlinks(parentDir)
+		if err != nil {
+			return "", errors.New("path traversal detected or path not allowed")
+		}
+		resolved = filepath.Join(resolvedParent, filepath.Base(absPath))
+	}
 
 	for _, root := range v.AllowedRoots {
 		cleanRoot := filepath.Clean(root)
-		if resolved == cleanRoot || strings.HasPrefix(resolved, cleanRoot+string(filepath.Separator)) {
+		absRoot, err := filepath.Abs(cleanRoot)
+		if err != nil {
+			continue
+		}
+
+		resolvedRoot := absRoot
+		if rr, err := filepath.EvalSymlinks(absRoot); err == nil {
+			resolvedRoot = rr
+		}
+
+		if resolved == resolvedRoot || strings.HasPrefix(resolved, resolvedRoot+string(filepath.Separator)) {
 			return resolved, nil
 		}
 	}

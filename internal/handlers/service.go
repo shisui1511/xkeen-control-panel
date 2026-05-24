@@ -3,8 +3,20 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
+
+type ServiceStatusResponse struct {
+	IsRunning    bool   `json:"is_running"`
+	ActiveKernel string `json:"active_kernel"`
+	PID          int    `json:"pid"`
+	Uptime       string `json:"uptime"`
+	BinaryPath   string `json:"binary_path"`
+	Raw          string `json:"raw"`
+}
 
 func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -13,10 +25,37 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.xkeenSvc.Status()
 	if err != nil {
-		a.errorResponse(w, out, http.StatusInternalServerError)
+		JSONError(w, http.StatusInternalServerError, out)
 		return
 	}
-	w.Write([]byte(out))
+
+	resp := ServiceStatusResponse{
+		BinaryPath: a.cfg.XKeenBinary,
+		Raw:        out,
+	}
+
+	// Detect which kernel is running and get its PID/Uptime
+	if a.kernelSvc != nil {
+		for _, info := range a.kernelSvc.List() {
+			if info.ProcessStatus == "running" {
+				resp.IsRunning = true
+				resp.ActiveKernel = info.Name
+				resp.PID = info.PID
+				resp.Uptime = info.Uptime
+				break
+			}
+		}
+	}
+
+	// Fallback to checking raw output if kernelSvc list is empty or doesn't find running
+	if !resp.IsRunning {
+		lower := strings.ToLower(out)
+		if strings.Contains(lower, "running") || strings.Contains(lower, "запущен") {
+			resp.IsRunning = true
+		}
+	}
+
+	JSONSuccess(w, resp)
 }
 
 func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +79,10 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if action == "switch_kernel" {
 		targetKernel = r.URL.Query().Get("kernel")
+		if targetKernel != "xray" && targetKernel != "mihomo" {
+			a.errorResponse(w, a.t(r, "service.invalid_kernel"), http.StatusBadRequest)
+			return
+		}
 	}
 
 	switch action {
@@ -72,6 +115,8 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) monitorAndRollbackKernel(name string) {
+	name = utils.SanitizeLogInput(name)
+
 	// Wait 10 seconds for the kernel to bootstrap and status to settle
 	time.Sleep(10 * time.Second)
 
@@ -80,21 +125,23 @@ func (a *API) monitorAndRollbackKernel(name string) {
 		return
 	}
 
-	if k.ProcessStatus != "running" {
-		log.Printf("Service: kernel %s failed to reach running state, triggering auto-rollback...", name)
+	kernelName := k.Name
 
-		if err := a.kernelSvc.Rollback(name); err != nil {
+	if k.ProcessStatus != "running" {
+		log.Printf("Service: kernel %s failed to reach running state, triggering auto-rollback...", kernelName)
+
+		if err := a.kernelSvc.Rollback(kernelName); err != nil {
 			log.Printf("Service: kernel auto-rollback failed: %v", err)
-			a.xkeenSvc.RecordAction("auto_rollback:"+name, "Откат завершился ошибкой: "+err.Error(), err)
+			a.xkeenSvc.RecordAction("auto_rollback:"+kernelName, "Откат завершился ошибкой: "+err.Error(), err)
 			return
 		}
 
 		// Restart service after rollback
 		out, err := a.xkeenSvc.Restart()
 		if err != nil {
-			a.xkeenSvc.RecordAction("auto_rollback:"+name, "Откат выполнен. Перезапуск XKeen завершился ошибкой: "+err.Error()+"\nВывод:\n"+out, err)
+			a.xkeenSvc.RecordAction("auto_rollback:"+kernelName, "Откат выполнен. Перезапуск XKeen завершился ошибкой: "+err.Error()+"\nВывод:\n"+out, err)
 		} else {
-			a.xkeenSvc.RecordAction("auto_rollback:"+name, "Откат ядра и перезапуск XKeen выполнены успешно.\nВывод:\n"+out, nil)
+			a.xkeenSvc.RecordAction("auto_rollback:"+kernelName, "Откат ядра и перезапуск XKeen выполнены успешно.\nВывод:\n"+out, nil)
 		}
 	}
 }

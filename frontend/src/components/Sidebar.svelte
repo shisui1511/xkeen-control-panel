@@ -13,11 +13,6 @@
   export let onInstallPWA: () => void = () => {};
   export let isCollapsed: boolean = false;
   export let onToggleCollapse: () => void = () => {};
-
-  function navigate(tab: string) {
-    onSwitchTab(tab);
-    isSidebarOpen.set(false);
-  }
 </script>
 
 <!-- Brand block -->
@@ -52,7 +47,7 @@
   </span>
 </div>
 
-<nav style="flex: 1; overflow-y: auto; padding: 4px 0 10px;">
+<nav style="flex: 1; overflow-y: auto; padding: 4px 0 10px; scrollbar-width: none;">
   <!-- Core group -->
   <details class="nav-group" open>
     <summary>
@@ -77,42 +72,46 @@
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
-    <button
+    <a
+      href="#/dashboard"
       class="nav-item"
       class:active={currentTab === 'dashboard'}
-      on:click={() => navigate('dashboard')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.dashboard')}
     >
       <Icon name="dashboard" size={16} />
       {$t('nav.dashboard')}
-    </button>
-    <button
+    </a>
+    <a
+      href="#/services"
       class="nav-item"
       class:active={currentTab === 'services'}
-      on:click={() => navigate('services')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.services')}
     >
       <Icon name="services" size={16} />
       {$t('nav.services')}
-    </button>
-    <button
+    </a>
+    <a
+      href="#/editor"
       class="nav-item"
       class:active={currentTab === 'editor'}
-      on:click={() => navigate('editor')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.editor')}
     >
       <Icon name="editor" size={16} />
       {$t('nav.editor')}
-    </button>
-    <button
+    </a>
+    <a
+      href="#/settings"
       class="nav-item"
       class:active={currentTab === 'settings'}
-      on:click={() => navigate('settings')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.settings')}
     >
       <Icon name="settings" size={16} />
       {$t('nav.settings')}
-    </button>
+    </a>
   </details>
 
   <!-- Services group -->
@@ -146,51 +145,56 @@
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
-    <button
+    <a
+      href="#/logs"
       class="nav-item"
       class:active={currentTab === 'logs'}
-      on:click={() => navigate('logs')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.logs')}
     >
       <Icon name="logs" size={16} />
       {$t('nav.logs')}
-    </button>
-    <button
+    </a>
+    <a
+      href="#/connections"
       class="nav-item"
       class:active={currentTab === 'connections'}
-      on:click={() => navigate('connections')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.connections')}
     >
       <Icon name="connections" size={16} />
       {$t('nav.connections')}
-    </button>
-    <button
+    </a>
+    <a
+      href="#/dat"
       class="nav-item"
       class:active={currentTab === 'dat'}
-      on:click={() => navigate('dat')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.dat')}
     >
       <Icon name="dat" size={16} />
       {$t('nav.dat')}
-    </button>
-    <button
+    </a>
+    <a
+      href="#/mihomo-gen"
       class="nav-item"
       class:active={currentTab === 'mihomo-gen'}
-      on:click={() => navigate('mihomo-gen')}
+      on:click={() => isSidebarOpen.set(false)}
       title="Mihomo Generator"
     >
       <Icon name="settings" size={16} />
       Mihomo Generator
-    </button>
-    <button
+    </a>
+    <a
+      href="#/console"
       class="nav-item"
       class:active={currentTab === 'console'}
-      on:click={() => navigate('console')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.console')}
     >
       <Icon name="console" size={16} />
       {$t('nav.console')}
-    </button>
+    </a>
   </details>
 
   <!-- Proxy & Rules group -->
@@ -212,42 +216,46 @@
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
-    <button
+    <a
+      href="#/proxies"
       class="nav-item"
       class:active={currentTab === 'proxies'}
-      on:click={() => navigate('proxies')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.proxies')}
     >
       <Icon name="proxies" size={16} />
       {$t('nav.proxies')}
-    </button>
-    <button
+    </a>
+    <a
+      href="#/rules"
       class="nav-item"
       class:active={currentTab === 'rules'}
-      on:click={() => navigate('rules')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.rules')}
     >
       <Icon name="rules" size={16} />
       {$t('nav.rules')}
-    </button>
-    <button
+    </a>
+    <a
+      href="#/subscriptions"
       class="nav-item"
       class:active={currentTab === 'subscriptions'}
-      on:click={() => navigate('subscriptions')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.subscriptions')}
     >
       <Icon name="subscriptions" size={16} />
       {$t('nav.subscriptions')}
-    </button>
-    <button
+    </a>
+    <a
+      href="#/smartproxy"
       class="nav-item"
       class:active={currentTab === 'smartproxy'}
-      on:click={() => navigate('smartproxy')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.smartproxy')}
     >
       <Icon name="smartproxy" size={16} />
       {$t('nav.smartproxy')}
-    </button>
+    </a>
   </details>
 
   <!-- Tools group -->
@@ -271,33 +279,70 @@
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
-    <button
+    <a
+      href="#/traffic"
       class="nav-item"
       class:active={currentTab === 'traffic'}
-      on:click={() => navigate('traffic')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.traffic')}
     >
       <Icon name="traffic" size={16} />
       {$t('nav.traffic')}
-    </button>
-    <button
+    </a>
+    <a
+      href="#/trafficquotas"
       class="nav-item"
       class:active={currentTab === 'trafficquotas'}
-      on:click={() => navigate('trafficquotas')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.trafficquotas')}
     >
       <Icon name="trafficquotas" size={16} />
       {$t('nav.trafficquotas')}
-    </button>
-    <button
+    </a>
+    <a
+      href="#/network"
       class="nav-item"
       class:active={currentTab === 'network'}
-      on:click={() => navigate('network')}
+      on:click={() => isSidebarOpen.set(false)}
       title={$t('nav.network')}
     >
       <Icon name="network" size={16} />
       {$t('nav.network')}
-    </button>
+    </a>
+  </details>
+
+  <!-- Access group -->
+  <details class="nav-group" open>
+    <summary>
+      <span class="group-ttl">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          ><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path
+            d="M7 11V7a5 5 0 0 1 10 0v4"
+          /></svg
+        >
+        {$t('nav.group_access')}
+      </span>
+      <span class="nav-group-arrow">▶</span>
+    </summary>
+    <a
+      href="#/settings"
+      class="nav-item nav-item-preview"
+      class:active={currentTab === 'settings'}
+      on:click={() => isSidebarOpen.set(false)}
+      title={$t('nav.settings')}
+    >
+      <Icon name="settings" size={16} />
+      {$t('nav.settings')}
+      <span class="nav-preview-tag">превью</span>
+    </a>
   </details>
 </nav>
 

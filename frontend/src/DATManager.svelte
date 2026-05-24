@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { t, currentLang } from './i18n';
   import Icon from './lib/components/Icon.svelte';
+  import { showToast } from './stores';
 
   export let onSwitchTab: (tab: string) => void = () => {};
 
@@ -14,6 +15,10 @@
     type: string;
     is_symlink: boolean;
     symlink_to?: string;
+    tag_count?: number;
+    record_count?: number;
+    version?: string;
+    info?: string;
   }
 
   interface DATTag {
@@ -25,6 +30,7 @@
   let loading = false;
   let error = '';
   let globalUpdating = false;
+  let rollbacking = false;
 
   // Tag browser state
   let tagDrawer: {
@@ -74,6 +80,32 @@
       error = e.message;
     } finally {
       globalUpdating = false;
+    }
+  }
+
+  async function rollbackAll() {
+    rollbacking = true;
+    error = '';
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/dat/rollback', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text);
+      }
+      showToast(
+        'success',
+        $currentLang === 'ru' ? 'Файлы успешно откачены' : 'Files rolled back successfully'
+      );
+      await fetchFiles();
+    } catch (e: any) {
+      error = e.message;
+      showToast('error', e.message);
+    } finally {
+      rollbacking = false;
     }
   }
 
@@ -134,6 +166,72 @@
     return file.name.toLowerCase().endsWith('.dat');
   }
 
+  const DAT_STALE_DAYS = 30;
+  const DAT_WARN_DAYS = 7;
+
+  function fileAgeDays(file: DATFile): number {
+    if (!file.last_update) return 999;
+    return (Date.now() / 1000 - file.last_update) / 86400;
+  }
+
+  function getFileStatus(file: DATFile): 'missing' | 'outdated' | 'warning' | 'ok' {
+    if (!file.exists) return 'missing';
+    const age = fileAgeDays(file);
+    if (age >= DAT_STALE_DAYS) return 'outdated';
+    if (age >= DAT_WARN_DAYS) return 'warning';
+    return 'ok';
+  }
+
+  function getStatusBadge(file: DATFile): { cls: string; label: string } {
+    const s = getFileStatus(file);
+    if (s === 'missing')
+      return { cls: 'badge badge-error', label: $currentLang === 'ru' ? 'НЕТ ФАЙЛА' : 'MISSING' };
+    if (s === 'outdated')
+      return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕЛО' : 'OUTDATED' };
+    if (s === 'warning')
+      return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕЛО' : 'OUTDATED' };
+    return { cls: 'badge badge-success', label: 'OK' };
+  }
+
+  function getTypeBadge(file: DATFile): string {
+    const n = file.name.toLowerCase();
+    if (n.includes('geoip')) return 'GEOIP';
+    if (n.includes('geosite')) return 'GEOSITE';
+    if (n.endsWith('.mmdb')) return 'MMDB';
+    if (n.endsWith('.dat')) return 'DAT';
+    return file.name.split('.').pop()?.toUpperCase() || 'FILE';
+  }
+
+  function getFreshnessPct(file: DATFile): number {
+    if (!file.exists) return 0;
+    const age = fileAgeDays(file);
+    return Math.max(0, Math.min(100, 100 - (age / DAT_STALE_DAYS) * 100));
+  }
+
+  function getFreshnessColor(file: DATFile): string {
+    const s = getFileStatus(file);
+    if (s === 'outdated' || s === 'warning') return 'var(--warning)';
+    return 'var(--success)';
+  }
+
+  function formatRelativeDate(ts: number): string {
+    if (!ts) return '-';
+    const diffSec = Math.floor(Date.now() / 1000 - ts);
+    if (diffSec < 3600)
+      return $currentLang === 'ru'
+        ? `${Math.floor(diffSec / 60)} мин назад`
+        : `${Math.floor(diffSec / 60)} min ago`;
+    if (diffSec < 86400)
+      return $currentLang === 'ru'
+        ? `${Math.floor(diffSec / 3600)} ч назад`
+        : `${Math.floor(diffSec / 3600)} h ago`;
+    if (diffSec < 86400 * 30)
+      return $currentLang === 'ru'
+        ? `${Math.floor(diffSec / 86400)} д назад`
+        : `${Math.floor(diffSec / 86400)} d ago`;
+    return formatDate(ts);
+  }
+
   $: xrayFiles = files.filter((f) => f.type === 'xray');
   $: mihomoFiles = files.filter((f) => f.type === 'mihomo');
   $: otherFiles = files.filter((f) => f.type !== 'xray' && f.type !== 'mihomo');
@@ -157,9 +255,11 @@
     <div class="ph-actions">
       <button
         class="btn btn-secondary"
-        on:click={fetchFiles}
-        disabled={loading}
-        title={$t('app.refresh')}
+        on:click={rollbackAll}
+        disabled={rollbacking || loading || globalUpdating}
+        title={$currentLang === 'ru'
+          ? 'Откатить DAT-файлы из бэкапа'
+          : 'Rollback DAT files from backup'}
       >
         <svg
           width="14"
@@ -172,10 +272,16 @@
           stroke-linejoin="round"
           style="margin-right: 6px;"
         >
-          <polyline points="23 4 23 10 17 10" />
-          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+          <polyline points="3 7 3 12 8 12" />
+          <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
         </svg>
-        {$t('app.refresh')}
+        {rollbacking
+          ? $currentLang === 'ru'
+            ? 'Откат...'
+            : 'Rolling...'
+          : $currentLang === 'ru'
+            ? 'Откатить'
+            : 'Rollback'}
       </button>
       <button
         class="btn btn-primary"
@@ -273,30 +379,34 @@
               <div class="dr-main">
                 <div class="dr-name">
                   {file.name}
-                  {#if !file.exists}
-                    <span class="badge badge-error">{$t('dat.not_found')}</span>
-                  {:else}
-                    <span class="badge badge-success">OK</span>
-                  {/if}
-                  <span class="badge badge-type"
-                    >{file.name.split('.').pop()?.toUpperCase() || 'DAT'}</span
-                  >
+                  <span class={getStatusBadge(file).cls}>{getStatusBadge(file).label}</span>
+                  <span class="badge badge-type">{getTypeBadge(file)}</span>
                 </div>
                 <div class="dr-meta">
                   {formatSize(file.size)} ·
                   {#if file.is_symlink}
                     {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
                   {/if}
+                  {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
+                    {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
+                  {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
+                    {file.record_count.toLocaleString()}
+                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                  {/if}
+                  {#if file.info}
+                    {file.info} ·
+                  {/if}
                   {$t('dat.updated')}
-                  {formatDate(file.last_update)}
+                  {formatRelativeDate(file.last_update)}
+                  {#if file.version}
+                    · {file.version}
+                  {/if}
                 </div>
               </div>
               <div class="stat-bar" style="width:120px;">
                 <div
                   class="stat-bar-fill"
-                  style="width: {file.exists ? '100%' : '0%'}; background: {file.exists
-                    ? 'var(--success)'
-                    : 'var(--error)'}"
+                  style="width: {getFreshnessPct(file)}%; background: {getFreshnessColor(file)}"
                 ></div>
               </div>
               <div class="dr-actions">
@@ -319,14 +429,25 @@
                     {$currentLang === 'ru' ? 'Теги' : 'Tags'}
                   </button>
                 {/if}
-                <button
-                  class="btn btn-secondary btn-icon-only"
-                  on:click={updateAll}
-                  disabled={globalUpdating}
-                  title={$t('dat.update_all')}
-                >
-                  ↓
-                </button>
+                {#if getFileStatus(file) === 'outdated' || getFileStatus(file) === 'warning'}
+                  <button
+                    class="btn btn-primary"
+                    on:click={updateAll}
+                    disabled={globalUpdating}
+                    title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
+                  >
+                    {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                  </button>
+                {:else}
+                  <button
+                    class="btn btn-secondary btn-icon-only"
+                    on:click={updateAll}
+                    disabled={globalUpdating}
+                    title={$t('dat.update_all')}
+                  >
+                    ↓
+                  </button>
+                {/if}
               </div>
             </div>
           {/each}
@@ -373,30 +494,34 @@
               <div class="dr-main">
                 <div class="dr-name">
                   {file.name}
-                  {#if !file.exists}
-                    <span class="badge badge-error">{$t('dat.not_found')}</span>
-                  {:else}
-                    <span class="badge badge-success">OK</span>
-                  {/if}
-                  <span class="badge badge-type"
-                    >{file.name.split('.').pop()?.toUpperCase() || 'DAT'}</span
-                  >
+                  <span class={getStatusBadge(file).cls}>{getStatusBadge(file).label}</span>
+                  <span class="badge badge-type">{getTypeBadge(file)}</span>
                 </div>
                 <div class="dr-meta">
                   {formatSize(file.size)} ·
                   {#if file.is_symlink}
                     {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
                   {/if}
+                  {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
+                    {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
+                  {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
+                    {file.record_count.toLocaleString()}
+                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                  {/if}
+                  {#if file.info}
+                    {file.info} ·
+                  {/if}
                   {$t('dat.updated')}
-                  {formatDate(file.last_update)}
+                  {formatRelativeDate(file.last_update)}
+                  {#if file.version}
+                    · {file.version}
+                  {/if}
                 </div>
               </div>
               <div class="stat-bar" style="width:120px;">
                 <div
                   class="stat-bar-fill"
-                  style="width: {file.exists ? '100%' : '0%'}; background: {file.exists
-                    ? 'var(--success)'
-                    : 'var(--error)'}"
+                  style="width: {getFreshnessPct(file)}%; background: {getFreshnessColor(file)}"
                 ></div>
               </div>
               <div class="dr-actions">
@@ -419,14 +544,25 @@
                     {$currentLang === 'ru' ? 'Теги' : 'Tags'}
                   </button>
                 {/if}
-                <button
-                  class="btn btn-secondary btn-icon-only"
-                  on:click={updateAll}
-                  disabled={globalUpdating}
-                  title={$t('dat.update_all')}
-                >
-                  ↓
-                </button>
+                {#if getFileStatus(file) === 'outdated' || getFileStatus(file) === 'warning'}
+                  <button
+                    class="btn btn-primary"
+                    on:click={updateAll}
+                    disabled={globalUpdating}
+                    title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
+                  >
+                    {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                  </button>
+                {:else}
+                  <button
+                    class="btn btn-secondary btn-icon-only"
+                    on:click={updateAll}
+                    disabled={globalUpdating}
+                    title={$t('dat.update_all')}
+                  >
+                    ↓
+                  </button>
+                {/if}
               </div>
             </div>
           {/each}
@@ -459,39 +595,56 @@
               <div class="dr-main">
                 <div class="dr-name">
                   {file.name}
-                  {#if !file.exists}
-                    <span class="badge badge-error">{$t('dat.not_found')}</span>
-                  {:else}
-                    <span class="badge badge-success">OK</span>
-                  {/if}
-                  <span class="badge badge-type">{file.type?.toUpperCase() || 'DAT'}</span>
+                  <span class={getStatusBadge(file).cls}>{getStatusBadge(file).label}</span>
+                  <span class="badge badge-type">{getTypeBadge(file)}</span>
                 </div>
                 <div class="dr-meta">
                   {formatSize(file.size)} · {file.path} ·
                   {#if file.is_symlink}
                     {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
                   {/if}
+                  {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
+                    {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
+                  {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
+                    {file.record_count.toLocaleString()}
+                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                  {/if}
+                  {#if file.info}
+                    {file.info} ·
+                  {/if}
                   {$t('dat.updated')}
-                  {formatDate(file.last_update)}
+                  {formatRelativeDate(file.last_update)}
+                  {#if file.version}
+                    · {file.version}
+                  {/if}
                 </div>
               </div>
               <div class="stat-bar" style="width:120px;">
                 <div
                   class="stat-bar-fill"
-                  style="width: {file.exists ? '100%' : '0%'}; background: {file.exists
-                    ? 'var(--success)'
-                    : 'var(--error)'}"
+                  style="width: {getFreshnessPct(file)}%; background: {getFreshnessColor(file)}"
                 ></div>
               </div>
               <div class="dr-actions">
-                <button
-                  class="btn btn-secondary btn-icon-only"
-                  on:click={updateAll}
-                  disabled={globalUpdating}
-                  title={$t('dat.update_all')}
-                >
-                  ↓
-                </button>
+                {#if getFileStatus(file) === 'outdated' || getFileStatus(file) === 'warning'}
+                  <button
+                    class="btn btn-primary"
+                    on:click={updateAll}
+                    disabled={globalUpdating}
+                    title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
+                  >
+                    {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                  </button>
+                {:else}
+                  <button
+                    class="btn btn-secondary btn-icon-only"
+                    on:click={updateAll}
+                    disabled={globalUpdating}
+                    title={$t('dat.update_all')}
+                  >
+                    ↓
+                  </button>
+                {/if}
               </div>
             </div>
           {/each}

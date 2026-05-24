@@ -151,8 +151,27 @@
         fetch('/api/mihomo/status')
       ]);
 
-      const svcText =
-        svcRes.status === 'fulfilled' && svcRes.value.ok ? await svcRes.value.text() : '';
+      let isXkeenRunning = false;
+      let xkeenRaw = '';
+      if (svcRes.status === 'fulfilled' && svcRes.value.ok) {
+        const text = await svcRes.value.text();
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && parsed.success && parsed.data) {
+            isXkeenRunning = parsed.data.is_running;
+            xkeenRaw = parsed.data.raw || '';
+          } else {
+            xkeenRaw = text;
+            isXkeenRunning =
+              text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
+          }
+        } catch (_) {
+          xkeenRaw = text;
+          isXkeenRunning =
+            text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
+        }
+      }
+
       const mihomoText =
         mihomoRes.status === 'fulfilled' && mihomoRes.value.ok ? await mihomoRes.value.text() : '';
 
@@ -199,10 +218,7 @@
       }
 
       serviceStatus = {
-        xkeen:
-          svcText.toLowerCase().includes('running') || svcText.toLowerCase().includes('запущен')
-            ? 'running'
-            : svcText || 'unknown',
+        xkeen: isXkeenRunning ? 'running' : xkeenRaw || 'unknown',
         xray: xrayProcessStatus,
         mihomo: mihomoProcessStatus,
         connections: connCount,
@@ -357,26 +373,6 @@
     }
   }
 
-  async function copySystemInfo() {
-    if (!systemStats) return;
-    const lines = [
-      `Версия XKeen: ${version}`,
-      `Платформа: ${systemStats.platform}`,
-      `Ядро: ${systemStats.kernel_version}`,
-      `Хост: ${systemStats.hostname}`,
-      `IP интерфейса: ${systemStats.ip_interface}`,
-      `Часовой пояс: ${systemStats.timezone}`,
-      `Конфиг: ${systemStats.config_path} (${systemStats.config_lines} строк)`,
-      `Последнее обновление: ${statsLastFetched}`
-    ].join('\n');
-    try {
-      await navigator.clipboard.writeText(lines);
-      showToast('success', 'Скопировано в буфер обмена');
-    } catch (_) {
-      showToast('error', 'Не удалось скопировать');
-    }
-  }
-
   function statusColor(status: string): string {
     if (status === 'running') return 'success';
     if (status === 'stopped' || status === 'not_installed') return 'error';
@@ -492,7 +488,7 @@
           <div>
             <div class="crumbs">
               {$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
-              {$t('nav.monitoring')}
+              {$t('nav.dashboard')}
             </div>
             <h1>{$t('dash.title')}</h1>
             <p class="sub">{$t('dash.welcome')}</p>
@@ -571,40 +567,6 @@
         <!-- Live Service Status card -->
         <div style="margin-bottom: 18px;">
           <Card title={$t('dash.service_status')}>
-            {#snippet actions()}
-              <button class="ct-btn" onclick={fetchLiveStatus} title={$t('app.refresh')}>
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  ><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg
-                >
-              </button>
-              <button
-                class="ct-btn"
-                onclick={() => switchTab('services')}
-                title={$t('nav.services')}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  ><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline
-                    points="15 3 21 3 21 9"
-                  /><line x1="10" y1="14" x2="21" y2="3" /></svg
-                >
-              </button>
-            {/snippet}
             {#if statusLoading}
               <div class="status-badges-row">
                 <div class="status-badge-item">
@@ -691,21 +653,6 @@
         {#if systemStats}
           <div style="margin-bottom: 18px;">
             <Card title={$t('dash.system_stats')}>
-              {#snippet actions()}
-                <button class="ct-btn" onclick={fetchSystemStats} title={$t('app.refresh')}>
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    ><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg
-                  >
-                </button>
-              {/snippet}
               <div class="stats-grid">
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.ram')}</div>
@@ -802,36 +749,6 @@
         <!-- System Info -->
         <div style="margin-bottom: 18px;">
           <Card title={$t('dash.system_info')}>
-            {#snippet actions()}
-              <button class="ct-btn" onclick={copySystemInfo} title="Копировать">
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-                    d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"
-                  /></svg
-                >
-              </button>
-              <button class="ct-btn" onclick={fetchSystemStats} title={$t('app.refresh')}>
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  ><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg
-                >
-              </button>
-            {/snippet}
             <div class="info-rows">
               <div class="info-row">
                 <div class="lbl">{$t('dash.info_version')}</div>
@@ -882,28 +799,6 @@
         <!-- Quick Actions -->
         <div style="margin-bottom: 8px;">
           <Card title={$t('dash.quick_actions')}>
-            {#snippet actions()}
-              <button
-                class="ct-btn"
-                onclick={() => {
-                  fetchSubscriptionSummary();
-                  fetchProxySummary();
-                }}
-                title={$t('app.refresh')}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  ><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg
-                >
-              </button>
-            {/snippet}
             <div class="qa-grid-mini">
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->

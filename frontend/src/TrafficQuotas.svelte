@@ -15,6 +15,7 @@
     period: string;
     enabled: boolean;
     alert_threshold: number;
+    action?: string;
     current_bytes: number;
     last_reset: number;
   }
@@ -55,6 +56,7 @@
   let formLimitUnit = 'GB';
   let formPeriod = 'monthly';
   let formAlertThreshold = 80;
+  let formAction = 'notify';
   let formEnabled = true;
 
   let activeDropdownId: string | null = null;
@@ -70,6 +72,10 @@
     { value: 'weekly', label: $t('trafficquotas.period_weekly') },
     { value: 'monthly', label: $t('trafficquotas.period_monthly') }
   ];
+
+  $: activeQuotas = quotas.filter((q) => q.enabled);
+  $: sumQuotaLimit = activeQuotas.reduce((s, q) => s + q.limit_bytes, 0);
+  $: totalPct = sumQuotaLimit > 0 ? Math.min(100, ((stats?.total || 0) / sumQuotaLimit) * 100) : 0;
 
   async function fetchQuotas() {
     loading = true;
@@ -111,6 +117,7 @@
     formLimitUnit = 'GB';
     formPeriod = 'monthly';
     formAlertThreshold = 80;
+    formAction = 'notify';
     formEnabled = true;
     activeDropdownId = null;
   }
@@ -122,6 +129,7 @@
     formTargetID = q.target_id;
     formPeriod = q.period;
     formAlertThreshold = q.alert_threshold;
+    formAction = q.action || 'notify';
     formEnabled = q.enabled;
     // Restore limit value/unit
     let bytes = q.limit_bytes;
@@ -158,6 +166,7 @@
       limit_bytes: getLimitBytes(),
       period: formPeriod,
       alert_threshold: formAlertThreshold,
+      action: formAction,
       enabled: formEnabled
     };
 
@@ -251,6 +260,32 @@
   function percent(q: Quota): number {
     if (q.limit_bytes <= 0) return 0;
     return Math.min(100, (q.current_bytes / q.limit_bytes) * 100);
+  }
+
+  function getActionBadgeClass(action?: string): string {
+    switch (action) {
+      case 'throttle':
+        return 'badge tq-action-throttle';
+      case 'log_only':
+        return 'badge tq-action-log';
+      case 'block':
+        return 'badge tq-action-block';
+      default:
+        return 'badge tq-action-notify';
+    }
+  }
+
+  function getActionLabel(action?: string): string {
+    switch (action) {
+      case 'throttle':
+        return $t('trafficquotas.action_throttle');
+      case 'log_only':
+        return $t('trafficquotas.action_log_only');
+      case 'block':
+        return $t('trafficquotas.action_block');
+      default:
+        return $t('trafficquotas.action_notify');
+    }
   }
 
   function toggleDropdown(id: string, event: MouseEvent) {
@@ -349,19 +384,41 @@
   <!-- Stats Summaries -->
   {#if stats}
     <div class="card mb-3">
-      <h2 class="card-title">{$t('trafficquotas.stats')}</h2>
+      <h2 class="card-title">{$currentLang === 'ru' ? 'СВОДКА' : 'SUMMARY'}</h2>
       <div class="stats-grid">
         <div class="stat-box">
           <div class="stat-label">{$t('trafficquotas.total_download')}</div>
           <div class="stat-value">{formatBytes(stats.total_download)}</div>
+          <div class="stat-sub">{$currentLang === 'ru' ? 'загружено' : 'received'}</div>
         </div>
         <div class="stat-box">
           <div class="stat-label">{$t('trafficquotas.total_upload')}</div>
           <div class="stat-value">{formatBytes(stats.total_upload)}</div>
+          <div class="stat-sub">{$currentLang === 'ru' ? 'отправлено' : 'sent'}</div>
         </div>
         <div class="stat-box">
-          <div class="stat-label">{$t('trafficquotas.total')}</div>
+          <div class="stat-label">Σ {$t('trafficquotas.total')}</div>
           <div class="stat-value">{formatBytes(stats.total)}</div>
+          {#if sumQuotaLimit > 0}
+            <div class="stat-bar" style="margin-top: 8px;">
+              <div
+                class="stat-bar-fill"
+                class:warning={totalPct >= 80 && totalPct < 100}
+                class:error={totalPct >= 100}
+                style="width: {totalPct}%"
+              ></div>
+            </div>
+            <div class="stat-sub">
+              {totalPct.toFixed(1)}% {$currentLang === 'ru' ? 'от лимита' : 'of limit'}
+            </div>
+          {/if}
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">{$currentLang === 'ru' ? 'ЛИМИТЫ' : 'QUOTAS'}</div>
+          <div class="stat-value">
+            {activeQuotas.length}<span class="stat-value-unit"> / {quotas.length}</span>
+          </div>
+          <div class="stat-sub">{$currentLang === 'ru' ? 'активных' : 'active'}</div>
         </div>
       </div>
     </div>
@@ -385,6 +442,7 @@
               <th>{$t('trafficquotas.period')}</th>
               <th>Использовано</th>
               <th>{$t('trafficquotas.limit')}</th>
+              <th>{$t('trafficquotas.action')}</th>
               <th>Состояние</th>
               <th>Статус</th>
               <th style="width: 50px;"></th>
@@ -423,6 +481,11 @@
                   </div>
                 </td>
                 <td class="mono">{formatBytes(q.limit_bytes)}</td>
+                <td>
+                  <span class={getActionBadgeClass(q.action)}>
+                    {getActionLabel(q.action)}
+                  </span>
+                </td>
                 <td>
                   {#if q.enabled}
                     <span class="status-badge active">
@@ -630,6 +693,16 @@
           />
         </div>
 
+        <div class="form-group">
+          <label for="form-action" class="form-label">{$t('trafficquotas.action')}</label>
+          <select id="form-action" class="input" bind:value={formAction}>
+            <option value="notify">{$t('trafficquotas.action_notify')}</option>
+            <option value="throttle">{$t('trafficquotas.action_throttle')}</option>
+            <option value="log_only">{$t('trafficquotas.action_log_only')}</option>
+            <option value="block">{$t('trafficquotas.action_block')}</option>
+          </select>
+        </div>
+
         <div class="form-group-checkbox">
           <label class="toggle-switch">
             <input type="checkbox" id="form-enabled" bind:checked={formEnabled} />
@@ -693,6 +766,18 @@
     font-weight: 600;
     font-size: 20px;
     color: var(--fg-primary);
+  }
+
+  .stat-value-unit {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--fg-secondary);
+  }
+
+  .stat-sub {
+    font-size: 11px;
+    color: var(--fg-dim);
+    margin-top: 4px;
   }
 
   .table-responsive {
@@ -983,5 +1068,26 @@
   input:checked + .toggle-slider:before {
     transform: translateX(14px);
     background-color: #fff;
+  }
+
+  :global(.tq-action-notify) {
+    background: rgba(251, 191, 36, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+  }
+  :global(.tq-action-throttle) {
+    background: rgba(251, 146, 60, 0.15);
+    color: #fb923c;
+    border: 1px solid rgba(251, 146, 60, 0.3);
+  }
+  :global(.tq-action-log) {
+    background: rgba(148, 163, 184, 0.12);
+    color: var(--fg-secondary);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+  }
+  :global(.tq-action-block) {
+    background: rgba(239, 91, 107, 0.15);
+    color: var(--danger);
+    border: 1px solid rgba(239, 91, 107, 0.3);
   }
 </style>

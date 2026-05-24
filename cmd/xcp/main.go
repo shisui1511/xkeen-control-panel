@@ -180,6 +180,7 @@ func main() {
 	srv.HandleProtected("/api/dat/list", api.DATList)
 	srv.HandleProtected("/api/dat/tags", api.DATListTags)
 	srv.HandleProtected("/api/dat/update", api.DATUpdate)
+	srv.HandleProtected("/api/dat/rollback", api.DATRollback)
 
 	// Xkeen Console
 	consoleSvc := services.NewConsoleService(cfg.XKeenBinary)

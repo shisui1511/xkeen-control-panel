@@ -16,6 +16,18 @@
     udp?: boolean;
     xudp?: boolean;
     tfo?: boolean;
+    tls?: boolean;
+    network?: string;
+    cipher?: string;
+  }
+
+  function getProxyTypeLabel(proxy: Proxy | undefined): string {
+    if (!proxy) return 'unknown';
+    const parts: string[] = [proxy.type];
+    if (proxy.network && proxy.network !== 'tcp') parts.push(proxy.network.toUpperCase());
+    else if (proxy.tls) parts.push('TLS');
+    if (proxy.cipher && !['auto', 'none', ''].includes(proxy.cipher)) parts.push(proxy.cipher);
+    return parts.join(' · ');
   }
 
   interface ProxyGroup {
@@ -302,7 +314,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
         {$t('proxies.title')}
       </div>
       <h1>{$t('proxies.title')}</h1>
@@ -448,7 +460,7 @@
                 >
                   <div>
                     <div class="p-name">{proxyName}</div>
-                    <div class="p-type">{proxy?.type || 'unknown'}</div>
+                    <div class="p-type">{getProxyTypeLabel(proxy)}</div>
                   </div>
 
                   <div style="display: flex; align-items: center; gap: 8px;">

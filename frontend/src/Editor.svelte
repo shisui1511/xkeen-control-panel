@@ -66,7 +66,13 @@
     url: string;
   }
 
-  let files: string[] = [];
+  interface ConfigFileInfo {
+    name: string;
+    path: string;
+    size: number;
+  }
+
+  let files: ConfigFileInfo[] = [];
   let selectedFile = '';
   let loading = false;
   let saving = false;
@@ -78,8 +84,16 @@
   let currentDir = xrayDir;
 
   // Dual-panel sidebar file lists
-  let xrayFiles: string[] = [];
-  let mihomoFiles: string[] = [];
+  let xrayFiles: ConfigFileInfo[] = [];
+  let mihomoFiles: ConfigFileInfo[] = [];
+  let fileSearchQuery = '';
+  $: filteredXrayFiles = xrayFiles.filter((file) =>
+    file.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
+  );
+  $: filteredMihomoFiles = mihomoFiles.filter((file) =>
+    file.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
+  );
+  let showSidebar = true;
 
   // Status bar cursor position
   let cursorLine = 1;
@@ -275,6 +289,13 @@
           highlightActiveLine(),
           highlightSelectionMatches(),
           keymap.of([
+            {
+              key: 'Mod-s',
+              run: () => {
+                checkBeforeSave();
+                return true;
+              }
+            },
             ...closeBracketsKeymap,
             ...defaultKeymap,
             ...searchKeymap,
@@ -486,6 +507,20 @@
     }
 
     return processedGroups;
+  }
+
+  function downloadFile() {
+    if (!selectedFile || !editorView) return;
+    const content = editorView.state.doc.toString();
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = selectedFile.split('/').pop() || 'config';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   async function checkBeforeSave() {
@@ -889,7 +924,7 @@
     <div>
       <div class="crumbs">
         {$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
-        {$t('editor.h1')}
+        {$t('nav.editor')}
       </div>
       <h1>{$t('editor.h1')}</h1>
       <p class="sub">{$t('editor.h1_sub')}</p>
@@ -915,99 +950,190 @@
         >
         {$t('editor.new_file')}
       </button>
+      {#if selectedFile}
+        <button
+          class="btn btn-secondary"
+          on:click={() => loadFile(selectedFile)}
+          disabled={loading}
+          title={$t('editor.reload')}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg
+          >
+          {$t('editor.reload')}
+        </button>
+        <button
+          class="btn btn-secondary"
+          on:click={checkBeforeSave}
+          disabled={saving}
+          title={$t('app.save')}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            ><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline
+              points="17 21 17 13 7 13 7 21"
+            /><polyline points="7 3 7 8 15 8" /></svg
+          >
+          {saving ? $t('app.loading') : $t('app.save')}
+        </button>
+      {/if}
     </div>
   </div>
 
-  <div class="editor-grid">
-    <div>
-      <!-- Xray Section -->
-      <div class="editor-files" style="margin-bottom:12px;">
-        <div
-          class="editor-files-head"
-          style="display:flex;align-items:center;justify-content:space-between;"
-        >
-          <span>Xray</span>
-          <span
-            style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
-            >{xrayDir}</span
-          >
-        </div>
-        <div class="file-list">
-          {#each xrayFiles as file}
-            {@const name = file.split('/').pop()}
+  <div class="editor-grid" style={showSidebar ? '' : 'grid-template-columns: 1fr;'}>
+    {#if showSidebar}
+      <div>
+        <!-- File Search -->
+        <div style="margin-bottom: 12px; position: relative;">
+          <input
+            type="text"
+            class="input"
+            style="width: 100%; padding: 8px 12px; font-size: 13px;"
+            placeholder={$t('app.search') || 'Поиск файлов...'}
+            bind:value={fileSearchQuery}
+          />
+          {#if fileSearchQuery}
             <button
-              class="file-row"
-              class:active={file === selectedFile}
-              on:click={() => loadFile(file)}
+              on:click={() => (fileSearchQuery = '')}
+              style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--fg-dim); cursor: pointer; font-size: 16px; padding: 0 4px;"
+              title="Очистить"
             >
-              <span class="fr-name">{name}</span>
-              {#if file === selectedFile}
-                <span class="fr-meta">{fileSize}</span>
-              {/if}
+              ×
             </button>
-          {:else}
-            <span
-              class="sb-empty"
-              style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;">—</span
-            >
-          {/each}
+          {/if}
         </div>
-      </div>
 
-      <!-- Mihomo Section -->
-      <div class="editor-files">
-        <div
-          class="editor-files-head"
-          style="display:flex;align-items:center;justify-content:space-between;"
-        >
-          <span>Mihomo</span>
-          <span
-            style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
-            >{mihomoDir}</span
+        <!-- Xray Section -->
+        <div class="editor-files" style="margin-bottom:12px;">
+          <div
+            class="editor-files-head"
+            style="display:flex;align-items:center;justify-content:space-between;"
           >
-        </div>
-        <div class="file-list">
-          {#each mihomoFiles as file}
-            {@const name = file.split('/').pop()}
-            <button
-              class="file-row"
-              class:active={file === selectedFile}
-              on:click={() => loadFile(file)}
-            >
-              <span class="fr-name">{name}</span>
-              {#if file === selectedFile}
-                <span class="fr-meta">{fileSize}</span>
-              {/if}
-            </button>
-          {:else}
+            <span>Xray</span>
             <span
-              class="sb-empty"
-              style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;">—</span
+              style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
+              >{xrayDir}</span
             >
-          {/each}
-        </div>
-      </div>
-
-      <!-- Backups Section -->
-      {#if backups.length > 0}
-        <div class="editor-files" style="margin-top:12px;">
-          <div class="editor-files-head">
-            <span>{$t('editor.backups')}</span>
           </div>
           <div class="file-list">
-            {#each backups as backup}
-              <button class="file-row" on:click={() => restoreBackup(backup)}>
-                <span class="fr-name">{backup.split('.backup-')[1] || backup}</span>
+            {#each filteredXrayFiles as file}
+              <button
+                class="file-row"
+                class:active={file.path === selectedFile}
+                on:click={() => loadFile(file.path)}
+              >
+                <span class="fr-name">{file.name}</span>
+                <span class="fr-meta">{formatBytes(file.size)}</span>
               </button>
+            {:else}
+              <span
+                class="sb-empty"
+                style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;"
+                >—</span
+              >
             {/each}
           </div>
         </div>
-      {/if}
-    </div>
+
+        <!-- Mihomo Section -->
+        <div class="editor-files">
+          <div
+            class="editor-files-head"
+            style="display:flex;align-items:center;justify-content:space-between;"
+          >
+            <span>Mihomo</span>
+            <span
+              style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
+              >{mihomoDir}</span
+            >
+          </div>
+          <div class="file-list">
+            {#each filteredMihomoFiles as file}
+              <button
+                class="file-row"
+                class:active={file.path === selectedFile}
+                on:click={() => loadFile(file.path)}
+              >
+                <span class="fr-name">{file.name}</span>
+                <span class="fr-meta">{formatBytes(file.size)}</span>
+              </button>
+            {:else}
+              <span
+                class="sb-empty"
+                style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;"
+                >—</span
+              >
+            {/each}
+          </div>
+        </div>
+
+        <!-- Backups Section -->
+        {#if backups.length > 0}
+          <div class="editor-files" style="margin-top:12px;">
+            <div class="editor-files-head">
+              <span>{$t('editor.backups')}</span>
+            </div>
+            <div class="file-list">
+              {#each backups as backup}
+                <button class="file-row" on:click={() => restoreBackup(backup)}>
+                  <span class="fr-name">{backup.split('.backup-')[1] || backup}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <!-- Main Editor Card -->
     <div class="editor-main-card">
       <div class="editor-toolbar">
+        <button
+          class="btn btn-secondary"
+          style="padding: 6px 10px; margin-right: 8px;"
+          on:click={() => (showSidebar = !showSidebar)}
+          title={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
+          aria-label={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
+        >
+          {#if showSidebar}
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"><polyline points="15 18 9 12 15 6" /></svg
+            >
+          {:else}
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg
+            >
+          {/if}
+        </button>
         <span class="file-name"
           >{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span
         >
@@ -1154,12 +1280,22 @@
             </div>
 
             <button
-              on:click={checkBeforeSave}
-              disabled={saving}
-              class="btn btn-primary"
-              style="padding: 6px 14px;"
+              on:click={downloadFile}
+              class="btn btn-secondary"
+              style="padding: 6px 10px;"
+              title="Скачать файл"
+              aria-label="Скачать файл"
             >
-              {saving ? $t('app.loading') : $t('app.save')}
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+              </svg>
             </button>
           {/if}
         </span>
@@ -1586,6 +1722,54 @@
 
 <style>
   /* hot-fix layout, требует визуального ревью Claude Design */
+  .editor-grid {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 14px;
+    align-items: start;
+  }
+  .editor-files {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .editor-files-head {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+    font-weight: 700;
+  }
+  .editor-main-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .editor-toolbar {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .editor-toolbar .file-name {
+    font-family: var(--font-family-mono);
+    font-size: 13px;
+    color: var(--fg-primary);
+    font-weight: 600;
+  }
+  .editor-toolbar .file-meta {
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    color: var(--fg-dim);
+  }
+
   :global(.cm-editor) {
     height: 100% !important;
     font-size: 13.5px;

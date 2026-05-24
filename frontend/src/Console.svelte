@@ -129,6 +129,7 @@
     subtitle={$t('console.subtitle')}
     breadcrumbs={[{ label: $t('nav.group_services') }, { label: $t('nav.console') }]}
     {onSwitchTab}
+    hideHome={true}
   />
 
   {#if error}

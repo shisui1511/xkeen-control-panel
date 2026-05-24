@@ -23,6 +23,21 @@ type CommandDef struct {
 	Dangerous   bool   `json:"dangerous"`
 }
 
+// diagCmd holds a hardcoded diagnostic command (binary + fixed args).
+// Using a separate type prevents any user-supplied data from reaching exec.
+type diagCmd struct {
+	binary string
+	args   []string
+}
+
+// diagnosticCommands maps internal diag keys to safe, hardcoded exec calls.
+var diagnosticCommands = map[string]diagCmd{
+	"__diag:ping":     {binary: "ping", args: []string{"-c", "4", "cloudflare.com"}},
+	"__diag:curl":     {binary: "curl", args: []string{"-s", "--max-time", "5", "ifconfig.me"}},
+	"__diag:tracert":  {binary: "traceroute", args: []string{"-m", "15", "cloudflare.com"}},
+	"__diag:nslookup": {binary: "nslookup", args: []string{"openai.com"}},
+}
+
 // CommandResult represents the result of a command execution
 type CommandResult struct {
 	Success bool   `json:"success"`
@@ -97,12 +112,20 @@ func (s *ConsoleService) GetCommands() []CommandCategory {
 				{Name: "About", Description: "О программе", Command: "-about"},
 			},
 		},
+		{
+			Name: "diagnostic",
+			Commands: []CommandDef{
+				{Name: "Ping", Description: "ping cloudflare.com", Command: "__diag:ping"},
+				{Name: "Public IP", Description: "curl ifconfig.me", Command: "__diag:curl"},
+				{Name: "Traceroute", Description: "traceroute cloudflare.com", Command: "__diag:tracert"},
+				{Name: "DNS Lookup", Description: "nslookup openai.com", Command: "__diag:nslookup"},
+			},
+		},
 	}
 }
 
-// Execute runs an XKeen command and returns its output
+// Execute runs an XKeen or diagnostic command and returns its output.
 func (s *ConsoleService) Execute(command string) (*CommandResult, error) {
-	// Validate command against whitelist
 	if !s.isAllowedCommand(command) {
 		return &CommandResult{
 			Success: false,
@@ -113,7 +136,13 @@ func (s *ConsoleService) Execute(command string) (*CommandResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	cmd := exec.Command(s.xkeenPath, command)
+	var cmd *exec.Cmd
+	if dc, ok := diagnosticCommands[command]; ok {
+		cmd = exec.Command(dc.binary, dc.args...)
+	} else {
+		cmd = exec.Command(s.xkeenPath, command)
+	}
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

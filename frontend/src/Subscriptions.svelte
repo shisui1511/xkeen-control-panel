@@ -13,10 +13,38 @@
     interval: number;
     last_update: string;
     enabled: boolean;
+    type?: string;
     filter_name?: string;
     filter_type?: string;
     filter_transport?: string;
     proxy_count?: number;
+    last_error?: string;
+    upload?: number;
+    download?: number;
+    total?: number;
+    rule_count?: number;
+  }
+
+  function getSubTypeBadge(sub: Subscription): string {
+    if (sub.type === 'mihomo') return 'clash · YAML';
+    return 'xray · JSON';
+  }
+
+  function formatTraffic(bytes: number): string {
+    const gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) return `${gb.toFixed(1)} GB`;
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(1)} MB`;
+  }
+
+  function formatTrafficUsage(upload?: number, download?: number, total?: number): string {
+    const used = (upload || 0) + (download || 0);
+    if (used === 0 && (!total || total === 0)) return '—';
+    const usedStr = formatTraffic(used);
+    if (total && total > 0) {
+      return `${usedStr} / ${formatTraffic(total)}`;
+    }
+    return usedStr;
   }
 
   let subscriptions: Subscription[] = [];
@@ -325,7 +353,11 @@
             <div class="sub-title-wrapper">
               <div class="sub-title-line">
                 {sub.name}
-                {#if sub.enabled}
+                {#if sub.last_error}
+                  <span class="status-badge error-badge" title={sub.last_error}>
+                    {$currentLang === 'ru' ? 'ошибка' : 'error'}
+                  </span>
+                {:else if sub.enabled}
                   <span class="status-badge active"
                     ><span class="status-dot success" style="margin:0;"></span>{$currentLang ===
                     'ru'
@@ -340,17 +372,22 @@
                   >
                 {/if}
               </div>
-              <div class="sub-url-line">{sub.url}</div>
+              <div class="sub-url-line">
+                <span class="sub-type-badge">{getSubTypeBadge(sub)}</span>
+                {sub.url}
+              </div>
             </div>
             <div class="sub-actions-wrapper">
               <button
-                class="btn btn-secondary btn-sm"
+                class="btn {sub.last_error ? 'btn-danger-outline' : 'btn-secondary'} btn-sm"
                 on:click={() => refreshSubscription(sub.id)}
                 disabled={refreshLoading[sub.id]}
               >
                 {#if refreshLoading[sub.id]}
                   <span class="spinner" style="margin-right: 4px;">...</span>
                   {$t('app.loading')}
+                {:else if sub.last_error}
+                  {$currentLang === 'ru' ? 'Повторить' : 'Retry'}
                 {:else}
                   {$t('subscr.refresh')}
                 {/if}
@@ -388,12 +425,14 @@
               <div class="meta-value">{sub.proxy_count || 0}</div>
             </div>
             <div class="meta-column">
-              <div class="meta-label">{$currentLang === 'ru' ? 'ИНТЕРВАЛ' : 'INTERVAL'}</div>
-              <div class="meta-value">{sub.interval}h</div>
+              <div class="meta-label">{$currentLang === 'ru' ? 'ПРАВИЛ' : 'RULES'}</div>
+              <div class="meta-value">{sub.type === 'mihomo' ? sub.rule_count || 0 : '—'}</div>
             </div>
             <div class="meta-column">
-              <div class="meta-label">{$currentLang === 'ru' ? 'ПРЕФИКС ТЕГОВ' : 'TAG PREFIX'}</div>
-              <div class="meta-value">{sub.tag_prefix || '—'}</div>
+              <div class="meta-label">{$currentLang === 'ru' ? 'ТРАФИК' : 'TRAFFIC'}</div>
+              <div class="meta-value">
+                {formatTrafficUsage(sub.upload, sub.download, sub.total)}
+              </div>
             </div>
             <div class="meta-column">
               <div class="meta-label">{$currentLang === 'ru' ? 'ОБНОВЛЕНО' : 'UPDATED'}</div>
@@ -750,5 +789,38 @@
     display: flex;
     justify-content: flex-end;
     gap: 12px;
+  }
+
+  :global(.error-badge) {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+
+  :global(.btn-danger-outline) {
+    background: rgba(239, 68, 68, 0.08);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+  }
+  :global(.btn-danger-outline:hover) {
+    background: rgba(239, 68, 68, 0.16);
+  }
+
+  :global(.sub-type-badge) {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 600;
+    font-family: var(--font-family-mono);
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(41, 194, 240, 0.08);
+    color: var(--accent);
+    border: 1px solid rgba(41, 194, 240, 0.2);
+    margin-right: 6px;
+    vertical-align: middle;
   }
 </style>

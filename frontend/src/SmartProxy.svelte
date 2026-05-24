@@ -328,19 +328,27 @@
           <div class="profile-card-header">
             <span class="profile-card-name">{p.name}</span>
 
-            <span
-              class="badge"
-              class:badge-info={p.mode !== 'auto-failover'}
-              class:badge-warning={p.mode === 'auto-failover'}
-            >
-              {p.mode === 'time-based'
-                ? $t('smartproxy.mode_time')
-                : p.mode === 'auto-failover'
-                  ? $t('smartproxy.mode_failover')
-                  : p.mode === 'round-robin'
-                    ? $t('smartproxy.mode_roundrobin')
-                    : p.mode || $t('smartproxy.mode_time')}
-            </span>
+            {#if !p.enabled}
+              <span class="badge sp-mode-badge sp-mode-disabled">
+                {$currentLang === 'ru' ? 'ВЫКЛ' : 'DISABLED'}
+              </span>
+            {:else if p.mode === 'time-based'}
+              <span class="badge sp-mode-badge sp-mode-scheduled">
+                {$t('smartproxy.mode_time')}
+              </span>
+            {:else if p.mode === 'auto-failover'}
+              <span class="badge sp-mode-badge sp-mode-always-on">
+                {$t('smartproxy.mode_failover')}
+              </span>
+            {:else if p.mode === 'round-robin'}
+              <span class="badge sp-mode-badge sp-mode-roundrobin">
+                {$t('smartproxy.mode_roundrobin')}
+              </span>
+            {:else}
+              <span class="badge sp-mode-badge sp-mode-scheduled">
+                {p.mode}
+              </span>
+            {/if}
 
             <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
               <label class="toggle-switch">
@@ -847,5 +855,35 @@
     display: flex;
     justify-content: flex-end;
     gap: 12px;
+  }
+
+  /* Mode color badges */
+  :global(.sp-mode-badge) {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+  :global(.sp-mode-always-on) {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+  }
+  :global(.sp-mode-scheduled) {
+    background: rgba(41, 194, 240, 0.1);
+    color: var(--accent);
+    border: 1px solid rgba(41, 194, 240, 0.25);
+  }
+  :global(.sp-mode-roundrobin) {
+    background: rgba(156, 163, 175, 0.1);
+    color: #9ca3af;
+    border: 1px solid rgba(156, 163, 175, 0.22);
+  }
+  :global(.sp-mode-disabled) {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.25);
   }
 </style>

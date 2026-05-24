@@ -14,6 +14,12 @@ import (
 
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
 
+type ConfigFileInfo struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Size int64  `json:"size"`
+}
+
 func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -35,7 +41,22 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	a.jsonResponse(w, files)
+
+	res := make([]ConfigFileInfo, 0, len(files))
+	for _, f := range files {
+		info, err := os.Stat(f)
+		var size int64
+		if err == nil {
+			size = info.Size()
+		}
+		res = append(res, ConfigFileInfo{
+			Name: filepath.Base(f),
+			Path: f,
+			Size: size,
+		})
+	}
+
+	a.jsonResponse(w, res)
 }
 
 func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {

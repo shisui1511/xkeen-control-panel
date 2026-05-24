@@ -39,7 +39,13 @@ type Subscription struct {
 	FilterType      string `json:"filter_type,omitempty"`
 	FilterTransport string `json:"filter_transport,omitempty"`
 
-	ProxyCount int `json:"proxy_count"`
+	ProxyCount int    `json:"proxy_count"`
+	LastError  string `json:"last_error,omitempty"`
+
+	Upload    int64 `json:"upload,omitempty"`
+	Download  int64 `json:"download,omitempty"`
+	Total     int64 `json:"total,omitempty"`
+	RuleCount int   `json:"rule_count,omitempty"`
 }
 
 // Outbound represents a parsed proxy outbound
@@ -94,6 +100,20 @@ func (s *SubscriptionService) load() {
 		return
 	}
 	json.Unmarshal(data, &s.subscriptions)
+
+	needSave := false
+	for i := range s.subscriptions {
+		if s.subscriptions[i].ID == "" {
+			s.subscriptions[i].ID = fmt.Sprintf("sub_%d_%d", time.Now().Unix(), i)
+			needSave = true
+		}
+	}
+	if needSave {
+		indentData, err := json.MarshalIndent(s.subscriptions, "", "  ")
+		if err == nil {
+			utils.AtomicWriteFile(path, indentData, 0600)
+		}
+	}
 }
 
 func (s *SubscriptionService) save() error {
@@ -243,15 +263,36 @@ func (s *SubscriptionService) Refresh(id string) error {
 	subCopy := *sub
 	s.mu.Unlock()
 
+	var refreshErr error
 	if subCopy.Type == "mihomo" {
-		return s.refreshMihomo(&subCopy)
+		refreshErr = s.refreshMihomo(&subCopy)
+	} else {
+		refreshErr = s.refreshXray(&subCopy)
 	}
-	return s.refreshXray(&subCopy)
+
+	// Persist last_error so frontend can show error state
+	s.mu.Lock()
+	if live := s.GetLocked(id); live != nil {
+		if refreshErr != nil {
+			live.LastError = refreshErr.Error()
+		} else {
+			live.LastError = ""
+			live.LastUpdate = subCopy.LastUpdate
+			live.Upload = subCopy.Upload
+			live.Download = subCopy.Download
+			live.Total = subCopy.Total
+			live.RuleCount = subCopy.RuleCount
+		}
+		_ = s.save()
+	}
+	s.mu.Unlock()
+
+	return refreshErr
 }
 
 func (s *SubscriptionService) refreshXray(sub *Subscription) error {
 	// Download subscription (outside of lock to avoid blocking other operations)
-	outbounds, err := s.downloadAndParse(sub.URL)
+	outbounds, err := s.downloadAndParse(sub.URL, sub)
 	if err != nil {
 		return err
 	}
@@ -274,12 +315,12 @@ func (s *SubscriptionService) refreshXray(sub *Subscription) error {
 		return err
 	}
 
-	live.LastUpdate = time.Now()
-	return s.save()
+	sub.LastUpdate = time.Now()
+	return nil
 }
 
 func (s *SubscriptionService) refreshMihomo(sub *Subscription) error {
-	body, err := s.downloadRaw(sub.URL)
+	body, err := s.downloadRaw(sub.URL, sub)
 	if err != nil {
 		return err
 	}
@@ -299,18 +340,12 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription) error {
 		return fmt.Errorf("write provider file: %w", err)
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	live := s.GetLocked(sub.ID)
-	if live == nil {
-		return fmt.Errorf("subscription not found")
-	}
-	live.LastUpdate = time.Now()
-	return s.save()
+	sub.RuleCount = countMihomoRules(content)
+	sub.LastUpdate = time.Now()
+	return nil
 }
 
-func (s *SubscriptionService) downloadRaw(subURL string) ([]byte, error) {
+func (s *SubscriptionService) downloadRaw(subURL string, sub *Subscription) ([]byte, error) {
 	parsed, err := url.Parse(subURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, fmt.Errorf("only http and https URLs are allowed for subscriptions")
@@ -320,6 +355,13 @@ func (s *SubscriptionService) downloadRaw(subURL string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if userInfo := resp.Header.Get("Subscription-Userinfo"); userInfo != "" {
+		sub.Upload, sub.Download, sub.Total = parseSubscriptionUserinfo(userInfo)
+	} else {
+		sub.Upload, sub.Download, sub.Total = 0, 0, 0
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
@@ -343,7 +385,7 @@ func (s *SubscriptionService) GetLocked(id string) *Subscription {
 	return nil
 }
 
-func (s *SubscriptionService) downloadAndParse(subURL string) ([]Outbound, error) {
+func (s *SubscriptionService) downloadAndParse(subURL string, sub *Subscription) ([]Outbound, error) {
 	// C-6: validate URL scheme
 	parsed, err := url.Parse(subURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -355,6 +397,12 @@ func (s *SubscriptionService) downloadAndParse(subURL string) ([]Outbound, error
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if userInfo := resp.Header.Get("Subscription-Userinfo"); userInfo != "" {
+		sub.Upload, sub.Download, sub.Total = parseSubscriptionUserinfo(userInfo)
+	} else {
+		sub.Upload, sub.Download, sub.Total = 0, 0, 0
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
@@ -1187,4 +1235,65 @@ func (s *SubscriptionService) RunScheduler(ctx context.Context, checkInterval ti
 			s.checkAndRefreshDue(t)
 		}
 	}
+}
+
+// parseSubscriptionUserinfo parses values from Subscription-Userinfo header:
+// e.g., upload=123; download=456; total=789; expire=0
+func parseSubscriptionUserinfo(header string) (upload, download, total int64) {
+	parts := strings.Split(header, ";")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		k := strings.ToLower(strings.TrimSpace(kv[0]))
+		vStr := strings.TrimSpace(kv[1])
+		val, err := strconv.ParseInt(vStr, 10, 64)
+		if err != nil {
+			continue
+		}
+		switch k {
+		case "upload":
+			upload = val
+		case "download":
+			download = val
+		case "total":
+			total = val
+		}
+	}
+	return
+}
+
+// countMihomoRules counts the number of rules in a Mihomo config.
+// It finds the "rules:" section and counts lines that start with "-" or "  -" inside it.
+func countMihomoRules(content string) int {
+	lines := strings.Split(content, "\n")
+	inRulesSection := false
+	count := 0
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if inRulesSection {
+			if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, "-") && strings.Contains(line, ":") {
+				if !strings.HasPrefix(trimmed, "rules:") {
+					inRulesSection = false
+				}
+			}
+		}
+
+		if strings.HasPrefix(trimmed, "rules:") {
+			inRulesSection = true
+			continue
+		}
+
+		if inRulesSection {
+			if strings.HasPrefix(trimmed, "-") {
+				count++
+			}
+		}
+	}
+	return count
 }

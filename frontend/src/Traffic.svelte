@@ -24,6 +24,25 @@
   let udpConnectionsCount = 0;
   let connInterval: any = null;
 
+  // Connection history for stats
+  const CONN_HISTORY_MAX = 3600; // 1 hour at 1 sample/sec
+  let connHistory: { ts: number; count: number }[] = [];
+
+  $: connDeltaPerMin = (() => {
+    if (connHistory.length < 2) return 0;
+    const now = connHistory[connHistory.length - 1];
+    let minuteAgo = connHistory[0];
+    for (let i = connHistory.length - 1; i >= 0; i--) {
+      if (now.ts - connHistory[i].ts >= 60000) {
+        minuteAgo = connHistory[i];
+        break;
+      }
+    }
+    return now.count - minuteAgo.count;
+  })();
+
+  $: connPeakHour = connHistory.length > 0 ? Math.max(...connHistory.map((h) => h.count)) : 0;
+
   function formatSpeed(bytesPerSecond: number): string {
     if (bytesPerSecond === 0) return '0 B/s';
     const k = 1024;
@@ -49,6 +68,10 @@
         activeConnectionsCount = conns.length;
         tcpConnectionsCount = conns.filter((c: any) => c.metadata?.network === 'TCP').length;
         udpConnectionsCount = conns.filter((c: any) => c.metadata?.network === 'UDP').length;
+        const now = Date.now();
+        connHistory.push({ ts: now, count: conns.length });
+        if (connHistory.length > CONN_HISTORY_MAX) connHistory.shift();
+        connHistory = connHistory;
       }
     } catch (e) {
       // ignore
@@ -205,7 +228,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$currentLang === 'ru' ? 'Инструменты' : 'Tools'}
+        {$t('nav.group_tools')}
         <span style="color:var(--fg-faint);margin:0 6px;">/</span>
         {$t('traffic.title')}
       </div>
@@ -213,8 +236,8 @@
       <p class="sub">{$t('traffic.realtime')}</p>
     </div>
     <div class="ph-actions">
-      <span class="status-indicator" class:connected>
-        {connected ? 'live' : 'offline'}
+      <span class="status-indicator" class:connected class:live={connected}>
+        ● {connected ? 'live' : 'offline'}
       </span>
     </div>
   </div>
@@ -275,6 +298,15 @@
       </div>
       <div class="stat-value active-connections-color">{activeConnectionsCount}</div>
       <div class="stat-session">{tcpConnectionsCount} TCP · {udpConnectionsCount} UDP</div>
+      {#if connHistory.length >= 2}
+        <div class="stat-session" style="margin-top: 2px; color: var(--fg-dim);">
+          {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$currentLang === 'ru'
+            ? 'мин'
+            : 'min'}
+          · {$currentLang === 'ru' ? 'пик' : 'peak'}
+          {connPeakHour}
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -540,5 +572,14 @@
     padding: 0 10px 0 80px;
     font-size: 11px;
     color: var(--fg-dim);
+  }
+
+  :global(.status-indicator.live) {
+    color: var(--accent);
+    border-color: rgba(41, 194, 240, 0.4);
+    background: rgba(41, 194, 240, 0.08);
+  }
+  :global(.status-indicator.live::before) {
+    display: none;
   }
 </style>
