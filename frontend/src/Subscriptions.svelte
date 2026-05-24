@@ -19,11 +19,32 @@
     filter_transport?: string;
     proxy_count?: number;
     last_error?: string;
+    upload?: number;
+    download?: number;
+    total?: number;
+    rule_count?: number;
   }
 
   function getSubTypeBadge(sub: Subscription): string {
     if (sub.type === 'mihomo') return 'clash · YAML';
     return 'xray · JSON';
+  }
+
+  function formatTraffic(bytes: number): string {
+    const gb = bytes / (1024 * 1024 * 1024);
+    if (gb >= 1) return `${gb.toFixed(1)} GB`;
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(1)} MB`;
+  }
+
+  function formatTrafficUsage(upload?: number, download?: number, total?: number): string {
+    const used = (upload || 0) + (download || 0);
+    if (used === 0 && (!total || total === 0)) return '—';
+    const usedStr = formatTraffic(used);
+    if (total && total > 0) {
+      return `${usedStr} / ${formatTraffic(total)}`;
+    }
+    return usedStr;
   }
 
   let subscriptions: Subscription[] = [];
@@ -404,12 +425,12 @@
               <div class="meta-value">{sub.proxy_count || 0}</div>
             </div>
             <div class="meta-column">
-              <div class="meta-label">{$currentLang === 'ru' ? 'ИНТЕРВАЛ' : 'INTERVAL'}</div>
-              <div class="meta-value">{sub.interval}h</div>
+              <div class="meta-label">{$currentLang === 'ru' ? 'ПРАВИЛ' : 'RULES'}</div>
+              <div class="meta-value">{sub.type === 'mihomo' ? (sub.rule_count || 0) : '—'}</div>
             </div>
             <div class="meta-column">
-              <div class="meta-label">{$currentLang === 'ru' ? 'ПРЕФИКС ТЕГОВ' : 'TAG PREFIX'}</div>
-              <div class="meta-value">{sub.tag_prefix || '—'}</div>
+              <div class="meta-label">{$currentLang === 'ru' ? 'ТРАФИК' : 'TRAFFIC'}</div>
+              <div class="meta-value">{formatTrafficUsage(sub.upload, sub.download, sub.total)}</div>
             </div>
             <div class="meta-column">
               <div class="meta-label">{$currentLang === 'ru' ? 'ОБНОВЛЕНО' : 'UPDATED'}</div>
