@@ -86,7 +86,7 @@ func (a *API) SubscriptionDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) SubscriptionRefresh(w http.ResponseWriter, r *http.Request) {

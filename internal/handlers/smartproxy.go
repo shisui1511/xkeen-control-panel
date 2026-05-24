@@ -119,7 +119,7 @@ func (a *API) SmartProxyDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) SmartProxySetEnabled(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +146,7 @@ func (a *API) SmartProxySetEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) SmartProxyStatus(w http.ResponseWriter, r *http.Request) {

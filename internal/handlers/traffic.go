@@ -122,7 +122,7 @@ func (a *API) TrafficQuotaDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) TrafficQuotaSetEnabled(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +147,7 @@ func (a *API) TrafficQuotaSetEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) TrafficQuotaReset(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +171,7 @@ func (a *API) TrafficQuotaReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) TrafficStats(w http.ResponseWriter, r *http.Request) {
@@ -201,5 +201,5 @@ func (a *API) TrafficAlertsClear(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.trafficQuotaSvc.ClearAlerts()
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }

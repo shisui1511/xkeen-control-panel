@@ -72,7 +72,7 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) SnapshotDownload(w http.ResponseWriter, r *http.Request) {
@@ -124,5 +124,5 @@ func (a *API) SnapshotDelete(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }

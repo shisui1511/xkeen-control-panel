@@ -90,7 +90,7 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +135,7 @@ func (a *API) ConfigCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +160,7 @@ func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +197,7 @@ func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 type ConfigValidateRequest struct {
