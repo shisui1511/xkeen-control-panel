@@ -13,11 +13,17 @@
     interval: number;
     last_update: string;
     enabled: boolean;
+    type?: string;
     filter_name?: string;
     filter_type?: string;
     filter_transport?: string;
     proxy_count?: number;
     last_error?: string;
+  }
+
+  function getSubTypeBadge(sub: Subscription): string {
+    if (sub.type === 'mihomo') return 'clash · YAML';
+    return 'xray · JSON';
   }
 
   let subscriptions: Subscription[] = [];
@@ -345,7 +351,10 @@
                   >
                 {/if}
               </div>
-              <div class="sub-url-line">{sub.url}</div>
+              <div class="sub-url-line">
+                <span class="sub-type-badge">{getSubTypeBadge(sub)}</span>
+                {sub.url}
+              </div>
             </div>
             <div class="sub-actions-wrapper">
               <button
@@ -776,5 +785,19 @@
   }
   :global(.btn-danger-outline:hover) {
     background: rgba(239, 68, 68, 0.16);
+  }
+
+  :global(.sub-type-badge) {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 600;
+    font-family: var(--font-family-mono);
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(41, 194, 240, 0.08);
+    color: var(--accent);
+    border: 1px solid rgba(41, 194, 240, 0.2);
+    margin-right: 6px;
+    vertical-align: middle;
   }
 </style>
