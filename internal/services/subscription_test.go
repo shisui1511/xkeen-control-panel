@@ -14,7 +14,7 @@ import (
 
 func TestSubscriptionService_New(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewSubscriptionService(tmp, "/opt/etc/xray")
+	svc := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")
 	if svc == nil {
 		t.Fatal("expected non-nil service")
 	}
@@ -22,7 +22,7 @@ func TestSubscriptionService_New(t *testing.T) {
 
 func TestSubscriptionService_Add(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewSubscriptionService(tmp, "/opt/etc/xray")
+	svc := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")
 
 	sub := Subscription{
 		Name:      "Test Sub",
@@ -47,7 +47,7 @@ func TestSubscriptionService_Add(t *testing.T) {
 
 func TestSubscriptionService_Delete(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewSubscriptionService(tmp, "/opt/etc/xray")
+	svc := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")
 
 	sub := Subscription{
 		Name:    "To Delete",
@@ -156,7 +156,7 @@ func TestPortIsInteger(t *testing.T) {
 // TestDownloadAndParseSchemeValidation: file:// scheme returns error.
 func TestDownloadAndParseSchemeValidation(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewSubscriptionService(tmp, "/opt/etc/xray")
+	svc := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")
 	_, err := svc.downloadAndParse("file:///etc/passwd")
 	if err == nil {
 		t.Fatal("expected error for file:// URL, got nil")
@@ -184,7 +184,7 @@ func TestFilterTransport(t *testing.T) {
 func TestSubscriptionService_Persistence(t *testing.T) {
 	tmp := t.TempDir()
 
-	svc1 := NewSubscriptionService(tmp, "/opt/etc/xray")
+	svc1 := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")
 	sub := Subscription{
 		Name:    "Persistent Sub",
 		URL:     "https://example.com/sub",
@@ -192,7 +192,7 @@ func TestSubscriptionService_Persistence(t *testing.T) {
 	}
 	svc1.Add(&sub)
 
-	svc2 := NewSubscriptionService(tmp, "/opt/etc/xray")
+	svc2 := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")
 	subs := svc2.List()
 	if len(subs) != 1 {
 		t.Fatalf("expected 1 subscription after reload, got %d", len(subs))
@@ -413,7 +413,7 @@ func TestParseTUICLink(t *testing.T) {
 // TestSubscriptionEntryLimit: >500 non-empty lines → error; 500 → success.
 func TestSubscriptionEntryLimit(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewSubscriptionService(tmp, tmp)
+	svc := NewSubscriptionService(tmp, tmp, tmp)
 	// Use plain http.DefaultClient so httptest servers (loopback) are reachable
 	svc.httpClient = http.DefaultClient
 
@@ -457,7 +457,7 @@ func TestSubscriptionEntryLimit(t *testing.T) {
 // TestTagDeduplication: writeFragment with duplicate tags → suffixed tags.
 func TestTagDeduplication(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewSubscriptionService(tmp, tmp)
+	svc := NewSubscriptionService(tmp, tmp, tmp)
 	sub := &Subscription{ID: "test", Name: "test"}
 
 	outbounds := []Outbound{
@@ -501,7 +501,7 @@ func TestTagDeduplication(t *testing.T) {
 // TestDownloadAndParse_NetworkError: server closes connection immediately → error returned, no file created.
 func TestDownloadAndParse_NetworkError(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewSubscriptionService(tmp, tmp)
+	svc := NewSubscriptionService(tmp, tmp, tmp)
 	// Use plain http.DefaultClient so httptest servers (loopback) are reachable
 	svc.httpClient = http.DefaultClient
 
@@ -541,7 +541,7 @@ func TestSubscriptionScheduler_FrozenClock(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewSubscriptionService(tmp, tmp)
+	svc := NewSubscriptionService(tmp, tmp, tmp)
 	svc.httpClient = http.DefaultClient
 
 	// Subscription 1: overdue (last update 2 hours ago, interval 1 hour)
@@ -574,10 +574,10 @@ func TestSubscriptionScheduler_FrozenClock(t *testing.T) {
 
 	// Verify isDue directly (synchronous, no ticker needed)
 	now := time.Now()
-	if !svc.isDue(sub1, now) {
+	if !svc.isRefreshDue(sub1, now) {
 		t.Error("expected sub1 (overdue) to be due")
 	}
-	if svc.isDue(sub2, now) {
+	if svc.isRefreshDue(sub2, now) {
 		t.Error("expected sub2 (recent) to NOT be due")
 	}
 
@@ -603,7 +603,7 @@ func TestSubscriptionScheduler_FrozenClock(t *testing.T) {
 // TestSubscriptionGet_ReturnsCopy (T006): modifying the returned copy must not affect the original.
 func TestSubscriptionGet_ReturnsCopy(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewSubscriptionService(tmp, "/opt/etc/xray")
+	svc := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")
 
 	sub := Subscription{
 		Name:    "Original",
@@ -635,7 +635,7 @@ func TestSubscriptionGet_ReturnsCopy(t *testing.T) {
 
 func TestSubscriptionProxyCount(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewSubscriptionService(tmp, tmp)
+	svc := NewSubscriptionService(tmp, tmp, tmp)
 
 	sub := Subscription{
 		Name:    "Proxy Count Test",
@@ -673,5 +673,262 @@ func TestSubscriptionProxyCount(t *testing.T) {
 	subs := svc.List()
 	if subs[0].ProxyCount != 2 {
 		t.Errorf("expected ProxyCount 2 in List(), got %d", subs[0].ProxyCount)
+	}
+}
+
+// TestParseSOCKSLink: socks:// and socks5:// links.
+func TestParseSOCKSLink(t *testing.T) {
+	tests := []struct {
+		name     string
+		link     string
+		wantTag  string
+		wantPort int
+		wantUser string
+	}{
+		{
+			name:     "socks5 with auth",
+			link:     "socks5://user:pass@socks.example.com:1080#mysocks",
+			wantTag:  "mysocks",
+			wantPort: 1080,
+			wantUser: "user",
+		},
+		{
+			name:     "socks without auth",
+			link:     "socks://socks.example.com:1080#sock",
+			wantTag:  "sock",
+			wantPort: 1080,
+			wantUser: "",
+		},
+		{
+			name:     "socks5 fallback tag from hostname",
+			link:     "socks5://socks.example.com:443",
+			wantTag:  "socks.example.com",
+			wantPort: 443,
+			wantUser: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ob := parseSOCKSLink(tc.link)
+			if ob == nil {
+				t.Fatal("expected non-nil Outbound")
+			}
+			if ob.Protocol != "socks" {
+				t.Errorf("expected protocol=socks, got %q", ob.Protocol)
+			}
+			if ob.Tag != tc.wantTag {
+				t.Errorf("expected tag=%q, got %q", tc.wantTag, ob.Tag)
+			}
+			servers, ok := ob.Settings["servers"].([]map[string]interface{})
+			if !ok || len(servers) == 0 {
+				t.Fatal("expected servers in settings")
+			}
+			if servers[0]["port"] != tc.wantPort {
+				t.Errorf("expected port=%d, got %v", tc.wantPort, servers[0]["port"])
+			}
+			if tc.wantUser != "" {
+				users, ok := servers[0]["users"].([]map[string]interface{})
+				if !ok || len(users) == 0 {
+					t.Fatal("expected users in server")
+				}
+				if users[0]["user"] != tc.wantUser {
+					t.Errorf("expected user=%q, got %v", tc.wantUser, users[0]["user"])
+				}
+			} else {
+				if _, hasUsers := servers[0]["users"]; hasUsers {
+					t.Error("expected no users in server for anonymous socks")
+				}
+			}
+		})
+	}
+}
+
+// TestParseHTTPProxyLink: http-proxy:// links.
+func TestParseHTTPProxyLink(t *testing.T) {
+	link := "http-proxy://proxyuser:proxypass@http.example.com:3128#httpproxy"
+	ob := parseHTTPProxyLink(link)
+	if ob == nil {
+		t.Fatal("expected non-nil Outbound")
+	}
+	if ob.Protocol != "http" {
+		t.Errorf("expected protocol=http, got %q", ob.Protocol)
+	}
+	if ob.Tag != "httpproxy" {
+		t.Errorf("expected tag=httpproxy, got %q", ob.Tag)
+	}
+	servers, ok := ob.Settings["servers"].([]map[string]interface{})
+	if !ok || len(servers) == 0 {
+		t.Fatal("expected servers in settings")
+	}
+	if servers[0]["address"] != "http.example.com" {
+		t.Errorf("expected address=http.example.com, got %v", servers[0]["address"])
+	}
+	if servers[0]["port"] != 3128 {
+		t.Errorf("expected port=3128, got %v", servers[0]["port"])
+	}
+	users, ok := servers[0]["users"].([]map[string]interface{})
+	if !ok || len(users) == 0 {
+		t.Fatal("expected users in server")
+	}
+	if users[0]["user"] != "proxyuser" {
+		t.Errorf("expected user=proxyuser, got %v", users[0]["user"])
+	}
+}
+
+// TestParseLinks: batch parse returns correct results and per-link errors.
+func TestParseLinks(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+
+	links := []string{
+		"vless://550e8400-e29b-41d4-a716-446655440000@host.example.com:443?security=none#vlessnode",
+		"socks5://user:pass@socks.example.com:1080#socksnode",
+		"notaprotocol://garbage",
+		"", // empty — should be skipped
+	}
+
+	results := svc.ParseLinks(links)
+
+	// Empty link skipped → 3 results
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results (empty link skipped), got %d", len(results))
+	}
+
+	if results[0].Error != "" {
+		t.Errorf("expected no error for vless link, got %q", results[0].Error)
+	}
+	if results[0].Outbound == nil || results[0].Outbound.Protocol != "vless" {
+		t.Errorf("expected vless outbound, got %v", results[0].Outbound)
+	}
+
+	if results[1].Error != "" {
+		t.Errorf("expected no error for socks5 link, got %q", results[1].Error)
+	}
+	if results[1].Outbound == nil || results[1].Outbound.Protocol != "socks" {
+		t.Errorf("expected socks outbound, got %v", results[1].Outbound)
+	}
+
+	if results[2].Error == "" {
+		t.Error("expected error for unsupported protocol")
+	}
+	if results[2].Outbound != nil {
+		t.Error("expected nil outbound for unsupported protocol")
+	}
+}
+
+// TestExponentialBackoff: recordFailure increases delay, clearFailure resets.
+func TestExponentialBackoff(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+
+	id := "sub_backoff_test"
+
+	// First failure: delay = backoffBase (5 min)
+	svc.recordFailure(id)
+	val, ok := svc.retries.Load(id)
+	if !ok {
+		t.Fatal("expected retry state after first failure")
+	}
+	rs := val.(*retryState)
+	if rs.failCount != 1 {
+		t.Errorf("expected failCount=1, got %d", rs.failCount)
+	}
+	expectedDelay1 := backoffBase
+	actualDelay1 := time.Until(rs.nextRetry)
+	if actualDelay1 < expectedDelay1-time.Second || actualDelay1 > expectedDelay1+time.Second {
+		t.Errorf("expected delay ~%v, got %v", expectedDelay1, actualDelay1)
+	}
+
+	// Second failure: delay = backoffBase * 2
+	svc.recordFailure(id)
+	val, _ = svc.retries.Load(id)
+	rs = val.(*retryState)
+	if rs.failCount != 2 {
+		t.Errorf("expected failCount=2, got %d", rs.failCount)
+	}
+	expectedDelay2 := backoffBase * 2
+	actualDelay2 := time.Until(rs.nextRetry)
+	if actualDelay2 < expectedDelay2-time.Second || actualDelay2 > expectedDelay2+time.Second {
+		t.Errorf("expected delay ~%v, got %v", expectedDelay2, actualDelay2)
+	}
+
+	// clearFailure removes state
+	svc.clearFailure(id)
+	if _, ok := svc.retries.Load(id); ok {
+		t.Error("expected retry state to be cleared after success")
+	}
+}
+
+// TestBackoffCap: after enough failures, delay caps at backoffMax.
+func TestBackoffCap(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	id := "sub_cap_test"
+
+	// Trigger enough failures that 2^(failCount-1) * backoffBase > backoffMax
+	for i := 0; i < 20; i++ {
+		svc.recordFailure(id)
+	}
+	val, ok := svc.retries.Load(id)
+	if !ok {
+		t.Fatal("expected retry state")
+	}
+	rs := val.(*retryState)
+	actualDelay := time.Until(rs.nextRetry)
+	if actualDelay > backoffMax+time.Second {
+		t.Errorf("expected delay capped at %v, got %v", backoffMax, actualDelay)
+	}
+}
+
+// TestMihomoSubscriptionType: refresh of type "mihomo" writes a YAML provider file.
+func TestMihomoSubscriptionType(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	svc.httpClient = http.DefaultClient
+
+	yamlContent := `proxies:
+  - name: TestProxy
+    type: ss
+    server: ss.example.com
+    port: 8388
+    cipher: aes-256-gcm
+    password: testpass
+`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(yamlContent))
+	}))
+	defer ts.Close()
+
+	sub := Subscription{
+		Name:    "Mihomo Sub",
+		URL:     ts.URL,
+		Type:    "mihomo",
+		Enabled: true,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	id := svc.List()[0].ID
+	if err := svc.Refresh(id); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	// Provider file must exist
+	got := svc.List()[0]
+	provPath := svc.getMihomoProviderPath(&got)
+	data, err := os.ReadFile(provPath)
+	if err != nil {
+		t.Fatalf("expected provider file at %s: %v", provPath, err)
+	}
+	if !strings.Contains(string(data), "proxies:") {
+		t.Error("expected 'proxies:' in provider file")
+	}
+
+	// ProxyCount should reflect one proxy
+	if got.ProxyCount != 1 {
+		t.Errorf("expected ProxyCount=1, got %d", got.ProxyCount)
 	}
 }

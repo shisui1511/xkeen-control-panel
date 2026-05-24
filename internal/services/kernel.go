@@ -689,6 +689,90 @@ func (s *KernelService) Install(name string) error {
 	return nil
 }
 
+// Rollback restores the kernel binary from the latest backup.
+func (s *KernelService) Rollback(name string) error {
+	s.mu.Lock()
+	k, ok := s.kernels[name]
+	if !ok {
+		s.mu.Unlock()
+		return fmt.Errorf("kernel not found: %s", name)
+	}
+	s.resolveBinaryPath(k)
+	binaryPath := k.BinaryPath
+	s.mu.Unlock()
+
+	backupDir := filepath.Join(filepath.Dir(binaryPath), ".backup")
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		return fmt.Errorf("read backup dir: %w", err)
+	}
+
+	var backups []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "kernel.bak.") {
+			backups = append(backups, filepath.Join(backupDir, e.Name()))
+		}
+	}
+
+	if len(backups) == 0 {
+		return fmt.Errorf("no backup found for kernel %s", name)
+	}
+
+	// Latest backup is the last one (since names contain timestamps and os.ReadDir sorts by name)
+	latestBackup := backups[len(backups)-1]
+
+	// Atomic replace
+	tempDest := filepath.Join(filepath.Dir(binaryPath), filepath.Base(binaryPath)+".new")
+	if err := validateKernelPath(tempDest); err != nil {
+		return err
+	}
+
+	src, err := os.Open(latestBackup)
+	if err != nil {
+		return fmt.Errorf("open backup file: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.Create(tempDest)
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return fmt.Errorf("copy backup: %w", err)
+	}
+
+	if err := dst.Close(); err != nil {
+		return err
+	}
+	if err := src.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Chmod(tempDest, 0755); err != nil {
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+
+	if err := os.Rename(tempDest, binaryPath); err != nil {
+		return fmt.Errorf("rename to target path: %w", err)
+	}
+
+	// Reset cache under lock
+	s.mu.Lock()
+	if kk := s.kernels[name]; kk != nil {
+		kk.binaryPathCachedAt = time.Time{}
+		s.resolveBinaryPath(kk)
+		kk.verCache = &versionCache{} // clear version cache
+		kk.CurrentVersion = s.detectVersion(kk)
+		kk.Status = "idle"
+		kk.Message = "Rolled back to backup"
+	}
+	s.mu.Unlock()
+
+	return nil
+}
+
 // pruneBackups removes oldest backup files in dir, keeping only the `keep` most recent.
 // Files are sorted by name (timestamp suffix ensures lexicographic order = chronological order).
 // Errors are logged but do not fail the caller.

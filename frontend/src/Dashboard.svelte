@@ -23,6 +23,7 @@
   import SmartProxy from './SmartProxy.svelte';
   import TrafficQuotas from './TrafficQuotas.svelte';
   import DATManager from './DATManager.svelte';
+  import MihomoGenerator from './MihomoGenerator.svelte';
   import Console from './Console.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
 
@@ -1037,6 +1038,10 @@
     {:else if currentTab === 'dat'}
       <div transition:fade={{ duration: 150 }}>
         <DATManager onSwitchTab={switchTab} />
+      </div>
+    {:else if currentTab === 'mihomo-gen'}
+      <div transition:fade={{ duration: 150 }}>
+        <MihomoGenerator onSwitchTab={switchTab} />
       </div>
     {:else if currentTab === 'console'}
       <div transition:fade={{ duration: 150 }}>

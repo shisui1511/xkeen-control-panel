@@ -15,7 +15,7 @@
     crosshairCursor,
     highlightActiveLine
   } from '@codemirror/view';
-  import { EditorState } from '@codemirror/state';
+  import { EditorState, Compartment } from '@codemirror/state';
   import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
   import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
   import {
@@ -51,10 +51,14 @@
   import { xraySchema } from './schemas/xray';
   import { mihomoSchema } from './schemas/mihomo';
 
+  // Snippets
+  import { xraySnippetSource, mihomoSnippetSource } from './lib/snippets';
+
   export let onSwitchTab: (tab: string) => void = () => {};
 
   let editorContainer: HTMLDivElement;
   let editorView: EditorView | null = null;
+  const schemaCompartment = new Compartment();
   interface Template {
     name: string;
     description: string;
@@ -188,12 +192,16 @@
 
     if (!schema) return [];
 
+    const isXray = path.includes('xray') || path.includes('/opt/etc/xray');
+    const snippetSource = isXray ? xraySnippetSource : mihomoSnippetSource;
+
     if (isJson) {
       // In expert mode, skip strict schema linting but keep autocomplete and hover
       if (expert) {
         return [
           linter(jsonParseLinter(), { delay: 300 }),
           jsonLanguage.data.of({ autocomplete: jsonCompletion() }),
+          jsonLanguage.data.of({ autocomplete: snippetSource }),
           hoverTooltip(jsonSchemaHover()),
           stateExtensions(schema)
         ];
@@ -202,6 +210,7 @@
         linter(jsonParseLinter(), { delay: 300 }),
         linter(jsonSchemaLinter(), { needsRefresh: handleRefresh }),
         jsonLanguage.data.of({ autocomplete: jsonCompletion() }),
+        jsonLanguage.data.of({ autocomplete: snippetSource }),
         hoverTooltip(jsonSchemaHover()),
         stateExtensions(schema)
       ];
@@ -212,6 +221,7 @@
       if (expert) {
         return [
           yamlLanguage.data.of({ autocomplete: yamlCompletion() }),
+          yamlLanguage.data.of({ autocomplete: snippetSource }),
           hoverTooltip(yamlSchemaHover()),
           stateExtensions(schema)
         ];
@@ -219,6 +229,7 @@
       return [
         linter(yamlSchemaLinter(), { needsRefresh: handleRefresh }),
         yamlLanguage.data.of({ autocomplete: yamlCompletion() }),
+        yamlLanguage.data.of({ autocomplete: snippetSource }),
         hoverTooltip(yamlSchemaHover()),
         stateExtensions(schema)
       ];
@@ -293,7 +304,7 @@
               cursorCol = pos - line.from + 1;
             }
           }),
-          ...schemaExts
+          schemaCompartment.of(schemaExts)
         ]
       });
 
@@ -656,18 +667,21 @@
 
   function toggleSchema() {
     schemaEnabled = !schemaEnabled;
-    if (selectedFile) {
-      // Reload current file to apply/remove schema extensions
-      const content = editorView ? editorView.state.doc.toString() : '';
-      loadFile(selectedFile);
+    if (editorView && selectedFile) {
+      const newExts = getSchemaExtensions(selectedFile, expertMode);
+      editorView.dispatch({
+        effects: schemaCompartment.reconfigure(newExts)
+      });
     }
   }
 
   function toggleExpertMode() {
     expertMode = !expertMode;
-    // Expert mode disables strict schema validation to reduce visual noise for advanced edits
-    if (selectedFile) {
-      loadFile(selectedFile);
+    if (editorView && selectedFile) {
+      const newExts = getSchemaExtensions(selectedFile, expertMode);
+      editorView.dispatch({
+        effects: schemaCompartment.reconfigure(newExts)
+      });
     }
   }
 

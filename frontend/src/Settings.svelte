@@ -148,7 +148,7 @@
     try {
       const res = await fetch(`/api/config/backups?path=${encodeURIComponent(selectedFile)}`);
       if (res.ok) {
-        backups = await res.json();
+        backups = (await res.json()) ?? [];
       } else {
         backups = [];
       }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -30,8 +31,10 @@ type Subscription struct {
 	Interval   int       `json:"interval"` // hours
 	LastUpdate time.Time `json:"last_update"`
 	Enabled    bool      `json:"enabled"`
+	// Type defines the format of the subscription: "xray" (default) or "mihomo"
+	Type string `json:"type,omitempty"`
 
-	// Filters
+	// Filters (Xray only)
 	FilterName      string `json:"filter_name,omitempty"`
 	FilterType      string `json:"filter_type,omitempty"`
 	FilterTransport string `json:"filter_transport,omitempty"`
@@ -47,21 +50,36 @@ type Outbound struct {
 	StreamSettings map[string]interface{} `json:"streamSettings,omitempty"`
 }
 
-// SubscriptionService manages subscriptions
-type SubscriptionService struct {
-	dataDir       string
-	configDir     string
-	subscriptions []Subscription
-	mu            sync.RWMutex
-	ongoing       sync.Map // Map of ID -> struct{}{} to track active refreshes
-	httpClient    *http.Client
+// backoff constants for failed auto-refreshes
+const (
+	backoffBase = 5 * time.Minute
+	backoffMax  = 4 * time.Hour
+)
+
+// retryState tracks exponential backoff per subscription.
+type retryState struct {
+	failCount int
+	nextRetry time.Time
 }
 
-func NewSubscriptionService(dataDir, configDir string) *SubscriptionService {
+// SubscriptionService manages subscriptions
+type SubscriptionService struct {
+	dataDir         string
+	configDir       string // Xray config dir for fragment files
+	mihomoConfigDir string // Mihomo config dir for proxy-provider files
+	subscriptions   []Subscription
+	mu              sync.RWMutex
+	ongoing         sync.Map // Map of ID -> struct{}{} to track active refreshes
+	retries         sync.Map // ID -> *retryState for exponential backoff
+	httpClient      *http.Client
+}
+
+func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *SubscriptionService {
 	svc := &SubscriptionService{
-		dataDir:    dataDir,
-		configDir:  configDir,
-		httpClient: utils.SafeHTTPClient(30 * time.Second),
+		dataDir:         dataDir,
+		configDir:       configDir,
+		mihomoConfigDir: mihomoConfigDir,
+		httpClient:      utils.SafeHTTPClient(30 * time.Second),
 	}
 	svc.load()
 	return svc
@@ -113,6 +131,9 @@ func (s *SubscriptionService) Get(id string) *Subscription {
 }
 
 func (s *SubscriptionService) getProxyCount(sub *Subscription) int {
+	if sub.Type == "mihomo" {
+		return s.getMihomoProxyCount(sub)
+	}
 	path := s.getFragmentPath(sub)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -130,6 +151,23 @@ func (s *SubscriptionService) getProxyCount(sub *Subscription) int {
 		}
 	}
 	return len(outbounds)
+}
+
+// getMihomoProxyCount counts proxy entries in the saved provider YAML
+// by counting lines that match "  - name:" or "- name:".
+func (s *SubscriptionService) getMihomoProxyCount(sub *Subscription) int {
+	data, err := os.ReadFile(s.getMihomoProviderPath(sub))
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- name:") {
+			count++
+		}
+	}
+	return count
 }
 
 func (s *SubscriptionService) Add(sub *Subscription) error {
@@ -178,9 +216,13 @@ func (s *SubscriptionService) Delete(id string) error {
 	}
 	s.subscriptions = newList
 
-	// Delete managed fragment file
-	fragmentPath := s.getFragmentPath(sub)
-	os.Remove(fragmentPath)
+	// Delete managed fragment / provider file
+	if sub.Type == "mihomo" {
+		os.Remove(s.getMihomoProviderPath(sub))
+	} else {
+		fragmentPath := s.getFragmentPath(sub)
+		os.Remove(fragmentPath)
+	}
 
 	return s.save()
 }
@@ -198,8 +240,16 @@ func (s *SubscriptionService) Refresh(id string) error {
 		s.mu.Unlock()
 		return fmt.Errorf("subscription not found")
 	}
+	subCopy := *sub
 	s.mu.Unlock()
 
+	if subCopy.Type == "mihomo" {
+		return s.refreshMihomo(&subCopy)
+	}
+	return s.refreshXray(&subCopy)
+}
+
+func (s *SubscriptionService) refreshXray(sub *Subscription) error {
 	// Download subscription (outside of lock to avoid blocking other operations)
 	outbounds, err := s.downloadAndParse(sub.URL)
 	if err != nil {
@@ -210,23 +260,78 @@ func (s *SubscriptionService) Refresh(id string) error {
 	defer s.mu.Unlock()
 
 	// Re-get sub in case it was modified
-	sub = s.GetLocked(id)
-	if sub == nil {
+	live := s.GetLocked(sub.ID)
+	if live == nil {
 		return fmt.Errorf("subscription not found")
 	}
 
 	// Apply filters
-	outbounds = s.applyFilters(outbounds, sub)
+	outbounds = s.applyFilters(outbounds, live)
 
 	// Generate fragment file
-	fragmentPath := s.getFragmentPath(sub)
-	if err := s.writeFragment(fragmentPath, outbounds, sub); err != nil {
+	fragmentPath := s.getFragmentPath(live)
+	if err := s.writeFragment(fragmentPath, outbounds, live); err != nil {
 		return err
 	}
 
-	// Update last update time
-	sub.LastUpdate = time.Now()
+	live.LastUpdate = time.Now()
 	return s.save()
+}
+
+func (s *SubscriptionService) refreshMihomo(sub *Subscription) error {
+	body, err := s.downloadRaw(sub.URL)
+	if err != nil {
+		return err
+	}
+
+	providerPath := s.getMihomoProviderPath(sub)
+	if err := os.MkdirAll(filepath.Dir(providerPath), 0755); err != nil {
+		return fmt.Errorf("create providers dir: %w", err)
+	}
+
+	// Ensure content has a proxies: header; wrap bare lists if needed
+	content := strings.TrimSpace(string(body))
+	if !strings.HasPrefix(content, "proxies:") && !strings.Contains(content, "\nproxies:") {
+		content = "proxies:\n" + content
+	}
+
+	if err := utils.AtomicWriteFile(providerPath, []byte(content), 0600); err != nil {
+		return fmt.Errorf("write provider file: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	live := s.GetLocked(sub.ID)
+	if live == nil {
+		return fmt.Errorf("subscription not found")
+	}
+	live.LastUpdate = time.Now()
+	return s.save()
+}
+
+func (s *SubscriptionService) downloadRaw(subURL string) ([]byte, error) {
+	parsed, err := url.Parse(subURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return nil, fmt.Errorf("only http and https URLs are allowed for subscriptions")
+	}
+	resp, err := s.httpClient.Get(subURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, maxSubscriptionBytes))
+}
+
+func (s *SubscriptionService) getMihomoProviderPath(sub *Subscription) string {
+	dir := s.mihomoConfigDir
+	if dir == "" {
+		dir = "/opt/etc/mihomo"
+	}
+	return filepath.Join(dir, "providers", fmt.Sprintf("xcp_%s.yaml", sub.ID))
 }
 
 func (s *SubscriptionService) GetLocked(id string) *Subscription {
@@ -416,6 +521,16 @@ func parseShareLink(link string) *Outbound {
 	// tuic:// (TUIC)
 	if strings.HasPrefix(link, "tuic://") {
 		return parseTUICLink(link)
+	}
+
+	// socks:// or socks5://
+	if strings.HasPrefix(link, "socks://") || strings.HasPrefix(link, "socks5://") {
+		return parseSOCKSLink(link)
+	}
+
+	// http:// proxy (must come after http-based subscription URL check is done)
+	if strings.HasPrefix(link, "http-proxy://") {
+		return parseHTTPProxyLink(link)
 	}
 
 	return nil
@@ -879,21 +994,181 @@ func parseSSLink(link string) *Outbound {
 	}
 }
 
-// isDue returns true if a subscription is overdue for a refresh.
-// A subscription is due when it is enabled, has a non-zero interval, and
-// the elapsed time since LastUpdate exceeds Interval hours.
-func (s *SubscriptionService) isDue(sub *Subscription, now time.Time) bool {
-	return sub.Enabled && sub.Interval > 0 && now.Sub(sub.LastUpdate) >= time.Duration(sub.Interval)*time.Hour
+func parseSOCKSLink(link string) *Outbound {
+	// socks:// or socks5://user:pass@host:port#tag
+	// Normalise socks5:// to socks:// so url.Parse works uniformly
+	link = strings.Replace(link, "socks5://", "socks://", 1)
+	u, err := url.Parse(link)
+	if err != nil {
+		return nil
+	}
+
+	tag := u.Fragment
+	if tag == "" {
+		tag = u.Hostname()
+	}
+
+	portInt, err := strconv.Atoi(u.Port())
+	if err != nil || portInt < 1 || portInt > 65535 {
+		return nil
+	}
+
+	server := map[string]interface{}{
+		"address": u.Hostname(),
+		"port":    portInt,
+	}
+	if u.User != nil {
+		user := u.User.Username()
+		pass, _ := u.User.Password()
+		if user != "" {
+			server["users"] = []map[string]interface{}{
+				{"user": user, "pass": pass},
+			}
+		}
+	}
+
+	return &Outbound{
+		Tag:      tag,
+		Protocol: "socks",
+		Settings: map[string]interface{}{
+			"servers": []map[string]interface{}{server},
+		},
+	}
+}
+
+// parseHTTPProxyLink parses http-proxy://user:pass@host:port#tag share links.
+// Uses the "http-proxy://" scheme to avoid conflicts with http:// subscription URLs.
+func parseHTTPProxyLink(link string) *Outbound {
+	// Normalise http-proxy:// → http:// so url.Parse can handle it
+	link = strings.Replace(link, "http-proxy://", "http://", 1)
+	u, err := url.Parse(link)
+	if err != nil {
+		return nil
+	}
+
+	tag := u.Fragment
+	if tag == "" {
+		tag = u.Hostname()
+	}
+
+	portInt, err := strconv.Atoi(u.Port())
+	if err != nil || portInt < 1 || portInt > 65535 {
+		return nil
+	}
+
+	server := map[string]interface{}{
+		"address": u.Hostname(),
+		"port":    portInt,
+	}
+	if u.User != nil {
+		user := u.User.Username()
+		pass, _ := u.User.Password()
+		if user != "" {
+			server["users"] = []map[string]interface{}{
+				{"user": user, "pass": pass},
+			}
+		}
+	}
+
+	return &Outbound{
+		Tag:      tag,
+		Protocol: "http",
+		Settings: map[string]interface{}{
+			"servers": []map[string]interface{}{server},
+		},
+	}
+}
+
+// ParseLinksResult holds the result for a single link parse attempt.
+type ParseLinksResult struct {
+	Link     string    `json:"link"`
+	Outbound *Outbound `json:"outbound,omitempty"`
+	Error    string    `json:"error,omitempty"`
+}
+
+// ParseLinks parses a slice of share links and returns results for each.
+// Unsupported or invalid links are reported as errors, not fatal failures.
+func (s *SubscriptionService) ParseLinks(links []string) []ParseLinksResult {
+	results := make([]ParseLinksResult, 0, len(links))
+	for _, link := range links {
+		link = strings.TrimSpace(link)
+		if link == "" {
+			continue
+		}
+		ob := parseShareLink(link)
+		if ob == nil {
+			results = append(results, ParseLinksResult{
+				Link:  link,
+				Error: "unsupported or invalid share link format",
+			})
+		} else {
+			results = append(results, ParseLinksResult{
+				Link:     link,
+				Outbound: ob,
+			})
+		}
+	}
+	return results
+}
+
+// isRefreshDue returns true if a subscription needs to be refreshed.
+// Respects the exponential backoff state for previously-failed refreshes.
+func (s *SubscriptionService) isRefreshDue(sub *Subscription, now time.Time) bool {
+	if !sub.Enabled || sub.Interval <= 0 {
+		return false
+	}
+	// Check backoff: if a previous attempt failed, wait until nextRetry
+	if val, ok := s.retries.Load(sub.ID); ok {
+		rs := val.(*retryState)
+		if now.Before(rs.nextRetry) {
+			return false
+		}
+	}
+	return now.Sub(sub.LastUpdate) >= time.Duration(sub.Interval)*time.Hour
+}
+
+// recordFailure increments the failure counter and schedules the next retry
+// with exponential backoff capped at backoffMax.
+func (s *SubscriptionService) recordFailure(id string) {
+	rs := &retryState{failCount: 1}
+	if val, ok := s.retries.Load(id); ok {
+		rs = val.(*retryState)
+		rs.failCount++
+	}
+	delay := backoffBase * (1 << uint(rs.failCount-1))
+	if delay > backoffMax {
+		delay = backoffMax
+	}
+	rs.nextRetry = time.Now().Add(delay)
+	s.retries.Store(id, rs)
+}
+
+// clearFailure resets the backoff state on a successful refresh.
+func (s *SubscriptionService) clearFailure(id string) {
+	s.retries.Delete(id)
 }
 
 // checkAndRefreshDue scans all subscriptions and launches a goroutine for
-// each one that is due at the given point in time.
+// each one that is due at the given point in time. Failed refreshes are
+// subject to exponential backoff.
 func (s *SubscriptionService) checkAndRefreshDue(now time.Time) {
 	subs := s.List()
 	for _, sub := range subs {
-		if s.isDue(&sub, now) {
+		if s.isRefreshDue(&sub, now) {
 			go func(id string) {
-				_ = s.Refresh(id) // errors are logged inside Refresh
+				if err := s.Refresh(id); err != nil {
+					// "already in progress" is not a real failure — skip backoff
+					if !strings.Contains(err.Error(), "already in progress") {
+						s.recordFailure(id)
+						fc := 0
+						if val, ok := s.retries.Load(id); ok {
+							fc = val.(*retryState).failCount
+						}
+						log.Printf("subscription %s: auto-refresh failed (attempt %d): %v", id, fc, err)
+					}
+				} else {
+					s.clearFailure(id)
+				}
 			}(sub.ID)
 		}
 	}

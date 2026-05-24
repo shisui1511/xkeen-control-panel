@@ -226,3 +226,185 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 }
 
 var safePathComponentRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// DATTagResult holds metadata about a tag inside a .dat file.
+type DATTagResult struct {
+	Tag   string `json:"tag"`
+	Count int    `json:"count"` // number of entries under this tag (0 if unknown)
+}
+
+// ListTags reads country_code / tag names from an Xray-format GeoSiteList or GeoIPList .dat file.
+// It uses a minimal protobuf parser — no external dependencies required.
+// Works with files up to ~100 MB; reads the entire file into memory once.
+func (s *DATManagerService) ListTags(name string) ([]DATTagResult, error) {
+	safeName := filepath.Base(filepath.Clean(name))
+	if !safePathComponentRe.MatchString(safeName) {
+		return nil, fmt.Errorf("invalid file name")
+	}
+
+	// Look in both directories
+	var path string
+	for _, dir := range []string{s.xrayDir, s.mihomoDir} {
+		candidate := filepath.Join(dir, safeName)
+		if _, err := os.Stat(candidate); err == nil {
+			path = candidate
+			break
+		}
+	}
+	if path == "" {
+		return nil, fmt.Errorf("file not found: %s", safeName)
+	}
+	if !strings.HasSuffix(safeName, ".dat") {
+		return nil, fmt.Errorf("only .dat files are supported for tag listing")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	tags, err := parseDATTags(data)
+	if err != nil {
+		return nil, err
+	}
+	return tags, nil
+}
+
+// parseDATTags extracts country_code tags from a serialised GeoIPList or GeoSiteList.
+//
+// Protobuf encoding used here:
+//
+//	GeoIPList   { repeated GeoIP   entry = 1; }
+//	GeoSiteList { repeated GeoSite entry = 1; }
+//	GeoIP/GeoSite { string country_code = 1; ... }
+//
+// Outer message: field-1 LEN (repeated entries).
+// Inner message: field-1 LEN (country_code string) + more fields (skipped).
+func parseDATTags(data []byte) ([]DATTagResult, error) {
+	var results []DATTagResult
+	pos := 0
+
+	for pos < len(data) {
+		// Read outer field tag
+		outerTag, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+
+		wireType := outerTag & 0x7
+		fieldNum := outerTag >> 3
+
+		if wireType != 2 {
+			// Skip non-LEN fields
+			pos, _ = pbSkipField(data, pos, wireType)
+			continue
+		}
+
+		// Read length of sub-message
+		length, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+		end := pos + int(length)
+		if end > len(data) {
+			break
+		}
+
+		if fieldNum == 1 {
+			// Parse entry sub-message to find country_code (field 1) and count entries (field 2)
+			tag, count := parseDATEntry(data[pos:end])
+			if tag != "" {
+				results = append(results, DATTagResult{Tag: tag, Count: count})
+			}
+		}
+		pos = end
+	}
+
+	return results, nil
+}
+
+// parseDATEntry reads a single GeoIP or GeoSite message and returns
+// (country_code, number of domain/cidr sub-entries under field 2).
+func parseDATEntry(data []byte) (string, int) {
+	var tag string
+	count := 0
+	pos := 0
+
+	for pos < len(data) {
+		ft, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+
+		wireType := ft & 0x7
+		fieldNum := ft >> 3
+
+		if wireType != 2 {
+			pos, _ = pbSkipField(data, pos, wireType)
+			continue
+		}
+
+		length, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+
+		end := pos + int(length)
+		if end > len(data) {
+			break
+		}
+
+		switch fieldNum {
+		case 1: // country_code
+			tag = string(data[pos:end])
+		case 2: // domain / cidr list entry — just count them
+			count++
+		}
+		pos = end
+	}
+
+	return tag, count
+}
+
+// pbReadVarint decodes a protobuf varint starting at data[offset].
+// Returns (value, bytes_consumed); bytes_consumed==0 means error.
+func pbReadVarint(data []byte, offset int) (uint64, int) {
+	var result uint64
+	for i := 0; i < 10 && offset+i < len(data); i++ {
+		b := data[offset+i]
+		result |= uint64(b&0x7F) << (7 * uint(i))
+		if b&0x80 == 0 {
+			return result, i + 1
+		}
+	}
+	return 0, 0
+}
+
+// pbSkipField advances pos past a field with the given wire type.
+// Returns (new_pos, error).
+func pbSkipField(data []byte, pos int, wireType uint64) (int, error) {
+	switch wireType {
+	case 0: // varint
+		_, n := pbReadVarint(data, pos)
+		if n == 0 {
+			return pos, fmt.Errorf("truncated varint")
+		}
+		return pos + n, nil
+	case 1: // 64-bit
+		return pos + 8, nil
+	case 2: // length-delimited
+		length, n := pbReadVarint(data, pos)
+		if n == 0 {
+			return pos, fmt.Errorf("truncated length")
+		}
+		return pos + n + int(length), nil
+	case 5: // 32-bit
+		return pos + 4, nil
+	default:
+		return len(data), fmt.Errorf("unknown wire type %d", wireType)
+	}
+}

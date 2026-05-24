@@ -40,6 +40,7 @@ func main() {
 	if err != nil {
 		log.Printf("Failed to load config: %v. Creating default...", err)
 		cfg = config.Default()
+		cfg.ConfigPath = *configPath
 		if err := os.MkdirAll(filepath.Dir(*configPath), 0755); err == nil {
 			_ = config.Save(*configPath, cfg)
 		}
@@ -64,7 +65,7 @@ func main() {
 			KeyPath:  cfg.HTTPS.KeyPath,
 		},
 		SavePasswordHash: func(hash string) error {
-			return cfg.SavePasswordHash(*configPath, hash)
+			return cfg.SavePasswordHash(cfg.ConfigPath, hash)
 		},
 	}
 
@@ -99,6 +100,8 @@ func main() {
 	srv.HandleProtected("/api/config/delete", api.ConfigDelete)
 	srv.HandleProtected("/api/config/rename", api.ConfigRename)
 	srv.HandleProtected("/api/config/validate", api.ConfigValidate)
+	srv.HandleProtected("/api/settings", api.SettingsGet)
+	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
 	srv.HandleProtected("/api/service/status", api.ServiceStatus)
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
 	srv.HandleProtected("/api/service/restart-log", api.ServiceRestartLog)
@@ -116,6 +119,7 @@ func main() {
 	srv.HandleProtected("/api/update/status", api.UpdateStatusEndpoint)
 
 	// Subscription endpoints
+	srv.HandleProtected("/api/outbound/parse", api.OutboundParse)
 	srv.HandleProtected("/api/subscriptions", api.SubscriptionList)
 	srv.HandleProtected("/api/subscriptions/add", api.SubscriptionAdd)
 	srv.HandleProtected("/api/subscriptions/update", api.SubscriptionUpdate)
@@ -157,7 +161,7 @@ func main() {
 	api.SetSmartProxyService(smartProxySvc)
 	defer smartProxySvc.Stop()
 
-	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL)
+	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL, cfg.MihomoSecret)
 	trafficQuotaSvc.Start()
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
@@ -174,6 +178,7 @@ func main() {
 	api.SetDATManagerService(datSvc)
 
 	srv.HandleProtected("/api/dat/list", api.DATList)
+	srv.HandleProtected("/api/dat/tags", api.DATListTags)
 	srv.HandleProtected("/api/dat/update", api.DATUpdate)
 
 	// Xkeen Console
@@ -189,7 +194,7 @@ func main() {
 	srv.HandleProtected("/api/templates/fetch", api.TemplateFetch)
 
 	// Subscriptions + auto-refresh scheduler
-	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir)
+	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
 	api.SetSubscriptionService(subscriptionSvc)
 
 	// Start subscription auto-refresh scheduler. It checks every 15 minutes
@@ -211,6 +216,7 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/install", api.KernelInstall)
 	srv.HandleProtected("/api/kernels/{name}/status", api.KernelStatus)
 	srv.HandleProtected("/api/kernels/{name}/channel", api.KernelChannel)
+	srv.HandleProtected("/api/kernels/{name}/rollback", api.KernelRollback)
 
 	log.Printf("XKeen Control Panel v%s starting...", Version)
 	if cfg.Auth.PasswordHash == "" {

@@ -6,15 +6,17 @@
 
 Веб-панель для управления XKeen/Mihomo на роутерах Keenetic/Netcraze.
 
-- **Go backend** — статический бинарник, 5-10 MB RAM
+- **Go backend** — статический бинарник, 5–10 MB RAM
 - **Svelte 5 frontend** — встроен в бинарник, bundle ~160 KB gzipped
-- **ARM64 + MIPSLE** — поддержка всех Keenetic с Entware
+- **ARM64 + MIPSLE + MIPS** — поддержка всех Keenetic с Entware
 - **Smart Proxy** — автоматическое переключение прокси по расписанию и задержке
 - **Traffic Quotas** — учёт трафика и гибкие лимиты на прокси
 - **Kernel Manager** — установка и обновление Xray и Mihomo прямо из UI
 - **DAT Manager** — управление базами GeoIP и GeoSite
 - **Console** — выполнение команд XKeen с просмотром вывода в реальном времени
 - **PWA** — поддержка установки как приложения на телефон или компьютер
+
+---
 
 ## Установка
 
@@ -32,16 +34,20 @@ curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/s
 
 ### Ручная установка
 
-
 ```bash
 # 1. Скачать бинарник (замените {VERSION} на актуальную версию)
-# ARM64 (KN-1810, KN-1910, KN-1010)
+
+# ARM64 (KN-2710, KN-1811, KN-1012)
 curl -fL -o /opt/sbin/xcp \
   "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xcp_{VERSION}_arm64"
 
-# MIPSLE (KN-1912, KN-2410)
+# MIPSLE (KN-1010, KN-1810, KN-1910)
 curl -fL -o /opt/sbin/xcp \
   "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xcp_{VERSION}_mipsle"
+
+# MIPS (KN-2510, KN-2410, KN-2010)
+curl -fL -o /opt/sbin/xcp \
+  "https://github.com/shisui1511/xkeen-control-panel/releases/latest/download/xcp_{VERSION}_mips"
 
 chmod +x /opt/sbin/xcp
 
@@ -66,6 +72,8 @@ EOF
 
 При первом входе будет предложено задать пароль администратора.
 
+---
+
 ## Обновление
 
 ### Из веб-интерфейса
@@ -77,29 +85,27 @@ Settings → Update → кнопка **"Проверить обновления"
 
 ### Через SSH
 
-# Интерактивное меню (установка/обновление/удаление + выбор канала)
 ```bash
+# Интерактивное меню (установка/обновление/удаление + выбор канала)
 curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/scripts/setup.sh | sh
-```
 
 # Или сразу командой:
-```bash
 curl -Ls https://raw.githubusercontent.com/shisui1511/xkeen-control-panel/main/scripts/setup.sh | sh -s -- install
 ```
 
 Скрипт автоматически:
-1. Опредерит архитектуру роутера
+1. Определит архитектуру роутера
 2. Остановит текущую версию
 3. Скачает новый бинарник
 4. Перезапустит сервис
+
+---
 
 ## HTTPS
 
 Панель поддерживает самоподписанные сертификаты для HTTPS в локальной сети.
 
-### Включение HTTPS
-
-В `config.json`:
+### Включение через config.json
 
 ```json
 {
@@ -123,7 +129,9 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -addext "subjectAltName=IP:192.168.1.1"
 ```
 
-> ⚠️ Браузер покажет предупреждение о самоподписанном сертификате — это нормально для LAN. Нажмите "Дополнительно" → "Перейти на сайт".
+> ⚠️ Браузер покажет предупреждение о самоподписанном сертификате — это нормально для LAN. Нажмите «Дополнительно» → «Перейти на сайт».
+
+---
 
 ## Управление сервисом
 
@@ -134,6 +142,8 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 /opt/etc/init.d/S99xcp status   # Статус
 ```
 
+---
+
 ## Удаление
 
 ```bash
@@ -143,51 +153,46 @@ rm -f /opt/etc/init.d/S99xcp
 rm -rf /opt/etc/xcp   # удалить конфиги (опционально)
 ```
 
+---
+
 ## Совместимость
 
 | Архитектура | Требования к RAM | Имя бинарника | Статус поддержки |
-|-------------|------------------|---------------|-------------------|
+|-------------|------------------|---------------|------------------|
 | **ARM64 (aarch64)** | >= 128 MB | `xcp_{VERSION}_arm64` | ✅ Полная |
 | **MIPSLE (mipsel)** | >= 128 MB | `xcp_{VERSION}_mipsle` | ✅ Полная |
 | **MIPS (mips)** | >= 64 MB* | `xcp_{VERSION}_mips` | ⚠️ Экспериментальная |
 
-> *Модели с 64 MB RAM могут испытывать нехватку памяти при одновременной работе Entware, XKeen/Mihomo и веб-панели. Рекомендуется использовать роутеры с >= 128 MB RAM.
+> \*Модели с 64 MB RAM могут испытывать нехватку памяти при одновременной работе Entware, XKeen/Mihomo и веб-панели. Рекомендуется использовать роутеры с >= 128 MB RAM.
 
-### Список совместимых моделей Keenetic
+### Совместимые модели Keenetic
 
-| Архитектура | Совместимые модели роутеров |
-|-------------|----------------------------|
+| Архитектура | Модели |
+|-------------|--------|
 | **ARM64 (aarch64)** | Peak (KN-2710), Ultra/Titan (KN-1811/KN-1812), Giga (KN-1012), Hopper (KN-3811), Hopper SE (KN-3812), Hopper 4G+ (KN-2312), Hero 5G (KN-4110) |
 | **MIPSLE (mipsel)** | Giga/Hero (KN-1010/KN-1011), Ultra (KN-1810), Viva/Skipper (KN-1910/KN-1912/KN-1913), Giant (KN-2610), Hero 4G (KN-2310/KN-2311), Hopper (KN-3810), Skipper 4G (KN-2910), Launcher DSL (KN-2012), Speedster DSL (KN-2113), Hopper DSL (KN-3611), 4G (KN-1212), Extra/Carrier (KN-1711/KN-1713) |
 | **MIPS (mips)** | Ultra SE/Peak DSL (KN-2510), Giga SE/Hero DSL (KN-2410), DSL/Omni DSL (KN-2010), Skipper DSL (KN-2112), Duo/Extra DSL (KN-2110), Hopper DSL (KN-3610) |
 
-Панель работает совместно с другими инструментами (XKeen-UI, zashboard) на разных портах без каких-либо конфликтов.
+Панель работает совместно с другими инструментами (XKeen-UI, zashboard) на разных портах без конфликтов.
+
+---
 
 ## Разработка
 
-# Установка зависимостей
 ```bash
+# Зависимости
 make deps
-cd frontend && npm ci
+cd frontend && npm ci && cd ..
 
 # Сборка
-cd frontend && npm run build
-cd .. && make build
+cd frontend && npm run build && cd ..
+make build
 
 # Cross-compile для роутеров
 make keenetic-arm64
 make keenetic-mipsle
+make keenetic-mips
 
-# Frontend dev server (proxy /api → :8090)
+# Frontend dev-сервер (proxy /api → :8090)
 cd frontend && npm run dev
 ```
-
-## Стек
-
-| Компонент | Технология |
-|-----------|------------|
-| Backend | Go 1.25, net/http, gorilla/websocket |
-| Frontend | Svelte 5, TypeScript, Vite |
-| CSS | Custom Properties (light/dark themes) |
-| Auth | bcrypt + HMAC session cookies |
-| Build | go:embed (frontend в бинарнике) |
