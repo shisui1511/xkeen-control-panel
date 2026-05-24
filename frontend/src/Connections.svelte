@@ -346,19 +346,19 @@
             >
             <th
               style="text-align: left; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
-              >{$t('conn.proxy')}</th
+              >{$t('conn.chain')}</th
             >
             <th
               style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
-              >↑</th
+              >↑ {$t('conn.upload')}</th
             >
             <th
               style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
-              >↓</th
+              >↓ {$t('conn.download')}</th
             >
             <th
               style="text-align: right; padding: 10px 14px; color: var(--fg-dim); font-weight: 600;"
-              >⏱</th
+              >⏱ {$t('conn.duration')}</th
             >
             <th style="width: 40px;"></th>
           </tr>
