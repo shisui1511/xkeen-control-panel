@@ -255,6 +255,15 @@
     } catch (e) {}
   }
 
+  function downloadKernelBinary(name: string) {
+    const a = document.createElement('a');
+    a.href = `/api/kernels/${name}/download`;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
   async function setKernelChannel(name: string, channel: string) {
     try {
       const csrfToken = localStorage.getItem('csrf_token');
@@ -634,11 +643,19 @@
               class="btn btn-secondary"
               on:click={() => installKernel('xray')}
               disabled={xray.status !== 'idle'}
-              title={$t('svc.download')}
+              title={$t('svc.install_update')}
             >
               {xray.status === 'downloading' || xray.status === 'installing'
                 ? $t('kernels.installing')
-                : $t('svc.download')}
+                : $t('svc.install_update')}
+            </button>
+            <button
+              class="btn btn-secondary"
+              on:click={() => downloadKernelBinary('xray')}
+              disabled={xray.status === 'downloading' || xray.status === 'installing'}
+              title={$t('svc.download')}
+            >
+              {$t('svc.download')}
             </button>
           {/if}
           <button
@@ -652,9 +669,9 @@
           <button
             class="btn btn-primary"
             on:click={() => installKernel('xray')}
-            title={$t('svc.download')}
+            title={$t('svc.install_update')}
           >
-            {$t('svc.download')}
+            {$t('svc.install_update')}
           </button>
         {/if}
       </div>
@@ -795,20 +812,28 @@
               class="btn btn-secondary"
               on:click={() => installKernel('mihomo')}
               disabled={mihomo.status !== 'idle'}
-              title={$t('svc.download')}
+              title={$t('svc.install_update')}
             >
               {mihomo.status === 'downloading' || mihomo.status === 'installing'
                 ? $t('kernels.installing')
-                : $t('svc.download')}
+                : $t('svc.install_update')}
+            </button>
+            <button
+              class="btn btn-secondary"
+              on:click={() => downloadKernelBinary('mihomo')}
+              disabled={mihomo.status === 'downloading' || mihomo.status === 'installing'}
+              title={$t('svc.download')}
+            >
+              {$t('svc.download')}
             </button>
           {/if}
         {:else}
           <button
             class="btn btn-primary"
             on:click={() => installKernel('mihomo')}
-            title={$t('svc.download')}
+            title={$t('svc.install_update')}
           >
-            {$t('svc.download')}
+            {$t('svc.install_update')}
           </button>
         {/if}
       </div>

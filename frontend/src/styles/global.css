@@ -906,6 +906,59 @@ h2.card-title {
   flex-shrink: 0;
 }
 
+/* ----- Shared page-head pattern (Connections, Rules, Proxies, etc.) ----- */
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.page-head h1 {
+  margin: 4px 0 6px;
+  font-size: 22px;
+  font-weight: 700;
+}
+.page-head .sub {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 13px;
+}
+.page-head .crumbs {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.ph-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  padding-top: 6px;
+}
+@media (max-width: 640px) {
+  .page-head {
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .ph-actions {
+    width: 100%;
+    padding-top: 0;
+    gap: 8px;
+  }
+  .ph-actions .btn {
+    flex: 1;
+    justify-content: center;
+    min-width: 0;
+  }
+}
+
 /* ----- Breadcrumbs ----- */
 .breadcrumbs {
   display: flex;

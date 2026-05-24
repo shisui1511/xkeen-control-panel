@@ -338,17 +338,19 @@ verify_checksum() {
   local hash_downloaded
   local expected_hash
   local actual_hash
-  
+  local url
+  local source
+
   bin_file="$1"
   ver="$2"
-  
+
   info "Проверяем SHA-256 контрольную сумму..."
   hash_file="/tmp/${BINARY}_${ver}_${ARCH_LABEL}.sha256"
   rm -f "$hash_file"
-  
+
   hash_downloaded=false
   for source in "github" "jsdelivr" "raw"; do
-    local url=""
+    url=""
     case "$source" in
       github) url="https://github.com/${REPO}/releases/download/${ver}/xcp_${ver}_${ARCH_LABEL}.sha256" ;;
       jsdelivr) url="https://cdn.jsdelivr.net/gh/${REPO}@binaries/bin/xcp_${ver}_${ARCH_LABEL}.sha256" ;;
@@ -497,6 +499,18 @@ poll_api() {
   return 1
 }
 
+# Верификация, chmod, mv — общая часть после успешной загрузки
+_apply_binary() {
+  local source_label
+  source_label="$1"
+  verify_checksum "$TEMP_BIN" "$LATEST_VER" || { rm -f "$TEMP_BIN"; return 1; }
+  chmod +x "$TEMP_BIN"
+  mv "$TEMP_BIN" "$BIN_PATH"
+  ok "Бинарник установлен (источник: $source_label)"
+  log_install "Installed version $LATEST_VER from $source_label"
+  return 0
+}
+
 # Загрузка бинарника
 install_binary() {
   mkdir -p "$INSTALL_DIR"
@@ -520,45 +534,22 @@ install_binary() {
     return 2
   fi
 
+  local url
+
   # 1. Основной источник — GitHub Releases
   info "Пробуем GitHub Releases..."
-  local url
   url=$(get_github_releases_url "$LATEST_VER")
-  if try_download "$url"; then
-    ok "Загружено с GitHub Releases"
-    verify_checksum "$TEMP_BIN" "$LATEST_VER" || { rm -f "$TEMP_BIN"; return 1; }
-    chmod +x "$TEMP_BIN"
-    mv "$TEMP_BIN" "$BIN_PATH"
-    ok "Бинарник установлен"
-    log_install "Installed version $LATEST_VER from GitHub Releases"
-    return 0
-  fi
+  try_download "$url" && { _apply_binary "GitHub Releases" && return 0 || return 1; }
 
   # 2. Fallback — jsDelivr CDN
   warn "GitHub недоступен, пробуем jsDelivr..."
   url=$(get_jsdelivr_url "$LATEST_VER")
-  if try_download "$url"; then
-    ok "Загружено через jsDelivr"
-    verify_checksum "$TEMP_BIN" "$LATEST_VER" || { rm -f "$TEMP_BIN"; return 1; }
-    chmod +x "$TEMP_BIN"
-    mv "$TEMP_BIN" "$BIN_PATH"
-    ok "Бинарник установлен"
-    log_install "Installed version $LATEST_VER from jsDelivr"
-    return 0
-  fi
+  try_download "$url" && { _apply_binary "jsDelivr CDN" && return 0 || return 1; }
 
   # 3. Fallback — raw.githubusercontent.com
   warn "jsDelivr недоступен, пробуем raw.githubusercontent.com..."
   url=$(get_raw_url "$LATEST_VER")
-  if try_download "$url"; then
-    ok "Загружено с raw.githubusercontent.com"
-    verify_checksum "$TEMP_BIN" "$LATEST_VER" || { rm -f "$TEMP_BIN"; return 1; }
-    chmod +x "$TEMP_BIN"
-    mv "$TEMP_BIN" "$BIN_PATH"
-    ok "Бинарник установлен"
-    log_install "Installed version $LATEST_VER from Raw GitHub"
-    return 0
-  fi
+  try_download "$url" && { _apply_binary "raw.githubusercontent.com" && return 0 || return 1; }
 
   error "Все источники недоступны. Проверьте интернет"
   log_install "Error: all download sources failed"
@@ -576,18 +567,8 @@ get_version() {
 
 # Баннер
 print_banner() {
-  printf "${GREEN}${BOLD}"
-  cat <<'EOF'
- █████ █████ █████   ████                                   █████████  ███████████ 
-▒▒███ ▒▒███ ▒▒███   ███▒                                   ███▒▒▒▒▒███▒▒███▒▒▒▒▒███
- Profiler/Manager  ███     ██████   ██████  ████████      ███     ▒▒▒  ▒███    ▒███
-   ▒▒█████    ▒███████     ███▒▒███ ███▒▒███▒▒███▒▒███    ▒███          ▒██████████ 
-    ███▒███   ▒███▒▒███   ▒███████ ▒███████  ▒███ ▒███    ▒███          ▒███▒▒▒▒▒▒  
-   ███ ▒▒███  ▒███ ▒▒███  ▒███▒▒▒  ▒███▒▒▒   ▒███ ▒███    ▒▒███     ███ ▒███        
-   █████ █████ █████ ▒▒████▒▒██████ ▒▒██████  ████ █████    ▒▒█████████  █████       
-  ▒▒▒▒▒ ▒▒▒▒▒ ▒▒▒▒▒   ▒▒▒▒  ▒▒▒▒▒▒   ▒▒▒▒▒▒  ▒▒▒▒ ▒▒▒▒▒      ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒       
-EOF
-  printf "${NC}\n"
+  printf "\n${BOLD}${CYAN}  XKeen Control Panel${NC}\n"
+  printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
 }
 
 # Установка
@@ -812,37 +793,33 @@ show_installer_menu() {
   check_disk_space_status
   check_port_status "$DEFAULT_PORT"
 
+  clear 2>/dev/null || printf '\033[2J\033[H'
   print_banner
-  printf "┌────────────────────────────────────────────────────────┐\n"
-  printf "│             XKeen Control Panel Installer              │\n"
-  printf "└────────────────────────────────────────────────────────┘\n\n"
-  printf "Панель управления XKeen Control Panel не найдена в системе.\n"
-  printf "Платформа роутера: ${CYAN}%s${NC}\n\n" "$ARCH_LABEL"
-  
-  printf "Проверка окружения:\n"
+  printf "  Установщик  ·  платформа: ${CYAN}%s${NC}\n\n" "$ARCH_LABEL"
+
   if [ "$STATUS_ENTWARE" = "OK" ]; then
-    printf "  [${GREEN}OK${NC}] Раздел /opt доступен на запись\n"
+    printf "  [${GREEN}OK${NC}]   /opt доступен на запись\n"
   else
-    printf "  [${RED}ERR${NC}] Раздел /opt не доступен на запись!\n"
+    printf "  [${RED}ERR${NC}]  /opt не доступен на запись!\n"
   fi
-  
+
   if [ "$STATUS_SPACE" = "OK" ]; then
-    printf "  [${GREEN}OK${NC}] Свободное место: %s MB (требуется >= 15 MB)\n" "$SPACE_VAL"
+    printf "  [${GREEN}OK${NC}]   Свободно: %s MB  (мин. 15 MB)\n" "$SPACE_VAL"
   else
-    printf "  [${RED}ERR${NC}] Свободное место: %s MB (мало места, требуется >= 15 MB)\n" "$SPACE_VAL"
+    printf "  [${RED}ERR${NC}]  Свободно: %s MB  (недостаточно, мин. 15 MB)\n" "$SPACE_VAL"
   fi
 
   if [ "$STATUS_PORT" = "OK" ]; then
-    printf "  [${GREEN}OK${NC}] Порт %s свободен\n" "$DEFAULT_PORT"
+    printf "  [${GREEN}OK${NC}]   Порт %s свободен\n" "$DEFAULT_PORT"
   else
     printf "  [${YELLOW}WARN${NC}] Порт %s занят\n" "$DEFAULT_PORT"
   fi
-  
-  printf "\nВыберите вариант установки:\n"
-  printf "  ${BOLD}1)${NC} Стандартная установка (канал Stable, порт %s)\n" "$DEFAULT_PORT"
-  printf "  ${BOLD}2)${NC} Установка тестовой версии (канал Pre-release, порт %s)\n" "$DEFAULT_PORT"
-  printf "  ${BOLD}0)${NC} Выход\n\n"
-  printf "${GREEN}> ${NC}"
+
+  printf "\n  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
+  printf "  ${BOLD}1${NC}  Установить  (Stable, порт %s)\n" "$DEFAULT_PORT"
+  printf "  ${BOLD}2${NC}  Установить  (Pre-release, порт %s)\n" "$DEFAULT_PORT"
+  printf "  ${BOLD}0${NC}  Выход\n\n"
+  printf "${GREEN}>${NC} "
 }
 
 # Экран «Менеджер управления»
@@ -855,44 +832,40 @@ show_manager_menu() {
   local _ip
   local address
   local proto
-  
+
   cur_version=$(get_version)
   port=$(grep -o '"port":[[:space:]]*[0-9]*' "$INSTALL_DIR/config.json" 2>/dev/null | grep -o '[0-9]*' || echo "$DEFAULT_PORT")
-  channel_label="Stable (стабильный)"
+  channel_label="Stable"
   if [ "$CHANNEL" = "prerelease" ]; then
     channel_label="Pre-release (тестовый)"
   fi
-  
+
   status_text="остановлен"
   status_color="$RED"
   if pgrep -x "$BINARY" >/dev/null 2>&1; then
     status_text="активен"
     status_color="$GREEN"
   fi
-  
+
   proto=$(get_proto)
   _ip=$(ip -4 a s br0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p')
   _ip=${_ip:-"192.168.1.1"}
   address="${proto}://${_ip}:${port}"
 
+  clear 2>/dev/null || printf '\033[2J\033[H'
   print_banner
-  printf "┌────────────────────────────────────────────────────────┐\n"
-  printf "│             XKeen Control Panel Manager                │\n"
-  printf "└────────────────────────────────────────────────────────┘\n"
-  printf "  Версия:   ${CYAN}%s${NC} (${status_color}%s${NC})\n" "$cur_version" "$status_text"
-  printf "  Порт:     %s\n" "$port"
-  printf "  Канал:    %s\n" "$channel_label"
-  printf "  Адрес:    ${CYAN}%s${NC}\n" "$address"
-  printf "──────────────────────────────────────────────────────────\n\n"
-  
-  printf "Доступные действия по управлению:\n"
-  printf "  ${BOLD}1)${NC} Проверить и установить обновления\n"
-  printf "  ${BOLD}2)${NC} Управление службой (Запустить / Остановить / Перезапустить)\n"
-  printf "  ${BOLD}3)${NC} Переключить канал обновлений (сейчас: %s)\n" "$([ "$CHANNEL" = "stable" ] && echo "Stable" || echo "Pre-release")"
-  printf "  ${BOLD}4)${NC} Переустановить панель (сбросить конфигурацию)\n"
-  printf "  ${BOLD}5)${NC} Удалить панель из системы\n"
-  printf "  ${BOLD}0)${NC} Выход\n\n"
-  printf "${GREEN}> ${NC}"
+  printf "  Версия:  ${CYAN}%s${NC}  ·  статус: ${status_color}%s${NC}\n" "$cur_version" "$status_text"
+  printf "  Канал:   %s  ·  порт: %s\n" "$channel_label" "$port"
+  printf "  Адрес:   ${CYAN}%s${NC}\n" "$address"
+  printf "\n  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
+
+  printf "  ${BOLD}1${NC}  Проверить и установить обновления\n"
+  printf "  ${BOLD}2${NC}  Управление службой  (старт / стоп / рестарт)\n"
+  printf "  ${BOLD}3${NC}  Переключить канал   (сейчас: %s)\n" "$channel_label"
+  printf "  ${BOLD}4${NC}  Переустановить панель  (сброс конфига)\n"
+  printf "  ${BOLD}5${NC}  Удалить панель из системы\n"
+  printf "  ${BOLD}0${NC}  Выход\n\n"
+  printf "${GREEN}>${NC} "
 }
 
 # Подменю управления службой
@@ -901,19 +874,20 @@ manage_service_menu() {
   local status_text
   local status_color
   while true; do
-    print_banner
     status_text="остановлен"
     status_color="$RED"
     if pgrep -x "$BINARY" >/dev/null 2>&1; then
       status_text="активен"
       status_color="$GREEN"
     fi
-    printf "Управление службой XKeen Control Panel (статус: ${status_color}%s${NC})\n\n" "$status_text"
-    printf "  1) Запустить службу\n"
-    printf "  2) Остановить службу\n"
-    printf "  3) Перезапустить службу\n"
-    printf "  0) Назад\n\n"
-    printf "${GREEN}> ${NC}"
+    clear 2>/dev/null || printf '\033[2J\033[H'
+    printf "\n${BOLD}${CYAN}  Управление службой${NC}  ·  статус: ${status_color}%s${NC}\n" "$status_text"
+    printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
+    printf "  ${BOLD}1${NC}  Запустить\n"
+    printf "  ${BOLD}2${NC}  Остановить\n"
+    printf "  ${BOLD}3${NC}  Перезапустить\n"
+    printf "  ${BOLD}0${NC}  Назад\n\n"
+    printf "${GREEN}>${NC} "
     read choice < /dev/tty || return
     
     case "$choice" in
@@ -1030,7 +1004,7 @@ ARG_PORT=""
 
 # Считываем сохраненный канал обновлений, если файл существует
 if [ -f "$INSTALL_DIR/channel" ]; then
-  CHANNEL=$(cat "$INSTALL_DIR/channel" | tr -d '[:space:]')
+  CHANNEL=$(tr -d '[:space:]' < "$INSTALL_DIR/channel")
 fi
 
 # Считываем аргументы
@@ -1095,9 +1069,11 @@ if [ -f "$BIN_PATH" ]; then
         ;;
       2)
         manage_service_menu
+        continue
         ;;
       3)
         switch_channel
+        continue
         ;;
       4)
         printf "\nПереустановить панель и сбросить конфиг? [y/N]: "
@@ -1124,9 +1100,10 @@ if [ -f "$BIN_PATH" ]; then
         ;;
       *)
         error "Неверный выбор"
+        continue
         ;;
     esac
-    printf "\nНажмите Enter для продолжения..."
+    printf "\n${CYAN}Нажмите Enter для продолжения...${NC}"
     read dummy < /dev/tty || true
   done
 else

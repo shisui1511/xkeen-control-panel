@@ -623,4 +623,27 @@
   .btn-latency-test:hover svg {
     opacity: 1 !important;
   }
+
+  /* Mobile: proxy cards stack, observatory stats handled globally at 768px */
+  @media (max-width: 640px) {
+    .group-grid {
+      gap: 10px;
+    }
+    .group-card .gc-head {
+      padding: 12px 14px;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .proxy-row {
+      padding: 10px 14px;
+      gap: 8px;
+    }
+    .proxy-row .p-name {
+      font-size: 12px;
+    }
+    .lat {
+      font-size: 11px;
+      padding: 2px 5px;
+    }
+  }
 </style>
