@@ -338,17 +338,19 @@ verify_checksum() {
   local hash_downloaded
   local expected_hash
   local actual_hash
-  
+  local url
+  local source
+
   bin_file="$1"
   ver="$2"
-  
+
   info "Проверяем SHA-256 контрольную сумму..."
   hash_file="/tmp/${BINARY}_${ver}_${ARCH_LABEL}.sha256"
   rm -f "$hash_file"
-  
+
   hash_downloaded=false
   for source in "github" "jsdelivr" "raw"; do
-    local url=""
+    url=""
     case "$source" in
       github) url="https://github.com/${REPO}/releases/download/${ver}/xcp_${ver}_${ARCH_LABEL}.sha256" ;;
       jsdelivr) url="https://cdn.jsdelivr.net/gh/${REPO}@binaries/bin/xcp_${ver}_${ARCH_LABEL}.sha256" ;;
@@ -497,6 +499,18 @@ poll_api() {
   return 1
 }
 
+# Верификация, chmod, mv — общая часть после успешной загрузки
+_apply_binary() {
+  local source_label
+  source_label="$1"
+  verify_checksum "$TEMP_BIN" "$LATEST_VER" || { rm -f "$TEMP_BIN"; return 1; }
+  chmod +x "$TEMP_BIN"
+  mv "$TEMP_BIN" "$BIN_PATH"
+  ok "Бинарник установлен (источник: $source_label)"
+  log_install "Installed version $LATEST_VER from $source_label"
+  return 0
+}
+
 # Загрузка бинарника
 install_binary() {
   mkdir -p "$INSTALL_DIR"
@@ -520,45 +534,22 @@ install_binary() {
     return 2
   fi
 
+  local url
+
   # 1. Основной источник — GitHub Releases
   info "Пробуем GitHub Releases..."
-  local url
   url=$(get_github_releases_url "$LATEST_VER")
-  if try_download "$url"; then
-    ok "Загружено с GitHub Releases"
-    verify_checksum "$TEMP_BIN" "$LATEST_VER" || { rm -f "$TEMP_BIN"; return 1; }
-    chmod +x "$TEMP_BIN"
-    mv "$TEMP_BIN" "$BIN_PATH"
-    ok "Бинарник установлен"
-    log_install "Installed version $LATEST_VER from GitHub Releases"
-    return 0
-  fi
+  try_download "$url" && { _apply_binary "GitHub Releases" && return 0 || return 1; }
 
   # 2. Fallback — jsDelivr CDN
   warn "GitHub недоступен, пробуем jsDelivr..."
   url=$(get_jsdelivr_url "$LATEST_VER")
-  if try_download "$url"; then
-    ok "Загружено через jsDelivr"
-    verify_checksum "$TEMP_BIN" "$LATEST_VER" || { rm -f "$TEMP_BIN"; return 1; }
-    chmod +x "$TEMP_BIN"
-    mv "$TEMP_BIN" "$BIN_PATH"
-    ok "Бинарник установлен"
-    log_install "Installed version $LATEST_VER from jsDelivr"
-    return 0
-  fi
+  try_download "$url" && { _apply_binary "jsDelivr CDN" && return 0 || return 1; }
 
   # 3. Fallback — raw.githubusercontent.com
   warn "jsDelivr недоступен, пробуем raw.githubusercontent.com..."
   url=$(get_raw_url "$LATEST_VER")
-  if try_download "$url"; then
-    ok "Загружено с raw.githubusercontent.com"
-    verify_checksum "$TEMP_BIN" "$LATEST_VER" || { rm -f "$TEMP_BIN"; return 1; }
-    chmod +x "$TEMP_BIN"
-    mv "$TEMP_BIN" "$BIN_PATH"
-    ok "Бинарник установлен"
-    log_install "Installed version $LATEST_VER from Raw GitHub"
-    return 0
-  fi
+  try_download "$url" && { _apply_binary "raw.githubusercontent.com" && return 0 || return 1; }
 
   error "Все источники недоступны. Проверьте интернет"
   log_install "Error: all download sources failed"
@@ -802,6 +793,7 @@ show_installer_menu() {
   check_disk_space_status
   check_port_status "$DEFAULT_PORT"
 
+  clear 2>/dev/null || printf '\033[2J\033[H'
   print_banner
   printf "  Установщик  ·  платформа: ${CYAN}%s${NC}\n\n" "$ARCH_LABEL"
 
@@ -860,6 +852,7 @@ show_manager_menu() {
   _ip=${_ip:-"192.168.1.1"}
   address="${proto}://${_ip}:${port}"
 
+  clear 2>/dev/null || printf '\033[2J\033[H'
   print_banner
   printf "  Версия:  ${CYAN}%s${NC}  ·  статус: ${status_color}%s${NC}\n" "$cur_version" "$status_text"
   printf "  Канал:   %s  ·  порт: %s\n" "$channel_label" "$port"
@@ -887,6 +880,7 @@ manage_service_menu() {
       status_text="активен"
       status_color="$GREEN"
     fi
+    clear 2>/dev/null || printf '\033[2J\033[H'
     printf "\n${BOLD}${CYAN}  Управление службой${NC}  ·  статус: ${status_color}%s${NC}\n" "$status_text"
     printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
     printf "  ${BOLD}1${NC}  Запустить\n"
@@ -1010,7 +1004,7 @@ ARG_PORT=""
 
 # Считываем сохраненный канал обновлений, если файл существует
 if [ -f "$INSTALL_DIR/channel" ]; then
-  CHANNEL=$(cat "$INSTALL_DIR/channel" | tr -d '[:space:]')
+  CHANNEL=$(tr -d '[:space:]' < "$INSTALL_DIR/channel")
 fi
 
 # Считываем аргументы
@@ -1075,9 +1069,11 @@ if [ -f "$BIN_PATH" ]; then
         ;;
       2)
         manage_service_menu
+        continue
         ;;
       3)
         switch_channel
+        continue
         ;;
       4)
         printf "\nПереустановить панель и сбросить конфиг? [y/N]: "
@@ -1104,9 +1100,10 @@ if [ -f "$BIN_PATH" ]; then
         ;;
       *)
         error "Неверный выбор"
+        continue
         ;;
     esac
-    printf "\nНажмите Enter для продолжения..."
+    printf "\n${CYAN}Нажмите Enter для продолжения...${NC}"
     read dummy < /dev/tty || true
   done
 else
