@@ -17,6 +17,7 @@
     filter_type?: string;
     filter_transport?: string;
     proxy_count?: number;
+    last_error?: string;
   }
 
   let subscriptions: Subscription[] = [];
@@ -325,7 +326,11 @@
             <div class="sub-title-wrapper">
               <div class="sub-title-line">
                 {sub.name}
-                {#if sub.enabled}
+                {#if sub.last_error}
+                  <span class="status-badge error-badge" title={sub.last_error}>
+                    {$currentLang === 'ru' ? 'ошибка' : 'error'}
+                  </span>
+                {:else if sub.enabled}
                   <span class="status-badge active"
                     ><span class="status-dot success" style="margin:0;"></span>{$currentLang ===
                     'ru'
@@ -344,13 +349,15 @@
             </div>
             <div class="sub-actions-wrapper">
               <button
-                class="btn btn-secondary btn-sm"
+                class="btn {sub.last_error ? 'btn-danger-outline' : 'btn-secondary'} btn-sm"
                 on:click={() => refreshSubscription(sub.id)}
                 disabled={refreshLoading[sub.id]}
               >
                 {#if refreshLoading[sub.id]}
                   <span class="spinner" style="margin-right: 4px;">...</span>
                   {$t('app.loading')}
+                {:else if sub.last_error}
+                  {$currentLang === 'ru' ? 'Повторить' : 'Retry'}
                 {:else}
                   {$t('subscr.refresh')}
                 {/if}
@@ -750,5 +757,24 @@
     display: flex;
     justify-content: flex-end;
     gap: 12px;
+  }
+
+  :global(.error-badge) {
+    background: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+
+  :global(.btn-danger-outline) {
+    background: rgba(239, 68, 68, 0.08);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.35);
+  }
+  :global(.btn-danger-outline:hover) {
+    background: rgba(239, 68, 68, 0.16);
   }
 </style>

@@ -39,7 +39,8 @@ type Subscription struct {
 	FilterType      string `json:"filter_type,omitempty"`
 	FilterTransport string `json:"filter_transport,omitempty"`
 
-	ProxyCount int `json:"proxy_count"`
+	ProxyCount int    `json:"proxy_count"`
+	LastError  string `json:"last_error,omitempty"`
 }
 
 // Outbound represents a parsed proxy outbound
@@ -243,10 +244,26 @@ func (s *SubscriptionService) Refresh(id string) error {
 	subCopy := *sub
 	s.mu.Unlock()
 
+	var refreshErr error
 	if subCopy.Type == "mihomo" {
-		return s.refreshMihomo(&subCopy)
+		refreshErr = s.refreshMihomo(&subCopy)
+	} else {
+		refreshErr = s.refreshXray(&subCopy)
 	}
-	return s.refreshXray(&subCopy)
+
+	// Persist last_error so frontend can show error state
+	s.mu.Lock()
+	if live := s.GetLocked(id); live != nil {
+		if refreshErr != nil {
+			live.LastError = refreshErr.Error()
+		} else {
+			live.LastError = ""
+		}
+		_ = s.save()
+	}
+	s.mu.Unlock()
+
+	return refreshErr
 }
 
 func (s *SubscriptionService) refreshXray(sub *Subscription) error {
