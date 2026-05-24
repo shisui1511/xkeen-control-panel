@@ -576,18 +576,8 @@ get_version() {
 
 # Баннер
 print_banner() {
-  printf "${GREEN}${BOLD}"
-  cat <<'EOF'
- █████ █████ █████   ████                                   █████████  ███████████ 
-▒▒███ ▒▒███ ▒▒███   ███▒                                   ███▒▒▒▒▒███▒▒███▒▒▒▒▒███
- Profiler/Manager  ███     ██████   ██████  ████████      ███     ▒▒▒  ▒███    ▒███
-   ▒▒█████    ▒███████     ███▒▒███ ███▒▒███▒▒███▒▒███    ▒███          ▒██████████ 
-    ███▒███   ▒███▒▒███   ▒███████ ▒███████  ▒███ ▒███    ▒███          ▒███▒▒▒▒▒▒  
-   ███ ▒▒███  ▒███ ▒▒███  ▒███▒▒▒  ▒███▒▒▒   ▒███ ▒███    ▒▒███     ███ ▒███        
-   █████ █████ █████ ▒▒████▒▒██████ ▒▒██████  ████ █████    ▒▒█████████  █████       
-  ▒▒▒▒▒ ▒▒▒▒▒ ▒▒▒▒▒   ▒▒▒▒  ▒▒▒▒▒▒   ▒▒▒▒▒▒  ▒▒▒▒ ▒▒▒▒▒      ▒▒▒▒▒▒▒▒▒  ▒▒▒▒▒       
-EOF
-  printf "${NC}\n"
+  printf "\n${BOLD}${CYAN}  XKeen Control Panel${NC}\n"
+  printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
 }
 
 # Установка
@@ -813,36 +803,31 @@ show_installer_menu() {
   check_port_status "$DEFAULT_PORT"
 
   print_banner
-  printf "┌────────────────────────────────────────────────────────┐\n"
-  printf "│             XKeen Control Panel Installer              │\n"
-  printf "└────────────────────────────────────────────────────────┘\n\n"
-  printf "Панель управления XKeen Control Panel не найдена в системе.\n"
-  printf "Платформа роутера: ${CYAN}%s${NC}\n\n" "$ARCH_LABEL"
-  
-  printf "Проверка окружения:\n"
+  printf "  Установщик  ·  платформа: ${CYAN}%s${NC}\n\n" "$ARCH_LABEL"
+
   if [ "$STATUS_ENTWARE" = "OK" ]; then
-    printf "  [${GREEN}OK${NC}] Раздел /opt доступен на запись\n"
+    printf "  [${GREEN}OK${NC}]   /opt доступен на запись\n"
   else
-    printf "  [${RED}ERR${NC}] Раздел /opt не доступен на запись!\n"
+    printf "  [${RED}ERR${NC}]  /opt не доступен на запись!\n"
   fi
-  
+
   if [ "$STATUS_SPACE" = "OK" ]; then
-    printf "  [${GREEN}OK${NC}] Свободное место: %s MB (требуется >= 15 MB)\n" "$SPACE_VAL"
+    printf "  [${GREEN}OK${NC}]   Свободно: %s MB  (мин. 15 MB)\n" "$SPACE_VAL"
   else
-    printf "  [${RED}ERR${NC}] Свободное место: %s MB (мало места, требуется >= 15 MB)\n" "$SPACE_VAL"
+    printf "  [${RED}ERR${NC}]  Свободно: %s MB  (недостаточно, мин. 15 MB)\n" "$SPACE_VAL"
   fi
 
   if [ "$STATUS_PORT" = "OK" ]; then
-    printf "  [${GREEN}OK${NC}] Порт %s свободен\n" "$DEFAULT_PORT"
+    printf "  [${GREEN}OK${NC}]   Порт %s свободен\n" "$DEFAULT_PORT"
   else
     printf "  [${YELLOW}WARN${NC}] Порт %s занят\n" "$DEFAULT_PORT"
   fi
-  
-  printf "\nВыберите вариант установки:\n"
-  printf "  ${BOLD}1)${NC} Стандартная установка (канал Stable, порт %s)\n" "$DEFAULT_PORT"
-  printf "  ${BOLD}2)${NC} Установка тестовой версии (канал Pre-release, порт %s)\n" "$DEFAULT_PORT"
-  printf "  ${BOLD}0)${NC} Выход\n\n"
-  printf "${GREEN}> ${NC}"
+
+  printf "\n  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
+  printf "  ${BOLD}1${NC}  Установить  (Stable, порт %s)\n" "$DEFAULT_PORT"
+  printf "  ${BOLD}2${NC}  Установить  (Pre-release, порт %s)\n" "$DEFAULT_PORT"
+  printf "  ${BOLD}0${NC}  Выход\n\n"
+  printf "${GREEN}>${NC} "
 }
 
 # Экран «Менеджер управления»
@@ -855,44 +840,39 @@ show_manager_menu() {
   local _ip
   local address
   local proto
-  
+
   cur_version=$(get_version)
   port=$(grep -o '"port":[[:space:]]*[0-9]*' "$INSTALL_DIR/config.json" 2>/dev/null | grep -o '[0-9]*' || echo "$DEFAULT_PORT")
-  channel_label="Stable (стабильный)"
+  channel_label="Stable"
   if [ "$CHANNEL" = "prerelease" ]; then
     channel_label="Pre-release (тестовый)"
   fi
-  
+
   status_text="остановлен"
   status_color="$RED"
   if pgrep -x "$BINARY" >/dev/null 2>&1; then
     status_text="активен"
     status_color="$GREEN"
   fi
-  
+
   proto=$(get_proto)
   _ip=$(ip -4 a s br0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p')
   _ip=${_ip:-"192.168.1.1"}
   address="${proto}://${_ip}:${port}"
 
   print_banner
-  printf "┌────────────────────────────────────────────────────────┐\n"
-  printf "│             XKeen Control Panel Manager                │\n"
-  printf "└────────────────────────────────────────────────────────┘\n"
-  printf "  Версия:   ${CYAN}%s${NC} (${status_color}%s${NC})\n" "$cur_version" "$status_text"
-  printf "  Порт:     %s\n" "$port"
-  printf "  Канал:    %s\n" "$channel_label"
-  printf "  Адрес:    ${CYAN}%s${NC}\n" "$address"
-  printf "──────────────────────────────────────────────────────────\n\n"
-  
-  printf "Доступные действия по управлению:\n"
-  printf "  ${BOLD}1)${NC} Проверить и установить обновления\n"
-  printf "  ${BOLD}2)${NC} Управление службой (Запустить / Остановить / Перезапустить)\n"
-  printf "  ${BOLD}3)${NC} Переключить канал обновлений (сейчас: %s)\n" "$([ "$CHANNEL" = "stable" ] && echo "Stable" || echo "Pre-release")"
-  printf "  ${BOLD}4)${NC} Переустановить панель (сбросить конфигурацию)\n"
-  printf "  ${BOLD}5)${NC} Удалить панель из системы\n"
-  printf "  ${BOLD}0)${NC} Выход\n\n"
-  printf "${GREEN}> ${NC}"
+  printf "  Версия:  ${CYAN}%s${NC}  ·  статус: ${status_color}%s${NC}\n" "$cur_version" "$status_text"
+  printf "  Канал:   %s  ·  порт: %s\n" "$channel_label" "$port"
+  printf "  Адрес:   ${CYAN}%s${NC}\n" "$address"
+  printf "\n  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
+
+  printf "  ${BOLD}1${NC}  Проверить и установить обновления\n"
+  printf "  ${BOLD}2${NC}  Управление службой  (старт / стоп / рестарт)\n"
+  printf "  ${BOLD}3${NC}  Переключить канал   (сейчас: %s)\n" "$channel_label"
+  printf "  ${BOLD}4${NC}  Переустановить панель  (сброс конфига)\n"
+  printf "  ${BOLD}5${NC}  Удалить панель из системы\n"
+  printf "  ${BOLD}0${NC}  Выход\n\n"
+  printf "${GREEN}>${NC} "
 }
 
 # Подменю управления службой
@@ -901,19 +881,19 @@ manage_service_menu() {
   local status_text
   local status_color
   while true; do
-    print_banner
     status_text="остановлен"
     status_color="$RED"
     if pgrep -x "$BINARY" >/dev/null 2>&1; then
       status_text="активен"
       status_color="$GREEN"
     fi
-    printf "Управление службой XKeen Control Panel (статус: ${status_color}%s${NC})\n\n" "$status_text"
-    printf "  1) Запустить службу\n"
-    printf "  2) Остановить службу\n"
-    printf "  3) Перезапустить службу\n"
-    printf "  0) Назад\n\n"
-    printf "${GREEN}> ${NC}"
+    printf "\n${BOLD}${CYAN}  Управление службой${NC}  ·  статус: ${status_color}%s${NC}\n" "$status_text"
+    printf "  ${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n\n"
+    printf "  ${BOLD}1${NC}  Запустить\n"
+    printf "  ${BOLD}2${NC}  Остановить\n"
+    printf "  ${BOLD}3${NC}  Перезапустить\n"
+    printf "  ${BOLD}0${NC}  Назад\n\n"
+    printf "${GREEN}>${NC} "
     read choice < /dev/tty || return
     
     case "$choice" in
