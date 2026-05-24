@@ -100,5 +100,5 @@ func (a *API) jsonResponse(w http.ResponseWriter, v interface{}) {
 }
 
 func (a *API) errorResponse(w http.ResponseWriter, message string, status int) {
-	http.Error(w, message, status)
+	JSONError(w, status, message)
 }

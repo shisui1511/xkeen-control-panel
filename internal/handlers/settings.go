@@ -13,6 +13,10 @@ type SettingsResponse struct {
 }
 
 func (a *API) SettingsGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	JSONSuccess(w, SettingsResponse{
 		Port:  a.cfg.Port,
 		HTTPS: a.cfg.HTTPS,

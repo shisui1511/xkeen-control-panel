@@ -270,37 +270,37 @@ func (s *SmartProxyService) evaluateProfiles() {
 	}
 }
 
-func (s *SmartProxyService) evaluateTimeBased(p *Profile) {
-	now := time.Now()
-	currentDay := int(now.Weekday()) // 0=Sunday
-	currentTime := now.Format("15:04")
-
-	// Check day of week
-	dayMatch := false
-	for _, d := range p.DaysOfWeek {
-		if d == currentDay {
-			dayMatch = true
-			break
+// isDayMatch returns true if day (0=Sunday) is in the days list.
+// An empty list matches all days.
+func isDayMatch(days []int, day int) bool {
+	if len(days) == 0 {
+		return true
+	}
+	for _, d := range days {
+		if d == day {
+			return true
 		}
 	}
-	if !dayMatch {
+	return false
+}
+
+// isTimeInRange returns true if current is within [start, end].
+// Handles midnight-crossing ranges (start > end): active when current >= start OR current <= end.
+func isTimeInRange(start, end, current string) bool {
+	if start <= end {
+		return current >= start && current <= end
+	}
+	return current >= start || current <= end
+}
+
+func (s *SmartProxyService) evaluateTimeBased(p *Profile) {
+	now := time.Now()
+	if !isDayMatch(p.DaysOfWeek, int(now.Weekday())) {
 		return
 	}
-
-	// Check time range.
-	// For midnight-crossing ranges (e.g. 22:00–06:00), StartTime > EndTime
-	// so the condition inverts: active if time >= start OR time <= end.
-	var inRange bool
-	if p.StartTime <= p.EndTime {
-		inRange = currentTime >= p.StartTime && currentTime <= p.EndTime
-	} else {
-		inRange = currentTime >= p.StartTime || currentTime <= p.EndTime
-	}
-	if !inRange {
+	if !isTimeInRange(p.StartTime, p.EndTime, now.Format("15:04")) {
 		return
 	}
-
-	// Apply profile
 	if err := s.applyProfile(p); err != nil {
 		log.Printf("SmartProxy: failed to apply profile %s: %v", p.Name, err)
 	}

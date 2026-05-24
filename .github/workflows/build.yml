@@ -219,33 +219,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
           COMMIT_COUNT: ${{ needs.build.outputs.commit_count }}
+          MODE: prerelease
         run: |
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-          
-          # Находим последний stable tag для changelog
-          LATEST_STABLE=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
-          if [ -n "$LATEST_STABLE" ]; then
-            CHANGELOG=$(git log --pretty=format:"- %s by @${GITHUB_ACTOR} in %h" "${LATEST_STABLE}..HEAD" 2>/dev/null || echo "Список изменений недоступен")
-          else
-            CHANGELOG=$(git log --pretty=format:"- %s by @${GITHUB_ACTOR} in %h" -15 2>/dev/null || echo "Список изменений недоступен")
-          fi
-
-          cat > /tmp/release-notes.md << ENDNOTES
-          ⚠️ **Пре-релиз.** Не рекомендуется для production-использования.
-
-          **Коммит:** \`${SHORT_SHA}\`  
-          **Build:** ${COMMIT_COUNT} коммитов с ${LATEST_STABLE:-начала}  
-          **Дата:** $(date -u +%Y-%m-%d)
-
-          ## Что изменилось
-
-          ${CHANGELOG}
-          ENDNOTES
+          python3 .github/scripts/gen_notes.py
 
           # Удаляем старый rolling pre-release и тег
-          echo "Deleting old rolling pre-release ${VERSION}..."
           gh release delete "${VERSION}" --yes 2>/dev/null || true
-          # Удаляем локально и на удалённом, игнорируя ошибки
           git tag -d "${VERSION}" 2>/dev/null || true
           git push origin --delete "refs/tags/${VERSION}" 2>/dev/null || true
 
@@ -253,10 +232,9 @@ jobs:
           git tag -f "${VERSION}" "${GITHUB_SHA}"
           git push origin -f "${VERSION}"
 
-          # Создаём новый release
           gh release create "${VERSION}" \
             --target "${GITHUB_SHA}" \
-            --title "${VERSION} (build ${COMMIT_COUNT})" \
+            --title "${VERSION} · build #${COMMIT_COUNT}" \
             --notes-file /tmp/release-notes.md \
             --prerelease \
             artifacts/xcp_arm64/xcp_${VERSION}_arm64 \
@@ -271,40 +249,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
+          MODE: stable
         run: |
           if echo "$VERSION" | grep -qvE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "ERROR: Invalid stable version format: $VERSION"
             exit 1
           fi
 
-          PREV_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -2 | head -1)
-          if [ -z "$PREV_TAG" ] || [ "$PREV_TAG" = "$VERSION" ]; then
-            CHANGELOG="Initial release."
-          else
-            CHANGELOG=$(git log --pretty=format:"- %s by @${GITHUB_ACTOR} in %h" "${PREV_TAG}..${VERSION}" 2>/dev/null || echo "Changelog unavailable")
-          fi
-
-          cat > /tmp/release-notes.md << EOF
-          ## Что изменилось
-
-          ${CHANGELOG}
-
-          **Полный список изменений:** https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${VERSION}
-
-          ---
-
-          ## Установка
-
-          Установка одной командой:
-          \`\`\`sh
-          curl -Ls https://raw.githubusercontent.com/${{ github.repository }}/main/scripts/setup.sh | sh
-          \`\`\`
-
-          Или скачайте бинарник для вашей архитектуры, сделайте его исполняемым и запустите:
-          \`\`\`sh
-          ./xcp_${VERSION}_<arch> -version
-          \`\`\`
-          EOF
+          python3 .github/scripts/gen_notes.py
 
           gh release create "${VERSION}" \
             --target "${GITHUB_SHA}" \
@@ -318,7 +270,6 @@ jobs:
             artifacts/xcp_mips/xcp_${VERSION}_mips.sha256
 
           # Удаляем rolling pre-release этой же версии (cleanup)
-          # При выпуске v0.9.1 удаляем v0.9.2-dev (PATCH+1 от нового stable)
           _BASE="${VERSION#v}"
           _MAJOR=$(echo "$_BASE" | cut -d. -f1)
           _MINOR=$(echo "$_BASE" | cut -d. -f2)

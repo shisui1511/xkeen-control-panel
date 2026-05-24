@@ -213,6 +213,367 @@ func TestSaveLocked_Throttle(t *testing.T) {
 	}
 }
 
+// --- Delta calculation ---
+
+// TestProcessConnSnapshot_Delta verifies that processConnSnapshot correctly
+// calculates delta bytes for existing connections and treats new ones as full deltas.
+func TestProcessConnSnapshot_Delta(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	// Seed the tracker with a connection that already has some bytes.
+	svc.connectionTracker.Store("conn1", connStats{Upload: 100, Download: 200})
+
+	// Snapshot: conn1 increased, conn2 is new.
+	snapshot := []mihomoConn{
+		{ID: "conn1", Chains: []string{"proxy-a"}, Upload: 150, Download: 300},
+		{ID: "conn2", Chains: []string{"proxy-b"}, Upload: 50, Download: 80},
+	}
+	svc.processConnSnapshot(snapshot)
+
+	svc.mu.RLock()
+	statsA := svc.proxyStats["proxy-a"]
+	statsB := svc.proxyStats["proxy-b"]
+	svc.mu.RUnlock()
+
+	if statsA == nil {
+		t.Fatal("expected proxyStats for proxy-a")
+	}
+	// delta for conn1: upload=50, download=100
+	if statsA.UploadBytes != 50 {
+		t.Errorf("proxy-a UploadBytes: want 50, got %d", statsA.UploadBytes)
+	}
+	if statsA.DownloadBytes != 100 {
+		t.Errorf("proxy-a DownloadBytes: want 100, got %d", statsA.DownloadBytes)
+	}
+	if statsA.TotalBytes != 150 {
+		t.Errorf("proxy-a TotalBytes: want 150, got %d", statsA.TotalBytes)
+	}
+
+	if statsB == nil {
+		t.Fatal("expected proxyStats for proxy-b")
+	}
+	// New connection: full bytes counted as delta.
+	if statsB.UploadBytes != 50 {
+		t.Errorf("proxy-b UploadBytes: want 50, got %d", statsB.UploadBytes)
+	}
+	if statsB.DownloadBytes != 80 {
+		t.Errorf("proxy-b DownloadBytes: want 80, got %d", statsB.DownloadBytes)
+	}
+}
+
+// TestProcessConnSnapshot_ClosedConnectionCleanup verifies that connections not in
+// the latest snapshot are removed from the tracker.
+func TestProcessConnSnapshot_ClosedConnectionCleanup(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	svc.connectionTracker.Store("old-conn", connStats{Upload: 10, Download: 20})
+
+	// Snapshot without old-conn → it should be removed.
+	svc.processConnSnapshot([]mihomoConn{})
+
+	if _, ok := svc.connectionTracker.Load("old-conn"); ok {
+		t.Error("expected old-conn to be removed from tracker after closure")
+	}
+}
+
+// TestProcessConnSnapshot_NegativeDeltaIgnored verifies that negative deltas
+// (counter wraparound / reconnect) are clamped to zero.
+func TestProcessConnSnapshot_NegativeDeltaIgnored(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	svc.connectionTracker.Store("conn1", connStats{Upload: 500, Download: 500})
+
+	// Upload/Download are lower than the last seen values (counter reset).
+	snapshot := []mihomoConn{
+		{ID: "conn1", Chains: []string{"proxy-a"}, Upload: 100, Download: 100},
+	}
+	svc.processConnSnapshot(snapshot)
+
+	svc.mu.RLock()
+	stats := svc.proxyStats["proxy-a"]
+	svc.mu.RUnlock()
+
+	// Stats entry should not have been created (delta was 0 after clamping).
+	if stats != nil && (stats.UploadBytes != 0 || stats.DownloadBytes != 0) {
+		t.Errorf("expected 0 bytes from negative delta, got up=%d down=%d",
+			stats.UploadBytes, stats.DownloadBytes)
+	}
+}
+
+// --- Period boundary tests ---
+
+// TestCheckResets_DailyBoundary verifies that a daily quota resets when LastReset is yesterday.
+func TestCheckResets_DailyBoundary(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	yesterday := time.Now().AddDate(0, 0, -1)
+	quota := &TrafficQuota{
+		Name:         "DailyQuota",
+		TargetType:   "global",
+		LimitBytes:   1024,
+		Period:       "daily",
+		Enabled:      true,
+		CurrentBytes: 999,
+	}
+	if err := svc.AddQuota(quota); err != nil {
+		t.Fatalf("AddQuota: %v", err)
+	}
+
+	// Backdate LastReset to yesterday via UpdateQuota.
+	id := svc.ListQuotas()[0].ID
+	updated := svc.ListQuotas()[0]
+	updated.LastReset = yesterday.Unix()
+	if err := svc.UpdateQuota(id, &updated); err != nil {
+		t.Fatalf("UpdateQuota: %v", err)
+	}
+
+	svc.checkResets()
+
+	quotas := svc.ListQuotas()
+	if len(quotas) != 1 {
+		t.Fatalf("expected 1 quota, got %d", len(quotas))
+	}
+	if quotas[0].CurrentBytes != 0 {
+		t.Errorf("expected CurrentBytes=0 after daily reset, got %d", quotas[0].CurrentBytes)
+	}
+	if quotas[0].LastReset <= yesterday.Unix() {
+		t.Errorf("expected LastReset to advance after reset")
+	}
+}
+
+// TestCheckResets_MonthlyBoundary verifies that a monthly quota resets when LastReset is last month.
+func TestCheckResets_MonthlyBoundary(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	lastMonth := time.Now().AddDate(0, -1, 0)
+	quota := &TrafficQuota{
+		Name:         "MonthlyQuota",
+		TargetType:   "global",
+		LimitBytes:   10_000_000,
+		Period:       "monthly",
+		Enabled:      true,
+		CurrentBytes: 5_000_000,
+	}
+	if err := svc.AddQuota(quota); err != nil {
+		t.Fatalf("AddQuota: %v", err)
+	}
+
+	id := svc.ListQuotas()[0].ID
+	updated := svc.ListQuotas()[0]
+	updated.LastReset = lastMonth.Unix()
+	if err := svc.UpdateQuota(id, &updated); err != nil {
+		t.Fatalf("UpdateQuota: %v", err)
+	}
+
+	svc.checkResets()
+
+	quotas := svc.ListQuotas()
+	if quotas[0].CurrentBytes != 0 {
+		t.Errorf("expected CurrentBytes=0 after monthly reset, got %d", quotas[0].CurrentBytes)
+	}
+}
+
+// TestCheckResets_NoResetWithinPeriod verifies that a quota within its period is not reset.
+func TestCheckResets_NoResetWithinPeriod(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	quota := &TrafficQuota{
+		Name:         "FreshQuota",
+		TargetType:   "global",
+		LimitBytes:   1024,
+		Period:       "daily",
+		Enabled:      true,
+		CurrentBytes: 100,
+	}
+	if err := svc.AddQuota(quota); err != nil {
+		t.Fatalf("AddQuota: %v", err)
+	}
+
+	// Manually bump CurrentBytes to 100 (AddQuota sets it to 0).
+	id := svc.ListQuotas()[0].ID
+	current := svc.ListQuotas()[0]
+	current.CurrentBytes = 100
+	// LastReset defaults to now (same day) — no reset should trigger.
+	if err := svc.UpdateQuota(id, &current); err != nil {
+		t.Fatalf("UpdateQuota: %v", err)
+	}
+
+	svc.checkResets()
+
+	quotas := svc.ListQuotas()
+	if quotas[0].CurrentBytes != 100 {
+		t.Errorf("expected CurrentBytes=100 (no reset), got %d", quotas[0].CurrentBytes)
+	}
+}
+
+// TestCheckResets_ProxyStatsReset verifies that proxyStats for the target proxy
+// are zeroed when the quota resets.
+func TestCheckResets_ProxyStatsReset(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	// Add and backdate the quota.
+	quota := &TrafficQuota{
+		Name:       "ProxyQuota",
+		TargetType: "proxy",
+		TargetID:   "proxy-x",
+		LimitBytes: 2000,
+		Period:     "daily",
+		Enabled:    true,
+	}
+	if err := svc.AddQuota(quota); err != nil {
+		t.Fatalf("AddQuota: %v", err)
+	}
+	id := svc.ListQuotas()[0].ID
+	backdated := svc.ListQuotas()[0]
+	backdated.LastReset = time.Now().AddDate(0, 0, -1).Unix()
+	if err := svc.UpdateQuota(id, &backdated); err != nil {
+		t.Fatalf("UpdateQuota: %v", err)
+	}
+
+	// Manually inject proxy stats.
+	svc.mu.Lock()
+	svc.proxyStats["proxy-x"] = &ProxyTraffic{
+		ProxyName:     "proxy-x",
+		UploadBytes:   500,
+		DownloadBytes: 500,
+		TotalBytes:    1000,
+	}
+	svc.mu.Unlock()
+
+	svc.checkResets()
+
+	svc.mu.RLock()
+	stat := svc.proxyStats["proxy-x"]
+	svc.mu.RUnlock()
+
+	if stat == nil {
+		t.Fatal("expected proxyStats entry to still exist")
+	}
+	if stat.TotalBytes != 0 {
+		t.Errorf("expected proxyStats zeroed after reset, got TotalBytes=%d", stat.TotalBytes)
+	}
+}
+
+// --- Alert generation tests ---
+
+// TestCheckQuotas_CriticalAlert verifies that a critical alert is generated when usage >= 100%.
+func TestCheckQuotas_CriticalAlert(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	svc.mu.Lock()
+	svc.proxyStats["proxy-z"] = &ProxyTraffic{
+		ProxyName:  "proxy-z",
+		TotalBytes: 1200, // over limit
+	}
+	svc.mu.Unlock()
+
+	quota := &TrafficQuota{
+		Name:       "OverLimit",
+		TargetType: "proxy",
+		TargetID:   "proxy-z",
+		LimitBytes: 1000,
+		Period:     "daily",
+		Enabled:    true,
+	}
+	if err := svc.AddQuota(quota); err != nil {
+		t.Fatalf("AddQuota: %v", err)
+	}
+
+	svc.checkQuotas()
+
+	alerts := svc.GetAlerts()
+	if len(alerts) == 0 {
+		t.Fatal("expected at least one alert, got none")
+	}
+	var found bool
+	for _, a := range alerts {
+		if a.Severity == "critical" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected critical alert, got %+v", alerts)
+	}
+}
+
+// TestCheckQuotas_WarningAlert verifies that a warning alert fires when usage crosses alertThreshold.
+func TestCheckQuotas_WarningAlert(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	svc.mu.Lock()
+	svc.proxyStats["proxy-w"] = &ProxyTraffic{
+		ProxyName:  "proxy-w",
+		TotalBytes: 850, // 85% of 1000
+	}
+	svc.mu.Unlock()
+
+	quota := &TrafficQuota{
+		Name:           "WarnQuota",
+		TargetType:     "proxy",
+		TargetID:       "proxy-w",
+		LimitBytes:     1000,
+		AlertThreshold: 80, // warn at 80%
+		Period:         "daily",
+		Enabled:        true,
+	}
+	if err := svc.AddQuota(quota); err != nil {
+		t.Fatalf("AddQuota: %v", err)
+	}
+
+	svc.checkQuotas()
+
+	alerts := svc.GetAlerts()
+	if len(alerts) == 0 {
+		t.Fatal("expected at least one alert, got none")
+	}
+	if alerts[0].Severity != "warning" {
+		t.Errorf("expected warning alert, got severity=%q", alerts[0].Severity)
+	}
+}
+
+// TestCheckQuotas_NoAlertBelowThreshold verifies that no alert fires when usage is below threshold.
+func TestCheckQuotas_NoAlertBelowThreshold(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	svc.mu.Lock()
+	svc.proxyStats["proxy-ok"] = &ProxyTraffic{
+		ProxyName:  "proxy-ok",
+		TotalBytes: 500, // 50% of 1000, threshold at 80%
+	}
+	svc.mu.Unlock()
+
+	quota := &TrafficQuota{
+		Name:           "OkQuota",
+		TargetType:     "proxy",
+		TargetID:       "proxy-ok",
+		LimitBytes:     1000,
+		AlertThreshold: 80,
+		Period:         "daily",
+		Enabled:        true,
+	}
+	if err := svc.AddQuota(quota); err != nil {
+		t.Fatalf("AddQuota: %v", err)
+	}
+
+	svc.checkQuotas()
+
+	alerts := svc.GetAlerts()
+	if len(alerts) != 0 {
+		t.Errorf("expected no alerts at 50%% usage, got %d: %+v", len(alerts), alerts)
+	}
+}
+
 // TestSaveLocked_ThrottleExpiry verifies that saveLocked(false) writes after the
 // throttle window expires.
 func TestSaveLocked_ThrottleExpiry(t *testing.T) {

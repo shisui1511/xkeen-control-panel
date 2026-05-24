@@ -28,6 +28,10 @@ func (a *API) SnapshotRouter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) SnapshotList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	list, err := a.snapshotSvc.List()
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
@@ -72,10 +76,14 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) SnapshotDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/snapshots/")
 	id = strings.TrimSuffix(id, "/download")
 
@@ -124,5 +132,5 @@ func (a *API) SnapshotDelete(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }

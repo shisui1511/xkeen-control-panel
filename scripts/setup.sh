@@ -2,9 +2,9 @@
 
 REPO="shisui1511/xkeen-control-panel"
 BINARY="xcp"
-INSTALL_DIR="/opt/etc/xcp"
-BIN_PATH="/opt/sbin/xcp"
-INIT_SCRIPT="/opt/etc/init.d/S99xcp"
+INSTALL_DIR="${XCP_INSTALL_DIR:-/opt/etc/xcp}"
+BIN_PATH="${XCP_BIN_PATH:-/opt/sbin/xcp}"
+INIT_SCRIPT="${XCP_INIT_SCRIPT:-/opt/etc/init.d/S99xcp}"
 DEFAULT_PORT=8090
 
 # Цвета
@@ -1020,6 +1020,9 @@ parse_args() {
 }
 
 # ===== Главный цикл =====
+
+# Allow test harness to source functions without executing main
+[ -n "$SETUP_TEST_MODE" ] && return 0 2>/dev/null; true
 
 INTERACTIVE="true"
 CHANNEL="stable"

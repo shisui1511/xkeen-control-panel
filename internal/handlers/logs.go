@@ -194,6 +194,10 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) LogsDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	if a.cfg.LogPath == "" {
 		a.errorResponse(w, "Log path is not configured", http.StatusBadRequest)
 		return

@@ -15,6 +15,10 @@ import (
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
 
 func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	dir := r.URL.Query().Get("dir")
 	if dir == "" {
 		dir = a.cfg.XRayConfigDir
@@ -35,6 +39,10 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	path := r.URL.Query().Get("path")
 
 	cleanPath, err := a.pathVal.Validate(path)
@@ -90,10 +98,14 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	path := r.URL.Query().Get("path")
 	cleanPath, err := a.pathVal.Validate(path)
 	if err != nil {
@@ -135,7 +147,7 @@ func (a *API) ConfigCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +172,7 @@ func (a *API) ConfigDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +209,7 @@ func (a *API) ConfigRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Write([]byte("OK"))
+	JSONSuccess(w, nil)
 }
 
 type ConfigValidateRequest struct {

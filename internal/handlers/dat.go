@@ -5,6 +5,10 @@ import (
 )
 
 func (a *API) DATList(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	if a.datSvc == nil {
 		a.errorResponse(w, "DAT Manager service unavailable", http.StatusServiceUnavailable)
 		return
@@ -13,6 +17,10 @@ func (a *API) DATList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) DATListTags(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
 	if a.datSvc == nil {
 		a.errorResponse(w, "DAT Manager service unavailable", http.StatusServiceUnavailable)
 		return
