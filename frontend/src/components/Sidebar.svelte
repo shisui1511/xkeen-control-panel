@@ -49,7 +49,7 @@
   </span>
 </div>
 
-<nav style="flex: 1; overflow-y: auto; padding: 4px 0 10px;">
+<nav style="flex: 1; overflow-y: auto; padding: 4px 0 10px; scrollbar-width: none;">
   <!-- Core group -->
   <details class="nav-group" open>
     <summary>
