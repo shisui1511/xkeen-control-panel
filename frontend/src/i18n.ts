@@ -428,6 +428,11 @@ const translations: Record<Lang, Record<string, string>> = {
     'trafficquotas.period_daily': 'Ежедневно',
     'trafficquotas.period_weekly': 'Еженедельно',
     'trafficquotas.period_monthly': 'Ежемесячно',
+    'trafficquotas.action': 'Действие',
+    'trafficquotas.action_notify': 'УВЕДОМИТЬ',
+    'trafficquotas.action_throttle': 'ОГРАНИЧИТЬ',
+    'trafficquotas.action_log_only': 'ЖУРНАЛ',
+    'trafficquotas.action_block': 'БЛОКИРОВАТЬ',
 
     // Rules
     'rules.title': 'Правила маршрутизации',
@@ -1141,6 +1146,11 @@ const translations: Record<Lang, Record<string, string>> = {
     'trafficquotas.period_daily': 'Daily',
     'trafficquotas.period_weekly': 'Weekly',
     'trafficquotas.period_monthly': 'Monthly',
+    'trafficquotas.action': 'Action',
+    'trafficquotas.action_notify': 'NOTIFY',
+    'trafficquotas.action_throttle': 'THROTTLE',
+    'trafficquotas.action_log_only': 'LOG ONLY',
+    'trafficquotas.action_block': 'BLOCK',
 
     // Rules
     'rules.title': 'Routing Rules',
