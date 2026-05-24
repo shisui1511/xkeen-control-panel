@@ -17,7 +17,28 @@
     status: string;
     process_status: string;
     message: string;
+    pid?: number;
+    uptime?: string;
+    api_addr?: string;
   }
+
+  interface XKeenStatusInfo {
+    isRunning: boolean;
+    activeKernel: string;
+    pid: number;
+    uptime: string;
+    binaryPath: string;
+    raw: string;
+  }
+
+  let xkeenInfo: XKeenStatusInfo = {
+    isRunning: false,
+    activeKernel: '',
+    pid: 0,
+    uptime: '',
+    binaryPath: '',
+    raw: ''
+  };
 
   let xkeenStatus = '';
   let loading = false;
@@ -75,17 +96,55 @@
       const res = await fetch('/api/service/status');
       if (res.ok) {
         const text = await res.text();
-        const lower = text.toLowerCase();
-        if (lower.includes('не запущен') || lower.includes('not running')) {
-          xkeenStatus = $t('svc.kernel_not_selected');
-        } else {
-          xkeenStatus = text;
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && parsed.success && parsed.data) {
+            xkeenInfo = {
+              isRunning: parsed.data.is_running,
+              activeKernel: parsed.data.active_kernel || '',
+              pid: parsed.data.pid || 0,
+              uptime: parsed.data.uptime || '',
+              binaryPath: parsed.data.binary_path || '',
+              raw: parsed.data.raw || ''
+            };
+            
+            const lower = xkeenInfo.raw.toLowerCase();
+            if (lower.includes('не запущен') || lower.includes('not running')) {
+              xkeenStatus = $t('svc.kernel_not_selected');
+            } else {
+              xkeenStatus = xkeenInfo.raw;
+            }
+          } else {
+            parseRawText(text);
+          }
+        } catch (_) {
+          parseRawText(text);
         }
       } else {
         xkeenStatus = $t('app.error');
+        xkeenInfo = { isRunning: false, activeKernel: '', pid: 0, uptime: '', binaryPath: '', raw: $t('app.error') };
       }
     } catch (e) {
       xkeenStatus = $t('app.unavailable');
+      xkeenInfo = { isRunning: false, activeKernel: '', pid: 0, uptime: '', binaryPath: '', raw: $t('app.unavailable') };
+    }
+  }
+
+  function parseRawText(text: string) {
+    const lower = text.toLowerCase();
+    const isRunning = lower.includes('running') || lower.includes('запущен');
+    xkeenInfo = {
+      isRunning: isRunning,
+      activeKernel: isRunning ? (lower.includes('xray') ? 'xray' : lower.includes('mihomo') ? 'mihomo' : '') : '',
+      pid: 0,
+      uptime: '',
+      binaryPath: '',
+      raw: text
+    };
+    if (lower.includes('не запущен') || lower.includes('not running')) {
+      xkeenStatus = $t('svc.kernel_not_selected');
+    } else {
+      xkeenStatus = text;
     }
   }
 
@@ -322,15 +381,16 @@
         </div>
         <div class="k-meta">
           {#if isRunning}
-            {#if xkeenStatus}
+            {#if xkeenInfo.pid}
+              PID {xkeenInfo.pid} · uptime {xkeenInfo.uptime || '—'} · {xkeenInfo.binaryPath || '/opt/sbin/xkeen'}
+            {:else if xkeenStatus}
               {xkeenStatus}
             {:else}
               {$t('svc.xkeen_module')}{#if activeKernel !== 'none'}
                 · {$t('svc.active_kernel')}: {activeKernel}{/if}
             {/if}
           {:else}
-            {$t('svc.xkeen_module')}{#if xkeenStatus}
-              · {xkeenStatus}{/if}
+            {$t('svc.xkeen_module')}{#if xkeenInfo.binaryPath} · {xkeenInfo.binaryPath}{/if}
           {/if}
         </div>
       </div>
@@ -474,7 +534,9 @@
           {#if !kernelsLoaded}
             <Skeleton type="text-line" width="120px" />
           {:else if xray}
-            {#if xray.has_update}
+            {#if xray.process_status === 'running'}
+              v{xray.current_version} · PID {xray.pid || '—'} · uptime {xray.uptime || '—'} · {xray.binary_path}
+            {:else if xray.has_update}
               v{xray.current_version} &rarr; {xray.latest_version} · {xray.binary_path}
               {#if xray.message}
                 · {xray.message}{/if}
@@ -630,11 +692,7 @@
             <Skeleton type="text-line" width="120px" />
           {:else if mihomo}
             {#if mihomo.process_status === 'running'}
-              {#if mihomo.message}
-                {mihomo.message}
-              {:else}
-                v{mihomo.current_version} · {mihomo.binary_path}
-              {/if}
+              API {mihomo.api_addr || '127.0.0.1:9090'} · clash-meta (v{mihomo.current_version}) · uptime {mihomo.uptime || '—'} · {mihomo.binary_path}
             {:else}
               {mihomo.binary_path}
               {#if mihomo.message}

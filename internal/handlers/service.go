@@ -3,8 +3,18 @@ package handlers
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
+
+type ServiceStatusResponse struct {
+	IsRunning    bool   `json:"is_running"`
+	ActiveKernel string `json:"active_kernel"`
+	PID          int    `json:"pid"`
+	Uptime       string `json:"uptime"`
+	BinaryPath   string `json:"binary_path"`
+	Raw          string `json:"raw"`
+}
 
 func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -13,10 +23,37 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.xkeenSvc.Status()
 	if err != nil {
-		a.errorResponse(w, out, http.StatusInternalServerError)
+		JSONError(w, http.StatusInternalServerError, out)
 		return
 	}
-	w.Write([]byte(out))
+
+	resp := ServiceStatusResponse{
+		BinaryPath: a.cfg.XKeenBinary,
+		Raw:        out,
+	}
+
+	// Detect which kernel is running and get its PID/Uptime
+	if a.kernelSvc != nil {
+		for _, info := range a.kernelSvc.List() {
+			if info.ProcessStatus == "running" {
+				resp.IsRunning = true
+				resp.ActiveKernel = info.Name
+				resp.PID = info.PID
+				resp.Uptime = info.Uptime
+				break
+			}
+		}
+	}
+
+	// Fallback to checking raw output if kernelSvc list is empty or doesn't find running
+	if !resp.IsRunning {
+		lower := strings.ToLower(out)
+		if strings.Contains(lower, "running") || strings.Contains(lower, "запущен") {
+			resp.IsRunning = true
+		}
+	}
+
+	JSONSuccess(w, resp)
 }
 
 func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {

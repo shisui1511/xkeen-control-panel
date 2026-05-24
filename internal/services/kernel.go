@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"runtime"
 	"strings"
 	"sync"
@@ -133,6 +134,9 @@ type KernelInfo struct {
 	Status         string `json:"status"`         // idle, checking, downloading, installing, done, failed
 	ProcessStatus  string `json:"process_status"` // running, stopped, not_installed, not_accessible, unknown
 	Message        string `json:"message"`
+	PID            int    `json:"pid,omitempty"`
+	Uptime         string `json:"uptime,omitempty"`
+	APIAddr        string `json:"api_addr,omitempty"`
 
 	// binaryPathCachedAt records when BinaryPath was last resolved via auto-detection.
 	// Access must be protected by the KernelService mutex.
@@ -187,6 +191,76 @@ func kernelProcessStatus(binaryPath string) string {
 	}
 
 	return "stopped"
+}
+
+func kernelProcessStatusDetailed(binaryPath string) (status string, pid int, uptime string) {
+	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+		return "not_installed", 0, ""
+	}
+
+	// Check if the binary is accessible (readable/executable)
+	f, err := os.Open(binaryPath)
+	if err != nil {
+		return "not_accessible", 0, ""
+	}
+	f.Close()
+
+	base := filepath.Base(binaryPath)
+
+	// Method 1: /proc/*/exe readlink (no external tools required)
+	matches, _ := filepath.Glob("/proc/*/exe")
+	for _, link := range matches {
+		target, err := os.Readlink(link)
+		if err == nil && filepath.Base(target) == base {
+			parts := strings.Split(link, "/")
+			if len(parts) >= 3 {
+				if p, err := strconv.Atoi(parts[2]); err == nil {
+					uptimeStr := getProcUptime(parts[2])
+					return "running", p, uptimeStr
+				}
+			}
+			return "running", 0, ""
+		}
+	}
+
+	// Method 2: pidof fallback when /proc gives no entries
+	if len(matches) == 0 {
+		out, err := exec.Command("pidof", base).Output()
+		if err == nil {
+			pidStr := strings.TrimSpace(string(out))
+			firstPid := strings.Split(pidStr, " ")[0]
+			if p, err := strconv.Atoi(firstPid); err == nil {
+				uptimeStr := getProcUptime(firstPid)
+				return "running", p, uptimeStr
+			}
+		}
+	}
+
+	return "stopped", 0, ""
+}
+
+func getProcUptime(pidStr string) string {
+	procPath := filepath.Join("/proc", pidStr)
+	st, err := os.Stat(procPath)
+	if err != nil {
+		return ""
+	}
+	duration := time.Since(st.ModTime())
+	return formatUptimeRu(duration)
+}
+
+func formatUptimeRu(d time.Duration) string {
+	days := int(d.Hours()) / 24
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+
+	if days > 0 {
+		return fmt.Sprintf("%dд %dч %dм", days, hours, minutes)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dч %dм", hours, minutes)
+	}
+	return fmt.Sprintf("%dм", minutes)
 }
 
 // KernelService manages proxy kernels (xray, mihomo)
@@ -304,7 +378,10 @@ func (s *KernelService) List() []KernelInfo {
 	// Resolve live data outside the global lock to avoid blocking Install/CheckLatest
 	for i := range snapshots {
 		snapshots[i].CurrentVersion = s.detectVersion(&snapshots[i])
-		snapshots[i].ProcessStatus = kernelProcessStatus(snapshots[i].BinaryPath)
+		status, pid, uptime := kernelProcessStatusDetailed(snapshots[i].BinaryPath)
+		snapshots[i].ProcessStatus = status
+		snapshots[i].PID = pid
+		snapshots[i].Uptime = uptime
 	}
 	return snapshots
 }
@@ -325,7 +402,10 @@ func (s *KernelService) Get(name string) *KernelInfo {
 	}
 	// Refresh version and process status outside global lock
 	snap.CurrentVersion = s.detectVersion(&snap)
-	snap.ProcessStatus = kernelProcessStatus(snap.BinaryPath)
+	status, pid, uptime := kernelProcessStatusDetailed(snap.BinaryPath)
+	snap.ProcessStatus = status
+	snap.PID = pid
+	snap.Uptime = uptime
 	return &snap
 }
 

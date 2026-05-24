@@ -12,7 +12,21 @@ func (a *API) KernelList(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
 		return
 	}
-	JSONSuccess(w, a.kernelSvc.List())
+	list := a.kernelSvc.List()
+	for i := range list {
+		if list[i].Name == "mihomo" {
+			addr := a.cfg.MihomoAPIURL
+			if a.mihomoSvc != nil {
+				if parsedController, _, err := a.mihomoSvc.ParseConfig(); err == nil && parsedController != "" {
+					addr = parsedController
+				}
+			}
+			addr = strings.TrimPrefix(addr, "http://")
+			addr = strings.TrimPrefix(addr, "https://")
+			list[i].APIAddr = addr
+		}
+	}
+	JSONSuccess(w, list)
 }
 
 func (a *API) KernelCheck(w http.ResponseWriter, r *http.Request) {
@@ -81,6 +95,18 @@ func (a *API) KernelStatus(w http.ResponseWriter, r *http.Request) {
 	if k == nil {
 		JSONError(w, http.StatusNotFound, "Kernel not found")
 		return
+	}
+
+	if k.Name == "mihomo" {
+		addr := a.cfg.MihomoAPIURL
+		if a.mihomoSvc != nil {
+			if parsedController, _, err := a.mihomoSvc.ParseConfig(); err == nil && parsedController != "" {
+				addr = parsedController
+			}
+		}
+		addr = strings.TrimPrefix(addr, "http://")
+		addr = strings.TrimPrefix(addr, "https://")
+		k.APIAddr = addr
 	}
 
 	JSONSuccess(w, k)

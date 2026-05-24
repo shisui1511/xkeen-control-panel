@@ -151,8 +151,25 @@
         fetch('/api/mihomo/status')
       ]);
 
-      const svcText =
-        svcRes.status === 'fulfilled' && svcRes.value.ok ? await svcRes.value.text() : '';
+      let isXkeenRunning = false;
+      let xkeenRaw = '';
+      if (svcRes.status === 'fulfilled' && svcRes.value.ok) {
+        const text = await svcRes.value.text();
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && parsed.success && parsed.data) {
+            isXkeenRunning = parsed.data.is_running;
+            xkeenRaw = parsed.data.raw || '';
+          } else {
+            xkeenRaw = text;
+            isXkeenRunning = text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
+          }
+        } catch (_) {
+          xkeenRaw = text;
+          isXkeenRunning = text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
+        }
+      }
+
       const mihomoText =
         mihomoRes.status === 'fulfilled' && mihomoRes.value.ok ? await mihomoRes.value.text() : '';
 
@@ -199,10 +216,7 @@
       }
 
       serviceStatus = {
-        xkeen:
-          svcText.toLowerCase().includes('running') || svcText.toLowerCase().includes('запущен')
-            ? 'running'
-            : svcText || 'unknown',
+        xkeen: isXkeenRunning ? 'running' : (xkeenRaw || 'unknown'),
         xray: xrayProcessStatus,
         mihomo: mihomoProcessStatus,
         connections: connCount,
