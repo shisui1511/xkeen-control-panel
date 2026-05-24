@@ -73,6 +73,10 @@
     { value: 'monthly', label: $t('trafficquotas.period_monthly') }
   ];
 
+  $: activeQuotas = quotas.filter((q) => q.enabled);
+  $: sumQuotaLimit = activeQuotas.reduce((s, q) => s + q.limit_bytes, 0);
+  $: totalPct = sumQuotaLimit > 0 ? Math.min(100, ((stats?.total || 0) / sumQuotaLimit) * 100) : 0;
+
   async function fetchQuotas() {
     loading = true;
     try {
@@ -372,19 +376,39 @@
   <!-- Stats Summaries -->
   {#if stats}
     <div class="card mb-3">
-      <h2 class="card-title">{$t('trafficquotas.stats')}</h2>
+      <h2 class="card-title">{$currentLang === 'ru' ? 'СВОДКА' : 'SUMMARY'}</h2>
       <div class="stats-grid">
         <div class="stat-box">
           <div class="stat-label">{$t('trafficquotas.total_download')}</div>
           <div class="stat-value">{formatBytes(stats.total_download)}</div>
+          <div class="stat-sub">{$currentLang === 'ru' ? 'загружено' : 'received'}</div>
         </div>
         <div class="stat-box">
           <div class="stat-label">{$t('trafficquotas.total_upload')}</div>
           <div class="stat-value">{formatBytes(stats.total_upload)}</div>
+          <div class="stat-sub">{$currentLang === 'ru' ? 'отправлено' : 'sent'}</div>
         </div>
         <div class="stat-box">
-          <div class="stat-label">{$t('trafficquotas.total')}</div>
+          <div class="stat-label">Σ {$t('trafficquotas.total')}</div>
           <div class="stat-value">{formatBytes(stats.total)}</div>
+          {#if sumQuotaLimit > 0}
+            <div class="stat-bar" style="margin-top: 8px;">
+              <div
+                class="stat-bar-fill"
+                class:warning={totalPct >= 80 && totalPct < 100}
+                class:error={totalPct >= 100}
+                style="width: {totalPct}%"
+              ></div>
+            </div>
+            <div class="stat-sub">{totalPct.toFixed(1)}% {$currentLang === 'ru' ? 'от лимита' : 'of limit'}</div>
+          {/if}
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">{$currentLang === 'ru' ? 'ЛИМИТЫ' : 'QUOTAS'}</div>
+          <div class="stat-value">
+            {activeQuotas.length}<span class="stat-value-unit"> / {quotas.length}</span>
+          </div>
+          <div class="stat-sub">{$currentLang === 'ru' ? 'активных' : 'active'}</div>
         </div>
       </div>
     </div>
@@ -732,6 +756,18 @@
     font-weight: 600;
     font-size: 20px;
     color: var(--fg-primary);
+  }
+
+  .stat-value-unit {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--fg-secondary);
+  }
+
+  .stat-sub {
+    font-size: 11px;
+    color: var(--fg-dim);
+    margin-top: 4px;
   }
 
   .table-responsive {
