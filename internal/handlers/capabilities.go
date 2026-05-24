@@ -25,6 +25,7 @@ type MihomoCapability struct {
 	APIReachable     bool   `json:"api_reachable"`
 	APIAuthenticated bool   `json:"api_authenticated"`
 	Reachable        bool   `json:"reachable"` // backward compatibility
+	APIURL           string `json:"api_url,omitempty"`
 	DiscoveredSecret string `json:"discovered_secret,omitempty"`
 }
 
@@ -82,6 +83,7 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	resp.Mihomo.APIReachable = reachable
 	resp.Mihomo.APIAuthenticated = authenticated
 	resp.Mihomo.Reachable = reachable
+	resp.Mihomo.APIURL = a.cfg.MihomoAPIURL
 	resp.Mihomo.DiscoveredSecret = discoveredSecret
 
 	a.capsCacheMutex.Lock()
