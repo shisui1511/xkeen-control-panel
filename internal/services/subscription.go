@@ -254,7 +254,8 @@ func (s *SubscriptionService) SetKernelService(svc *KernelService) {
 // генерирует новый UUID v4 и сохраняет его для следующих запусков.
 // Используется как x-hwid header для провайдеров с HWID Device Limit.
 func loadOrGenerateHWID(dataDir string) string {
-	path := filepath.Join(dataDir, "xcp_hwid.txt")
+	dir := filepath.Join(dataDir, "data")
+	path := filepath.Join(dir, "xcp_hwid.txt")
 	if data, err := os.ReadFile(path); err == nil {
 		if id := strings.TrimSpace(string(data)); len(id) == 36 {
 			return id
@@ -268,6 +269,7 @@ func loadOrGenerateHWID(dataDir string) string {
 	u[8] = (u[8] & 0x3f) | 0x80 // variant bits
 	id := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		u[0:4], u[4:6], u[6:8], u[8:10], u[10:16])
+	_ = os.MkdirAll(dir, 0755)
 	_ = os.WriteFile(path, []byte(id), 0600)
 	return id
 }
@@ -284,6 +286,12 @@ func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *Subscri
 	return svc
 }
 
+func (s *SubscriptionService) subPath(filename string) string {
+	dir := filepath.Join(s.dataDir, "subscriptions")
+	_ = os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, filename)
+}
+
 func (s *SubscriptionService) SetHTTPClient(client *http.Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -293,7 +301,7 @@ func (s *SubscriptionService) SetHTTPClient(client *http.Client) {
 func (s *SubscriptionService) load() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	path := filepath.Join(s.dataDir, "subscriptions.json")
+	path := s.subPath("subscriptions.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return
@@ -317,7 +325,7 @@ func (s *SubscriptionService) load() {
 
 func (s *SubscriptionService) save() error {
 	// Note: mu must be held by caller or we use a separate locked version
-	path := filepath.Join(s.dataDir, "subscriptions.json")
+	path := s.subPath("subscriptions.json")
 	data, err := json.MarshalIndent(s.subscriptions, "", "  ")
 	if err != nil {
 		return err
@@ -456,9 +464,9 @@ func (s *SubscriptionService) Delete(id string) error {
 	}
 
 	// Delete diagnostic files
-	os.Remove(filepath.Join(s.dataDir, "sub_"+id+"_raw.txt"))
-	os.Remove(filepath.Join(s.dataDir, "sub_"+id+"_headers.json"))
-	os.Remove(filepath.Join(s.dataDir, "sub_"+id+"_parse_report.json"))
+	os.Remove(s.subPath("sub_" + id + "_raw.txt"))
+	os.Remove(s.subPath("sub_" + id + "_headers.json"))
+	os.Remove(s.subPath("sub_" + id + "_parse_report.json"))
 
 	return s.save()
 }
@@ -969,9 +977,7 @@ func skipReasonForScheme(line string) string {
 }
 
 func (s *SubscriptionService) saveDebugFiles(id string, body []byte, headers http.Header, report *ParseReport) {
-	_ = os.MkdirAll(s.dataDir, 0755)
-
-	rawPath := filepath.Join(s.dataDir, "sub_"+id+"_raw.txt")
+	rawPath := s.subPath("sub_" + id + "_raw.txt")
 	_ = utils.AtomicWriteFile(rawPath, body, 0600)
 
 	hdrMap := make(map[string][]string)
@@ -980,14 +986,14 @@ func (s *SubscriptionService) saveDebugFiles(id string, body []byte, headers htt
 	}
 	hdrData, err := json.MarshalIndent(hdrMap, "", "  ")
 	if err == nil {
-		hdrPath := filepath.Join(s.dataDir, "sub_"+id+"_headers.json")
+		hdrPath := s.subPath("sub_" + id + "_headers.json")
 		_ = utils.AtomicWriteFile(hdrPath, hdrData, 0600)
 	}
 
 	if report != nil {
 		repData, err := json.MarshalIndent(report, "", "  ")
 		if err == nil {
-			repPath := filepath.Join(s.dataDir, "sub_"+id+"_parse_report.json")
+			repPath := s.subPath("sub_" + id + "_parse_report.json")
 			_ = utils.AtomicWriteFile(repPath, repData, 0600)
 		}
 	}
@@ -1009,13 +1015,13 @@ func (s *SubscriptionService) GetRaw(id string) (string, map[string][]string, er
 		return "", nil, fmt.Errorf("subscription not found")
 	}
 
-	rawPath := filepath.Join(s.dataDir, "sub_"+id+"_raw.txt")
+	rawPath := s.subPath("sub_" + id + "_raw.txt")
 	bodyBytes, err := os.ReadFile(rawPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("raw response not found: %w", err)
 	}
 
-	hdrPath := filepath.Join(s.dataDir, "sub_"+id+"_headers.json")
+	hdrPath := s.subPath("sub_" + id + "_headers.json")
 	hdrBytes, err := os.ReadFile(hdrPath)
 	if err != nil {
 		return string(bodyBytes), nil, nil
@@ -1045,7 +1051,7 @@ func (s *SubscriptionService) GetParseReport(id string) (*ParseReport, error) {
 		return nil, fmt.Errorf("subscription not found")
 	}
 
-	repPath := filepath.Join(s.dataDir, "sub_"+id+"_parse_report.json")
+	repPath := s.subPath("sub_" + id + "_parse_report.json")
 	repBytes, err := os.ReadFile(repPath)
 	if err != nil {
 		return nil, fmt.Errorf("parse report not found: %w", err)

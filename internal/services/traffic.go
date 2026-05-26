@@ -110,7 +110,9 @@ func (s *TrafficQuotaService) Stop() {
 }
 
 func (s *TrafficQuotaService) storePath() string {
-	return filepath.Join(s.dataDir, "traffic.json")
+	dir := filepath.Join(s.dataDir, "traffic")
+	_ = os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, "traffic.json")
 }
 
 func (s *TrafficQuotaService) load() {

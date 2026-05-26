@@ -41,7 +41,9 @@ func NewXKeenService(binary, dataDir string) *XKeenService {
 // --- Restart log ---
 
 func (s *XKeenService) restartLogPath() string {
-	return filepath.Join(s.dataDir, "restart_log.json")
+	dir := filepath.Join(s.dataDir, "data")
+	_ = os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, "restart_log.json")
 }
 
 func (s *XKeenService) loadRestartLog() {
