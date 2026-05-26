@@ -13,11 +13,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -80,8 +82,7 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 	info.CurrentVersion = currentVersion
 	info.Channel = channel
 
-	// Compare versions (simple string comparison for now)
-	info.HasUpdate = info.LatestVersion != "" && info.LatestVersion != currentVersion
+	info.HasUpdate = info.LatestVersion != "" && compareSemver(info.LatestVersion, currentVersion) > 0
 
 	if info.HasUpdate {
 		arch := runtime.GOARCH
@@ -188,7 +189,7 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 	st.Progress = 90
 	setUpdateState(st)
 
-	go a.restartProcess(binPath, "", a.cfg.DataDir)
+	go a.restartProcess(binPath, "", a.cfg.DataDir, "")
 
 	JSONSuccess(w, getUpdateState())
 }
@@ -199,6 +200,104 @@ func (a *API) UpdateStatusEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSONSuccess(w, getUpdateState())
+}
+
+func (a *API) UpdateEventsSSE(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	// Сразу отправляем текущий статус
+	state := getUpdateState()
+	data, err := json.Marshal(state)
+	if err == nil {
+		fmt.Fprintf(w, "data: %s\n\n", data)
+		flusher.Flush()
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	lastState := state
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			currentState := getUpdateState()
+			if currentState.Status != lastState.Status || currentState.Progress != lastState.Progress || currentState.Message != lastState.Message {
+				data, err := json.Marshal(currentState)
+				if err == nil {
+					fmt.Fprintf(w, "data: %s\n\n", data)
+					flusher.Flush()
+				}
+				lastState = currentState
+			}
+			if currentState.Status == "done" || currentState.Status == "failed" {
+				return
+			}
+		}
+	}
+}
+
+// UpdateChannelHandler маршрутизирует GET → UpdateChannelGet, POST → UpdateChannelSet.
+func (a *API) UpdateChannelHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		a.UpdateChannelGet(w, r)
+	case http.MethodPost:
+		a.UpdateChannelSet(w, r)
+	default:
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+	}
+}
+
+// UpdateChannelGet возвращает сохранённый канал обновлений (stable/beta/dev).
+func (a *API) UpdateChannelGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	ch := a.cfg.UpdateChannel
+	if ch == "" {
+		ch = "stable"
+	}
+	JSONSuccess(w, map[string]string{"channel": ch})
+}
+
+// UpdateChannelSet сохраняет выбранный канал обновлений в config.json.
+func (a *API) UpdateChannelSet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Channel string `json:"channel"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		a.errorResponse(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	switch body.Channel {
+	case "stable", "beta":
+	default:
+		a.errorResponse(w, "channel must be stable or beta", http.StatusBadRequest)
+		return
+	}
+	a.cfg.UpdateChannel = body.Channel
+	if err := config.Save(a.cfg.ConfigPath, a.cfg); err != nil {
+		a.errorResponse(w, "failed to save config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	JSONSuccess(w, map[string]string{"channel": body.Channel})
 }
 
 func (a *API) performUpdate(channel string) {
@@ -230,7 +329,7 @@ func (a *API) performUpdate(channel string) {
 	}
 
 	currentVersion := strings.TrimPrefix(a.srv.GetVersion(), "v")
-	if info.LatestVersion == currentVersion {
+	if compareSemver(info.LatestVersion, currentVersion) <= 0 {
 		setUpdateState(UpdateStatus{
 			Status:    "done",
 			Progress:  100,
@@ -350,10 +449,10 @@ func (a *API) performUpdate(channel string) {
 	// Give time for response to be sent
 	time.Sleep(500 * time.Millisecond)
 
-	go a.restartProcess(binPath, backupPath, a.cfg.DataDir)
+	go a.restartProcess(binPath, backupPath, a.cfg.DataDir, info.LatestVersion)
 }
 
-func (a *API) restartProcess(binPath string, backupPath string, dataDir string) {
+func (a *API) restartProcess(binPath string, backupPath string, dataDir string, expectedVersion string) {
 	// Fork new process
 	configPath := filepath.Join(dataDir, "config.json")
 	cmd := exec.Command(binPath, "-config", configPath)
@@ -383,19 +482,28 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string) 
 	for i := 0; i < 10; i++ {
 		resp, err := client.Get(healthURL)
 		if err == nil && resp.StatusCode == http.StatusOK {
+			ok := true
+			if expectedVersion != "" {
+				var versionResp struct {
+					Version string `json:"version"`
+				}
+				_ = json.NewDecoder(resp.Body).Decode(&versionResp)
+				newVer := strings.TrimPrefix(expectedVersion, "v")
+				actualVer := strings.TrimPrefix(versionResp.Version, "v")
+				ok = actualVer == newVer
+			}
 			resp.Body.Close()
-			setUpdateState(UpdateStatus{
-				Status:    "done",
-				Progress:  100,
-				Message:   "Update complete",
-				Timestamp: time.Now().Unix(),
-			})
-
-			// Exit old process
-			time.Sleep(1 * time.Second)
-			os.Exit(0)
-		}
-		if resp != nil {
+			if ok {
+				setUpdateState(UpdateStatus{
+					Status:    "done",
+					Progress:  100,
+					Message:   "Update complete",
+					Timestamp: time.Now().Unix(),
+				})
+				time.Sleep(1 * time.Second)
+				os.Exit(0)
+			}
+		} else if resp != nil {
 			resp.Body.Close()
 		}
 		time.Sleep(1 * time.Second)
@@ -420,6 +528,52 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string) 
 		Message:   msg,
 		Timestamp: time.Now().Unix(),
 	})
+}
+
+// compareSemver сравнивает две версии без префикса "v".
+// Возвращает -1 (a < b), 0 (a == b), 1 (a > b).
+// Pre-release суффикс (через "-") считается меньше стабильной версии.
+func compareSemver(a, b string) int {
+	aParts := strings.SplitN(a, "-", 2)
+	bParts := strings.SplitN(b, "-", 2)
+
+	aNums := strings.Split(aParts[0], ".")
+	bNums := strings.Split(bParts[0], ".")
+
+	maxLen := len(aNums)
+	if len(bNums) > maxLen {
+		maxLen = len(bNums)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var an, bn int
+		if i < len(aNums) {
+			an, _ = strconv.Atoi(aNums[i])
+		}
+		if i < len(bNums) {
+			bn, _ = strconv.Atoi(bNums[i])
+		}
+		if an < bn {
+			return -1
+		}
+		if an > bn {
+			return 1
+		}
+	}
+
+	// Одинаковые цифры: pre-release < stable.
+	aHasPre := len(aParts) > 1
+	bHasPre := len(bParts) > 1
+	if aHasPre && !bHasPre {
+		return -1
+	}
+	if !aHasPre && bHasPre {
+		return 1
+	}
+	if aHasPre && bHasPre {
+		return strings.Compare(aParts[1], bParts[1])
+	}
+	return 0
 }
 
 func fetchLatestRelease(channel string) (*UpdateInfo, error) {
@@ -449,13 +603,7 @@ func fetchLatestRelease(channel string) (*UpdateInfo, error) {
 				Changelog:     rel.Body,
 			}, nil
 		}
-		if channel == "beta" && (strings.Contains(tag, "beta") || !rel.Prerelease) {
-			return &UpdateInfo{
-				LatestVersion: tag,
-				Changelog:     rel.Body,
-			}, nil
-		}
-		if channel == "dev" {
+		if channel == "beta" {
 			return &UpdateInfo{
 				LatestVersion: tag,
 				Changelog:     rel.Body,

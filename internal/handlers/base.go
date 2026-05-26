@@ -20,6 +20,7 @@ type API struct {
 	mihomoSvc           *services.MihomoService
 	configSvc           *services.ConfigService
 	subscriptionSvc     *services.SubscriptionService
+	subscriptionHealthSvc *services.SubscriptionHealthService
 	kernelSvc           *services.KernelService
 	networkSvc          *services.NetworkToolsService
 	smartProxySvc       *services.SmartProxyService
@@ -78,6 +79,10 @@ func (a *API) SetKernelService(svc *services.KernelService) {
 
 func (a *API) SetSubscriptionService(svc *services.SubscriptionService) {
 	a.subscriptionSvc = svc
+}
+
+func (a *API) SetSubscriptionHealthService(svc *services.SubscriptionHealthService) {
+	a.subscriptionHealthSvc = svc
 }
 
 func (a *API) SetNetworkToolsService(svc *services.NetworkToolsService) {

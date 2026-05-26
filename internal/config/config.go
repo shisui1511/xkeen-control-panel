@@ -25,6 +25,8 @@ type Config struct {
 	Auth            AuthConfig  `json:"auth"`
 	HTTPS           HTTPSConfig `json:"https"`
 	MihomoSecret    string      `json:"mihomo_secret"`
+	UpdateChannel   string      `json:"update_channel"` // stable, beta, dev
+	DevMode         bool        `json:"dev_mode"`
 	ConfigPath      string      `json:"-"`
 }
 
@@ -97,6 +99,7 @@ func Default() *Config {
 			CertPath: "",
 			KeyPath:  "",
 		},
+		UpdateChannel: "stable",
 	}
 }
 

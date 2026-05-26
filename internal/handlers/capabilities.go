@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -10,6 +11,16 @@ import (
 type CapabilitiesResponse struct {
 	Kernels map[string]KernelCapability `json:"kernels"`
 	Mihomo  MihomoCapability            `json:"mihomo"`
+	XRay    XRayCapability              `json:"xray"`
+}
+
+// XRayCapability describes XRay confdir setup status.
+type XRayCapability struct {
+	// ConfDir — путь к директории конфигов XRay (из cfg.XRayConfigDir).
+	ConfDir string `json:"conf_dir"`
+	// ConfDirExists — true если директория существует на диске.
+	// Если false — fragment-файлы подписок не будут подхвачены XRay.
+	ConfDirExists bool `json:"conf_dir_exists"`
 }
 
 // KernelCapability holds install status for a single kernel.
@@ -85,6 +96,12 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	resp.Mihomo.Reachable = reachable
 	resp.Mihomo.APIURL = a.cfg.MihomoAPIURL
 	resp.Mihomo.DiscoveredSecret = discoveredSecret
+
+	// XRay confdir capability
+	resp.XRay.ConfDir = a.cfg.XRayConfigDir
+	if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
+		resp.XRay.ConfDirExists = true
+	}
 
 	a.capsCacheMutex.Lock()
 	a.capsCache = resp
