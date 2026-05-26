@@ -46,6 +46,20 @@ func main() {
 		}
 	}
 
+	// Setup logging to file if configured
+	if cfg.XCPLogPath != "" {
+		if err := os.MkdirAll(filepath.Dir(cfg.XCPLogPath), 0755); err == nil {
+			logFile, err := os.OpenFile(cfg.XCPLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err == nil {
+				log.SetOutput(logFile)
+			} else {
+				log.Printf("Failed to open log file %s: %v", cfg.XCPLogPath, err)
+			}
+		} else {
+			log.Printf("Failed to create log directory for %s: %v", cfg.XCPLogPath, err)
+		}
+	}
+
 	srvCfg := &server.Config{
 		Port:             cfg.Port,
 		XRayConfigDir:    cfg.XRayConfigDir,
