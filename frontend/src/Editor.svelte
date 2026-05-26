@@ -93,6 +93,11 @@
   $: filteredMihomoFiles = mihomoFiles.filter((file) =>
     file.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
   );
+  $: isMihomoAutoEdited =
+    selectedFile.includes('/mihomo/') &&
+    (selectedFile.endsWith('config.yaml') ||
+      selectedFile.endsWith('config.yml') ||
+      selectedFile.endsWith('default.yaml'));
   let showSidebar = true;
 
   // Status bar cursor position
@@ -1300,6 +1305,16 @@
           {/if}
         </span>
       </div>
+
+      {#if isMihomoAutoEdited}
+        <div class="alert alert-warning" style="margin: 12px 14px 0;" role="status">
+          <span aria-hidden="true">⚠️</span>
+          <div>
+            <strong>{$t('editor.mihomo_autoedit_title')}</strong>
+            <div style="margin-top: 2px;">{$t('editor.mihomo_autoedit_body')}</div>
+          </div>
+        </div>
+      {/if}
 
       {#if loading}
         <div class="loading" style="min-height: 420px; display: grid; place-items: center;">
