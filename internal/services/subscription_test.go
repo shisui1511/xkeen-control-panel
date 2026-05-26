@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1271,7 +1272,11 @@ func TestSubscription_ConcurrencyRace(t *testing.T) {
 	}
 
 	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case <-stop:
@@ -1284,6 +1289,7 @@ func TestSubscription_ConcurrencyRace(t *testing.T) {
 	}()
 
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case <-stop:
@@ -1301,5 +1307,6 @@ func TestSubscription_ConcurrencyRace(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 	close(stop)
+	wg.Wait()
 }
 

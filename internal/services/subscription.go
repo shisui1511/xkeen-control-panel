@@ -760,9 +760,11 @@ func parseSubscriptionBody(body []byte, contentTypeHeader string, sub *Subscript
 	content := strings.TrimSpace(string(body))
 
 	// 1) Sing-box JSON
-	if strings.Contains(contentType, "json") && looksLikeSingBoxJSON(body) {
+	if (contentType == "" || strings.Contains(contentType, "json")) && looksLikeSingBoxJSON(body) {
 		if outs, err := parseSingBoxJSON(body); err == nil && len(outs) > 0 {
 			sub.DetectedFormat = "sing-box"
+			sub.LastCount = len(outs)
+			sub.LastSkipped = 0
 			return outs, nil, nil
 		}
 	}
@@ -771,6 +773,7 @@ func parseSubscriptionBody(body []byte, contentTypeHeader string, sub *Subscript
 	if outs := parseXrayConfigArray(body); len(outs) > 0 {
 		sub.DetectedFormat = "xray-json"
 		sub.LastCount = len(outs)
+		sub.LastSkipped = 0
 		return outs, nil, nil
 	}
 
@@ -786,6 +789,8 @@ func parseSubscriptionBody(body []byte, contentTypeHeader string, sub *Subscript
 		}
 		if len(valid) > 0 {
 			sub.DetectedFormat = "xray-json"
+			sub.LastCount = len(valid)
+			sub.LastSkipped = 0
 			return valid, nil, nil
 		}
 	}
@@ -796,6 +801,8 @@ func parseSubscriptionBody(body []byte, contentTypeHeader string, sub *Subscript
 	}
 	if err := json.Unmarshal(body, &jsonConfig); err == nil && len(jsonConfig.Outbounds) > 0 {
 		sub.DetectedFormat = "xray-json"
+		sub.LastCount = len(jsonConfig.Outbounds)
+		sub.LastSkipped = 0
 		return jsonConfig.Outbounds, nil, nil
 	}
 

@@ -24,6 +24,7 @@ type NodeHealth struct {
 type SubscriptionHealthService struct {
 	dataDir         string
 	subscriptionSvc *SubscriptionService
+	dialFunc        func(network, address string, timeout time.Duration) (net.Conn, error)
 
 	mu    sync.RWMutex
 	cache map[string]map[string]NodeHealth // subscriptionID -> tag -> NodeHealth
@@ -84,7 +85,7 @@ func (s *SubscriptionHealthService) ForceCheckNode(subscriptionID, nodeTag strin
 		return NodeHealth{LatencyMs: -1, Checked: time.Now()}, false
 	}
 
-	h := dialNode(targetServer)
+	h := s.dialNode(targetServer)
 
 	s.mu.Lock()
 	if s.cache[subscriptionID] == nil {
@@ -117,7 +118,7 @@ func (s *SubscriptionHealthService) checkSubscription(sub *Subscription) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			h := dialNode(server)
+			h := s.dialNode(server)
 			mu.Lock()
 			results[tag] = h
 			mu.Unlock()
@@ -137,17 +138,26 @@ func (s *SubscriptionHealthService) checkSubscription(sub *Subscription) {
 }
 
 // dialNode выполняет TCP-dial к адресу host:port и возвращает NodeHealth.
-func dialNode(server string) NodeHealth {
+func (s *SubscriptionHealthService) dialNode(server string) NodeHealth {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), healthDialTimeout)
-	defer cancel()
+	var conn net.Conn
+	var err error
 
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", server)
+	if s.dialFunc != nil {
+		conn, err = s.dialFunc("tcp", server, healthDialTimeout)
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), healthDialTimeout)
+		defer cancel()
+		var d net.Dialer
+		conn, err = d.DialContext(ctx, "tcp", server)
+	}
+
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		return NodeHealth{Alive: false, LatencyMs: -1, Checked: time.Now()}
 	}
-	conn.Close()
+	if conn != nil {
+		conn.Close()
+	}
 	return NodeHealth{Alive: true, LatencyMs: latency, Checked: time.Now()}
 }
