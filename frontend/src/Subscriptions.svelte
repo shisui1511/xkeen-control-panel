@@ -497,7 +497,20 @@
       flagsSupported = false;
     }
 
-    loadSubscriptions();
+    loadSubscriptions().then(() => {
+      const expandId = sessionStorage.getItem('expand_subscription_id');
+      if (expandId) {
+        sessionStorage.removeItem('expand_subscription_id');
+        toggleExpand(expandId).then(() => {
+          setTimeout(() => {
+            const el = document.getElementById(`sub-card-${expandId}`);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 100);
+        });
+      }
+    });
     fetchCapabilities();
     fetchDevMode();
     window.addEventListener('click', handleClickOutside);
@@ -621,7 +634,7 @@
 
     <div class="subscriptions-list">
       {#each subscriptions as sub}
-        <div class="card sub-card">
+        <div class="card sub-card" id="sub-card-{sub.id}">
           <div class="sub-card-layout">
             <div class="sub-card-left">
               <div class="type-dot-wrapper">

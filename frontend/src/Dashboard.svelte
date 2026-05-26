@@ -311,7 +311,16 @@
   function getTabFromHash(): string {
     const hash = window.location.hash;
     if (hash && hash.startsWith('#/')) {
-      return hash.slice(2);
+      const path = hash.slice(2);
+      if (path.startsWith('subscriptions/')) {
+        const id = path.slice('subscriptions/'.length);
+        if (id) {
+          sessionStorage.setItem('expand_subscription_id', id);
+        }
+        window.location.hash = '#/subscriptions';
+        return 'subscriptions';
+      }
+      return path;
     }
     return 'dashboard';
   }
