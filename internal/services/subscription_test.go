@@ -1228,9 +1228,9 @@ func TestParseXrayConfigArray_IgnoresNonConfigArrays(t *testing.T) {
 
 func TestSubscription_DeepCopy(t *testing.T) {
 	sub := Subscription{
-		ID:         "test",
-		Name:       "original",
-		ProxyNames: []string{"node1", "node2"},
+		ID:           "test",
+		Name:         "original",
+		ProxyNames:   []string{"node1", "node2"},
 		MihomoGroups: []string{"group1"},
 		Nodes: []SubscriptionNode{
 			{Tag: "node1", Name: "Node 1"},
@@ -1258,10 +1258,10 @@ func TestSubscription_ConcurrencyRace(t *testing.T) {
 	svc := NewSubscriptionService(tmp, tmp, tmp)
 
 	sub := Subscription{
-		ID:         "test",
-		Name:       "original",
-		Enabled:    true,
-		ProxyNames: []string{"node1"},
+		ID:           "test",
+		Name:         "original",
+		Enabled:      true,
+		ProxyNames:   []string{"node1"},
 		MihomoGroups: []string{"group1"},
 		Nodes: []SubscriptionNode{
 			{Tag: "node1", Name: "Node 1"},
@@ -1309,4 +1309,3 @@ func TestSubscription_ConcurrencyRace(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
-

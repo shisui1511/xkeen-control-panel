@@ -42,8 +42,8 @@ func TestSubscriptionE2E(t *testing.T) {
 	subSvc.SetHTTPClient(ts.Client()) // используем http-клиент mock-сервера
 
 	cfg := &config.Config{
-		DataDir:       tmp,
-		XRayConfigDir: xrayDir,
+		DataDir:         tmp,
+		XRayConfigDir:   xrayDir,
 		MihomoConfigDir: mihomoDir,
 	}
 
@@ -54,11 +54,11 @@ func TestSubscriptionE2E(t *testing.T) {
 
 	// 3. Добавление новой подписки через API (POST /api/subscriptions/add)
 	addPayload := map[string]interface{}{
-		"name":      "Integration Sub",
-		"url":       ts.URL,
-		"type":      "xray",
-		"enabled":   true,
-		"interval":  12,
+		"name":       "Integration Sub",
+		"url":        ts.URL,
+		"type":       "xray",
+		"enabled":    true,
+		"interval":   12,
 		"tag_prefix": "test-pfx",
 	}
 	payloadBytes, _ := json.Marshal(addPayload)

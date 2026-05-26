@@ -14,28 +14,28 @@ import (
 )
 
 type API struct {
-	cfg                 *config.Config
-	srv                 *server.Server
-	xkeenSvc            *services.XKeenService
-	mihomoSvc           *services.MihomoService
-	configSvc           *services.ConfigService
-	subscriptionSvc     *services.SubscriptionService
+	cfg                   *config.Config
+	srv                   *server.Server
+	xkeenSvc              *services.XKeenService
+	mihomoSvc             *services.MihomoService
+	configSvc             *services.ConfigService
+	subscriptionSvc       *services.SubscriptionService
 	subscriptionHealthSvc *services.SubscriptionHealthService
-	kernelSvc           *services.KernelService
-	networkSvc          *services.NetworkToolsService
-	smartProxySvc       *services.SmartProxyService
-	trafficQuotaSvc     *services.TrafficQuotaService
-	datSvc              *services.DATManagerService
-	snapshotSvc         *services.SnapshotService
-	consoleSvc          *services.ConsoleService
-	templateSvc         *services.TemplateService
-	pathVal             *utils.PathValidator
-	configValCache      bool
-	configValCacheTime  time.Time
-	configValCacheMutex sync.Mutex
-	capsCache           interface{}
-	capsCacheTime       time.Time
-	capsCacheMutex      sync.Mutex
+	kernelSvc             *services.KernelService
+	networkSvc            *services.NetworkToolsService
+	smartProxySvc         *services.SmartProxyService
+	trafficQuotaSvc       *services.TrafficQuotaService
+	datSvc                *services.DATManagerService
+	snapshotSvc           *services.SnapshotService
+	consoleSvc            *services.ConsoleService
+	templateSvc           *services.TemplateService
+	pathVal               *utils.PathValidator
+	configValCache        bool
+	configValCacheTime    time.Time
+	configValCacheMutex   sync.Mutex
+	capsCache             interface{}
+	capsCacheTime         time.Time
+	capsCacheMutex        sync.Mutex
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {

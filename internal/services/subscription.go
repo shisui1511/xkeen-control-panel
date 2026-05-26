@@ -76,18 +76,18 @@ func (s *SubscriptionService) fetchWithUserAgent(subURL string, sub *Subscriptio
 
 // SubscriptionNode представляет метаданные отдельного узла подписки.
 type SubscriptionNode struct {
-	Tag       string `json:"tag"`                  // Уникальный тег XRay (sub-N-K)
-	Name      string `json:"name"`                 // Чистое имя без флагов и мусора
-	Country   string `json:"country,omitempty"`    // ISO-код страны (например, RU, DE)
-	Flag      string `json:"flag,omitempty"`       // Эмодзи флаг (например, 🇷🇺)
-	UseCase   string `json:"use_case,omitempty"`   // Область применения (например, "Youtube, Instagram")
-	Speed     string `json:"speed,omitempty"`      // Скорость (например, "1Gb/s")
-	IsNew     bool   `json:"is_new,omitempty"`     // Флаг новизны
-	Protocol  string `json:"protocol"`             // Протокол (vless, vmess, trojan, shadowsocks)
-	Transport string `json:"transport,omitempty"`  // Транспорт (ws, grpc, httpupgrade, xhttp, tcp)
-	Security  string `json:"security,omitempty"`   // Безопасность (tls, reality, none)
-	Server    string `json:"server,omitempty"`     // Адрес сервера (хост:порт)
-	Active    bool   `json:"active,omitempty"`     // Выбран ли узел активным
+	Tag       string `json:"tag"`                 // Уникальный тег XRay (sub-N-K)
+	Name      string `json:"name"`                // Чистое имя без флагов и мусора
+	Country   string `json:"country,omitempty"`   // ISO-код страны (например, RU, DE)
+	Flag      string `json:"flag,omitempty"`      // Эмодзи флаг (например, 🇷🇺)
+	UseCase   string `json:"use_case,omitempty"`  // Область применения (например, "Youtube, Instagram")
+	Speed     string `json:"speed,omitempty"`     // Скорость (например, "1Gb/s")
+	IsNew     bool   `json:"is_new,omitempty"`    // Флаг новизны
+	Protocol  string `json:"protocol"`            // Протокол (vless, vmess, trojan, shadowsocks)
+	Transport string `json:"transport,omitempty"` // Транспорт (ws, grpc, httpupgrade, xhttp, tcp)
+	Security  string `json:"security,omitempty"`  // Безопасность (tls, reality, none)
+	Server    string `json:"server,omitempty"`    // Адрес сервера (хост:порт)
+	Active    bool   `json:"active,omitempty"`    // Выбран ли узел активным
 }
 
 // Subscription represents a proxy subscription
@@ -129,11 +129,11 @@ type Subscription struct {
 	RuleCount int   `json:"rule_count,omitempty"`
 
 	// Метаданные из response headers (Remnawave/Marzban протокол).
-	ProfileTitle       string `json:"profile_title,omitempty"`        // имя из header profile-title (base64)
-	ProfileUpdateHours int    `json:"profile_update_hours,omitempty"` // из header profile-update-interval
-	SupportURL         string `json:"support_url,omitempty"`          // из header support-url
-	ProfileWebPageURL  string `json:"profile_web_page_url,omitempty"` // из header profile-web-page-url
-	Expire             int64  `json:"expire,omitempty"`               // unix ts окончания подписки
+	ProfileTitle        string `json:"profile_title,omitempty"`         // имя из header profile-title (base64)
+	ProfileUpdateHours  int    `json:"profile_update_hours,omitempty"`  // из header profile-update-interval
+	SupportURL          string `json:"support_url,omitempty"`           // из header support-url
+	ProfileWebPageURL   string `json:"profile_web_page_url,omitempty"`  // из header profile-web-page-url
+	Expire              int64  `json:"expire,omitempty"`                // unix ts окончания подписки
 	UseProviderInterval bool   `json:"use_provider_interval,omitempty"` // использовать ли интервал провайдера
 
 	// Mihomo state tracking — для in-place правки config.yaml.
@@ -185,7 +185,6 @@ func (s *Subscription) Clone() Subscription {
 	return res
 }
 
-
 // Outbound represents a parsed proxy outbound
 type Outbound struct {
 	Tag            string                 `json:"tag"`
@@ -208,7 +207,6 @@ type ParseReport struct {
 	Skipped      []SkipReason `json:"skipped"`
 	Timestamp    time.Time    `json:"timestamp"`
 }
-
 
 // backoff constants for failed auto-refreshes
 const (

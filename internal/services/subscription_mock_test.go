@@ -111,7 +111,6 @@ rules:
 
 			got := svc.Get(id)
 
-
 			if got.DetectedFormat != tt.expectedFormat {
 				t.Errorf("expected format %q, got %q", tt.expectedFormat, got.DetectedFormat)
 			}

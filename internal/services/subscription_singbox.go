@@ -29,12 +29,12 @@ type singBoxOutbound struct {
 }
 
 type singBoxTLS struct {
-	Enabled    bool             `json:"enabled"`
-	ServerName string           `json:"server_name"`
-	Insecure   bool             `json:"insecure"`
-	ALPN       []string         `json:"alpn"`
-	Reality    *singBoxReality  `json:"reality,omitempty"`
-	UTLS       *singBoxUTLS     `json:"utls,omitempty"`
+	Enabled    bool            `json:"enabled"`
+	ServerName string          `json:"server_name"`
+	Insecure   bool            `json:"insecure"`
+	ALPN       []string        `json:"alpn"`
+	Reality    *singBoxReality `json:"reality,omitempty"`
+	UTLS       *singBoxUTLS    `json:"utls,omitempty"`
 }
 
 type singBoxReality struct {

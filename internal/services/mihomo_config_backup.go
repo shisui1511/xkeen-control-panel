@@ -15,8 +15,8 @@ const mihomoConfigBackupRetention = 5
 // backupMihomoConfig копирует текущий config.yaml в data-директорию с
 // timestamp-суффиксом перед любым in-place редактированием.
 //
-//   dataDir — корневой каталог данных панели (например /opt/xcp_data).
-//   configPath — абсолютный путь к Mihomo config.yaml.
+//	dataDir — корневой каталог данных панели (например /opt/xcp_data).
+//	configPath — абсолютный путь к Mihomo config.yaml.
 //
 // Бэкапы попадают в {dataDir}/backup/mihomo/config.yaml.{unixNanoTs}.
 // Старые сверх retention автоматически удаляются.
