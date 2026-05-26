@@ -498,28 +498,38 @@
     }
 
     loadSubscriptions().then(() => {
-      const expandId = sessionStorage.getItem('expand_subscription_id');
-      if (expandId) {
-        sessionStorage.removeItem('expand_subscription_id');
-        toggleExpand(expandId).then(() => {
-          setTimeout(() => {
-            const el = document.getElementById(`sub-card-${expandId}`);
-            if (el) {
-              el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-          }, 100);
-        });
-      }
+      checkAutoExpand();
     });
     fetchCapabilities();
     fetchDevMode();
+    
+    const handleHashChange = () => {
+      checkAutoExpand();
+    };
+    window.addEventListener('hashchange', handleHashChange);
     window.addEventListener('click', handleClickOutside);
     window.addEventListener('keydown', handleKeydown);
     return () => {
+      window.removeEventListener('hashchange', handleHashChange);
       window.removeEventListener('click', handleClickOutside);
       window.removeEventListener('keydown', handleKeydown);
     };
   });
+
+  function checkAutoExpand() {
+    const expandId = sessionStorage.getItem('expand_subscription_id');
+    if (expandId) {
+      sessionStorage.removeItem('expand_subscription_id');
+      toggleExpand(expandId).then(() => {
+        setTimeout(() => {
+          const el = document.getElementById(`sub-card-${expandId}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }, 100);
+      });
+    }
+  }
 
   let stats = $derived((() => {
     const totalNodes = subscriptions.reduce((sum, s) => sum + (s.proxy_count || 0), 0);
