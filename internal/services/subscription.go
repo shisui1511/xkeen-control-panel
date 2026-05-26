@@ -284,6 +284,12 @@ func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *Subscri
 	return svc
 }
 
+func (s *SubscriptionService) SetHTTPClient(client *http.Client) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.httpClient = client
+}
+
 func (s *SubscriptionService) load() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
