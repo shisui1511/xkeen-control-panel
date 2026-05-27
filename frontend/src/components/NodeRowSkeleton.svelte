@@ -15,7 +15,12 @@
         </div>
       </div>
       <div class="right-section">
-        <Skeleton type="text-line" width="50px" height="12px" style="margin: 0; margin-right: 8px;" />
+        <Skeleton
+          type="text-line"
+          width="50px"
+          height="12px"
+          style="margin: 0; margin-right: 8px;"
+        />
         <Skeleton type="rect" width="80px" height="28px" style="border-radius: var(--radius-md);" />
       </div>
     </div>

@@ -52,8 +52,15 @@
     class:chip-default={!(sub.use_provider_interval && sub.profile_update_hours)}
     title={$t('subscr.provider_interval')}
   >
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2.5"
+    >
+      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
     </svg>
     {#if sub.use_provider_interval && sub.profile_update_hours && sub.profile_update_hours > 0}
       {$currentLang === 'ru' ? 'Пров:' : 'Prov:'} {sub.profile_update_hours}h
@@ -65,9 +72,7 @@
   <!-- Качество подписки -->
   {#if sub.detected_format}
     {#if ['xray-json', 'clash-meta', 'sing-box'].includes(sub.detected_format)}
-      <span class="chip chip-success" title={$t('subscr.quality_full_tip')}>
-        ✓ 100%
-      </span>
+      <span class="chip chip-success" title={$t('subscr.quality_full_tip')}> ✓ 100% </span>
     {:else}
       <span class="chip chip-warning" title={$t('subscr.quality_partial_tip')}>
         ⚠ {$t('subscr.quality_partial')}
@@ -77,9 +82,22 @@
 
   <!-- Ссылка на поддержку -->
   {#if sub.support_url}
-    <a href={sub.support_url} target="_blank" rel="noopener noreferrer" class="chip chip-default chip--icon" title={sub.support_url}>
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    <a
+      href={sub.support_url}
+      target="_blank"
+      rel="noopener noreferrer"
+      class="chip chip-default chip--icon"
+      title={sub.support_url}
+    >
+      <svg
+        width="12"
+        height="12"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2.5"
+      >
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
       </svg>
       Support
     </a>

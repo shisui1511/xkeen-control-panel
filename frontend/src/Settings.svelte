@@ -2,7 +2,14 @@
   import { onMount, onDestroy } from 'svelte';
   import { t, setLang, currentLang, getAvailableLangs, type Lang } from './i18n';
   import Icon from './lib/components/Icon.svelte';
-  import { capabilities, fetchCapabilities, showToast, devMode, fetchDevMode, setDevMode } from './stores';
+  import {
+    capabilities,
+    fetchCapabilities,
+    showToast,
+    devMode,
+    fetchDevMode,
+    setDevMode
+  } from './stores';
 
   export let onSwitchTab: (tab: string) => void = () => {};
 
@@ -19,7 +26,8 @@
 
   let version = '...';
   let langs = getAvailableLangs();
-  let activeTab: 'general' | 'updates' | 'security' | 'connection' | 'backups' | 'about' = 'general';
+  let activeTab: 'general' | 'updates' | 'security' | 'connection' | 'backups' | 'about' =
+    'general';
 
   // Backups state variables
   let configFiles: string[] = [];
@@ -671,7 +679,6 @@
         </div>
       </div>
     </div>
-
   {/if}
 
   <!-- Updates tab -->
@@ -695,13 +702,13 @@
           <span class="field-row-name">{$t('settings.update_channel')}</span>
           <div class="field-row-val">
             <div class="channel-switcher">
-              {#each (['stable', 'beta'] as const) as ch}
+              {#each ['stable', 'beta'] as const as ch}
                 <button
                   class="channel-btn"
                   class:active={updateChannel === ch}
                   on:click={() => saveUpdateChannel(ch)}
-                  disabled={updateInstalling}
-                >{$t(`settings.channel_${ch}`)}</button>
+                  disabled={updateInstalling}>{$t(`settings.channel_${ch}`)}</button
+                >
               {/each}
             </div>
           </div>
@@ -735,7 +742,7 @@
         {#if updateInfo?.has_update}
           <button
             class="btn btn-primary"
-            on:click={() => showConfirmUpdateModal = true}
+            on:click={() => (showConfirmUpdateModal = true)}
             disabled={updateInstalling}
             title={$t('settings.install_update')}
           >
@@ -756,13 +763,15 @@
       class="modal-overlay"
       role="button"
       tabindex="0"
-      on:click={() => showConfirmUpdateModal = false}
+      on:click={() => (showConfirmUpdateModal = false)}
       on:keydown={(e) => e.key === 'Escape' && (showConfirmUpdateModal = false)}
     >
       <div class="modal-card" role="presentation" on:click|stopPropagation>
         <div class="modal-card-header">
           <h2>{$t('settings.update_confirm_title')}</h2>
-          <button class="modal-close-btn" on:click={() => showConfirmUpdateModal = false}>&times;</button>
+          <button class="modal-close-btn" on:click={() => (showConfirmUpdateModal = false)}
+            >&times;</button
+          >
         </div>
         <div class="modal-card-body">
           <p>{$t('settings.update_confirm_text')}</p>
@@ -773,11 +782,16 @@
           {/if}
         </div>
         <div class="modal-card-footer">
-          <button class="btn btn-secondary" on:click={() => showConfirmUpdateModal = false}>{$t('app.cancel')}</button>
-          <button class="btn btn-primary" on:click={() => {
-            showConfirmUpdateModal = false;
-            installUpdate();
-          }}>{$t('settings.update_install_btn')}</button>
+          <button class="btn btn-secondary" on:click={() => (showConfirmUpdateModal = false)}
+            >{$t('app.cancel')}</button
+          >
+          <button
+            class="btn btn-primary"
+            on:click={() => {
+              showConfirmUpdateModal = false;
+              installUpdate();
+            }}>{$t('settings.update_install_btn')}</button
+          >
         </div>
       </div>
     </div>
@@ -1068,7 +1082,7 @@
         </div>
       </div>
     </div>
-    {/if}
+  {/if}
 </div>
 
 <style>
@@ -1282,7 +1296,10 @@
     color: var(--fg-secondary);
     font-size: 13px;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    transition:
+      background 0.15s,
+      color 0.15s,
+      border-color 0.15s;
   }
 
   .channel-btn:hover {

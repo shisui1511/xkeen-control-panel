@@ -1,8 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t, currentLang } from './i18n';
-  import { showConfirm, capabilities, fetchCapabilities, showToast, devMode, fetchDevMode } from './stores';
-
+  import {
+    showConfirm,
+    capabilities,
+    fetchCapabilities,
+    showToast,
+    devMode,
+    fetchDevMode
+  } from './stores';
 
   let { onSwitchTab = () => {} } = $props<{ onSwitchTab?: (tab: string) => void }>();
 
@@ -353,7 +359,7 @@
 
   function parseAnnouncementLines(text: string): AnnouncementLine[] {
     if (!text) return [];
-    return text.split('\n').map(line => {
+    return text.split('\n').map((line) => {
       line = line.trim();
       let isWarn = false;
       let cleanText = line;
@@ -425,7 +431,7 @@
     return `${h.latency_ms}ms`;
   }
 
-  type Token = 
+  type Token =
     | { type: 'text'; value: string }
     | { type: 'bold'; value: string }
     | { type: 'italic'; value: string }
@@ -433,14 +439,14 @@
 
   function parseSimpleMarkdown(text: string): Token[] {
     if (!text) return [];
-    
+
     const tokens: Token[] = [];
     const regex = /(\*\*.*?\*\*|\*.*?\*|\[.*?\]\(.*?\))/g;
     const parts = text.split(regex);
-    
+
     for (const part of parts) {
       if (!part) continue;
-      
+
       if (part.startsWith('**') && part.endsWith('**')) {
         tokens.push({ type: 'bold', value: part.slice(2, -2) });
       } else if (part.startsWith('*') && part.endsWith('*')) {
@@ -544,19 +550,22 @@
     if (!countryCode) return '';
     const code = countryCode.toUpperCase();
     const styles: Record<string, string> = {
-      'EU': 'background: linear-gradient(135deg, #0b3c98, #072561); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3); border-color: rgba(41, 194, 240, 0.3);',
-      'RU': 'background: linear-gradient(135deg, #1e88e5, #e53935); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3);',
-      'DE': 'background: linear-gradient(135deg, #ffb300, #ff3d00, #212121); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
-      'NL': 'background: linear-gradient(135deg, #ff7043, #d84315); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3);',
-      'PL': 'background: linear-gradient(180deg, #ffffff 50%, #e91e63 50%); color: #333333; box-shadow: inset 0 0 4px rgba(0,0,0,0.15); border-color: rgba(255, 255, 255, 0.1);',
-      'FI': 'background: linear-gradient(135deg, #ffffff 40%, #0d47a1 40%); color: #0d47a1;',
-      'LT': 'background: linear-gradient(135deg, #4caf50, #ffeb3b, #f44336); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
-      'EE': 'background: linear-gradient(135deg, #29b6f6, #212121, #ffffff); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
-      'ES': 'background: linear-gradient(135deg, #e53935, #ffeb3b, #e53935); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
-      'US': 'background: linear-gradient(135deg, #0d47a1, #b71c1c); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3);',
-      'AM': 'background: linear-gradient(135deg, #e53935, #0d47a1, #ffb300); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
+      EU: 'background: linear-gradient(135deg, #0b3c98, #072561); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3); border-color: rgba(41, 194, 240, 0.3);',
+      RU: 'background: linear-gradient(135deg, #1e88e5, #e53935); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3);',
+      DE: 'background: linear-gradient(135deg, #ffb300, #ff3d00, #212121); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
+      NL: 'background: linear-gradient(135deg, #ff7043, #d84315); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3);',
+      PL: 'background: linear-gradient(180deg, #ffffff 50%, #e91e63 50%); color: #333333; box-shadow: inset 0 0 4px rgba(0,0,0,0.15); border-color: rgba(255, 255, 255, 0.1);',
+      FI: 'background: linear-gradient(135deg, #ffffff 40%, #0d47a1 40%); color: #0d47a1;',
+      LT: 'background: linear-gradient(135deg, #4caf50, #ffeb3b, #f44336); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
+      EE: 'background: linear-gradient(135deg, #29b6f6, #212121, #ffffff); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
+      ES: 'background: linear-gradient(135deg, #e53935, #ffeb3b, #e53935); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
+      US: 'background: linear-gradient(135deg, #0d47a1, #b71c1c); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3);',
+      AM: 'background: linear-gradient(135deg, #e53935, #0d47a1, #ffb300); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);'
     };
-    return styles[code] ?? 'background: linear-gradient(135deg, #424242, #212121); color: var(--fg-primary);';
+    return (
+      styles[code] ??
+      'background: linear-gradient(135deg, #424242, #212121); color: var(--fg-primary);'
+    );
   }
 
   onMount(() => {
@@ -582,7 +591,7 @@
     });
     fetchCapabilities();
     fetchDevMode();
-    
+
     const handleHashChange = () => {
       checkAutoExpand();
     };
@@ -611,31 +620,32 @@
     }
   }
 
-  let stats = $derived((() => {
-    const totalNodes = subscriptions.reduce((sum, s) => sum + (s.proxy_count || 0), 0);
-    let minNext = Infinity;
-    subscriptions.forEach((s) => {
-      if (s.enabled && s.last_update && !s.last_update.startsWith('0001')) {
-        const next = new Date(s.last_update).getTime() + s.interval * 3600 * 1000;
-        const diff = next - Date.now();
-        if (diff > 0 && diff < minNext) {
-          minNext = diff;
+  let stats = $derived(
+    (() => {
+      const totalNodes = subscriptions.reduce((sum, s) => sum + (s.proxy_count || 0), 0);
+      let minNext = Infinity;
+      subscriptions.forEach((s) => {
+        if (s.enabled && s.last_update && !s.last_update.startsWith('0001')) {
+          const next = new Date(s.last_update).getTime() + s.interval * 3600 * 1000;
+          const diff = next - Date.now();
+          if (diff > 0 && diff < minNext) {
+            minNext = diff;
+          }
         }
+      });
+      let nextStr = '—';
+      if (minNext !== Infinity) {
+        const diffHours = Math.floor(minNext / (3600 * 1000));
+        const diffMins = Math.floor((minNext % (3600 * 1000)) / (60 * 1000));
+        nextStr = `${diffHours}ч ${diffMins}м`;
       }
-    });
-    let nextStr = '—';
-    if (minNext !== Infinity) {
-      const diffHours = Math.floor(minNext / (3600 * 1000));
-      const diffMins = Math.floor((minNext % (3600 * 1000)) / (60 * 1000));
-      nextStr = `${diffHours}ч ${diffMins}м`;
-    }
-    return {
-      total: subscriptions.length,
-      nodes: totalNodes,
-      next: nextStr
-    };
-  })());
-
+      return {
+        total: subscriptions.length,
+        nodes: totalNodes,
+        next: nextStr
+      };
+    })()
+  );
 </script>
 
 <div class="container">
@@ -678,7 +688,18 @@
 
   {#if $capabilities?.xray && !$capabilities.xray.conf_dir_exists}
     <div class="confdir-warning">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        style="flex-shrink:0"
+        ><path
+          d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+        /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg
+      >
       <span>{$t('subscr.confdir_warning').replace('{dir}', $capabilities.xray.conf_dir)}</span>
     </div>
   {/if}
@@ -705,18 +726,29 @@
   {:else}
     <div class="stats-chips-row mb-3">
       <span class="chip chip-default">
-        <b>{stats.total}</b> {$currentLang === 'ru' ? 'подписки' : 'subscriptions'}
+        <b>{stats.total}</b>
+        {$currentLang === 'ru' ? 'подписки' : 'subscriptions'}
       </span>
       <span class="chip chip-default">
-        <b>{stats.nodes}</b> {$currentLang === 'ru' ? 'узлов суммарно' : 'nodes total'}
+        <b>{stats.nodes}</b>
+        {$currentLang === 'ru' ? 'узлов суммарно' : 'nodes total'}
       </span>
       {#if stats.next !== '—'}
         <span class="chip chip-default chip--icon">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="timer-icon">
-            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            class="timer-icon"
+          >
+            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
           </svg>
           <span>
-            {$currentLang === 'ru' ? 'след. обновление через' : 'next update in'} <b>{stats.next}</b>
+            {$currentLang === 'ru' ? 'след. обновление через' : 'next update in'}
+            <b>{stats.next}</b>
           </span>
         </span>
       {/if}
@@ -731,77 +763,129 @@
             <!-- Левая колонка хедера -->
             <div class="sub-header-left">
               <!-- Стрелочка разворачивания нод -->
-              <button 
-                class="collapse-toggle" 
-                class:expanded={expandedSubs[sub.id]} 
+              <button
+                class="collapse-toggle"
+                class:expanded={expandedSubs[sub.id]}
                 on:click={() => toggleExpand(sub.id)}
                 aria-label="Toggle node list"
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                >
                   <polyline points="9 18 15 12 9 6" />
                 </svg>
               </button>
 
               <!-- LED точка статуса (активна / выключена) -->
-              <div 
-                class="type-dot" 
-                class:mihomo={sub.type === 'mihomo'} 
-                class:disabled={!sub.enabled} 
+              <div
+                class="type-dot"
+                class:mihomo={sub.type === 'mihomo'}
+                class:disabled={!sub.enabled}
                 class:has-error={!!sub.last_error}
                 title={sub.last_error || (sub.enabled ? $t('app.active') : $t('app.disabled'))}
               ></div>
 
               <!-- Имя подписки -->
-              <h2 class="sub-name" on:click={() => toggleExpand(sub.id)}>{sub.profile_title || sub.name}</h2>
+              <h2 class="sub-name" on:click={() => toggleExpand(sub.id)}>
+                {sub.profile_title || sub.name}
+              </h2>
             </div>
 
             <!-- Правая колонка хедера -->
             <div class="sub-header-right">
               <!-- Дата обновления -->
-              <span class="sub-update-time" title={$t('subscr.updated_at').replace('{date}', formatDate(sub.last_update))}>
+              <span
+                class="sub-update-time"
+                title={$t('subscr.updated_at').replace('{date}', formatDate(sub.last_update))}
+              >
                 {formatUpdateDate(sub.last_update)}
               </span>
 
               <!-- Синий чип количества нод -->
-              <span class="nodes-count-badge" on:click={() => toggleExpand(sub.id)} title={$t('subscr.nodes_count').replace('{count}', String(sub.proxy_count || 0))}>
+              <span
+                class="nodes-count-badge"
+                on:click={() => toggleExpand(sub.id)}
+                title={$t('subscr.nodes_count').replace('{count}', String(sub.proxy_count || 0))}
+              >
                 {sub.proxy_count || 0}
               </span>
 
               <!-- Кнопка Обновить подписку (круговая стрелочка) -->
-              <button 
-                class="action-icon-btn" 
-                on:click={() => refreshSubscription(sub.id)} 
-                disabled={refreshLoading[sub.id]} 
+              <button
+                class="action-icon-btn"
+                on:click={() => refreshSubscription(sub.id)}
+                disabled={refreshLoading[sub.id]}
                 title={$t('subscr.refresh')}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class:spinning={refreshLoading[sub.id]}>
-                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  class:spinning={refreshLoading[sub.id]}
+                >
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
                 </svg>
               </button>
 
               <!-- Кнопка редактирования -->
-              <button class="action-icon-btn" on:click={() => openEditModal(sub)} title={$t('app.edit')}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              <button
+                class="action-icon-btn"
+                on:click={() => openEditModal(sub)}
+                title={$t('app.edit')}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                >
+                  <circle cx="12" cy="12" r="3" /><path
+                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+                  />
                 </svg>
               </button>
 
               <!-- Кнопка три точки -->
               <div class="dropdown-container">
-                <button class="action-icon-btn dots-btn" on:click={() => toggleDropdown(sub.id)} aria-label="More actions">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+                <button
+                  class="action-icon-btn dots-btn"
+                  on:click={() => toggleDropdown(sub.id)}
+                  aria-label="More actions"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                  >
+                    <circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="5" r="1.5" /><circle
+                      cx="12"
+                      cy="19"
+                      r="1.5"
+                    />
                   </svg>
                 </button>
                 {#if activeDropdownId === sub.id}
                   <div class="dropdown-menu">
                     {#if $devMode}
-                    <button
-                      on:click={() => {
-                        openDiagnosticModal(sub);
-                        activeDropdownId = null;
-                      }}>🔍 {$t('subscr.diag_btn')}</button
-                    >
+                      <button
+                        on:click={() => {
+                          openDiagnosticModal(sub);
+                          activeDropdownId = null;
+                        }}>🔍 {$t('subscr.diag_btn')}</button
+                      >
                     {/if}
                     <button
                       on:click={() => {
@@ -821,14 +905,18 @@
             <!-- Срок действия -->
             <div class="sub-meta-left">
               {#if exp}
-                <span class="expire-text" class:expired={exp.expired} class:warning={exp.days !== null && exp.days <= 5}>
+                <span
+                  class="expire-text"
+                  class:expired={exp.expired}
+                  class:warning={exp.days !== null && exp.days <= 5}
+                >
                   {exp.text}
                 </span>
                 <span class="meta-divider">|</span>
               {/if}
-              
+
               <span class="sub-type-label">{sub.type === 'mihomo' ? 'Mihomo' : 'XRay'}</span>
-              
+
               {#if sub.hwid_locked}
                 <span class="meta-divider">|</span>
                 <span class="hwid-locked-badge">⚠ HWID Locked</span>
@@ -838,7 +926,10 @@
             <!-- Объем трафика -->
             <div class="sub-meta-right">
               <span class="traffic-text">
-                {formatTraffic((sub.upload || 0) + (sub.download || 0))} / {sub.total && sub.total > 0 ? formatTraffic(sub.total) : '∞'}
+                {formatTraffic((sub.upload || 0) + (sub.download || 0))} / {sub.total &&
+                sub.total > 0
+                  ? formatTraffic(sub.total)
+                  : '∞'}
               </span>
             </div>
           </div>
@@ -847,9 +938,22 @@
           {#if sub.support_url || sub.announcement}
             <div class="sub-actions-row">
               {#if sub.support_url}
-                <a href={sub.support_url} target="_blank" rel="noopener noreferrer" class="btn btn-support">
+                <a
+                  href={sub.support_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="btn btn-support"
+                >
                   <!-- Telegram Icon (Plane) -->
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="support-icon">
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    class="support-icon"
+                  >
                     <line x1="22" y1="2" x2="11" y2="13"></line>
                     <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
                   </svg>
@@ -861,12 +965,22 @@
                 <div class="announcement-wrapper">
                   <button class="btn btn-announcement">
                     <!-- Bell/Info Icon -->
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="announce-icon">
-                      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      class="announce-icon"
+                    >
+                      <path
+                        d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"
+                      />
                     </svg>
                     <span>{$currentLang === 'ru' ? 'Объявление' : 'Announcement'}</span>
                   </button>
-                  
+
                   <!-- Всплывающий popover при ховере на .announcement-wrapper -->
                   <div class="announcement-popover">
                     {#each parseAnnouncementLines(sub.announcement) as line}
@@ -882,7 +996,9 @@
                               {:else if token.type === 'italic'}
                                 <em>{token.value}</em>
                               {:else if token.type === 'link'}
-                                <a href={token.url} target="_blank" rel="noopener noreferrer">{token.text}</a>
+                                <a href={token.url} target="_blank" rel="noopener noreferrer"
+                                  >{token.text}</a
+                                >
                               {/if}
                             {/each}
                           </span>
@@ -897,7 +1013,9 @@
                             {:else if token.type === 'italic'}
                               <em>{token.value}</em>
                             {:else if token.type === 'link'}
-                              <a href={token.url} target="_blank" rel="noopener noreferrer">{token.text}</a>
+                              <a href={token.url} target="_blank" rel="noopener noreferrer"
+                                >{token.text}</a
+                              >
                             {/if}
                           {/each}
                         </div>
@@ -909,125 +1027,154 @@
             </div>
           {/if}
 
-            {#if expandedSubs[sub.id]}
-              <div class="nodes-preview-content">
-                {#if subNodesLoading[sub.id]}
-                  <div class="loading-nodes">
-                    <span class="spinner-xs"></span>
-                    <span style="margin-left: 8px;">{$t('app.loading')}</span>
+          {#if expandedSubs[sub.id]}
+            <div class="nodes-preview-content">
+              {#if subNodesLoading[sub.id]}
+                <div class="loading-nodes">
+                  <span class="spinner-xs"></span>
+                  <span style="margin-left: 8px;">{$t('app.loading')}</span>
+                </div>
+              {:else}
+                <!-- Nodes list -->
+                {#if !subNodes[sub.id] || subNodes[sub.id].length === 0}
+                  <div class="empty-nodes">
+                    {$t('subscr.detail.no_nodes')}
                   </div>
                 {:else}
+                  <div class="inline-nodes-list">
+                    {#each subNodes[sub.id] as node}
+                      {@const h = subHealth[sub.id]?.[node.tag]}
+                      {@const isNodeActive = node.active}
+                      {@const metaText =
+                        node.use_case || node.speed
+                          ? `${node.use_case || ''}${node.use_case && node.speed ? ' - ' : ''}${node.speed || ''}`
+                          : `${node.protocol || ''}${node.protocol && node.transport ? ' · ' + node.transport : ''}${node.security && node.security !== 'none' ? ' · ' + node.security : ''}`}
+                      <!-- svelte-ignore a11y_click_events_have_key_events -->
+                      <!-- svelte-ignore a11y_no_static_element_interactions -->
+                      <div
+                        class="sub-node-row"
+                        class:active={isNodeActive}
+                        on:click={() => {
+                          if (sub.type !== 'mihomo') {
+                            setActiveNode(sub.id, node.tag, sub.type);
+                          }
+                        }}
+                      >
+                        {#if isNodeActive}
+                          <div class="sub-node-active-bar"></div>
+                        {/if}
 
-
-                  <!-- Nodes list -->
-                  {#if !subNodes[sub.id] || subNodes[sub.id].length === 0}
-                    <div class="empty-nodes">
-                      {$t('subscr.detail.no_nodes')}
-                    </div>
-                  {:else}
-                    <div class="inline-nodes-list">
-                      {#each subNodes[sub.id] as node}
-                        {@const h = subHealth[sub.id]?.[node.tag]}
-                        {@const isNodeActive = node.active}
-                        {@const metaText = node.use_case || node.speed ? `${node.use_case || ''}${node.use_case && node.speed ? ' - ' : ''}${node.speed || ''}` : `${node.protocol || ''}${node.protocol && node.transport ? ' · ' + node.transport : ''}${node.security && node.security !== 'none' ? ' · ' + node.security : ''}`}
-                        <!-- svelte-ignore a11y_click_events_have_key_events -->
-                        <!-- svelte-ignore a11y_no_static_element_interactions -->
+                        <!-- Flag Avatar -->
                         <div
-                          class="sub-node-row"
+                          class="sub-node-avatar-container"
                           class:active={isNodeActive}
-                          on:click={() => {
-                            if (sub.type !== 'mihomo') {
-                              setActiveNode(sub.id, node.tag, sub.type);
-                            }
-                          }}
+                          style={(!flagsSupported || !node.flag) && node.country
+                            ? getCountryColorStyle(node.country)
+                            : ''}
                         >
-                          {#if isNodeActive}
-                            <div class="sub-node-active-bar"></div>
+                          {#if flagsSupported && node.flag}
+                            <span class="sub-node-flag">{node.flag}</span>
+                          {:else if node.country}
+                            <span class="sub-node-avatar-text">{node.country}</span>
+                          {:else}
+                            <span class="sub-node-flag-fallback">🌐</span>
                           {/if}
+                        </div>
 
-                          <!-- Flag Avatar -->
-                          <div 
-                             class="sub-node-avatar-container" 
-                             class:active={isNodeActive}
-                             style={(!flagsSupported || !node.flag) && node.country ? getCountryColorStyle(node.country) : ''}
-                           >
-                             {#if flagsSupported && node.flag}
-                               <span class="sub-node-flag">{node.flag}</span>
-                             {:else}
-                               {#if node.country}
-                                 <span class="sub-node-avatar-text">{node.country}</span>
-                               {:else}
-                                 <span class="sub-node-flag-fallback">🌐</span>
-                               {/if}
-                             {/if}
-                           </div>
-
-                          <!-- Text Info -->
-                          <div class="sub-node-info">
-                            <div class="sub-node-name-row">
-                              <span class="sub-node-name">
-                                {node.name || $t('country.' + node.country) || node.tag}
-                                {#if node.is_new}
-                                  <span class="sub-node-name-new"> [NEW]</span>
-                                {/if}
-                              </span>
-                            </div>
-                            <div class="sub-node-meta-row">
-                              {#if metaText}
-                                <span class="sub-node-chip-blue">{metaText}</span>
+                        <!-- Text Info -->
+                        <div class="sub-node-info">
+                          <div class="sub-node-name-row">
+                            <span class="sub-node-name">
+                              {node.name || $t('country.' + node.country) || node.tag}
+                              {#if node.is_new}
+                                <span class="sub-node-name-new"> [NEW]</span>
                               {/if}
-                            </div>
+                            </span>
                           </div>
-
-                          <!-- Status / Ping right -->
-                          <div class="sub-node-status-container">
-                            <!-- Золотой чип формата/протокола -->
-                            <span class="sub-node-chip-gold">{sub.type === 'mihomo' ? 'YAML' : 'JSON'}</span>
-
-                            <button
-                              class="sub-node-ping-btn"
-                              on:click={(e) => {
-                                e.stopPropagation();
-                                checkNodeHealth(sub.id, node.tag);
-                              }}
-                              disabled={checkingNodes[sub.id]?.[node.tag]}
-                              title="Проверить пинг"
-                            >
-                              {#if checkingNodes[sub.id]?.[node.tag]}
-                                <span class="spinner-xs"></span>
-                              {:else}
-                                {#if h}
-                                  <span class="sub-node-ping-val {latencyClass(h)}">{latencyLabel(h)}</span>
-                                  {#if h.alive}
-                                    <div class="sub-node-status-icon success">
-                                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4">
-                                        <polyline points="20 6 9 17 4 12"/>
-                                      </svg>
-                                    </div>
-                                  {:else}
-                                    <div class="sub-node-status-icon danger">
-                                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4">
-                                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                                      </svg>
-                                    </div>
-                                  {/if}
-                                {:else}
-                                  <div class="sub-node-status-icon default-ok">
-                                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4">
-                                      <polyline points="20 6 9 17 4 12"/>
-                                    </svg>
-                                  </div>
-                                {/if}
-                              {/if}
-                            </button>
+                          <div class="sub-node-meta-row">
+                            {#if metaText}
+                              <span class="sub-node-chip-blue">{metaText}</span>
+                            {/if}
                           </div>
                         </div>
-                      {/each}
-                    </div>
-                  {/if}
+
+                        <!-- Status / Ping right -->
+                        <div class="sub-node-status-container">
+                          <!-- Золотой чип формата/протокола -->
+                          <span class="sub-node-chip-gold"
+                            >{sub.type === 'mihomo' ? 'YAML' : 'JSON'}</span
+                          >
+
+                          <button
+                            class="sub-node-ping-btn"
+                            on:click={(e) => {
+                              e.stopPropagation();
+                              checkNodeHealth(sub.id, node.tag);
+                            }}
+                            disabled={checkingNodes[sub.id]?.[node.tag]}
+                            title="Проверить пинг"
+                          >
+                            {#if checkingNodes[sub.id]?.[node.tag]}
+                              <span class="spinner-xs"></span>
+                            {:else if h}
+                              <span class="sub-node-ping-val {latencyClass(h)}"
+                                >{latencyLabel(h)}</span
+                              >
+                              {#if h.alive}
+                                <div class="sub-node-status-icon success">
+                                  <svg
+                                    width="8"
+                                    height="8"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="4"
+                                  >
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                </div>
+                              {:else}
+                                <div class="sub-node-status-icon danger">
+                                  <svg
+                                    width="8"
+                                    height="8"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="4"
+                                  >
+                                    <line x1="18" y1="6" x2="6" y2="18" /><line
+                                      x1="6"
+                                      y1="6"
+                                      x2="18"
+                                      y2="18"
+                                    />
+                                  </svg>
+                                </div>
+                              {/if}
+                            {:else}
+                              <div class="sub-node-status-icon default-ok">
+                                <svg
+                                  width="8"
+                                  height="8"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  stroke-width="4"
+                                >
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                              </div>
+                            {/if}
+                          </button>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
                 {/if}
-              </div>
-            {/if}
+              {/if}
+            </div>
+          {/if}
         </div>
       {/each}
     </div>
@@ -1084,7 +1231,11 @@
           />
         </div>
 
-        <button type="button" class="advanced-toggle-btn" on:click={() => showAdvanced = !showAdvanced}>
+        <button
+          type="button"
+          class="advanced-toggle-btn"
+          on:click={() => (showAdvanced = !showAdvanced)}
+        >
           <span class="arrow">{showAdvanced ? '▼' : '►'}</span>
           <span>{$t('subscr.advanced_params') || 'Дополнительные параметры'}</span>
         </button>
@@ -1125,7 +1276,9 @@
             </div>
 
             <div class="form-group">
-              <label for="form-filter-transport" class="form-label">{$t('subscr.filter_transport')}</label>
+              <label for="form-filter-transport" class="form-label"
+                >{$t('subscr.filter_transport')}</label
+              >
               <input
                 id="form-filter-transport"
                 type="text"
@@ -1147,14 +1300,21 @@
 
         <div class="form-group-checkbox">
           <label class="toggle-switch">
-            <input type="checkbox" id="use-provider-interval" bind:checked={formUseProviderInterval} />
+            <input
+              type="checkbox"
+              id="use-provider-interval"
+              bind:checked={formUseProviderInterval}
+            />
             <span class="toggle-slider"></span>
           </label>
           <label for="use-provider-interval" class="checkbox-label">
             {$t('subscr.use_provider_interval')}
             {#if editingSub && editingSub.profile_update_hours && editingSub.profile_update_hours > 0}
               <span style="color: var(--accent); font-size: 11px; margin-left: 4px;">
-                ({$t('subscr.provider_dictates').replace('{hours}', String(editingSub.profile_update_hours))})
+                ({$t('subscr.provider_dictates').replace(
+                  '{hours}',
+                  String(editingSub.profile_update_hours)
+                )})
               </span>
             {/if}
           </label>
@@ -1186,21 +1346,21 @@
         <button
           class="diag-tab-btn"
           class:active={diagnosticTab === 'report'}
-          on:click={() => diagnosticTab = 'report'}
+          on:click={() => (diagnosticTab = 'report')}
         >
           {$t('subscr.tab_report')}
         </button>
         <button
           class="diag-tab-btn"
           class:active={diagnosticTab === 'headers'}
-          on:click={() => diagnosticTab = 'headers'}
+          on:click={() => (diagnosticTab = 'headers')}
         >
           {$t('subscr.tab_headers')}
         </button>
         <button
           class="diag-tab-btn"
           class:active={diagnosticTab === 'raw'}
-          on:click={() => diagnosticTab = 'raw'}
+          on:click={() => (diagnosticTab = 'raw')}
         >
           {$t('subscr.tab_raw')}
         </button>
@@ -1212,79 +1372,73 @@
             <span class="spinner" style="margin-right: 8px;">...</span>
             {$t('subscr.loading_diag')}
           </div>
-        {:else}
-          {#if diagnosticTab === 'report'}
-            <div class="tab-content">
-              <div class="diag-summary-cards">
-                <div class="diag-sum-card success">
-                  <div class="title">{$t('subscr.diag_parsed')}</div>
-                  <div class="val">{parseReportData?.parsed_count ?? 0}</div>
-                </div>
-                <div class="diag-sum-card warning">
-                  <div class="title">{$t('subscr.diag_skipped')}</div>
-                  <div class="val">{parseReportData?.skipped_count ?? 0}</div>
-                </div>
-                <div class="diag-sum-card">
-                  <div class="title">{$t('subscr.diag_time')}</div>
-                  <div class="val">{formatDate(parseReportData?.timestamp || '')}</div>
-                </div>
+        {:else if diagnosticTab === 'report'}
+          <div class="tab-content">
+            <div class="diag-summary-cards">
+              <div class="diag-sum-card success">
+                <div class="title">{$t('subscr.diag_parsed')}</div>
+                <div class="val">{parseReportData?.parsed_count ?? 0}</div>
               </div>
+              <div class="diag-sum-card warning">
+                <div class="title">{$t('subscr.diag_skipped')}</div>
+                <div class="val">{parseReportData?.skipped_count ?? 0}</div>
+              </div>
+              <div class="diag-sum-card">
+                <div class="title">{$t('subscr.diag_time')}</div>
+                <div class="val">{formatDate(parseReportData?.timestamp || '')}</div>
+              </div>
+            </div>
 
-              <div class="diag-table-wrapper">
-                {#if parseReportData && parseReportData.skipped && parseReportData.skipped.length > 0}
-                  <table class="diag-table">
-                    <thead>
+            <div class="diag-table-wrapper">
+              {#if parseReportData && parseReportData.skipped && parseReportData.skipped.length > 0}
+                <table class="diag-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 80px;">{$t('subscr.table_line')}</th>
+                      <th>{$t('subscr.table_reason')}</th>
+                      <th>{$t('subscr.table_snippet')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each parseReportData.skipped as item}
                       <tr>
-                        <th style="width: 80px;">{$t('subscr.table_line')}</th>
-                        <th>{$t('subscr.table_reason')}</th>
-                        <th>{$t('subscr.table_snippet')}</th>
+                        <td class="line-num">{item.line}</td>
+                        <td class="reason">{item.reason}</td>
+                        <td class="snippet"><code>{item.snippet}</code></td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {#each parseReportData.skipped as item}
-                        <tr>
-                          <td class="line-num">{item.line}</td>
-                          <td class="reason">{item.reason}</td>
-                          <td class="snippet"><code>{item.snippet}</code></td>
-                        </tr>
-                      {/each}
-                    </tbody>
-                  </table>
-                {:else}
-                  <div class="text-center" style="padding: 1.5rem; color: var(--fg-secondary);">
-                    {$t('subscr.no_skips')}
+                    {/each}
+                  </tbody>
+                </table>
+              {:else}
+                <div class="text-center" style="padding: 1.5rem; color: var(--fg-secondary);">
+                  {$t('subscr.no_skips')}
+                </div>
+              {/if}
+            </div>
+          </div>
+        {:else if diagnosticTab === 'headers'}
+          <div class="tab-content">
+            {#if rawResponseData && rawResponseData.headers}
+              <div class="diag-headers-list">
+                {#each Object.entries(rawResponseData.headers) as [key, val]}
+                  <div class="hdr-item">
+                    <span class="hdr-key">{key}</span>
+                    <span class="hdr-val">{val.join(', ')}</span>
                   </div>
-                {/if}
+                {/each}
               </div>
-            </div>
-          {:else if diagnosticTab === 'headers'}
-            <div class="tab-content">
-              {#if rawResponseData && rawResponseData.headers}
-                <div class="diag-headers-list">
-                  {#each Object.entries(rawResponseData.headers) as [key, val]}
-                    <div class="hdr-item">
-                      <span class="hdr-key">{key}</span>
-                      <span class="hdr-val">{val.join(', ')}</span>
-                    </div>
-                  {/each}
-                </div>
-              {:else}
-                <div class="text-center" style="padding: 1.5rem; color: var(--fg-secondary);">
-                  —
-                </div>
-              {/if}
-            </div>
-          {:else if diagnosticTab === 'raw'}
-            <div class="tab-content height-100">
-              {#if rawResponseData && rawResponseData.body}
-                <pre class="raw-body-pre"><code>{rawResponseData.body}</code></pre>
-              {:else}
-                <div class="text-center" style="padding: 1.5rem; color: var(--fg-secondary);">
-                  —
-                </div>
-              {/if}
-            </div>
-          {/if}
+            {:else}
+              <div class="text-center" style="padding: 1.5rem; color: var(--fg-secondary);">—</div>
+            {/if}
+          </div>
+        {:else if diagnosticTab === 'raw'}
+          <div class="tab-content height-100">
+            {#if rawResponseData && rawResponseData.body}
+              <pre class="raw-body-pre"><code>{rawResponseData.body}</code></pre>
+            {:else}
+              <div class="text-center" style="padding: 1.5rem; color: var(--fg-secondary);">—</div>
+            {/if}
+          </div>
         {/if}
       </div>
 
@@ -1355,7 +1509,9 @@
     display: grid;
     place-items: center;
     border-radius: 4px;
-    transition: color var(--transition-fast), background var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
   .collapse-toggle:hover {
     color: var(--accent);
@@ -1401,7 +1557,9 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-family: var(--font-family-sans), 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', 'Android Emoji', EmojiSymbols, sans-serif;
+    font-family:
+      var(--font-family-sans), 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+      'Noto Color Emoji', 'Android Emoji', EmojiSymbols, sans-serif;
   }
   .sub-name:hover {
     color: var(--accent);
@@ -1418,7 +1576,10 @@
     display: grid;
     place-items: center;
     opacity: 0;
-    transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+    transition:
+      opacity var(--transition-fast),
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
   .sub-header-left:hover .edit-icon-btn,
   .edit-icon-btn:focus {
@@ -1484,8 +1645,12 @@
   }
 
   @keyframes rotate {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   /* Метаданные (Строка под заголовком) */
@@ -1606,7 +1771,9 @@
     opacity: 0;
     pointer-events: none;
     transform: translateY(6px);
-    transition: opacity var(--transition-fast) ease, transform var(--transition-fast) ease;
+    transition:
+      opacity var(--transition-fast) ease,
+      transform var(--transition-fast) ease;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -1997,7 +2164,8 @@
     font-size: 12px;
   }
 
-  .diag-table th, .diag-table td {
+  .diag-table th,
+  .diag-table td {
     padding: 10px 12px;
     text-align: left;
     border-bottom: 1px solid var(--border);
@@ -2076,7 +2244,8 @@
   }
 
   /* Стили для встроенного списка узлов */
-  .loading-nodes, .empty-nodes {
+  .loading-nodes,
+  .empty-nodes {
     padding: 16px;
     text-align: center;
     color: var(--fg-dim);
@@ -2337,10 +2506,18 @@
     color: #22c55e;
   }
 
-  .latency-good { color: #22c55e; }
-  .latency-ok { color: #f59e0b; }
-  .latency-bad { color: var(--danger); }
-  .latency-unknown { color: var(--fg-faint); }
+  .latency-good {
+    color: #22c55e;
+  }
+  .latency-ok {
+    color: #f59e0b;
+  }
+  .latency-bad {
+    color: var(--danger);
+  }
+  .latency-unknown {
+    color: var(--fg-faint);
+  }
 
   @media (max-width: 768px) {
     .sub-header-row {
