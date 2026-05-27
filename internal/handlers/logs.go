@@ -176,6 +176,11 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 				if ctx.Err() != nil {
 					return
 				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(2 * time.Second):
+				}
 			}
 		} else {
 			if !hasShownWaiting {
