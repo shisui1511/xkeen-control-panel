@@ -27,6 +27,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@v6
 
@@ -66,6 +67,7 @@ jobs:
     name: Build
     needs: test
     runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
     strategy:
       matrix:
         include:
@@ -208,6 +210,7 @@ jobs:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -321,7 +324,7 @@ jobs:
     name: Cleanup artifacts
     runs-on: ubuntu-latest
     needs: release
-    if: always()
+    if: always() && github.actor != 'dependabot[bot]'
     steps:
       - uses: geekyeggo/delete-artifact@v6
         with:
