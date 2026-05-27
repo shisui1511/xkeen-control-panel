@@ -228,10 +228,18 @@
 
   onMount(() => {
     connect();
+    const mainContent = document.querySelector('.main-content') as HTMLElement;
+    if (mainContent) {
+      mainContent.style.overflowY = 'hidden';
+    }
   });
 
   onDestroy(() => {
     disconnect();
+    const mainContent = document.querySelector('.main-content') as HTMLElement;
+    if (mainContent) {
+      mainContent.style.overflowY = '';
+    }
   });
 </script>
 
@@ -328,13 +336,12 @@
         </button>
       </div>
 
-      <div class="filters" style="flex:1;margin-left:14px;">
+      <div class="toolbar-right">
         <input
           type="text"
           class="filter-input"
           placeholder={$t('logs.filter')}
           bind:value={filter}
-          style="flex:1;"
         />
 
         <!-- Вкладки источников -->
@@ -360,15 +367,15 @@
           <option value="error">error</option>
           <option value="debug">debug</option>
         </select>
-      </div>
 
-      <label class="toggle-label" style="margin-left:auto;">
-        <label class="toggle-switch">
-          <input type="checkbox" bind:checked={autoScroll} />
-          <span class="toggle-slider"></span>
+        <label class="toggle-label">
+          <label class="toggle-switch">
+            <input type="checkbox" bind:checked={autoScroll} />
+            <span class="toggle-slider"></span>
+          </label>
+          {$t('logs.autoscroll')}
         </label>
-        {$t('logs.autoscroll')}
-      </label>
+      </div>
     </div>
 
     {#if !connected}
@@ -451,23 +458,32 @@
   .logs-page {
     display: flex;
     flex-direction: column;
-    height: 100%;
-    min-height: 0;
-    flex: 1;
+    height: 100vh;
+    box-sizing: border-box;
+    padding: 28px 36px 16px;
+    gap: 16px;
     background: var(--bg);
+  }
+
+  @media (max-width: 768px) {
+    .logs-page {
+      height: calc(100vh - 50px);
+      padding: 16px 16px 12px;
+      gap: 12px;
+    }
   }
 
   .logs-page-container {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 12px;
     flex: 1;
     min-height: 0;
-    padding: 0 20px 20px;
   }
 
   .logs-pane {
     flex: 1;
+    min-height: 0;
     background: #050d16;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -476,7 +492,8 @@
     font-size: 12.5px;
     line-height: 1.5;
     overflow-y: auto;
-    min-height: 350px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
   }
 
   .logs-pane .line {
@@ -524,90 +541,129 @@
   .toolbar {
     display: flex;
     align-items: center;
+    justify-content: space-between;
+    gap: 12px;
     flex-wrap: wrap;
-    gap: 8px;
-    position: sticky;
-    top: 0;
-    z-index: 10;
     background: var(--bg);
-    padding: 8px 0 6px;
-  }
-
-  /* Source tab pills */
-  .source-tabs {
-    display: flex;
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    overflow: hidden;
-    background: var(--bg-secondary);
-    flex-shrink: 0;
-  }
-  .stab {
-    padding: 3px 10px;
-    font-size: 11.5px;
-    font-weight: 500;
-    color: var(--fg-secondary);
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    transition: background 0.12s, color 0.12s;
-    line-height: 1.5;
-  }
-  .stab:hover:not(.stab-active) {
-    background: var(--bg-hover);
-    color: var(--fg-primary);
-  }
-  .stab.stab-active {
-    background: var(--accent);
-    color: #fff;
+    padding: 4px 0 10px;
+    border-bottom: 1px solid var(--border-light);
   }
 
   .toolbar-left {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     flex-shrink: 0;
   }
 
-  .filters {
+  .toolbar-right {
     display: flex;
     align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
+    gap: 12px;
     flex: 1;
-    margin-left: 14px;
+    min-width: 300px;
+    justify-content: flex-end;
   }
 
-  .filter-input {
+  /* Unified sizing and style for all toolbar controls */
+  .toolbar :global(.btn) {
+    height: 34px;
+    padding: 0 14px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    box-sizing: border-box;
+  }
+
+  .toolbar .filter-input {
+    height: 34px;
+    padding: 0 12px;
+    font-size: 12.5px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--fg-primary);
+    box-sizing: border-box;
     flex: 1;
+    max-width: 280px;
     min-width: 120px;
-    height: 30px;
-    padding: 0 10px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-primary);
-    font-size: 12.5px;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .toolbar .filter-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
 
-  .source-select {
-    height: 30px;
-    padding: 0 8px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-primary);
+  .toolbar .source-select {
+    height: 34px;
+    padding: 0 28px 0 12px;
     font-size: 12.5px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--fg-primary);
+    box-sizing: border-box;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%238aa0b7' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 10px;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .toolbar .source-select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .toolbar .source-tabs {
+    display: inline-flex;
+    height: 34px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-secondary);
+    box-sizing: border-box;
+    padding: 2px;
+  }
+
+  .toolbar .stab {
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 14px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-secondary);
+    background: transparent;
+    border: none;
+    border-radius: calc(var(--radius-md) - 2px);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+  }
+  .toolbar .stab:hover:not(.stab-active) {
+    background: var(--bg-hover);
+    color: var(--fg-primary);
+  }
+  .toolbar .stab.stab-active {
+    background: var(--accent);
+    color: #03182a;
   }
 
   .toggle-label {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 12.5px;
+    gap: 8px;
+    font-size: 12px;
     color: var(--fg-secondary);
     cursor: pointer;
-    margin-left: auto;
     flex-shrink: 0;
   }
 
