@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '../i18n';
-  import { isSidebarOpen } from '../stores';
+  import { isSidebarOpen, capabilities } from '../stores';
   import Icon from '../lib/components/Icon.svelte';
 
   export let currentTab: string = 'dashboard';
@@ -155,6 +155,7 @@
       <Icon name="logs" size={16} />
       {$t('nav.logs')}
     </a>
+    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
     <a
       href="#/connections"
       class="nav-item"
@@ -165,6 +166,7 @@
       <Icon name="connections" size={16} />
       {$t('nav.connections')}
     </a>
+    {/if}
     <a
       href="#/dat"
       class="nav-item"
@@ -175,6 +177,7 @@
       <Icon name="dat" size={16} />
       {$t('nav.dat')}
     </a>
+    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
     <a
       href="#/mihomo-gen"
       class="nav-item"
@@ -185,6 +188,7 @@
       <Icon name="settings" size={16} />
       Mihomo Generator
     </a>
+    {/if}
     <a
       href="#/console"
       class="nav-item"
@@ -216,6 +220,7 @@
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
+    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
     <a
       href="#/proxies"
       class="nav-item"
@@ -236,6 +241,7 @@
       <Icon name="rules" size={16} />
       {$t('nav.rules')}
     </a>
+    {/if}
     <a
       href="#/subscriptions"
       class="nav-item"
@@ -246,6 +252,7 @@
       <Icon name="subscriptions" size={16} />
       {$t('nav.subscriptions')}
     </a>
+    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
     <a
       href="#/smartproxy"
       class="nav-item"
@@ -256,6 +263,7 @@
       <Icon name="smartproxy" size={16} />
       {$t('nav.smartproxy')}
     </a>
+    {/if}
   </details>
 
   <!-- Tools group -->
@@ -279,6 +287,7 @@
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
+    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
     <a
       href="#/traffic"
       class="nav-item"
@@ -299,6 +308,7 @@
       <Icon name="trafficquotas" size={16} />
       {$t('nav.trafficquotas')}
     </a>
+    {/if}
     <a
       href="#/network"
       class="nav-item"
