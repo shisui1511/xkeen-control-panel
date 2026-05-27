@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t } from './i18n';
-  import EmptyState from './components/EmptyState.svelte';
 
   interface LogEntry {
     timestamp: string;
@@ -11,21 +10,21 @@
     raw: string;
   }
 
-  let logs: LogEntry[] = [];
-  let ws: WebSocket | null = null;
-  let connected = false;
-  let paused = false;
-  let filter = '';
-  let sourceFilter = '';
-  let levelFilter = '';
-  let autoScroll = true;
-  let logContainer: HTMLDivElement;
-  let availableSources: string[] = [];
+  let logs = $state<LogEntry[]>([]);
+  let ws = $state<WebSocket | null>(null);
+  let connected = $state(false);
+  let paused = $state(false);
+  let filter = $state('');
+  let sourceFilter = $state('');
+  let levelFilter = $state('');
+  let autoScroll = $state(true);
+  let logContainer = $state<HTMLDivElement>();
+  let availableSources = $state<string[]>([]);
 
   // Предопределённые вкладки источников
   const KNOWN_SOURCES = ['xkeen', 'xray', 'mihomo'];
 
-  $: filteredLogs = (() => {
+  const filteredLogs = $derived.by(() => {
     let result = logs;
     if (filter) {
       const lf = filter.toLowerCase();
@@ -38,17 +37,34 @@
       result = result.filter((log) => log.level === levelFilter);
     }
     return result;
-  })();
+  });
 
   function parseLogLine(raw: string): LogEntry {
     let timestamp = '';
     let source = '';
     let level = '';
-    let text = raw;
+    let text = raw.trim();
 
-    // 1. Extract timestamp from the beginning of the line
-    // Formats: 2026/05/23 00:58:33 or 2026-05-23T00:58:33+03:00 or just 00:58:33
-    const tsMatch = raw.match(/^(\d{4}[-/]\d{2}[-/]\d{2}[T\s])?(\d{2}:\d{2}:\d{2})/);
+    // 1. Сначала извлекаем префикс источника, добавляемый бэкендом: ^\[([^\]]+)\]\s*
+    const bracketMatch = text.match(/^\[([^\]]+)\]\s*/);
+    if (bracketMatch) {
+      const tag = bracketMatch[1].toLowerCase();
+      // Нормализуем источник
+      if (tag.includes('access.log') || tag.includes('error.log') || tag === 'xray') {
+        source = 'xray';
+      } else if (tag.includes('mihomo.log') || tag === 'mihomo') {
+        source = 'mihomo';
+      } else if (tag.includes('xkeen-detached') || tag.includes('xkeen.log') || tag === 'xkeen') {
+        source = 'xkeen';
+      } else {
+        source = bracketMatch[1];
+      }
+      text = text.substring(bracketMatch[0].length).trim();
+    }
+
+    // 2. Теперь извлекаем таймстамп из начала строки
+    // Поддерживаем форматы: 2026/05/23 00:58:33, 2026-05-23T00:58:33+03:00, 2026-05-23 00:58:33, 00:58:33
+    const tsMatch = text.match(/^(\d{4}[-/]\d{2}[-/]\d{2}[T\s]|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\s*)?(\d{2}:\d{2}:\d{2})/);
     if (tsMatch) {
       timestamp = tsMatch[2];
       text = text.substring(tsMatch[0].length).trim();
@@ -57,17 +73,17 @@
       timestamp = now.toTimeString().split(' ')[0];
     }
 
-    // 2. Parse brackets tags like [INF], [Info], [xray], [mihomo]
+    // 3. Парсим Bracket теги в оставшемся тексте (например, уровень лога [INF], [Warning])
     const tags: string[] = [];
     let tempText = text;
     while (true) {
       const tagMatch = tempText.match(/^\[([^\]]+)\]\s*/);
       if (!tagMatch) break;
       tags.push(tagMatch[1]);
-      tempText = tempText.substring(tagMatch[0].length);
+      tempText = tempText.substring(tagMatch[0].length).trim();
     }
 
-    // Determine level and source from tags
+    // Ищем уровень лога в тегах
     for (const tag of tags) {
       const lowerTag = tag.toLowerCase();
       if (['info', 'inf', 'information'].includes(lowerTag)) {
@@ -78,43 +94,34 @@
         level = 'error';
       } else if (['debug', 'dbg'].includes(lowerTag)) {
         level = 'debug';
-      } else {
-        source = tag;
+      } else if (!source) {
+        // Если источник еще не определен, берем первый неизвестный тег
+        if (lowerTag === 'xray') source = 'xray';
+        else if (lowerTag === 'mihomo') source = 'mihomo';
+        else if (lowerTag === 'xkeen') source = 'xkeen';
       }
     }
 
-    // If source is not set but we have tags, pick the first non-level tag
-    if (!source && tags.length > 0) {
-      for (const tag of tags) {
-        const lowerTag = tag.toLowerCase();
-        if (
-          ![
-            'info',
-            'inf',
-            'information',
-            'warning',
-            'warn',
-            'wrn',
-            'error',
-            'err',
-            'debug',
-            'dbg'
-          ].includes(lowerTag)
-        ) {
-          source = tag;
-          break;
-        }
-      }
-    }
-
-    // Fallback detection of level from raw text if not found in tags
-    if (!level) {
+    // Дефолтный источник на основе содержимого, если не определен
+    if (!source) {
       const lowerRaw = raw.toLowerCase();
-      if (lowerRaw.includes('error') || lowerRaw.includes('err:')) {
+      if (lowerRaw.includes('xray')) {
+        source = 'xray';
+      } else if (lowerRaw.includes('mihomo')) {
+        source = 'mihomo';
+      } else {
+        source = 'xkeen';
+      }
+    }
+
+    // Fallback детекция уровня из текста
+    if (!level) {
+      const lowerText = text.toLowerCase();
+      if (lowerText.includes('error') || lowerText.includes('err:')) {
         level = 'error';
-      } else if (lowerRaw.includes('warning') || lowerRaw.includes('warn:')) {
+      } else if (lowerText.includes('warning') || lowerText.includes('warn:')) {
         level = 'warning';
-      } else if (lowerRaw.includes('debug') || lowerRaw.includes('dbg:')) {
+      } else if (lowerText.includes('debug') || lowerText.includes('dbg:')) {
         level = 'debug';
       } else {
         level = 'info';
@@ -153,7 +160,11 @@
         updateSources();
 
         if (autoScroll && logContainer) {
-          logContainer.scrollTop = logContainer.scrollHeight;
+          setTimeout(() => {
+            if (logContainer) {
+              logContainer.scrollTop = logContainer.scrollHeight;
+            }
+          }, 0);
         }
       }
     };
@@ -390,20 +401,31 @@
       {/each}
 
       {#if getFilteredLogs().length === 0}
-        <EmptyState
-          title={!connected
-            ? $t('logs.disconnected_title')
-            : filter || sourceFilter || levelFilter
-              ? $t('logs.no_filtered_logs')
-              : $t('logs.no_logs')}
-          description={!connected
-            ? $t('logs.disconnected_desc')
-            : connected
-              ? $t('logs.waiting')
-              : $t('logs.connect_hint')}
-          ctaText={!connected ? $t('logs.reconnect') : ''}
-          oncta={connect}
-        />
+        <div class="logs-empty-placeholder">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="empty-icon" style="margin-bottom: 12px; opacity: 0.6;">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="8" y1="12" x2="16" y2="12" />
+          </svg>
+          <div class="empty-title" style="font-size: 14px; font-weight: 500; color: var(--fg-secondary); margin-bottom: 6px;">
+            {!connected
+              ? $t('logs.disconnected_title')
+              : filter || sourceFilter || levelFilter
+                ? $t('logs.no_filtered_logs')
+                : $t('logs.no_logs')}
+          </div>
+          <div class="empty-desc" style="font-size: 12px; color: var(--fg-faint); max-width: 280px; line-height: 1.4;">
+            {!connected
+              ? $t('logs.disconnected_desc')
+              : connected
+                ? $t('logs.waiting')
+                : $t('logs.connect_hint')}
+          </div>
+          {#if !connected}
+            <button on:click={connect} class="btn btn-secondary btn-small" style="margin-top: 14px; padding: 4px 8px; font-size: 12px;">
+              {$t('logs.reconnect')}
+            </button>
+          {/if}
+        </div>
       {/if}
     </div>
 
@@ -613,5 +635,16 @@
   }
   .stat b {
     color: var(--fg-secondary);
+  }
+
+  .logs-empty-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    text-align: center;
+    color: var(--fg-dim);
+    height: 100%;
   }
 </style>
