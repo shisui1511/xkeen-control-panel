@@ -2,7 +2,14 @@
   import { onMount, onDestroy } from 'svelte';
   import { t, setLang, currentLang, getAvailableLangs, type Lang } from './i18n';
   import Icon from './lib/components/Icon.svelte';
-  import { capabilities, fetchCapabilities, showToast } from './stores';
+  import {
+    capabilities,
+    fetchCapabilities,
+    showToast,
+    devMode,
+    fetchDevMode,
+    setDevMode
+  } from './stores';
 
   export let onSwitchTab: (tab: string) => void = () => {};
 
@@ -19,7 +26,8 @@
 
   let version = '...';
   let langs = getAvailableLangs();
-  let activeTab: 'general' | 'security' | 'connection' | 'backups' | 'about' = 'general';
+  let activeTab: 'general' | 'updates' | 'security' | 'connection' | 'backups' | 'about' =
+    'general';
 
   // Backups state variables
   let configFiles: string[] = [];
@@ -309,6 +317,30 @@
   let updateChecking = false;
   let updateInstalling = false;
   let statusInterval: ReturnType<typeof setInterval>;
+  let updateChannel: 'stable' | 'beta' = 'stable';
+
+  async function fetchUpdateChannel() {
+    try {
+      const res = await fetch('/api/update/channel');
+      if (res.ok) {
+        const data = await res.json();
+        updateChannel = data.channel ?? 'stable';
+      }
+    } catch (_) {}
+  }
+
+  async function saveUpdateChannel(ch: 'stable' | 'beta') {
+    updateChannel = ch;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      await fetch('/api/update/channel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        body: JSON.stringify({ channel: ch })
+      });
+      showToast('success', $t('settings.channel_saved'));
+    } catch (_) {}
+  }
 
   async function fetchVersion() {
     try {
@@ -325,7 +357,7 @@
     setLang(select.value as Lang);
   }
 
-  async function checkUpdate(channel: string = 'stable') {
+  async function checkUpdate(channel: string = updateChannel) {
     updateChecking = true;
     try {
       const res = await fetch(`/api/update/check?channel=${channel}`);
@@ -355,7 +387,36 @@
     }
   }
 
-  async function installUpdate(channel: string = 'stable') {
+  let sseSource: EventSource | null = null;
+  let showConfirmUpdateModal = false;
+
+  function startStatusSSE() {
+    if (sseSource) {
+      sseSource.close();
+    }
+    updateInstalling = true;
+    sseSource = new EventSource('/api/update/events');
+    sseSource.onmessage = (event) => {
+      try {
+        const state = JSON.parse(event.data);
+        updateStatus = state;
+        if (state.status === 'done' || state.status === 'failed') {
+          updateInstalling = false;
+          sseSource?.close();
+          sseSource = null;
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    sseSource.onerror = () => {
+      updateInstalling = false;
+      sseSource?.close();
+      sseSource = null;
+    };
+  }
+
+  async function installUpdate(channel: string = updateChannel) {
     updateInstalling = true;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
@@ -364,7 +425,9 @@
         headers: { 'X-CSRF-Token': csrfToken || '' }
       });
       if (res.ok) {
-        startStatusPolling();
+        startStatusSSE();
+      } else {
+        updateInstalling = false;
       }
     } catch (e) {
       updateInstalling = false;
@@ -372,6 +435,7 @@
   }
 
   async function rollbackUpdate() {
+    updateInstalling = true;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch('/api/update/rollback', {
@@ -379,10 +443,12 @@
         headers: { 'X-CSRF-Token': csrfToken || '' }
       });
       if (res.ok) {
-        startStatusPolling();
+        startStatusSSE();
+      } else {
+        updateInstalling = false;
       }
     } catch (e) {
-      // ignore
+      updateInstalling = false;
     }
   }
 
@@ -391,32 +457,34 @@
       const res = await fetch('/api/update/status');
       if (res.ok) {
         const envelope = await res.json();
-        // UpdateStatusEndpoint uses JSONSuccess envelope: {success, data: {...}}
         updateStatus = envelope.data ?? envelope;
         if (updateStatus?.status === 'done' || updateStatus?.status === 'failed') {
           updateInstalling = false;
-          clearInterval(statusInterval);
         }
       }
     } catch (e) {
-      clearInterval(statusInterval);
       updateInstalling = false;
     }
   }
 
-  function startStatusPolling() {
-    fetchStatus();
-    statusInterval = setInterval(fetchStatus, 2000);
-  }
-
-  onMount(() => {
+  onMount(async () => {
     fetchVersion();
     fetchCapabilities();
+    fetchDevMode();
     loadAppearanceSettings();
+    fetchUpdateChannel();
+
+    await fetchStatus();
+    if (updateStatus && !['idle', 'done', 'failed'].includes(updateStatus.status)) {
+      startStatusSSE();
+    }
   });
 
   onDestroy(() => {
-    if (statusInterval) clearInterval(statusInterval);
+    if (sseSource) {
+      sseSource.close();
+      sseSource = null;
+    }
   });
 </script>
 
@@ -439,6 +507,11 @@
       class="stab"
       class:active={activeTab === 'general'}
       on:click={() => (activeTab = 'general')}>{$t('settings.tab_general')}</button
+    >
+    <button
+      class="stab"
+      class:active={activeTab === 'updates'}
+      on:click={() => (activeTab = 'updates')}>{$t('settings.tab_updates')}</button
     >
     <button
       class="stab"
@@ -590,10 +663,26 @@
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
         </div>
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.dev_mode')}</span>
+            <div class="field-row-desc">{$t('settings.dev_mode_desc')}</div>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              checked={$devMode}
+              on:change={(e) => setDevMode((e.target as HTMLInputElement).checked)}
+            />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          </label>
+        </div>
       </div>
     </div>
+  {/if}
 
-    <!-- Panel self-update (moved from separate tab) -->
+  <!-- Updates tab -->
+  {#if activeTab === 'updates'}
     <div class="card mb-2">
       <div class="card-label">{$t('settings.update')}</div>
       <div class="field-group">
@@ -609,6 +698,21 @@
             >
           </div>
         {/if}
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.update_channel')}</span>
+          <div class="field-row-val">
+            <div class="channel-switcher">
+              {#each ['stable', 'beta'] as const as ch}
+                <button
+                  class="channel-btn"
+                  class:active={updateChannel === ch}
+                  on:click={() => saveUpdateChannel(ch)}
+                  disabled={updateInstalling}>{$t(`settings.channel_${ch}`)}</button
+                >
+              {/each}
+            </div>
+          </div>
+        </div>
       </div>
 
       {#if updateInfo?.changelog}
@@ -629,7 +733,7 @@
       <div class="card-actions">
         <button
           class="btn btn-secondary"
-          on:click={() => checkUpdate('stable')}
+          on:click={() => checkUpdate()}
           disabled={updateChecking || updateInstalling}
           title={$t('settings.check_update')}
         >
@@ -638,7 +742,7 @@
         {#if updateInfo?.has_update}
           <button
             class="btn btn-primary"
-            on:click={() => installUpdate('stable')}
+            on:click={() => (showConfirmUpdateModal = true)}
             disabled={updateInstalling}
             title={$t('settings.install_update')}
           >
@@ -650,6 +754,45 @@
             {$t('settings.rollback')}
           </button>
         {/if}
+      </div>
+    </div>
+  {/if}
+
+  {#if showConfirmUpdateModal}
+    <div
+      class="modal-overlay"
+      role="button"
+      tabindex="0"
+      on:click={() => (showConfirmUpdateModal = false)}
+      on:keydown={(e) => e.key === 'Escape' && (showConfirmUpdateModal = false)}
+    >
+      <div class="modal-card" role="presentation" on:click|stopPropagation>
+        <div class="modal-card-header">
+          <h2>{$t('settings.update_confirm_title')}</h2>
+          <button class="modal-close-btn" on:click={() => (showConfirmUpdateModal = false)}
+            >&times;</button
+          >
+        </div>
+        <div class="modal-card-body">
+          <p>{$t('settings.update_confirm_text')}</p>
+          {#if updateInfo?.changelog}
+            <div class="changelog-box" style="max-height: 300px; margin-top: 10px;">
+              <pre>{updateInfo.changelog}</pre>
+            </div>
+          {/if}
+        </div>
+        <div class="modal-card-footer">
+          <button class="btn btn-secondary" on:click={() => (showConfirmUpdateModal = false)}
+            >{$t('app.cancel')}</button
+          >
+          <button
+            class="btn btn-primary"
+            on:click={() => {
+              showConfirmUpdateModal = false;
+              installUpdate();
+            }}>{$t('settings.update_install_btn')}</button
+          >
+        </div>
       </div>
     </div>
   {/if}
@@ -1140,6 +1283,41 @@
     border: 1px solid rgba(16, 185, 129, 0.25);
   }
 
+  .channel-switcher {
+    display: flex;
+    gap: 4px;
+  }
+
+  .channel-btn {
+    padding: 4px 12px;
+    border-radius: var(--radius-sm, 4px);
+    border: 1px solid var(--border);
+    background: var(--bg-deep, var(--bg));
+    color: var(--fg-secondary);
+    font-size: 13px;
+    cursor: pointer;
+    transition:
+      background 0.15s,
+      color 0.15s,
+      border-color 0.15s;
+  }
+
+  .channel-btn:hover {
+    border-color: var(--accent);
+    color: var(--fg);
+  }
+
+  .channel-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .channel-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .changelog-box {
     margin: 12px 0;
     padding: 10px;
@@ -1271,5 +1449,91 @@
 
   .toggle input:checked ~ .toggle-track .toggle-thumb {
     transform: translateX(16px);
+  }
+
+  /* Modal Styles */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+  }
+
+  .modal-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    width: 100%;
+    max-width: 520px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    max-height: 90vh;
+    animation: modal-anim 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes modal-anim {
+    from {
+      transform: scale(0.95) translateY(10px);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
+  }
+
+  .modal-card-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .modal-card-header h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--fg-primary);
+  }
+
+  .modal-close-btn {
+    background: none;
+    border: none;
+    color: var(--fg-dim);
+    font-size: 24px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px;
+  }
+
+  .modal-close-btn:hover {
+    color: var(--fg-primary);
+  }
+
+  .modal-card-body {
+    padding: 24px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .modal-card-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
   }
 </style>

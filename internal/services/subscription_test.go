@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -157,7 +159,7 @@ func TestPortIsInteger(t *testing.T) {
 func TestDownloadAndParseSchemeValidation(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")
-	_, err := svc.downloadAndParse("file:///etc/passwd", &Subscription{})
+	_, _, _, _, err := svc.downloadAndParse("file:///etc/passwd", &Subscription{})
 	if err == nil {
 		t.Fatal("expected error for file:// URL, got nil")
 	}
@@ -417,40 +419,40 @@ func TestSubscriptionEntryLimit(t *testing.T) {
 	// Use plain http.DefaultClient so httptest servers (loopback) are reachable
 	svc.httpClient = http.DefaultClient
 
-	// Build 501 vless lines
-	lines501 := make([]string, 501)
-	for i := range lines501 {
-		lines501[i] = "vless://550e8400-e29b-41d4-a716-446655440000@host.example.com:443?security=none#tag"
+	// Build 5001 vless lines (сверх нового лимита 5000).
+	lines5001 := make([]string, 5001)
+	for i := range lines5001 {
+		lines5001[i] = "vless://550e8400-e29b-41d4-a716-446655440000@host.example.com:443?security=none#tag"
 	}
-	body501 := strings.Join(lines501, "\n")
+	body5001 := strings.Join(lines5001, "\n")
 
-	ts501 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts5001 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(body501))
+		w.Write([]byte(body5001))
 	}))
-	defer ts501.Close()
+	defer ts5001.Close()
 
-	_, err := svc.downloadAndParse(ts501.URL, &Subscription{})
+	_, _, _, _, err := svc.downloadAndParse(ts5001.URL, &Subscription{})
 	if err == nil {
-		t.Error("expected error for 501 entries, got nil")
+		t.Error("expected error for 5001 entries, got nil")
 	}
 
-	// Build exactly 500 vless lines
-	lines500 := make([]string, 500)
-	for i := range lines500 {
-		lines500[i] = "vless://550e8400-e29b-41d4-a716-446655440000@host.example.com:443?security=none#tag"
+	// Build exactly 5000 vless lines — должно пройти.
+	lines5000 := make([]string, 5000)
+	for i := range lines5000 {
+		lines5000[i] = "vless://550e8400-e29b-41d4-a716-446655440000@host.example.com:443?security=none#tag"
 	}
-	body500 := strings.Join(lines500, "\n")
+	body5000 := strings.Join(lines5000, "\n")
 
-	ts500 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts5000 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(body500))
+		w.Write([]byte(body5000))
 	}))
-	defer ts500.Close()
+	defer ts5000.Close()
 
-	_, err = svc.downloadAndParse(ts500.URL, &Subscription{})
+	_, _, _, _, err = svc.downloadAndParse(ts5000.URL, &Subscription{})
 	if err != nil {
-		t.Errorf("expected no error for 500 entries, got: %v", err)
+		t.Errorf("expected no error for 5000 entries, got: %v", err)
 	}
 }
 
@@ -467,7 +469,7 @@ func TestTagDeduplication(t *testing.T) {
 	}
 
 	path := svc.getFragmentPath(sub)
-	if err := svc.writeFragment(path, outbounds, sub); err != nil {
+	if _, err := svc.writeFragment(path, outbounds, sub); err != nil {
 		t.Fatalf("writeFragment failed: %v", err)
 	}
 
@@ -518,7 +520,7 @@ func TestDownloadAndParse_NetworkError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, err := svc.downloadAndParse(ts.URL, &Subscription{})
+	_, _, _, _, err := svc.downloadAndParse(ts.URL, &Subscription{})
 	if err == nil {
 		t.Error("expected error for connection reset, got nil")
 	}
@@ -660,7 +662,7 @@ func TestSubscriptionProxyCount(t *testing.T) {
 		{Tag: "proxy1", Protocol: "vmess"},
 		{Tag: "proxy2", Protocol: "vless"},
 	}
-	if err := svc.writeFragment(path, outbounds, got); err != nil {
+	if _, err := svc.writeFragment(path, outbounds, got); err != nil {
 		t.Fatalf("writeFragment failed: %v", err)
 	}
 
@@ -881,7 +883,7 @@ func TestBackoffCap(t *testing.T) {
 	}
 }
 
-// TestMihomoSubscriptionType: refresh of type "mihomo" writes a YAML provider file.
+// TestMihomoSubscriptionType: refresh of type "mihomo" writes proxies into config.yaml in-place.
 func TestMihomoSubscriptionType(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewSubscriptionService(tmp, tmp, tmp)
@@ -916,28 +918,32 @@ func TestMihomoSubscriptionType(t *testing.T) {
 		t.Fatalf("Refresh: %v", err)
 	}
 
-	// Provider file must exist
 	got := svc.List()[0]
-	provPath := svc.getMihomoProviderPath(&got)
-	data, err := os.ReadFile(provPath)
+
+	// config.yaml должен содержать блок прокси из подписки.
+	configPath := filepath.Join(tmp, "config.yaml")
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		t.Fatalf("expected provider file at %s: %v", provPath, err)
+		t.Fatalf("expected config.yaml at %s: %v", configPath, err)
 	}
-	if !strings.Contains(string(data), "proxies:") {
-		t.Error("expected 'proxies:' in provider file")
+	if !strings.Contains(string(data), "TestProxy") {
+		t.Error("expected 'TestProxy' in config.yaml after refresh")
 	}
 
-	// ProxyCount should reflect one proxy
+	// ProxyCount (via LastCount) must be 1.
 	if got.ProxyCount != 1 {
 		t.Errorf("expected ProxyCount=1, got %d", got.ProxyCount)
+	}
+	if len(got.ProxyNames) != 1 || got.ProxyNames[0] != "TestProxy" {
+		t.Errorf("expected ProxyNames=[TestProxy], got %v", got.ProxyNames)
 	}
 }
 
 func TestSubscriptionTrafficAndRules(t *testing.T) {
 	// 1. Test parseSubscriptionUserinfo
-	upload, download, total := parseSubscriptionUserinfo("upload=1073741824; download=5368709120; total=107374182400; expire=1700000000")
-	if upload != 1073741824 || download != 5368709120 || total != 107374182400 {
-		t.Errorf("parseSubscriptionUserinfo failed: upload=%d, download=%d, total=%d", upload, download, total)
+	upload, download, total, expire := parseSubscriptionUserinfo("upload=1073741824; download=5368709120; total=107374182400; expire=1700000000")
+	if upload != 1073741824 || download != 5368709120 || total != 107374182400 || expire != 1700000000 {
+		t.Errorf("parseSubscriptionUserinfo failed: upload=%d, download=%d, total=%d, expire=%d", upload, download, total, expire)
 	}
 
 	// 2. Test countMihomoRules
@@ -1002,4 +1008,304 @@ proxies:
 	if got.RuleCount != 1 {
 		t.Errorf("expected RuleCount=1, got %d", got.RuleCount)
 	}
+}
+
+func TestRoutingFragmentAutoMode(t *testing.T) {
+	tmp := t.TempDir()
+	configDir := filepath.Join(tmp, "xray")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	outbounds := []Outbound{
+		{Tag: "pfx-node1", Protocol: "vless"},
+		{Tag: "pfx-node2", Protocol: "vless"},
+	}
+	sub := &Subscription{ID: "sub1", TagPrefix: "pfx"}
+	svc := &SubscriptionService{dataDir: tmp, configDir: configDir}
+
+	routingPath := svc.getRoutingFragmentPath(sub)
+	if err := svc.writeRoutingFragment(routingPath, sub, []string{"pfx-node1", "pfx-node2"}); err != nil {
+		t.Fatalf("writeRoutingFragment: %v", err)
+	}
+
+	data, err := os.ReadFile(routingPath)
+	if err != nil {
+		t.Fatalf("routing fragment not written: %v", err)
+	}
+
+	var frag struct {
+		Routing struct {
+			Balancers []struct {
+				Tag      string   `json:"tag"`
+				Selector []string `json:"selector"`
+			} `json:"balancers"`
+			Rules []struct {
+				BalancerTag string   `json:"balancerTag"`
+				Domain      []string `json:"domain"`
+			} `json:"rules"`
+		} `json:"routing"`
+	}
+	if err := json.Unmarshal(data, &frag); err != nil {
+		t.Fatalf("invalid routing JSON: %v", err)
+	}
+
+	if len(frag.Routing.Balancers) != 1 {
+		t.Fatalf("expected 1 balancer, got %d", len(frag.Routing.Balancers))
+	}
+	if frag.Routing.Balancers[0].Selector[0] != "pfx-" {
+		t.Errorf("selector: %v", frag.Routing.Balancers[0].Selector)
+	}
+	if len(frag.Routing.Rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(frag.Routing.Rules))
+	}
+	if frag.Routing.Rules[0].BalancerTag != "sub1-balancer" {
+		t.Errorf("balancerTag: %v", frag.Routing.Rules[0].BalancerTag)
+	}
+
+	// Verify domain list contains geolocation-!cn
+	hasDomain := false
+	for _, d := range frag.Routing.Rules[0].Domain {
+		if d == "geosite:geolocation-!cn" {
+			hasDomain = true
+		}
+	}
+	if !hasDomain {
+		t.Errorf("missing geosite:geolocation-!cn in rule domains: %v", frag.Routing.Rules[0].Domain)
+	}
+
+	// Without TagPrefix — should use direct outboundTag
+	sub2 := &Subscription{ID: "sub2", TagPrefix: ""}
+	path2 := svc.getRoutingFragmentPath(sub2)
+	if err := svc.writeRoutingFragment(path2, sub2, []string{"node1"}); err != nil {
+		t.Fatalf("writeRoutingFragment no-prefix: %v", err)
+	}
+	data2, _ := os.ReadFile(path2)
+	var frag2 struct {
+		Routing struct {
+			Rules []struct {
+				OutboundTag string `json:"outboundTag"`
+			} `json:"rules"`
+		} `json:"routing"`
+	}
+	json.Unmarshal(data2, &frag2)
+	if len(frag2.Routing.Rules) == 0 || frag2.Routing.Rules[0].OutboundTag != "node1" {
+		t.Errorf("outboundTag: %v", frag2.Routing.Rules)
+	}
+
+	_ = outbounds
+}
+
+func TestSubscriptionDiagnostics(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	svc.httpClient = http.DefaultClient
+
+	// Сервер, возвращающий vmess и невалидную строку
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("profile-title", "base64:VGVzdCBPbmU=")
+		w.Header().Set("support-url", "https://t.me/support")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("vmess://eyJhZGQiOiIxLjIuMy40IiwicG9ydCI6IjQ0MyIsImlkIjoiNTUwZTg0MDAtZTI5Yi00MWQ0LWE3MTYtNDQ2NjU1NDQwMDAwIiwicHMiOiJ2bWVzcy1ub2RlIiwibmV0IjoidGNwIiwidHlwZSI6Im5vbmUifQ==\ninvalid-line\n"))
+	}))
+	defer ts.Close()
+
+	sub := Subscription{
+		ID:      "diag_test",
+		Name:    "Diag Test",
+		URL:     ts.URL,
+		Enabled: true,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	err := svc.Refresh("diag_test")
+	if err != nil {
+		t.Fatalf("Refresh failed: %v", err)
+	}
+
+	// 1. Проверяем GetRaw
+	body, headers, err := svc.GetRaw("diag_test")
+	if err != nil {
+		t.Fatalf("GetRaw failed: %v", err)
+	}
+	if !strings.Contains(body, "vmess://") {
+		t.Errorf("expected body to contain vmess, got %q", body)
+	}
+	if headers["Support-Url"][0] != "https://t.me/support" {
+		t.Errorf("expected support-url header, got %v", headers["Support-Url"])
+	}
+
+	// 2. Проверяем GetParseReport
+	report, err := svc.GetParseReport("diag_test")
+	if err != nil {
+		t.Fatalf("GetParseReport failed: %v", err)
+	}
+	if report.ParsedCount != 1 {
+		t.Errorf("expected 1 parsed node, got %d", report.ParsedCount)
+	}
+	if report.SkippedCount != 1 {
+		t.Errorf("expected 1 skipped line, got %d", report.SkippedCount)
+	}
+	if len(report.Skipped) != 1 {
+		t.Fatalf("expected 1 skip reason, got %d", len(report.Skipped))
+	}
+	if report.Skipped[0].Line != 2 {
+		t.Errorf("expected line 2 skipped, got %d", report.Skipped[0].Line)
+	}
+	if report.Skipped[0].Snippet != "invalid-line" {
+		t.Errorf("expected snippet 'invalid-line', got %q", report.Skipped[0].Snippet)
+	}
+
+	// 3. Проверяем удаление
+	if err := svc.Delete("diag_test"); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+	_, _, err = svc.GetRaw("diag_test")
+	if err == nil {
+		t.Error("expected error getting raw after delete, got nil")
+	}
+}
+
+func TestParseXrayConfigArray(t *testing.T) {
+	body := []byte(`[
+		{
+			"remarks": "🇩🇪 Germany",
+			"dns": {"servers": ["1.1.1.1"]},
+			"outbounds": [
+				{
+					"tag": "proxy",
+					"protocol": "vless",
+					"settings": {"vnext": [{"address": "de.example.com", "port": 443, "users": [{"id": "uuid-1", "encryption": "none"}]}]},
+					"streamSettings": {"network": "tcp", "security": "reality"}
+				},
+				{"tag": "direct", "protocol": "freedom", "settings": {}}
+			]
+		},
+		{
+			"remarks": "🇳🇱 Netherlands",
+			"dns": {"servers": ["8.8.8.8"]},
+			"outbounds": [
+				{
+					"tag": "proxy",
+					"protocol": "vless",
+					"settings": {"vnext": [{"address": "nl.example.com", "port": 443, "users": [{"id": "uuid-2", "encryption": "none"}]}]},
+					"streamSettings": {"network": "tcp"}
+				}
+			]
+		}
+	]`)
+
+	outs := parseXrayConfigArray(body)
+	if len(outs) != 2 {
+		t.Fatalf("expected 2 outbounds, got %d", len(outs))
+	}
+	if outs[0].Tag != "🇩🇪 Germany" {
+		t.Errorf("expected tag '🇩🇪 Germany', got %q", outs[0].Tag)
+	}
+	if outs[0].Protocol != "vless" {
+		t.Errorf("expected protocol vless, got %q", outs[0].Protocol)
+	}
+	if outs[1].Tag != "🇳🇱 Netherlands" {
+		t.Errorf("expected tag '🇳🇱 Netherlands', got %q", outs[1].Tag)
+	}
+}
+
+func TestParseXrayConfigArray_IgnoresNonConfigArrays(t *testing.T) {
+	// Plain outbound array should NOT match (no nested outbounds)
+	body := []byte(`[{"tag":"node1","protocol":"vless","settings":{}}]`)
+	if outs := parseXrayConfigArray(body); len(outs) != 0 {
+		t.Errorf("expected 0, got %d outbounds for plain outbound array", len(outs))
+	}
+
+	// Object should NOT match
+	body2 := []byte(`{"outbounds":[{"tag":"t","protocol":"vless","settings":{}}]}`)
+	if outs := parseXrayConfigArray(body2); len(outs) != 0 {
+		t.Errorf("expected 0, got %d outbounds for object format", len(outs))
+	}
+}
+
+func TestSubscription_DeepCopy(t *testing.T) {
+	sub := Subscription{
+		ID:           "test",
+		Name:         "original",
+		ProxyNames:   []string{"node1", "node2"},
+		MihomoGroups: []string{"group1"},
+		Nodes: []SubscriptionNode{
+			{Tag: "node1", Name: "Node 1"},
+		},
+	}
+
+	cloned := sub.Clone()
+	cloned.ProxyNames[0] = "mutated"
+	cloned.MihomoGroups[0] = "mutated"
+	cloned.Nodes[0].Name = "mutated"
+
+	if sub.ProxyNames[0] != "node1" {
+		t.Error("ProxyNames slice sharing detected")
+	}
+	if sub.MihomoGroups[0] != "group1" {
+		t.Error("MihomoGroups slice sharing detected")
+	}
+	if sub.Nodes[0].Name != "Node 1" {
+		t.Error("Nodes slice sharing detected")
+	}
+}
+
+func TestSubscription_ConcurrencyRace(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+
+	sub := Subscription{
+		ID:           "test",
+		Name:         "original",
+		Enabled:      true,
+		ProxyNames:   []string{"node1"},
+		MihomoGroups: []string{"group1"},
+		Nodes: []SubscriptionNode{
+			{Tag: "node1", Name: "Node 1"},
+		},
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				svc.List()
+				svc.Get("test")
+			}
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				s := svc.Get("test")
+				if s != nil {
+					s.ProxyNames = append(s.ProxyNames, "new")
+					s.Nodes = append(s.Nodes, SubscriptionNode{Tag: "new"})
+					svc.Update("test", s)
+				}
+			}
+		}
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	close(stop)
+	wg.Wait()
 }

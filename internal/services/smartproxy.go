@@ -102,7 +102,9 @@ func (s *SmartProxyService) Stop() {
 }
 
 func (s *SmartProxyService) storePath() string {
-	return filepath.Join(s.dataDir, "profiles.json")
+	dir := filepath.Join(s.dataDir, "smartproxy")
+	_ = os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, "profiles.json")
 }
 
 func (s *SmartProxyService) load() {

@@ -1,0 +1,37 @@
+{
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "US-New York | ChatGPT",
+      "server": "us.example.com",
+      "server_port": 443,
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "us.example.com",
+        "reality": {
+          "enabled": true,
+          "public_key": "pubkey123",
+          "short_id": "shortid456"
+        },
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        }
+      }
+    },
+    {
+      "type": "vmess",
+      "tag": "NL - Amsterdam (Gaming) 1Gb/s",
+      "server": "nl.example.com",
+      "server_port": 8080,
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "transport": {
+        "type": "ws",
+        "path": "/ws",
+        "host": "nl.example.com"
+      }
+    }
+  ]
+}

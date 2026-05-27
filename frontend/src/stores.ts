@@ -18,6 +18,10 @@ export interface CapabilitiesData {
     api_url?: string;
     discovered_secret?: string;
   };
+  xray?: {
+    conf_dir: string;
+    conf_dir_exists: boolean;
+  };
 }
 
 export const capabilities = writable<CapabilitiesData | null>(null);
@@ -81,4 +85,33 @@ export function showConfirm(
   return new Promise((resolve) => {
     confirmStore.set({ title, message, confirmLabel, cancelLabel, resolve });
   });
+}
+
+// --- Dev mode store ---
+
+export const devMode = writable(false);
+
+export async function fetchDevMode(): Promise<void> {
+  try {
+    const res = await fetch('/api/settings');
+    if (res.ok) {
+      const envelope = await res.json();
+      const data = envelope.data ?? envelope;
+      devMode.set(data.dev_mode ?? false);
+    }
+  } catch (_) {
+    // ignore
+  }
+}
+
+export async function setDevMode(enabled: boolean): Promise<void> {
+  const csrfToken = localStorage.getItem('csrf_token');
+  const res = await fetch('/api/settings/dev-mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+    body: JSON.stringify({ enabled })
+  });
+  if (res.ok) {
+    devMode.set(enabled);
+  }
 }

@@ -20,11 +20,14 @@ type Config struct {
 	AllowedRoots    []string    `json:"allowed_roots"`
 	LogLevel        string      `json:"log_level"`
 	LogPath         string      `json:"log_path"`
+	XCPLogPath      string      `json:"xcp_log_path"`
 	LogSources      []string    `json:"log_sources"`
 	DataDir         string      `json:"data_dir"`
 	Auth            AuthConfig  `json:"auth"`
 	HTTPS           HTTPSConfig `json:"https"`
 	MihomoSecret    string      `json:"mihomo_secret"`
+	UpdateChannel   string      `json:"update_channel"` // stable, beta, dev
+	DevMode         bool        `json:"dev_mode"`
 	ConfigPath      string      `json:"-"`
 }
 
@@ -75,7 +78,8 @@ func Default() *Config {
 		DataDir:         "/opt/etc/xcp",
 		LogLevel:        "info",
 		LogPath:         "/opt/var/log/xkeen.log",
-		LogSources:      []string{"/opt/var/log/xkeen.log"},
+		XCPLogPath:      "/opt/var/log/xcp.log",
+		LogSources:      []string{"/opt/var/log/xkeen.log", "/opt/var/log/xcp.log"},
 		AllowedRoots: []string{
 			"/opt/etc/xray",
 			"/opt/etc/xkeen",
@@ -97,6 +101,7 @@ func Default() *Config {
 			CertPath: "",
 			KeyPath:  "",
 		},
+		UpdateChannel: "stable",
 	}
 }
 
@@ -111,11 +116,30 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg.ConfigPath = path
+
+	if cfg.XCPLogPath == "" {
+		cfg.XCPLogPath = "/opt/var/log/xcp.log"
+	}
+
 	if len(cfg.LogSources) == 0 {
+		sources := []string{}
 		if cfg.LogPath != "" {
-			cfg.LogSources = []string{cfg.LogPath}
+			sources = append(sources, cfg.LogPath)
 		} else {
-			cfg.LogSources = []string{"/opt/var/log/xkeen.log"}
+			sources = append(sources, "/opt/var/log/xkeen.log")
+		}
+		sources = append(sources, cfg.XCPLogPath)
+		cfg.LogSources = sources
+	} else {
+		found := false
+		for _, s := range cfg.LogSources {
+			if s == cfg.XCPLogPath {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cfg.LogSources = append(cfg.LogSources, cfg.XCPLogPath)
 		}
 	}
 	return cfg, nil

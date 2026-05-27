@@ -46,6 +46,20 @@ func main() {
 		}
 	}
 
+	// Setup logging to file if configured
+	if cfg.XCPLogPath != "" {
+		if err := os.MkdirAll(filepath.Dir(cfg.XCPLogPath), 0755); err == nil {
+			logFile, err := os.OpenFile(cfg.XCPLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err == nil {
+				log.SetOutput(logFile)
+			} else {
+				log.Printf("Failed to open log file %s: %v", cfg.XCPLogPath, err)
+			}
+		} else {
+			log.Printf("Failed to create log directory for %s: %v", cfg.XCPLogPath, err)
+		}
+	}
+
 	srvCfg := &server.Config{
 		Port:             cfg.Port,
 		XRayConfigDir:    cfg.XRayConfigDir,
@@ -102,6 +116,7 @@ func main() {
 	srv.HandleProtected("/api/config/validate", api.ConfigValidate)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
+	srv.HandleProtected("/api/settings/dev-mode", api.SettingsDevMode)
 	srv.HandleProtected("/api/service/status", api.ServiceStatus)
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
 	srv.HandleProtected("/api/service/restart-log", api.ServiceRestartLog)
@@ -117,6 +132,8 @@ func main() {
 	srv.HandleProtected("/api/update/install", api.UpdateInstall)
 	srv.HandleProtected("/api/update/rollback", api.UpdateRollback)
 	srv.HandleProtected("/api/update/status", api.UpdateStatusEndpoint)
+	srv.HandleProtected("/api/update/events", api.UpdateEventsSSE)
+	srv.HandleProtected("/api/update/channel", api.UpdateChannelHandler)
 
 	// Subscription endpoints
 	srv.HandleProtected("/api/outbound/parse", api.OutboundParse)
@@ -126,6 +143,11 @@ func main() {
 	srv.HandleProtected("/api/subscriptions/delete", api.SubscriptionDelete)
 	srv.HandleProtected("/api/subscriptions/refresh", api.SubscriptionRefresh)
 	srv.HandleProtected("/api/subscriptions/refresh-all", api.SubscriptionRefreshAll)
+	srv.HandleProtected("/api/subscriptions/raw", api.SubscriptionRaw)
+	srv.HandleProtected("/api/subscriptions/parse-report", api.SubscriptionParseReport)
+	srv.HandleProtected("/api/subscriptions/nodes", api.SubscriptionNodes)
+	srv.HandleProtected("/api/subscriptions/health", api.SubscriptionHealth)
+	srv.HandleProtected("/api/subscriptions/active", api.SubscriptionSetActive)
 
 	// Network Tools endpoints
 	srv.HandleProtected("/api/network/ping", api.NetworkPing)
@@ -196,6 +218,7 @@ func main() {
 
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
+	subscriptionSvc.SetConsoleService(consoleSvc)
 	api.SetSubscriptionService(subscriptionSvc)
 
 	// Start subscription auto-refresh scheduler. It checks every 15 minutes
@@ -204,6 +227,12 @@ func main() {
 	go subscriptionSvc.RunScheduler(schedulerCtx, 15*time.Minute)
 	defer cancelScheduler()
 
+	// Subscription health checker (TCP-dial каждые 5 минут)
+	healthSvc := services.NewSubscriptionHealthService(cfg.DataDir, subscriptionSvc)
+	healthSvc.Start()
+	api.SetSubscriptionHealthService(healthSvc)
+	defer healthSvc.Stop()
+
 	// Network Tools
 	networkSvc := services.NewNetworkToolsService()
 	api.SetNetworkToolsService(networkSvc)
@@ -211,6 +240,7 @@ func main() {
 	// Kernels
 	kernelSvc := services.NewKernelService()
 	api.SetKernelService(kernelSvc)
+	subscriptionSvc.SetKernelService(kernelSvc)
 	srv.HandleProtected("/api/kernels", api.KernelList)
 	srv.HandleProtected("/api/kernels/debug", api.KernelDebug)
 	srv.HandleProtected("/api/kernels/{name}/check", api.KernelCheck)

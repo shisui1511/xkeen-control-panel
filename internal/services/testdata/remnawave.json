@@ -1,0 +1,36 @@
+[
+  {
+    "remarks": "DE-Frankfurt [NEW] (Youtube, Instagram) 10Gb/s",
+    "outbounds": [
+      {
+        "tag": "proxy-de",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "de.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "id": "550e8400-e29b-41d4-a716-446655440000",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "reality",
+          "realitySettings": {
+            "publicKey": "pubkey123",
+            "shortId": "shortid456",
+            "serverName": "sni.example.com",
+            "fingerprint": "chrome"
+          }
+        }
+      }
+    ]
+  }
+]

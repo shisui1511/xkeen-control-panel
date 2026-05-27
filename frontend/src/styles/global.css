@@ -134,6 +134,27 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #102a44 transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #102a44;
+  border-radius: 6px;
+  transition: background var(--transition-fast);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #1a426b;
 }
 
 body {
@@ -313,6 +334,18 @@ h2.card-title {
 }
 .input::placeholder {
   color: var(--fg-dim);
+}
+
+/* Hide spin buttons globally for input[type="number"] */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
 }
 
 .form-group {
@@ -1659,4 +1692,89 @@ pre.code-output {
   .api-offline-meta {
     margin-left: 0;
   }
+}
+
+/* ============================================================
+   Chips system (Phase 5.5)
+   ============================================================ */
+:root {
+  --chip-padding: 3px 8px;
+  --chip-radius: 6px;
+  --chip-font: 11.5px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--chip-padding);
+  border-radius: var(--chip-radius);
+  font-size: var(--chip-font);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  vertical-align: middle;
+  border: 1px solid transparent;
+  transition: all var(--transition-fast);
+}
+
+.chip-success {
+  background: rgba(70, 209, 138, 0.08);
+  color: var(--success);
+  border-color: rgba(70, 209, 138, 0.2);
+}
+
+.chip-warning {
+  background: rgba(240, 180, 80, 0.08);
+  color: var(--warning);
+  border-color: rgba(240, 180, 80, 0.2);
+}
+
+.chip-danger {
+  background: rgba(239, 91, 107, 0.08);
+  color: var(--danger);
+  border-color: rgba(239, 91, 107, 0.2);
+}
+
+.chip-info {
+  background: rgba(41, 194, 240, 0.08);
+  color: var(--accent);
+  border-color: rgba(41, 194, 240, 0.2);
+}
+
+.chip-default {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg-secondary);
+  border-color: var(--border);
+}
+
+/* Кликабельный чип */
+a.chip {
+  text-decoration: none;
+  cursor: pointer;
+}
+a.chip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg-primary);
+  border-color: var(--accent);
+}
+
+/* С точкой (LED) */
+.chip--dot::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+}
+
+/* С иконкой */
+.chip--icon svg,
+.chip--icon :global(svg) {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  color: currentColor;
 }
