@@ -287,7 +287,14 @@ func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *Subscri
 func (s *SubscriptionService) subPath(filename string) string {
 	dir := filepath.Join(s.dataDir, "subscriptions")
 	_ = os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, filename)
+	
+	// Sanitize filename to prevent path traversal (CWE-22)
+	filename = filepath.Base(filename)
+	clean := filepath.Clean(filename)
+	if strings.Contains(clean, "..") || strings.Contains(clean, "/") || strings.Contains(clean, "\\") {
+		return filepath.Join(dir, "invalid_id")
+	}
+	return filepath.Join(dir, clean)
 }
 
 func (s *SubscriptionService) SetHTTPClient(client *http.Client) {
@@ -430,6 +437,9 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 }
 
 func (s *SubscriptionService) Delete(id string) error {
+	if strings.Contains(id, "..") || strings.Contains(id, "/") || strings.Contains(id, "\\") {
+		return fmt.Errorf("invalid subscription ID format")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Find subscription
@@ -999,6 +1009,9 @@ func (s *SubscriptionService) saveDebugFiles(id string, body []byte, headers htt
 
 // GetRaw возвращает сырое тело ответа и заголовки последней загрузки подписки.
 func (s *SubscriptionService) GetRaw(id string) (string, map[string][]string, error) {
+	if strings.Contains(id, "..") || strings.Contains(id, "/") || strings.Contains(id, "\\") {
+		return "", nil, fmt.Errorf("invalid subscription ID format")
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1035,6 +1048,9 @@ func (s *SubscriptionService) GetRaw(id string) (string, map[string][]string, er
 
 // GetParseReport возвращает отчет о результатах парсинга последней загрузки подписки.
 func (s *SubscriptionService) GetParseReport(id string) (*ParseReport, error) {
+	if strings.Contains(id, "..") || strings.Contains(id, "/") || strings.Contains(id, "\\") {
+		return nil, fmt.Errorf("invalid subscription ID format")
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
