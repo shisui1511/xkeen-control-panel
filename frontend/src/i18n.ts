@@ -318,7 +318,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.notification_sound': 'Звук уведомлений',
     'settings.notification_sound_desc': 'Тост-уведомления с лёгким сигналом',
     'settings.dev_mode': 'Режим разработчика',
-    'settings.dev_mode_desc': 'Показывать диагностические инструменты (сводка парсинга, заголовки, сырой ответ)',
+    'settings.dev_mode_desc':
+      'Показывать диагностические инструменты (сводка парсинга, заголовки, сырой ответ)',
     'settings.change_password': 'Смена пароля',
     'settings.current_password': 'Текущий пароль',
     'settings.new_password': 'Новый пароль',
@@ -595,7 +596,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.advanced_params': 'Дополнительные параметры',
     'subscr.delete_confirm': 'Вы уверены, что хотите удалить эту подписку?',
     'subscr.hwid_locked_warning': 'Провайдер не принял HWID — могут приходить заглушки вместо нод',
-    'subscr.confdir_warning': 'Директория конфигов XRay не найдена ({dir}). Fragment-файлы подписок не будут применены.',
+    'subscr.confdir_warning':
+      'Директория конфигов XRay не найдена ({dir}). Fragment-файлы подписок не будут применены.',
     'subscr.provider_interval': 'Провайдер рекомендует этот интервал обновления',
     'subscr.diag_btn': 'Диагностика',
     'subscr.diag_title': 'Диагностика подписки: {name}',
@@ -613,15 +615,18 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.quality': 'Качество подписки',
     'subscr.quality_full': '100% параметров',
     'subscr.quality_partial': 'Частично (v2ray fallback)',
-    'subscr.quality_full_tip': 'Провайдер вернул полноценный xray-json или clash формат. Все параметры (Reality, TLS, ALPN) сохранены.',
-    'subscr.quality_partial_tip': 'Провайдер вернул base64 fallback. Некоторые современные параметры могут быть утеряны.',
+    'subscr.quality_full_tip':
+      'Провайдер вернул полноценный xray-json или clash формат. Все параметры (Reality, TLS, ALPN) сохранены.',
+    'subscr.quality_partial_tip':
+      'Провайдер вернул base64 fallback. Некоторые современные параметры могут быть утеряны.',
     'subscr.nodes_count': '{count} узлов',
     'subscr.rules_count': '{count} правил',
     'subscr.expires_in': 'Истекает через {days} дн.',
     'subscr.expires_soon': 'Истекает скоро',
     'subscr.expired': 'Истекла',
     'subscr.nodes_preview': 'Просмотр узлов',
-    'subscr.nodes_preview_placeholder': 'Список с метаданными и ping-тестами будет доступен в v0.15.0 после завершения интеграции бэкенда.',
+    'subscr.nodes_preview_placeholder':
+      'Список с метаданными и ping-тестами будет доступен в v0.15.0 после завершения интеграции бэкенда.',
     'subscr.active_nodes': 'Активная нода',
     'subscr.updated_at': 'Обновлено: {date}',
     'subscr.infinite_traffic': 'Безлимитный',
@@ -645,7 +650,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.detail.activate_error': 'Ошибка активации ноды',
     'subscr.detail.open': 'Узлы',
     'settings.update_confirm_title': 'Подтверждение обновления',
-    'settings.update_confirm_text': 'Вы уверены, что хотите обновить панель управления? Список изменений:',
+    'settings.update_confirm_text':
+      'Вы уверены, что хотите обновить панель управления? Список изменений:',
     'settings.update_install_btn': 'Обновить панель',
 
     // Logs
@@ -1379,8 +1385,11 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.enabled': 'Enabled',
     'subscr.advanced_params': 'Advanced settings',
     'subscr.delete_confirm': 'Are you sure you want to delete this subscription?',
-    'subscr.hwid_locked_warning': 'Provider rejected HWID — stub nodes may appear instead of real ones',
-    'subscr.confdir_warning': 'XRay config directory not found ({dir}). Subscription fragment files will not be applied.',
+    'subscr.hwid_locked_warning':
+      'Provider rejected HWID — stub nodes may appear instead of real ones',
+    'subscr.confdir_warning':
+      'XRay config directory not found ({dir}). Subscription fragment files will not be applied.',
+    'subscr.provider_interval': 'Provider recommends this update interval',
     'subscr.diag_btn': 'Diagnostics',
     'subscr.diag_title': 'Subscription Diagnostics: {name}',
     'subscr.tab_report': 'Parse Summary',
@@ -1397,15 +1406,18 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.quality': 'Subscription quality',
     'subscr.quality_full': '100% parameters',
     'subscr.quality_partial': 'Partial (v2ray fallback)',
-    'subscr.quality_full_tip': 'Provider returned full xray-json or clash format. All parameters (Reality, TLS, ALPN) are preserved.',
-    'subscr.quality_partial_tip': 'Provider returned base64 fallback. Some modern parameters might be lost.',
+    'subscr.quality_full_tip':
+      'Provider returned full xray-json or clash format. All parameters (Reality, TLS, ALPN) are preserved.',
+    'subscr.quality_partial_tip':
+      'Provider returned base64 fallback. Some modern parameters might be lost.',
     'subscr.nodes_count': '{count} nodes',
     'subscr.rules_count': '{count} rules',
     'subscr.expires_in': 'Expires in {days} d.',
     'subscr.expires_soon': 'Expires soon',
     'subscr.expired': 'Expired',
     'subscr.nodes_preview': 'Nodes Preview',
-    'subscr.nodes_preview_placeholder': 'Node list with metadata and health checks will be available in v0.15.0 after backend integration.',
+    'subscr.nodes_preview_placeholder':
+      'Node list with metadata and health checks will be available in v0.15.0 after backend integration.',
     'subscr.active_nodes': 'Active node',
     'subscr.updated_at': 'Updated: {date}',
     'subscr.infinite_traffic': 'Unlimited',
