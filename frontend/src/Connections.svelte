@@ -30,10 +30,14 @@
   let connections: Connection[] = [];
   let loading = false;
   let error = '';
-  let loadTimedOut = false;
-  let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
-  let refreshInterval: ReturnType<typeof setInterval>;
-  let autoRefresh = true;
+  let wsConnected = false;
+  let wsReconnecting = false;
+
+  // WebSocket
+  let ws: WebSocket | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectDelay = 2000;
+  const MAX_RECONNECT_DELAY = 30000;
 
   // Filters
   let filterSource = '';
@@ -44,33 +48,59 @@
   $: uniqueRules = [...new Set(connections.map((c) => c.rule).filter(Boolean))].sort();
   $: uniqueChains = [...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort();
 
-  async function fetchConnections() {
-    loading = true;
-    error = '';
-    loadTimedOut = false;
-    if (loadTimeoutId) clearTimeout(loadTimeoutId);
-    loadTimeoutId = setTimeout(() => {
-      if (loading) {
-        loading = false;
-        loadTimedOut = true;
-        error = $t('ds.empty.load_timeout');
-      }
-    }, 10000);
-    try {
-      const res = await fetch('/api/mihomo/proxy/connections');
-      if (!res.ok) throw new Error('Failed to load connections');
+  function connectWS() {
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
 
-      const data = await res.json();
-      connections = data.connections || [];
-    } catch (e: any) {
-      error = e.message;
-    } finally {
-      if (loadTimeoutId) {
-        clearTimeout(loadTimeoutId);
-        loadTimeoutId = null;
-      }
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/mihomo/connections/ws`;
+
+    wsReconnecting = false;
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      wsConnected = true;
+      wsReconnecting = false;
+      reconnectDelay = 2000;
+      error = '';
       loading = false;
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        connections = data.connections || [];
+        loading = false;
+      } catch (_) {}
+    };
+
+    ws.onerror = () => {
+      wsConnected = false;
+    };
+
+    ws.onclose = () => {
+      wsConnected = false;
+      if (!destroyed) {
+        wsReconnecting = true;
+        reconnectTimer = setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+          connectWS();
+        }, reconnectDelay);
+      }
+    };
+  }
+
+  function disconnectWS() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     }
+    if (ws) {
+      ws.onclose = null;
+      ws.close();
+      ws = null;
+    }
+    wsConnected = false;
+    wsReconnecting = false;
   }
 
   async function closeConnection(id: string) {
@@ -83,7 +113,6 @@
 
       if (!res.ok) throw new Error('Failed to close connection');
       showToast('success', $t('conn.close_success'));
-      await fetchConnections();
     } catch (e: any) {
       error = e.message;
     }
@@ -100,7 +129,6 @@
 
       if (!res.ok) throw new Error('Failed to close all connections');
       showToast('success', $t('conn.close_all_success'));
-      await fetchConnections();
     } catch (e: any) {
       error = e.message;
     }
@@ -114,6 +142,15 @@
   function getChainPath(conn: Connection): string {
     if (!conn.chains || conn.chains.length === 0) return 'DIRECT';
     return conn.chains.join(' → ');
+  }
+
+  function getHost(conn: Connection): string {
+    return conn.metadata.host || conn.metadata.destinationIP;
+  }
+
+  function getHostTooltip(conn: Connection): string {
+    const host = conn.metadata.host || conn.metadata.destinationIP;
+    return `${host}:${conn.metadata.destinationPort}`;
   }
 
   function formatBytes(bytes: number): string {
@@ -139,28 +176,7 @@
     }
   }
 
-  function getFilteredConnections(): Connection[] {
-    return connections.filter((conn) => {
-      if (filterSource && !conn.metadata.sourceIP.includes(filterSource)) return false;
-      if (
-        filterDest &&
-        !conn.metadata.host.includes(filterDest) &&
-        !conn.metadata.destinationIP.includes(filterDest)
-      )
-        return false;
-      if (filterRule && conn.rule !== filterRule) return false;
-      if (filterProxy && getChainPath(conn) !== filterProxy) return false;
-      return true;
-    });
-  }
 
-  function toggleAutoRefresh() {
-    autoRefresh = !autoRefresh;
-    clearInterval(refreshInterval); // always clear before (re)creating
-    if (autoRefresh) {
-      refreshInterval = setInterval(fetchConnections, 3000);
-    }
-  }
 
   let mihomoLaunching = false;
 
@@ -179,12 +195,11 @@
       if (!res.ok) throw new Error('Failed to start Mihomo');
       setTimeout(async () => {
         await fetchCapabilities();
-        fetchConnections();
+        connectWS();
         mihomoLaunching = false;
       }, 1500);
       setTimeout(async () => {
         await fetchCapabilities();
-        fetchConnections();
       }, 4000);
     } catch (e: any) {
       showToast('error', e.message);
@@ -194,18 +209,33 @@
 
   $: totalUpload = connections.reduce((acc, c) => acc + c.upload, 0);
   $: totalDownload = connections.reduce((acc, c) => acc + c.download, 0);
-  $: filteredConnections = getFilteredConnections();
+  // Явное реактивное выражение — Svelte отслеживает connections, filterSource, filterDest, filterRule, filterProxy
+  $: filteredConnections = connections.filter((conn) => {
+    if (filterSource && !(conn.metadata.sourceIP || '').includes(filterSource)) return false;
+    if (
+      filterDest &&
+      !(conn.metadata.host || '').includes(filterDest) &&
+      !(conn.metadata.destinationIP || '').includes(filterDest)
+    )
+      return false;
+    if (filterRule && conn.rule !== filterRule) return false;
+    if (filterProxy && getChainPath(conn) !== filterProxy) return false;
+    return true;
+  });
+
+
+  let destroyed = false;
 
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {
-      fetchConnections();
-      refreshInterval = setInterval(fetchConnections, 3000);
+      loading = true;
+      connectWS();
     }
   });
 
   onDestroy(() => {
-    clearInterval(refreshInterval);
-    if (loadTimeoutId) clearTimeout(loadTimeoutId);
+    destroyed = true;
+    disconnectWS();
   });
 </script>
 
@@ -216,35 +246,17 @@
         {$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
         {$t('conn.title')}
       </div>
-      <h1>{$t('conn.title')}</h1>
+      <h1>
+        {$t('conn.title')}
+        {#if wsConnected}
+          <span class="live-indicator" title="WebSocket активен">{$t('conn.live')}</span>
+        {:else if wsReconnecting}
+          <span class="live-indicator live-reconnecting">{$t('conn.ws_reconnecting')}</span>
+        {/if}
+      </h1>
       <p class="sub">{$t('conn.active')}</p>
     </div>
     <div class="ph-actions">
-      <label
-        class="toggle-label"
-        style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-secondary); cursor: pointer; user-select: none;"
-      >
-        <label
-          class="toggle-switch"
-          style="position: relative; display: inline-block; width: 36px; height: 20px;"
-        >
-          <input
-            type="checkbox"
-            checked={autoRefresh}
-            on:change={toggleAutoRefresh}
-            style="opacity: 0; width: 0; height: 0;"
-          />
-          <span
-            class="toggle-slider"
-            style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border); transition: .2s; border-radius: 20px;"
-          ></span>
-        </label>
-        {$t('conn.autorefresh')}
-      </label>
-      <button class="btn btn-secondary" on:click={fetchConnections} disabled={loading}>
-        <Icon name="refresh" size={14} />
-        {$t('app.refresh')}
-      </button>
       <button
         class="btn btn-secondary"
         style="color:var(--danger);"
@@ -273,7 +285,7 @@
       description={error}
       icon={WarningIcon}
       ctaText={$t('app.refresh')}
-      oncta={fetchConnections}
+      oncta={connectWS}
     />
   {:else}
     <div class="toolbar mb-2">
@@ -336,9 +348,10 @@
         <thead>
           <tr>
             <th class="col-src">{$t('conn.source')}</th>
-            <th>{$t('conn.destination')}</th>
+            <th class="col-host">{$t('conn.host')}</th>
             <th>{$t('conn.rule')}</th>
             <th class="col-chain">{$t('conn.chain')}</th>
+            <th class="col-network">{$t('conn.network')}</th>
             <th class="col-traffic col-upload">↑ {$t('conn.upload')}</th>
             <th class="col-traffic col-download">↓ {$t('conn.download')}</th>
             <th class="col-duration">⏱ {$t('conn.duration')}</th>
@@ -350,9 +363,10 @@
             {#each Array(5) as _}
               <tr>
                 <td class="col-src"><Skeleton type="text-line" width="120px" /></td>
-                <td><Skeleton type="text-line" width="180px" /></td>
+                <td class="col-host"><Skeleton type="text-line" width="160px" /></td>
                 <td><Skeleton type="text-line" width="80px" /></td>
                 <td class="col-chain"><Skeleton type="text-line" width="100px" /></td>
+                <td class="col-network"><Skeleton type="text-line" width="40px" /></td>
                 <td class="col-traffic col-upload"><Skeleton type="text-line" width="50px" /></td>
                 <td class="col-traffic col-download"><Skeleton type="text-line" width="50px" /></td>
                 <td class="col-duration"><Skeleton type="text-line" width="30px" /></td>
@@ -363,10 +377,12 @@
             {#each filteredConnections as conn (conn.id)}
               <tr class="conn-row">
                 <td class="mono col-src">{conn.metadata.sourceIP}:{conn.metadata.sourcePort}</td>
-                <td class="mono" style="word-break:break-all;"
-                  >{conn.metadata.host || conn.metadata.destinationIP}:{conn.metadata
-                    .destinationPort}</td
-                >
+                <td class="mono col-host">
+                  <span title={getHostTooltip(conn)} class="host-cell">
+                    {getHost(conn)}
+                    <span class="host-port">:{conn.metadata.destinationPort}</span>
+                  </span>
+                </td>
                 <td>
                   <span class="badge badge-info">
                     {conn.rule}
@@ -376,6 +392,15 @@
                   {/if}
                 </td>
                 <td class="col-chain cell-route">{getChainPath(conn)}</td>
+                <td class="col-network">
+                  <span
+                    class="badge net-badge"
+                    class:net-tcp={conn.metadata.network?.toUpperCase() === 'TCP'}
+                    class:net-udp={conn.metadata.network?.toUpperCase() === 'UDP'}
+                  >
+                    {conn.metadata.network?.toUpperCase() || '—'}
+                  </span>
+                </td>
                 <td
                   class="mono col-traffic col-upload"
                   style="text-align:right;color:var(--accent);">{formatBytes(conn.upload)}</td
@@ -400,8 +425,8 @@
               </tr>
             {:else}
               <tr>
-                <td colspan="8" style="text-align: center; padding: 30px; color: var(--fg-dim);">
-                  {$t('conn.no_connections')}
+                <td colspan="9" style="text-align: center; padding: 30px; color: var(--fg-dim);">
+                  {wsConnected ? $t('conn.no_connections') : $t('conn.ws_offline')}
                 </td>
               </tr>
             {/each}
@@ -413,30 +438,32 @@
 </div>
 
 <style>
-  /* Custom slider styles to match global design system */
-  .toggle-switch input:checked + .toggle-slider {
-    background-color: var(--accent) !important;
+  /* Live indicator */
+  .live-indicator {
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 500;
+    color: #22d3ee;
+    margin-left: 10px;
+    letter-spacing: 0.03em;
+    vertical-align: middle;
+    animation: live-pulse 2s ease-in-out infinite;
   }
-  .toggle-switch input:checked + .toggle-slider::before {
-    transform: translateX(16px);
+  .live-reconnecting {
+    color: var(--fg-dim);
+    animation: none;
   }
-  .toggle-slider::before {
-    position: absolute;
-    content: '';
-    height: 16px;
-    width: 16px;
-    left: 2px;
-    bottom: 2px;
-    background-color: white;
-    transition: 0.2s;
-    border-radius: 50%;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  @keyframes live-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
   }
+
   .conn-table-container {
     overflow-x: auto;
   }
   .connections-table {
-    min-width: 700px;
+    min-width: 800px;
   }
   .rule-payload {
     font-size: 11px;
@@ -451,11 +478,46 @@
     color: white !important;
   }
 
+  /* Host cell */
+  .host-cell {
+    display: inline-block;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+    cursor: default;
+  }
+  .host-port {
+    color: var(--fg-dim);
+    font-size: 11px;
+  }
+
+  /* Network badge */
+  .net-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+  }
+  .net-tcp {
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.25);
+  }
+  .net-udp {
+    background: rgba(167, 139, 250, 0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(167, 139, 250, 0.25);
+  }
+
   /* Column priority — hide tier-2/3 columns on mobile */
   @media (max-width: 640px) {
     .col-src,
     .col-traffic,
-    .col-duration {
+    .col-duration,
+    .col-network {
       display: none;
     }
     .connections-table {
@@ -463,7 +525,8 @@
     }
   }
   @media (max-width: 480px) {
-    .col-chain {
+    .col-chain,
+    .col-host {
       display: none;
     }
   }
