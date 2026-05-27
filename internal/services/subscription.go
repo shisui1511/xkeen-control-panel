@@ -287,7 +287,7 @@ func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *Subscri
 func (s *SubscriptionService) subPath(filename string) string {
 	dir := filepath.Join(s.dataDir, "subscriptions")
 	_ = os.MkdirAll(dir, 0755)
-	
+
 	// Sanitize filename to prevent path traversal (CWE-22)
 	filename = filepath.Base(filename)
 	clean := filepath.Clean(filename)
