@@ -48,6 +48,18 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
+		// Explicit inline validation for CodeQL path sanitization
+		var pathAllowed bool
+		for _, root := range a.cfg.AllowedRoots {
+			cleanRoot := filepath.Clean(root)
+			if cleanF == cleanRoot || strings.HasPrefix(cleanF, cleanRoot+string(filepath.Separator)) {
+				pathAllowed = true
+				break
+			}
+		}
+		if !pathAllowed {
+			continue
+		}
 		info, statErr := os.Stat(cleanF)
 		var size int64
 		if statErr == nil {
