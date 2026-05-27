@@ -133,9 +133,7 @@ func ReplaceMihomoProxies(content string, oldNames []string, newBlocks []string)
 
 	for _, nb := range newBlocks {
 		nbLines := strings.Split(strings.TrimRight(nb, "\n"), "\n")
-		for _, l := range nbLines {
-			out = append(out, l)
-		}
+		out = append(out, nbLines...)
 	}
 
 	if end < len(lines) {
