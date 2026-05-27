@@ -41,6 +41,7 @@
     expire?: number;
     hwid_locked?: boolean;
     use_provider_interval?: boolean;
+    announcement?: string;
   }
 
   interface SubscriptionNode {
@@ -529,15 +530,15 @@
         body: JSON.stringify({ node_tag: nodeTag })
       });
       if (res.ok) {
-        showToast($t('subscr.detail.activated'), 'success');
+        showToast('success', $t('subscr.detail.activated'));
         if (subNodes[subId]) {
           subNodes[subId] = subNodes[subId].map((n) => ({ ...n, active: n.tag === nodeTag }));
         }
       } else if (res.status === 409) {
-        showToast($t('subscr.detail.auto_routing_conflict'), 'warning');
+        showToast('error', $t('subscr.detail.auto_routing_conflict'));
       } else {
         const err = await res.json().catch(() => ({}));
-        showToast(err.error || $t('subscr.detail.activate_error'), 'error');
+        showToast('error', err.error || $t('subscr.detail.activate_error'));
       }
     } catch (e: any) {
       showToast('error', e.message || $t('app.error'));
