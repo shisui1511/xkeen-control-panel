@@ -56,6 +56,7 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 		"/opt/var/log/xray/access.log",
 		"/opt/var/log/xray/error.log",
 		"/opt/var/log/xkeen-detached.log",
+		"/opt/var/log/mihomo.log",
 	} {
 		already := false
 		for _, s := range sources {

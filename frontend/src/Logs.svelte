@@ -22,6 +22,24 @@
   let logContainer: HTMLDivElement;
   let availableSources: string[] = [];
 
+  // Предопределённые вкладки источников
+  const KNOWN_SOURCES = ['xkeen', 'xray', 'mihomo'];
+
+  $: filteredLogs = (() => {
+    let result = logs;
+    if (filter) {
+      const lf = filter.toLowerCase();
+      result = result.filter((log) => log.raw.toLowerCase().includes(lf));
+    }
+    if (sourceFilter) {
+      result = result.filter((log) => log.source.toLowerCase() === sourceFilter.toLowerCase());
+    }
+    if (levelFilter) {
+      result = result.filter((log) => log.level === levelFilter);
+    }
+    return result;
+  })();
+
   function parseLogLine(raw: string): LogEntry {
     let timestamp = '';
     let source = '';
@@ -135,9 +153,7 @@
         updateSources();
 
         if (autoScroll && logContainer) {
-          setTimeout(() => {
-            logContainer.scrollTop = logContainer.scrollHeight;
-          }, 10);
+          logContainer.scrollTop = logContainer.scrollHeight;
         }
       }
     };
@@ -185,18 +201,7 @@
   }
 
   function getFilteredLogs(): LogEntry[] {
-    let result = logs;
-    if (filter) {
-      const lowerFilter = filter.toLowerCase();
-      result = result.filter((log) => log.raw.toLowerCase().includes(lowerFilter));
-    }
-    if (sourceFilter) {
-      result = result.filter((log) => log.source === sourceFilter);
-    }
-    if (levelFilter) {
-      result = result.filter((log) => log.level === levelFilter);
-    }
-    return result;
+    return filteredLogs;
   }
 
   function getSourceColor(source: string): string {
@@ -321,12 +326,21 @@
           style="flex:1;"
         />
 
-        <select bind:value={sourceFilter} class="source-select">
-          <option value="">{$t('logs.all_sources')}</option>
-          {#each availableSources as source}
-            <option value={source}>{source}</option>
+        <!-- Вкладки источников -->
+        <div class="source-tabs" role="group" aria-label={$t('logs.source')}>
+          <button
+            class="stab"
+            class:stab-active={sourceFilter === ''}
+            on:click={() => (sourceFilter = '')}
+          >{$t('logs.all_sources')}</button>
+          {#each KNOWN_SOURCES as src}
+            <button
+              class="stab"
+              class:stab-active={sourceFilter === src}
+              on:click={() => (sourceFilter = sourceFilter === src ? '' : src)}
+            >{src}</button>
           {/each}
-        </select>
+        </div>
 
         <select bind:value={levelFilter} class="source-select">
           <option value="">{$t('logs.all_levels')}</option>
@@ -485,10 +499,119 @@
     flex: 1;
   }
 
-  .logs-pane .lv-debug {
-    color: var(--fg-dim);
-    word-break: break-all;
-    white-space: pre-wrap;
+  .toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--bg);
+    padding: 8px 0 6px;
+  }
+
+  /* Source tab pills */
+  .source-tabs {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+  }
+  .stab {
+    padding: 3px 10px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--fg-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+    line-height: 1.5;
+  }
+  .stab:hover:not(.stab-active) {
+    background: var(--bg-hover);
+    color: var(--fg-primary);
+  }
+  .stab.stab-active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .filters {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
     flex: 1;
+    margin-left: 14px;
+  }
+
+  .filter-input {
+    flex: 1;
+    min-width: 120px;
+    height: 30px;
+    padding: 0 10px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
+    font-size: 12.5px;
+  }
+
+  .source-select {
+    height: 30px;
+    padding: 0 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
+    font-size: 12.5px;
+  }
+
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: var(--fg-secondary);
+    cursor: pointer;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  .status-indicator {
+    font-size: 12px;
+    color: var(--fg-dim);
+    padding: 3px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .status-indicator.connected {
+    color: #4ade80;
+    border-color: rgba(74, 222, 128, 0.3);
+    background: rgba(74, 222, 128, 0.06);
+  }
+
+  .stats {
+    display: flex;
+    gap: 16px;
+    font-size: 11.5px;
+    color: var(--fg-dim);
+    padding: 4px 0;
+    flex-shrink: 0;
+  }
+  .stat b {
+    color: var(--fg-secondary);
   }
 </style>
