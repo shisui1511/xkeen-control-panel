@@ -804,7 +804,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'apioffline.retry_title': 'Переподключить сейчас',
     'apioffline.sec_ago': 'сек назад',
     'apioffline.min_ago': 'мин назад',
-    'apioffline.hour_ago': 'ч назад'
+    'apioffline.hour_ago': 'ч назад',
+    'svc.xray_active_warning': 'Этот раздел доступен только для ядра Mihomo. Сейчас запущено ядро Xray.',
+    'svc.mihomo_stopped_warning': 'Ядро Mihomo остановлено. Запустите его на странице Сервисы.'
   },
   en: {
     // Common
@@ -1600,7 +1602,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'apioffline.retry_title': 'Retry now',
     'apioffline.sec_ago': 'sec ago',
     'apioffline.min_ago': 'min ago',
-    'apioffline.hour_ago': 'h ago'
+    'apioffline.hour_ago': 'h ago',
+    'svc.xray_active_warning': 'This section is only available for the Mihomo kernel. The Xray kernel is currently running.',
+    'svc.mihomo_stopped_warning': 'The Mihomo kernel is stopped. Start it in the Services section.'
   }
 };
 
