@@ -687,7 +687,7 @@
     </div>
   </div>
 
-  {#if $capabilities?.xray && !$capabilities.xray.conf_dir_exists}
+  {#if $capabilities?.xray && !$capabilities.xray.conf_dir_exists && $capabilities.active_kernel === 'xray'}
     <div class="confdir-warning">
       <svg
         width="16"
