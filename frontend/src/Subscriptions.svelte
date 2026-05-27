@@ -2,8 +2,7 @@
   import { onMount } from 'svelte';
   import { t, currentLang } from './i18n';
   import { showConfirm, capabilities, fetchCapabilities, showToast, devMode, fetchDevMode } from './stores';
-  import SubscriptionHeader from './components/SubscriptionHeader.svelte';
-  import SubscriptionChips from './components/SubscriptionChips.svelte';
+
 
   let { onSwitchTab = () => {} } = $props<{ onSwitchTab?: (tab: string) => void }>();
 
@@ -81,9 +80,9 @@
 
   function formatTraffic(bytes: number): string {
     const gb = bytes / (1024 * 1024 * 1024);
-    if (gb >= 1) return `${gb.toFixed(1)} GB`;
+    if (gb >= 1) return `${gb.toFixed(2)} GB`;
     const mb = bytes / (1024 * 1024);
-    return `${mb.toFixed(1)} MB`;
+    return `${mb.toFixed(2)} MB`;
   }
 
   function formatTrafficUsage(upload?: number, download?: number, total?: number): string {
@@ -167,6 +166,7 @@
   let formFilterTransport = $state('');
   let formEnabled = $state(true);
   let formUseProviderInterval = $state(false);
+  let showAdvanced = $state(false);
 
   async function loadSubscriptions() {
     loading = true;
@@ -298,6 +298,7 @@
     formFilterTransport = '';
     formEnabled = true;
     formUseProviderInterval = false;
+    showAdvanced = false;
     showAddModal = true;
   }
 
@@ -312,12 +313,14 @@
     formFilterTransport = sub.filter_transport || '';
     formEnabled = sub.enabled;
     formUseProviderInterval = !!sub.use_provider_interval;
+    showAdvanced = false;
     showAddModal = true;
   }
 
   function closeModal() {
     showAddModal = false;
     editingSub = null;
+    showAdvanced = false;
   }
 
   function formatDate(dateStr: string): string {
@@ -329,6 +332,64 @@
       hour: '2-digit',
       minute: '2-digit'
     });
+  }
+
+  function formatUpdateDate(dateStr: string): string {
+    if (!dateStr || dateStr.startsWith('0001')) return '—';
+    const d = new Date(dateStr);
+    const pad = (num: number) => String(num).padStart(2, '0');
+    const day = pad(d.getDate());
+    const month = pad(d.getMonth() + 1);
+    const year = String(d.getFullYear()).slice(-2);
+    const hours = pad(d.getHours());
+    const minutes = pad(d.getMinutes());
+    return `${day}.${month}.${year}, ${hours}:${minutes}`;
+  }
+
+  interface AnnouncementLine {
+    isWarn: boolean;
+    text: string;
+  }
+
+  function parseAnnouncementLines(text: string): AnnouncementLine[] {
+    if (!text) return [];
+    return text.split('\n').map(line => {
+      line = line.trim();
+      let isWarn = false;
+      let cleanText = line;
+      if (line.startsWith('!')) {
+        isWarn = true;
+        cleanText = line.substring(1).trim();
+      } else if (line.startsWith('⚠')) {
+        isWarn = true;
+        cleanText = line.substring(1).trim();
+      } else if (line.startsWith('|')) {
+        isWarn = true;
+        cleanText = line.substring(1).trim();
+      }
+      return {
+        isWarn,
+        text: cleanText
+      };
+    });
+  }
+
+  interface ExpireDaysInfo {
+    expired: boolean;
+    days: number | null;
+    text: string;
+  }
+
+  function getExpireDays(expire?: number): ExpireDaysInfo | null {
+    if (!expire || expire <= 0) return null;
+    const diff = expire * 1000 - Date.now();
+    if (diff <= 0) return { expired: true, days: null, text: $t('subscr.expired') };
+    const days = Math.ceil(diff / (24 * 3600 * 1000));
+    return {
+      expired: false,
+      days,
+      text: $t('subscr.expires_in').replace('{days}', String(days))
+    };
   }
 
   function toggleDropdown(id: string) {
@@ -477,6 +538,25 @@
     } finally {
       activatingNode[subId] = null;
     }
+  }
+
+  function getCountryColorStyle(countryCode: string | undefined): string {
+    if (!countryCode) return '';
+    const code = countryCode.toUpperCase();
+    const styles: Record<string, string> = {
+      'EU': 'background: linear-gradient(135deg, #0b3c98, #072561); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3); border-color: rgba(41, 194, 240, 0.3);',
+      'RU': 'background: linear-gradient(135deg, #1e88e5, #e53935); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3);',
+      'DE': 'background: linear-gradient(135deg, #ffb300, #ff3d00, #212121); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
+      'NL': 'background: linear-gradient(135deg, #ff7043, #d84315); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3);',
+      'PL': 'background: linear-gradient(180deg, #ffffff 50%, #e91e63 50%); color: #333333; box-shadow: inset 0 0 4px rgba(0,0,0,0.15); border-color: rgba(255, 255, 255, 0.1);',
+      'FI': 'background: linear-gradient(135deg, #ffffff 40%, #0d47a1 40%); color: #0d47a1;',
+      'LT': 'background: linear-gradient(135deg, #4caf50, #ffeb3b, #f44336); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
+      'EE': 'background: linear-gradient(135deg, #29b6f6, #212121, #ffffff); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
+      'ES': 'background: linear-gradient(135deg, #e53935, #ffeb3b, #e53935); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
+      'US': 'background: linear-gradient(135deg, #0d47a1, #b71c1c); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.3);',
+      'AM': 'background: linear-gradient(135deg, #e53935, #0d47a1, #ffb300); color: #ffffff; text-shadow: 0 1px 2px rgba(0,0,0,0.4);',
+    };
+    return styles[code] ?? 'background: linear-gradient(135deg, #424242, #212121); color: var(--fg-primary);';
   }
 
   onMount(() => {
@@ -644,96 +724,190 @@
 
     <div class="subscriptions-list">
       {#each subscriptions as sub}
+        {@const exp = getExpireDays(sub.expire)}
         <div class="card sub-card" id="sub-card-{sub.id}">
-          <div class="sub-card-layout">
-            <div class="sub-card-left">
-              <div class="type-dot-wrapper">
-                <div class="type-dot" class:mihomo={sub.type === 'mihomo'} title={sub.type === 'mihomo' ? 'Mihomo' : 'XRay'}></div>
-              </div>
-              <div class="sub-card-content">
-                <SubscriptionHeader sub={sub} onEdit={() => openEditModal(sub)} />
-                <div class="sub-url-row">
-                  <span class="sub-url-text" title={sub.url}>{sub.url}</span>
-                </div>
-                <div class="sub-updated-row">
-                  {$t('subscr.updated_at').replace('{date}', formatDate(sub.last_update))}
-                </div>
-                <div class="sub-chips-wrapper">
-                  <SubscriptionChips sub={sub} />
-                </div>
-                {#if sub.hwid_locked}
-                  <div class="hwid-locked-warning">
-                    ⚠ {$t('subscr.hwid_locked_warning')}
+          <!-- Хедер подписки -->
+          <div class="sub-header-row">
+            <!-- Левая колонка хедера -->
+            <div class="sub-header-left">
+              <!-- Стрелочка разворачивания нод -->
+              <button 
+                class="collapse-toggle" 
+                class:expanded={expandedSubs[sub.id]} 
+                on:click={() => toggleExpand(sub.id)}
+                aria-label="Toggle node list"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+
+              <!-- LED точка статуса (активна / выключена) -->
+              <div 
+                class="type-dot" 
+                class:mihomo={sub.type === 'mihomo'} 
+                class:disabled={!sub.enabled} 
+                class:has-error={!!sub.last_error}
+                title={sub.last_error || (sub.enabled ? $t('app.active') : $t('app.disabled'))}
+              ></div>
+
+              <!-- Имя подписки -->
+              <h2 class="sub-name" on:click={() => toggleExpand(sub.id)}>{sub.profile_title || sub.name}</h2>
+            </div>
+
+            <!-- Правая колонка хедера -->
+            <div class="sub-header-right">
+              <!-- Дата обновления -->
+              <span class="sub-update-time" title={$t('subscr.updated_at').replace('{date}', formatDate(sub.last_update))}>
+                {formatUpdateDate(sub.last_update)}
+              </span>
+
+              <!-- Синий чип количества нод -->
+              <span class="nodes-count-badge" on:click={() => toggleExpand(sub.id)} title={$t('subscr.nodes_count').replace('{count}', String(sub.proxy_count || 0))}>
+                {sub.proxy_count || 0}
+              </span>
+
+              <!-- Кнопка Обновить подписку (круговая стрелочка) -->
+              <button 
+                class="action-icon-btn" 
+                on:click={() => refreshSubscription(sub.id)} 
+                disabled={refreshLoading[sub.id]} 
+                title={$t('subscr.refresh')}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class:spinning={refreshLoading[sub.id]}>
+                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+                </svg>
+              </button>
+
+              <!-- Кнопка редактирования -->
+              <button class="action-icon-btn" on:click={() => openEditModal(sub)} title={$t('app.edit')}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+              </button>
+
+              <!-- Кнопка три точки -->
+              <div class="dropdown-container">
+                <button class="action-icon-btn dots-btn" on:click={() => toggleDropdown(sub.id)} aria-label="More actions">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+                  </svg>
+                </button>
+                {#if activeDropdownId === sub.id}
+                  <div class="dropdown-menu">
+                    {#if $devMode}
+                    <button
+                      on:click={() => {
+                        openDiagnosticModal(sub);
+                        activeDropdownId = null;
+                      }}>🔍 {$t('subscr.diag_btn')}</button
+                    >
+                    {/if}
+                    <button
+                      on:click={() => {
+                        deleteSubscription(sub.id);
+                        activeDropdownId = null;
+                      }}
+                      class="delete-action">{$t('app.delete')}</button
+                    >
                   </div>
                 {/if}
               </div>
             </div>
+          </div>
 
-            <div class="sub-card-right">
-              <div class="sub-actions-wrapper">
-                <button
-                  class="btn {sub.last_error ? 'btn-danger-outline' : 'btn-secondary'} btn-sm"
-                  on:click={() => refreshSubscription(sub.id)}
-                  disabled={refreshLoading[sub.id]}
-                >
-                  {#if refreshLoading[sub.id]}
-                    <span class="spinner" style="margin-right: 4px;">...</span>
-                    {$t('app.loading')}
-                  {:else if sub.last_error}
-                    {$currentLang === 'ru' ? 'Повторить' : 'Retry'}
-                  {:else}
-                    {$t('subscr.refresh')}
-                  {/if}
-                </button>
+          <!-- Подстрока с оставшимся временем и трафиком (Метаданные) -->
+          <div class="sub-meta-row">
+            <!-- Срок действия -->
+            <div class="sub-meta-left">
+              {#if exp}
+                <span class="expire-text" class:expired={exp.expired} class:warning={exp.days !== null && exp.days <= 5}>
+                  {exp.text}
+                </span>
+                <span class="meta-divider">|</span>
+              {/if}
+              
+              <span class="sub-type-label">{sub.type === 'mihomo' ? 'Mihomo' : 'XRay'}</span>
+              
+              {#if sub.hwid_locked}
+                <span class="meta-divider">|</span>
+                <span class="hwid-locked-badge">⚠ HWID Locked</span>
+              {/if}
+            </div>
 
-                {#if $devMode}
-                <button
-                  class="btn btn-secondary btn-sm"
-                  on:click={() => openDiagnosticModal(sub)}
-                >
-                  🔍 {$t('subscr.diag_btn')}
-                </button>
-                {/if}
-
-                <div class="dropdown-container">
-                  <button
-                    class="btn btn-secondary action-btn-dots"
-                    on:click={() => toggleDropdown(sub.id)}>⋯</button
-                  >
-                  {#if activeDropdownId === sub.id}
-                    <div class="dropdown-menu">
-                      <button
-                        on:click={() => {
-                          openEditModal(sub);
-                          activeDropdownId = null;
-                        }}>{$t('app.edit')}</button
-                      >
-                      <button
-                        on:click={() => {
-                          deleteSubscription(sub.id);
-                          activeDropdownId = null;
-                        }}
-                        class="delete-action">{$t('app.delete')}</button
-                      >
-                    </div>
-                  {/if}
-                </div>
-              </div>
+            <!-- Объем трафика -->
+            <div class="sub-meta-right">
+              <span class="traffic-text">
+                {formatTraffic((sub.upload || 0) + (sub.download || 0))} / {sub.total && sub.total > 0 ? formatTraffic(sub.total) : '∞'}
+              </span>
             </div>
           </div>
 
-          <!-- Nodes link & Inline content -->
-          <div class="nodes-preview-section">
-            <button
-              class="nodes-preview-toggle-btn"
-              class:expanded={expandedSubs[sub.id]}
-              on:click={() => toggleExpand(sub.id)}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="arrow-icon" class:rotated={expandedSubs[sub.id]}>
-                <polyline points="9 18 15 12 9 6"/>
-              </svg>
-              <span>{$t('subscr.detail.open')} ({sub.proxy_count || 0})</span>
-            </button>
+          <!-- Блок кнопок поддержки и объявления под метаданными -->
+          {#if sub.support_url || sub.announcement}
+            <div class="sub-actions-row">
+              {#if sub.support_url}
+                <a href={sub.support_url} target="_blank" rel="noopener noreferrer" class="btn btn-support">
+                  <!-- Telegram Icon (Plane) -->
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="support-icon">
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                  </svg>
+                  <span>{$currentLang === 'ru' ? 'Поддержка' : 'Support'}</span>
+                </a>
+              {/if}
+
+              {#if sub.announcement}
+                <div class="announcement-wrapper">
+                  <button class="btn btn-announcement">
+                    <!-- Bell/Info Icon -->
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="announce-icon">
+                      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>
+                    </svg>
+                    <span>{$currentLang === 'ru' ? 'Объявление' : 'Announcement'}</span>
+                  </button>
+                  
+                  <!-- Всплывающий popover при ховере на .announcement-wrapper -->
+                  <div class="announcement-popover">
+                    {#each parseAnnouncementLines(sub.announcement) as line}
+                      {#if line.isWarn}
+                        <div class="inline-announcement-warn">
+                          <span class="inline-warn-icon">!</span>
+                          <span class="inline-warn-text">
+                            {#each parseSimpleMarkdown(line.text) as token}
+                              {#if token.type === 'text'}
+                                {token.value}
+                              {:else if token.type === 'bold'}
+                                <strong>{token.value}</strong>
+                              {:else if token.type === 'italic'}
+                                <em>{token.value}</em>
+                              {:else if token.type === 'link'}
+                                <a href={token.url} target="_blank" rel="noopener noreferrer">{token.text}</a>
+                              {/if}
+                            {/each}
+                          </span>
+                        </div>
+                      {:else}
+                        <div class="announcement-line">
+                          {#each parseSimpleMarkdown(line.text) as token}
+                            {#if token.type === 'text'}
+                              {token.value}
+                            {:else if token.type === 'bold'}
+                              <strong>{token.value}</strong>
+                            {:else if token.type === 'italic'}
+                              <em>{token.value}</em>
+                            {:else if token.type === 'link'}
+                              <a href={token.url} target="_blank" rel="noopener noreferrer">{token.text}</a>
+                            {/if}
+                          {/each}
+                        </div>
+                      {/if}
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/if}
 
             {#if expandedSubs[sub.id]}
               <div class="nodes-preview-content">
@@ -743,25 +917,7 @@
                     <span style="margin-left: 8px;">{$t('app.loading')}</span>
                   </div>
                 {:else}
-                  <!-- Announcement -->
-                  {#if sub.announcement}
-                    <div class="inline-announcement-warn">
-                      <span class="inline-warn-icon">!</span>
-                      <span class="inline-warn-text">
-                        {#each parseSimpleMarkdown(sub.announcement) as token}
-                          {#if token.type === 'text'}
-                            {token.value}
-                          {:else if token.type === 'bold'}
-                            <strong>{token.value}</strong>
-                          {:else if token.type === 'italic'}
-                            <em>{token.value}</em>
-                          {:else if token.type === 'link'}
-                            <a href={token.url} target="_blank" rel="noopener noreferrer">{token.text}</a>
-                          {/if}
-                        {/each}
-                      </span>
-                    </div>
-                  {/if}
+
 
                   <!-- Nodes list -->
                   {#if !subNodes[sub.id] || subNodes[sub.id].length === 0}
@@ -773,6 +929,7 @@
                       {#each subNodes[sub.id] as node}
                         {@const h = subHealth[sub.id]?.[node.tag]}
                         {@const isNodeActive = node.active}
+                        {@const metaText = node.use_case || node.speed ? `${node.use_case || ''}${node.use_case && node.speed ? ' - ' : ''}${node.speed || ''}` : `${node.protocol || ''}${node.protocol && node.transport ? ' · ' + node.transport : ''}${node.security && node.security !== 'none' ? ' · ' + node.security : ''}`}
                         <!-- svelte-ignore a11y_click_events_have_key_events -->
                         <!-- svelte-ignore a11y_no_static_element_interactions -->
                         <div
@@ -789,45 +946,44 @@
                           {/if}
 
                           <!-- Flag Avatar -->
-                          <div class="sub-node-avatar-container" class:active={isNodeActive}>
-                            {#if flagsSupported && node.flag}
-                              <span class="sub-node-flag">{node.flag}</span>
-                            {:else}
-                              {#if node.country}
-                                <span class="sub-node-avatar-text">{node.country}</span>
-                              {:else}
-                                <span class="sub-node-flag-fallback">🌐</span>
-                              {/if}
-                            {/if}
-                          </div>
+                          <div 
+                             class="sub-node-avatar-container" 
+                             class:active={isNodeActive}
+                             style={(!flagsSupported || !node.flag) && node.country ? getCountryColorStyle(node.country) : ''}
+                           >
+                             {#if flagsSupported && node.flag}
+                               <span class="sub-node-flag">{node.flag}</span>
+                             {:else}
+                               {#if node.country}
+                                 <span class="sub-node-avatar-text">{node.country}</span>
+                               {:else}
+                                 <span class="sub-node-flag-fallback">🌐</span>
+                               {/if}
+                             {/if}
+                           </div>
 
                           <!-- Text Info -->
                           <div class="sub-node-info">
                             <div class="sub-node-name-row">
-                              <span class="sub-node-name">{node.name || $t('country.' + node.country) || node.tag}</span>
-                              {#if node.is_new}
-                                <span class="sub-node-badge-new">NEW</span>
-                              {/if}
+                              <span class="sub-node-name">
+                                {node.name || $t('country.' + node.country) || node.tag}
+                                {#if node.is_new}
+                                  <span class="sub-node-name-new"> [NEW]</span>
+                                {/if}
+                              </span>
                             </div>
                             <div class="sub-node-meta-row">
-                              {#if node.use_case || node.speed}
-                                <span class="sub-node-meta-text">
-                                  {node.use_case || ''}
-                                  {#if node.use_case && node.speed} — {/if}
-                                  {node.speed || ''}
-                                </span>
-                              {:else}
-                                <span class="sub-node-meta-text">
-                                  {node.protocol || ''}
-                                  {#if node.protocol && node.transport} — {/if}
-                                  {node.transport || ''}
-                                </span>
+                              {#if metaText}
+                                <span class="sub-node-chip-blue">{metaText}</span>
                               {/if}
                             </div>
                           </div>
 
                           <!-- Status / Ping right -->
                           <div class="sub-node-status-container">
+                            <!-- Золотой чип формата/протокола -->
+                            <span class="sub-node-chip-gold">{sub.type === 'mihomo' ? 'YAML' : 'JSON'}</span>
+
                             <button
                               class="sub-node-ping-btn"
                               on:click={(e) => {
@@ -872,7 +1028,6 @@
                 {/if}
               </div>
             {/if}
-          </div>
         </div>
       {/each}
     </div>
@@ -916,17 +1071,6 @@
         </div>
 
         <div class="form-group">
-          <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
-          <input
-            id="form-tag-prefix"
-            type="text"
-            class="input"
-            bind:value={formTagPrefix}
-            placeholder={$t('subscr.tag_prefix_placeholder')}
-          />
-        </div>
-
-        <div class="form-group">
           <label for="form-interval" class="form-label"
             >{$t('subscr.interval')} ({$currentLang === 'ru' ? 'часов' : 'hours'})</label
           >
@@ -940,38 +1084,58 @@
           />
         </div>
 
-        <div class="form-group">
-          <label for="form-filter-name" class="form-label">{$t('subscr.filter_name')}</label>
-          <input
-            id="form-filter-name"
-            type="text"
-            class="input"
-            bind:value={formFilterName}
-            placeholder={$t('subscr.filter_placeholder')}
-          />
-        </div>
+        <button type="button" class="advanced-toggle-btn" on:click={() => showAdvanced = !showAdvanced}>
+          <span class="arrow">{showAdvanced ? '▼' : '►'}</span>
+          <span>{$t('subscr.advanced_params') || 'Дополнительные параметры'}</span>
+        </button>
 
-        <div class="form-group">
-          <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
-          <input
-            id="form-filter-type"
-            type="text"
-            class="input"
-            bind:value={formFilterType}
-            placeholder="vmess, vless, trojan..."
-          />
-        </div>
+        {#if showAdvanced}
+          <div class="advanced-fields-box">
+            <div class="form-group">
+              <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
+              <input
+                id="form-tag-prefix"
+                type="text"
+                class="input"
+                bind:value={formTagPrefix}
+                placeholder={$t('subscr.tag_prefix_placeholder')}
+              />
+            </div>
 
-        <div class="form-group">
-          <label for="form-filter-transport" class="form-label">{$t('subscr.filter_transport')}</label>
-          <input
-            id="form-filter-transport"
-            type="text"
-            class="input"
-            bind:value={formFilterTransport}
-            placeholder="ws, grpc, tcp..."
-          />
-        </div>
+            <div class="form-group">
+              <label for="form-filter-name" class="form-label">{$t('subscr.filter_name')}</label>
+              <input
+                id="form-filter-name"
+                type="text"
+                class="input"
+                bind:value={formFilterName}
+                placeholder={$t('subscr.filter_placeholder')}
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
+              <input
+                id="form-filter-type"
+                type="text"
+                class="input"
+                bind:value={formFilterType}
+                placeholder="vmess, vless, trojan..."
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="form-filter-transport" class="form-label">{$t('subscr.filter_transport')}</label>
+              <input
+                id="form-filter-transport"
+                type="text"
+                class="input"
+                bind:value={formFilterTransport}
+                placeholder="ws, grpc, tcp..."
+              />
+            </div>
+          </div>
+        {/if}
 
         <div class="form-group-checkbox">
           <label class="toggle-switch">
@@ -1158,149 +1322,353 @@
   }
 
   .sub-card {
-    padding: 20px 24px;
+    padding: 24px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 12px;
     position: relative;
-    overflow: hidden;
   }
 
-  .sub-card-layout {
+  /* Хедер карточки */
+  .sub-header-row {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    gap: 20px;
+    align-items: center;
+    gap: 16px;
   }
 
-  .sub-card-left {
-    display: flex;
-    gap: 14px;
-    flex: 1;
-    min-width: 0;
-  }
-
-  .type-dot-wrapper {
-    padding-top: 6px;
+  .sub-header-left {
     display: flex;
     align-items: center;
-    justify-content: center;
-  }
-
-  .type-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 6px var(--accent);
-    flex-shrink: 0;
-  }
-  .type-dot.mihomo {
-    background: #8b5cf6;
-    box-shadow: 0 0 6px #8b5cf6;
-  }
-
-  .sub-card-content {
-    display: flex;
-    flex-direction: column;
     gap: 10px;
     flex: 1;
     min-width: 0;
   }
 
-  .sub-url-row {
-    font-family: var(--font-family-mono);
-    font-size: 12px;
-    color: var(--fg-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
-
-  .sub-url-text {
-    cursor: pointer;
-  }
-
-  .hwid-locked-warning {
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--color-warning, #f59e0b);
-    opacity: 0.9;
-  }
-
-  .sub-updated-row {
-    font-size: 11.5px;
-    color: var(--fg-dim);
-    margin-top: -4px;
-  }
-
-  .sub-card-right {
-    display: flex;
-    align-items: flex-start;
-    flex-shrink: 0;
-  }
-
-  .sub-actions-wrapper {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .sub-card .btn-sm {
-    height: 32px;
-    padding: 0 12px;
-    font-size: 12px;
-    border-radius: var(--radius-md);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  /* Раздел предпросмотра узлов */
-  .nodes-preview-section {
-    border-top: 1px solid var(--border);
-    margin: 0 -24px -20px;
-  }
-
-  .nodes-preview-toggle-btn {
-    width: 100%;
-    background: rgba(0, 0, 0, 0.08);
+  /* Стрелочка */
+  .collapse-toggle {
+    background: transparent;
     border: none;
-    padding: 10px 24px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--fg-secondary);
-    cursor: pointer;
-    text-align: left;
-    transition: background var(--transition-fast), color var(--transition-fast);
-  }
-
-  .nodes-preview-toggle-btn:hover {
-    background: rgba(255, 255, 255, 0.02);
-    color: var(--fg-primary);
-  }
-
-  .arrow-icon {
-    transition: transform var(--transition-fast);
+    padding: 4px;
     color: var(--fg-dim);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    border-radius: 4px;
+    transition: color var(--transition-fast), background var(--transition-fast);
   }
-
-  .arrow-icon.rotated {
+  .collapse-toggle:hover {
+    color: var(--accent);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .collapse-toggle svg {
+    transition: transform var(--transition-fast);
+  }
+  .collapse-toggle.expanded svg {
     transform: rotate(90deg);
   }
 
-  .nodes-preview-content {
-    padding: 16px 24px 20px;
-    background: rgba(0, 0, 0, 0.12);
+  /* LED светодиод */
+  .type-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    flex-shrink: 0;
+    transition: all var(--transition-fast);
+  }
+  .type-dot.mihomo {
+    background: #8b5cf6;
+    box-shadow: 0 0 8px #8b5cf6;
+  }
+  .type-dot.disabled {
+    background: var(--fg-faint);
+    box-shadow: none;
+  }
+  .type-dot.has-error {
+    background: var(--danger);
+    box-shadow: 0 0 8px var(--danger);
+  }
+
+  /* Имя */
+  .sub-name {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--fg-primary);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--font-family-sans), 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji', 'Android Emoji', EmojiSymbols, sans-serif;
+  }
+  .sub-name:hover {
+    color: var(--accent);
+  }
+
+  /* Быстрая кнопка карандаша */
+  .edit-icon-btn {
+    background: transparent;
+    border: none;
+    padding: 4px;
+    color: var(--fg-dim);
+    cursor: pointer;
+    border-radius: 4px;
+    display: grid;
+    place-items: center;
+    opacity: 0;
+    transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  }
+  .sub-header-left:hover .edit-icon-btn,
+  .edit-icon-btn:focus {
+    opacity: 1;
+  }
+  .edit-icon-btn:hover {
+    color: var(--accent);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .sub-header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .sub-update-time {
+    font-size: 12px;
+    color: var(--fg-dim);
+  }
+
+  /* Синий чип количества нод */
+  .nodes-count-badge {
+    background: rgba(41, 194, 240, 0.1);
+    border: 1px solid rgba(41, 194, 240, 0.25);
+    color: var(--accent);
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 11.5px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+  .nodes-count-badge:hover {
+    background: rgba(41, 194, 240, 0.18);
+    border-color: rgba(41, 194, 240, 0.45);
+    box-shadow: 0 0 10px rgba(41, 194, 240, 0.2);
+  }
+
+  /* action кнопки-иконки */
+  .action-icon-btn {
+    background: transparent;
+    border: none;
+    padding: 6px;
+    color: var(--fg-dim);
+    cursor: pointer;
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    transition: all var(--transition-fast);
+  }
+  .action-icon-btn:hover {
+    color: var(--accent);
+    background: var(--hover);
+  }
+  .action-icon-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .action-icon-btn svg.spinning {
+    animation: rotate 1.5s linear infinite;
+  }
+
+  @keyframes rotate {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  /* Метаданные (Строка под заголовком) */
+  .sub-meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--fg-secondary);
+    padding-bottom: 2px;
+  }
+
+  .sub-meta-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .meta-divider {
+    color: var(--fg-faint);
+    user-select: none;
+  }
+
+  .expire-text.warning {
+    color: var(--warning);
+  }
+  .expire-text.expired {
+    color: var(--danger);
+  }
+
+  .hwid-locked-badge {
+    color: var(--warning);
+    font-weight: 600;
+  }
+
+  .sub-type-label {
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    color: var(--fg-dim);
+  }
+
+  .sub-meta-right {
+    font-family: var(--font-family-mono);
+    color: var(--fg-secondary);
+  }
+
+  /* Кнопки поддержки и объявления */
+  .sub-actions-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 4px;
+    align-items: center;
+  }
+
+  .btn-support {
+    background: rgba(139, 92, 246, 0.12);
+    border: 1px solid rgba(139, 92, 246, 0.25);
+    color: #a78bfa;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    transition: all var(--transition-fast);
+  }
+  .btn-support:hover {
+    background: rgba(139, 92, 246, 0.22);
+    border-color: rgba(139, 92, 246, 0.45);
+    color: #c4b5fd;
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.2);
+  }
+
+  .announcement-wrapper {
+    position: relative;
+    display: inline-block;
+  }
+
+  .btn-announcement {
+    background: rgba(240, 180, 80, 0.1);
+    border: 1px solid rgba(240, 180, 80, 0.25);
+    color: #f3d9a6;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+  .btn-announcement:hover {
+    background: rgba(240, 180, 80, 0.2);
+    border-color: rgba(240, 180, 80, 0.45);
+    color: #fff;
+    box-shadow: 0 0 10px rgba(240, 180, 80, 0.2);
+  }
+
+  /* Popover при ховере на объявление */
+  .announcement-popover {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+    padding: 16px;
+    width: 380px;
+    z-index: 250;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(6px);
+    transition: opacity var(--transition-fast) ease, transform var(--transition-fast) ease;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    border-bottom-left-radius: var(--radius-lg);
-    border-bottom-right-radius: var(--radius-lg);
+    gap: 10px;
+  }
+  .announcement-popover::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 24px;
+    border-width: 6px;
+    border-style: solid;
+    border-color: transparent transparent var(--border-strong) transparent;
+  }
+  .announcement-wrapper:hover .announcement-popover {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
+  .announcement-line {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--fg-primary);
+  }
+  .announcement-line a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .announcement-line a:hover {
+    text-decoration: underline;
+  }
+
+  .inline-announcement-warn {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(239, 91, 107, 0.08);
+    border-left: 3px solid var(--danger);
+    border-radius: var(--radius-sm);
+    color: #f4b6be;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .inline-warn-icon {
+    color: var(--danger);
+    font-weight: 700;
+    user-select: none;
+  }
+  .inline-announcement-warn a {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
+  /* Раздел предпросмотра нод (Компактный инлайн-вид) */
+  .nodes-preview-content.inline-mode {
+    border-top: 1px solid var(--border);
+    margin-top: 8px;
+    padding-top: 16px;
+    background: transparent;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 
   .nodes-preview-info {
@@ -1478,6 +1846,21 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) var(--bg-card);
+  }
+  .modal-card-body::-webkit-scrollbar {
+    width: 6px;
+  }
+  .modal-card-body::-webkit-scrollbar-track {
+    background: var(--bg-card);
+  }
+  .modal-card-body::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 4px;
+  }
+  .modal-card-body::-webkit-scrollbar-thumb:hover {
+    background: var(--accent);
   }
 
   .form-group-checkbox {
@@ -1752,7 +2135,7 @@
     position: relative;
     display: flex;
     align-items: center;
-    padding: 8px 12px;
+    padding: 10px 16px;
     border-bottom: 1px solid var(--border);
     cursor: pointer;
     transition: background var(--transition-fast);
@@ -1780,18 +2163,19 @@
   }
 
   .sub-node-avatar-container {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--border);
+    width: 32px;
+    height: 32px;
+    border-radius: 8px; /* скругленный квадрат как в INCY */
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-right: 10px;
+    margin-right: 12px;
     flex-shrink: 0;
-    font-size: 15px;
+    font-size: 16px;
     transition: all var(--transition-fast);
+    color: var(--fg-secondary);
   }
 
   .sub-node-avatar-container.active {
@@ -1801,10 +2185,11 @@
   }
 
   .sub-node-avatar-text {
-    font-size: 9px;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: 800;
     text-transform: uppercase;
-    color: var(--fg-secondary);
+    color: inherit;
+    letter-spacing: 0.02em;
   }
 
   .sub-node-avatar-container.active .sub-node-avatar-text {
@@ -1812,7 +2197,7 @@
   }
 
   .sub-node-flag-fallback {
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .sub-node-info {
@@ -1828,23 +2213,60 @@
   }
 
   .sub-node-name {
-    font-size: 12.5px;
-    font-weight: 500;
+    font-size: 13px;
+    font-weight: 600;
     color: var(--fg-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .sub-node-badge-new {
-    font-size: 8px;
-    font-weight: 700;
+  .sub-node-name-new {
     color: #f59e0b;
-    background: rgba(245, 158, 11, 0.15);
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    border-radius: 3px;
-    padding: 0px 3px;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+  }
+
+  .sub-node-chip-blue {
+    background: rgba(41, 194, 240, 0.08);
+    border: 1px solid rgba(41, 194, 240, 0.2);
+    color: #7dd3fc;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    margin-top: 3px;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sub-node-row.active .sub-node-chip-blue {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: #fff;
+  }
+
+  .sub-node-chip-gold {
+    background: rgba(245, 158, 11, 0.07);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 9.5px;
+    font-weight: 700;
     letter-spacing: 0.05em;
+    display: inline-block;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .sub-node-row.active .sub-node-chip-gold {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #fff;
   }
 
   .sub-node-meta-row {
@@ -1852,17 +2274,12 @@
     align-items: center;
   }
 
-  .sub-node-meta-text {
-    font-size: 10.5px;
-    color: var(--fg-dim);
-  }
-
   .sub-node-status-container {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 12px;
     flex-shrink: 0;
-    margin-left: 10px;
+    margin-left: 12px;
   }
 
   .sub-node-ping-btn {
@@ -1926,13 +2343,67 @@
   .latency-unknown { color: var(--fg-faint); }
 
   @media (max-width: 768px) {
-    .sub-card-layout {
-      flex-direction: column;
-      gap: 16px;
+    .sub-header-row {
+      flex-wrap: wrap;
+      gap: 12px;
     }
-    .sub-card-right {
+    .sub-header-left {
+      width: 100%;
+    }
+    .sub-header-right {
       width: 100%;
       justify-content: flex-end;
     }
+    .sub-meta-row {
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .announcement-popover {
+      width: calc(100vw - 64px);
+      max-width: 340px;
+      left: -20px;
+    }
+    .announcement-popover::before {
+      left: 50px;
+    }
+  }
+
+  /* Кнопка спойлера продвинутых настроек */
+  .advanced-toggle-btn {
+    background: transparent;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    margin: 12px 0 6px 0;
+    width: 100%;
+    text-align: left;
+    outline: none;
+    transition: color var(--transition-fast);
+  }
+  .advanced-toggle-btn:hover {
+    color: var(--accent-hover, #64b5f6);
+  }
+  .advanced-toggle-btn .arrow {
+    display: inline-block;
+    transition: transform var(--transition-fast);
+    font-size: 11px;
+    width: 12px;
+  }
+  .advanced-fields-box {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-top: 4px;
+    margin-bottom: 12px;
   }
 </style>
