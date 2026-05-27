@@ -28,10 +28,12 @@ jobs:
       PR_URL: ${{ github.event.pull_request.html_url }}
     steps:
       - uses: dependabot/fetch-metadata@v3
+        id: metadata
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Approve & enable auto-merge
+        if: steps.metadata.outputs.update-type != 'version-update:semver-major'
         run: |
           gh pr review --approve "$PR_URL"
           gh pr merge --auto --squash "$PR_URL"
