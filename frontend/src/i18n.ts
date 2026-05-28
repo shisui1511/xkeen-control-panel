@@ -578,6 +578,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'conn.live': '● live',
     'conn.ws_offline': 'Нет данных',
     'conn.ws_reconnecting': 'Переподключение...',
+    'conn.show_process_name': 'Имя источника',
+    'conn.process_mode_disabled_hint': 'Требуется активное ядро Mihomo',
 
     // Subscriptions
     'subscr.title': 'Подписки',
@@ -1379,6 +1381,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'conn.live': '● live',
     'conn.ws_offline': 'No data',
     'conn.ws_reconnecting': 'Reconnecting...',
+    'conn.show_process_name': 'Show process name',
+    'conn.process_mode_disabled_hint': 'Requires active Mihomo core',
 
     // Subscriptions
     'subscr.title': 'Subscriptions',
