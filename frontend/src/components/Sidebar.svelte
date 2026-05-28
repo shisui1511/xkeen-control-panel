@@ -177,18 +177,7 @@
       <Icon name="dat" size={16} />
       {$t('nav.dat')}
     </a>
-    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
-    <a
-      href="#/mihomo-gen"
-      class="nav-item"
-      class:active={currentTab === 'mihomo-gen'}
-      on:click={() => isSidebarOpen.set(false)}
-      title="Mihomo Generator"
-    >
-      <Icon name="settings" size={16} />
-      Mihomo Generator
-    </a>
-    {/if}
+
     <a
       href="#/console"
       class="nav-item"

@@ -7,18 +7,19 @@ build/
 .vscode/
 /xcp
 
+# Machine-local configs
+.mcp.json
+
 # Внутренняя документация разработчика
 AGENTS.md
 ROADMAP.md
 CLAUDE.md
 GEMINI.md
 
-.agents
-.specify
-.opencode
+.agent
+.planning
 .claude
 .gemini
-specs
 
 # Node.js files (frontend build)
 node_modules/

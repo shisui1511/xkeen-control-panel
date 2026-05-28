@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { t } from './i18n';
+  import { fade } from 'svelte/transition';
+  import { t, currentLang } from './i18n';
+  $: ru = $currentLang === 'ru';
   import { showToast } from './stores';
   import Icon from './lib/components/Icon.svelte';
   import {
@@ -53,6 +55,7 @@
 
   // Snippets
   import { xraySnippetSource, mihomoSnippetSource } from './lib/snippets';
+  import MihomoGenerator from './MihomoGenerator.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
 
@@ -132,6 +135,51 @@
   // Dirty state tracking
   let originalContent = '';
   let isDirty = false;
+
+  // Local active tab: 'files' or 'generator'
+  let activeTab: 'files' | 'generator' = 'files';
+
+  function checkHashTab() {
+    if (window.location.hash === '#/mihomo-gen') {
+      activeTab = 'generator';
+    } else {
+      activeTab = 'files';
+    }
+  }
+
+  function setTab(tab: 'files' | 'generator') {
+    activeTab = tab;
+    if (tab === 'generator') {
+      window.location.hash = '#/mihomo-gen';
+    } else {
+      window.location.hash = '#/editor';
+    }
+  }
+
+  function handleInsertIntoEditor(yamlContent: string) {
+    if (selectedFile) {
+      if (editorView) {
+        editorView.dispatch({
+          changes: {
+            from: 0,
+            to: editorView.state.doc.length,
+            insert: yamlContent
+          }
+        });
+        isDirty = true;
+        // Save draft to local storage
+        localStorage.setItem(`editor.draft.${selectedFile}`, yamlContent);
+      }
+      activeTab = 'files';
+      window.location.hash = '#/editor';
+      showToast('success', $t('editor.yaml_inserted') || 'Конфигурация вставлена в редактор. Не забудьте сохранить её!');
+    } else {
+      // Switch to files tab and warn the user
+      activeTab = 'files';
+      window.location.hash = '#/editor';
+      showToast('warning', $t('editor.select_file_warn') || 'Пожалуйста, выберите файл в панели слева для вставки YAML.');
+    }
+  }
 
   // Draft state tracking
   let hasDraft = false;
@@ -915,12 +963,15 @@
   onMount(() => {
     loadFiles();
     loadTemplates();
+    checkHashTab();
+    window.addEventListener('hashchange', checkHashTab);
   });
 
   onDestroy(() => {
     if (editorView) {
       editorView.destroy();
     }
+    window.removeEventListener('hashchange', checkHashTab);
   });
 </script>
 
@@ -930,37 +981,23 @@
       <div class="crumbs">
         {$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
         {$t('nav.editor')}
+        {#if activeTab === 'generator'}
+          <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+          {ru ? 'Генератор Mihomo' : 'Mihomo Generator'}
+        {/if}
       </div>
-      <h1>{$t('editor.h1')}</h1>
-      <p class="sub">{$t('editor.h1_sub')}</p>
+      <h1>{activeTab === 'generator' ? (ru ? 'Визуальный генератор Mihomo' : 'Mihomo Visual Generator') : $t('editor.h1')}</h1>
+      <p class="sub">{activeTab === 'generator' ? (ru ? 'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.' : 'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.') : $t('editor.h1_sub')}</p>
     </div>
-    <div class="ph-actions">
-      <button
-        class="btn btn-primary"
-        on:click={() => {
-          showCreateModal = true;
-          newFileName = '';
-        }}
-        title={$t('editor.create_file')}
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.5"
-          stroke-linecap="round"
-          ><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg
-        >
-        {$t('editor.new_file')}
-      </button>
-      {#if selectedFile}
+    {#if activeTab === 'files'}
+      <div class="ph-actions">
         <button
-          class="btn btn-secondary"
-          on:click={() => loadFile(selectedFile)}
-          disabled={loading}
-          title={$t('editor.reload')}
+          class="btn btn-primary"
+          on:click={() => {
+            showCreateModal = true;
+            newFileName = '';
+          }}
+          title={$t('editor.create_file')}
         >
           <svg
             width="14"
@@ -968,39 +1005,79 @@
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            stroke-width="2"
+            stroke-width="2.5"
             stroke-linecap="round"
-            stroke-linejoin="round"
-            ><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg
+            ><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg
           >
-          {$t('editor.reload')}
+          {$t('editor.new_file')}
         </button>
-        <button
-          class="btn btn-secondary"
-          on:click={checkBeforeSave}
-          disabled={saving}
-          title={$t('app.save')}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            ><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline
-              points="17 21 17 13 7 13 7 21"
-            /><polyline points="7 3 7 8 15 8" /></svg
+        {#if selectedFile}
+          <button
+            class="btn btn-secondary"
+            on:click={() => loadFile(selectedFile)}
+            disabled={loading}
+            title={$t('editor.reload')}
           >
-          {saving ? $t('app.loading') : $t('app.save')}
-        </button>
-      {/if}
-    </div>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg
+            >
+            {$t('editor.reload')}
+          </button>
+          <button
+            class="btn btn-secondary"
+            on:click={checkBeforeSave}
+            disabled={saving}
+            title={$t('app.save')}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              ><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline
+                points="17 21 17 13 7 13 7 21"
+              /><polyline points="7 3 7 8 15 8" /></svg
+            >
+            {saving ? $t('app.loading') : $t('app.save')}
+          </button>
+        {/if}
+      </div>
+    {/if}
   </div>
 
-  <div class="editor-grid" style={showSidebar ? '' : 'grid-template-columns: 1fr;'}>
+  <div class="editor-tabs">
+    <button
+      class="tab-btn"
+      class:active={activeTab === 'files'}
+      on:click={() => setTab('files')}
+    >
+      <Icon name="editor" size={14} />
+      {ru ? 'Файлы' : 'Files'}
+    </button>
+    <button
+      class="tab-btn"
+      class:active={activeTab === 'generator'}
+      on:click={() => setTab('generator')}
+    >
+      <Icon name="settings" size={14} />
+      Mihomo Generator
+    </button>
+  </div>
+
+  {#if activeTab === 'files'}
+    <div class="editor-grid" style={showSidebar ? '' : 'grid-template-columns: 1fr;'}>
     {#if showSidebar}
       <div>
         <!-- File Search -->
@@ -1349,6 +1426,16 @@
       {/if}
     </div>
   </div>
+{:else if activeTab === 'generator'}
+  <div transition:fade={{ duration: 150 }} style="margin-top: 16px;">
+    <MihomoGenerator
+      onSwitchTab={onSwitchTab}
+      onInsertIntoEditor={handleInsertIntoEditor}
+      {selectedFile}
+      embedded={true}
+    />
+  </div>
+{/if}
 </div>
 
 <!-- Modals with Hopper styles -->
@@ -1736,6 +1823,41 @@
 {/if}
 
 <style>
+  .editor-tabs {
+    display: inline-flex;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px;
+    margin-bottom: 16px;
+  }
+
+  .tab-btn {
+    background: none;
+    border: none;
+    color: var(--fg-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+
+  .tab-btn:hover {
+    color: var(--fg-primary);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .tab-btn.active {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--fg-primary);
+  }
+
   /* hot-fix layout, требует визуального ревью Claude Design */
   .editor-grid {
     display: grid;
