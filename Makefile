@@ -1,7 +1,7 @@
 .PHONY: build run clean test lint fmt deps keenetic-arm64 keenetic-mipsle keenetic-mips compress
 
 BINARY_NAME=xcp
-VERSION?=$(shell git describe --tags --always 2>/dev/null || grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4 || echo "dev")
+VERSION?=$(shell git fetch --tags --prune --force 2>/dev/null || true; git describe --tags --always 2>/dev/null || grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4 || echo "dev")
 
 deps:
 	go mod download
