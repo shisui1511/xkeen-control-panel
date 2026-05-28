@@ -198,6 +198,11 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.yaml_inserted': 'Конфигурация вставлена в редактор. Не забудьте сохранить её!',
     'editor.select_file_warn': 'Пожалуйста, выберите файл в панели слева для вставки YAML.',
     'editor.no_changes': 'Нет изменений для сохранения',
+    'editor.tab_files': 'Файлы',
+    'editor.tab_generator': 'Mihomo Generator',
+    'editor.generator_title': 'Визуальный генератор Mihomo',
+    'editor.generator_subtitle': 'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.',
+    'editor.crumbs_generator': 'Генератор Mihomo',
     'editor.template_applied': 'Шаблон успешно применен',
     'editor.template_error': 'Ошибка при применении шаблона',
 
@@ -1009,6 +1014,11 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.yaml_inserted': 'Configuration inserted into editor. Remember to save it!',
     'editor.select_file_warn': 'Please select a file in the left panel to insert YAML.',
     'editor.no_changes': 'No changes to save',
+    'editor.tab_files': 'Files',
+    'editor.tab_generator': 'Mihomo Generator',
+    'editor.generator_title': 'Mihomo Visual Generator',
+    'editor.generator_subtitle': 'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.',
+    'editor.crumbs_generator': 'Mihomo Generator',
     'editor.template_applied': 'Template applied successfully',
     'editor.template_error': 'Failed to apply template',
 

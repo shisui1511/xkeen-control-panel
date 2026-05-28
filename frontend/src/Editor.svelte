@@ -983,11 +983,11 @@
         {$t('nav.editor')}
         {#if activeTab === 'generator'}
           <span style="color:var(--fg-faint);margin:0 6px;">/</span>
-          {ru ? 'Генератор Mihomo' : 'Mihomo Generator'}
+          {$t('editor.crumbs_generator')}
         {/if}
       </div>
-      <h1>{activeTab === 'generator' ? (ru ? 'Визуальный генератор Mihomo' : 'Mihomo Visual Generator') : $t('editor.h1')}</h1>
-      <p class="sub">{activeTab === 'generator' ? (ru ? 'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.' : 'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.') : $t('editor.h1_sub')}</p>
+      <h1>{activeTab === 'generator' ? $t('editor.generator_title') : $t('editor.h1')}</h1>
+      <p class="sub">{activeTab === 'generator' ? $t('editor.generator_subtitle') : $t('editor.h1_sub')}</p>
     </div>
     {#if activeTab === 'files'}
       <div class="ph-actions">
@@ -1064,7 +1064,7 @@
       on:click={() => setTab('files')}
     >
       <Icon name="editor" size={14} />
-      {ru ? 'Файлы' : 'Files'}
+      {$t('editor.tab_files')}
     </button>
     <button
       class="tab-btn"
@@ -1072,7 +1072,7 @@
       on:click={() => setTab('generator')}
     >
       <Icon name="settings" size={14} />
-      Mihomo Generator
+      {$t('editor.tab_generator')}
     </button>
   </div>
 
