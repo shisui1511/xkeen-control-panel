@@ -211,4 +211,3 @@ func TestLogsWebSocket_Sources(t *testing.T) {
 		t.Errorf("expected to receive log line with 'mihomo.log' prefix and message content")
 	}
 }
-

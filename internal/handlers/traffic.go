@@ -9,7 +9,6 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
-
 func (a *API) TrafficQuotaList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -209,7 +208,6 @@ func (a *API) TrafficAlerts(w http.ResponseWriter, r *http.Request) {
 	a.jsonResponse(w, a.trafficQuotaSvc.GetAlerts())
 }
 
-
 func (a *API) TrafficAlertsClear(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -293,4 +291,3 @@ func (a *API) ConnectionsWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-

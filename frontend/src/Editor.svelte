@@ -172,12 +172,19 @@
       }
       activeTab = 'files';
       window.location.hash = '#/editor';
-      showToast('success', $t('editor.yaml_inserted') || 'Конфигурация вставлена в редактор. Не забудьте сохранить её!');
+      showToast(
+        'success',
+        $t('editor.yaml_inserted') || 'Конфигурация вставлена в редактор. Не забудьте сохранить её!'
+      );
     } else {
       // Switch to files tab and warn the user
       activeTab = 'files';
       window.location.hash = '#/editor';
-      showToast('warning', $t('editor.select_file_warn') || 'Пожалуйста, выберите файл в панели слева для вставки YAML.');
+      showToast(
+        'info',
+        $t('editor.select_file_warn') ||
+          'Пожалуйста, выберите файл в панели слева для вставки YAML.'
+      );
     }
   }
 
@@ -987,7 +994,9 @@
         {/if}
       </div>
       <h1>{activeTab === 'generator' ? $t('editor.generator_title') : $t('editor.h1')}</h1>
-      <p class="sub">{activeTab === 'generator' ? $t('editor.generator_subtitle') : $t('editor.h1_sub')}</p>
+      <p class="sub">
+        {activeTab === 'generator' ? $t('editor.generator_subtitle') : $t('editor.h1_sub')}
+      </p>
     </div>
     {#if activeTab === 'files'}
       <div class="ph-actions">
@@ -1058,11 +1067,7 @@
   </div>
 
   <div class="editor-tabs">
-    <button
-      class="tab-btn"
-      class:active={activeTab === 'files'}
-      on:click={() => setTab('files')}
-    >
+    <button class="tab-btn" class:active={activeTab === 'files'} on:click={() => setTab('files')}>
       <Icon name="editor" size={14} />
       {$t('editor.tab_files')}
     </button>
@@ -1078,296 +1083,121 @@
 
   {#if activeTab === 'files'}
     <div class="editor-grid" style={showSidebar ? '' : 'grid-template-columns: 1fr;'}>
-    {#if showSidebar}
-      <div>
-        <!-- File Search -->
-        <div style="margin-bottom: 12px; position: relative;">
-          <input
-            type="text"
-            class="input"
-            style="width: 100%; padding: 8px 12px; font-size: 13px;"
-            placeholder={$t('app.search') || 'Поиск файлов...'}
-            bind:value={fileSearchQuery}
-          />
-          {#if fileSearchQuery}
-            <button
-              on:click={() => (fileSearchQuery = '')}
-              style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--fg-dim); cursor: pointer; font-size: 16px; padding: 0 4px;"
-              title="Очистить"
-            >
-              ×
-            </button>
-          {/if}
-        </div>
-
-        <!-- Xray Section -->
-        <div class="editor-files" style="margin-bottom:12px;">
-          <div
-            class="editor-files-head"
-            style="display:flex;align-items:center;justify-content:space-between;"
-          >
-            <span>Xray</span>
-            <span
-              style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
-              >{xrayDir}</span
-            >
-          </div>
-          <div class="file-list">
-            {#each filteredXrayFiles as file}
+      {#if showSidebar}
+        <div>
+          <!-- File Search -->
+          <div style="margin-bottom: 12px; position: relative;">
+            <input
+              type="text"
+              class="input"
+              style="width: 100%; padding: 8px 12px; font-size: 13px;"
+              placeholder={$t('app.search') || 'Поиск файлов...'}
+              bind:value={fileSearchQuery}
+            />
+            {#if fileSearchQuery}
               <button
-                class="file-row"
-                class:active={file.path === selectedFile}
-                on:click={() => loadFile(file.path)}
+                on:click={() => (fileSearchQuery = '')}
+                style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--fg-dim); cursor: pointer; font-size: 16px; padding: 0 4px;"
+                title="Очистить"
               >
-                <span class="fr-name">{file.name}</span>
-                <span class="fr-meta">{formatBytes(file.size)}</span>
+                ×
               </button>
-            {:else}
-              <span
-                class="sb-empty"
-                style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;"
-                >—</span
-              >
-            {/each}
+            {/if}
           </div>
-        </div>
 
-        <!-- Mihomo Section -->
-        <div class="editor-files">
-          <div
-            class="editor-files-head"
-            style="display:flex;align-items:center;justify-content:space-between;"
-          >
-            <span>Mihomo</span>
-            <span
-              style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
-              >{mihomoDir}</span
+          <!-- Xray Section -->
+          <div class="editor-files" style="margin-bottom:12px;">
+            <div
+              class="editor-files-head"
+              style="display:flex;align-items:center;justify-content:space-between;"
             >
-          </div>
-          <div class="file-list">
-            {#each filteredMihomoFiles as file}
-              <button
-                class="file-row"
-                class:active={file.path === selectedFile}
-                on:click={() => loadFile(file.path)}
-              >
-                <span class="fr-name">{file.name}</span>
-                <span class="fr-meta">{formatBytes(file.size)}</span>
-              </button>
-            {:else}
+              <span>Xray</span>
               <span
-                class="sb-empty"
-                style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;"
-                >—</span
+                style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
+                >{xrayDir}</span
               >
-            {/each}
-          </div>
-        </div>
-
-        <!-- Backups Section -->
-        {#if backups.length > 0}
-          <div class="editor-files" style="margin-top:12px;">
-            <div class="editor-files-head">
-              <span>{$t('editor.backups')}</span>
             </div>
             <div class="file-list">
-              {#each backups as backup}
-                <button class="file-row" on:click={() => restoreBackup(backup)}>
-                  <span class="fr-name">{backup.split('.backup-')[1] || backup}</span>
+              {#each filteredXrayFiles as file}
+                <button
+                  class="file-row"
+                  class:active={file.path === selectedFile}
+                  on:click={() => loadFile(file.path)}
+                >
+                  <span class="fr-name">{file.name}</span>
+                  <span class="fr-meta">{formatBytes(file.size)}</span>
                 </button>
+              {:else}
+                <span
+                  class="sb-empty"
+                  style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;"
+                  >—</span
+                >
               {/each}
             </div>
           </div>
-        {/if}
-      </div>
-    {/if}
 
-    <!-- Main Editor Card -->
-    <div class="editor-main-card">
-      <div class="editor-toolbar">
-        <button
-          class="btn btn-secondary"
-          style="padding: 6px 10px; margin-right: 8px;"
-          on:click={() => (showSidebar = !showSidebar)}
-          title={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
-          aria-label={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
-        >
-          {#if showSidebar}
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"><polyline points="15 18 9 12 15 6" /></svg
+          <!-- Mihomo Section -->
+          <div class="editor-files">
+            <div
+              class="editor-files-head"
+              style="display:flex;align-items:center;justify-content:space-between;"
             >
-          {:else}
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg
-            >
-          {/if}
-        </button>
-        <span class="file-name"
-          >{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span
-        >
-        {#if selectedFile}
-          <span class="file-meta" style="margin-left:8px;"
-            >{fileSize} · {fileType} · UTF‑8 · {fileLineEndings}</span
-          >
-        {/if}
-
-        {#if hasDraft}
-          <div
-            class="editor-draft-bar"
-            style="margin-left: 12px; display: inline-flex; align-items: center; gap: 6px;"
-          >
-            <span>{$t('editor.has_draft') || 'Есть черновик'}</span>
-            <button on:click={restoreDraft} class="btn btn-sm btn-warning">
-              {$t('editor.restore_draft') || 'Восстановить'}
-            </button>
-            <button
-              on:click={discardDraft}
-              class="btn btn-sm btn-secondary"
-              style="padding: 2px 8px;"
-            >
-              {$t('editor.discard_draft') || 'Сбросить'}
-            </button>
-          </div>
-        {/if}
-
-        <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-          {#if selectedFile}
-            <label
-              class="toggle-label"
-              for="schema-toggle"
-              title="Enable schema validation, autocomplete and hover tooltips"
-            >
-              <label class="toggle-switch">
-                <input
-                  id="schema-toggle"
-                  type="checkbox"
-                  bind:checked={schemaEnabled}
-                  on:change={toggleSchema}
-                />
-                <span class="toggle-slider"></span>
-              </label>
-              {$t('editor.schema')}
-            </label>
-
-            <label
-              class="toggle-label"
-              for="expert-toggle"
-              title="Expert mode: full schema assist / Beginner: simplified"
-            >
-              <label class="toggle-switch">
-                <input
-                  id="expert-toggle"
-                  type="checkbox"
-                  bind:checked={expertMode}
-                  on:change={toggleExpertMode}
-                />
-                <span class="toggle-slider"></span>
-              </label>
-              {$t('editor.expert')}
-            </label>
-
-            <!-- Kebab actions -->
-            <div class="kebab-wrap">
-              <button
-                class="btn btn-secondary"
-                style="padding:6px 10px;"
-                on:click={toggleKebab}
-                title="Дополнительные действия"
-                aria-label="Дополнительные действия"
+              <span>Mihomo</span>
+              <span
+                style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
+                >{mihomoDir}</span
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle
-                    cx="12"
-                    cy="19"
-                    r="2"
-                  />
-                </svg>
-              </button>
-              {#if showKebabMenu}
-                <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div
-                  class="kebab-dropdown"
-                  style="right:0;top:calc(100% + 4px);"
-                  on:click|stopPropagation
-                >
-                  <button
-                    class="kebab-item"
-                    on:click={() => {
-                      showKebabMenu = false;
-                      applyQuickFixes();
-                    }}
-                  >
-                    <Icon name="settings" size={14} />
-                    {$t('editor.quick_fix')}
-                  </button>
-                  <button
-                    class="kebab-item"
-                    on:click={() => {
-                      showKebabMenu = false;
-                      showTemplatesModal = true;
-                      loadTemplates();
-                    }}
-                  >
-                    <Icon name="editor" size={14} />
-                    {$t('editor.templates')}
-                  </button>
-                  <button
-                    class="kebab-item"
-                    on:click={() => {
-                      showKebabMenu = false;
-                      showGeneratorModal = true;
-                    }}
-                  >
-                    <Icon name="add" size={14} />
-                    {$t('editor.generator')}
-                  </button>
-                  <button
-                    class="kebab-item"
-                    on:click={() => {
-                      showKebabMenu = false;
-                      showRenameModal = true;
-                      renameTarget = selectedFile.split('/').pop() || '';
-                    }}
-                  >
-                    {$t('app.rename')}
-                  </button>
-                  <div class="kebab-divider"></div>
-                  <button
-                    class="kebab-item danger"
-                    on:click={() => {
-                      showKebabMenu = false;
-                      deleteFile();
-                    }}
-                  >
-                    <Icon name="trash" size={14} />
-                    {$t('app.delete')}
-                  </button>
-                </div>
-              {/if}
             </div>
+            <div class="file-list">
+              {#each filteredMihomoFiles as file}
+                <button
+                  class="file-row"
+                  class:active={file.path === selectedFile}
+                  on:click={() => loadFile(file.path)}
+                >
+                  <span class="fr-name">{file.name}</span>
+                  <span class="fr-meta">{formatBytes(file.size)}</span>
+                </button>
+              {:else}
+                <span
+                  class="sb-empty"
+                  style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;"
+                  >—</span
+                >
+              {/each}
+            </div>
+          </div>
 
-            <button
-              on:click={downloadFile}
-              class="btn btn-secondary"
-              style="padding: 6px 10px;"
-              title="Скачать файл"
-              aria-label="Скачать файл"
-            >
+          <!-- Backups Section -->
+          {#if backups.length > 0}
+            <div class="editor-files" style="margin-top:12px;">
+              <div class="editor-files-head">
+                <span>{$t('editor.backups')}</span>
+              </div>
+              <div class="file-list">
+                {#each backups as backup}
+                  <button class="file-row" on:click={() => restoreBackup(backup)}>
+                    <span class="fr-name">{backup.split('.backup-')[1] || backup}</span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Main Editor Card -->
+      <div class="editor-main-card">
+        <div class="editor-toolbar">
+          <button
+            class="btn btn-secondary"
+            style="padding: 6px 10px; margin-right: 8px;"
+            on:click={() => (showSidebar = !showSidebar)}
+            title={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
+            aria-label={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
+          >
+            {#if showSidebar}
               <svg
                 width="13"
                 height="13"
@@ -1375,67 +1205,242 @@
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"><polyline points="15 18 9 12 15 6" /></svg
               >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-              </svg>
-            </button>
+            {:else}
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg
+              >
+            {/if}
+          </button>
+          <span class="file-name"
+            >{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span
+          >
+          {#if selectedFile}
+            <span class="file-meta" style="margin-left:8px;"
+              >{fileSize} · {fileType} · UTF‑8 · {fileLineEndings}</span
+            >
           {/if}
-        </span>
-      </div>
 
-      {#if isMihomoAutoEdited}
-        <div class="alert alert-warning" style="margin: 12px 14px 0;" role="status">
-          <span aria-hidden="true">⚠️</span>
-          <div>
-            <strong>{$t('editor.mihomo_autoedit_title')}</strong>
-            <div style="margin-top: 2px;">{$t('editor.mihomo_autoedit_body')}</div>
-          </div>
-        </div>
-      {/if}
+          {#if hasDraft}
+            <div
+              class="editor-draft-bar"
+              style="margin-left: 12px; display: inline-flex; align-items: center; gap: 6px;"
+            >
+              <span>{$t('editor.has_draft') || 'Есть черновик'}</span>
+              <button on:click={restoreDraft} class="btn btn-sm btn-warning">
+                {$t('editor.restore_draft') || 'Восстановить'}
+              </button>
+              <button
+                on:click={discardDraft}
+                class="btn btn-sm btn-secondary"
+                style="padding: 2px 8px;"
+              >
+                {$t('editor.discard_draft') || 'Сбросить'}
+              </button>
+            </div>
+          {/if}
 
-      {#if loading}
-        <div class="loading" style="min-height: 420px; display: grid; place-items: center;">
-          <div class="spinner"></div>
-        </div>
-      {:else if !selectedFile}
-        <div
-          class="empty-state"
-          style="min-height: 420px; display: grid; place-items: center; color: var(--fg-dim);"
-        >
-          <p>{$t('editor.select_file')}</p>
-        </div>
-      {:else}
-        <div class="editor-pane" style="display: block; padding: 0;">
-          <div class="editor-container" bind:this={editorContainer} style="height: 520px;"></div>
-        </div>
-      {/if}
+          <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+            {#if selectedFile}
+              <label
+                class="toggle-label"
+                for="schema-toggle"
+                title="Enable schema validation, autocomplete and hover tooltips"
+              >
+                <label class="toggle-switch">
+                  <input
+                    id="schema-toggle"
+                    type="checkbox"
+                    bind:checked={schemaEnabled}
+                    on:change={toggleSchema}
+                  />
+                  <span class="toggle-slider"></span>
+                </label>
+                {$t('editor.schema')}
+              </label>
 
-      <!-- Status Bar -->
-      {#if selectedFile}
-        <div
-          style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:14px;font-family:var(--font-family-mono);font-size:11px;color:var(--fg-dim);"
-        >
-          <span class:status-dirty={isDirty}>
-            <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
-            {isDirty ? $t('editor.unsaved') || 'Изменён' : $t('editor.saved') || 'Сохранён'}
+              <label
+                class="toggle-label"
+                for="expert-toggle"
+                title="Expert mode: full schema assist / Beginner: simplified"
+              >
+                <label class="toggle-switch">
+                  <input
+                    id="expert-toggle"
+                    type="checkbox"
+                    bind:checked={expertMode}
+                    on:change={toggleExpertMode}
+                  />
+                  <span class="toggle-slider"></span>
+                </label>
+                {$t('editor.expert')}
+              </label>
+
+              <!-- Kebab actions -->
+              <div class="kebab-wrap">
+                <button
+                  class="btn btn-secondary"
+                  style="padding:6px 10px;"
+                  on:click={toggleKebab}
+                  title="Дополнительные действия"
+                  aria-label="Дополнительные действия"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle
+                      cx="12"
+                      cy="19"
+                      r="2"
+                    />
+                  </svg>
+                </button>
+                {#if showKebabMenu}
+                  <!-- svelte-ignore a11y-click-events-have-key-events -->
+                  <!-- svelte-ignore a11y-no-static-element-interactions -->
+                  <div
+                    class="kebab-dropdown"
+                    style="right:0;top:calc(100% + 4px);"
+                    on:click|stopPropagation
+                  >
+                    <button
+                      class="kebab-item"
+                      on:click={() => {
+                        showKebabMenu = false;
+                        applyQuickFixes();
+                      }}
+                    >
+                      <Icon name="settings" size={14} />
+                      {$t('editor.quick_fix')}
+                    </button>
+                    <button
+                      class="kebab-item"
+                      on:click={() => {
+                        showKebabMenu = false;
+                        showTemplatesModal = true;
+                        loadTemplates();
+                      }}
+                    >
+                      <Icon name="editor" size={14} />
+                      {$t('editor.templates')}
+                    </button>
+                    <button
+                      class="kebab-item"
+                      on:click={() => {
+                        showKebabMenu = false;
+                        showGeneratorModal = true;
+                      }}
+                    >
+                      <Icon name="add" size={14} />
+                      {$t('editor.generator')}
+                    </button>
+                    <button
+                      class="kebab-item"
+                      on:click={() => {
+                        showKebabMenu = false;
+                        showRenameModal = true;
+                        renameTarget = selectedFile.split('/').pop() || '';
+                      }}
+                    >
+                      {$t('app.rename')}
+                    </button>
+                    <div class="kebab-divider"></div>
+                    <button
+                      class="kebab-item danger"
+                      on:click={() => {
+                        showKebabMenu = false;
+                        deleteFile();
+                      }}
+                    >
+                      <Icon name="trash" size={14} />
+                      {$t('app.delete')}
+                    </button>
+                  </div>
+                {/if}
+              </div>
+
+              <button
+                on:click={downloadFile}
+                class="btn btn-secondary"
+                style="padding: 6px 10px;"
+                title="Скачать файл"
+                aria-label="Скачать файл"
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                </svg>
+              </button>
+            {/if}
           </span>
-          <span>schema: {selectedFile.includes('xray') ? 'xray@latest' : 'mihomo@latest'}</span>
-          <span>{cursorLine}:{cursorCol}</span>
-          <span style="margin-left:auto;">Ctrl+S — сохранить · Ctrl+Z — отменить</span>
         </div>
-      {/if}
+
+        {#if isMihomoAutoEdited}
+          <div class="alert alert-warning" style="margin: 12px 14px 0;" role="status">
+            <span aria-hidden="true">⚠️</span>
+            <div>
+              <strong>{$t('editor.mihomo_autoedit_title')}</strong>
+              <div style="margin-top: 2px;">{$t('editor.mihomo_autoedit_body')}</div>
+            </div>
+          </div>
+        {/if}
+
+        {#if loading}
+          <div class="loading" style="min-height: 420px; display: grid; place-items: center;">
+            <div class="spinner"></div>
+          </div>
+        {:else if !selectedFile}
+          <div
+            class="empty-state"
+            style="min-height: 420px; display: grid; place-items: center; color: var(--fg-dim);"
+          >
+            <p>{$t('editor.select_file')}</p>
+          </div>
+        {:else}
+          <div class="editor-pane" style="display: block; padding: 0;">
+            <div class="editor-container" bind:this={editorContainer} style="height: 520px;"></div>
+          </div>
+        {/if}
+
+        <!-- Status Bar -->
+        {#if selectedFile}
+          <div
+            style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:14px;font-family:var(--font-family-mono);font-size:11px;color:var(--fg-dim);"
+          >
+            <span class:status-dirty={isDirty}>
+              <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
+              {isDirty ? $t('editor.unsaved') || 'Изменён' : $t('editor.saved') || 'Сохранён'}
+            </span>
+            <span>schema: {selectedFile.includes('xray') ? 'xray@latest' : 'mihomo@latest'}</span>
+            <span>{cursorLine}:{cursorCol}</span>
+            <span style="margin-left:auto;">Ctrl+S — сохранить · Ctrl+Z — отменить</span>
+          </div>
+        {/if}
+      </div>
     </div>
-  </div>
-{:else if activeTab === 'generator'}
-  <div transition:fade={{ duration: 150 }} style="margin-top: 16px;">
-    <MihomoGenerator
-      onSwitchTab={onSwitchTab}
-      onInsertIntoEditor={handleInsertIntoEditor}
-      {selectedFile}
-      embedded={true}
-    />
-  </div>
-{/if}
+  {:else if activeTab === 'generator'}
+    <div transition:fade={{ duration: 150 }} style="margin-top: 16px;">
+      <MihomoGenerator
+        {onSwitchTab}
+        onInsertIntoEditor={handleInsertIntoEditor}
+        {selectedFile}
+        embedded={true}
+      />
+    </div>
+  {/if}
 </div>
 
 <!-- Modals with Hopper styles -->
@@ -1845,7 +1850,9 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast);
   }
 
   .tab-btn:hover {

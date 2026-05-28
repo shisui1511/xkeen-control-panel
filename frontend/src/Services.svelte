@@ -312,7 +312,9 @@
   $: activeKernel = (() => {
     if (xray?.process_status === 'running') return 'xray';
     if (mihomo?.process_status === 'running') return 'mihomo';
-    const lastSwitch = restartLog.find((entry) => entry.action.startsWith('switch_kernel:') && entry.success);
+    const lastSwitch = restartLog.find(
+      (entry) => entry.action.startsWith('switch_kernel:') && entry.success
+    );
     if (lastSwitch) {
       return lastSwitch.action.split(':')[1];
     }
@@ -509,7 +511,9 @@
                 class:ks-switching={switchingKernelTo === 'xray'}
                 disabled={switchingKernelTo !== null || activeKernel === 'xray'}
                 on:click={() => switchKernel('xray')}
-                title={activeKernel === 'xray' ? $t('svc.active_label') : $t('svc.make_active') + ' Xray'}
+                title={activeKernel === 'xray'
+                  ? $t('svc.active_label')
+                  : $t('svc.make_active') + ' Xray'}
               >
                 {#if switchingKernelTo === 'xray'}
                   <span class="ks-dot ks-dot-spin"></span>
@@ -528,7 +532,9 @@
                 class:ks-switching={switchingKernelTo === 'mihomo'}
                 disabled={switchingKernelTo !== null || activeKernel === 'mihomo'}
                 on:click={() => switchKernel('mihomo')}
-                title={activeKernel === 'mihomo' ? $t('svc.active_label') : $t('svc.make_active') + ' Mihomo'}
+                title={activeKernel === 'mihomo'
+                  ? $t('svc.active_label')
+                  : $t('svc.make_active') + ' Mihomo'}
               >
                 {#if switchingKernelTo === 'mihomo'}
                   <span class="ks-dot ks-dot-spin"></span>
@@ -1034,7 +1040,9 @@
     background: transparent;
     border: none;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition:
+      background 0.15s,
+      color 0.15s;
     line-height: 1.5;
   }
   .ks-btn:hover:not(:disabled):not(.ks-active) {
@@ -1066,15 +1074,20 @@
     box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.25);
   }
   .ks-dot-idle {
-    background: var(--fg-faint, rgba(255,255,255,0.15));
+    background: var(--fg-faint, rgba(255, 255, 255, 0.15));
   }
   .ks-dot-spin {
     background: var(--accent);
     animation: ks-pulse 1s ease-in-out infinite;
   }
   @keyframes ks-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
   }
   .kernel-card .k-ico {
     width: 60px;

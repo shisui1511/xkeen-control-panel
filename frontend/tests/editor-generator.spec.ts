@@ -23,7 +23,7 @@ test.describe('Editor & Mihomo Generator integration test suite', () => {
     // Перехватываем все запросы к API
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
-      
+
       if (url.includes('/api/auth/me')) {
         await route.fulfill({
           status: 200,
@@ -61,19 +61,23 @@ test.describe('Editor & Mihomo Generator integration test suite', () => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(isMihomo ? [
-            {
-              name: 'config.yaml',
-              path: '/opt/etc/mihomo/config.yaml',
-              size: 1500
-            }
-          ] : [
-            {
-              name: 'xray-config.json',
-              path: '/opt/etc/xray/configs/xray-config.json',
-              size: 1200
-            }
-          ])
+          body: JSON.stringify(
+            isMihomo
+              ? [
+                  {
+                    name: 'config.yaml',
+                    path: '/opt/etc/mihomo/config.yaml',
+                    size: 1500
+                  }
+                ]
+              : [
+                  {
+                    name: 'xray-config.json',
+                    path: '/opt/etc/xray/configs/xray-config.json',
+                    size: 1200
+                  }
+                ]
+          )
         });
       } else if (url.includes('/api/config/read')) {
         await route.fulfill({
@@ -97,7 +101,9 @@ test.describe('Editor & Mihomo Generator integration test suite', () => {
     });
   });
 
-  test('successfully displays editor tabs and switches between files and generator', async ({ page }) => {
+  test('successfully displays editor tabs and switches between files and generator', async ({
+    page
+  }) => {
     await page.goto('/#/editor');
 
     // Проверяем наличие верхних вкладок в редакторе
@@ -133,7 +139,9 @@ test.describe('Editor & Mihomo Generator integration test suite', () => {
     await expect(page.locator('h1').filter({ hasText: 'Визуальный генератор' })).toBeVisible();
   });
 
-  test('warns and redirects when trying to insert config with no active file selected', async ({ page }) => {
+  test('warns and redirects when trying to insert config with no active file selected', async ({
+    page
+  }) => {
     await page.goto('/#/mihomo-gen');
 
     // Кнопка должна называться "Открыть в редакторе", так как файл не выбран

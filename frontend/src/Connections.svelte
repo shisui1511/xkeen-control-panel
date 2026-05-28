@@ -18,7 +18,7 @@
       sourcePort: string;
       destinationPort: string;
       host: string;
-      process?: string;  // Mihomo populates when find-process-mode=always
+      process?: string; // Mihomo populates when find-process-mode=always
     };
     upload: number;
     download: number;
@@ -222,8 +222,6 @@
     }
   }
 
-
-
   let mihomoLaunching = false;
 
   async function launchMihomo() {
@@ -275,8 +273,6 @@
     if (filterProxy && getChainPath(conn) !== filterProxy) return false;
     return true;
   });
-
-
 
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {
@@ -531,8 +527,13 @@
     animation: none;
   }
   @keyframes live-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.45; }
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
   }
 
   .conn-table-container {

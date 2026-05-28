@@ -201,7 +201,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.tab_files': 'Файлы',
     'editor.tab_generator': 'Mihomo Generator',
     'editor.generator_title': 'Визуальный генератор Mihomo',
-    'editor.generator_subtitle': 'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.',
+    'editor.generator_subtitle':
+      'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.',
     'editor.crumbs_generator': 'Генератор Mihomo',
     'editor.template_applied': 'Шаблон успешно применен',
     'editor.template_error': 'Ошибка при применении шаблона',
@@ -232,7 +233,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.service_label': 'Сервис',
     'svc.switching': 'Переключение...',
     'svc.switch_confirm_title': 'Переключить ядро?',
-    'svc.switch_confirm_msg': 'Переключить с {from} на {to}? XKeen перезапустится с новой конфигурацией.',
+    'svc.switch_confirm_msg':
+      'Переключить с {from} на {to}? XKeen перезапустится с новой конфигурацией.',
     'svc.make_active': 'Сделать активным',
     'svc.active_kernel_label': 'Активное ядро',
     'svc.h1': 'Сервисы и ядра',
@@ -815,7 +817,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'apioffline.sec_ago': 'сек назад',
     'apioffline.min_ago': 'мин назад',
     'apioffline.hour_ago': 'ч назад',
-    'svc.xray_active_warning': 'Этот раздел доступен только для ядра Mihomo. Сейчас запущено ядро Xray.',
+    'svc.xray_active_warning':
+      'Этот раздел доступен только для ядра Mihomo. Сейчас запущено ядро Xray.',
     'svc.mihomo_stopped_warning': 'Ядро Mihomo остановлено. Запустите его на странице Сервисы.'
   },
   en: {
@@ -1017,7 +1020,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.tab_files': 'Files',
     'editor.tab_generator': 'Mihomo Generator',
     'editor.generator_title': 'Mihomo Visual Generator',
-    'editor.generator_subtitle': 'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.',
+    'editor.generator_subtitle':
+      'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.',
     'editor.crumbs_generator': 'Mihomo Generator',
     'editor.template_applied': 'Template applied successfully',
     'editor.template_error': 'Failed to apply template',
@@ -1048,7 +1052,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.service_label': 'Service',
     'svc.switching': 'Switching...',
     'svc.switch_confirm_title': 'Switch kernel?',
-    'svc.switch_confirm_msg': 'Switch from {from} to {to}? XKeen will restart with the new configuration.',
+    'svc.switch_confirm_msg':
+      'Switch from {from} to {to}? XKeen will restart with the new configuration.',
     'svc.make_active': 'Make active',
     'svc.active_kernel_label': 'Active kernel',
     'svc.h1': 'Services & Kernels',
@@ -1623,7 +1628,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'apioffline.sec_ago': 'sec ago',
     'apioffline.min_ago': 'min ago',
     'apioffline.hour_ago': 'h ago',
-    'svc.xray_active_warning': 'This section is only available for the Mihomo kernel. The Xray kernel is currently running.',
+    'svc.xray_active_warning':
+      'This section is only available for the Mihomo kernel. The Xray kernel is currently running.',
     'svc.mihomo_stopped_warning': 'The Mihomo kernel is stopped. Start it in the Services section.'
   }
 };

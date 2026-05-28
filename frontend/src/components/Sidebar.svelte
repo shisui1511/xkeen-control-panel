@@ -156,16 +156,16 @@
       {$t('nav.logs')}
     </a>
     {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
-    <a
-      href="#/connections"
-      class="nav-item"
-      class:active={currentTab === 'connections'}
-      on:click={() => isSidebarOpen.set(false)}
-      title={$t('nav.connections')}
-    >
-      <Icon name="connections" size={16} />
-      {$t('nav.connections')}
-    </a>
+      <a
+        href="#/connections"
+        class="nav-item"
+        class:active={currentTab === 'connections'}
+        on:click={() => isSidebarOpen.set(false)}
+        title={$t('nav.connections')}
+      >
+        <Icon name="connections" size={16} />
+        {$t('nav.connections')}
+      </a>
     {/if}
     <a
       href="#/dat"
@@ -210,26 +210,26 @@
       <span class="nav-group-arrow">▶</span>
     </summary>
     {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
-    <a
-      href="#/proxies"
-      class="nav-item"
-      class:active={currentTab === 'proxies'}
-      on:click={() => isSidebarOpen.set(false)}
-      title={$t('nav.proxies')}
-    >
-      <Icon name="proxies" size={16} />
-      {$t('nav.proxies')}
-    </a>
-    <a
-      href="#/rules"
-      class="nav-item"
-      class:active={currentTab === 'rules'}
-      on:click={() => isSidebarOpen.set(false)}
-      title={$t('nav.rules')}
-    >
-      <Icon name="rules" size={16} />
-      {$t('nav.rules')}
-    </a>
+      <a
+        href="#/proxies"
+        class="nav-item"
+        class:active={currentTab === 'proxies'}
+        on:click={() => isSidebarOpen.set(false)}
+        title={$t('nav.proxies')}
+      >
+        <Icon name="proxies" size={16} />
+        {$t('nav.proxies')}
+      </a>
+      <a
+        href="#/rules"
+        class="nav-item"
+        class:active={currentTab === 'rules'}
+        on:click={() => isSidebarOpen.set(false)}
+        title={$t('nav.rules')}
+      >
+        <Icon name="rules" size={16} />
+        {$t('nav.rules')}
+      </a>
     {/if}
     <a
       href="#/subscriptions"
@@ -242,16 +242,16 @@
       {$t('nav.subscriptions')}
     </a>
     {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
-    <a
-      href="#/smartproxy"
-      class="nav-item"
-      class:active={currentTab === 'smartproxy'}
-      on:click={() => isSidebarOpen.set(false)}
-      title={$t('nav.smartproxy')}
-    >
-      <Icon name="smartproxy" size={16} />
-      {$t('nav.smartproxy')}
-    </a>
+      <a
+        href="#/smartproxy"
+        class="nav-item"
+        class:active={currentTab === 'smartproxy'}
+        on:click={() => isSidebarOpen.set(false)}
+        title={$t('nav.smartproxy')}
+      >
+        <Icon name="smartproxy" size={16} />
+        {$t('nav.smartproxy')}
+      </a>
     {/if}
   </details>
 
@@ -277,26 +277,26 @@
       <span class="nav-group-arrow">▶</span>
     </summary>
     {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
-    <a
-      href="#/traffic"
-      class="nav-item"
-      class:active={currentTab === 'traffic'}
-      on:click={() => isSidebarOpen.set(false)}
-      title={$t('nav.traffic')}
-    >
-      <Icon name="traffic" size={16} />
-      {$t('nav.traffic')}
-    </a>
-    <a
-      href="#/trafficquotas"
-      class="nav-item"
-      class:active={currentTab === 'trafficquotas'}
-      on:click={() => isSidebarOpen.set(false)}
-      title={$t('nav.trafficquotas')}
-    >
-      <Icon name="trafficquotas" size={16} />
-      {$t('nav.trafficquotas')}
-    </a>
+      <a
+        href="#/traffic"
+        class="nav-item"
+        class:active={currentTab === 'traffic'}
+        on:click={() => isSidebarOpen.set(false)}
+        title={$t('nav.traffic')}
+      >
+        <Icon name="traffic" size={16} />
+        {$t('nav.traffic')}
+      </a>
+      <a
+        href="#/trafficquotas"
+        class="nav-item"
+        class:active={currentTab === 'trafficquotas'}
+        on:click={() => isSidebarOpen.set(false)}
+        title={$t('nav.trafficquotas')}
+      >
+        <Icon name="trafficquotas" size={16} />
+        {$t('nav.trafficquotas')}
+      </a>
     {/if}
     <a
       href="#/network"

@@ -18,7 +18,7 @@ test.describe('Proxy Kernels switching test suite', () => {
     // Перехватываем все запросы к API
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
-      
+
       if (url.includes('/api/auth/me')) {
         await route.fulfill({
           status: 200,
@@ -159,7 +159,9 @@ test.describe('Proxy Kernels switching test suite', () => {
               pid: 1234,
               uptime: '2h 15m',
               binary_path: '/opt/sbin/xkeen',
-              raw: switchRequested ? 'Mihomo (running)\nXKeen is running' : 'Xray-core (running)\nXKeen is running'
+              raw: switchRequested
+                ? 'Mihomo (running)\nXKeen is running'
+                : 'Xray-core (running)\nXKeen is running'
             }
           })
         });
@@ -182,7 +184,9 @@ test.describe('Proxy Kernels switching test suite', () => {
     });
   });
 
-  test('successfully switches active kernel xray -> mihomo with optimistic UI spinner', async ({ page }) => {
+  test('successfully switches active kernel xray -> mihomo with optimistic UI spinner', async ({
+    page
+  }) => {
     // Переходим на страницу
     await page.goto('/#/services');
 

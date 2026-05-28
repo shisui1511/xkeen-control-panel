@@ -64,7 +64,9 @@
 
     // 2. Теперь извлекаем таймстамп из начала строки
     // Поддерживаем форматы: 2026/05/23 00:58:33, 2026-05-23T00:58:33+03:00, 2026-05-23 00:58:33, 00:58:33
-    const tsMatch = text.match(/^(\d{4}[-/]\d{2}[-/]\d{2}[T\s]|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\s*)?(\d{2}:\d{2}:\d{2})/);
+    const tsMatch = text.match(
+      /^(\d{4}[-/]\d{2}[-/]\d{2}[T\s]|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\s*)?(\d{2}:\d{2}:\d{2})/
+    );
     if (tsMatch) {
       timestamp = tsMatch[2];
       text = text.substring(tsMatch[0].length).trim();
@@ -349,14 +351,14 @@
           <button
             class="stab"
             class:stab-active={sourceFilter === ''}
-            on:click={() => (sourceFilter = '')}
-          >{$t('logs.all_sources')}</button>
+            on:click={() => (sourceFilter = '')}>{$t('logs.all_sources')}</button
+          >
           {#each KNOWN_SOURCES as src}
             <button
               class="stab"
               class:stab-active={sourceFilter === src}
-              on:click={() => (sourceFilter = sourceFilter === src ? '' : src)}
-            >{src}</button>
+              on:click={() => (sourceFilter = sourceFilter === src ? '' : src)}>{src}</button
+            >
           {/each}
         </div>
 
@@ -409,18 +411,33 @@
 
       {#if getFilteredLogs().length === 0}
         <div class="logs-empty-placeholder">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="empty-icon" style="margin-bottom: 12px; opacity: 0.6;">
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="empty-icon"
+            style="margin-bottom: 12px; opacity: 0.6;"
+          >
             <circle cx="12" cy="12" r="10" />
             <line x1="8" y1="12" x2="16" y2="12" />
           </svg>
-          <div class="empty-title" style="font-size: 14px; font-weight: 500; color: var(--fg-secondary); margin-bottom: 6px;">
+          <div
+            class="empty-title"
+            style="font-size: 14px; font-weight: 500; color: var(--fg-secondary); margin-bottom: 6px;"
+          >
             {!connected
               ? $t('logs.disconnected_title')
               : filter || sourceFilter || levelFilter
                 ? $t('logs.no_filtered_logs')
                 : $t('logs.no_logs')}
           </div>
-          <div class="empty-desc" style="font-size: 12px; color: var(--fg-faint); max-width: 280px; line-height: 1.4;">
+          <div
+            class="empty-desc"
+            style="font-size: 12px; color: var(--fg-faint); max-width: 280px; line-height: 1.4;"
+          >
             {!connected
               ? $t('logs.disconnected_desc')
               : connected
@@ -428,7 +445,11 @@
                 : $t('logs.connect_hint')}
           </div>
           {#if !connected}
-            <button on:click={connect} class="btn btn-secondary btn-small" style="margin-top: 14px; padding: 4px 8px; font-size: 12px;">
+            <button
+              on:click={connect}
+              class="btn btn-secondary btn-small"
+              style="margin-top: 14px; padding: 4px 8px; font-size: 12px;"
+            >
               {$t('logs.reconnect')}
             </button>
           {/if}
@@ -591,7 +612,9 @@
     flex: 1;
     max-width: 280px;
     min-width: 120px;
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    transition:
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
   .toolbar .filter-input:focus {
     outline: none;
@@ -614,7 +637,9 @@
     background-repeat: no-repeat;
     background-position: right 10px center;
     background-size: 10px;
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    transition:
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
   .toolbar .source-select:focus {
     outline: none;
@@ -645,7 +670,9 @@
     border: none;
     border-radius: calc(var(--radius-md) - 2px);
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition:
+      background 0.15s,
+      color 0.15s;
     white-space: nowrap;
   }
   .toolbar .stab:hover:not(.stab-active) {

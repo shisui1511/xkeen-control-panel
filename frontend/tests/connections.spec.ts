@@ -141,8 +141,12 @@ test.describe('Connections page test suite', () => {
     // В таблице 2 строки — по одной на каждое соединение из WS mock
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(2);
     // Первая строка содержит данные conn-1 (youtube.com, PROXY chain, TCP badge)
-    await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText('youtube.com');
-    await expect(page.locator('.connections-table tbody td.col-chain').first()).toContainText('PROXY');
+    await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
+      'youtube.com'
+    );
+    await expect(page.locator('.connections-table tbody td.col-chain').first()).toContainText(
+      'PROXY'
+    );
     await expect(page.locator('.connections-table tbody .net-badge').first()).toContainText('TCP');
   });
 
