@@ -195,7 +195,15 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.discard_draft': 'Сбросить',
     'editor.draft_restored': 'Черновик восстановлен',
     'editor.draft_discarded': 'Черновик удален',
+    'editor.yaml_inserted': 'Конфигурация вставлена в редактор. Не забудьте сохранить её!',
+    'editor.select_file_warn': 'Пожалуйста, выберите файл в панели слева для вставки YAML.',
     'editor.no_changes': 'Нет изменений для сохранения',
+    'editor.tab_files': 'Файлы',
+    'editor.tab_generator': 'Mihomo Generator',
+    'editor.generator_title': 'Визуальный генератор Mihomo',
+    'editor.generator_subtitle':
+      'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.',
+    'editor.crumbs_generator': 'Генератор Mihomo',
     'editor.template_applied': 'Шаблон успешно применен',
     'editor.template_error': 'Ошибка при применении шаблона',
 
@@ -224,6 +232,11 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.channel_preview': 'Предварительный',
     'svc.service_label': 'Сервис',
     'svc.switching': 'Переключение...',
+    'svc.switch_confirm_title': 'Переключить ядро?',
+    'svc.switch_confirm_msg':
+      'Переключить с {from} на {to}? XKeen перезапустится с новой конфигурацией.',
+    'svc.make_active': 'Сделать активным',
+    'svc.active_kernel_label': 'Активное ядро',
     'svc.h1': 'Сервисы и ядра',
     'svc.h1_sub': 'Управление модулем XKeen, ядрами Xray и Mihomo, обновлениями.',
     'svc.section_xkeen': 'XKeen — главный модуль',
@@ -569,6 +582,14 @@ const translations: Record<Lang, Record<string, string>> = {
     'net.tab_http': 'HTTP Test',
     'logs.export': 'Экспорт в TXT',
     'conn.autorefresh': 'Автообновление',
+    'conn.network': 'Сеть',
+    'conn.host': 'Хост',
+    'conn.live': '● live',
+    'conn.ws_offline': 'Нет данных',
+    'conn.ws_reconnecting': 'Переподключение...',
+    'conn.show_process_name': 'Имя источника',
+    'conn.process_mode_disabled_hint': 'Требуется активное ядро Mihomo',
+    'conn.ws_active': 'WebSocket активен',
 
     // Subscriptions
     'subscr.title': 'Подписки',
@@ -795,7 +816,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'apioffline.retry_title': 'Переподключить сейчас',
     'apioffline.sec_ago': 'сек назад',
     'apioffline.min_ago': 'мин назад',
-    'apioffline.hour_ago': 'ч назад'
+    'apioffline.hour_ago': 'ч назад',
+    'svc.xray_active_warning':
+      'Этот раздел доступен только для ядра Mihomo. Сейчас запущено ядро Xray.',
+    'svc.mihomo_stopped_warning': 'Ядро Mihomo остановлено. Запустите его на странице Сервисы.'
   },
   en: {
     // Common
@@ -990,7 +1014,15 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.discard_draft': 'Discard',
     'editor.draft_restored': 'Draft restored',
     'editor.draft_discarded': 'Draft discarded',
+    'editor.yaml_inserted': 'Configuration inserted into editor. Remember to save it!',
+    'editor.select_file_warn': 'Please select a file in the left panel to insert YAML.',
     'editor.no_changes': 'No changes to save',
+    'editor.tab_files': 'Files',
+    'editor.tab_generator': 'Mihomo Generator',
+    'editor.generator_title': 'Mihomo Visual Generator',
+    'editor.generator_subtitle':
+      'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.',
+    'editor.crumbs_generator': 'Mihomo Generator',
     'editor.template_applied': 'Template applied successfully',
     'editor.template_error': 'Failed to apply template',
 
@@ -1019,6 +1051,11 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.channel_preview': 'Preview',
     'svc.service_label': 'Service',
     'svc.switching': 'Switching...',
+    'svc.switch_confirm_title': 'Switch kernel?',
+    'svc.switch_confirm_msg':
+      'Switch from {from} to {to}? XKeen will restart with the new configuration.',
+    'svc.make_active': 'Make active',
+    'svc.active_kernel_label': 'Active kernel',
     'svc.h1': 'Services & Kernels',
     'svc.h1_sub': 'Manage XKeen module, Xray and Mihomo kernels, and updates.',
     'svc.section_xkeen': 'XKeen — main module',
@@ -1359,6 +1396,14 @@ const translations: Record<Lang, Record<string, string>> = {
     'net.tab_http': 'HTTP Test',
     'logs.export': 'Export to TXT',
     'conn.autorefresh': 'Auto-refresh',
+    'conn.network': 'Network',
+    'conn.host': 'Host',
+    'conn.live': '● live',
+    'conn.ws_offline': 'No data',
+    'conn.ws_reconnecting': 'Reconnecting...',
+    'conn.show_process_name': 'Show process name',
+    'conn.process_mode_disabled_hint': 'Requires active Mihomo core',
+    'conn.ws_active': 'WebSocket connected',
 
     // Subscriptions
     'subscr.title': 'Subscriptions',
@@ -1582,7 +1627,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'apioffline.retry_title': 'Retry now',
     'apioffline.sec_ago': 'sec ago',
     'apioffline.min_ago': 'min ago',
-    'apioffline.hour_ago': 'h ago'
+    'apioffline.hour_ago': 'h ago',
+    'svc.xray_active_warning':
+      'This section is only available for the Mihomo kernel. The Xray kernel is currently running.',
+    'svc.mihomo_stopped_warning': 'The Mihomo kernel is stopped. Start it in the Services section.'
   }
 };
 

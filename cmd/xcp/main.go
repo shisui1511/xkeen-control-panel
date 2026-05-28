@@ -176,6 +176,7 @@ func main() {
 	srv.HandleProtected("/api/traffic/stats", api.TrafficStats)
 	srv.HandleProtected("/api/traffic/alerts", api.TrafficAlerts)
 	srv.HandleProtected("/api/traffic/alerts/clear", api.TrafficAlertsClear)
+	srv.HandleProtected("/api/mihomo/connections/ws", api.ConnectionsWebSocket)
 
 	// Start background services
 	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, cfg.MihomoAPIURL)

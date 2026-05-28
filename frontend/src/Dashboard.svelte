@@ -320,6 +320,9 @@
         window.location.hash = '#/subscriptions';
         return 'subscriptions';
       }
+      if (path === 'mihomo-gen') {
+        return 'editor';
+      }
       return path;
     }
     return 'dashboard';

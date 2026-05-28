@@ -83,6 +83,10 @@ type TrafficQuotaService struct {
 
 	// connectionTracker maps connection ID -> last seen {upload, download}
 	connectionTracker sync.Map
+
+	// fan-out: подписчики получают raw JSON-снимки подключений
+	connSubs   map[chan []byte]struct{}
+	connSubsMu sync.RWMutex
 }
 
 func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaService {
@@ -94,6 +98,7 @@ func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaServ
 		proxyStats: make(map[string]*ProxyTraffic),
 		alerts:     []TrafficAlert{},
 		stopCh:     make(chan struct{}),
+		connSubs:   make(map[chan []byte]struct{}),
 	}
 	svc.load()
 	return svc
@@ -413,10 +418,8 @@ func (s *TrafficQuotaService) streamConnections() error {
 	log.Printf("TrafficQuota: WebSocket connected to %s", wsURL)
 
 	for {
-		var payload struct {
-			Connections []mihomoConn `json:"connections"`
-		}
-		if err := conn.ReadJSON(&payload); err != nil {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
 			select {
 			case <-s.stopCh:
 				return nil // graceful shutdown
@@ -424,8 +427,42 @@ func (s *TrafficQuotaService) streamConnections() error {
 				return fmt.Errorf("read: %w", err)
 			}
 		}
+		var payload struct {
+			Connections []mihomoConn `json:"connections"`
+		}
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			continue
+		}
+		s.broadcastConnections(raw)
 		s.processConnSnapshot(payload.Connections)
 	}
+}
+
+// broadcastConnections рассылает raw JSON-снимок всем подписчикам WebSocket.
+func (s *TrafficQuotaService) broadcastConnections(raw []byte) {
+	s.connSubsMu.RLock()
+	defer s.connSubsMu.RUnlock()
+	for ch := range s.connSubs {
+		select {
+		case ch <- raw:
+		default: // медленный клиент — пропускаем
+		}
+	}
+}
+
+// SubscribeConnections регистрирует канал для получения снимков подключений.
+// Возвращает канал и функцию отписки, которую вызывают при закрытии WebSocket.
+func (s *TrafficQuotaService) SubscribeConnections() (ch chan []byte, unsub func()) {
+	ch = make(chan []byte, 4)
+	s.connSubsMu.Lock()
+	s.connSubs[ch] = struct{}{}
+	s.connSubsMu.Unlock()
+	unsub = func() {
+		s.connSubsMu.Lock()
+		delete(s.connSubs, ch)
+		s.connSubsMu.Unlock()
+	}
+	return
 }
 
 // processConnSnapshot computes per-proxy traffic deltas from a Mihomo

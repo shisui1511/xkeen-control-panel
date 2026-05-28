@@ -3,10 +3,15 @@ package handlers
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // TestWebSocket_PingPong verifies that the server sends ping frames and that
@@ -126,5 +131,83 @@ func TestWebSocketOrigin_Bypass(t *testing.T) {
 				t.Errorf("CheckOrigin = %v, want %v", got, tc.expectAllow)
 			}
 		})
+	}
+}
+
+// TestLogsWebSocket_Sources verifies that multiple log sources are successfully read
+// and formatted with their filenames as tags in the WebSocket stream.
+func TestLogsWebSocket_Sources(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	mihomoLogPath := filepath.Join(tmpDir, "mihomo.log")
+	if err := os.WriteFile(mihomoLogPath, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	xrayLogPath := filepath.Join(tmpDir, "xray.log")
+	if err := os.WriteFile(xrayLogPath, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		LogSources:   []string{mihomoLogPath, xrayLogPath},
+		AllowedRoots: []string{tmpDir},
+	}
+	api := &API{
+		cfg:     cfg,
+		pathVal: utils.NewPathValidator(cfg.AllowedRoots),
+	}
+
+	serverDone := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(serverDone)
+		api.LogsWebSocket(w, r)
+	}))
+	defer ts.Close()
+
+	wsURL := "ws" + ts.URL[4:]
+	dialer := websocket.Dialer{}
+	header := http.Header{}
+	header.Set("Origin", ts.URL)
+	conn, _, err := dialer.Dial(wsURL, header)
+	if err != nil {
+		t.Skipf("WebSocket dial failed (e.g. tail not available in environment): %v", err)
+	}
+	defer conn.Close()
+
+	// Give tail utility a brief moment to start up and register files
+	time.Sleep(150 * time.Millisecond)
+
+	// Append a line of log data to mihomo.log
+	fMihomo, err := os.OpenFile(mihomoLogPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testMsg := "mihomo log message test line\n"
+	if _, err := fMihomo.WriteString(testMsg); err != nil {
+		fMihomo.Close()
+		t.Fatal(err)
+	}
+	fMihomo.Close()
+
+	// Read messages from the WebSocket and check for the parsed source-prefix
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	var receivedExpectedLog bool
+	// Read a few messages (could be system notices or initial tail logs)
+	for i := 0; i < 10; i++ {
+		_, p, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+		got := string(p)
+		if strings.Contains(got, "mihomo.log") && strings.Contains(got, "mihomo log message test line") {
+			receivedExpectedLog = true
+			break
+		}
+	}
+
+	if !receivedExpectedLog {
+		t.Errorf("expected to receive log line with 'mihomo.log' prefix and message content")
 	}
 }

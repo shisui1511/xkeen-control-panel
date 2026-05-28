@@ -10,6 +10,7 @@ export interface KernelCapability {
 
 export interface CapabilitiesData {
   kernels: Record<string, KernelCapability>;
+  active_kernel: string;
   mihomo: {
     reachable: boolean;
     process_running: boolean;

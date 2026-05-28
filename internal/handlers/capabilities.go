@@ -9,9 +9,10 @@ import (
 
 // CapabilitiesResponse describes which backend features are available.
 type CapabilitiesResponse struct {
-	Kernels map[string]KernelCapability `json:"kernels"`
-	Mihomo  MihomoCapability            `json:"mihomo"`
-	XRay    XRayCapability              `json:"xray"`
+	Kernels      map[string]KernelCapability `json:"kernels"`
+	Mihomo       MihomoCapability            `json:"mihomo"`
+	XRay         XRayCapability              `json:"xray"`
+	ActiveKernel string                      `json:"active_kernel"`
 }
 
 // XRayCapability describes XRay confdir setup status.
@@ -96,6 +97,32 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	resp.Mihomo.Reachable = reachable
 	resp.Mihomo.APIURL = a.cfg.MihomoAPIURL
 	resp.Mihomo.DiscoveredSecret = discoveredSecret
+
+	// Detect which kernel is currently active
+	var activeKernel string
+	if a.kernelSvc != nil {
+		for _, info := range a.kernelSvc.List() {
+			if info.ProcessStatus == "running" {
+				activeKernel = info.Name
+				break
+			}
+		}
+	}
+	if activeKernel == "" && a.xkeenSvc != nil {
+		// Fallback to checking from xkeen -status raw output
+		if status, err := a.xkeenSvc.Status(); err == nil {
+			lower := strings.ToLower(status)
+			if strings.Contains(lower, "xray") {
+				activeKernel = "xray"
+			} else if strings.Contains(lower, "mihomo") {
+				activeKernel = "mihomo"
+			}
+		}
+	}
+	if activeKernel == "" {
+		activeKernel = "none"
+	}
+	resp.ActiveKernel = activeKernel
 
 	// XRay confdir capability
 	resp.XRay.ConfDir = a.cfg.XRayConfigDir

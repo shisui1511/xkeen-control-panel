@@ -3,7 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
@@ -218,4 +220,74 @@ func (a *API) TrafficAlertsClear(w http.ResponseWriter, r *http.Request) {
 
 	a.trafficQuotaSvc.ClearAlerts()
 	JSONSuccess(w, nil)
+}
+
+// ConnectionsWebSocket транслирует снимки активных подключений Mihomo
+// через WebSocket к браузеру. Данные берутся из fan-out TrafficQuotaService,
+// который уже держит одно соединение с Mihomo /connections.
+func (a *API) ConnectionsWebSocket(w http.ResponseWriter, r *http.Request) {
+	if a.trafficQuotaSvc == nil {
+		http.Error(w, "Traffic Quota service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
+		return nil
+	})
+
+	ch, unsub := a.trafficQuotaSvc.SubscribeConnections()
+	defer unsub()
+
+	ctx := r.Context()
+
+	// Ping-горутина
+	stopPing := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(wsPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					return
+				}
+			case <-stopPing:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	defer close(stopPing)
+
+	// Читаем входящие фреймы (close/ping) — необходимо для корректной работы pong handler
+	go func() {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case raw, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, raw); err != nil {
+				return
+			}
+		}
+	}
 }

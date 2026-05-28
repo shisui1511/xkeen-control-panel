@@ -3,6 +3,9 @@
   import { showToast } from './stores';
 
   export let onSwitchTab: (tab: string) => void = () => {};
+  export let selectedFile: string = '';
+  export let onInsertIntoEditor: (content: string) => void = () => {};
+  export let embedded: boolean = false;
 
   type ProxyType = 'vless' | 'hysteria2' | 'tuic' | 'ss' | 'vmess';
   type GroupType = 'select' | 'url-test' | 'fallback' | 'load-balance';
@@ -324,7 +327,11 @@
   }
 
   function openInEditor() {
-    onSwitchTab('editor');
+    if (onInsertIntoEditor) {
+      onInsertIntoEditor(yaml);
+    } else {
+      onSwitchTab('editor');
+    }
   }
 
   const ru = $currentLang === 'ru';
@@ -352,52 +359,58 @@
 </script>
 
 <div class="container">
-  <div class="page-head">
-    <div>
-      <div class="crumbs">
-        {ru ? 'Сервисы' : 'Services'} <span class="crumb-sep">/</span>
-        {ru ? 'Генератор Mihomo' : 'Mihomo Generator'}
+  {#if !embedded}
+    <div class="page-head">
+      <div>
+        <div class="crumbs">
+          {ru ? 'Сервисы' : 'Services'} <span class="crumb-sep">/</span>
+          {ru ? 'Генератор Mihomo' : 'Mihomo Generator'}
+        </div>
+        <h1>{ru ? 'Визуальный генератор Mihomo' : 'Mihomo Visual Generator'}</h1>
+        <p class="sub">
+          {ru
+            ? 'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.'
+            : 'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.'}
+        </p>
       </div>
-      <h1>{ru ? 'Визуальный генератор Mihomo' : 'Mihomo Visual Generator'}</h1>
-      <p class="sub">
-        {ru
-          ? 'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.'
-          : 'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.'}
-      </p>
+      <div class="ph-actions">
+        <button class="btn btn-secondary" on:click={openInEditor}>
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right:5px"
+            ><path d="M12 20h9" /><path
+              d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
+            /></svg
+          >
+          {#if selectedFile}
+            {ru ? 'Вставить в редактор' : 'Insert into Editor'}
+          {:else}
+            {ru ? 'Открыть в редакторе' : 'Open in Editor'}
+          {/if}
+        </button>
+        <button class="btn btn-primary" on:click={copyYAML} disabled={!yaml}>
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right:5px"
+            ><rect x="9" y="9" width="13" height="13" rx="2" /><path
+              d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+            /></svg
+          >
+          {ru ? 'Копировать YAML' : 'Copy YAML'}
+        </button>
+      </div>
     </div>
-    <div class="ph-actions">
-      <button class="btn btn-secondary" on:click={openInEditor}>
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          style="margin-right:5px"
-          ><path d="M12 20h9" /><path
-            d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
-          /></svg
-        >
-        {ru ? 'Открыть в редакторе' : 'Open in Editor'}
-      </button>
-      <button class="btn btn-primary" on:click={copyYAML} disabled={!yaml}>
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          style="margin-right:5px"
-          ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-            d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-          /></svg
-        >
-        {ru ? 'Копировать YAML' : 'Copy YAML'}
-      </button>
-    </div>
-  </div>
+  {/if}
 
   <div class="gen-layout">
     <!-- Left: sections -->
@@ -869,6 +882,45 @@
           (ru
             ? '# Добавьте элементы слева\n# чтобы сгенерировать YAML'
             : '# Add elements on the left\n# to generate YAML')}</pre>
+
+      {#if embedded}
+        <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
+          <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right:5px"
+              ><path d="M12 20h9" /><path
+                d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
+              /></svg
+            >
+            {#if selectedFile}
+              {ru ? 'Вставить в редактор' : 'Insert into Editor'}
+            {:else}
+              {ru ? 'Открыть в редакторе' : 'Open in Editor'}
+            {/if}
+          </button>
+          <button class="btn btn-primary" on:click={copyYAML} disabled={!yaml} style="flex: 1;">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right:5px"
+              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              /></svg
+            >
+            {ru ? 'Копировать' : 'Copy'}
+          </button>
+        </div>
+      {/if}
     </div>
   </div>
 </div>

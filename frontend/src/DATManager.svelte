@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { t, currentLang } from './i18n';
   import Icon from './lib/components/Icon.svelte';
-  import { showToast } from './stores';
+  import { showToast, capabilities } from './stores';
 
   export let onSwitchTab: (tab: string) => void = () => {};
 
@@ -341,7 +341,7 @@
     <p class="text-secondary">{$t('dat.no_files')}</p>
   {:else}
     <!-- Xray Group -->
-    {#if xrayFiles.length > 0}
+    {#if xrayFiles.length > 0 && ($capabilities === null || $capabilities.active_kernel === 'xray')}
       <div class="card card-tight mb-3">
         <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
           Xray ({xrayFiles[0]?.path || '/opt/etc/xray/datfiles'})
@@ -456,7 +456,7 @@
     {/if}
 
     <!-- Mihomo Group -->
-    {#if mihomoFiles.length > 0}
+    {#if mihomoFiles.length > 0 && ($capabilities === null || $capabilities.active_kernel === 'mihomo')}
       <div class="card card-tight mb-3">
         <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
           Mihomo ({mihomoFiles[0]?.path || '/opt/etc/mihomo'})

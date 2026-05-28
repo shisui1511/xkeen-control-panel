@@ -153,7 +153,7 @@ def stable_notes(version, prev_tag):
     changelog = build_changelog(feats, fixes, others)
 
     return f"""\
-> Веб-панель управления XKeen для роутеров Keenetic — единый бинарник без зависимостей.
+> Веб-панель управления XKeen для роутеров Keenetic/Netcraze — единый бинарник без зависимостей.
 
 {changelog}
 

@@ -1,12 +1,8 @@
 package handlers
 
 import (
-	"log"
 	"net/http"
 	"strings"
-	"time"
-
-	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 type ServiceStatusResponse struct {
@@ -94,6 +90,16 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 		out, err = a.xkeenSvc.Restart()
 	case "switch_kernel":
 		out, err = a.xkeenSvc.SwitchKernel(targetKernel)
+		if err == nil {
+			// После успешной смены ядра сразу запускаем XKeen
+			startOut, startErr := a.xkeenSvc.Start()
+			if startErr != nil {
+				out = out + "\n" + startOut
+				err = startErr
+			} else {
+				out = out + "\n" + startOut
+			}
+		}
 	default:
 		a.errorResponse(w, a.t(r, "service.invalid_action"), http.StatusBadRequest)
 		return
@@ -106,44 +112,7 @@ func (a *API) ServiceControl(w http.ResponseWriter, r *http.Request) {
 
 	a.ClearCapabilitiesCache()
 
-	// If a kernel was targeted, launch async monitor
-	if targetKernel != "" && (action == "restart" || action == "switch_kernel") {
-		go a.monitorAndRollbackKernel(targetKernel)
-	}
-
 	w.Write([]byte(out))
-}
-
-func (a *API) monitorAndRollbackKernel(name string) {
-	name = utils.SanitizeLogInput(name)
-
-	// Wait 10 seconds for the kernel to bootstrap and status to settle
-	time.Sleep(10 * time.Second)
-
-	k := a.kernelSvc.Get(name)
-	if k == nil {
-		return
-	}
-
-	kernelName := k.Name
-
-	if k.ProcessStatus != "running" {
-		log.Printf("Service: kernel %s failed to reach running state, triggering auto-rollback...", kernelName)
-
-		if err := a.kernelSvc.Rollback(kernelName); err != nil {
-			log.Printf("Service: kernel auto-rollback failed: %v", err)
-			a.xkeenSvc.RecordAction("auto_rollback:"+kernelName, "Откат завершился ошибкой: "+err.Error(), err)
-			return
-		}
-
-		// Restart service after rollback
-		out, err := a.xkeenSvc.Restart()
-		if err != nil {
-			a.xkeenSvc.RecordAction("auto_rollback:"+kernelName, "Откат выполнен. Перезапуск XKeen завершился ошибкой: "+err.Error()+"\nВывод:\n"+out, err)
-		} else {
-			a.xkeenSvc.RecordAction("auto_rollback:"+kernelName, "Откат ядра и перезапуск XKeen выполнены успешно.\nВывод:\n"+out, nil)
-		}
-	}
 }
 
 func (a *API) ServiceRestartLog(w http.ResponseWriter, r *http.Request) {

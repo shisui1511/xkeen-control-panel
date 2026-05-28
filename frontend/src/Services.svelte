@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t } from './i18n';
-  import { showToast, fetchCapabilities } from './stores';
+  import { showToast, fetchCapabilities, showConfirm } from './stores';
   import Skeleton from './components/Skeleton.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
@@ -209,10 +209,8 @@
     }
   }
 
-  let switchingKernel = false;
-
-  async function switchAndStart(kernel: string) {
-    switchingKernel = true;
+  async function switchKernel(kernel: string) {
+    switchingKernelTo = kernel;
     actionLoading[`switch-${kernel}`] = true;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
@@ -229,7 +227,7 @@
       showToast('error', `${$t('svc.action_error')}: ${e.message}`);
     } finally {
       actionLoading[`switch-${kernel}`] = false;
-      switchingKernel = false;
+      switchingKernelTo = null;
     }
   }
 
@@ -311,21 +309,33 @@
 
   $: xray = kernels.find((k) => k.name === 'xray');
   $: mihomo = kernels.find((k) => k.name === 'mihomo');
-  $: activeKernel =
-    xray?.process_status === 'running'
-      ? 'xray'
-      : mihomo?.process_status === 'running'
-        ? 'mihomo'
-        : 'none';
+  $: activeKernel = (() => {
+    if (xray?.process_status === 'running') return 'xray';
+    if (mihomo?.process_status === 'running') return 'mihomo';
+    const lastSwitch = restartLog.find(
+      (entry) => entry.action.startsWith('switch_kernel:') && entry.success
+    );
+    if (lastSwitch) {
+      return lastSwitch.action.split(':')[1];
+    }
+    return xkeenInfo.activeKernel || 'none';
+  })();
   $: isRunning = xray?.process_status === 'running' || mihomo?.process_status === 'running';
 
+  // Optimistic UI: при переключении/смене ядра подсвечиваем спиннером целевую кнопку
+  let switchingKernelTo: string | null = null;
+
   onMount(() => {
-    fetchStatus();
+    // Единый тикер: fetchKernels — источник правды для статуса процесса.
+    // fetchStatus нужен только для XKeen pid/uptime/binaryPath.
     fetchKernels();
+    fetchStatus();
     fetchRestartLog();
-    const interval = setInterval(fetchStatus, 10000);
+    const kernelInterval = setInterval(fetchKernels, 5000);
+    const statusInterval = setInterval(fetchStatus, 15000);
     return () => {
-      clearInterval(interval);
+      clearInterval(kernelInterval);
+      clearInterval(statusInterval);
       Object.values(statusIntervals).forEach(clearInterval);
     };
   });
@@ -490,27 +500,76 @@
       style="margin:0;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;"
     >
       <span>{$t('svc.section_kernels')}</span>
-      <span
-        style="font-size:11px;color:var(--fg-dim);letter-spacing:.04em;font-weight:500;text-transform:none;display:flex;align-items:center;gap:6px;"
-      >
-        {$t('svc.channel_prefix')} ·
-        <select
-          value={xray?.channel || mihomo?.channel || 'stable'}
-          on:change={(e) => {
-            const ch = e.currentTarget.value;
-            setKernelChannel('xray', ch);
-            setKernelChannel('mihomo', ch);
-          }}
-          style="background:transparent;border:0;color:var(--accent);font-size:11px;font-weight:600;padding:0;cursor:pointer;outline:none;"
+      <div style="display:flex;align-items:center;gap:12px;">
+        <!-- Pill-переключатель активного ядра -->
+        {#if kernelsLoaded && (xray || mihomo)}
+          <div class="kernel-switcher" aria-label={$t('svc.active_kernel_label')} role="group">
+            {#if xray}
+              <button
+                class="ks-btn"
+                class:ks-active={activeKernel === 'xray'}
+                class:ks-switching={switchingKernelTo === 'xray'}
+                disabled={switchingKernelTo !== null || activeKernel === 'xray'}
+                on:click={() => switchKernel('xray')}
+                title={activeKernel === 'xray'
+                  ? $t('svc.active_label')
+                  : $t('svc.make_active') + ' Xray'}
+              >
+                {#if switchingKernelTo === 'xray'}
+                  <span class="ks-dot ks-dot-spin"></span>
+                {:else if activeKernel === 'xray'}
+                  <span class="ks-dot ks-dot-running"></span>
+                {:else}
+                  <span class="ks-dot ks-dot-idle"></span>
+                {/if}
+                Xray
+              </button>
+            {/if}
+            {#if mihomo}
+              <button
+                class="ks-btn"
+                class:ks-active={activeKernel === 'mihomo'}
+                class:ks-switching={switchingKernelTo === 'mihomo'}
+                disabled={switchingKernelTo !== null || activeKernel === 'mihomo'}
+                on:click={() => switchKernel('mihomo')}
+                title={activeKernel === 'mihomo'
+                  ? $t('svc.active_label')
+                  : $t('svc.make_active') + ' Mihomo'}
+              >
+                {#if switchingKernelTo === 'mihomo'}
+                  <span class="ks-dot ks-dot-spin"></span>
+                {:else if activeKernel === 'mihomo'}
+                  <span class="ks-dot ks-dot-running"></span>
+                {:else}
+                  <span class="ks-dot ks-dot-idle"></span>
+                {/if}
+                Mihomo
+              </button>
+            {/if}
+          </div>
+        {/if}
+        <span
+          style="font-size:11px;color:var(--fg-dim);letter-spacing:.04em;font-weight:500;text-transform:none;display:flex;align-items:center;gap:6px;"
         >
-          <option value="stable" style="background:var(--bg-card);color:var(--fg-primary);"
-            >{$t('svc.channel_stable').toLowerCase()}</option
+          {$t('svc.channel_prefix')} ·
+          <select
+            value={xray?.channel || mihomo?.channel || 'stable'}
+            on:change={(e) => {
+              const ch = e.currentTarget.value;
+              setKernelChannel('xray', ch);
+              setKernelChannel('mihomo', ch);
+            }}
+            style="background:transparent;border:0;color:var(--accent);font-size:11px;font-weight:600;padding:0;cursor:pointer;outline:none;"
           >
-          <option value="preview" style="background:var(--bg-card);color:var(--fg-primary);"
-            >{$t('svc.channel_preview').toLowerCase()}</option
-          >
-        </select>
-      </span>
+            <option value="stable" style="background:var(--bg-card);color:var(--fg-primary);"
+              >{$t('svc.channel_stable').toLowerCase()}</option
+            >
+            <option value="preview" style="background:var(--bg-card);color:var(--fg-primary);"
+              >{$t('svc.channel_preview').toLowerCase()}</option
+            >
+          </select>
+        </span>
+      </div>
     </h2>
 
     <!-- Xray row -->
@@ -624,18 +683,6 @@
                 stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
               >
               {$t('svc.restart')}
-            </button>
-          {:else}
-            <button
-              class="btn btn-primary"
-              on:click={() => switchAndStart('xray')}
-              disabled={switchingKernel}
-              title={$t('app.start')}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-                ><polygon points="5 3 19 12 5 21 5 3" /></svg
-              >
-              {actionLoading['switch-xray'] ? $t('svc.starting') : $t('app.start')}
             </button>
           {/if}
           {#if xray.has_update}
@@ -794,18 +841,6 @@
             >
               {$t('svc.api_test')}
             </button>
-          {:else}
-            <button
-              class="btn btn-primary"
-              on:click={() => switchAndStart('mihomo')}
-              disabled={switchingKernel}
-              title={$t('app.start')}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-                ><polygon points="5 3 19 12 5 21 5 3" /></svg
-              >
-              {actionLoading['switch-mihomo'] ? $t('svc.starting') : $t('app.start')}
-            </button>
           {/if}
           {#if mihomo.has_update}
             <button
@@ -841,7 +876,7 @@
   </div>
 
   <!-- Auto-start card -->
-  <div class="card">
+  <div class="card" style="margin-bottom:18px;">
     <h2 class="card-title">{$t('svc.section_autostart')}</h2>
     <div class="field-row" style="border-bottom:1px solid var(--border-light);">
       <div>
@@ -983,6 +1018,76 @@
     display: grid;
     grid-template-columns: 60px 1fr auto;
     align-items: center;
+  }
+
+  /* Pill-переключатель активного ядра */
+  .kernel-switcher {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+  }
+  .ks-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--fg-secondary);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition:
+      background 0.15s,
+      color 0.15s;
+    line-height: 1.5;
+  }
+  .ks-btn:hover:not(:disabled):not(.ks-active) {
+    background: var(--bg-hover);
+    color: var(--fg-primary);
+  }
+  .ks-btn.ks-active {
+    background: var(--accent);
+    color: #fff;
+    cursor: default;
+  }
+  .ks-btn:disabled:not(.ks-active) {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .ks-btn.ks-switching {
+    background: rgba(41, 194, 240, 0.2);
+    color: var(--accent);
+    cursor: wait;
+  }
+  .ks-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .ks-dot-running {
+    background: #4ade80;
+    box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.25);
+  }
+  .ks-dot-idle {
+    background: var(--fg-faint, rgba(255, 255, 255, 0.15));
+  }
+  .ks-dot-spin {
+    background: var(--accent);
+    animation: ks-pulse 1s ease-in-out infinite;
+  }
+  @keyframes ks-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
   }
   .kernel-card .k-ico {
     width: 60px;
