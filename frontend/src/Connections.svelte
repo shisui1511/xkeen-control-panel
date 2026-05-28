@@ -18,6 +18,7 @@
       sourcePort: string;
       destinationPort: string;
       host: string;
+      process?: string;  // Mihomo populates when find-process-mode=always
     };
     upload: number;
     download: number;
@@ -45,8 +46,44 @@
   let filterRule = '';
   let filterProxy = '';
 
+  // Source-name toggle
+  let showProcessName = false;
+  let processModePatchPending = false;
+
   $: uniqueRules = [...new Set(connections.map((c) => c.rule).filter(Boolean))].sort();
   $: uniqueChains = [...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort();
+  $: isMihomoActive = $capabilities === null || $capabilities.mihomo.reachable;
+
+  async function loadProcessMode() {
+    try {
+      const res = await fetch('/api/mihomo/proxy/configs');
+      if (res.ok) {
+        const cfg = await res.json();
+        showProcessName = cfg['find-process-mode'] === 'always';
+      }
+    } catch (_) {}
+  }
+
+  async function onToggleProcessName() {
+    if (processModePatchPending) return;
+    processModePatchPending = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      await fetch('/api/mihomo/proxy/configs', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({ 'find-process-mode': showProcessName ? 'always' : 'off' })
+      });
+    } catch (_) {
+      // Revert on error
+      showProcessName = !showProcessName;
+    } finally {
+      processModePatchPending = false;
+    }
+  }
 
   function connectWS() {
     if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
@@ -148,6 +185,11 @@
     return conn.metadata.host || conn.metadata.destinationIP;
   }
 
+  function getSourceName(conn: Connection): string {
+    if (showProcessName && conn.metadata.process) return conn.metadata.process;
+    return `${conn.metadata.sourceIP}:${conn.metadata.sourcePort}`;
+  }
+
   function getHostTooltip(conn: Connection): string {
     const host = conn.metadata.host || conn.metadata.destinationIP;
     return `${host}:${conn.metadata.destinationPort}`;
@@ -230,6 +272,7 @@
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       loading = true;
       connectWS();
+      loadProcessMode();
     }
   });
 
@@ -257,6 +300,22 @@
       <p class="sub">{$t('conn.active')}</p>
     </div>
     <div class="ph-actions">
+      <label
+        class="toggle-label"
+        class:disabled={!isMihomoActive}
+        title={!isMihomoActive ? $t('conn.process_mode_disabled_hint') : ''}
+      >
+        <label class="toggle-switch">
+          <input
+            type="checkbox"
+            bind:checked={showProcessName}
+            on:change={onToggleProcessName}
+            disabled={!isMihomoActive || processModePatchPending}
+          />
+          <span class="toggle-slider"></span>
+        </label>
+        {$t('conn.show_process_name')}
+      </label>
       <button
         class="btn btn-secondary"
         style="color:var(--danger);"
@@ -376,7 +435,7 @@
           {:else}
             {#each filteredConnections as conn (conn.id)}
               <tr class="conn-row">
-                <td class="mono col-src">{conn.metadata.sourceIP}:{conn.metadata.sourcePort}</td>
+                <td class="mono col-src">{getSourceName(conn)}</td>
                 <td class="mono col-host">
                   <span title={getHostTooltip(conn)} class="host-cell">
                     {getHost(conn)}
@@ -438,6 +497,13 @@
 </div>
 
 <style>
+  /* Toggle disabled state */
+  .toggle-label.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
   /* Live indicator */
   .live-indicator {
     display: inline-flex;
