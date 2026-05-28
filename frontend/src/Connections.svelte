@@ -33,6 +33,7 @@
   let error = '';
   let wsConnected = false;
   let wsReconnecting = false;
+  let destroyed = false;
 
   // WebSocket
   let ws: WebSocket | null = null;
@@ -69,7 +70,7 @@
     processModePatchPending = true;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      await fetch('/api/mihomo/proxy/configs', {
+      const res = await fetch('/api/mihomo/proxy/configs', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -77,8 +78,9 @@
         },
         body: JSON.stringify({ 'find-process-mode': showProcessName ? 'always' : 'off' })
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (_) {
-      // Revert on error
+      // Revert on network error or non-2xx HTTP response
       showProcessName = !showProcessName;
     } finally {
       processModePatchPending = false;
@@ -198,15 +200,17 @@
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
     const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
   function getDuration(startStr: string): string {
     try {
       const start = new Date(startStr);
+      if (isNaN(start.getTime())) return '—';
       const diffMs = Date.now() - start.getTime();
+      if (diffMs < 0) return '0с';
       const diffSec = Math.floor(diffMs / 1000);
       if (diffSec < 60) return `${diffSec}с`;
       const diffMin = Math.floor(diffSec / 60);
@@ -253,7 +257,14 @@
   $: totalDownload = connections.reduce((acc, c) => acc + c.download, 0);
   // Явное реактивное выражение — Svelte отслеживает connections, filterSource, filterDest, filterRule, filterProxy
   $: filteredConnections = connections.filter((conn) => {
-    if (filterSource && !(conn.metadata.sourceIP || '').includes(filterSource)) return false;
+    if (filterSource) {
+      // Match against the value shown in the source column (process name or IP:port)
+      const sourceName =
+        showProcessName && conn.metadata.process
+          ? conn.metadata.process
+          : conn.metadata.sourceIP || '';
+      if (!sourceName.includes(filterSource)) return false;
+    }
     if (
       filterDest &&
       !(conn.metadata.host || '').includes(filterDest) &&
@@ -266,7 +277,6 @@
   });
 
 
-  let destroyed = false;
 
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {
@@ -292,7 +302,7 @@
       <h1>
         {$t('conn.title')}
         {#if wsConnected}
-          <span class="live-indicator" title="WebSocket активен">{$t('conn.live')}</span>
+          <span class="live-indicator" title={$t('conn.ws_active')}>{$t('conn.live')}</span>
         {:else if wsReconnecting}
           <span class="live-indicator live-reconnecting">{$t('conn.ws_reconnecting')}</span>
         {/if}

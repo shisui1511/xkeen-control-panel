@@ -580,6 +580,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'conn.ws_reconnecting': 'Переподключение...',
     'conn.show_process_name': 'Имя источника',
     'conn.process_mode_disabled_hint': 'Требуется активное ядро Mihomo',
+    'conn.ws_active': 'WebSocket активен',
 
     // Subscriptions
     'subscr.title': 'Подписки',
@@ -1383,6 +1384,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'conn.ws_reconnecting': 'Reconnecting...',
     'conn.show_process_name': 'Show process name',
     'conn.process_mode_disabled_hint': 'Requires active Mihomo core',
+    'conn.ws_active': 'WebSocket connected',
 
     // Subscriptions
     'subscr.title': 'Subscriptions',
