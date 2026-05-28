@@ -1,8 +1,8 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page, type Route } from '@playwright/test';
 
 // Вспомогательная функция: настройка REST-моков с указанными capabilities
-async function setupRestMocks(page: any, mihomoReachable = true) {
-  await page.route('**/api/**', async (route: any) => {
+async function setupRestMocks(page: Page, mihomoReachable = true) {
+  await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
 
     if (url.includes('/api/auth/me')) {
@@ -60,7 +60,7 @@ async function setupRestMocks(page: any, mihomoReachable = true) {
 }
 
 // Вспомогательная функция: отключение Service Worker
-async function disableServiceWorker(page: any) {
+async function disableServiceWorker(page: Page) {
   await page.addInitScript(() => {
     Object.defineProperty(window.navigator, 'serviceWorker', {
       value: undefined,
