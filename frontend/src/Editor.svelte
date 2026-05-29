@@ -1757,11 +1757,12 @@
                 {#if tab.isDirty}
                   <span class="tab-dirty-dot">●</span>
                 {/if}
-                <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <span
                   class="tab-close-btn"
+                  role="button"
+                  tabindex="-1"
                   on:click|stopPropagation={() => closeTab(tab.path)}
+                  on:keydown|stopPropagation={(e) => (e.key === 'Enter' || e.key === ' ') && closeTab(tab.path)}
                   title="Закрыть"
                   aria-label="Закрыть"
                 >
@@ -2067,12 +2068,13 @@
                 <!-- Список бэкапов слева -->
                 <div class="drawer-sidebar">
                   {#each backups as backup}
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <div
                       class="backup-item"
                       class:active={selectedBackup === backup}
+                      role="button"
+                      tabindex="0"
                       on:click={() => selectBackup(backup)}
+                      on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), selectBackup(backup))}
                     >
                       <span class="backup-time">{formatBackupDate(backup)}</span>
                       <button
@@ -3077,6 +3079,11 @@
     font-size: 12px;
     text-align: left;
     transition: all 0.15s ease;
+  }
+
+  .backup-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .backup-item:hover {
