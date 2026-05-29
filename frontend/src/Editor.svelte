@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { fade } from 'svelte/transition';
+  import { fade, slide } from 'svelte/transition';
   import { t, currentLang } from './i18n';
   $: ru = $currentLang === 'ru';
   import { showToast } from './stores';
@@ -94,6 +94,12 @@
   let tabs: EditorTab[] = [];
   let activeTabPath = '';
   let breadcrumbs: PathSegment[] = [];
+
+  // Drawer states
+  let drawerOpen = false;
+  let selectedBackup = '';
+  let diffGroups: any[] = [];
+  let backupLoading = false;
 
   function jumpToSegment(pos: number) {
     if (!editorView) return;
@@ -770,6 +776,42 @@
     }
   }
 
+  async function selectBackup(backupPath: string) {
+    if (selectedBackup === backupPath) return;
+    selectedBackup = backupPath;
+    backupLoading = true;
+    diffGroups = [];
+    try {
+      const res = await fetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
+      if (!res.ok) throw new Error('Failed to load backup content');
+      const backupContent = await res.text();
+      const currentContent = editorView ? editorView.state.doc.toString() : '';
+      diffGroups = getDiffGroups(backupContent, currentContent);
+    } catch (e: any) {
+      showToast('error', $t('editor.restore_error') + ': ' + e.message);
+    } finally {
+      backupLoading = false;
+    }
+  }
+
+  function formatBackupDate(backup: string): string {
+    const parts = backup.split('.backup-');
+    if (parts.length < 2) return backup;
+    const tsStr = parts[1];
+    const yyyymmdd = tsStr.slice(0, 8); // YYYYMMDD
+    const hhmmss = tsStr.slice(9, 15);   // HHMMSS
+    if (yyyymmdd.length === 8 && hhmmss.length === 6) {
+      const y = yyyymmdd.slice(0, 4);
+      const m = yyyymmdd.slice(4, 6);
+      const d = yyyymmdd.slice(6, 8);
+      const hh = hhmmss.slice(0, 2);
+      const mm = hhmmss.slice(2, 4);
+      const ss = hhmmss.slice(4, 6);
+      return `${d}.${m}.${y} ${hh}:${mm}:${ss}`;
+    }
+    return tsStr;
+  }
+
   let showSaveConfirmModal = false;
   let validationResult: { valid: boolean; error: string } | null = null;
   let validationLoading = false;
@@ -1000,10 +1042,24 @@
             insert: content
           }
         });
+
+        // Обновить состояние активной вкладки
+        const activeT = tabs.find((t) => t.path === selectedFile);
+        if (activeT) {
+          activeT.currentContent = content;
+          activeT.isDirty = content !== activeT.originalContent;
+          isDirty = activeT.isDirty;
+          tabs = [...tabs];
+        }
       }
 
+      // Закрыть выдвижную панель бэкапов
+      drawerOpen = false;
+      selectedBackup = '';
+      diffGroups = [];
+
       showToast('success', $t('editor.backup_restored'));
-    } catch (e) {
+    } catch (e: any) {
       showToast('error', $t('editor.restore_error') + ': ' + e.message);
     }
   }
@@ -1497,21 +1553,6 @@
             </div>
           </div>
 
-          <!-- Backups Section -->
-          {#if backups.length > 0}
-            <div class="editor-files" style="margin-top:12px;">
-              <div class="editor-files-head">
-                <span>{$t('editor.backups')}</span>
-              </div>
-              <div class="file-list">
-                {#each backups as backup}
-                  <button class="file-row" on:click={() => restoreBackup(backup)}>
-                    <span class="fr-name">{backup.split('.backup-')[1] || backup}</span>
-                  </button>
-                {/each}
-              </div>
-            </div>
-          {/if}
         </div>
       {/if}
 
@@ -1789,7 +1830,7 @@
         <!-- Status Bar -->
         {#if selectedFile}
           <div
-            style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:14px;font-family:var(--font-family-mono);font-size:11px;color:var(--fg-dim);"
+            style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:14px;align-items:center;font-family:var(--font-family-mono);font-size:11px;color:var(--fg-dim);"
           >
             <span class:status-dirty={isDirty}>
               <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
@@ -1797,8 +1838,99 @@
             </span>
             <span>schema: {selectedFile.includes('xray') ? 'xray@latest' : 'mihomo@latest'}</span>
             <span>{cursorLine}:{cursorCol}</span>
+
+            {#if backups.length > 0}
+              <button
+                class="backups-toggle-btn"
+                on:click={() => drawerOpen = !drawerOpen}
+                title="История резервных копий"
+                aria-label="История резервных копий"
+              >
+                <svg
+                  class="chevron-icon"
+                  class:rotated={drawerOpen}
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                >
+                  <polyline points="18 15 12 9 6 15"></polyline>
+                </svg>
+                {$t('editor.backups') || 'Бэкапы'} ({backups.length})
+              </button>
+            {/if}
+
             <span style="margin-left:auto;">Ctrl+S — сохранить · Ctrl+Z — отменить</span>
           </div>
+
+          {#if drawerOpen && backups.length > 0}
+            <div class="editor-bottom-drawer" transition:slide={{ duration: 200 }}>
+              <div class="drawer-layout">
+                <!-- Список бэкапов слева -->
+                <div class="drawer-sidebar">
+                  {#each backups as backup}
+                    <!-- svelte-ignore a11y-click-events-have-key-events -->
+                    <!-- svelte-ignore a11y-no-static-element-interactions -->
+                    <div
+                      class="backup-item"
+                      class:active={selectedBackup === backup}
+                      on:click={() => selectBackup(backup)}
+                    >
+                      <span class="backup-time">{formatBackupDate(backup)}</span>
+                      <button
+                        class="btn btn-sm btn-secondary restore-inline-btn"
+                        on:click|stopPropagation={() => restoreBackup(backup)}
+                      >
+                        Восстановить
+                      </button>
+                    </div>
+                  {/each}
+                </div>
+
+                <!-- Зона diff-viewer справа -->
+                <div class="drawer-main">
+                  {#if selectedBackup}
+                    <div class="diff-viewer-container">
+                      <div class="diff-header">
+                        <span>Сравнение с бэкапом от {formatBackupDate(selectedBackup)}</span>
+                      </div>
+                      <div class="diff-body">
+                        {#if backupLoading}
+                          <div style="display:grid;place-items:center;height:100px;">
+                            <div class="spinner"></div>
+                          </div>
+                        {:else}
+                          {#each diffGroups as group}
+                            {#if group.type === 'added'}
+                              {#each group.lines as line}
+                                <div class="diff-line diff-line-added">+ {line}</div>
+                              {/each}
+                            {:else if group.type === 'removed'}
+                              {#each group.lines as line}
+                                <div class="diff-line diff-line-removed">- {line}</div>
+                              {/each}
+                            {:else if group.type === 'collapsed'}
+                              <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
+                            {:else}
+                              {#each group.lines as line}
+                                <div class="diff-line diff-line-unchanged">{line}</div>
+                              {/each}
+                            {/if}
+                          {/each}
+                        {/if}
+                      </div>
+                    </div>
+                  {:else}
+                    <div class="drawer-empty-state">
+                      Выберите резервную копию слева для сравнения изменений
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            </div>
+          {/if}
         {/if}
       </div>
     </div>
@@ -2682,5 +2814,169 @@
 
   :global(.line-highlight-flash) {
     animation: line-flash 1s ease-out;
+  }
+
+  .backups-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--fg-dim);
+    font-size: 11px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: var(--font-family-mono);
+    transition: all 0.15s ease;
+    margin-left: 10px;
+  }
+
+  .backups-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--fg-primary);
+  }
+
+  .chevron-icon {
+    transition: transform 0.2s ease;
+  }
+  .chevron-icon.rotated {
+    transform: rotate(180deg);
+  }
+
+  .editor-bottom-drawer {
+    height: 250px;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .drawer-layout {
+    display: flex;
+    height: 100%;
+  }
+
+  .drawer-sidebar {
+    width: 240px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    scrollbar-width: thin;
+  }
+
+  .backup-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: transparent;
+    color: var(--fg-dim);
+    border: 0;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 12px;
+    text-align: left;
+    transition: all 0.15s ease;
+  }
+
+  .backup-item:hover {
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--fg-primary);
+  }
+
+  .backup-item.active {
+    background: var(--accent-dim);
+    color: var(--fg-primary);
+  }
+
+  .restore-inline-btn {
+    padding: 2px 6px;
+    font-size: 10px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  .backup-item:hover .restore-inline-btn,
+  .backup-item.active .restore-inline-btn {
+    opacity: 1;
+  }
+
+  .drawer-main {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .diff-viewer-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+
+  .diff-header {
+    padding: 8px 14px;
+    background: rgba(255,255,255,0.01);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--fg-dim);
+  }
+
+  .diff-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 14px;
+    background: var(--bg-page);
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    scrollbar-width: thin;
+  }
+
+  /* Стилизация строк Visual Diff */
+  .diff-line {
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .diff-line-added {
+    background: rgba(46, 160, 67, 0.12);
+    color: #3fb950;
+    border-left: 3px solid #2ea043;
+    padding-left: 6px;
+  }
+
+  .diff-line-removed {
+    background: rgba(248, 81, 73, 0.12);
+    color: #f85149;
+    border-left: 3px solid #f85149;
+    padding-left: 6px;
+  }
+
+  .diff-line-collapsed {
+    background: rgba(255,255,255,0.02);
+    color: var(--fg-faint);
+    text-align: center;
+    font-style: italic;
+    padding: 4px 0;
+    border-top: 1px dashed var(--border);
+    border-bottom: 1px dashed var(--border);
+    margin: 4px 0;
+  }
+
+  .diff-line-unchanged {
+    color: var(--fg-dim);
+    padding-left: 9px;
+  }
+
+  .drawer-empty-state {
+    display: grid;
+    place-items: center;
+    height: 100%;
+    color: var(--fg-faint);
+    font-size: 12px;
   }
 </style>
