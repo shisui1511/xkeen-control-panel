@@ -5,6 +5,8 @@
   $: ru = $currentLang === 'ru';
   import { showToast } from './stores';
   import Icon from './lib/components/Icon.svelte';
+  import EmptyState from './components/EmptyState.svelte';
+  import EditorIcon from './lib/components/icons/Editor.svelte';
   import {
     EditorView,
     keymap,
@@ -668,6 +670,7 @@
         activeTabPath = path;
         selectedFile = path;
       }
+      tabs = [...tabs];
 
       const lang = path.endsWith('.yaml') || path.endsWith('.yml') ? yaml() : json();
       const schemaExts = getSchemaExtensions(path, expertMode);
@@ -1730,7 +1733,16 @@
       {/if}
 
       <!-- Main Editor Card -->
-      <div class="editor-main-card">
+      {#if tabs.length === 0}
+        <div class="editor-empty-card">
+          <EmptyState
+            title={$t('editor.select_file')}
+            description={$t('editor.empty_state_body')}
+            icon={EditorIcon}
+          />
+        </div>
+      {:else}
+        <div class="editor-main-card">
         {#if tabs.length > 0}
           <div class="editor-tab-strip">
             {#each tabs as tab (tab.path)}
@@ -2117,6 +2129,7 @@
           {/if}
         {/if}
       </div>
+      {/if}
     </div>
   {:else if activeTab === 'generator'}
     <div transition:fade={{ duration: 150 }} style="margin-top: 16px;">
@@ -3210,5 +3223,74 @@
     color: var(--accent);
     padding: 0 10px;
     border-left: 1px solid var(--border);
+  }
+
+  /* Стилизация скроллбаров (scrollbar-thin) */
+  .file-list {
+    max-height: 250px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .file-list::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .file-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .file-list::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .file-list::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-dim);
+  }
+
+  :global(.cm-scroller) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  :global(.cm-scroller::-webkit-scrollbar) {
+    width: 6px;
+    height: 6px;
+  }
+  :global(.cm-scroller::-webkit-scrollbar-track) {
+    background: transparent;
+  }
+  :global(.cm-scroller::-webkit-scrollbar-thumb) {
+    background: var(--border);
+    border-radius: var(--radius-sm);
+  }
+  :global(.cm-scroller::-webkit-scrollbar-thumb:hover) {
+    background: var(--fg-dim);
+  }
+
+  .drawer-sidebar::-webkit-scrollbar,
+  .diff-body::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .drawer-sidebar::-webkit-scrollbar-track,
+  .diff-body::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .drawer-sidebar::-webkit-scrollbar-thumb,
+  .diff-body::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .editor-empty-card :global(.empty-state) {
+    min-height: 500px;
+    justify-content: center;
+  }
+
+  /* Мобильная адаптивность */
+  @media (max-width: 767px) {
+    .editor-grid {
+      grid-template-columns: 1fr !important;
+      gap: 12px;
+    }
   }
 </style>
