@@ -89,9 +89,12 @@
   let files: ConfigFileInfo[] = [];
   let selectedFile = '';
   let loading = false;
+  let loadingPath: string | null = null;
+  const pendingPins = new Set<string>();
   let saving = false;
   let backups: string[] = [];
   let tabs: EditorTab[] = [];
+  let activeTabPath = '';
   let breadcrumbs: PathSegment[] = [];
   let applyLoading = false;
   let backgroundStatusText = '';
@@ -567,6 +570,7 @@
   }
 
   async function loadFile(path: string, isPreviewClick = true) {
+    console.log("loadFile called with path:", path, "isPreviewClick:", isPreviewClick);
     if (!path) return;
 
     const existingTab = tabs.find((t) => t.path === path);
@@ -579,7 +583,20 @@
       return;
     }
 
+    if (loading && loadingPath === path) {
+      if (!isPreviewClick) {
+        pendingPins.add(path);
+      }
+      return;
+    }
+
+    if (loading) return;
+
     loading = true;
+    loadingPath = path;
+    if (!isPreviewClick) {
+      pendingPins.add(path);
+    }
 
     try {
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
@@ -602,12 +619,15 @@
       }
 
       const previewTab = tabs.find((t) => t.isPreview);
+      const isPreview = isPreviewClick && !pendingPins.has(path);
+      pendingPins.delete(path);
 
-      if (isPreviewClick) {
+      if (isPreview) {
         if (previewTab) {
           if (previewTab.isDirty) {
             if (!confirmUnsaved()) {
               loading = false;
+              loadingPath = null;
               return;
             }
             localStorage.removeItem('editor.draft.' + previewTab.path);
@@ -739,6 +759,7 @@
       }
 
       loading = false;
+      loadingPath = null;
       await tick();
 
       if (editorView) {
@@ -761,8 +782,10 @@
       await loadBackups(path);
       tabs = [...tabs];
     } catch (e: any) {
+      console.error("loadFile error:", e);
       showToast('error', $t('editor.file_load_error') + ': ' + (e?.message || e));
       loading = false;
+      loadingPath = null;
     }
   }
 
@@ -1027,8 +1050,10 @@
   }
 
   async function handleSaveAndApply() {
+    console.log("handleSaveAndApply called. selectedFile:", selectedFile, "editorView:", !!editorView);
     if (!selectedFile || !editorView) return;
     applyLoading = true;
+    await tick();
     backgroundStatusText = $t('editor.saving') || 'Сохранение...';
 
     try {
@@ -1100,6 +1125,7 @@
       // 4. Опрос статуса
       startBackgroundStatusCheck();
     } catch (e: any) {
+      console.error("handleSaveAndApply error:", e);
       showToast('error', $t('editor.save_error') + ': ' + e.message);
       applyLoading = false;
       backgroundStatusText = '';
