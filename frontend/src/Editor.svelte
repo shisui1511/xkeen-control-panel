@@ -75,11 +75,24 @@
     size: number;
   }
 
+  interface EditorTab {
+    path: string;
+    name: string;
+    isDirty: boolean;
+    isPreview: boolean;
+    scrollState?: { top: number; left: number };
+    cursorPos?: number;
+    originalContent: string;
+    currentContent: string;
+  }
+
   let files: ConfigFileInfo[] = [];
   let selectedFile = '';
   let loading = false;
   let saving = false;
   let backups: string[] = [];
+  let tabs: EditorTab[] = [];
+  let activeTabPath = '';
 
   // Directory management
   const xrayDir = '/opt/etc/xray/configs';
@@ -212,6 +225,8 @@
   }
 
   function checkDirty(): boolean {
+    const activeTab = tabs.find(t => t.path === activeTabPath);
+    if (activeTab) return activeTab.isDirty;
     if (!editorView) return false;
     return editorView.state.doc.toString() !== originalContent;
   }
@@ -312,18 +327,297 @@
     return [];
   }
 
-  async function loadFile(path: string) {
+  function pinTab(path: string) {
+    const tab = tabs.find((t) => t.path === path);
+    if (tab && tab.isPreview) {
+      tab.isPreview = false;
+      tabs = [...tabs];
+    }
+  }
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    if (e.ctrlKey && e.key === 'Tab') {
+      e.preventDefault();
+      if (tabs.length <= 1) return;
+      const currentIndex = tabs.findIndex((t) => t.path === activeTabPath);
+      if (currentIndex === -1) return;
+      let nextIndex = 0;
+      if (e.shiftKey) {
+        nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      } else {
+        nextIndex = (currentIndex + 1) % tabs.length;
+      }
+      switchTab(tabs[nextIndex].path);
+    }
+  }
+
+  async function switchTab(path: string) {
+    if (activeTabPath === path) return;
+
+    // Сохранить текущее состояние активной вкладки перед уходом
+    if (activeTabPath && editorView) {
+      const activeTab = tabs.find((t) => t.path === activeTabPath);
+      if (activeTab) {
+        activeTab.scrollState = {
+          top: editorView.scrollDOM.scrollTop,
+          left: editorView.scrollDOM.scrollLeft
+        };
+        activeTab.cursorPos = editorView.state.selection.main.head;
+        activeTab.currentContent = editorView.state.doc.toString();
+        activeTab.isDirty = activeTab.currentContent !== activeTab.originalContent;
+      }
+    }
+
+    const targetTab = tabs.find((t) => t.path === path);
+    if (!targetTab) return;
+
+    activeTabPath = path;
+    selectedFile = path;
+    loading = true;
+
+    try {
+      const lang = path.endsWith('.yaml') || path.endsWith('.yml') ? yaml() : json();
+      const schemaExts = getSchemaExtensions(path, expertMode);
+
+      const state = EditorState.create({
+        doc: targetTab.currentContent,
+        extensions: [
+          lineNumbers(),
+          highlightActiveLineGutter(),
+          highlightSpecialChars(),
+          history(),
+          foldGutter(),
+          drawSelection(),
+          dropCursor(),
+          EditorState.allowMultipleSelections.of(true),
+          indentOnInput(),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          bracketMatching(),
+          closeBrackets(),
+          autocompletion(),
+          rectangularSelection(),
+          crosshairCursor(),
+          highlightActiveLine(),
+          highlightSelectionMatches(),
+          keymap.of([
+            {
+              key: 'Mod-s',
+              run: () => {
+                checkBeforeSave();
+                return true;
+              }
+            },
+            ...closeBracketsKeymap,
+            ...defaultKeymap,
+            ...searchKeymap,
+            ...historyKeymap,
+            ...foldKeymap,
+            ...completionKeymap,
+            ...lintKeymap
+          ]),
+          lang,
+          EditorView.lineWrapping,
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) {
+              const currentContent = update.state.doc.toString();
+              const activeT = tabs.find((t) => t.path === selectedFile);
+              if (activeT) {
+                activeT.currentContent = currentContent;
+                activeT.isDirty = currentContent !== activeT.originalContent;
+                isDirty = activeT.isDirty;
+
+                if (activeT.isPreview) {
+                  activeT.isPreview = false;
+                  tabs = [...tabs];
+                }
+
+                if (isDirty) {
+                  localStorage.setItem(`editor.draft.${selectedFile}`, currentContent);
+                } else {
+                  localStorage.removeItem(`editor.draft.${selectedFile}`);
+                }
+              }
+            }
+            if (update.selectionSet || update.docChanged) {
+              const pos = update.state.selection.main.head;
+              const line = update.state.doc.lineAt(pos);
+              cursorLine = line.number;
+              cursorCol = pos - line.from + 1;
+            }
+          }),
+          schemaCompartment.of(schemaExts)
+        ]
+      });
+
+      originalContent = targetTab.originalContent;
+      isDirty = targetTab.isDirty;
+
+      // Проверка черновика в localStorage
+      const draft = localStorage.getItem(`editor.draft.${path}`);
+      if (draft && draft !== targetTab.originalContent) {
+        hasDraft = true;
+        draftContent = draft;
+      } else {
+        hasDraft = false;
+        draftContent = '';
+      }
+
+      loading = false;
+      await tick();
+
+      if (editorView) {
+        if (editorView.dom.isConnected) {
+          editorView.setState(state);
+        } else {
+          editorView.destroy();
+          editorView = null;
+          if (editorContainer) {
+            editorView = new EditorView({ state, parent: editorContainer });
+          }
+        }
+      } else if (editorContainer) {
+        editorView = new EditorView({ state, parent: editorContainer });
+      }
+
+      // Восстановить позицию прокрутки и курсора
+      if (editorView) {
+        if (targetTab.cursorPos !== undefined) {
+          editorView.dispatch({
+            selection: { anchor: targetTab.cursorPos, head: targetTab.cursorPos }
+          });
+        }
+        if (targetTab.scrollState) {
+          editorView.scrollDOM.scrollTop = targetTab.scrollState.top;
+          editorView.scrollDOM.scrollLeft = targetTab.scrollState.left;
+        }
+      }
+
+      await loadBackups(path);
+      tabs = [...tabs];
+    } catch (e: any) {
+      showToast('error', $t('editor.file_load_error') + ': ' + (e?.message || e));
+      loading = false;
+    }
+  }
+
+  function closeTab(path: string) {
+    const tabIndex = tabs.findIndex((t) => t.path === path);
+    if (tabIndex === -1) return;
+
+    const tabToClose = tabs[tabIndex];
+
+    if (tabToClose.isDirty) {
+      if (activeTabPath !== path) {
+        switchTab(path);
+      }
+      if (!confirmUnsaved()) return;
+      localStorage.removeItem('editor.draft.' + path);
+    }
+
+    tabs.splice(tabIndex, 1);
+
+    if (activeTabPath === path) {
+      if (tabs.length > 0) {
+        const nextActiveIndex = Math.min(tabIndex, tabs.length - 1);
+        const nextTab = tabs[nextActiveIndex];
+        activeTabPath = '';
+        switchTab(nextTab.path);
+      } else {
+        activeTabPath = '';
+        selectedFile = '';
+        originalContent = '';
+        isDirty = false;
+        if (editorView) {
+          editorView.setState(EditorState.create({ doc: '' }));
+        }
+      }
+    }
+
+    tabs = [...tabs];
+  }
+
+  async function loadFile(path: string, isPreviewClick = true) {
     if (!path) return;
-    if (selectedFile && path !== selectedFile && !confirmUnsaved()) return;
+
+    const existingTab = tabs.find((t) => t.path === path);
+    if (existingTab) {
+      if (!isPreviewClick && existingTab.isPreview) {
+        existingTab.isPreview = false;
+        tabs = [...tabs];
+      }
+      await switchTab(path);
+      return;
+    }
 
     loading = true;
-    isDirty = false;
 
     try {
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
       if (!res.ok) throw new Error('Failed to load file');
 
       const content = await res.text();
+
+      // Сохранить текущее состояние активной вкладки перед уходом
+      if (activeTabPath && editorView) {
+        const activeTab = tabs.find((t) => t.path === activeTabPath);
+        if (activeTab) {
+          activeTab.scrollState = {
+            top: editorView.scrollDOM.scrollTop,
+            left: editorView.scrollDOM.scrollLeft
+          };
+          activeTab.cursorPos = editorView.state.selection.main.head;
+          activeTab.currentContent = editorView.state.doc.toString();
+          activeTab.isDirty = activeTab.currentContent !== activeTab.originalContent;
+        }
+      }
+
+      const previewTab = tabs.find((t) => t.isPreview);
+
+      if (isPreviewClick) {
+        if (previewTab) {
+          if (previewTab.isDirty) {
+            if (!confirmUnsaved()) {
+              loading = false;
+              return;
+            }
+            localStorage.removeItem('editor.draft.' + previewTab.path);
+          }
+          previewTab.path = path;
+          previewTab.name = path.split('/').pop() || '';
+          previewTab.originalContent = content;
+          previewTab.currentContent = content;
+          previewTab.isDirty = false;
+          previewTab.isPreview = true;
+          previewTab.scrollState = undefined;
+          previewTab.cursorPos = undefined;
+          activeTabPath = path;
+          selectedFile = path;
+        } else {
+          const newTab: EditorTab = {
+            path,
+            name: path.split('/').pop() || '',
+            originalContent: content,
+            currentContent: content,
+            isDirty: false,
+            isPreview: true
+          };
+          tabs.push(newTab);
+          activeTabPath = path;
+          selectedFile = path;
+        }
+      } else {
+        const newTab: EditorTab = {
+          path,
+          name: path.split('/').pop() || '',
+          originalContent: content,
+          currentContent: content,
+          isDirty: false,
+          isPreview: false
+        };
+        tabs.push(newTab);
+        activeTabPath = path;
+        selectedFile = path;
+      }
 
       const lang = path.endsWith('.yaml') || path.endsWith('.yml') ? yaml() : json();
       const schemaExts = getSchemaExtensions(path, expertMode);
@@ -369,8 +663,17 @@
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
               const currentContent = update.state.doc.toString();
-              isDirty = currentContent !== originalContent;
-              if (selectedFile) {
+              const activeT = tabs.find((t) => t.path === selectedFile);
+              if (activeT) {
+                activeT.currentContent = currentContent;
+                activeT.isDirty = currentContent !== activeT.originalContent;
+                isDirty = activeT.isDirty;
+
+                if (activeT.isPreview) {
+                  activeT.isPreview = false;
+                  tabs = [...tabs];
+                }
+
                 if (isDirty) {
                   localStorage.setItem(`editor.draft.${selectedFile}`, currentContent);
                 } else {
@@ -392,7 +695,6 @@
       originalContent = content;
       isDirty = false;
 
-      // Check draft
       const draft = localStorage.getItem(`editor.draft.${path}`);
       if (draft && draft !== content) {
         hasDraft = true;
@@ -402,19 +704,13 @@
         draftContent = '';
       }
 
-      // Снять loading и установить selectedFile — Svelte отрендерит editorContainer
       loading = false;
-      selectedFile = path;
-
-      // Ждём рендера editorContainer в DOM
       await tick();
 
       if (editorView) {
         if (editorView.dom.isConnected) {
-          // Same container — just swap state
           editorView.setState(state);
         } else {
-          // Container was recreated (was destroyed while loading=true) — remount
           editorView.destroy();
           editorView = null;
           if (editorContainer) {
@@ -429,6 +725,7 @@
       }
 
       await loadBackups(path);
+      tabs = [...tabs];
     } catch (e: any) {
       showToast('error', $t('editor.file_load_error') + ': ' + (e?.message || e));
       loading = false;
@@ -982,6 +1279,8 @@
   });
 </script>
 
+<svelte:window on:keydown={handleGlobalKeydown} />
+
 <div class="container">
   <div class="page-head">
     <div>
@@ -1122,7 +1421,8 @@
                 <button
                   class="file-row"
                   class:active={file.path === selectedFile}
-                  on:click={() => loadFile(file.path)}
+                  on:click={() => loadFile(file.path, true)}
+                  on:dblclick={() => loadFile(file.path, false)}
                 >
                   <span class="fr-name">{file.name}</span>
                   <span class="fr-meta">{formatBytes(file.size)}</span>
@@ -1154,7 +1454,8 @@
                 <button
                   class="file-row"
                   class:active={file.path === selectedFile}
-                  on:click={() => loadFile(file.path)}
+                  on:click={() => loadFile(file.path, true)}
+                  on:dblclick={() => loadFile(file.path, false)}
                 >
                   <span class="fr-name">{file.name}</span>
                   <span class="fr-meta">{formatBytes(file.size)}</span>
@@ -1189,6 +1490,37 @@
 
       <!-- Main Editor Card -->
       <div class="editor-main-card">
+        {#if tabs.length > 0}
+          <div class="editor-tab-strip">
+            {#each tabs as tab (tab.path)}
+              <button
+                class="editor-tab"
+                class:active={tab.path === activeTabPath}
+                class:preview={tab.isPreview}
+                on:click={() => switchTab(tab.path)}
+                on:dblclick={() => pinTab(tab.path)}
+              >
+                <span class="tab-name">{tab.name}</span>
+                {#if tab.isDirty}
+                  <span class="tab-dirty-dot">●</span>
+                {/if}
+                <!-- svelte-ignore a11y-click-events-have-key-events -->
+                <!-- svelte-ignore a11y-no-static-element-interactions -->
+                <span
+                  class="tab-close-btn"
+                  on:click|stopPropagation={() => closeTab(tab.path)}
+                  title="Закрыть"
+                  aria-label="Закрыть"
+                >
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </span>
+              </button>
+            {/each}
+          </div>
+        {/if}
         <div class="editor-toolbar">
           <button
             class="btn btn-secondary"
@@ -2175,5 +2507,94 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  .editor-tab-strip {
+    display: flex;
+    gap: 2px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .editor-tab-strip::-webkit-scrollbar {
+    height: 3px;
+  }
+
+  .editor-tab-strip::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius);
+  }
+
+  .editor-tab {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: rgba(255, 255, 255, 0.01);
+    color: var(--fg-dim);
+    border: 0;
+    border-right: 1px solid var(--border);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    position: relative;
+  }
+
+  .editor-tab:hover {
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--fg-primary);
+  }
+
+  .editor-tab.active {
+    background: var(--bg-page);
+    color: var(--fg-primary);
+    font-weight: 600;
+  }
+
+  .editor-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent);
+  }
+
+  .editor-tab.preview .tab-name {
+    font-style: italic;
+    opacity: 0.8;
+  }
+
+  .tab-dirty-dot {
+    color: var(--warning);
+    font-size: 10px;
+    margin-left: 2px;
+    line-height: 1;
+  }
+
+  .tab-close-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--fg-dim);
+    border: 0;
+    cursor: pointer;
+    padding: 0;
+    margin-left: 4px;
+    transition: all 0.1s ease;
+  }
+
+  .tab-close-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--fg-primary);
   }
 </style>
