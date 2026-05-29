@@ -53,9 +53,9 @@
   import { xraySchema } from './schemas/xray';
   import { mihomoSchema } from './schemas/mihomo';
 
-  // Snippets
   import { xraySnippetSource, mihomoSnippetSource } from './lib/snippets';
   import MihomoGenerator from './MihomoGenerator.svelte';
+  import { buildPathAtCursor, type PathSegment } from './lib/editor-utils';
 
   export let onSwitchTab: (tab: string) => void = () => {};
 
@@ -93,6 +93,25 @@
   let backups: string[] = [];
   let tabs: EditorTab[] = [];
   let activeTabPath = '';
+  let breadcrumbs: PathSegment[] = [];
+
+  function jumpToSegment(pos: number) {
+    if (!editorView) return;
+    editorView.focus();
+    editorView.dispatch({
+      selection: { anchor: pos, head: pos },
+      scrollIntoView: true
+    });
+
+    const line = editorView.state.doc.lineAt(pos);
+    const lineEl = editorView.dom.querySelector(`.cm-line:nth-child(${line.number})`);
+    if (lineEl) {
+      lineEl.classList.add('line-highlight-flash');
+      setTimeout(() => {
+        lineEl.classList.remove('line-highlight-flash');
+      }, 1000);
+    }
+  }
 
   // Directory management
   const xrayDir = '/opt/etc/xray/configs';
@@ -443,6 +462,10 @@
               const line = update.state.doc.lineAt(pos);
               cursorLine = line.number;
               cursorCol = pos - line.from + 1;
+
+              // Обновить хлебные крошки
+              const isYaml = selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml');
+              breadcrumbs = buildPathAtCursor(update.state, pos, isYaml);
             }
           }),
           schemaCompartment.of(schemaExts)
@@ -686,6 +709,10 @@
               const line = update.state.doc.lineAt(pos);
               cursorLine = line.number;
               cursorCol = pos - line.from + 1;
+
+              // Обновить хлебные крошки
+              const isYaml = selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml');
+              breadcrumbs = buildPathAtCursor(update.state, pos, isYaml);
             }
           }),
           schemaCompartment.of(schemaExts)
@@ -1517,6 +1544,18 @@
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                   </svg>
                 </span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+        {#if breadcrumbs.length > 0}
+          <div class="editor-breadcrumbs">
+            {#each breadcrumbs as segment, i}
+              {#if i > 0}
+                <span class="breadcrumb-divider">&gt;</span>
+              {/if}
+              <button class="breadcrumb-segment" on:click={() => jumpToSegment(segment.pos)}>
+                {segment.label}
               </button>
             {/each}
           </div>
@@ -2596,5 +2635,52 @@
   .tab-close-btn:hover {
     background: rgba(255, 255, 255, 0.1);
     color: var(--fg-primary);
+  }
+
+  .editor-breadcrumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: rgba(255, 255, 255, 0.015);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    color: var(--fg-dim);
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+
+  .editor-breadcrumbs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .breadcrumb-segment {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    color: var(--fg-dim);
+    cursor: pointer;
+    transition: color 0.12s ease;
+  }
+
+  .breadcrumb-segment:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
+  .breadcrumb-divider {
+    color: var(--fg-faint);
+    user-select: none;
+  }
+
+  @keyframes line-flash {
+    0% { background: var(--accent-dim); }
+    100% { background: transparent; }
+  }
+
+  :global(.line-highlight-flash) {
+    animation: line-flash 1s ease-out;
   }
 </style>
