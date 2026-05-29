@@ -92,8 +92,9 @@
   let saving = false;
   let backups: string[] = [];
   let tabs: EditorTab[] = [];
-  let activeTabPath = '';
   let breadcrumbs: PathSegment[] = [];
+  let applyLoading = false;
+  let backgroundStatusText = '';
 
   // Drawer states
   let drawerOpen = false;
@@ -1025,6 +1026,122 @@
     }
   }
 
+  async function handleSaveAndApply() {
+    if (!selectedFile || !editorView) return;
+    applyLoading = true;
+    backgroundStatusText = $t('editor.saving') || 'Сохранение...';
+
+    try {
+      const content = editorView.state.doc.toString();
+      const csrfToken = localStorage.getItem('csrf_token');
+
+      // 1. POST /api/config/save
+      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: content
+      });
+
+      if (!saveRes.ok) throw new Error('Failed to save file');
+
+      originalContent = content;
+      isDirty = false;
+      localStorage.removeItem(`editor.draft.${selectedFile}`);
+      hasDraft = false;
+      draftContent = '';
+
+      // Update tab state
+      const activeT = tabs.find((t) => t.path === selectedFile);
+      if (activeT) {
+        activeT.isDirty = false;
+        activeT.originalContent = content;
+        tabs = [...tabs];
+      }
+
+      await loadBackups(selectedFile);
+
+      // 2. POST /api/config/validate
+      backgroundStatusText = $t('editor.validating') || 'Валидация...';
+      const valRes = await fetch('/api/config/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({
+          path: selectedFile,
+          content: content
+        })
+      });
+
+      if (valRes.ok) {
+        const valData = await valRes.json();
+        if (valData && valData.valid === false) {
+          throw new Error(valData.error || 'Configuration validation failed');
+        }
+      } else {
+        const text = await valRes.text();
+        throw new Error(text || 'Validation endpoint failed');
+      }
+
+      // 3. POST /api/service/control?action=restart
+      backgroundStatusText = $t('editor.restarting') || 'Перезапуск службы...';
+      const restartRes = await fetch('/api/service/control?action=restart', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+
+      const restartText = await restartRes.text();
+      if (!restartRes.ok) throw new Error(restartText || 'Failed to restart service');
+
+      // 4. Опрос статуса
+      startBackgroundStatusCheck();
+    } catch (e: any) {
+      showToast('error', $t('editor.save_error') + ': ' + e.message);
+      applyLoading = false;
+      backgroundStatusText = '';
+    }
+  }
+
+  function startBackgroundStatusCheck() {
+    let attempts = 0;
+    const maxAttempts = 12;
+    const intervalTime = 1500;
+
+    backgroundStatusText = `${$t('editor.checking_status') || 'Проверка статуса...'} (1/${maxAttempts})`;
+
+    const interval = setInterval(async () => {
+      attempts++;
+      backgroundStatusText = `${$t('editor.checking_status') || 'Проверка статуса...'} (${attempts}/${maxAttempts})`;
+
+      try {
+        const res = await fetch('/api/service/status');
+        if (res.ok) {
+          const parsed = await res.json();
+          if (parsed && parsed.success && parsed.data && parsed.data.is_running === true) {
+            clearInterval(interval);
+            showToast('success', $t('editor.apply_success') || 'Конфигурация успешно применилась, служба запущена!');
+            applyLoading = false;
+            backgroundStatusText = '';
+            return;
+          }
+        }
+      } catch (err) {
+        // Ignore check errors and retry
+      }
+
+      if (attempts >= maxAttempts) {
+        clearInterval(interval);
+        showToast('error', $t('editor.apply_timeout') || 'Служба не запустилась вовремя. Проверьте логи.');
+        applyLoading = false;
+        backgroundStatusText = '';
+      }
+    }, intervalTime);
+  }
+
   async function restoreBackup(backupPath: string) {
     if (!confirm($t('editor.restore_confirm'))) return;
 
@@ -1425,7 +1542,7 @@
           <button
             class="btn btn-secondary"
             on:click={checkBeforeSave}
-            disabled={saving}
+            disabled={saving || applyLoading}
             title={$t('app.save')}
           >
             <svg
@@ -1442,6 +1559,36 @@
               /><polyline points="7 3 7 8 15 8" /></svg
             >
             {saving ? $t('app.loading') : $t('app.save')}
+          </button>
+          <button
+            class="btn btn-accent"
+            on:click={handleSaveAndApply}
+            disabled={saving || applyLoading}
+            title={$t('editor.save_and_apply')}
+          >
+            {#if applyLoading}
+              <span class="ks-dot-spin">
+                <span class="ks-dot"></span>
+                <span class="ks-dot"></span>
+                <span class="ks-dot"></span>
+              </span>
+              {$t('app.loading')}
+            {:else}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline
+                  points="17 21 17 13 7 13 7 21"
+                /><polyline points="7 3 7 8 15 8" /><path d="m14 11-2 2-2-2" /><path d="M12 7v6" /></svg
+              >
+              {$t('editor.save_and_apply')}
+            {/if}
           </button>
         {/if}
       </div>
@@ -1838,6 +1985,17 @@
             </span>
             <span>schema: {selectedFile.includes('xray') ? 'xray@latest' : 'mihomo@latest'}</span>
             <span>{cursorLine}:{cursorCol}</span>
+
+            {#if applyLoading || backgroundStatusText}
+              <div class="status-apply-indicator">
+                <span class="ks-dot-spin">
+                  <span class="ks-dot" style="background-color: var(--accent);"></span>
+                  <span class="ks-dot" style="background-color: var(--accent);"></span>
+                  <span class="ks-dot" style="background-color: var(--accent);"></span>
+                </span>
+                <span>{backgroundStatusText}</span>
+              </div>
+            {/if}
 
             {#if backups.length > 0}
               <button
@@ -2978,5 +3136,53 @@
     height: 100%;
     color: var(--fg-faint);
     font-size: 12px;
+  }
+
+  .btn-accent {
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    border: 1px solid var(--accent);
+    color: #111; /* Тёмный цвет для контраста с ярким cyan/teal */
+    font-weight: 600;
+  }
+  .btn-accent:hover:not(:disabled) {
+    background: var(--accent-hover);
+    box-shadow: 0 0 10px var(--accent-soft);
+  }
+  .btn-accent:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  /* Loading dots spinner style */
+  .ks-dot-spin {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-right: 6px;
+  }
+  .ks-dot {
+    width: 6px;
+    height: 6px;
+    background-color: currentColor;
+    border-radius: 50%;
+    animation: ks-dot-bounce 1.4s infinite ease-in-out both;
+  }
+  .ks-dot:nth-child(1) { animation-delay: -0.32s; }
+  .ks-dot:nth-child(2) { animation-delay: -0.16s; }
+  
+  @keyframes ks-dot-bounce {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1); }
+  }
+  
+  /* Status bar apply loader styles */
+  .status-apply-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--accent);
+    padding: 0 10px;
+    border-left: 1px solid var(--border);
   }
 </style>
