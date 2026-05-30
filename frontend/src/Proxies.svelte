@@ -100,15 +100,24 @@
   }
 
   function getCollapsedProxies(group: ProxyGroup): string[] {
-    const active = group.now;
-    const sorted = group.all
-      .filter((name) => name !== active)
-      .sort((a, b) => {
+    const active = group.now && proxies[group.now] ? group.now : '';
+    const others = group.all.filter((name) => name !== active);
+
+    const sortByDelay = (names: string[]) =>
+      [...names].sort((a, b) => {
         const da = proxies[a] ? (getLastDelay(proxies[a]) ?? Infinity) : Infinity;
         const db = proxies[b] ? (getLastDelay(proxies[b]) ?? Infinity) : Infinity;
         return da - db;
       });
-    const top3 = sorted.slice(0, 3);
+
+    const alive = others.filter((n) => proxies[n] && isProxyAlive(proxies[n]));
+    const dead = others.filter((n) => !proxies[n] || !isProxyAlive(proxies[n]));
+
+    const top3 = sortByDelay(alive).slice(0, 3);
+    if (top3.length < 3) {
+      top3.push(...sortByDelay(dead).slice(0, 3 - top3.length));
+    }
+
     return active ? [active, ...top3] : top3.slice(0, 4);
   }
 
