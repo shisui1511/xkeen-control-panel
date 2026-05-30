@@ -8,13 +8,14 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
     mockProfiles = [];
     lastSavePayload = null;
 
-    // Disable Service Worker to intercept API requests
+    // Disable Service Worker to intercept API requests and force RU locale
     await page.addInitScript(() => {
       Object.defineProperty(window.navigator, 'serviceWorker', {
         value: undefined,
         writable: false,
         configurable: true
       });
+      window.localStorage.setItem('lang', 'ru');
     });
 
     // Mock API requests
@@ -42,6 +43,9 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
               kernels: {
                 xray: { installed: true },
                 mihomo: { installed: true }
+              },
+              mihomo: {
+                reachable: true
               }
             }
           })

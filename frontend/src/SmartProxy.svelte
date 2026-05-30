@@ -59,9 +59,11 @@
 
   async function fetchProfiles() {
     loading = true;
+    error = '';
     try {
       const res = await fetch('/api/smart-proxy/profiles');
-      if (res.ok) profiles = await res.json();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      profiles = await res.json();
     } catch (e: any) {
       error = e.message;
     } finally {
@@ -102,6 +104,7 @@
   }
 
   function startCreate() {
+    error = '';
     fetchClashProxies();
     currentStep = 1;
     showForm = true;
@@ -115,6 +118,7 @@
   }
 
   function startEdit(p: Profile) {
+    error = '';
     fetchClashProxies();
     currentStep = 1;
     editingProfile = p;
@@ -151,7 +155,7 @@
       ? $t('smartproxy.preset_night_title')
       : templateName === 'workday'
         ? $t('smartproxy.preset_workdays')
-        : $currentLang === 'ru' ? 'Круглосуточный прокси' : '24/7 Proxy';
+        : $t('smartproxy.preset_always_title');
 
     formSchedule = Array.from({ length: 7 }, () => Array(24).fill(false));
 
@@ -183,6 +187,13 @@
   function cancelEdit() {
     showForm = false;
     editingProfile = null;
+    error = '';
+    formName = '';
+    formEnabled = true;
+    formMode = 'time-based';
+    formGroupName = '';
+    formProxyName = '';
+    formSchedule = Array.from({ length: 7 }, () => Array(24).fill(false));
   }
 
   function nextStep() {
@@ -238,8 +249,9 @@
   }
 
   async function saveProfile() {
+    error = '';
     if (!formName || !formGroupName || !formProxyName) {
-      error = $t('smartproxy.save_error', { message: $currentLang === 'ru' ? 'Заполните обязательные поля' : 'Fill required fields' });
+      error = $t('smartproxy.save_error', { message: $t('smartproxy.fill_required') });
       return;
     }
 
@@ -279,6 +291,7 @@
   }
 
   async function deleteProfile(id: string) {
+    error = '';
     if (!(await showConfirm($t('app.confirm'), $t('app.delete') + '?'))) return;
     const csrfToken = localStorage.getItem('csrf_token');
     try {
@@ -295,6 +308,7 @@
   }
 
   async function toggleEnabled(p: Profile) {
+    error = '';
     const csrfToken = localStorage.getItem('csrf_token');
     try {
       const res = await fetch(
@@ -364,7 +378,7 @@
     </div>
     <div class="ph-actions" style="display:flex; gap:10px;">
       <button class="btn btn-secondary" on:click={() => createFromTemplate('always')}>
-        {$currentLang === 'ru' ? 'Из шаблона' : 'From Template'}
+        {$t('smartproxy.from_template')}
       </button>
       <button class="btn btn-primary" on:click={startCreate}>
         <svg
@@ -381,7 +395,7 @@
     </div>
   </div>
 
-  {#if error}
+  {#if error && !showForm}
     <div class="alert alert-error mb-2">{error}</div>
   {/if}
 
@@ -431,7 +445,7 @@
           <h3>{$t('smartproxy.preset_night_title')}</h3>
           <p>{$t('smartproxy.preset_night_desc')}</p>
           <button class="btn btn-secondary btn-sm" style="margin-top:auto;">
-            {$currentLang === 'ru' ? 'Выбрать' : 'Select'}
+            {$t('smartproxy.select')}
           </button>
         </div>
 
@@ -446,9 +460,9 @@
             </svg>
           </div>
           <h3>{$t('smartproxy.preset_workdays')}</h3>
-          <p>{$currentLang === 'ru' ? 'VPN активен в рабочие часы с понедельника по пятницу (09:00 - 18:00)' : 'VPN active during working hours Mon-Fri (09:00 - 18:00)'}</p>
+          <p>{$t('smartproxy.preset_workday_desc')}</p>
           <button class="btn btn-secondary btn-sm" style="margin-top:auto;">
-            {$currentLang === 'ru' ? 'Выбрать' : 'Select'}
+            {$t('smartproxy.select')}
           </button>
         </div>
 
@@ -460,17 +474,17 @@
               <polyline points="12 6 12 12 16 14"/>
             </svg>
           </div>
-          <h3>{$currentLang === 'ru' ? 'Круглосуточный VPN' : '24/7 VPN'}</h3>
-          <p>{$currentLang === 'ru' ? 'VPN-прокси работает непрерывно 24 часа в сутки, 7 дней в неделю' : 'VPN proxy runs continuously 24 hours a day, 7 days a week'}</p>
+          <h3>{$t('smartproxy.preset_always_title')}</h3>
+          <p>{$t('smartproxy.preset_always_desc')}</p>
           <button class="btn btn-secondary btn-sm" style="margin-top:auto;">
-            {$currentLang === 'ru' ? 'Выбрать' : 'Select'}
+            {$t('smartproxy.select')}
           </button>
         </div>
       </div>
 
       <div style="margin-top:24px; text-align:center;">
         <button class="btn btn-primary" on:click={startCreate}>
-          {$currentLang === 'ru' ? 'Создать вручную' : 'Create Manually'}
+          {$t('smartproxy.create_manually')}
         </button>
       </div>
     </div>
@@ -484,7 +498,7 @@
 
             {#if !p.enabled}
               <span class="badge sp-mode-badge sp-mode-disabled">
-                {$currentLang === 'ru' ? 'ВЫКЛ' : 'DISABLED'}
+                {$t('smartproxy.disabled')}
               </span>
             {:else}
               <span class="badge sp-mode-badge sp-mode-scheduled">
@@ -526,7 +540,7 @@
 
           <div class="field-row">
             <div>
-              <div class="lbl">{$currentLang === 'ru' ? 'Целевая группа' : 'Target Group'}</div>
+              <div class="lbl">{$t('smartproxy.target_group')}</div>
             </div>
             <div class="ctrl">
               <span class="status-badge" class:active={p.enabled}>
@@ -537,15 +551,13 @@
 
           <div class="field-row">
             <div>
-              <div class="lbl">{$currentLang === 'ru' ? 'Слоты расписания' : 'Schedule Slots'}</div>
+              <div class="lbl">{$t('smartproxy.schedule_slots')}</div>
               <div class="desc">
-                {$currentLang === 'ru' 
-                  ? `Активно часов в неделю: ${countActiveSlots(p.schedule)}`
-                  : `Active hours weekly: ${countActiveSlots(p.schedule)}`}
+                {$t('smartproxy.active_hours_weekly', { count: countActiveSlots(p.schedule) })}
               </div>
             </div>
             <div class="ctrl mono" style="font-size:12px; color:var(--fg-primary);">
-              {countActiveSlots(p.schedule)} / 168 {$currentLang === 'ru' ? 'ч' : 'h'}
+              {countActiveSlots(p.schedule)} / 168 {$t('smartproxy.hours_short')}
             </div>
           </div>
 
@@ -553,7 +565,7 @@
             <div class="field-row">
               <div>
                 <div class="lbl">
-                  {$currentLang === 'ru' ? 'Статистика срабатываний' : 'Execution stats'}
+                  {$t('smartproxy.execution_stats')}
                 </div>
               </div>
               <div class="ctrl mono" style="font-size:12px; color:var(--fg-secondary);">
@@ -601,6 +613,9 @@
       </div>
 
       <div class="modal-card-body">
+        {#if error}
+          <div class="alert alert-error mb-2">{error}</div>
+        {/if}
         <!-- STEP 1: Basic Info -->
         {#if currentStep === 1}
           <div class="form-group">
@@ -620,9 +635,7 @@
               <option value="time-based">{$t('smartproxy.mode_time')}</option>
             </select>
             <p class="hint" style="margin-top:6px;">
-              {$currentLang === 'ru' 
-                ? 'Режим расписания переключает прокси на основе заданной недельной сетки.' 
-                : 'Schedule mode switches proxies based on the weekly grid setup.'}
+              {$t('smartproxy.schedule_mode_hint')}
             </p>
           </div>
 
@@ -632,7 +645,7 @@
               <span class="toggle-slider"></span>
             </label>
             <label for="sp-enabled" class="checkbox-label">
-              {$currentLang === 'ru' ? 'Профиль активен' : 'Profile active'}
+              {$t('smartproxy.profile_active')}
             </label>
           </div>
         {/if}
@@ -643,7 +656,7 @@
             <label for="sp-group" class="form-label">{$t('smartproxy.proxy_group')} *</label>
             {#if mihomoGroups.length > 0}
               <select id="sp-group" class="input" bind:value={formGroupName}>
-                <option value="">-- {$currentLang === 'ru' ? 'Выбрать группу' : 'Select Group'} --</option>
+                <option value="">-- {$t('smartproxy.select_group')} --</option>
                 {#each mihomoGroups as g}
                   <option value={g}>{g}</option>
                 {/each}
@@ -663,7 +676,7 @@
             <label for="sp-proxy" class="form-label">{$t('smartproxy.proxy')} *</label>
             {#if mihomoProxies.length > 0}
               <select id="sp-proxy" class="input" bind:value={formProxyName}>
-                <option value="">-- {$currentLang === 'ru' ? 'Выбрать прокси' : 'Select Proxy'} --</option>
+                <option value="">-- {$t('smartproxy.select_proxy')} --</option>
                 <option value="DIRECT">DIRECT</option>
                 {#each mihomoProxies as p}
                   <option value={p}>{p}</option>
@@ -696,9 +709,7 @@
           </div>
 
           <p class="hint" style="margin-bottom:8px;">
-            {$currentLang === 'ru'
-              ? 'Зажмите мышь и ведите (Click-and-Drag), чтобы быстро рисовать или стирать интервалы.'
-              : 'Click and drag to easily paint or erase time intervals.'}
+            {$t('smartproxy.grid_paint_hint')}
           </p>
 
           <!-- 7x24 Grid Container with thin scrollbar -->
