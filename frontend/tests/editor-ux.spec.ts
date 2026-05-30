@@ -4,7 +4,7 @@ import { test, expect } from '@playwright/test';
 test.use({ locale: 'ru-RU' });
 
 test.describe('Editor UX (Multi-tab, Breadcrumbs, Drawer, Save & Apply) Test Suite', () => {
-  let fileContent = `port: 7890
+  const fileContent = `port: 7890
 socks-port: 7891
 allow-lan: true
 mode: Rule
@@ -17,7 +17,7 @@ proxies:
     uuid: test-uuid
 `;
 
-  let backupContent = `port: 7890
+  const backupContent = `port: 7890
 socks-port: 7891
 allow-lan: false
 mode: Global
