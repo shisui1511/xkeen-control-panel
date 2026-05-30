@@ -60,6 +60,13 @@
   let collapsedGroups = new Set<string>();
   let filterQuery = '';
   let initializedCollapse = false;
+  const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
+
+  function safeTimeout(fn: () => void | Promise<void>, ms: number): ReturnType<typeof setTimeout> {
+    const id = setTimeout(fn, ms);
+    pendingTimeouts.push(id);
+    return id;
+  }
 
   $: filteredGroups =
     filterQuery.trim() === ''
@@ -252,7 +259,7 @@
           }
         );
       }
-      setTimeout(async () => {
+      safeTimeout(async () => {
         await fetchProxies();
         testingLatency = false;
       }, 2000);
@@ -273,7 +280,7 @@
           headers: { 'X-CSRF-Token': csrfToken || '' }
         }
       );
-      setTimeout(async () => {
+      safeTimeout(async () => {
         await fetchProxies();
         testingProxy = '';
       }, 1500);
@@ -341,12 +348,12 @@
         body: JSON.stringify({ action: 'start' })
       });
       if (!res.ok) throw new Error('Failed to start Mihomo');
-      setTimeout(async () => {
+      safeTimeout(async () => {
         await fetchCapabilities();
         await fetchProxies();
         mihomoLaunching = false;
       }, 1500);
-      setTimeout(async () => {
+      safeTimeout(async () => {
         await fetchCapabilities();
         await fetchProxies();
       }, 4000);
@@ -359,7 +366,11 @@
   onMount(() => {
     fetchProxies();
     const interval = setInterval(fetchProxies, 10000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (loadTimeoutId) clearTimeout(loadTimeoutId);
+      pendingTimeouts.forEach(clearTimeout);
+    };
   });
 </script>
 
