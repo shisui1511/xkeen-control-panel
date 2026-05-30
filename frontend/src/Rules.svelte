@@ -18,7 +18,7 @@
   let searchQuery = '';
   let typeFilter = '';
   let proxyFilter = '';
-  let applying = false;
+  let activeTab: 'rules' | 'providers' = 'rules';
 
   async function fetchRules() {
     loading = true;
@@ -35,31 +35,6 @@
     } finally {
       loading = false;
     }
-  }
-
-  async function applyRules() {
-    applying = true;
-    try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/service/control?action=restart', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
-        }
-      });
-      if (!res.ok) throw new Error('Failed to apply configuration');
-      showToast('success', $t('rules.apply_success'));
-    } catch (e: any) {
-      showToast('error', e.message);
-    } finally {
-      applying = false;
-    }
-  }
-
-  function goToAddRule() {
-    showToast('info', $t('rules.add_tip'));
-    window.location.hash = '#/editor';
   }
 
   function getFilteredRules(): Rule[] {
@@ -180,17 +155,6 @@
     closeDropdowns();
   }
 
-  function editRule(rule: Rule) {
-    showToast(
-      'info',
-      $currentLang === 'ru'
-        ? `Найдите файл конфигурации для изменения: ${rule.payload}`
-        : `Find config file to edit: ${rule.payload}`
-    );
-    window.location.hash = '#/editor';
-    closeDropdowns();
-  }
-
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       fetchRules();
@@ -208,39 +172,22 @@
         {$t('nav.rules')}
       </div>
       <h1>{$t('rules.title')}</h1>
-      <p class="sub">{$t('rules.subtitle')}</p>
+      <p class="sub">{activeTab === 'rules' ? $t('rules.subtitle') : $t('rules.providers_subtitle')}</p>
     </div>
-    <div class="ph-actions">
-      <button class="btn btn-secondary" on:click={goToAddRule}>
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
-        >
-        {$t('rules.add')}
-      </button>
-      <button class="btn btn-primary" on:click={applyRules} disabled={applying}>
-        {#if applying}
-          <span class="spinner" style="margin-right: 6px;">...</span>
-          {$t('app.loading')}
-        {:else}
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-          >
-          {$t('rules.apply')}
-        {/if}
-      </button>
-    </div>
+    <div class="ph-actions"></div>
+  </div>
+
+  <div class="rules-tabs">
+    <button
+      class="tab-btn"
+      class:active={activeTab === 'rules'}
+      on:click={() => (activeTab = 'rules')}
+    >{$t('rules.tab_rules')}</button>
+    <button
+      class="tab-btn"
+      class:active={activeTab === 'providers'}
+      on:click={() => (activeTab = 'providers')}
+    >{$t('rules.tab_providers')}</button>
   </div>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
@@ -254,7 +201,8 @@
       ctaLoading={mihomoLaunching}
       oncta={launchMihomo}
     />
-  {:else if error}
+  {:else if activeTab === 'rules'}
+    {#if error}
     <EmptyState
       title={$t('ds.empty.error_title')}
       description={error}
@@ -262,7 +210,7 @@
       ctaText={$t('app.refresh')}
       oncta={fetchRules}
     />
-  {:else}
+    {:else}
     <div class="toolbar mb-2">
       <div class="filters">
         <input
@@ -279,7 +227,7 @@
           {/each}
         </select>
         <select bind:value={proxyFilter} class="source-select">
-          <option value="">{$currentLang === 'ru' ? 'Все таргеты' : 'All targets'}</option>
+          <option value="">{$t('rules.all_targets')}</option>
           {#each getUniqueProxies() as proxy}
             <option value={proxy}>{proxy}</option>
           {/each}
@@ -328,13 +276,10 @@
                   {#if activeDropdownRule === rule}
                     <div class="dropdown-menu">
                       <button on:click={() => copyPayload(rule)}>
-                        {$currentLang === 'ru' ? 'Копировать payload' : 'Copy payload'}
+                        {$t('rules.copy_payload')}
                       </button>
                       <button on:click={() => copyFullRule(rule)}>
-                        {$currentLang === 'ru' ? 'Копировать правило' : 'Copy rule'}
-                      </button>
-                      <button on:click={() => editRule(rule)}>
-                        {$currentLang === 'ru' ? 'Редактировать' : 'Edit'}
+                        {$t('rules.copy_rule')}
                       </button>
                     </div>
                   {/if}
@@ -364,13 +309,10 @@
                   {#if activeDropdownRule === rule}
                     <div class="dropdown-menu">
                       <button on:click={() => copyPayload(rule)}>
-                        {$currentLang === 'ru' ? 'Копировать payload' : 'Copy payload'}
+                        {$t('rules.copy_payload')}
                       </button>
                       <button on:click={() => copyFullRule(rule)}>
-                        {$currentLang === 'ru' ? 'Копировать правило' : 'Copy rule'}
-                      </button>
-                      <button on:click={() => editRule(rule)}>
-                        {$currentLang === 'ru' ? 'Редактировать' : 'Edit'}
+                        {$t('rules.copy_rule')}
                       </button>
                     </div>
                   {/if}
@@ -380,6 +322,11 @@
           {/if}
         </tbody>
       </table>
+    </div>
+    {/if}
+  {:else}
+    <div class="providers-placeholder">
+      <p>{$t('rules.no_providers')}</p>
     </div>
   {/if}
 </div>
@@ -517,6 +464,44 @@
 
   .dropdown-menu button:hover {
     background: var(--hover);
+  }
+
+  .rules-tabs {
+    display: inline-flex;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px;
+    margin-bottom: 16px;
+  }
+
+  .tab-btn {
+    background: none;
+    border: none;
+    color: var(--fg-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+
+  .tab-btn:hover {
+    color: var(--fg-primary);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .tab-btn.active {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--fg-primary);
+  }
+
+  .providers-placeholder {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--fg-dim);
   }
 
   /* Column priority on mobile — hide # index, truncate payload */
