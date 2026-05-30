@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { t, currentLang } from './i18n';
   import { capabilities, fetchCapabilities, showToast } from './stores';
   import EmptyState from './components/EmptyState.svelte';
@@ -180,6 +180,9 @@
   }
 
   let mihomoLaunching = false;
+  let _launchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  onDestroy(() => { if (_launchTimer) clearTimeout(_launchTimer); });
 
   async function launchMihomo() {
     mihomoLaunching = true;
@@ -194,15 +197,14 @@
         body: JSON.stringify({ action: 'start' })
       });
       if (!res.ok) throw new Error('Failed to start Mihomo');
-      setTimeout(async () => {
-        await fetchCapabilities();
-        fetchRules();
-        mihomoLaunching = false;
-      }, 1500);
-      setTimeout(async () => {
-        await fetchCapabilities();
-        fetchRules();
-      }, 4000);
+      _launchTimer = setTimeout(async () => {
+        try {
+          await fetchCapabilities();
+          fetchRules();
+        } finally {
+          mihomoLaunching = false;
+        }
+      }, 2500);
     } catch (e: any) {
       showToast('error', e.message);
       mihomoLaunching = false;
