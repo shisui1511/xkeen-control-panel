@@ -260,6 +260,12 @@
   $: nonMatchRules = filteredRules.filter(r => r.type.toUpperCase() !== 'MATCH');
   $: matchRules = filteredRules.filter(r => r.type.toUpperCase() === 'MATCH');
 
+  let _didFetchProviders = false;
+  $: if ($capabilities?.mihomo.reachable && !_didFetchProviders) {
+    _didFetchProviders = true;
+    fetchRuleProviders();
+  }
+
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       fetchRules();
