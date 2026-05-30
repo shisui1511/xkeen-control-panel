@@ -12,6 +12,15 @@
     proxy: string;
   }
 
+  interface RuleProvider {
+    name: string;
+    behavior: string;
+    type: string;
+    ruleCount: number;
+    updatedAt: string;
+    vehicleType: string;
+  }
+
   let rules: Rule[] = [];
   let loading = false;
   let error = '';
@@ -19,6 +28,11 @@
   let typeFilter = '';
   let proxyFilter = '';
   let activeTab: 'rules' | 'providers' = 'rules';
+
+  let ruleProviders: RuleProvider[] = [];
+  let loadingProviders = false;
+  let updatingProvider: string | null = null;
+  let updatingAll = false;
 
   async function fetchRules() {
     loading = true;
@@ -34,6 +48,86 @@
       error = e.message;
     } finally {
       loading = false;
+    }
+  }
+
+  async function fetchRuleProviders() {
+    loadingProviders = true;
+    try {
+      const res = await fetch('/api/mihomo/proxy/providers/rules');
+      if (!res.ok) throw new Error('Failed to load rule providers');
+      const data = await res.json();
+      // API возвращает { providers: { "name": { ... }, ... } }
+      const providersMap = data.providers || {};
+      ruleProviders = Object.values(providersMap) as RuleProvider[];
+    } catch (e: any) {
+      // При ошибке — пустой список, без error toast (провайдеров просто нет)
+      ruleProviders = [];
+    } finally {
+      loadingProviders = false;
+    }
+  }
+
+  async function updateProvider(name: string) {
+    updatingProvider = name;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        headers: {
+          'X-CSRF-Token': csrfToken || ''
+        }
+      });
+      if (!res.ok) throw new Error(`Failed to update provider: ${name}`);
+      showToast('success', $t('rules.update_success'));
+      // Re-fetch чтобы обновить updatedAt и ruleCount
+      await fetchRuleProviders();
+    } catch (e: any) {
+      showToast('error', e.message);
+    } finally {
+      updatingProvider = null;
+    }
+  }
+
+  async function updateAllProviders() {
+    updatingAll = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      for (const provider of ruleProviders) {
+        const res = await fetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(provider.name)}`, {
+          method: 'PUT',
+          headers: {
+            'X-CSRF-Token': csrfToken || ''
+          }
+        });
+        if (!res.ok) {
+          showToast('error', `Failed: ${provider.name}`);
+        }
+      }
+      showToast('success', $t('rules.update_all_success'));
+      await fetchRuleProviders();
+    } catch (e: any) {
+      showToast('error', e.message);
+    } finally {
+      updatingAll = false;
+    }
+  }
+
+  function formatRelativeTime(isoDate: string): string {
+    if (!isoDate) return '—';
+    try {
+      const date = new Date(isoDate);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMin = Math.floor(diffMs / 60000);
+      if (diffMin < 1) return $currentLang === 'ru' ? 'только что' : 'just now';
+      if (diffMin < 60) return `${diffMin} ${$currentLang === 'ru' ? 'мин. назад' : 'min ago'}`;
+      const diffHours = Math.floor(diffMin / 60);
+      if (diffHours < 24) return `${diffHours} ${$currentLang === 'ru' ? 'ч. назад' : 'h ago'}`;
+      const diffDays = Math.floor(diffHours / 24);
+      return `${diffDays} ${$currentLang === 'ru' ? 'дн. назад' : 'd ago'}`;
+    } catch {
+      return isoDate;
     }
   }
 
@@ -158,6 +252,7 @@
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       fetchRules();
+      fetchRuleProviders();
     }
   });
 </script>
@@ -174,7 +269,23 @@
       <h1>{$t('rules.title')}</h1>
       <p class="sub">{activeTab === 'rules' ? $t('rules.subtitle') : $t('rules.providers_subtitle')}</p>
     </div>
-    <div class="ph-actions"></div>
+    <div class="ph-actions">
+      {#if activeTab === 'providers' && ruleProviders.length > 0}
+        <button
+          class="btn btn-primary"
+          on:click={updateAllProviders}
+          disabled={updatingAll}
+        >
+          {#if updatingAll}
+            <span class="spinner-sm"></span>
+            {$t('rules.updating')}
+          {:else}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg>
+            {$t('rules.update_all')}
+          {/if}
+        </button>
+      {/if}
+    </div>
   </div>
 
   <div class="rules-tabs">
@@ -325,9 +436,56 @@
     </div>
     {/if}
   {:else}
-    <div class="providers-placeholder">
-      <p>{$t('rules.no_providers')}</p>
-    </div>
+    {#if loadingProviders}
+      <div class="loading-state">
+        <span class="spinner"></span>
+      </div>
+    {:else if ruleProviders.length === 0}
+      <div class="empty-providers">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity: 0.4; margin-bottom: 12px;">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+          <polyline points="10 9 9 9 8 9" />
+        </svg>
+        <p style="font-size: 14px; font-weight: 500; color: var(--fg-secondary); margin-bottom: 4px;">{$t('rules.no_providers')}</p>
+      </div>
+    {:else}
+      <div class="providers-list">
+        {#each ruleProviders as provider}
+          <div class="provider-card">
+            <div class="provider-info">
+              <div class="provider-name">{provider.name}</div>
+              <div class="provider-meta">
+                <span class="provider-badge">{provider.vehicleType || provider.type}</span>
+                {#if provider.behavior}
+                  <span class="provider-badge">{provider.behavior}</span>
+                {/if}
+                <span class="provider-count">{provider.ruleCount} {$t('rules.provider_rules_count')}</span>
+              </div>
+            </div>
+            <div class="provider-actions">
+              <span class="provider-updated">
+                {$t('rules.provider_updated')}: {formatRelativeTime(provider.updatedAt)}
+              </span>
+              <button
+                class="btn btn-secondary btn-sm"
+                on:click={() => updateProvider(provider.name)}
+                disabled={updatingProvider === provider.name || updatingAll}
+              >
+                {#if updatingProvider === provider.name}
+                  <span class="spinner-sm"></span>
+                {:else}
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg>
+                {/if}
+                {$t('rules.update')}
+              </button>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -498,10 +656,118 @@
     color: var(--fg-primary);
   }
 
-  .providers-placeholder {
-    text-align: center;
-    padding: 60px 20px;
+  .providers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .provider-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 18px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    transition: border-color 0.15s;
+  }
+
+  .provider-card:hover {
+    border-color: var(--border-hover, var(--border));
+  }
+
+  .provider-info {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .provider-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .provider-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .provider-badge {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
     color: var(--fg-dim);
+    font-family: var(--font-family-mono);
+    letter-spacing: 0.03em;
+  }
+
+  .provider-count {
+    font-size: 12px;
+    color: var(--fg-dim);
+  }
+
+  .provider-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .provider-updated {
+    font-size: 11.5px;
+    color: var(--fg-faint);
+    white-space: nowrap;
+  }
+
+  .btn-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+    height: 28px;
+  }
+
+  .spinner-sm {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .empty-providers {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    text-align: center;
+    color: var(--fg-dim);
+  }
+
+  .loading-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
   }
 
   /* Column priority on mobile — hide # index, truncate payload */
@@ -538,6 +804,17 @@
     th {
       padding: 10px 10px;
       font-size: 12px;
+    }
+
+    /* Mobile: stack provider card vertically */
+    .provider-card {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .provider-actions {
+      width: 100%;
+      justify-content: space-between;
     }
   }
 </style>
