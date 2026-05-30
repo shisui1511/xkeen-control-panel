@@ -253,16 +253,13 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
     // Кликаем по заголовку — группа должна развернуться
     await gcHead.click();
-    await page.waitForTimeout(300); // ждём CSS-transition
 
-    const expandedCount = await largeGroup.locator('.proxy-row').count();
-    // После разворачивания видны все 12 прокси
-    expect(expandedCount).toBe(12);
+    // После разворачивания видны все 12 прокси (toHaveCount авто-ретраит)
+    await expect(largeGroup.locator('.proxy-row')).toHaveCount(12);
 
     // Кликаем снова — группа сворачивается
     await gcHead.click();
-    await page.waitForTimeout(300);
-
+    await expect(largeGroup.locator('.proxy-row').first()).toBeVisible();
     const collapsedCount = await largeGroup.locator('.proxy-row').count();
     expect(collapsedCount).toBeLessThanOrEqual(4);
   });
@@ -277,11 +274,9 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
     // Кликаем по .more-hint
     await moreHint.click();
-    await page.waitForTimeout(300); // ждём раскрытия
 
-    // После клика группа должна развернуться — все 12 прокси видны
-    const expandedCount = await largeGroup.locator('.proxy-row').count();
-    expect(expandedCount).toBe(12);
+    // После клика группа должна развернуться — все 12 прокси видны (toHaveCount авто-ретраит)
+    await expect(largeGroup.locator('.proxy-row')).toHaveCount(12);
   });
 
   // D-08: Compact padding — .proxy-row имеет padding-top: 4px
@@ -290,7 +285,8 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
     // Разворачиваем группу, чтобы получить доступ к строкам прокси
     await largeGroup.locator('.gc-head').first().click();
-    await page.waitForTimeout(300);
+    // Ждём появления всех 12 строк прокси перед проверкой computed style
+    await expect(largeGroup.locator('.proxy-row')).toHaveCount(12);
 
     // Получаем computed style первой строки прокси
     const paddingTop = await largeGroup.locator('.proxy-row').first().evaluate((el) => {
