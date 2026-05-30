@@ -513,12 +513,15 @@
             !group.name.toLowerCase().includes(filterQuery.trim().toLowerCase())}
           {@const isCollapsed = collapsedGroups.has(group.name)}
           {@const collapsible = group.all.length > 8}
+          {@const shownProxies = isCollapsed ? getCollapsedProxies(group) : group.all}
+          {@const ROW_HEIGHT_PX = 36}
           <div class="group-card" style={isFiltered ? 'display:none;' : ''}>
             <div
               class="gc-head"
               class:collapsible
               role={collapsible ? 'button' : undefined}
               tabindex={collapsible ? 0 : undefined}
+              aria-expanded={collapsible ? !isCollapsed : undefined}
               on:click={() => collapsible && toggleCollapse(group.name)}
               on:keydown={(e) =>
                 (e.key === 'Enter' || e.key === ' ') && collapsible && toggleCollapse(group.name)}
@@ -542,10 +545,10 @@
             <div
               class="gc-body"
               style="max-height: {isCollapsed
-                ? getCollapsedProxies(group).length * 28 + 28 + 'px'
+                ? shownProxies.length * ROW_HEIGHT_PX + 28 + 'px'
                 : '2000px'};"
             >
-              {#each isCollapsed ? getCollapsedProxies(group) : group.all as proxyName}
+              {#each shownProxies as proxyName}
                 {@const isActive = group.now === proxyName}
                 {@const healthClass = getLatencyClass(proxyName)}
                 {@const healthText = getLatencyText(proxyName)}
@@ -613,8 +616,7 @@
                 </div>
               {/each}
               {#if isCollapsed}
-                {@const visibleCount = getCollapsedProxies(group).length}
-                {@const hiddenCount = group.all.length - visibleCount}
+                {@const hiddenCount = group.all.length - shownProxies.length}
                 {#if hiddenCount > 0}
                   <div
                     class="more-hint"
@@ -687,6 +689,7 @@
     gap: 14px;
     align-items: center;
     padding: 4px 8px;
+    min-height: 36px; /* соответствует ROW_HEIGHT_PX в JS для расчёта max-height */
     border-bottom: 1px solid var(--border-light);
   }
   .proxy-row:last-child {
