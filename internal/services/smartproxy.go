@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -25,42 +24,18 @@ const (
 	ModeGeo        ProfileMode = "geo-aware"
 )
 
-// Profile represents a proxy switching profile (time-based, auto-failover or round-robin)
+// Profile represents a proxy switching profile (time-based)
 type Profile struct {
-	ID      string      `json:"id"`
-	Name    string      `json:"name"`
-	Enabled bool        `json:"enabled"`
-	Mode    ProfileMode `json:"mode"` // "time-based" | "auto-failover" | "round-robin"
-
-	// Time-based fields
-	DaysOfWeek []int  `json:"days_of_week"` // 0=Sunday, 1=Monday, ... 6=Saturday
-	StartTime  string `json:"start_time"`   // HH:MM format
-	EndTime    string `json:"end_time"`     // HH:MM format
-
-	// Auto-failover fields
-	LatencyThreshold    int    `json:"latency_threshold"`    // ms
-	ConsecutiveFailures int    `json:"consecutive_failures"` // count
-	FallbackProxy       string `json:"fallback_proxy"`       // proxy name
-
-	// Round-robin fields
-	RoundRobinProxies []string `json:"round_robin_proxies"`
-	RoundRobinIndex   int      `json:"round_robin_index"`
-
-	// Geo-aware fields
-	GeoRegion     string `json:"geo_region"`      // e.g. "asia", "europe", "americas"
-	GeoAutoSelect bool   `json:"geo_auto_select"` // auto-select best proxy in region
-
-	// Target
-	GroupName string `json:"group_name"` // Mihomo proxy group name
-	ProxyName string `json:"proxy_name"` // Primary proxy to select
-
-	// Metadata
-	LastApplied int64 `json:"last_applied"` // Unix timestamp
-	ApplyCount  int   `json:"apply_count"`
-
-	// Failover tracking (runtime)
-	CurrentFailures int    `json:"current_failures"`
-	CurrentProxy    string `json:"current_proxy"`
+	ID           string      `json:"id"`
+	Name         string      `json:"name"`
+	Enabled      bool        `json:"enabled"`
+	Mode         ProfileMode `json:"mode"` // "time-based"
+	Schedule     [][]bool    `json:"schedule"` // 7x24 grid: [day][hour]
+	GroupName    string      `json:"group_name"` // Mihomo proxy group name
+	ProxyName    string      `json:"proxy_name"` // Primary proxy to select
+	LastApplied  int64       `json:"last_applied"` // Unix timestamp
+	ApplyCount   int         `json:"apply_count"`
+	CurrentProxy string      `json:"current_proxy"`
 }
 
 // SmartProxyService manages time-based proxy profiles
@@ -259,291 +234,24 @@ func (s *SmartProxyService) evaluateProfiles() {
 			continue
 		}
 
-		switch p.Mode {
-		case ModeFailover:
-			s.evaluateFailover(&p)
-		case ModeRoundRobin:
-			s.evaluateRoundRobin(&p)
-		case ModeGeo:
-			s.evaluateGeo(&p)
-		default: // ModeTimeBased
+		if p.Mode == ModeTimeBased {
 			s.evaluateTimeBased(&p)
 		}
 	}
 }
 
-// isDayMatch returns true if day (0=Sunday) is in the days list.
-// An empty list matches all days.
-func isDayMatch(days []int, day int) bool {
-	if len(days) == 0 {
-		return true
-	}
-	for _, d := range days {
-		if d == day {
-			return true
-		}
-	}
-	return false
-}
-
-// isTimeInRange returns true if current is within [start, end].
-// Handles midnight-crossing ranges (start > end): active when current >= start OR current <= end.
-func isTimeInRange(start, end, current string) bool {
-	if start <= end {
-		return current >= start && current <= end
-	}
-	return current >= start || current <= end
-}
-
 func (s *SmartProxyService) evaluateTimeBased(p *Profile) {
 	now := time.Now()
-	if !isDayMatch(p.DaysOfWeek, int(now.Weekday())) {
+	day := int(now.Weekday())
+	hour := now.Hour()
+
+	if day >= len(p.Schedule) || hour >= len(p.Schedule[day]) || !p.Schedule[day][hour] {
 		return
 	}
-	if !isTimeInRange(p.StartTime, p.EndTime, now.Format("15:04")) {
-		return
-	}
+
 	if err := s.applyProfile(p); err != nil {
 		log.Printf("SmartProxy: failed to apply profile %s: %v", p.Name, err)
 	}
-}
-
-// mihomoDelayResponse matches Mihomo delay endpoint response
-type mihomoDelayResponse struct {
-	Delay int `json:"delay"`
-}
-
-func (s *SmartProxyService) testProxyLatency(proxyName string) (int, error) {
-	url := fmt.Sprintf("%s/proxies/%s/delay?url=http://www.gstatic.com/generate_204&timeout=5000",
-		s.mihomoURL, proxyName)
-	resp, err := s.httpClient.Get(url)
-	if err != nil {
-		return -1, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return -1, fmt.Errorf("delay API returned %d", resp.StatusCode)
-	}
-
-	var data mihomoDelayResponse
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return -1, err
-	}
-	return data.Delay, nil
-}
-
-func (s *SmartProxyService) evaluateFailover(p *Profile) {
-	onFallback := p.CurrentProxy != "" && p.CurrentProxy != p.ProxyName
-
-	if onFallback {
-		// We are on fallback — test PRIMARY to decide if we can recover.
-		primaryDelay, err := s.testProxyLatency(p.ProxyName)
-		if err != nil {
-			primaryDelay = 9999
-		}
-		if primaryDelay <= p.LatencyThreshold {
-			// Primary recovered — switch back.
-			log.Printf("SmartProxy: profile %s primary %s recovered (%dms), switching back from %s",
-				p.Name, p.ProxyName, primaryDelay, p.CurrentProxy)
-			s.mu.Lock()
-			for i := range s.profiles {
-				if s.profiles[i].ID == p.ID {
-					s.profiles[i].CurrentProxy = ""
-					s.profiles[i].CurrentFailures = 0
-					break
-				}
-			}
-			s.mu.Unlock()
-			if err := s.applyProxyToGroup(p.GroupName, p.ProxyName); err != nil {
-				log.Printf("SmartProxy: recovery apply failed: %v", err)
-			} else {
-				s.updateProfileApplied(p.ID)
-			}
-		} else {
-			log.Printf("SmartProxy: profile %s primary %s still down (%dms), staying on fallback %s",
-				p.Name, p.ProxyName, primaryDelay, p.CurrentProxy)
-		}
-		return
-	}
-
-	// We are on primary — test it for failures.
-	delay, err := s.testProxyLatency(p.ProxyName)
-	if err != nil {
-		log.Printf("SmartProxy: latency test failed for %s: %v", p.ProxyName, err)
-		delay = 9999
-	}
-
-	s.mu.Lock()
-	for i := range s.profiles {
-		if s.profiles[i].ID != p.ID {
-			continue
-		}
-
-		if delay > p.LatencyThreshold {
-			s.profiles[i].CurrentFailures++
-			log.Printf("SmartProxy: profile %s proxy %s latency %dms > threshold %dms (failures: %d/%d)",
-				p.Name, p.ProxyName, delay, p.LatencyThreshold, s.profiles[i].CurrentFailures, p.ConsecutiveFailures)
-		} else {
-			if s.profiles[i].CurrentFailures > 0 {
-				log.Printf("SmartProxy: profile %s proxy %s latency %dms OK, resetting failures", p.Name, p.ProxyName, delay)
-			}
-			s.profiles[i].CurrentFailures = 0
-		}
-
-		if s.profiles[i].CurrentFailures >= p.ConsecutiveFailures && p.ConsecutiveFailures > 0 {
-			target := p.FallbackProxy
-			if target == "" {
-				target = "DIRECT"
-			}
-			log.Printf("SmartProxy: profile %s failing over %s → %s", p.Name, p.ProxyName, target)
-			s.profiles[i].CurrentProxy = target
-			s.profiles[i].CurrentFailures = 0
-			s.mu.Unlock()
-			if err := s.applyProxyToGroup(p.GroupName, target); err != nil {
-				log.Printf("SmartProxy: failover apply failed: %v", err)
-			} else {
-				s.updateProfileApplied(p.ID)
-			}
-			return
-		}
-		break
-	}
-	s.mu.Unlock()
-}
-
-func (s *SmartProxyService) evaluateRoundRobin(p *Profile) {
-	s.mu.Lock()
-	for i := range s.profiles {
-		if s.profiles[i].ID != p.ID {
-			continue
-		}
-
-		if len(s.profiles[i].RoundRobinProxies) == 0 {
-			s.mu.Unlock()
-			return
-		}
-
-		idx := s.profiles[i].RoundRobinIndex % len(s.profiles[i].RoundRobinProxies)
-		target := s.profiles[i].RoundRobinProxies[idx]
-		s.profiles[i].RoundRobinIndex = (s.profiles[i].RoundRobinIndex + 1) % len(s.profiles[i].RoundRobinProxies)
-		s.mu.Unlock()
-
-		log.Printf("SmartProxy: round-robin profile %s switching to %s", p.Name, target)
-		if err := s.applyProxyToGroup(p.GroupName, target); err != nil {
-			log.Printf("SmartProxy: round-robin apply failed: %v", err)
-		} else {
-			s.updateProfileApplied(p.ID)
-		}
-		return
-	}
-	s.mu.Unlock()
-}
-
-func (s *SmartProxyService) evaluateGeo(p *Profile) {
-	if !p.GeoAutoSelect {
-		return
-	}
-
-	// Get all proxies from Mihomo
-	proxies, err := s.fetchProxiesList()
-	if err != nil {
-		log.Printf("SmartProxy: geo profile %s failed to fetch proxies: %v", p.Name, err)
-		return
-	}
-
-	// Filter proxies by region (using naming convention: proxy name contains region)
-	var candidates []string
-	for _, proxyName := range proxies {
-		if strings.Contains(strings.ToLower(proxyName), strings.ToLower(p.GeoRegion)) {
-			candidates = append(candidates, proxyName)
-		}
-	}
-
-	if len(candidates) == 0 {
-		log.Printf("SmartProxy: geo profile %s no proxies found for region %s", p.Name, p.GeoRegion)
-		return
-	}
-
-	// Test latency for all candidates in parallel and pick the best
-	type result struct {
-		name  string
-		delay int
-	}
-	results := make(chan result, len(candidates))
-	var wg sync.WaitGroup
-
-	// Limit concurrency to 5 simultaneous tests
-	sem := make(chan struct{}, 5)
-
-	for _, candidate := range candidates {
-		wg.Add(1)
-		go func(name string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			delay, err := s.testProxyLatency(name)
-			if err == nil && delay > 0 {
-				results <- result{name, delay}
-			}
-		}(candidate)
-	}
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	bestProxy := ""
-	bestDelay := 999999
-	for res := range results {
-		if res.delay < bestDelay {
-			bestDelay = res.delay
-			bestProxy = res.name
-		}
-	}
-
-	if bestProxy == "" {
-		log.Printf("SmartProxy: geo profile %s all proxies in region %s are down", p.Name, p.GeoRegion)
-		return
-	}
-
-	log.Printf("SmartProxy: geo profile %s selected %s (%dms) in region %s", p.Name, bestProxy, bestDelay, p.GeoRegion)
-	if err := s.applyProxyToGroup(p.GroupName, bestProxy); err != nil {
-		log.Printf("SmartProxy: geo apply failed: %v", err)
-	} else {
-		s.updateProfileApplied(p.ID)
-	}
-}
-
-func (s *SmartProxyService) fetchProxiesList() ([]string, error) {
-	resp, err := s.httpClient.Get(s.mihomoURL + "/proxies")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("proxies API returned %d", resp.StatusCode)
-	}
-
-	var data struct {
-		Proxies map[string]interface{} `json:"proxies"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
-	}
-
-	var names []string
-	for name, p := range data.Proxies {
-		if proxy, ok := p.(map[string]interface{}); ok {
-			if t, ok := proxy["type"].(string); ok && t != "Selector" && t != "URLTest" && t != "Fallback" && t != "LoadBalance" && t != "Direct" && t != "Reject" {
-				names = append(names, name)
-			}
-		}
-	}
-	return names, nil
 }
 
 func (s *SmartProxyService) applyProxyToGroup(groupName, proxyName string) error {
@@ -611,6 +319,7 @@ func (s *SmartProxyService) CurrentStatus() map[string]interface{} {
 	now := time.Now()
 	currentDay := int(now.Weekday())
 	currentTime := now.Format("15:04")
+	currentHour := now.Hour()
 
 	s.mu.RLock()
 	profiles := make([]Profile, len(s.profiles))
@@ -625,21 +334,31 @@ func (s *SmartProxyService) CurrentStatus() map[string]interface{} {
 			continue
 		}
 
-		dayMatch := false
-		for _, d := range p.DaysOfWeek {
-			if d == currentDay {
-				dayMatch = true
-				break
-			}
-		}
-		if !dayMatch {
+		if p.Mode != ModeTimeBased {
 			continue
 		}
 
-		if currentTime >= p.StartTime && currentTime <= p.EndTime {
+		isActive := false
+		if currentDay < len(p.Schedule) && currentHour < len(p.Schedule[currentDay]) {
+			isActive = p.Schedule[currentDay][currentHour]
+		}
+
+		if isActive {
 			activeProfiles = append(activeProfiles, p)
-		} else if currentTime < p.StartTime {
-			nextProfiles = append(nextProfiles, p)
+		} else {
+			// Find if there is an active slot later today
+			hasFutureSlot := false
+			if currentDay < len(p.Schedule) {
+				for h := currentHour + 1; h < len(p.Schedule[currentDay]); h++ {
+					if p.Schedule[currentDay][h] {
+						hasFutureSlot = true
+						break
+					}
+				}
+			}
+			if hasFutureSlot {
+				nextProfiles = append(nextProfiles, p)
+			}
 		}
 	}
 
