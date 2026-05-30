@@ -242,6 +242,7 @@
   }
 
   function copyPayload(rule: Rule) {
+    if (!rule.payload) return;
     copyToClipboard(rule.payload, $currentLang === 'ru' ? 'Payload скопирован' : 'Payload copied');
     closeDropdowns();
   }
