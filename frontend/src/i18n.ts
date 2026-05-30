@@ -736,6 +736,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'proxies.obs_healthy_sub': 'latency < 300 мс',
     'proxies.obs_degraded_sub': '300–800 мс',
     'proxies.obs_unreachable_sub': 'timeout',
+    'proxies.filter_placeholder': 'Поиск группы',
+    'proxies.more_hint': '...ещё {count}',
+    'proxies.collapse_group': 'Свернуть группу',
+    'proxies.expand_group': 'Развернуть группу',
 
     // Setup script
     'setup.install': 'Установка',
@@ -1557,6 +1561,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'proxies.obs_healthy_sub': 'latency < 300 ms',
     'proxies.obs_degraded_sub': '300–800 ms',
     'proxies.obs_unreachable_sub': 'timeout',
+    'proxies.filter_placeholder': 'Search group',
+    'proxies.more_hint': '...{count} more',
+    'proxies.collapse_group': 'Collapse group',
+    'proxies.expand_group': 'Expand group',
 
     // Setup script
     'setup.install': 'Install',
