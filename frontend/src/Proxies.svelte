@@ -653,6 +653,7 @@
     transition: max-height var(--transition-normal);
   }
   .proxy-row {
+    position: relative;
     display: grid;
     grid-template-columns: 1fr auto auto;
     gap: 14px;
