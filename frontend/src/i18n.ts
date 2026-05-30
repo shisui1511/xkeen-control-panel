@@ -207,6 +207,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.crumbs_generator': 'Генератор Mihomo',
     'editor.template_applied': 'Шаблон успешно применен',
     'editor.template_error': 'Ошибка при применении шаблона',
+    'editor.save_and_apply': 'Сохранить и применить',
+    'editor.saving': 'Сохранение...',
+    'editor.restarting': 'Перезапуск службы...',
+    'editor.checking_status': 'Проверка статуса...',
+    'editor.apply_success': 'Конфигурация успешно применилась, служба запущена!',
+    'editor.apply_timeout': 'Служба не запустилась вовремя. Проверьте логи.',
 
     // Services
     'svc.title': 'Управление сервисами',
@@ -1046,6 +1052,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.crumbs_generator': 'Mihomo Generator',
     'editor.template_applied': 'Template applied successfully',
     'editor.template_error': 'Failed to apply template',
+    'editor.save_and_apply': 'Save & Apply',
+    'editor.saving': 'Saving...',
+    'editor.restarting': 'Restarting service...',
+    'editor.checking_status': 'Checking status...',
+    'editor.apply_success': 'Configuration applied successfully, service started!',
+    'editor.apply_timeout': 'Service did not start in time. Check logs.',
 
     // Services
     'svc.title': 'Service Management',
