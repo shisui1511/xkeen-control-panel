@@ -6,6 +6,7 @@
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
+  import ChevronDown from './lib/components/icons/ChevronDown.svelte';
 
   interface Proxy {
     name: string;
@@ -56,6 +57,16 @@
   let testingLatency = false;
   let testingProxy = '';
   let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let collapsedGroups = new Set<string>();
+  let filterQuery = '';
+  let initializedCollapse = false;
+
+  $: filteredGroups =
+    filterQuery.trim() === ''
+      ? groups
+      : groups.filter((g) =>
+          g.name.toLowerCase().includes(filterQuery.trim().toLowerCase())
+        );
 
   function getLastDelay(proxy: Proxy): number | undefined {
     if (proxy.history && proxy.history.length > 0) {
@@ -69,6 +80,36 @@
       return proxy.history[proxy.history.length - 1].delay > 0;
     }
     return proxy.alive ?? false;
+  }
+
+  function initCollapsed() {
+    collapsedGroups = new Set(
+      groups.filter((g) => g.all.length > 8).map((g) => g.name)
+    );
+    collapsedGroups = collapsedGroups;
+    initializedCollapse = true;
+  }
+
+  function toggleCollapse(groupName: string) {
+    if (collapsedGroups.has(groupName)) {
+      collapsedGroups.delete(groupName);
+    } else {
+      collapsedGroups.add(groupName);
+    }
+    collapsedGroups = collapsedGroups;
+  }
+
+  function getCollapsedProxies(group: ProxyGroup): string[] {
+    const active = group.now;
+    const sorted = group.all
+      .filter((name) => name !== active)
+      .sort((a, b) => {
+        const da = proxies[a] ? (getLastDelay(proxies[a]) ?? Infinity) : Infinity;
+        const db = proxies[b] ? (getLastDelay(proxies[b]) ?? Infinity) : Infinity;
+        return da - db;
+      });
+    const top3 = sorted.slice(0, 3);
+    return active ? [active, ...top3] : top3.slice(0, 4);
   }
 
   function computeStats(): ObservatoryStats {
@@ -143,6 +184,9 @@
           proxies[name].history = data.proxies[name].history;
         }
       });
+      if (!initializedCollapse) {
+        initCollapsed();
+      }
     } catch (e: any) {
       error = e.message;
     } finally {
@@ -321,6 +365,13 @@
       <p class="sub">{$t('proxies.subtitle')}</p>
     </div>
     <div class="ph-actions">
+      <input
+        class="group-search"
+        type="search"
+        bind:value={filterQuery}
+        placeholder={$t('proxies.filter_placeholder')}
+        aria-label={$t('proxies.filter_placeholder')}
+      />
       <button class="btn btn-secondary" on:click={fetchProxies} disabled={loading}>
         <svg
           width="14"
@@ -424,8 +475,21 @@
     {:else}
       <div class="group-grid">
         {#each groups as group}
-          <div class="group-card">
-            <div class="gc-head">
+          {@const isFiltered =
+            filterQuery.trim() !== '' &&
+            !group.name.toLowerCase().includes(filterQuery.trim().toLowerCase())}
+          {@const isCollapsed = collapsedGroups.has(group.name)}
+          {@const collapsible = group.all.length > 8}
+          <div class="group-card" style={isFiltered ? 'display:none;' : ''}>
+            <div
+              class="gc-head"
+              class:collapsible
+              role={collapsible ? 'button' : undefined}
+              tabindex={collapsible ? 0 : undefined}
+              on:click={() => collapsible && toggleCollapse(group.name)}
+              on:keydown={(e) =>
+                (e.key === 'Enter' || e.key === ' ') && collapsible && toggleCollapse(group.name)}
+            >
               <span class="name">{group.name}</span>
               <span class="type">{getGroupTypeLabel(group.type)}</span>
               {#if group.type !== 'Fallback'}
@@ -438,9 +502,22 @@
                 <span style="margin-left:auto;" class="status-badge active">{group.now || '—'}</span
                 >
               {/if}
+              {#if collapsible}
+                <ChevronDown
+                  size={14}
+                  class="chevron-icon{isCollapsed ? '' : ' rotated'}"
+                  color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
+                  aria-label={isCollapsed ? $t('proxies.expand_group') : $t('proxies.collapse_group')}
+                />
+              {/if}
             </div>
-            <div class="gc-body">
-              {#each group.all as proxyName}
+            <div
+              class="gc-body"
+              style="max-height: {isCollapsed
+                ? getCollapsedProxies(group).length * 28 + 28 + 'px'
+                : '2000px'};"
+            >
+              {#each isCollapsed ? getCollapsedProxies(group) : group.all as proxyName}
                 {@const isActive = group.now === proxyName}
                 {@const healthClass = getLatencyClass(proxyName)}
                 {@const healthText = getLatencyText(proxyName)}
@@ -507,6 +584,22 @@
                   {/if}
                 </div>
               {/each}
+              {#if isCollapsed}
+                {@const visibleCount = getCollapsedProxies(group).length}
+                {@const hiddenCount = group.all.length - visibleCount}
+                {#if hiddenCount > 0}
+                  <div
+                    class="more-hint"
+                    role="button"
+                    tabindex="0"
+                    on:click={() => toggleCollapse(group.name)}
+                    on:keydown={(e) =>
+                      (e.key === 'Enter' || e.key === ' ') && toggleCollapse(group.name)}
+                  >
+                    {$t('proxies.more_hint', { count: hiddenCount })}
+                  </div>
+                {/if}
+              {/if}
             </div>
           </div>
         {/each}
@@ -519,13 +612,8 @@
   /* proxies: group cards grid */
   .group-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 14px;
-  }
-  @media (max-width: 1024px) {
-    .group-grid {
-      grid-template-columns: 1fr;
-    }
+    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    gap: 16px;
   }
   .group-card {
     background: var(--bg-card);
@@ -539,6 +627,13 @@
     align-items: center;
     gap: 10px;
     border-bottom: 1px solid var(--border);
+  }
+  .group-card .gc-head.collapsible {
+    cursor: pointer;
+    user-select: none;
+  }
+  .group-card .gc-head.collapsible:hover {
+    background: var(--hover);
   }
   .group-card .gc-head .name {
     font-weight: 700;
@@ -554,13 +649,15 @@
   }
   .group-card .gc-body {
     padding: 0;
+    overflow: hidden;
+    transition: max-height var(--transition-normal);
   }
   .proxy-row {
     display: grid;
     grid-template-columns: 1fr auto auto;
     gap: 14px;
     align-items: center;
-    padding: 11px 18px;
+    padding: 4px 8px;
     border-bottom: 1px solid var(--border-light);
   }
   .proxy-row:last-child {
@@ -624,6 +721,48 @@
     opacity: 1 !important;
   }
 
+  .group-search {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
+    font-size: 13px;
+    font-family: var(--font-family-sans);
+    padding: 4px 12px;
+    width: 200px;
+    outline: none;
+    transition: border-color var(--transition-fast);
+  }
+  .group-search:focus {
+    border-color: var(--accent);
+  }
+  .group-search::placeholder {
+    color: var(--fg-dim);
+  }
+  .group-search::-webkit-search-cancel-button {
+    display: none;
+  }
+
+  :global(.chevron-icon) {
+    transition: transform var(--transition-fast);
+    flex-shrink: 0;
+  }
+  :global(.chevron-icon.rotated) {
+    transform: rotate(180deg);
+  }
+
+  .more-hint {
+    padding: 4px 16px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--fg-dim);
+    font-size: 12px;
+    border-top: 1px solid var(--border-light);
+  }
+  .more-hint:hover {
+    background: var(--hover);
+  }
+
   /* Mobile: proxy cards stack, observatory stats handled globally at 768px */
   @media (max-width: 640px) {
     .group-grid {
@@ -644,6 +783,9 @@
     .lat {
       font-size: 11px;
       padding: 2px 5px;
+    }
+    .group-search {
+      width: 100%;
     }
   }
 </style>
