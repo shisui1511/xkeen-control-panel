@@ -18,8 +18,6 @@
   let searchQuery = '';
   let typeFilter = '';
   let proxyFilter = '';
-  let applying = false;
-
   async function fetchRules() {
     loading = true;
     error = '';
@@ -35,31 +33,6 @@
     } finally {
       loading = false;
     }
-  }
-
-  async function applyRules() {
-    applying = true;
-    try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/service/control?action=restart', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
-        }
-      });
-      if (!res.ok) throw new Error('Failed to apply configuration');
-      showToast('success', $t('rules.apply_success'));
-    } catch (e: any) {
-      showToast('error', e.message);
-    } finally {
-      applying = false;
-    }
-  }
-
-  function goToAddRule() {
-    showToast('info', $t('rules.add_tip'));
-    window.location.hash = '#/editor';
   }
 
   function getFilteredRules(): Rule[] {
@@ -180,17 +153,6 @@
     closeDropdowns();
   }
 
-  function editRule(rule: Rule) {
-    showToast(
-      'info',
-      $currentLang === 'ru'
-        ? `Найдите файл конфигурации для изменения: ${rule.payload}`
-        : `Find config file to edit: ${rule.payload}`
-    );
-    window.location.hash = '#/editor';
-    closeDropdowns();
-  }
-
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       fetchRules();
@@ -210,37 +172,7 @@
       <h1>{$t('rules.title')}</h1>
       <p class="sub">{$t('rules.subtitle')}</p>
     </div>
-    <div class="ph-actions">
-      <button class="btn btn-secondary" on:click={goToAddRule}>
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
-        >
-        {$t('rules.add')}
-      </button>
-      <button class="btn btn-primary" on:click={applyRules} disabled={applying}>
-        {#if applying}
-          <span class="spinner" style="margin-right: 6px;">...</span>
-          {$t('app.loading')}
-        {:else}
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-          >
-          {$t('rules.apply')}
-        {/if}
-      </button>
-    </div>
+    <div class="ph-actions"></div>
   </div>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
@@ -279,7 +211,7 @@
           {/each}
         </select>
         <select bind:value={proxyFilter} class="source-select">
-          <option value="">{$currentLang === 'ru' ? 'Все таргеты' : 'All targets'}</option>
+          <option value="">{$t('rules.all_targets')}</option>
           {#each getUniqueProxies() as proxy}
             <option value={proxy}>{proxy}</option>
           {/each}
@@ -328,13 +260,10 @@
                   {#if activeDropdownRule === rule}
                     <div class="dropdown-menu">
                       <button on:click={() => copyPayload(rule)}>
-                        {$currentLang === 'ru' ? 'Копировать payload' : 'Copy payload'}
+                        {$t('rules.copy_payload')}
                       </button>
                       <button on:click={() => copyFullRule(rule)}>
-                        {$currentLang === 'ru' ? 'Копировать правило' : 'Copy rule'}
-                      </button>
-                      <button on:click={() => editRule(rule)}>
-                        {$currentLang === 'ru' ? 'Редактировать' : 'Edit'}
+                        {$t('rules.copy_rule')}
                       </button>
                     </div>
                   {/if}
@@ -364,13 +293,10 @@
                   {#if activeDropdownRule === rule}
                     <div class="dropdown-menu">
                       <button on:click={() => copyPayload(rule)}>
-                        {$currentLang === 'ru' ? 'Копировать payload' : 'Copy payload'}
+                        {$t('rules.copy_payload')}
                       </button>
                       <button on:click={() => copyFullRule(rule)}>
-                        {$currentLang === 'ru' ? 'Копировать правило' : 'Copy rule'}
-                      </button>
-                      <button on:click={() => editRule(rule)}>
-                        {$currentLang === 'ru' ? 'Редактировать' : 'Edit'}
+                        {$t('rules.copy_rule')}
                       </button>
                     </div>
                   {/if}
