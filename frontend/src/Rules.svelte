@@ -18,6 +18,8 @@
   let searchQuery = '';
   let typeFilter = '';
   let proxyFilter = '';
+  let activeTab: 'rules' | 'providers' = 'rules';
+
   async function fetchRules() {
     loading = true;
     error = '';
@@ -170,9 +172,22 @@
         {$t('nav.rules')}
       </div>
       <h1>{$t('rules.title')}</h1>
-      <p class="sub">{$t('rules.subtitle')}</p>
+      <p class="sub">{activeTab === 'rules' ? $t('rules.subtitle') : $t('rules.providers_subtitle')}</p>
     </div>
     <div class="ph-actions"></div>
+  </div>
+
+  <div class="rules-tabs">
+    <button
+      class="tab-btn"
+      class:active={activeTab === 'rules'}
+      on:click={() => (activeTab = 'rules')}
+    >{$t('rules.tab_rules')}</button>
+    <button
+      class="tab-btn"
+      class:active={activeTab === 'providers'}
+      on:click={() => (activeTab = 'providers')}
+    >{$t('rules.tab_providers')}</button>
   </div>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
@@ -186,7 +201,8 @@
       ctaLoading={mihomoLaunching}
       oncta={launchMihomo}
     />
-  {:else if error}
+  {:else if activeTab === 'rules'}
+    {#if error}
     <EmptyState
       title={$t('ds.empty.error_title')}
       description={error}
@@ -194,7 +210,7 @@
       ctaText={$t('app.refresh')}
       oncta={fetchRules}
     />
-  {:else}
+    {:else}
     <div class="toolbar mb-2">
       <div class="filters">
         <input
@@ -306,6 +322,11 @@
           {/if}
         </tbody>
       </table>
+    </div>
+    {/if}
+  {:else}
+    <div class="providers-placeholder">
+      <p>{$t('rules.no_providers')}</p>
     </div>
   {/if}
 </div>
@@ -443,6 +464,44 @@
 
   .dropdown-menu button:hover {
     background: var(--hover);
+  }
+
+  .rules-tabs {
+    display: inline-flex;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px;
+    margin-bottom: 16px;
+  }
+
+  .tab-btn {
+    background: none;
+    border: none;
+    color: var(--fg-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+
+  .tab-btn:hover {
+    color: var(--fg-primary);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .tab-btn.active {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--fg-primary);
+  }
+
+  .providers-placeholder {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--fg-dim);
   }
 
   /* Column priority on mobile — hide # index, truncate payload */
