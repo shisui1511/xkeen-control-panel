@@ -251,13 +251,14 @@
           )
         );
       } else {
-        await fetch(
+        const res = await fetch(
           '/api/mihomo/proxy/proxies/delay?url=http://www.gstatic.com/generate_204&timeout=5000',
           {
             method: 'GET',
             headers: { 'X-CSRF-Token': csrfToken || '' }
           }
         );
+        if (!res.ok) throw new Error($t('proxies.load_error'));
       }
       safeTimeout(async () => {
         await fetchProxies();
@@ -273,13 +274,14 @@
     testingProxy = proxyName;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      await fetch(
+      const res = await fetch(
         `/api/mihomo/proxy/proxies/${encodeURIComponent(proxyName)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`,
         {
           method: 'GET',
           headers: { 'X-CSRF-Token': csrfToken || '' }
         }
       );
+      if (!res.ok) throw new Error($t('proxies.load_error'));
       safeTimeout(async () => {
         await fetchProxies();
         testingProxy = '';
