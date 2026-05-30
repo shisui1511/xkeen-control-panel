@@ -61,8 +61,8 @@
       const providersMap = data.providers || {};
       ruleProviders = Object.values(providersMap) as RuleProvider[];
     } catch (e: any) {
-      // При ошибке — пустой список, без error toast (провайдеров просто нет)
       ruleProviders = [];
+      showToast('error', e.message);
     } finally {
       loadingProviders = false;
     }
