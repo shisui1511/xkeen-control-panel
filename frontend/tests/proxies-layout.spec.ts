@@ -289,7 +289,7 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     await expect(largeGroup.locator('.proxy-row')).toHaveCount(12);
 
     // Получаем computed style первой строки прокси
-    const paddingTop = await largeGroup.locator('.proxy-row').first().evaluate((el) => {
+    const paddingTop = await largeGroup.locator('.proxy-row').first().evaluate((el: Element) => {
       return window.getComputedStyle(el).paddingTop;
     });
 
@@ -314,7 +314,7 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
     // LargeGroup должна остаться видимой, SmallGroup — скрыться
     await expect(largeCard).toBeVisible();
-    const smallDisplay = await smallCard.evaluate((el) => window.getComputedStyle(el).display);
+    const smallDisplay = await smallCard.evaluate((el: Element) => window.getComputedStyle(el).display);
     expect(smallDisplay).toBe('none');
 
     // Очищаем поле поиска — обе группы снова видны
