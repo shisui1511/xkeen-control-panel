@@ -256,7 +256,16 @@
     closeDropdowns();
   }
 
-  $: filteredRules = getFilteredRules();
+  $: filteredRules = rules.filter((rule) => {
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      if (!rule.payload.toLowerCase().includes(q) && !rule.proxy.toLowerCase().includes(q))
+        return false;
+    }
+    if (typeFilter && rule.type !== typeFilter) return false;
+    if (proxyFilter && rule.proxy !== proxyFilter) return false;
+    return true;
+  });
   $: nonMatchRules = filteredRules.filter(r => r.type.toUpperCase() !== 'MATCH');
   $: matchRules = filteredRules.filter(r => r.type.toUpperCase() === 'MATCH');
 
