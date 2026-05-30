@@ -124,12 +124,12 @@
       const now = new Date();
       const diffMs = now.getTime() - date.getTime();
       const diffMin = Math.floor(diffMs / 60000);
-      if (diffMin < 1) return $currentLang === 'ru' ? 'только что' : 'just now';
-      if (diffMin < 60) return `${diffMin} ${$currentLang === 'ru' ? 'мин. назад' : 'min ago'}`;
+      if (diffMin < 1) return $t('rules.time_just_now');
+      if (diffMin < 60) return $t('rules.time_min_ago', { n: diffMin });
       const diffHours = Math.floor(diffMin / 60);
-      if (diffHours < 24) return `${diffHours} ${$currentLang === 'ru' ? 'ч. назад' : 'h ago'}`;
+      if (diffHours < 24) return $t('rules.time_h_ago', { n: diffHours });
       const diffDays = Math.floor(diffHours / 24);
-      return `${diffDays} ${$currentLang === 'ru' ? 'дн. назад' : 'd ago'}`;
+      return $t('rules.time_d_ago', { n: diffDays });
     } catch {
       return isoDate;
     }

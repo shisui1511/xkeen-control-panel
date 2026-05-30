@@ -487,6 +487,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'rules.copy_payload': 'Копировать payload',
     'rules.copy_rule': 'Копировать правило',
     'rules.all_targets': 'Все таргеты',
+    'rules.time_just_now': 'только что',
+    'rules.time_min_ago': '{n} мин. назад',
+    'rules.time_h_ago': '{n} ч. назад',
+    'rules.time_d_ago': '{n} дн. назад',
 
     // Traffic
     'traffic.title': 'Трафик',
@@ -1325,6 +1329,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'rules.copy_payload': 'Copy payload',
     'rules.copy_rule': 'Copy rule',
     'rules.all_targets': 'All targets',
+    'rules.time_just_now': 'just now',
+    'rules.time_min_ago': '{n} min ago',
+    'rules.time_h_ago': '{n} h ago',
+    'rules.time_d_ago': '{n} d ago',
 
     // Traffic
     'traffic.title': 'Traffic',
