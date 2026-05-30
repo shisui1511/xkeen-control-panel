@@ -255,6 +255,10 @@
     closeDropdowns();
   }
 
+  $: filteredRules = getFilteredRules();
+  $: nonMatchRules = filteredRules.filter(r => r.type.toUpperCase() !== 'MATCH');
+  $: matchRules = filteredRules.filter(r => r.type.toUpperCase() === 'MATCH');
+
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       fetchRules();
@@ -355,7 +359,7 @@
     <div class="stats mb-2">
       <span class="stat"><b>{rules.length}</b> {$currentLang === 'ru' ? 'всего' : 'total'}</span>
       <span class="stat"
-        ><b>{getFilteredRules().length}</b> {$currentLang === 'ru' ? 'показано' : 'shown'}</span
+        ><b>{filteredRules.length}</b> {$currentLang === 'ru' ? 'показано' : 'shown'}</span
       >
     </div>
 
@@ -371,38 +375,36 @@
           </tr>
         </thead>
         <tbody>
-          {#each getFilteredRules() as rule, i}
-            {#if rule.type.toUpperCase() !== 'MATCH'}
-              <tr>
-                <td class="mono col-num" style="color:var(--fg-dim);"
-                  >{String(i + 1).padStart(3, '0')}</td
-                >
-                <td>
-                  <span class={getRuleBadgeClass(rule.type)}>
-                    {rule.type}
-                  </span>
-                </td>
-                <td class="mono">{rule.payload}</td>
-                <td>
-                  <span class={getTargetBadgeClass(rule.proxy)}>
-                    {rule.proxy}
-                  </span>
-                </td>
-                <td style="position: relative; text-align: right;">
-                  <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
-                  {#if activeDropdownRule === rule}
-                    <div class="dropdown-menu">
-                      <button on:click={() => copyPayload(rule)}>
-                        {$t('rules.copy_payload')}
-                      </button>
-                      <button on:click={() => copyFullRule(rule)}>
-                        {$t('rules.copy_rule')}
-                      </button>
-                    </div>
-                  {/if}
-                </td>
-              </tr>
-            {/if}
+          {#each nonMatchRules as rule, i}
+            <tr>
+              <td class="mono col-num" style="color:var(--fg-dim);"
+                >{String(i + 1).padStart(3, '0')}</td
+              >
+              <td>
+                <span class={getRuleBadgeClass(rule.type)}>
+                  {rule.type}
+                </span>
+              </td>
+              <td class="mono">{rule.payload}</td>
+              <td>
+                <span class={getTargetBadgeClass(rule.proxy)}>
+                  {rule.proxy}
+                </span>
+              </td>
+              <td style="position: relative; text-align: right;">
+                <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
+                {#if activeDropdownRule === rule}
+                  <div class="dropdown-menu">
+                    <button on:click={() => copyPayload(rule)}>
+                      {$t('rules.copy_payload')}
+                    </button>
+                    <button on:click={() => copyFullRule(rule)}>
+                      {$t('rules.copy_rule')}
+                    </button>
+                  </div>
+                {/if}
+              </td>
+            </tr>
           {:else}
             <tr>
               <td
@@ -414,8 +416,8 @@
               </td>
             </tr>
           {/each}
-          {#if getFilteredRules().some((r) => r.type.toUpperCase() === 'MATCH')}
-            {#each getFilteredRules().filter((r) => r.type.toUpperCase() === 'MATCH') as rule}
+          {#if matchRules.length > 0}
+            {#each matchRules as rule}
               <tr class="match-fallback-row">
                 <td class="mono col-num" style="color:var(--fg-dim);">—</td>
                 <td><span class={getRuleBadgeClass(rule.type)}>{rule.type}</span></td>
