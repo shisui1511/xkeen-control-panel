@@ -534,12 +534,9 @@
                 >
               {/if}
               {#if collapsible}
-                <ChevronDown
-                  size={14}
-                  class="chevron-icon{isCollapsed ? '' : ' rotated'}"
-                  color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
-                  aria-label={isCollapsed ? $t('proxies.expand_group') : $t('proxies.collapse_group')}
-                />
+                <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
+                  <ChevronDown size={14} color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'} />
+                </span>
               {/if}
             </div>
             <div
@@ -775,11 +772,12 @@
     display: none;
   }
 
-  :global(.chevron-icon) {
-    transition: transform var(--transition-fast);
+  .chevron-wrap {
+    display: inline-flex;
     flex-shrink: 0;
+    transition: transform var(--transition-fast);
   }
-  :global(.chevron-icon.rotated) {
+  .chevron-wrap.rotated {
     transform: rotate(180deg);
   }
 
