@@ -141,7 +141,7 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
     const proxySelect = page.locator('#sp-proxy');
 
     await expect(groupSelect.locator('option')).toContainText(['PROXY-GROUP-1']);
-    await expect(proxySelect.locator('option')).toContainText(['proxy-node-1', 'proxy-node-2', 'DIRECT']);
+    await expect(proxySelect.locator('option')).toContainText(['DIRECT', 'proxy-node-1', 'proxy-node-2']);
 
     // Select target options
     await groupSelect.selectOption('PROXY-GROUP-1');
