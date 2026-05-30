@@ -520,7 +520,8 @@
           {@const isCollapsed = collapsedGroups.has(group.name)}
           {@const collapsible = group.all.length > 8}
           {@const shownProxies = isCollapsed ? getCollapsedProxies(group) : group.all}
-          {@const ROW_HEIGHT_PX = 36}
+          {@const hiddenCount = isCollapsed ? group.all.length - shownProxies.length : 0}
+          {@const ROW_HEIGHT_PX = 44}
           <div class="group-card" style={isFiltered ? 'display:none;' : ''}>
             <div
               class="gc-head"
@@ -551,7 +552,7 @@
             <div
               class="gc-body"
               style="max-height: {isCollapsed
-                ? shownProxies.length * ROW_HEIGHT_PX + 28 + 'px'
+                ? shownProxies.length * ROW_HEIGHT_PX + (hiddenCount > 0 ? 30 : 4) + 'px'
                 : '2000px'};"
             >
               {#each shownProxies as proxyName}
@@ -622,7 +623,6 @@
                 </div>
               {/each}
               {#if isCollapsed}
-                {@const hiddenCount = group.all.length - shownProxies.length}
                 {#if hiddenCount > 0}
                   <div
                     class="more-hint"
@@ -645,10 +645,15 @@
 </div>
 
 <style>
+  /* Observatory: compact padding for this page only */
+  .stat-box {
+    padding: 12px 18px 14px;
+  }
+
   /* proxies: group cards grid */
   .group-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 16px;
   }
   .group-card {
@@ -695,7 +700,7 @@
     gap: 14px;
     align-items: center;
     padding: 4px 8px;
-    min-height: 36px; /* соответствует ROW_HEIGHT_PX в JS для расчёта max-height */
+    min-height: 36px;
     border-bottom: 1px solid var(--border-light);
   }
   .proxy-row:last-child {
@@ -706,13 +711,14 @@
   }
   .proxy-row.now {
     background: var(--accent-soft);
+    padding-left: 20px;
   }
   .proxy-row.now::before {
     content: '→';
     color: var(--accent);
     font-weight: 700;
     position: absolute;
-    left: -2px;
+    left: 4px;
     top: 50%;
     transform: translateY(-50%);
   }
