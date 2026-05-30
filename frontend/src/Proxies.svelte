@@ -674,10 +674,10 @@
     content: '→';
     color: var(--accent);
     font-weight: 700;
-    margin-right: -8px;
-    grid-column: 1;
     position: absolute;
-    transform: translateX(-16px);
+    left: -2px;
+    top: 50%;
+    transform: translateY(-50%);
   }
   .proxy-row .p-name {
     font-weight: 500;
