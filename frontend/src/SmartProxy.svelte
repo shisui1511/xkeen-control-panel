@@ -10,19 +10,15 @@
     name: string;
     enabled: boolean;
     mode: string;
-    days_of_week: number[];
-    start_time: string;
-    end_time: string;
+    schedule?: boolean[][];
+    days_of_week?: number[];
+    start_time?: string;
+    end_time?: string;
     group_name: string;
     proxy_name: string;
-    latency_threshold?: number;
-    consecutive_failures?: number;
-    fallback_proxy?: string;
-    round_robin_proxies?: string[];
-    current_proxy?: string;
-    current_failures?: number;
     last_applied: number;
     apply_count: number;
+    current_proxy?: string;
   }
 
   interface Status {
@@ -38,30 +34,28 @@
   let error = '';
   let activeDropdownId: string | null = null;
 
-  // Form state
+  // Clash proxies
+  let mihomoGroups: string[] = [];
+  let mihomoProxies: string[] = [];
+
+  // Form & Wizard state
   let showForm = false;
+  let currentStep = 1;
   let editingProfile: Profile | null = null;
+
   let formName = '';
   let formEnabled = true;
   let formMode = 'time-based';
-  let formDays: number[] = [1, 2, 3, 4, 5];
-  let formStartTime = '09:00';
-  let formEndTime = '18:00';
   let formGroupName = '';
   let formProxyName = '';
-  let formLatencyThreshold = 500;
-  let formConsecutiveFailures = 3;
-  let formFallbackProxy = '';
-  let formRoundRobinProxies = '';
+  let formSchedule: boolean[][] = Array.from({ length: 7 }, () => Array(24).fill(false));
+
+  // Click-and-drag drawing state
+  let isDrawing = false;
+  let drawMode = true; // true to draw, false to erase
 
   $: dayNames = $t('smartproxy.days').split(',');
   const allDays = [0, 1, 2, 3, 4, 5, 6];
-
-  $: modes = [
-    { value: 'time-based', label: $t('smartproxy.mode_time') },
-    { value: 'auto-failover', label: $t('smartproxy.mode_failover') },
-    { value: 'round-robin', label: $t('smartproxy.mode_roundrobin') }
-  ];
 
   async function fetchProfiles() {
     loading = true;
@@ -84,38 +78,106 @@
     }
   }
 
+  async function fetchClashProxies() {
+    try {
+      const res = await fetch('/api/mihomo/proxy/proxies');
+      if (res.ok) {
+        const data = await res.json();
+        const groups: string[] = [];
+        const proxies: string[] = [];
+        for (const [name, p] of Object.entries(data.proxies || {})) {
+          const type = (p as any).type;
+          if (type === 'Selector' || type === 'Fallback' || type === 'URLTest' || type === 'LoadBalance') {
+            groups.push(name);
+          } else if (type !== 'Direct' && type !== 'Reject') {
+            proxies.push(name);
+          }
+        }
+        mihomoGroups = groups.sort();
+        mihomoProxies = proxies.sort();
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
   function startCreate() {
+    fetchClashProxies();
+    currentStep = 1;
     showForm = true;
     editingProfile = null;
     formName = '';
     formEnabled = true;
     formMode = 'time-based';
-    formDays = [1, 2, 3, 4, 5];
-    formStartTime = '09:00';
-    formEndTime = '18:00';
+    formSchedule = Array.from({ length: 7 }, () => Array(24).fill(false));
     formGroupName = '';
     formProxyName = '';
-    formLatencyThreshold = 500;
-    formConsecutiveFailures = 3;
-    formFallbackProxy = '';
-    formRoundRobinProxies = '';
   }
 
   function startEdit(p: Profile) {
+    fetchClashProxies();
+    currentStep = 1;
     editingProfile = p;
     formName = p.name;
     formEnabled = p.enabled;
     formMode = p.mode || 'time-based';
-    formDays = [...(p.days_of_week || [])];
-    formStartTime = p.start_time || '09:00';
-    formEndTime = p.end_time || '18:00';
     formGroupName = p.group_name;
     formProxyName = p.proxy_name;
-    formLatencyThreshold = p.latency_threshold || 500;
-    formConsecutiveFailures = p.consecutive_failures || 3;
-    formFallbackProxy = p.fallback_proxy || '';
-    formRoundRobinProxies = p.round_robin_proxies ? p.round_robin_proxies.join('\n') : '';
+
+    // Load or convert schedule
+    if (p.schedule && p.schedule.length === 7) {
+      formSchedule = p.schedule.map(row => [...row]);
+    } else {
+      formSchedule = Array.from({ length: 7 }, () => Array(24).fill(false));
+      if (p.days_of_week && p.start_time && p.end_time) {
+        const startHour = parseInt(p.start_time.split(':')[0], 10);
+        const endHour = parseInt(p.end_time.split(':')[0], 10);
+        for (const day of p.days_of_week) {
+          for (let h = startHour; h <= endHour; h++) {
+            if (h >= 0 && h < 24) {
+              formSchedule[day][h] = true;
+            }
+          }
+        }
+      }
+    }
+
     showForm = true;
+  }
+
+  function createFromTemplate(templateName: string) {
+    startCreate();
+    formName = templateName === 'night'
+      ? $t('smartproxy.preset_night_title')
+      : templateName === 'workday'
+        ? $t('smartproxy.preset_workdays')
+        : $currentLang === 'ru' ? 'Круглосуточный прокси' : '24/7 Proxy';
+
+    formSchedule = Array.from({ length: 7 }, () => Array(24).fill(false));
+
+    if (templateName === 'night') {
+      const nightHours = [23, 0, 1, 2, 3, 4, 5, 6, 7];
+      for (let d = 0; d < 7; d++) {
+        for (const h of nightHours) {
+          formSchedule[d][h] = true;
+        }
+      }
+    } else if (templateName === 'workday') {
+      for (let d = 1; d <= 5; d++) {
+        for (let h = 9; h <= 17; h++) {
+          formSchedule[d][h] = true;
+        }
+      }
+    } else if (templateName === 'always') {
+      for (let d = 0; d < 7; d++) {
+        for (let h = 0; h < 24; h++) {
+          formSchedule[d][h] = true;
+        }
+      }
+    }
+
+    // Directly open target select step
+    currentStep = 2;
   }
 
   function cancelEdit() {
@@ -123,35 +185,73 @@
     editingProfile = null;
   }
 
-  function toggleDay(day: number) {
-    if (formDays.includes(day)) {
-      formDays = formDays.filter((d) => d !== day);
-    } else {
-      formDays = [...formDays, day].sort();
+  function nextStep() {
+    if (currentStep < 3) currentStep++;
+  }
+
+  function prevStep() {
+    if (currentStep > 1) currentStep--;
+  }
+
+  // Preset functions
+  function presetFillAll() {
+    for (let d = 0; d < 7; d++) {
+      formSchedule[d].fill(true);
+    }
+    formSchedule = [...formSchedule];
+  }
+
+  function presetClearAll() {
+    for (let d = 0; d < 7; d++) {
+      formSchedule[d].fill(false);
+    }
+    formSchedule = [...formSchedule];
+  }
+
+  function presetWorkdays() {
+    presetClearAll();
+    for (let d = 1; d <= 5; d++) {
+      for (let h = 9; h <= 17; h++) {
+        formSchedule[d][h] = true;
+      }
+    }
+    formSchedule = [...formSchedule];
+  }
+
+  // Click-and-drag handlers
+  function handleCellMouseDown(day: number, hour: number) {
+    isDrawing = true;
+    drawMode = !formSchedule[day][hour];
+    formSchedule[day][hour] = drawMode;
+    formSchedule = [...formSchedule];
+  }
+
+  function handleCellMouseEnter(day: number, hour: number) {
+    if (isDrawing) {
+      formSchedule[day][hour] = drawMode;
+      formSchedule = [...formSchedule];
     }
   }
 
+  function handleMouseUp() {
+    isDrawing = false;
+  }
+
   async function saveProfile() {
+    if (!formName || !formGroupName || !formProxyName) {
+      error = $t('smartproxy.save_error', { message: $currentLang === 'ru' ? 'Заполните обязательные поля' : 'Fill required fields' });
+      return;
+    }
+
     const csrfToken = localStorage.getItem('csrf_token');
     const payload: any = {
       name: formName,
       enabled: formEnabled,
       mode: formMode,
       group_name: formGroupName,
-      proxy_name: formProxyName
+      proxy_name: formProxyName,
+      schedule: formSchedule
     };
-
-    if (formMode === 'time-based') {
-      payload.days_of_week = formDays;
-      payload.start_time = formStartTime;
-      payload.end_time = formEndTime;
-    } else if (formMode === 'auto-failover') {
-      payload.latency_threshold = formLatencyThreshold;
-      payload.consecutive_failures = formConsecutiveFailures;
-      payload.fallback_proxy = formFallbackProxy;
-    } else if (formMode === 'round-robin') {
-      payload.round_robin_proxies = formRoundRobinProxies.split('\n').filter((s) => s.trim());
-    }
 
     const url = editingProfile
       ? `/api/smart-proxy/profiles/update?id=${editingProfile.id}`
@@ -230,16 +330,24 @@
     }
   }
 
+  // Count active slots in schedule
+  function countActiveSlots(schedule?: boolean[][]): number {
+    if (!schedule) return 0;
+    return schedule.reduce((sum, row) => sum + row.filter(Boolean).length, 0);
+  }
+
   onMount(() => {
     fetchProfiles();
     fetchStatus();
     const interval = setInterval(fetchStatus, 30000);
     window.addEventListener('click', handleClickOutside);
     window.addEventListener('keydown', handleKeydown);
+    window.addEventListener('mouseup', handleMouseUp);
     return () => {
       clearInterval(interval);
       window.removeEventListener('click', handleClickOutside);
       window.removeEventListener('keydown', handleKeydown);
+      window.removeEventListener('mouseup', handleMouseUp);
     };
   });
 </script>
@@ -254,7 +362,10 @@
       <h1>{$t('smartproxy.title')}</h1>
       <p class="sub">{$t('smartproxy.subtitle')}</p>
     </div>
-    <div class="ph-actions">
+    <div class="ph-actions" style="display:flex; gap:10px;">
+      <button class="btn btn-secondary" on:click={() => createFromTemplate('always')}>
+        {$currentLang === 'ru' ? 'Из шаблона' : 'From Template'}
+      </button>
       <button class="btn btn-primary" on:click={startCreate}>
         <svg
           width="14"
@@ -302,23 +413,66 @@
 
   <!-- Profile List -->
   {#if profiles.length === 0}
-    <div
-      class="card text-center"
-      style="padding: 3rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;"
-    >
-      <p style="color: var(--fg-secondary); margin: 0;">{$t('smartproxy.no_profiles')}</p>
-      <button class="btn btn-primary" on:click={startCreate}>
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
-        >
-        {$t('smartproxy.add')}
-      </button>
+    <!-- Templates Empty State -->
+    <div class="empty-state-container">
+      <div class="empty-state-head">
+        <h2>{$t('smartproxy.no_profiles_title')}</h2>
+        <p>{$t('smartproxy.no_profiles_desc')}</p>
+      </div>
+
+      <div class="template-cards-grid">
+        <!-- Card 1: Night VPN -->
+        <div class="card template-card" on:click={() => createFromTemplate('night')} role="button" tabindex="0">
+          <div class="template-icon text-accent">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+          </div>
+          <h3>{$t('smartproxy.preset_night_title')}</h3>
+          <p>{$t('smartproxy.preset_night_desc')}</p>
+          <button class="btn btn-secondary btn-sm" style="margin-top:auto;">
+            {$currentLang === 'ru' ? 'Выбрать' : 'Select'}
+          </button>
+        </div>
+
+        <!-- Card 2: Workdays -->
+        <div class="card template-card" on:click={() => createFromTemplate('workday')} role="button" tabindex="0">
+          <div class="template-icon text-success">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+              <line x1="16" y1="2" x2="16" y2="6"/>
+              <line x1="8" y1="2" x2="8" y2="6"/>
+              <line x1="3" y1="10" x2="21" y2="10"/>
+            </svg>
+          </div>
+          <h3>{$t('smartproxy.preset_workdays')}</h3>
+          <p>{$currentLang === 'ru' ? 'VPN активен в рабочие часы с понедельника по пятницу (09:00 - 18:00)' : 'VPN active during working hours Mon-Fri (09:00 - 18:00)'}</p>
+          <button class="btn btn-secondary btn-sm" style="margin-top:auto;">
+            {$currentLang === 'ru' ? 'Выбрать' : 'Select'}
+          </button>
+        </div>
+
+        <!-- Card 3: 24/7 -->
+        <div class="card template-card" on:click={() => createFromTemplate('always')} role="button" tabindex="0">
+          <div class="template-icon text-warning">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </div>
+          <h3>{$currentLang === 'ru' ? 'Круглосуточный VPN' : '24/7 VPN'}</h3>
+          <p>{$currentLang === 'ru' ? 'VPN-прокси работает непрерывно 24 часа в сутки, 7 дней в неделю' : 'VPN proxy runs continuously 24 hours a day, 7 days a week'}</p>
+          <button class="btn btn-secondary btn-sm" style="margin-top:auto;">
+            {$currentLang === 'ru' ? 'Выбрать' : 'Select'}
+          </button>
+        </div>
+      </div>
+
+      <div style="margin-top:24px; text-align:center;">
+        <button class="btn btn-primary" on:click={startCreate}>
+          {$currentLang === 'ru' ? 'Создать вручную' : 'Create Manually'}
+        </button>
+      </div>
     </div>
   {:else}
     <div class="profile-grid">
@@ -332,21 +486,9 @@
               <span class="badge sp-mode-badge sp-mode-disabled">
                 {$currentLang === 'ru' ? 'ВЫКЛ' : 'DISABLED'}
               </span>
-            {:else if p.mode === 'time-based'}
-              <span class="badge sp-mode-badge sp-mode-scheduled">
-                {$t('smartproxy.mode_time')}
-              </span>
-            {:else if p.mode === 'auto-failover'}
-              <span class="badge sp-mode-badge sp-mode-always-on">
-                {$t('smartproxy.mode_failover')}
-              </span>
-            {:else if p.mode === 'round-robin'}
-              <span class="badge sp-mode-badge sp-mode-roundrobin">
-                {$t('smartproxy.mode_roundrobin')}
-              </span>
             {:else}
               <span class="badge sp-mode-badge sp-mode-scheduled">
-                {p.mode}
+                {$t('smartproxy.mode_time')}
               </span>
             {/if}
 
@@ -393,64 +535,19 @@
             </div>
           </div>
 
-          {#if p.mode === 'time-based'}
-            <div class="field-row">
-              <div>
-                <div class="lbl">{$currentLang === 'ru' ? 'Расписание' : 'Schedule'}</div>
-                <div class="desc">{p.days_of_week?.map((d) => dayNames[d]).join(', ')}</div>
-              </div>
-              <div class="ctrl mono" style="font-size:12px; color:var(--fg-primary);">
-                {p.start_time} – {p.end_time}
-              </div>
-            </div>
-          {:else if p.mode === 'auto-failover'}
-            <div class="field-row">
-              <div>
-                <div class="lbl">
-                  {$t('smartproxy.latency_threshold')} / {$t('smartproxy.consecutive_failures')}
-                </div>
-                <div class="desc">
-                  {$t('smartproxy.fallback_label')}: {p.fallback_proxy || 'DIRECT'}
-                </div>
-              </div>
-              <div class="ctrl mono" style="font-size:12px; color:var(--fg-primary);">
-                {p.latency_threshold}ms / {p.consecutive_failures}
-                {$currentLang === 'ru' ? 'раз' : 'times'}
+          <div class="field-row">
+            <div>
+              <div class="lbl">{$currentLang === 'ru' ? 'Слоты расписания' : 'Schedule Slots'}</div>
+              <div class="desc">
+                {$currentLang === 'ru' 
+                  ? `Активно часов в неделю: ${countActiveSlots(p.schedule)}`
+                  : `Active hours weekly: ${countActiveSlots(p.schedule)}`}
               </div>
             </div>
-
-            {#if p.current_failures && p.current_failures > 0}
-              <div class="field-row alert-row">
-                <div>
-                  <div class="lbl" style="color: var(--warning);">
-                    {$t('smartproxy.failures_label')}
-                  </div>
-                </div>
-                <div
-                  class="ctrl mono"
-                  style="color: var(--warning); font-weight: bold; font-size:12px;"
-                >
-                  {p.current_failures} / {p.consecutive_failures}
-                </div>
-              </div>
-            {/if}
-          {:else if p.mode === 'round-robin'}
-            <div class="field-row">
-              <div>
-                <div class="lbl">{$t('smartproxy.round_robin_proxies')}</div>
-                <div class="desc">
-                  {(p.round_robin_proxies || []).length}
-                  {$t('smartproxy.proxies_label')}
-                </div>
-              </div>
-              <div
-                class="ctrl mono"
-                style="font-size:11px; max-width: 200px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color:var(--fg-primary);"
-              >
-                {(p.round_robin_proxies || []).join(', ')}
-              </div>
+            <div class="ctrl mono" style="font-size:12px; color:var(--fg-primary);">
+              {countActiveSlots(p.schedule)} / 168 {$currentLang === 'ru' ? 'ч' : 'h'}
             </div>
-          {/if}
+          </div>
 
           {#if p.apply_count > 0}
             <div class="field-row">
@@ -470,6 +567,7 @@
   {/if}
 </div>
 
+<!-- Add/Edit Modal (3-Step Wizard) -->
 {#if showForm}
   <div
     class="modal-overlay"
@@ -483,143 +581,174 @@
         <h2>{editingProfile ? $t('smartproxy.edit_profile') : $t('smartproxy.new_profile')}</h2>
         <button class="modal-close-btn" on:click={cancelEdit}>&times;</button>
       </div>
+
+      <!-- Step Indicators -->
+      <div class="wizard-steps-bar">
+        <div class="wizard-step-indicator" class:active={currentStep >= 1}>
+          <span class="step-num">1</span>
+          <span class="step-lbl">{$t('smartproxy.step_1')}</span>
+        </div>
+        <div class="wizard-step-line" class:active={currentStep >= 2}></div>
+        <div class="wizard-step-indicator" class:active={currentStep >= 2}>
+          <span class="step-num">2</span>
+          <span class="step-lbl">{$t('smartproxy.step_2')}</span>
+        </div>
+        <div class="wizard-step-line" class:active={currentStep >= 3}></div>
+        <div class="wizard-step-indicator" class:active={currentStep >= 3}>
+          <span class="step-num">3</span>
+          <span class="step-lbl">{$t('smartproxy.step_3')}</span>
+        </div>
+      </div>
+
       <div class="modal-card-body">
-        <div class="form-group">
-          <label for="sp-name" class="form-label">{$t('smartproxy.name')}</label>
-          <input
-            id="sp-name"
-            type="text"
-            class="input"
-            bind:value={formName}
-            placeholder={$t('smartproxy.name_placeholder')}
-          />
-        </div>
-
-        <div class="form-group">
-          <label for="sp-mode" class="form-label">{$t('smartproxy.mode')}</label>
-          <select id="sp-mode" class="input" bind:value={formMode}>
-            {#each modes as m}
-              <option value={m.value}>{m.label}</option>
-            {/each}
-          </select>
-        </div>
-
-        {#if formMode === 'time-based'}
+        <!-- STEP 1: Basic Info -->
+        {#if currentStep === 1}
           <div class="form-group">
-            <label for="sp-days" class="form-label">{$t('smartproxy.days_of_week')}</label>
-            <div class="day-selector" id="sp-days">
-              {#each allDays as day}
-                <button
-                  type="button"
-                  class="day-btn"
-                  class:selected={formDays.includes(day)}
-                  on:click={() => toggleDay(day)}
-                >
-                  {dayNames[day]}
-                </button>
-              {/each}
-            </div>
-          </div>
-
-          <div class="form-row">
-            <div class="form-group">
-              <label for="sp-start" class="form-label">{$t('smartproxy.from')}</label>
-              <input id="sp-start" type="time" class="input" bind:value={formStartTime} />
-            </div>
-            <div class="form-group">
-              <label for="sp-end" class="form-label">{$t('smartproxy.to')}</label>
-              <input id="sp-end" type="time" class="input" bind:value={formEndTime} />
-            </div>
-          </div>
-        {:else if formMode === 'auto-failover'}
-          <div class="form-row">
-            <div class="form-group">
-              <label for="sp-threshold" class="form-label"
-                >{$t('smartproxy.latency_threshold')} (ms)</label
-              >
-              <input
-                id="sp-threshold"
-                type="number"
-                class="input"
-                bind:value={formLatencyThreshold}
-                min="50"
-                max="5000"
-              />
-            </div>
-            <div class="form-group">
-              <label for="sp-failures" class="form-label"
-                >{$t('smartproxy.consecutive_failures')}</label
-              >
-              <input
-                id="sp-failures"
-                type="number"
-                class="input"
-                bind:value={formConsecutiveFailures}
-                min="1"
-                max="10"
-              />
-            </div>
-          </div>
-          <div class="form-group">
-            <label for="sp-fallback" class="form-label">{$t('smartproxy.fallback_proxy')}</label>
+            <label for="sp-name" class="form-label">{$t('smartproxy.name')} *</label>
             <input
-              id="sp-fallback"
+              id="sp-name"
               type="text"
               class="input"
-              bind:value={formFallbackProxy}
-              placeholder="DIRECT"
+              bind:value={formName}
+              placeholder={$t('smartproxy.name_placeholder')}
             />
           </div>
-        {:else if formMode === 'round-robin'}
+
           <div class="form-group">
-            <label for="sp-rr" class="form-label">{$t('smartproxy.round_robin_proxies')}</label>
-            <textarea
-              id="sp-rr"
-              class="input"
-              bind:value={formRoundRobinProxies}
-              rows="4"
-              placeholder="proxy1&#10;proxy2&#10;proxy3"
-              style="resize: vertical; font-family: var(--font-family-mono);"
-            ></textarea>
-            <p class="hint">{$t('smartproxy.round_robin_hint')}</p>
+            <label for="sp-mode" class="form-label">{$t('smartproxy.mode')}</label>
+            <select id="sp-mode" class="input" bind:value={formMode} disabled>
+              <option value="time-based">{$t('smartproxy.mode_time')}</option>
+            </select>
+            <p class="hint" style="margin-top:6px;">
+              {$currentLang === 'ru' 
+                ? 'Режим расписания переключает прокси на основе заданной недельной сетки.' 
+                : 'Schedule mode switches proxies based on the weekly grid setup.'}
+            </p>
+          </div>
+
+          <div class="form-group-checkbox" style="margin-top: 10px;">
+            <label class="toggle-switch">
+              <input type="checkbox" id="sp-enabled" bind:checked={formEnabled} />
+              <span class="toggle-slider"></span>
+            </label>
+            <label for="sp-enabled" class="checkbox-label">
+              {$currentLang === 'ru' ? 'Профиль активен' : 'Profile active'}
+            </label>
           </div>
         {/if}
 
-        <div class="form-group">
-          <label for="sp-group" class="form-label">{$t('smartproxy.proxy_group')}</label>
-          <input
-            id="sp-group"
-            type="text"
-            class="input"
-            bind:value={formGroupName}
-            placeholder={$t('smartproxy.proxy_group_placeholder')}
-          />
-        </div>
+        <!-- STEP 2: Targets Selection -->
+        {#if currentStep === 2}
+          <div class="form-group">
+            <label for="sp-group" class="form-label">{$t('smartproxy.proxy_group')} *</label>
+            {#if mihomoGroups.length > 0}
+              <select id="sp-group" class="input" bind:value={formGroupName}>
+                <option value="">-- {$currentLang === 'ru' ? 'Выбрать группу' : 'Select Group'} --</option>
+                {#each mihomoGroups as g}
+                  <option value={g}>{g}</option>
+                {/each}
+              </select>
+            {:else}
+              <input
+                id="sp-group"
+                type="text"
+                class="input"
+                bind:value={formGroupName}
+                placeholder={$t('smartproxy.proxy_group_placeholder')}
+              />
+            {/if}
+          </div>
 
-        <div class="form-group">
-          <label for="sp-proxy" class="form-label">{$t('smartproxy.proxy')}</label>
-          <input
-            id="sp-proxy"
-            type="text"
-            class="input"
-            bind:value={formProxyName}
-            placeholder={$t('smartproxy.proxy_placeholder')}
-          />
-        </div>
+          <div class="form-group">
+            <label for="sp-proxy" class="form-label">{$t('smartproxy.proxy')} *</label>
+            {#if mihomoProxies.length > 0}
+              <select id="sp-proxy" class="input" bind:value={formProxyName}>
+                <option value="">-- {$currentLang === 'ru' ? 'Выбрать прокси' : 'Select Proxy'} --</option>
+                <option value="DIRECT">DIRECT</option>
+                {#each mihomoProxies as p}
+                  <option value={p}>{p}</option>
+                {/each}
+              </select>
+            {:else}
+              <input
+                id="sp-proxy"
+                type="text"
+                class="input"
+                bind:value={formProxyName}
+                placeholder={$t('smartproxy.proxy_placeholder')}
+              />
+            {/if}
+          </div>
+        {/if}
 
-        <div class="form-group-checkbox">
-          <label class="toggle-switch">
-            <input type="checkbox" id="sp-enabled" bind:checked={formEnabled} />
-            <span class="toggle-slider"></span>
-          </label>
-          <label for="sp-enabled" class="checkbox-label"
-            >{$currentLang === 'ru' ? 'Активен' : 'Enabled'}</label
-          >
-        </div>
+        <!-- STEP 3: Grid Scheduler -->
+        {#if currentStep === 3}
+          <div class="grid-presets-toolbar">
+            <button type="button" class="btn btn-secondary btn-sm" on:click={presetFillAll}>
+              {$t('smartproxy.preset_fill')}
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" on:click={presetClearAll}>
+              {$t('smartproxy.preset_clear')}
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" on:click={presetWorkdays}>
+              {$t('smartproxy.preset_workdays')}
+            </button>
+          </div>
+
+          <p class="hint" style="margin-bottom:8px;">
+            {$currentLang === 'ru'
+              ? 'Зажмите мышь и ведите (Click-and-Drag), чтобы быстро рисовать или стирать интервалы.'
+              : 'Click and drag to easily paint or erase time intervals.'}
+          </p>
+
+          <!-- 7x24 Grid Container with thin scrollbar -->
+          <div class="grid-scrollbar-container">
+            <div class="schedule-grid-table">
+              <!-- Top Hour Headers -->
+              <div class="grid-row-header">
+                <div class="day-label-sticky header-cell"></div>
+                {#each Array(24) as _, h}
+                  <div class="hour-header-cell">{h.toString().padStart(2, '0')}</div>
+                {/each}
+              </div>
+
+              <!-- Grid Rows per Day -->
+              {#each allDays as d}
+                <div class="grid-row-day">
+                  <div class="day-label-sticky">{dayNames[d]}</div>
+                  {#each Array(24) as _, h}
+                    {@const isCellActive = formSchedule[d][h]}
+                    <div
+                      class="grid-cell"
+                      class:active={isCellActive}
+                      on:mousedown|preventDefault={() => handleCellMouseDown(d, h)}
+                      on:mouseenter={() => handleCellMouseEnter(d, h)}
+                      role="presentation"
+                    ></div>
+                  {/each}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       </div>
+
       <div class="modal-card-footer">
+        {#if currentStep > 1}
+          <button class="btn btn-secondary" on:click={prevStep} style="margin-right:auto;">
+            {$t('app.back')}
+          </button>
+        {/if}
         <button class="btn btn-secondary" on:click={cancelEdit}>{$t('app.cancel')}</button>
-        <button class="btn btn-primary" on:click={saveProfile}>{$t('app.save')}</button>
+        {#if currentStep < 3}
+          <button class="btn btn-primary" on:click={nextStep} disabled={currentStep === 2 && (!formGroupName || !formProxyName)}>
+            {$t('app.continue')}
+          </button>
+        {:else}
+          <button class="btn btn-primary" on:click={saveProfile}>
+            {$t('app.save')}
+          </button>
+        {/if}
       </div>
     </div>
   </div>
@@ -659,44 +788,6 @@
     font-weight: 700;
     color: var(--fg-primary);
     font-size: 14px;
-  }
-
-  .alert-row {
-    background: rgba(240, 180, 80, 0.05);
-  }
-
-  .day-selector {
-    display: flex;
-    gap: 4px;
-    flex-wrap: wrap;
-    margin-top: 4px;
-  }
-
-  .day-btn {
-    padding: 8px 12px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-size: 12px;
-    color: var(--fg-secondary);
-    transition: all var(--transition-fast);
-  }
-
-  .day-btn:hover {
-    background: var(--hover);
-  }
-
-  .day-btn.selected {
-    background: var(--accent-soft);
-    color: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
   }
 
   .hint {
@@ -778,7 +869,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     width: 100%;
-    max-width: 520px;
+    max-width: 680px; /* Slightly wider modal for beautiful grid scroll */
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
     overflow: hidden;
     display: flex;
@@ -857,6 +948,230 @@
     gap: 12px;
   }
 
+  /* Wizard Step indicators styling */
+  .wizard-steps-bar {
+    display: flex;
+    align-items: center;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    gap: 10px;
+  }
+
+  .wizard-step-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    opacity: 0.45;
+    transition: opacity 0.25s ease;
+  }
+
+  .wizard-step-indicator.active {
+    opacity: 1;
+  }
+
+  .wizard-step-indicator .step-num {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .wizard-step-indicator .step-lbl {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--fg-primary);
+  }
+
+  .wizard-step-line {
+    flex-grow: 1;
+    height: 2px;
+    background: var(--border);
+    opacity: 0.5;
+  }
+
+  .wizard-step-line.active {
+    background: var(--accent);
+    opacity: 0.8;
+  }
+
+  /* 7x24 grid schedule styling */
+  .grid-presets-toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .grid-scrollbar-container {
+    overflow-x: auto;
+    max-width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    scrollbar-width: thin;
+  }
+
+  .schedule-grid-table {
+    display: flex;
+    flex-direction: column;
+    min-width: 600px;
+  }
+
+  .grid-row-header, .grid-row-day {
+    display: grid;
+    grid-template-columns: 80px repeat(24, 1fr);
+  }
+
+  .day-label-sticky {
+    position: sticky;
+    left: 0;
+    background: var(--bg-card);
+    padding: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--fg-secondary);
+    border-right: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    z-index: 2;
+  }
+
+  .day-label-sticky.header-cell {
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .hour-header-cell {
+    padding: 6px 4px;
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+    color: var(--fg-faint);
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .grid-cell {
+    height: 32px;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    cursor: crosshair;
+    background: rgba(255, 255, 255, 0.02);
+    transition: background var(--transition-fast);
+  }
+
+  .grid-cell:hover {
+    background: rgba(41, 194, 240, 0.15);
+  }
+
+  .grid-cell.active {
+    background: var(--accent);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+  }
+
+  .grid-cell.active:hover {
+    background: var(--accent-hover);
+  }
+
+  .grid-row-day:last-child .grid-cell {
+    border-bottom: none;
+  }
+
+  .grid-row-day .grid-cell:last-child {
+    border-right: none;
+  }
+
+  /* Empty state template cards design */
+  .empty-state-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 0;
+  }
+
+  .empty-state-head {
+    text-align: center;
+    margin-bottom: 32px;
+    max-width: 480px;
+  }
+
+  .empty-state-head h2 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--fg-primary);
+    margin-bottom: 8px;
+  }
+
+  .empty-state-head p {
+    font-size: 13px;
+    color: var(--fg-dim);
+    line-height: 1.5;
+  }
+
+  .template-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    width: 100%;
+    max-width: 820px;
+  }
+
+  @media (max-width: 768px) {
+    .template-cards-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .template-card {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--transition-fast), transform var(--transition-fast);
+  }
+
+  .template-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+
+  .template-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .template-card h3 {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--fg-primary);
+    margin: 0;
+  }
+
+  .template-card p {
+    font-size: 12px;
+    color: var(--fg-dim);
+    line-height: 1.4;
+    margin: 0;
+  }
+
+  .text-accent { color: var(--accent); }
+  .text-success { color: #10b981; }
+  .text-warning { color: #f59e0b; }
+
   /* Mode color badges */
   :global(.sp-mode-badge) {
     font-size: 10.5px;
@@ -866,21 +1181,13 @@
     padding: 2px 7px;
     border-radius: 4px;
   }
-  :global(.sp-mode-always-on) {
-    background: rgba(16, 185, 129, 0.12);
-    color: #10b981;
-    border: 1px solid rgba(16, 185, 129, 0.25);
-  }
+
   :global(.sp-mode-scheduled) {
     background: rgba(41, 194, 240, 0.1);
     color: var(--accent);
     border: 1px solid rgba(41, 194, 240, 0.25);
   }
-  :global(.sp-mode-roundrobin) {
-    background: rgba(156, 163, 175, 0.1);
-    color: #9ca3af;
-    border: 1px solid rgba(156, 163, 175, 0.22);
-  }
+
   :global(.sp-mode-disabled) {
     background: rgba(239, 68, 68, 0.1);
     color: #ef4444;
