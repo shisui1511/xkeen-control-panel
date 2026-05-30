@@ -91,25 +91,25 @@
 
   async function updateAllProviders() {
     updatingAll = true;
-    let failCount = 0;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
+      const beforeTimestamps = new Map(ruleProviders.map(p => [p.name, p.updatedAt]));
       for (const provider of ruleProviders) {
-        const res = await fetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(provider.name)}`, {
+        await fetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(provider.name)}`, {
           method: 'PUT',
-          headers: {
-            'X-CSRF-Token': csrfToken || ''
-          }
+          headers: { 'X-CSRF-Token': csrfToken || '' }
         });
-        if (!res.ok) {
-          failCount = failCount + 1;
-          showToast('error', `${$t('rules.update')} ${provider.name}: failed`);
-        }
-      }
-      if (failCount === 0) {
-        showToast('success', $t('rules.update_all_success'));
       }
       await fetchRuleProviders();
+      // Mihomo's PUT is async — determine success by comparing actual updatedAt timestamps
+      const failed = ruleProviders.filter(p => p.updatedAt === beforeTimestamps.get(p.name));
+      if (failed.length === 0) {
+        showToast('success', $t('rules.update_all_success'));
+      } else {
+        for (const p of failed) {
+          showToast('error', `${$t('rules.update')} ${p.name}: failed`);
+        }
+      }
     } catch (e: any) {
       showToast('error', e.message);
     } finally {
