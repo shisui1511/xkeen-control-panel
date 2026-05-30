@@ -91,6 +91,7 @@
 
   async function updateAllProviders() {
     updatingAll = true;
+    let failCount = 0;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       for (const provider of ruleProviders) {
@@ -101,10 +102,13 @@
           }
         });
         if (!res.ok) {
-          showToast('error', `Failed: ${provider.name}`);
+          failCount = failCount + 1;
+          showToast('error', `${$t('rules.update')} ${provider.name}: failed`);
         }
       }
-      showToast('success', $t('rules.update_all_success'));
+      if (failCount === 0) {
+        showToast('success', $t('rules.update_all_success'));
+      }
       await fetchRuleProviders();
     } catch (e: any) {
       showToast('error', e.message);
