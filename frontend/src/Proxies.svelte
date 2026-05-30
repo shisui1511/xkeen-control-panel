@@ -302,6 +302,17 @@
     return labels[type] || type;
   }
 
+  function nodesLabel(count: number): string {
+    if ($currentLang === 'ru') {
+      const m10 = count % 10;
+      const m100 = count % 100;
+      if (m10 === 1 && m100 !== 11) return `${count} узел`;
+      if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return `${count} узла`;
+      return `${count} узлов`;
+    }
+    return count === 1 ? `1 node` : `${count} nodes`;
+  }
+
   function getProxyDelay(proxyName: string): number | undefined {
     const proxy = proxies[proxyName];
     if (!proxy) return undefined;
@@ -516,9 +527,7 @@
               <span class="type">{getGroupTypeLabel(group.type)}</span>
               {#if group.type !== 'Fallback'}
                 <span style="margin-left:auto;" class="status-badge active">
-                  {$currentLang === 'ru'
-                    ? `${group.all.length} узлов`
-                    : `${group.all.length} nodes`}
+                  {nodesLabel(group.all.length)}
                 </span>
               {:else}
                 <span style="margin-left:auto;" class="status-badge active">{group.now || '—'}</span
