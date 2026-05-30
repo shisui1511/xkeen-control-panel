@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestSmartProxyService_New(t *testing.T) {
@@ -28,15 +29,19 @@ func TestSmartProxyService_Add(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewSmartProxyService(tmp, "http://localhost:9090")
 
+	schedule := make([][]bool, 7)
+	for i := range schedule {
+		schedule[i] = make([]bool, 24)
+		schedule[i][12] = true // Active at 12:00
+	}
+
 	profile := Profile{
-		Name:       "Test Profile",
-		Enabled:    true,
-		Mode:       ModeTimeBased,
-		GroupName:  "proxy-group",
-		ProxyName:  "proxy1",
-		StartTime:  "08:00",
-		EndTime:    "20:00",
-		DaysOfWeek: []int{1, 2, 3, 4, 5},
+		Name:      "Test Profile",
+		Enabled:   true,
+		Mode:      ModeTimeBased,
+		GroupName: "proxy-group",
+		ProxyName: "proxy1",
+		Schedule:  schedule,
 	}
 
 	err := svc.Add(&profile)
@@ -54,13 +59,16 @@ func TestSmartProxyService_Add(t *testing.T) {
 	if profiles[0].Mode != ModeTimeBased {
 		t.Fatalf("expected mode 'time-based', got %s", profiles[0].Mode)
 	}
+	if !profiles[0].Schedule[0][12] {
+		t.Fatal("expected schedule at [0][12] to be true")
+	}
 }
 
 func TestSmartProxyService_Delete(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewSmartProxyService(tmp, "http://localhost:9090")
 
-	profile := Profile{Name: "Delete Me", Enabled: true, Mode: ModeFailover}
+	profile := Profile{Name: "Delete Me", Enabled: true, Mode: ModeTimeBased}
 	err := svc.Add(&profile)
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
@@ -100,7 +108,7 @@ func TestSmartProxyService_Update(t *testing.T) {
 	updated := Profile{
 		Name:    "New Name",
 		Enabled: false,
-		Mode:    ModeRoundRobin,
+		Mode:    ModeTimeBased,
 	}
 
 	err = svc.Update(profiles[0].ID, &updated)
@@ -121,7 +129,7 @@ func TestSmartProxyService_Persistence(t *testing.T) {
 	tmp := t.TempDir()
 
 	svc1 := NewSmartProxyService(tmp, "http://localhost:9090")
-	err := svc1.Add(&Profile{Name: "Persistent Profile", Enabled: true, Mode: ModeGeo})
+	err := svc1.Add(&Profile{Name: "Persistent Profile", Enabled: true, Mode: ModeTimeBased})
 	if err != nil {
 		t.Fatalf("Add failed: %v", err)
 	}
@@ -136,7 +144,6 @@ func TestSmartProxyService_Persistence(t *testing.T) {
 	}
 }
 
-// TestSmartProxyGet_ReturnsCopy (T007): modifying the returned copy must not affect the original.
 func TestSmartProxyGet_ReturnsCopy(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewSmartProxyService(tmp, "http://localhost:9090")
@@ -169,83 +176,26 @@ func TestSmartProxyGet_ReturnsCopy(t *testing.T) {
 	}
 }
 
-// --- Pure-function tests (frozen clock) ---
+func TestSmartProxyService_2DScheduling(t *testing.T) {
+	var appliedGroup, appliedProxy string
+	var applyCount int
 
-// TestIsDayMatch verifies day-of-week matching with and without a schedule.
-func TestIsDayMatch(t *testing.T) {
-	tests := []struct {
-		name string
-		days []int
-		day  int
-		want bool
-	}{
-		{"empty list matches all", []int{}, 3, true},
-		{"day in list", []int{1, 2, 3}, 2, true},
-		{"day not in list", []int{1, 2, 3}, 5, false},
-		{"sunday (0)", []int{0}, 0, true},
-		{"saturday (6)", []int{6}, 6, true},
-		{"single day miss", []int{4}, 3, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isDayMatch(tc.days, tc.day); got != tc.want {
-				t.Errorf("isDayMatch(%v, %d) = %v, want %v", tc.days, tc.day, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestIsTimeInRange covers normal ranges, midnight-crossing ranges, and boundary values.
-func TestIsTimeInRange(t *testing.T) {
-	tests := []struct {
-		name    string
-		start   string
-		end     string
-		current string
-		want    bool
-	}{
-		// Normal range
-		{"inside normal range", "08:00", "20:00", "12:00", true},
-		{"at start of range", "08:00", "20:00", "08:00", true},
-		{"at end of range", "08:00", "20:00", "20:00", true},
-		{"before start", "08:00", "20:00", "07:59", false},
-		{"after end", "08:00", "20:00", "20:01", false},
-		// Midnight-crossing range (22:00–06:00)
-		{"midnight-crossing: after start", "22:00", "06:00", "23:00", true},
-		{"midnight-crossing: before end", "22:00", "06:00", "05:00", true},
-		{"midnight-crossing: at start", "22:00", "06:00", "22:00", true},
-		{"midnight-crossing: at end", "22:00", "06:00", "06:00", true},
-		{"midnight-crossing: middle of day (outside)", "22:00", "06:00", "14:00", false},
-		{"midnight-crossing: just before start", "22:00", "06:00", "21:59", false},
-		{"midnight-crossing: just after end", "22:00", "06:00", "06:01", false},
-		// Full-day range
-		{"full day start=end", "00:00", "23:59", "12:00", true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isTimeInRange(tc.start, tc.end, tc.current); got != tc.want {
-				t.Errorf("isTimeInRange(%q, %q, %q) = %v, want %v",
-					tc.start, tc.end, tc.current, got, tc.want)
-			}
-		})
-	}
-}
-
-// --- Failover recovery test via httptest ---
-
-// TestEvaluateFailover_Recovery verifies that when the primary proxy recovers
-// (delay <= threshold), the service switches back from the fallback proxy.
-func TestEvaluateFailover_Recovery(t *testing.T) {
-	// Mock Mihomo server: delay endpoint returns 50ms, PUT is a no-op.
+	// Mock Mihomo server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/proxies/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			// delay endpoint
-			_ = json.NewEncoder(w).Encode(map[string]int{"delay": 50})
+		if r.Method == http.MethodPut {
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				appliedProxy = body["name"]
+				// Extract group from path /proxies/{group}
+				parts := r.URL.Path
+				appliedGroup = parts[len("/proxies/"):]
+				applyCount++
+			}
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		// PUT — proxy switch
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusOK)
 	})
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
@@ -253,86 +203,118 @@ func TestEvaluateFailover_Recovery(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewSmartProxyService(tmp, ts.URL)
 
+	// Create 2D schedule: enable the current day & hour
+	now := time.Now()
+	day := int(now.Weekday())
+	hour := now.Hour()
+
+	schedule := make([][]bool, 7)
+	for i := range schedule {
+		schedule[i] = make([]bool, 24)
+	}
+	schedule[day][hour] = true // active right now
+
 	profile := Profile{
-		Name:                "FailoverTest",
-		Enabled:             true,
-		Mode:                ModeFailover,
-		GroupName:           "proxy-group",
-		ProxyName:           "primary",
-		FallbackProxy:       "fallback",
-		LatencyThreshold:    200,
-		ConsecutiveFailures: 2,
-		CurrentProxy:        "fallback", // simulating we are already on fallback
+		Name:      "Active Profile",
+		Enabled:   true,
+		Mode:      ModeTimeBased,
+		GroupName: "my-group",
+		ProxyName: "my-proxy",
+		Schedule:  schedule,
 	}
+
 	if err := svc.Add(&profile); err != nil {
-		t.Fatalf("Add: %v", err)
+		t.Fatalf("Add active profile failed: %v", err)
 	}
 
-	id := svc.List()[0].ID
+	// Run evaluateProfiles to trigger scheduler logic
+	svc.evaluateProfiles()
 
-	// Run evaluateFailover once — primary is healthy (50ms <= 200ms threshold)
-	p := svc.List()[0]
-	svc.evaluateFailover(&p)
+	// Verify Mihomo was called
+	if appliedGroup != "my-group" || appliedProxy != "my-proxy" {
+		t.Fatalf("Expected proxy my-proxy applied to my-group, got group: %s, proxy: %s", appliedGroup, appliedProxy)
+	}
 
-	// CurrentProxy should be reset (primary recovered)
-	updated := svc.Get(id)
-	if updated == nil {
-		t.Fatal("Get returned nil after evaluateFailover")
+	// Run it again — should not reapply since LastApplied is recent (< 5 min)
+	svc.evaluateProfiles()
+	if applyCount != 1 {
+		t.Fatalf("Expected apply count to be 1, got %d", applyCount)
 	}
-	if updated.CurrentProxy != "" {
-		t.Errorf("expected CurrentProxy to be cleared after recovery, got %q", updated.CurrentProxy)
+
+	// Now check CurrentStatus
+	status := svc.CurrentStatus()
+	activeList := status["active"].([]Profile)
+	if len(activeList) != 1 {
+		t.Fatalf("Expected 1 active profile, got %d", len(activeList))
 	}
-	if updated.CurrentFailures != 0 {
-		t.Errorf("expected CurrentFailures=0 after recovery, got %d", updated.CurrentFailures)
+	if activeList[0].Name != "Active Profile" {
+		t.Fatalf("Expected active profile Name 'Active Profile', got %s", activeList[0].Name)
+	}
+
+	// Disable profile and verify it is not evaluated/active
+	if err := svc.SetEnabled(profile.ID, false); err != nil {
+		t.Fatalf("SetEnabled failed: %v", err)
+	}
+
+	statusInactive := svc.CurrentStatus()
+	activeListInactive := statusInactive["active"].([]Profile)
+	if len(activeListInactive) != 0 {
+		t.Fatalf("Expected 0 active profiles after disable, got %d", len(activeListInactive))
 	}
 }
 
-// TestEvaluateFailover_Failover verifies that consecutive failures trigger a switch to the fallback proxy.
-func TestEvaluateFailover_Failover(t *testing.T) {
-	// Mock Mihomo: delay returns 9999ms (above threshold), PUT accepted.
-	mux := http.NewServeMux()
-	mux.HandleFunc("/proxies/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			_ = json.NewEncoder(w).Encode(map[string]int{"delay": 9999})
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-
+func TestSmartProxyService_2DScheduling_NextStatus(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewSmartProxyService(tmp, ts.URL)
+	svc := NewSmartProxyService(tmp, "http://localhost:9090")
+
+	now := time.Now()
+	day := int(now.Weekday())
+	nextHour := (now.Hour() + 1) % 24
+
+	schedule := make([][]bool, 7)
+	for i := range schedule {
+		schedule[i] = make([]bool, 24)
+	}
+	// Make it active ONLY in the next hour (if nextHour is 0, it means tomorrow, but that's fine for testing the logic)
+	schedule[day][nextHour] = true
 
 	profile := Profile{
-		Name:                "FailoverTrigger",
-		Enabled:             true,
-		Mode:                ModeFailover,
-		GroupName:           "proxy-group",
-		ProxyName:           "primary",
-		FallbackProxy:       "fallback",
-		LatencyThreshold:    200,
-		ConsecutiveFailures: 2,
+		Name:      "Next Hour Profile",
+		Enabled:   true,
+		Mode:      ModeTimeBased,
+		GroupName: "my-group",
+		ProxyName: "my-proxy",
+		Schedule:  schedule,
 	}
+
 	if err := svc.Add(&profile); err != nil {
-		t.Fatalf("Add: %v", err)
+		t.Fatalf("Add profile failed: %v", err)
 	}
 
-	id := svc.List()[0].ID
+	status := svc.CurrentStatus()
+	activeList := status["active"].([]Profile)
+	nextList := status["next"].([]Profile)
 
-	// First failure — not yet at threshold
-	p := svc.List()[0]
-	svc.evaluateFailover(&p)
-	after1 := svc.Get(id)
-	if after1.CurrentProxy != "" {
-		t.Errorf("after 1 failure: expected no failover yet, got CurrentProxy=%q", after1.CurrentProxy)
+	if len(activeList) != 0 {
+		t.Fatalf("Expected 0 active profiles, got %d", len(activeList))
 	}
 
-	// Second failure — should trigger failover
-	p = svc.List()[0]
-	svc.evaluateFailover(&p)
-	after2 := svc.Get(id)
-	if after2.CurrentProxy != "fallback" {
-		t.Errorf("after 2 failures: expected CurrentProxy=%q, got %q", "fallback", after2.CurrentProxy)
+	// If nextHour > now.Hour(), it should be in the nextList
+	if nextHour > now.Hour() {
+		if len(nextList) != 1 {
+			t.Fatalf("Expected 1 next profile, got %d", len(nextList))
+		}
+		if nextList[0].Name != "Next Hour Profile" {
+			t.Fatalf("Expected next profile Name 'Next Hour Profile', got %s", nextList[0].Name)
+		}
 	}
+}
+
+func TestSmartProxyService_StartStop(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSmartProxyService(tmp, "http://localhost:9090")
+	svc.Start()
+	// Let it run briefly
+	time.Sleep(10 * time.Millisecond)
+	svc.Stop()
 }
