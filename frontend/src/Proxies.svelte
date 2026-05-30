@@ -59,7 +59,7 @@
   let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let collapsedGroups = new Set<string>();
   let filterQuery = '';
-  let initializedCollapse = false;
+  let seenGroups = new Set<string>();
   const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
 
   function safeTimeout(fn: () => void | Promise<void>, ms: number): ReturnType<typeof setTimeout> {
@@ -89,12 +89,20 @@
     return proxy.alive ?? false;
   }
 
-  function initCollapsed() {
-    collapsedGroups = new Set(
-      groups.filter((g) => g.all.length > 8).map((g) => g.name)
-    );
+  function updateCollapsed() {
+    const current = new Set(groups.map((g) => g.name));
+    // Удалять устаревшие записи для исчезнувших групп
+    for (const name of [...collapsedGroups]) {
+      if (!current.has(name)) collapsedGroups.delete(name);
+    }
+    // Авто-сворачивать новые большие группы
+    for (const g of groups) {
+      if (g.all.length > 8 && !seenGroups.has(g.name)) {
+        collapsedGroups.add(g.name);
+      }
+      seenGroups.add(g.name);
+    }
     collapsedGroups = collapsedGroups;
-    initializedCollapse = true;
   }
 
   function toggleCollapse(groupName: string) {
@@ -200,9 +208,7 @@
           proxies[name].history = data.proxies[name].history;
         }
       });
-      if (!initializedCollapse) {
-        initCollapsed();
-      }
+      updateCollapsed();
     } catch (e: any) {
       error = e.message;
     } finally {
