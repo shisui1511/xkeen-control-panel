@@ -839,14 +839,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'apioffline.hour_ago': 'ч назад',
     'svc.xray_active_warning':
       'Этот раздел доступен только для ядра Mihomo. Сейчас запущено ядро Xray.',
-    'svc.mihomo_stopped_warning': 'Ядро Mihomo остановлено. Запустите его на странице Сервисы.',
-    'editor.save_and_apply': 'Сохранить и применить',
-    'editor.saving': 'Сохранение...',
-    'editor.validating': 'Валидация...',
-    'editor.restarting': 'Перезапуск службы...',
-    'editor.checking_status': 'Проверка статуса...',
-    'editor.apply_success': 'Конфигурация успешно применилась, служба запущена!',
-    'editor.apply_timeout': 'Служба не запустилась вовремя. Проверьте логи.'
+    'svc.mihomo_stopped_warning': 'Ядро Mihomo остановлено. Запустите его на странице Сервисы.'
   },
   en: {
     // Common
@@ -1677,14 +1670,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'apioffline.hour_ago': 'h ago',
     'svc.xray_active_warning':
       'This section is only available for the Mihomo kernel. The Xray kernel is currently running.',
-    'svc.mihomo_stopped_warning': 'The Mihomo kernel is stopped. Start it in the Services section.',
-    'editor.save_and_apply': 'Save & Apply',
-    'editor.saving': 'Saving...',
-    'editor.validating': 'Validating...',
-    'editor.restarting': 'Restarting service...',
-    'editor.checking_status': 'Checking status...',
-    'editor.apply_success': 'Configuration applied successfully, service started!',
-    'editor.apply_timeout': 'Service did not start in time. Check logs.'
+    'svc.mihomo_stopped_warning': 'The Mihomo kernel is stopped. Start it in the Services section.'
   }
 };
 
@@ -1707,7 +1693,7 @@ function detectLanguage(): Lang {
 export const currentLang = writable<Lang>(detectLanguage());
 
 // Derived store for translations
-export const t = derived(currentLang, ($lang) => {
+export const t = derived(currentLang, ($lang: Lang) => {
   return (key: string, params?: Record<string, string | number>): string => {
     const dict = translations[$lang] || translations.en;
     let text = dict[key] || key;
