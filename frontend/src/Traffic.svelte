@@ -84,7 +84,16 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
+  let reconnectTimeout: any = null;
+  let reconnectDelay = 1000;
+  const MAX_RECONNECT_DELAY = 16000;
+
   function connect() {
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${protocol}//${window.location.host}/api/traffic/ws`;
 
@@ -93,6 +102,7 @@
     ws.onopen = () => {
       connected = true;
       lastTickTime = 0;
+      reconnectDelay = 1000; // сбросить задержку при успешном подключении
     };
 
     ws.onmessage = (event) => {
@@ -142,6 +152,7 @@
 
     ws.onclose = () => {
       connected = false;
+      scheduleReconnect();
     };
 
     ws.onerror = () => {
@@ -149,8 +160,25 @@
     };
   }
 
+  function scheduleReconnect() {
+    if (ws && ws.readyState !== WebSocket.CLOSED) return;
+    if (reconnectTimeout) return;
+
+    reconnectTimeout = setTimeout(() => {
+      reconnectTimeout = null;
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+      connect();
+    }, reconnectDelay);
+  }
+
   function disconnect() {
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
     if (ws) {
+      ws.onclose = null; // предотвратить повторное подключение при явном закрытии
+      ws.onerror = null;
       ws.close();
       ws = null;
     }
