@@ -495,6 +495,15 @@ const translations: Record<Lang, Record<string, string>> = {
     'trafficquotas.action_throttle': 'ОГРАНИЧИТЬ',
     'trafficquotas.action_log_only': 'ЖУРНАЛ',
     'trafficquotas.action_block': 'БЛОКИРОВАТЬ',
+    'trafficquotas.action_redirect_direct': 'НА DIRECT',
+    'trafficquotas.banner_title': 'Полезная информация',
+    'trafficquotas.banner_text':
+      'Лимиты трафика позволяют автоматически ограничивать потребление или перенаправлять трафик через DIRECT при превышении лимита по конкретному прокси или глобально.',
+    'trafficquotas.badge_status_blocked': 'Заблокирован',
+    'trafficquotas.badge_status_redirected': 'Перенаправлен',
+    'trafficquotas.forecast_label': 'Прогноз на месяц',
+    'trafficquotas.forecast_calculating': 'расчет...',
+    'trafficquotas.forecast_subtext': 'Ожидаемый расход к концу периода',
 
     // Rules
     'rules.title': 'Правила маршрутизации',
@@ -1385,6 +1394,15 @@ const translations: Record<Lang, Record<string, string>> = {
     'trafficquotas.action_throttle': 'THROTTLE',
     'trafficquotas.action_log_only': 'LOG ONLY',
     'trafficquotas.action_block': 'BLOCK',
+    'trafficquotas.action_redirect_direct': 'TO DIRECT',
+    'trafficquotas.banner_title': 'Useful Information',
+    'trafficquotas.banner_text':
+      'Traffic quotas allow you to automatically limit consumption or redirect traffic through DIRECT when the limit is reached globally or for a specific proxy.',
+    'trafficquotas.badge_status_blocked': 'Blocked',
+    'trafficquotas.badge_status_redirected': 'Redirected',
+    'trafficquotas.forecast_label': 'Monthly Forecast',
+    'trafficquotas.forecast_calculating': 'calculating...',
+    'trafficquotas.forecast_subtext': 'Projected usage by end of period',
 
     // Rules
     'rules.title': 'Routing Rules',
