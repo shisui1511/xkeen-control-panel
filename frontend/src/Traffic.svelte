@@ -310,7 +310,7 @@
     <div>
       <div class="crumbs">
         {$t('nav.group_tools')}
-        <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        <span style="color:var(--fg-faint);margin:0 8px;">/</span>
         {$t('traffic.title')}
       </div>
       <h1>{$t('traffic.title')}</h1>
@@ -337,12 +337,11 @@
         <div class="stat-label">Upload</div>
         <div class="stat-value upload-color">{formatSpeed(totalUp)}</div>
         <div class="stat-session">
-          Σ {$currentLang === 'ru' ? 'сессии' : 'session'}
-          {formatBytes(sessionUp)}
+          Σ {$t('traffic.session')} {formatBytes(sessionUp)}
         </div>
       </div>
       {#if trafficData.length >= 2}
-        <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
+        <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none" role="img" aria-label={$t('traffic.upload_sparkline')}>
           <defs>
             <linearGradient id="sg-upload" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="var(--success)" stop-opacity="0.4" />
@@ -361,12 +360,11 @@
         <div class="stat-label">Download</div>
         <div class="stat-value download-color">{formatSpeed(totalDown)}</div>
         <div class="stat-session">
-          Σ {$currentLang === 'ru' ? 'сессии' : 'session'}
-          {formatBytes(sessionDown)}
+          Σ {$t('traffic.session')} {formatBytes(sessionDown)}
         </div>
       </div>
       {#if trafficData.length >= 2}
-        <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
+        <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none" role="img" aria-label={$t('traffic.download_sparkline')}>
           <defs>
             <linearGradient id="sg-download" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4" />
@@ -382,19 +380,19 @@
     <!-- Active Connections Card -->
     <div class="card stat-card-normal">
       <div class="stat-label">
-        {$currentLang === 'ru' ? 'Активные соединения' : 'Active Connections'}
+        {$t('traffic.active_connections')}
       </div>
       <div class="stat-value active-connections-color">{activeConnectionsCount}</div>
       <div class="stat-session">{tcpConnectionsCount} TCP · {udpConnectionsCount} UDP</div>
-      <div class="stat-session" style="margin-top: 2px; color: var(--fg-dim);">
+      <div class="stat-session" style="margin-top: 4px; color: var(--fg-dim);">
         {#if connDeltaPerMin === null}
-          — / {$currentLang === 'ru' ? 'мин' : 'min'}
+          — / {$t('traffic.per_min')}
         {:else}
           <span style={connDeltaPerMin < 0 ? 'color: var(--fg-dim);' : ''}>
-            {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$currentLang === 'ru' ? 'мин' : 'min'}
+            {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$t('traffic.per_min')}
           </span>
         {/if}
-        · {$currentLang === 'ru' ? 'пик' : 'peak'} {connPeakHour}
+        · {$t('traffic.peak')} {connPeakHour}
       </div>
     </div>
   </div>
@@ -405,15 +403,20 @@
       <span class="key"><span class="sw download-bg"></span>Download</span>
       <span class="key"><span class="sw upload-bg"></span>Upload</span>
       <span class="chart-time-label">
-        {$currentLang === 'ru' ? 'последняя минута · 1 точка/с' : 'last minute · 1 point/s'}
+        {$t('traffic.chart_legend_time')}
       </span>
     </div>
 
     <div class="chart-area-wrapper">
       {#if trafficData.length < 2}
-        <div class="chart-empty">
-          <span class="spinner" style="margin-right: 8px;">...</span>
-          {$currentLang === 'ru' ? 'Ожидание данных трафика...' : 'Waiting for traffic data...'}
+        <div class="chart-empty" style="flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <span class="spinner">...</span>
+            <span style="font-weight: 700;">{$t('traffic.waiting')}</span>
+          </div>
+          <p style="font-size: 14px; color: var(--fg-dim); margin: 0;">
+            {$t('traffic.empty_state_body')}
+          </p>
         </div>
       {:else}
         <div class="chart-y-axis">
@@ -423,7 +426,7 @@
           <span class="y-label">0 B/s</span>
         </div>
         <div class="chart-svg-container">
-          <svg viewBox="0 0 1000 240" preserveAspectRatio="none" style="width: 100%; height: 100%;">
+          <svg viewBox="0 0 1000 240" preserveAspectRatio="none" style="width: 100%; height: 100%;" role="img" aria-label={$t('traffic.main_chart')}>
             <defs>
               <linearGradient id="cg-download-main" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25" />
@@ -473,46 +476,46 @@
     </div>
 
     <div class="chart-x">
-      <span>60 {$currentLang === 'ru' ? 'сек назад' : 'sec ago'}</span>
-      <span>-45 {$currentLang === 'ru' ? 'сек' : 'sec'}</span>
-      <span>-30 {$currentLang === 'ru' ? 'сек' : 'sec'}</span>
-      <span>-15 {$currentLang === 'ru' ? 'сек' : 'sec'}</span>
-      <span>{$currentLang === 'ru' ? 'сейчас' : 'now'}</span>
+      <span>60 {$t('traffic.sec_ago')}</span>
+      <span>-45 {$t('traffic.sec')}</span>
+      <span>-30 {$t('traffic.sec')}</span>
+      <span>-15 {$t('traffic.sec')}</span>
+      <span>{$t('traffic.now')}</span>
     </div>
   </div>
 
   <!-- Peak Load Card -->
   <div class="card" style="margin-top: 16px; padding: 24px;">
-    <div style="font-size: 13px; font-weight: 700; color: var(--fg-primary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em;">
+    <div style="font-size: 11px; font-weight: 700; color: var(--fg-primary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.1em;">
       {$t('traffic.peak_load')}
     </div>
-    <div style="font-size: 12px; color: var(--fg-dim); margin-bottom: 16px;">
+    <div style="font-size: 11px; color: var(--fg-dim); margin-bottom: 16px;">
       {$t('traffic.peak_load_desc')}
     </div>
     <div class="table-container" style="overflow-x: auto;">
       <table class="connections-table" style="min-width: 100%; border-collapse: collapse;">
         <thead>
           <tr style="border-bottom: 1px solid var(--border); text-align: left;">
-            <th style="padding: 10px 12px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_hour')}</th>
-            <th style="padding: 10px 12px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_day')}</th>
-            <th style="padding: 10px 12px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_week')}</th>
+            <th style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_hour')}</th>
+            <th style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_day')}</th>
+            <th style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_week')}</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td style="padding: 12px; font-family: var(--font-family-mono); font-size: 14px;">
+            <td style="padding: 8px 16px; font-family: var(--font-family-mono); font-size: 14px;">
               <span class="upload-color">↑ {formatSpeed(peaks.peak_hour_up)}</span>
-              <span style="color: var(--fg-dim); margin: 0 6px;">/</span>
+              <span style="color: var(--fg-dim); margin: 0 8px;">/</span>
               <span class="download-color">↓ {formatSpeed(peaks.peak_hour_down)}</span>
             </td>
-            <td style="padding: 12px; font-family: var(--font-family-mono); font-size: 14px;">
+            <td style="padding: 8px 16px; font-family: var(--font-family-mono); font-size: 14px;">
               <span class="upload-color">↑ {formatSpeed(peaks.peak_day_up)}</span>
-              <span style="color: var(--fg-dim); margin: 0 6px;">/</span>
+              <span style="color: var(--fg-dim); margin: 0 8px;">/</span>
               <span class="download-color">↓ {formatSpeed(peaks.peak_day_down)}</span>
             </td>
-            <td style="padding: 12px; font-family: var(--font-family-mono); font-size: 14px;">
+            <td style="padding: 8px 16px; font-family: var(--font-family-mono); font-size: 14px;">
               <span class="upload-color">↑ {formatSpeed(peaks.peak_week_up)}</span>
-              <span style="color: var(--fg-dim); margin: 0 6px;">/</span>
+              <span style="color: var(--fg-dim); margin: 0 8px;">/</span>
               <span class="download-color">↓ {formatSpeed(peaks.peak_week_down)}</span>
             </td>
           </tr>
@@ -546,12 +549,12 @@
   }
 
   .stat-card-content {
-    padding: 20px 20px 0 20px;
+    padding: 24px 24px 0 24px;
     z-index: 2;
   }
 
   .stat-card-normal {
-    padding: 20px;
+    padding: 24px;
     height: 110px;
     display: flex;
     flex-direction: column;
@@ -587,7 +590,7 @@
   }
 
   .stat-session {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--fg-secondary);
     margin-top: 4px;
     margin-bottom: 8px;
@@ -675,11 +678,11 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    padding: 10px 8px;
+    padding: 12px 8px;
     border-right: 1px solid var(--border);
     background: rgba(0, 0, 0, 0.1);
     font-family: var(--font-family-mono);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--fg-dim);
     text-align: right;
     z-index: 5;
@@ -698,7 +701,7 @@
   .chart-x {
     display: flex;
     justify-content: space-between;
-    padding: 0 10px 0 80px;
+    padding: 0 8px 0 80px;
     font-size: 11px;
     color: var(--fg-dim);
   }

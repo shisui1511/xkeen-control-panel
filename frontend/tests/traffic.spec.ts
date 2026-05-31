@@ -123,4 +123,34 @@ test.describe('Traffic page test suite', () => {
 
     expect(confirmTriggered).toBe(true);
   });
+
+  test('SVG charts have role and aria-labels for accessibility', async ({ page }) => {
+    const mainChart = page.locator('.chart-svg-container svg');
+    await expect(mainChart).toHaveAttribute('role', 'img');
+    await expect(mainChart).toHaveAttribute('aria-label', /Main traffic speed chart/i);
+
+    const uploadSparkline = page.locator('.stat-card-spark:nth-child(1) svg.sparkline');
+    await expect(uploadSparkline).toHaveAttribute('role', 'img');
+    await expect(uploadSparkline).toHaveAttribute('aria-label', /Upload sparkline/i);
+
+    const downloadSparkline = page.locator('.stat-card-spark:nth-child(2) svg.sparkline');
+    await expect(downloadSparkline).toHaveAttribute('role', 'img');
+    await expect(downloadSparkline).toHaveAttribute('aria-label', /Download sparkline/i);
+  });
+});
+
+test.describe('Traffic empty state and auto-reconnect tests', () => {
+  test('shows empty state when no traffic data is received', async ({ page }) => {
+    await disableServiceWorker(page);
+    await setupRestMocks(page, true);
+    await page.routeWebSocket('**/api/traffic/ws', async (ws) => {
+      // не шлем фреймов
+    });
+
+    await page.goto('/#/traffic');
+
+    const emptyContainer = page.locator('.chart-empty');
+    await expect(emptyContainer).toContainText(/Waiting for traffic data/i);
+    await expect(emptyContainer).toContainText(/Connecting to the proxy kernel metrics/i);
+  });
 });
