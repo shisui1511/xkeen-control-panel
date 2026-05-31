@@ -176,6 +176,8 @@ func main() {
 	srv.HandleProtected("/api/traffic/stats", api.TrafficStats)
 	srv.HandleProtected("/api/traffic/alerts", api.TrafficAlerts)
 	srv.HandleProtected("/api/traffic/alerts/clear", api.TrafficAlertsClear)
+	srv.HandleProtected("/api/traffic/ws", api.TrafficWebSocket)
+	srv.HandleProtected("/api/traffic/reset", api.TrafficReset)
 	srv.HandleProtected("/api/mihomo/connections/ws", api.ConnectionsWebSocket)
 
 	// Start background services
