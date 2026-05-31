@@ -66,7 +66,7 @@
     return now.count - minuteAgo.count;
   })();
 
-  $: connPeakHour = connHistory.length > 0 ? Math.max(...connHistory.map((h) => h.count)) : 0;
+  $: connPeakHour = connHistory.reduce((max, h) => h.count > max ? h.count : max, 0);
 
   function formatSpeed(bytesPerSecond: number): string {
     if (bytesPerSecond === 0) return '0 B/s';
