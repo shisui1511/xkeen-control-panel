@@ -8,7 +8,7 @@ import (
 )
 
 func TestNetworkToolsService_New(t *testing.T) {
-	svc := NewNetworkToolsService()
+	svc := NewNetworkToolsService("http://127.0.0.1:9090")
 	if svc == nil {
 		t.Fatal("expected non-nil service")
 	}
@@ -26,7 +26,7 @@ func TestNetworkToolsService_Ping(t *testing.T) {
 	os.Setenv("PATH", tmpDir+":"+oldPath)
 	defer os.Setenv("PATH", oldPath)
 
-	svc := NewNetworkToolsService()
+	svc := NewNetworkToolsService("http://127.0.0.1:9090")
 	res, err := svc.Ping("test.com", 1)
 	if err != nil {
 		t.Fatalf("Ping failed: %v", err)
@@ -48,7 +48,7 @@ func TestNetworkToolsService_Traceroute(t *testing.T) {
 	os.Setenv("PATH", tmpDir+":"+oldPath)
 	defer os.Setenv("PATH", oldPath)
 
-	svc := NewNetworkToolsService()
+	svc := NewNetworkToolsService("http://127.0.0.1:9090")
 	res, err := svc.Traceroute("test.com", 10)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestNetworkToolsService_DNSLookup(t *testing.T) {
 	os.Setenv("PATH", tmpDir+":"+oldPath)
 	defer os.Setenv("PATH", oldPath)
 
-	svc := NewNetworkToolsService()
+	svc := NewNetworkToolsService("http://127.0.0.1:9090")
 	res, err := svc.DNSLookup("test.com", "ANY")
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestNetworkToolsService_HTTPTest(t *testing.T) {
 	os.Setenv("PATH", tmpDir+":"+oldPath)
 	defer os.Setenv("PATH", oldPath)
 
-	svc := NewNetworkToolsService()
+	svc := NewNetworkToolsService("http://127.0.0.1:9090")
 	res, err := svc.HTTPTest("http://test.com", 5)
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +114,7 @@ func TestNetworkToolsService_GetPublicIP(t *testing.T) {
 	os.Setenv("PATH", tmpDir+":"+oldPath)
 	defer os.Setenv("PATH", oldPath)
 
-	svc := NewNetworkToolsService()
+	svc := NewNetworkToolsService("http://127.0.0.1:9090")
 	res, err := svc.GetPublicIP()
 	if err != nil {
 		t.Fatal(err)

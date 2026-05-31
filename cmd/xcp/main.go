@@ -237,7 +237,7 @@ func main() {
 	defer healthSvc.Stop()
 
 	// Network Tools
-	networkSvc := services.NewNetworkToolsService()
+	networkSvc := services.NewNetworkToolsService(cfg.MihomoAPIURL)
 	api.SetNetworkToolsService(networkSvc)
 
 	// Kernels

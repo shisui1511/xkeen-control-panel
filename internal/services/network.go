@@ -1,19 +1,27 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
 
 // NetworkToolsService provides network diagnostic tools
-type NetworkToolsService struct{}
+type NetworkToolsService struct {
+	mihomoAPIURL string
+}
 
-func NewNetworkToolsService() *NetworkToolsService {
-	return &NetworkToolsService{}
+func NewNetworkToolsService(mihomoAPIURL string) *NetworkToolsService {
+	return &NetworkToolsService{
+		mihomoAPIURL: mihomoAPIURL,
+	}
 }
 
 // PingResult holds ping output
@@ -264,5 +272,133 @@ func (s *NetworkToolsService) GetPublicIP() (*IPInfo, error) {
 
 	result.Success = false
 	result.Error = "failed to detect public IP"
+	return result, nil
+}
+
+// ProxyTestResult holds proxy test output
+type ProxyTestResult struct {
+	ProxyName string `json:"proxy_name"`
+	URL       string `json:"url"`
+	Success   bool   `json:"success"`
+	Delay     int    `json:"delay"`
+	Output    string `json:"output"`
+	Error     string `json:"error,omitempty"`
+}
+
+// PortCheckResult holds port check output
+type PortCheckResult struct {
+	Host    string `json:"host"`
+	Port    int    `json:"port"`
+	Success bool   `json:"success"`
+	RTTMs   int64  `json:"rtt_ms"`
+	Output  string `json:"output"`
+	Error   string `json:"error,omitempty"`
+}
+
+// ProxyDelayTest makes an HTTP request to the Clash API to test proxy delay
+func (s *NetworkToolsService) ProxyDelayTest(proxyName, targetURL string, timeoutMs int) (*ProxyTestResult, error) {
+	if timeoutMs <= 0 {
+		timeoutMs = 5000
+	}
+
+	result := &ProxyTestResult{
+		ProxyName: proxyName,
+		URL:       targetURL,
+	}
+
+	escapedProxy := url.PathEscape(proxyName)
+	apiURL := fmt.Sprintf("%s/proxies/%s/delay?url=%s&timeout=%d",
+		strings.TrimSuffix(s.mihomoAPIURL, "/"),
+		escapedProxy,
+		url.QueryEscape(targetURL),
+		timeoutMs,
+	)
+
+	client := &http.Client{
+		Timeout: time.Duration(timeoutMs+1000) * time.Millisecond,
+	}
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		result.Success = false
+		result.Error = err.Error()
+		result.Output = fmt.Sprintf("Failed to create HTTP request: %s", err.Error())
+		return result, nil
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		result.Success = false
+		result.Error = err.Error()
+		result.Output = fmt.Sprintf("Failed to execute request to Clash API: %s", err.Error())
+		return result, nil
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		result.Success = false
+		result.Error = err.Error()
+		result.Output = fmt.Sprintf("Failed to read response body: %s", err.Error())
+		return result, nil
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		result.Success = false
+		var errData struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(body, &errData) == nil && errData.Message != "" {
+			result.Error = errData.Message
+		} else {
+			result.Error = fmt.Sprintf("Clash API returned status %d", resp.StatusCode)
+		}
+		result.Output = string(body)
+		return result, nil
+	}
+
+	var data struct {
+		Delay int `json:"delay"`
+	}
+	if err := json.Unmarshal(body, &data); err != nil {
+		result.Success = false
+		result.Error = fmt.Sprintf("Failed to parse Clash API response: %s", err.Error())
+		result.Output = string(body)
+		return result, nil
+	}
+
+	result.Success = true
+	result.Delay = data.Delay
+	result.Output = fmt.Sprintf("Proxy: %s\nTarget URL: %s\nDelay: %d ms\nStatus: Reachable", proxyName, targetURL, data.Delay)
+	return result, nil
+}
+
+// PortCheck checks if a TCP port on a remote host is open and measures RTT
+func (s *NetworkToolsService) PortCheck(host string, port int, timeout time.Duration) (*PortCheckResult, error) {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+
+	result := &PortCheckResult{
+		Host: host,
+		Port: port,
+	}
+
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	rtt := time.Since(start).Milliseconds()
+
+	if err != nil {
+		result.Success = false
+		result.Error = err.Error()
+		result.Output = fmt.Sprintf("Connection to %s failed:\n%s", addr, err.Error())
+		return result, nil
+	}
+	conn.Close()
+
+	result.Success = true
+	result.RTTMs = rtt
+	result.Output = fmt.Sprintf("Host: %s\nPort: %d\nStatus: Open\nRTT: %d ms", host, port, rtt)
 	return result, nil
 }
