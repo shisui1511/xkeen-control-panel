@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -65,6 +66,7 @@ type TrafficStore struct {
 	Quotas     []TrafficQuota           `json:"quotas"`
 	ProxyStats map[string]*ProxyTraffic `json:"proxy_stats"`
 	Peaks      TrafficPeaks             `json:"peaks"`
+	ResetTime  int64                    `json:"reset_time"`
 }
 
 // saveLockThrottle is the minimum interval between background/periodic saves
@@ -114,19 +116,25 @@ type TrafficQuotaService struct {
 	udpConnsCount     int64
 	trafficSubs       map[chan []byte]struct{}
 	trafficSubsMu     sync.RWMutex
+
+	httpClient     *http.Client
+	blockedProxies map[string]string
+	resetTime      int64
 }
 
 func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaService {
 	svc := &TrafficQuotaService{
-		dataDir:     dataDir,
-		mihomoURL:   mihomoURL,
-		secret:      secret,
-		quotas:      []TrafficQuota{},
-		proxyStats:  make(map[string]*ProxyTraffic),
-		alerts:      []TrafficAlert{},
-		stopCh:      make(chan struct{}),
-		connSubs:    make(map[chan []byte]struct{}),
-		trafficSubs: make(map[chan []byte]struct{}),
+		dataDir:        dataDir,
+		mihomoURL:      mihomoURL,
+		secret:         secret,
+		quotas:         []TrafficQuota{},
+		proxyStats:     make(map[string]*ProxyTraffic),
+		alerts:         []TrafficAlert{},
+		stopCh:         make(chan struct{}),
+		connSubs:       make(map[chan []byte]struct{}),
+		trafficSubs:    make(map[chan []byte]struct{}),
+		httpClient:     &http.Client{Timeout: 5 * time.Second},
+		blockedProxies: make(map[string]string),
 	}
 	svc.load()
 	return svc
@@ -155,10 +163,16 @@ func (s *TrafficQuotaService) storePath() string {
 func (s *TrafficQuotaService) load() {
 	data, err := os.ReadFile(s.storePath())
 	if err != nil {
+		s.mu.Lock()
+		s.resetTime = time.Now().Unix()
+		s.mu.Unlock()
 		return
 	}
 	var store TrafficStore
 	if err := json.Unmarshal(data, &store); err != nil {
+		s.mu.Lock()
+		s.resetTime = time.Now().Unix()
+		s.mu.Unlock()
 		return
 	}
 	s.mu.Lock()
@@ -169,6 +183,10 @@ func (s *TrafficQuotaService) load() {
 		s.proxyStats = make(map[string]*ProxyTraffic)
 	}
 	s.peaks = store.Peaks
+	s.resetTime = store.ResetTime
+	if s.resetTime == 0 {
+		s.resetTime = time.Now().Unix()
+	}
 	s.mu.Unlock()
 }
 
@@ -185,6 +203,7 @@ func (s *TrafficQuotaService) saveLocked(force bool) error {
 		Quotas:     s.quotas,
 		ProxyStats: s.proxyStats,
 		Peaks:      s.peaks,
+		ResetTime:  s.resetTime,
 	}
 
 	data, err := json.MarshalIndent(store, "", "  ")
@@ -330,6 +349,7 @@ func (s *TrafficQuotaService) GetStats() map[string]interface{} {
 		"total_download": totalDownload,
 		"total":          totalUpload + totalDownload,
 		"peaks":          s.peaks,
+		"reset_time":     s.resetTime,
 	}
 }
 
@@ -340,6 +360,7 @@ func (s *TrafficQuotaService) ResetStats() error {
 	s.proxyStats = make(map[string]*ProxyTraffic)
 
 	now := time.Now()
+	s.resetTime = now.Unix()
 	s.peaks = TrafficPeaks{
 		HourStart: now.Truncate(time.Hour).Unix(),
 		DayStart:  time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix(),
@@ -536,7 +557,6 @@ func (s *TrafficQuotaService) SubscribeConnections() (ch chan []byte, unsub func
 // connections snapshot and accumulates them into proxyStats.
 func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	activeIDs := make(map[string]bool, len(connections))
 
@@ -608,6 +628,9 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 	if err := s.saveLocked(false); err != nil {
 		log.Printf("TrafficQuota: failed to save stats: %v", err)
 	}
+	s.mu.Unlock()
+
+	s.checkQuotas()
 }
 
 // SubscribeTraffic регистрирует канал для получения снимков трафика.
@@ -859,12 +882,108 @@ type connStats struct {
 	Download int64
 }
 
-func (s *TrafficQuotaService) checkQuotas() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func contains(slice []string, val string) bool {
+	for _, item := range slice {
+		if item == val {
+			return true
+		}
+	}
+	return false
+}
 
-	for i := range s.quotas {
-		q := &s.quotas[i]
+type mihomoProxy struct {
+	Name string   `json:"name"`
+	Type string   `json:"type"`
+	Now  string   `json:"now"`
+	All  []string `json:"all"`
+}
+
+func (s *TrafficQuotaService) getMihomoProxies() (map[string]mihomoProxy, error) {
+	url := fmt.Sprintf("%s/proxies", strings.TrimRight(s.mihomoURL, "/"))
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if s.secret != "" {
+		req.Header.Set("Authorization", "Bearer "+s.secret)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("mihomo API returned %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Proxies map[string]mihomoProxy `json:"proxies"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return payload.Proxies, nil
+}
+
+func (s *TrafficQuotaService) applyProxyToGroup(groupName, proxyName string) error {
+	url := fmt.Sprintf("%s/proxies/%s", strings.TrimRight(s.mihomoURL, "/"), groupName)
+	bodyMap := map[string]string{"name": proxyName}
+	bodyBytes, err := json.Marshal(bodyMap)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if s.secret != "" {
+		req.Header.Set("Authorization", "Bearer "+s.secret)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("mihomo API returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (s *TrafficQuotaService) checkQuotas() {
+	s.mu.RLock()
+	quotasCopy := make([]TrafficQuota, len(s.quotas))
+	copy(quotasCopy, s.quotas)
+
+	proxyStatsCopy := make(map[string]int64)
+	for name, stat := range s.proxyStats {
+		proxyStatsCopy[name] = stat.TotalBytes
+	}
+	s.mu.RUnlock()
+
+	mihomoProxies, err := s.getMihomoProxies()
+	hasMihomo := err == nil
+	if err != nil {
+		log.Printf("TrafficQuota: failed to fetch Mihomo proxies: %v", err)
+	}
+
+	shouldBlock := make(map[string]string)
+	alertsToCreate := make([]struct {
+		quotaID  string
+		severity string
+		message  string
+	}, 0)
+
+	updatedCurrentBytes := make(map[string]int64)
+
+	for i := range quotasCopy {
+		q := &quotasCopy[i]
 		if !q.Enabled || q.LimitBytes <= 0 {
 			continue
 		}
@@ -872,26 +991,160 @@ func (s *TrafficQuotaService) checkQuotas() {
 		var current int64
 		switch q.TargetType {
 		case "proxy":
-			if stat, ok := s.proxyStats[q.TargetID]; ok {
-				current = stat.TotalBytes
-			}
+			current = proxyStatsCopy[q.TargetID]
 		case "global":
-			for _, stat := range s.proxyStats {
-				current += stat.TotalBytes
+			for _, total := range proxyStatsCopy {
+				current += total
 			}
 		}
 
-		q.CurrentBytes = current
+		updatedCurrentBytes[q.ID] = current
 		percent := float64(current) / float64(q.LimitBytes) * 100
 
 		if percent >= 100 {
-			s.addAlert(q, "critical", fmt.Sprintf("Лимит '%s' превышен: %s из %s (%.0f%%)",
-				q.Name, formatBytes(current), formatBytes(q.LimitBytes), percent))
+			alertsToCreate = append(alertsToCreate, struct {
+				quotaID  string
+				severity string
+				message  string
+			}{
+				quotaID:  q.ID,
+				severity: "critical",
+				message:  fmt.Sprintf("Лимит '%s' превышен: %s из %s (%.0f%%)", q.Name, formatBytes(current), formatBytes(q.LimitBytes), percent),
+			})
+
+			var fallback string
+			if q.Action == "block" {
+				fallback = "REJECT"
+			} else if q.Action == "redirect_direct" {
+				fallback = "DIRECT"
+			}
+
+			if fallback != "" && hasMihomo {
+				var groupName string
+				if q.TargetType == "proxy" {
+					groupName = q.TargetID
+				} else {
+					groupName = "GLOBAL"
+				}
+
+				if group, ok := mihomoProxies[groupName]; ok {
+					if contains(group.All, fallback) {
+						shouldBlock[groupName] = fallback
+					} else {
+						if globalGroup, ok := mihomoProxies["GLOBAL"]; ok && contains(globalGroup.All, fallback) {
+							shouldBlock["GLOBAL"] = fallback
+						}
+					}
+				}
+			}
 		} else if q.AlertThreshold > 0 && percent >= float64(q.AlertThreshold) {
-			s.addAlert(q, "warning", fmt.Sprintf("Лимит '%s' на %.0f%%: %s из %s",
-				q.Name, percent, formatBytes(current), formatBytes(q.LimitBytes)))
+			alertsToCreate = append(alertsToCreate, struct {
+				quotaID  string
+				severity string
+				message  string
+			}{
+				quotaID:  q.ID,
+				severity: "warning",
+				message:  fmt.Sprintf("Лимит '%s' на %.0f%%: %s из %s", q.Name, percent, formatBytes(current), formatBytes(q.LimitBytes)),
+			})
 		}
 	}
+
+	s.mu.Lock()
+
+	var restoreActions []struct {
+		groupName     string
+		originalProxy string
+	}
+	if hasMihomo {
+		for groupName, originalProxy := range s.blockedProxies {
+			if _, needed := shouldBlock[groupName]; !needed {
+				restoreActions = append(restoreActions, struct {
+					groupName     string
+					originalProxy string
+				}{groupName, originalProxy})
+			}
+		}
+	}
+
+	var blockActions []struct {
+		groupName string
+		fallback  string
+	}
+	if hasMihomo {
+		for groupName, fallback := range shouldBlock {
+			group, ok := mihomoProxies[groupName]
+			if !ok {
+				continue
+			}
+			if group.Now != fallback {
+				if _, saved := s.blockedProxies[groupName]; !saved {
+					if group.Now != "DIRECT" && group.Now != "REJECT" {
+						s.blockedProxies[groupName] = group.Now
+					}
+				}
+				blockActions = append(blockActions, struct {
+					groupName string
+					fallback  string
+				}{groupName, fallback})
+			}
+		}
+	}
+
+	s.mu.Unlock()
+
+	successfulRestores := make([]string, 0)
+	if hasMihomo {
+		for _, action := range restoreActions {
+			if err := s.applyProxyToGroup(action.groupName, action.originalProxy); err != nil {
+				log.Printf("TrafficQuota: failed to restore group %s to %s: %v", action.groupName, action.originalProxy, err)
+			} else {
+				successfulRestores = append(successfulRestores, action.groupName)
+			}
+		}
+
+		for _, action := range blockActions {
+			if err := s.applyProxyToGroup(action.groupName, action.fallback); err != nil {
+				log.Printf("TrafficQuota: failed to block group %s with %s: %v", action.groupName, action.fallback, err)
+			}
+		}
+	}
+
+	s.mu.Lock()
+	if hasMihomo {
+		for _, groupName := range successfulRestores {
+			delete(s.blockedProxies, groupName)
+		}
+	}
+
+	changed := false
+	for i := range s.quotas {
+		q := &s.quotas[i]
+		if current, ok := updatedCurrentBytes[q.ID]; ok {
+			if q.CurrentBytes != current {
+				q.CurrentBytes = current
+				changed = true
+			}
+		}
+	}
+
+	for _, alert := range alertsToCreate {
+		var quotaPtr *TrafficQuota
+		for i := range s.quotas {
+			if s.quotas[i].ID == alert.quotaID {
+				quotaPtr = &s.quotas[i]
+				break
+			}
+		}
+		if quotaPtr != nil {
+			s.addAlert(quotaPtr, alert.severity, alert.message)
+		}
+	}
+
+	if changed {
+		_ = s.saveLocked(false)
+	}
+	s.mu.Unlock()
 }
 
 func (s *TrafficQuotaService) addAlert(q *TrafficQuota, severity, message string) {
