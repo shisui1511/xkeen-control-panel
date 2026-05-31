@@ -56,11 +56,6 @@ func TestTemplateService_FetchByName(t *testing.T) {
 func TestTemplateService_FetchByName_Mocked(t *testing.T) {
 	svc := NewTemplateService()
 
-	_, err := net.LookupIP("raw.githubusercontent.com")
-	if err != nil {
-		t.Skip("skipping mocked template fetch test: no internet connection for DNS lookup")
-		return
-	}
 
 	mockContent := "mock config content"
 	svc.httpClient = &http.Client{
