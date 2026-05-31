@@ -92,6 +92,7 @@
   let selectedFile = '';
   let loading = false;
   let loadingPath: string | null = null;
+  let templateLoading = false;
   const pendingPins = new Set<string>();
   let saving = false;
   let backups: string[] = [];
@@ -1391,7 +1392,7 @@
       return;
 
     const backupContent = editorView.state.doc.toString();
-    loading = true;
+    templateLoading = true;
     try {
       const res = await fetch(`/api/templates/fetch?name=${encodeURIComponent(template.name)}`);
       if (!res.ok) throw new Error((await res.text()) || 'Failed to fetch template');
@@ -1416,7 +1417,7 @@
         });
       }
     } finally {
-      loading = false;
+      templateLoading = false;
     }
   }
 
@@ -2253,7 +2254,7 @@
 
       <div class="template-list">
         {#each templates as template}
-          <button class="template-item" on:click={() => applyTemplate(template)}>
+          <button class="template-item" on:click={() => applyTemplate(template)} disabled={templateLoading}>
             <div class="template-info">
               <span class="template-name">{template.name}</span>
               <span class="template-desc">{template.description}</span>
