@@ -958,6 +958,26 @@
     overflow: auto;
     white-space: pre-wrap;
     word-break: break-all;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) var(--bg-card);
+  }
+
+  .term-output::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .term-output::-webkit-scrollbar-track {
+    background: var(--bg-card);
+  }
+
+  .term-output::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .term-output::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-dim);
   }
 
   @media (max-width: 1024px) {
