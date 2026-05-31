@@ -137,8 +137,104 @@ async function setupMocks(
           data: 'v0.16.0'
         })
       });
+    } else if (url.includes('/api/system/stats')) {
+      // Dashboard.svelte обращается к systemStats.go_runtime.go_version напрямую —
+      // нужна полная структура с go_runtime, load и пр.
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          memory: { total: 524288000, used: 131072000, free: 393216000 },
+          load: [0.5, 0.4, 0.3],
+          uptime: { seconds: 3600, days: 0, hours: 1, minutes: 0 },
+          go_runtime: {
+            goroutines: 10,
+            heap_alloc: 4194304,
+            heap_sys: 8388608,
+            num_gc: 5,
+            go_version: 'go1.21.0',
+            gomaxprocs: 4,
+            goarch: 'arm64'
+          },
+          router_model: 'Keenetic',
+          hostname: 'keenetic',
+          wan_status: 'connected',
+          default_gateway: '192.168.1.1',
+          dns_servers: ['8.8.8.8'],
+          dns_resolving: true,
+          invalid_config: false,
+          platform: 'linux',
+          kernel_version: '5.15',
+          ip_interface: 'eth0',
+          timezone: 'Europe/Moscow',
+          config_path: '/opt/etc/xray/config.json',
+          config_lines: 0,
+          boot_time: '2024-01-01T00:00:00Z'
+        })
+      });
+    } else if (url.includes('/api/subscriptions')) {
+      // SubscriptionList возвращает сырой JSON-массив (не обёрнутый в {success,data})
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([])
+      });
+    } else if (url.includes('/api/config/list')) {
+      // ConfigList возвращает сырой JSON-массив файлов
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([])
+      });
+    } else if (url.includes('/api/traffic/quotas')) {
+      // TrafficQuotas.svelte: $: activeQuotas = quotas.filter(...) — нужен массив
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([])
+      });
+    } else if (url.includes('/api/traffic/alerts')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([])
+      });
+    } else if (url.includes('/api/traffic/stats')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ download: 0, upload: 0, total: 0, reset_time: 0 })
+      });
+    } else if (url.includes('/api/smart-proxy/profiles')) {
+      // SmartProxy.svelte: profiles = await res.json() — нужен массив
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([])
+      });
+    } else if (url.includes('/api/smart-proxy/status')) {
+      // SmartProxy.svelte: status.active.length — нужен объект с полем active
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ active: [], next: [], time: '00:00', day: 0 })
+      });
+    } else if (url.includes('/api/update/status')) {
+      // Settings.svelte: startStatusSSE() вызывается только если status != idle/done/failed
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'idle' })
+      });
+    } else if (url.includes('/api/dat/list')) {
+      // DATManager.svelte: data.sort(...) — нужен массив
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([])
+      });
     } else {
-      // Fallback-заглушка для всех прочих /api/** (subscriptions, clash api, traffic и т.д.)
+      // Fallback-заглушка для всех прочих /api/** (clash api, network tools и т.д.)
       // Возвращает пустой успешный ответ, чтобы страницы не падали с сетевой ошибкой,
       // которая сама по себе генерирует console.error
       await route.fulfill({
