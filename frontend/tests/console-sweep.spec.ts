@@ -172,7 +172,7 @@ function attachConsoleCollectors(page: Page) {
     const text = msg.text();
     if (level === 'error') {
       errors.push({ level, text });
-    } else if (level === 'warning' || level === 'warn') {
+    } else if (level === 'warning') {
       warnings.push({ level, text });
     }
   });
