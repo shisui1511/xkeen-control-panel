@@ -847,7 +847,7 @@
   {/if}
 
   <!-- Test History Section -->
-  <div class="card card-tight mb-3" style="padding: 16px 20px; margin-top: 16px;">
+  <div class="card mb-3" style="padding: 16px 20px; margin-top: 16px;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
       <h3 style="margin:0; font-size:14px; font-weight:700; color:var(--fg-primary); display:flex; align-items:center; gap:8px;">
         <Icon name="connections" size={14} />
