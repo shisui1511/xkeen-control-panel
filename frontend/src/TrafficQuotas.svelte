@@ -768,7 +768,7 @@
           <label for="form-action" class="form-label">{$t('trafficquotas.action')}</label>
           <select id="form-action" class="input" bind:value={formAction}>
             <option value="notify">{$t('trafficquotas.action_notify')}</option>
-            <option value="throttle">{$t('trafficquotas.action_throttle')}</option>
+            <option value="throttle" disabled>{$t('trafficquotas.action_throttle')} ({$currentLang === 'ru' ? 'не поддерживается' : 'unsupported'})</option>
             <option value="log_only">{$t('trafficquotas.action_log_only')}</option>
             <option value="block">{$t('trafficquotas.action_block')}</option>
             <option value="redirect_direct">{$t('trafficquotas.action_redirect_direct')}</option>
