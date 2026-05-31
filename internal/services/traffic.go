@@ -63,10 +63,11 @@ type TrafficPeaks struct {
 
 // TrafficStore is the on-disk format
 type TrafficStore struct {
-	Quotas     []TrafficQuota           `json:"quotas"`
-	ProxyStats map[string]*ProxyTraffic `json:"proxy_stats"`
-	Peaks      TrafficPeaks             `json:"peaks"`
-	ResetTime  int64                    `json:"reset_time"`
+	Quotas         []TrafficQuota           `json:"quotas"`
+	ProxyStats     map[string]*ProxyTraffic `json:"proxy_stats"`
+	Peaks          TrafficPeaks             `json:"peaks"`
+	ResetTime      int64                    `json:"reset_time"`
+	BlockedProxies map[string]string        `json:"blocked_proxies"`
 }
 
 // saveLockThrottle is the minimum interval between background/periodic saves
@@ -187,6 +188,11 @@ func (s *TrafficQuotaService) load() {
 	if s.resetTime == 0 {
 		s.resetTime = time.Now().Unix()
 	}
+	if store.BlockedProxies != nil {
+		s.blockedProxies = store.BlockedProxies
+	} else {
+		s.blockedProxies = make(map[string]string)
+	}
 	s.mu.Unlock()
 }
 
@@ -200,10 +206,11 @@ func (s *TrafficQuotaService) saveLocked(force bool) error {
 		return nil
 	}
 	store := TrafficStore{
-		Quotas:     s.quotas,
-		ProxyStats: s.proxyStats,
-		Peaks:      s.peaks,
-		ResetTime:  s.resetTime,
+		Quotas:         s.quotas,
+		ProxyStats:     s.proxyStats,
+		Peaks:          s.peaks,
+		ResetTime:      s.resetTime,
+		BlockedProxies: s.blockedProxies,
 	}
 
 	data, err := json.MarshalIndent(store, "", "  ")
@@ -244,6 +251,24 @@ func (s *TrafficQuotaService) rotateIfNeeded() {
 		if !active[name] {
 			delete(s.proxyStats, name)
 		}
+	}
+
+	// Write pruned state back to disk immediately so traffic.json exists
+	store := TrafficStore{
+		Quotas:         s.quotas,
+		ProxyStats:     s.proxyStats,
+		Peaks:          s.peaks,
+		ResetTime:      s.resetTime,
+		BlockedProxies: s.blockedProxies,
+	}
+	data, marshalErr := json.MarshalIndent(store, "", "  ")
+	if marshalErr != nil {
+		log.Printf("traffic: rotate marshal failed: %v", marshalErr)
+		return
+	}
+	if writeErr := utils.AtomicWriteFile(s.storePath(), data, 0600); writeErr != nil {
+		log.Printf("traffic: rotate write failed: %v", writeErr)
+		return
 	}
 }
 
