@@ -69,7 +69,7 @@ type TrafficStore struct {
 
 // saveLockThrottle is the minimum interval between background/periodic saves
 // (CRUD-triggered saves always use force=true and bypass throttling).
-const saveLockThrottle = 5 * time.Second
+const saveLockThrottle = 1 * time.Minute
 
 // maxTrafficFileSize is the rotation threshold for traffic.json.
 const maxTrafficFileSize = 5 * 1024 * 1024 // 5 MB
@@ -140,6 +140,10 @@ func (s *TrafficQuotaService) Start() {
 func (s *TrafficQuotaService) Stop() {
 	close(s.stopCh)
 	s.wg.Wait()
+
+	s.mu.Lock()
+	_ = s.saveLocked(true)
+	s.mu.Unlock()
 }
 
 func (s *TrafficQuotaService) storePath() string {
@@ -466,10 +470,16 @@ func (s *TrafficQuotaService) streamConnections() error {
 	}
 	defer conn.Close()
 
-	// Close the WebSocket when the service stops so ReadJSON unblocks.
+	done := make(chan struct{})
+	defer close(done)
+
+	// Close the WebSocket when the service stops so ReadJSON/ReadMessage unblocks.
 	go func() {
-		<-s.stopCh
-		conn.Close()
+		select {
+		case <-s.stopCh:
+			conn.Close()
+		case <-done:
+		}
 	}()
 
 	log.Printf("TrafficQuota: WebSocket connected to %s", wsURL)
@@ -685,10 +695,16 @@ func (s *TrafficQuotaService) streamTraffic() error {
 	}
 	defer conn.Close()
 
-	// Close the WebSocket when the service stops so ReadJSON unblocks.
+	done := make(chan struct{})
+	defer close(done)
+
+	// Close the WebSocket when the service stops so ReadMessage unblocks.
 	go func() {
-		<-s.stopCh
-		conn.Close()
+		select {
+		case <-s.stopCh:
+			conn.Close()
+		case <-done:
+		}
 	}()
 
 	log.Printf("TrafficQuota: WebSocket traffic connected to %s", wsURL)
