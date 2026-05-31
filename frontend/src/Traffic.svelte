@@ -538,27 +538,24 @@
     }
   }
 
-  .stat-card-spark {
+  .stat-card-spark { /* hot-fix */
     padding: 0;
     position: relative;
-    height: 110px;
+    height: 120px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     overflow: hidden;
   }
 
-  .stat-card-content {
-    padding: 24px 24px 0 24px;
+  .stat-card-content { /* hot-fix */
+    padding: 20px 24px 0 24px;
     z-index: 2;
   }
 
-  .stat-card-normal {
-    padding: 24px;
-    height: 110px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
+  .stat-card-normal { /* hot-fix */
+    padding: 20px 24px;
+    height: 120px;
   }
 
   .stat-label {
@@ -589,11 +586,11 @@
     color: var(--fg-primary);
   }
 
-  .stat-session {
+  .stat-session { /* hot-fix */
     font-size: 11px;
     color: var(--fg-secondary);
-    margin-top: 4px;
-    margin-bottom: 8px;
+    margin-top: 2px;
+    margin-bottom: 0;
   }
 
   .sparkline {
