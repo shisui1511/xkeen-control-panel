@@ -155,6 +155,8 @@ func main() {
 	srv.HandleProtected("/api/network/dns", api.NetworkDNS)
 	srv.HandleProtected("/api/network/http", api.NetworkHTTPTest)
 	srv.HandleProtected("/api/network/ip", api.NetworkIP)
+	srv.HandleProtected("/api/network/proxy-test", api.NetworkProxyTest)
+	srv.HandleProtected("/api/network/port-check", api.NetworkPortCheck)
 
 	// Smart Proxy Manager endpoints
 	srv.HandleProtected("/api/smart-proxy/profiles", api.SmartProxyList)
