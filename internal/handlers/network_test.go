@@ -26,6 +26,8 @@ func TestValidateURL_SSRFBlocked(t *testing.T) {
 		{"file scheme", "file:///etc/passwd"},
 		{"ftp scheme", "ftp://example.com/file"},
 		{"link-local", "http://169.254.169.254/latest/meta-data/"},
+		{"CGNAT", "http://100.64.1.1/secret"},
+		{"ULA IPv6", "http://[fd00::1]/secret"},
 	}
 
 	for _, tc := range cases {
