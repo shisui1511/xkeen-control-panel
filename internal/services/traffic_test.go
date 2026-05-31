@@ -1,6 +1,10 @@
 package services
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -741,5 +745,162 @@ func TestTraffic_TCPUDPAggregation(t *testing.T) {
 	}
 	if svc.udpConnsCount != 1 {
 		t.Errorf("expected udpConnsCount=1, got %d", svc.udpConnsCount)
+	}
+}
+
+func TestTrafficQuotaService_BlockAndRedirect(t *testing.T) {
+	var requestCount int
+	var lastMethod, lastPath string
+	var lastBody map[string]string
+
+	// 1. Setup mock Mihomo server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		lastMethod = r.Method
+		lastPath = r.URL.Path
+
+		if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/proxies/") {
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				lastBody = body
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		if r.Method == http.MethodGet && r.URL.Path == "/proxies" {
+			proxiesJSON := `{
+				"proxies": {
+					"GLOBAL": {
+						"name": "GLOBAL",
+						"type": "Selector",
+						"now": "US-Group",
+						"all": ["US-Group", "DIRECT", "REJECT"]
+					},
+					"US-Group": {
+						"name": "US-Group",
+						"type": "Selector",
+						"now": "us-node-1",
+						"all": ["us-node-1", "us-node-2", "DIRECT", "REJECT"]
+					}
+				}
+			}`
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(proxiesJSON))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	// 2. Initialize Service with Mock Server URL
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, ts.URL, "test-secret")
+
+	// 3. Add Quota (redirect_direct, target: US-Group)
+	quota := &TrafficQuota{
+		ID:         "quota-us",
+		Name:       "US Quota",
+		TargetType: "proxy",
+		TargetID:   "US-Group",
+		LimitBytes: 1000,
+		Enabled:    true,
+		Action:     "redirect_direct",
+	}
+	if err := svc.AddQuota(quota); err != nil {
+		t.Fatalf("AddQuota failed: %v", err)
+	}
+
+	// 4. Simulate usage exceeding the limit (1200 bytes)
+	svc.mu.Lock()
+	svc.proxyStats["US-Group"] = &ProxyTraffic{
+		ProxyName:  "US-Group",
+		TotalBytes: 1200,
+	}
+	svc.mu.Unlock()
+
+	// 5. Run checkQuotas()
+	svc.checkQuotas()
+
+	// Verify group switch API request was sent to Mihomo
+	if lastMethod != http.MethodPut || lastPath != "/proxies/US-Group" {
+		t.Errorf("expected PUT to /proxies/US-Group, got %s %s", lastMethod, lastPath)
+	}
+	if lastBody["name"] != "DIRECT" {
+		t.Errorf("expected switch to DIRECT, got %s", lastBody["name"])
+	}
+
+	// Verify original proxy is saved in blockedProxies
+	svc.mu.RLock()
+	orig := svc.blockedProxies["US-Group"]
+	svc.mu.RUnlock()
+	if orig != "us-node-1" {
+		t.Errorf("expected original proxy to be saved as us-node-1, got %s", orig)
+	}
+
+	// 6. Reset Quota and run checkQuotas() again -> should restore original proxy
+	if err := svc.ResetQuota("quota-us"); err != nil {
+		t.Fatalf("ResetQuota failed: %v", err)
+	}
+
+	svc.mu.Lock()
+	svc.proxyStats["US-Group"].TotalBytes = 0
+	svc.mu.Unlock()
+
+	// Re-mock proxies with current status (which was DIRECT after block)
+	// so that checkQuotas sees the current state in Mihomo
+	ts.Close() // close previous server
+	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastMethod = r.Method
+		lastPath = r.URL.Path
+		if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/proxies/") {
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				lastBody = body
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/proxies" {
+			proxiesJSON := `{
+				"proxies": {
+					"GLOBAL": {
+						"name": "GLOBAL",
+						"type": "Selector",
+						"now": "US-Group",
+						"all": ["US-Group", "DIRECT", "REJECT"]
+					},
+					"US-Group": {
+						"name": "US-Group",
+						"type": "Selector",
+						"now": "DIRECT",
+						"all": ["us-node-1", "us-node-2", "DIRECT", "REJECT"]
+					}
+				}
+			}`
+			w.Write([]byte(proxiesJSON))
+			return
+		}
+	}))
+	defer ts.Close()
+	svc.mihomoURL = ts.URL
+
+	svc.checkQuotas()
+
+	// Verify restore API request was sent
+	if lastMethod != http.MethodPut || lastPath != "/proxies/US-Group" {
+		t.Errorf("expected restore PUT to /proxies/US-Group, got %s %s", lastMethod, lastPath)
+	}
+	if lastBody["name"] != "us-node-1" {
+		t.Errorf("expected restore to us-node-1, got %s", lastBody["name"])
+	}
+
+	// Verify original proxy was removed from blockedProxies
+	svc.mu.RLock()
+	_, saved := svc.blockedProxies["US-Group"]
+	svc.mu.RUnlock()
+	if saved {
+		t.Error("expected US-Group to be removed from blockedProxies")
 	}
 }
