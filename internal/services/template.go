@@ -21,8 +21,9 @@ type Template struct {
 }
 
 type TemplateService struct {
-	templates []Template
-	mu        sync.RWMutex
+	templates  []Template
+	mu         sync.RWMutex
+	httpClient *http.Client
 }
 
 func NewTemplateService() *TemplateService {
@@ -33,27 +34,28 @@ func NewTemplateService() *TemplateService {
 				Name:        "Xray: VLESS + Reality",
 				Description: "Стандартная конфигурация Xray Reality с Vision",
 				Type:        "xray",
-				URL:         "https://raw.githubusercontent.com/XTLS/Xray-examples/main/VLESS-Reality-Vision/config.json",
+				URL:         "https://raw.githubusercontent.com/XTLS/Xray-examples/main/VLESS-TCP-XTLS-Vision-REALITY/config_server.jsonc",
 			},
 			{
 				Name:        "Xray: VMess + WS",
 				Description: "VMess через WebSocket (CDN friendly)",
 				Type:        "xray",
-				URL:         "https://raw.githubusercontent.com/XTLS/Xray-examples/main/VMess-Websocket-TLS/config_client.json",
+				URL:         "https://raw.githubusercontent.com/XTLS/Xray-examples/main/VMess-Websocket-TLS/config_client.jsonc",
 			},
 			{
 				Name:        "Mihomo: Basic Config",
 				Description: "Базовый конфиг Mihomo с группами прокси",
 				Type:        "mihomo",
-				URL:         "https://raw.githubusercontent.com/Loyalsoldier/clash-rules/release/config-classic-lite.yaml",
+				URL:         "https://raw.githubusercontent.com/MetaCubeX/mihomo/Alpha/docs/config.yaml",
 			},
 			{
 				Name:        "Mihomo: RU Bypass rules",
 				Description: "Набор правил для обхода блокировок РФ",
 				Type:        "mihomo",
-				URL:         "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Config/ACL4SSR_Online_Mini_MultiMode.ini", // This might need parsing
+				URL:         "https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/config/ACL4SSR_Online_Mini_MultiMode.ini", // This might need parsing
 			},
 		},
+		httpClient: utils.SafeHTTPClient(10 * time.Second),
 	}
 }
 
@@ -72,6 +74,7 @@ func (s *TemplateService) FetchByName(name string) (string, error) {
 			break
 		}
 	}
+	client := s.httpClient
 	s.mu.RUnlock()
 
 	if urlStr == "" {
@@ -99,7 +102,9 @@ func (s *TemplateService) FetchByName(name string) (string, error) {
 		}
 	}
 
-	client := utils.SafeHTTPClient(10 * time.Second)
+	if client == nil {
+		client = utils.SafeHTTPClient(10 * time.Second)
+	}
 
 	resp, err := client.Get(urlStr)
 	if err != nil {
