@@ -272,6 +272,7 @@ func (a *API) ConnectionsWebSocket(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
+				conn.Close() // Гарантирует прерывание цикла записи в основном потоке
 				return
 			}
 		}
@@ -341,6 +342,7 @@ func (a *API) TrafficWebSocket(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
+				conn.Close() // Гарантирует прерывание цикла записи в основном потоке
 				return
 			}
 		}
