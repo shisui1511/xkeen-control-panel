@@ -418,20 +418,21 @@ func TestCheckResets_NoResetWithinPeriod(t *testing.T) {
 	}
 }
 
-// TestCheckResets_ProxyStatsReset verifies that proxyStats for the target proxy
-// are zeroed when the quota resets.
-func TestCheckResets_ProxyStatsReset(t *testing.T) {
+// TestCheckResets_QuotaResetOnly verifies that a quota reset zeroes CurrentBytes
+// but leaves the shared proxyStats intact.
+func TestCheckResets_QuotaResetOnly(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
 	// Add and backdate the quota.
 	quota := &TrafficQuota{
-		Name:       "ProxyQuota",
-		TargetType: "proxy",
-		TargetID:   "proxy-x",
-		LimitBytes: 2000,
-		Period:     "daily",
-		Enabled:    true,
+		Name:         "ProxyQuota",
+		TargetType:   "proxy",
+		TargetID:     "proxy-x",
+		LimitBytes:   2000,
+		Period:       "daily",
+		Enabled:      true,
+		CurrentBytes: 1000,
 	}
 	if err := svc.AddQuota(quota); err != nil {
 		t.Fatalf("AddQuota: %v", err)
@@ -462,8 +463,15 @@ func TestCheckResets_ProxyStatsReset(t *testing.T) {
 	if stat == nil {
 		t.Fatal("expected proxyStats entry to still exist")
 	}
-	if stat.TotalBytes != 0 {
-		t.Errorf("expected proxyStats zeroed after reset, got TotalBytes=%d", stat.TotalBytes)
+	// proxyStats must NOT be zeroed.
+	if stat.TotalBytes != 1000 {
+		t.Errorf("expected proxyStats intact (1000), got TotalBytes=%d", stat.TotalBytes)
+	}
+
+	// Quota CurrentBytes must be reset to 0.
+	quotas := svc.ListQuotas()
+	if quotas[0].CurrentBytes != 0 {
+		t.Errorf("expected quota CurrentBytes to be reset to 0, got %d", quotas[0].CurrentBytes)
 	}
 }
 
@@ -474,20 +482,14 @@ func TestCheckQuotas_CriticalAlert(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
-	svc.mu.Lock()
-	svc.proxyStats["proxy-z"] = &ProxyTraffic{
-		ProxyName:  "proxy-z",
-		TotalBytes: 1200, // over limit
-	}
-	svc.mu.Unlock()
-
 	quota := &TrafficQuota{
-		Name:       "OverLimit",
-		TargetType: "proxy",
-		TargetID:   "proxy-z",
-		LimitBytes: 1000,
-		Period:     "daily",
-		Enabled:    true,
+		Name:         "OverLimit",
+		TargetType:   "proxy",
+		TargetID:     "proxy-z",
+		LimitBytes:   1000,
+		Period:       "daily",
+		Enabled:      true,
+		CurrentBytes: 1200, // over limit
 	}
 	if err := svc.AddQuota(quota); err != nil {
 		t.Fatalf("AddQuota: %v", err)
@@ -516,13 +518,6 @@ func TestCheckQuotas_WarningAlert(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
-	svc.mu.Lock()
-	svc.proxyStats["proxy-w"] = &ProxyTraffic{
-		ProxyName:  "proxy-w",
-		TotalBytes: 850, // 85% of 1000
-	}
-	svc.mu.Unlock()
-
 	quota := &TrafficQuota{
 		Name:           "WarnQuota",
 		TargetType:     "proxy",
@@ -531,6 +526,7 @@ func TestCheckQuotas_WarningAlert(t *testing.T) {
 		AlertThreshold: 80, // warn at 80%
 		Period:         "daily",
 		Enabled:        true,
+		CurrentBytes:   850, // 85% of 1000
 	}
 	if err := svc.AddQuota(quota); err != nil {
 		t.Fatalf("AddQuota: %v", err)
@@ -552,13 +548,6 @@ func TestCheckQuotas_NoAlertBelowThreshold(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
-	svc.mu.Lock()
-	svc.proxyStats["proxy-ok"] = &ProxyTraffic{
-		ProxyName:  "proxy-ok",
-		TotalBytes: 500, // 50% of 1000, threshold at 80%
-	}
-	svc.mu.Unlock()
-
 	quota := &TrafficQuota{
 		Name:           "OkQuota",
 		TargetType:     "proxy",
@@ -567,6 +556,7 @@ func TestCheckQuotas_NoAlertBelowThreshold(t *testing.T) {
 		AlertThreshold: 80,
 		Period:         "daily",
 		Enabled:        true,
+		CurrentBytes:   500, // 50% of 1000, threshold at 80%
 	}
 	if err := svc.AddQuota(quota); err != nil {
 		t.Fatalf("AddQuota: %v", err)
@@ -816,10 +806,7 @@ func TestTrafficQuotaService_BlockAndRedirect(t *testing.T) {
 
 	// 4. Simulate usage exceeding the limit (1200 bytes)
 	svc.mu.Lock()
-	svc.proxyStats["US-Group"] = &ProxyTraffic{
-		ProxyName:  "US-Group",
-		TotalBytes: 1200,
-	}
+	svc.quotas[0].CurrentBytes = 1200
 	svc.mu.Unlock()
 
 	// 5. Run checkQuotas()
@@ -845,10 +832,6 @@ func TestTrafficQuotaService_BlockAndRedirect(t *testing.T) {
 	if err := svc.ResetQuota("quota-us"); err != nil {
 		t.Fatalf("ResetQuota failed: %v", err)
 	}
-
-	svc.mu.Lock()
-	svc.proxyStats["US-Group"].TotalBytes = 0
-	svc.mu.Unlock()
 
 	// Re-mock proxies with current status (which was DIRECT after block)
 	// so that checkQuotas sees the current state in Mihomo

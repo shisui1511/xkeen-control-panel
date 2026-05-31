@@ -628,6 +628,22 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 			stat.UploadBytes += deltaUp
 			stat.DownloadBytes += deltaDown
 			stat.TotalBytes = stat.UploadBytes + stat.DownloadBytes
+
+			for i := range s.quotas {
+				q := &s.quotas[i]
+				if !q.Enabled {
+					continue
+				}
+				match := false
+				if q.TargetType == "global" {
+					match = true
+				} else if q.TargetType == "proxy" && q.TargetID == proxyName {
+					match = true
+				}
+				if match {
+					q.CurrentBytes += (deltaUp + deltaDown)
+				}
+			}
 		}
 
 		s.connectionTracker.Store(conn.ID, connStats{Upload: conn.Upload, Download: conn.Download})
@@ -870,7 +886,20 @@ func (s *TrafficQuotaService) checkResets() {
 		case "daily":
 			shouldReset = lastReset.Year() != now.Year() || lastReset.YearDay() != now.YearDay()
 		case "weekly":
-			shouldReset = lastReset.AddDate(0, 0, 7).Before(now)
+			// Reset on calendar week boundary (Monday 00:00).
+			lastOffset := int(lastReset.Weekday() - time.Monday)
+			if lastOffset < 0 {
+				lastOffset += 7
+			}
+			lastWeekStart := time.Date(lastReset.Year(), lastReset.Month(), lastReset.Day()-lastOffset, 0, 0, 0, 0, lastReset.Location()).Unix()
+
+			nowOffset := int(now.Weekday() - time.Monday)
+			if nowOffset < 0 {
+				nowOffset += 7
+			}
+			nowWeekStart := time.Date(now.Year(), now.Month(), now.Day()-nowOffset, 0, 0, 0, 0, now.Location()).Unix()
+
+			shouldReset = lastWeekStart != nowWeekStart
 		case "monthly":
 			shouldReset = lastReset.Year() != now.Year() || lastReset.Month() != now.Month()
 		}
@@ -879,22 +908,6 @@ func (s *TrafficQuotaService) checkResets() {
 			q.CurrentBytes = 0
 			q.LastReset = now.Unix()
 			changed = true
-			// Reset accumulated proxy stats so checkQuotas reads from zero
-			// after the period boundary, not from historical cumulative totals.
-			switch q.TargetType {
-			case "proxy":
-				if stat, ok := s.proxyStats[q.TargetID]; ok {
-					stat.UploadBytes = 0
-					stat.DownloadBytes = 0
-					stat.TotalBytes = 0
-				}
-			case "global":
-				for _, stat := range s.proxyStats {
-					stat.UploadBytes = 0
-					stat.DownloadBytes = 0
-					stat.TotalBytes = 0
-				}
-			}
 		}
 	}
 
@@ -1010,25 +1023,13 @@ func (s *TrafficQuotaService) checkQuotas() {
 		message  string
 	}, 0)
 
-	updatedCurrentBytes := make(map[string]int64)
-
 	for i := range quotasCopy {
 		q := &quotasCopy[i]
 		if !q.Enabled || q.LimitBytes <= 0 {
 			continue
 		}
 
-		var current int64
-		switch q.TargetType {
-		case "proxy":
-			current = proxyStatsCopy[q.TargetID]
-		case "global":
-			for _, total := range proxyStatsCopy {
-				current += total
-			}
-		}
-
-		updatedCurrentBytes[q.ID] = current
+		current := q.CurrentBytes
 		percent := float64(current) / float64(q.LimitBytes) * 100
 
 		if percent >= 100 {
@@ -1147,17 +1148,6 @@ func (s *TrafficQuotaService) checkQuotas() {
 		}
 	}
 
-	changed := false
-	for i := range s.quotas {
-		q := &s.quotas[i]
-		if current, ok := updatedCurrentBytes[q.ID]; ok {
-			if q.CurrentBytes != current {
-				q.CurrentBytes = current
-				changed = true
-			}
-		}
-	}
-
 	for _, alert := range alertsToCreate {
 		var quotaPtr *TrafficQuota
 		for i := range s.quotas {
@@ -1171,9 +1161,6 @@ func (s *TrafficQuotaService) checkQuotas() {
 		}
 	}
 
-	if changed {
-		_ = s.saveLocked(false)
-	}
 	s.mu.Unlock()
 }
 
