@@ -446,7 +446,7 @@
   {#if stats}
     <div class="card mb-3">
       <h2 class="card-title">{$t('trafficquotas.summary')}</h2>
-      <div class="stats-grid">
+      <div class="tq-stats-grid">
         <div class="stat-box">
           <div class="stat-label">{$t('trafficquotas.total_download')}</div>
           <div class="stat-value">{formatBytes(stats.total_download)}</div>
@@ -818,7 +818,7 @@
     gap: 8px;
   }
 
-  .stats-grid {
+  .tq-stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 16px;
