@@ -410,7 +410,7 @@
         <div style="color:var(--fg-dim);font-size:12px;font-family:var(--font-family-mono);">
           ({status.time}, {dayNames[status.day]})
         </div>
-        {#if status.active.length > 0}
+        {#if status.active?.length > 0}
           <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap;">
             {#each status.active as p}
               <span class="status-badge active">{p.name} → {p.current_proxy || p.proxy_name}</span>
