@@ -249,17 +249,24 @@
     const startIdx = maxPoints - points.length;
     const getX = (idx: number) => (startIdx + idx) * step;
 
+    const getDownloadY = (val: number) => height - (val / maxVal) * (height - 20);
+    const getUploadY = (valUp: number, valDown: number) => {
+      const y = height - (valUp / maxVal) * (height - 20);
+      // Сдвигаем линию Upload чуть выше при совпадении для видимости обеих линий
+      return valUp === valDown ? y - 1.5 : y;
+    };
+
     // Download path
-    let dLinePath = `M ${getX(0)} ${height - (points[0].down / maxVal) * (height - 20)}`;
+    let dLinePath = `M ${getX(0)} ${getDownloadY(points[0].down)}`;
     for (let i = 1; i < points.length; i++) {
-      dLinePath += ` L ${getX(i)} ${height - (points[i].down / maxVal) * (height - 20)}`;
+      dLinePath += ` L ${getX(i)} ${getDownloadY(points[i].down)}`;
     }
     const dAreaPath = `${dLinePath} L ${getX(points.length - 1)} ${height} L ${getX(0)} ${height} Z`;
 
     // Upload path
-    let uLinePath = `M ${getX(0)} ${height - (points[0].up / maxVal) * (height - 20)}`;
+    let uLinePath = `M ${getX(0)} ${getUploadY(points[0].up, points[0].down)}`;
     for (let i = 1; i < points.length; i++) {
-      uLinePath += ` L ${getX(i)} ${height - (points[i].up / maxVal) * (height - 20)}`;
+      uLinePath += ` L ${getX(i)} ${getUploadY(points[i].up, points[i].down)}`;
     }
     const uAreaPath = `${uLinePath} L ${getX(points.length - 1)} ${height} L ${getX(0)} ${height} Z`;
 
@@ -283,9 +290,9 @@
     const maxDown = Math.max(...points.map((p) => p.down)) || 1;
     const width = 200;
     const height = 42;
-    const step = width / 19; // 20 points, 19 steps
-
-    const startX = width - (points.length - 1) * step;
+    // Динамически растягиваем спарклайн на всю ширину карточки при малом числе точек
+    const step = width / (points.length - 1);
+    const startX = 0;
 
     // Up
     let uLine = `M ${startX} ${height - (points[0].up / maxUp) * (height - 8)}`;
@@ -318,7 +325,7 @@
     </div>
     <div class="ph-actions" style="display: flex; gap: 12px; align-items: center;">
       <span class="status-indicator" class:connected class:live={connected}>
-        ● {connected ? 'live' : 'offline'}
+        {connected ? 'live' : 'offline'}
       </span>
       <button
         class="btn btn-secondary btn-reset"
@@ -334,7 +341,7 @@
     <!-- Upload Card -->
     <div class="card stat-card-spark">
       <div class="stat-card-content">
-        <div class="stat-label">Upload</div>
+        <div class="stat-label">{$t('traffic.upload')}</div>
         <div class="stat-value upload-color">{formatSpeed(totalUp)}</div>
         <div class="stat-session">
           Σ {$t('traffic.session')} {formatBytes(sessionUp)}
@@ -357,7 +364,7 @@
     <!-- Download Card -->
     <div class="card stat-card-spark">
       <div class="stat-card-content">
-        <div class="stat-label">Download</div>
+        <div class="stat-label">{$t('traffic.download')}</div>
         <div class="stat-value download-color">{formatSpeed(totalDown)}</div>
         <div class="stat-session">
           Σ {$t('traffic.session')} {formatBytes(sessionDown)}
@@ -400,8 +407,8 @@
   <!-- Main Chart Card -->
   <div class="card chart-card">
     <div class="chart-legend">
-      <span class="key"><span class="sw download-bg"></span>Download</span>
-      <span class="key"><span class="sw upload-bg"></span>Upload</span>
+      <span class="key"><span class="sw download-bg"></span>{$t('traffic.download')}</span>
+      <span class="key"><span class="sw upload-bg"></span>{$t('traffic.upload')}</span>
       <span class="chart-time-label">
         {$t('traffic.chart_legend_time')}
       </span>
@@ -443,7 +450,8 @@
               y1="60"
               x2="1000"
               y2="60"
-              stroke="rgba(255,255,255,.03)"
+              stroke="var(--border)"
+              opacity="0.3"
               stroke-dasharray="4"
             />
             <line
@@ -451,7 +459,8 @@
               y1="120"
               x2="1000"
               y2="120"
-              stroke="rgba(255,255,255,.03)"
+              stroke="var(--border)"
+              opacity="0.3"
               stroke-dasharray="4"
             />
             <line
@@ -459,7 +468,8 @@
               y1="180"
               x2="1000"
               y2="180"
-              stroke="rgba(255,255,255,.03)"
+              stroke="var(--border)"
+              opacity="0.3"
               stroke-dasharray="4"
             />
 
@@ -709,6 +719,9 @@
     background: rgba(41, 194, 240, 0.08);
   }
   :global(.status-indicator.live::before) {
-    display: none;
+    display: inline-block !important;
+    background: var(--accent) !important;
+    box-shadow: 0 0 8px var(--accent) !important;
+    animation: ledPulse 2.4s infinite !important;
   }
 </style>

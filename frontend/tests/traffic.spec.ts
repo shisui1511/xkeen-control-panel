@@ -89,6 +89,9 @@ test.describe('Traffic page test suite', () => {
     // Mock WebSocket для трафика
     await page.routeWebSocket('**/api/traffic/ws', async (ws) => {
       ws.send(TRAFFIC_FRAME);
+      // Отправляем второй фрейм, чтобы у клиента было минимум 2 точки для отрисовки графиков
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      ws.send(TRAFFIC_FRAME);
     });
 
     await page.goto('/#/traffic');
