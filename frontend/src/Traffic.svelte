@@ -337,7 +337,7 @@
     </div>
   </div>
 
-  <div class="stats-grid mb-2">
+  <div class="traffic-stats-grid mb-2">
     <!-- Upload Card -->
     <div class="card stat-card-spark">
       <div class="stat-card-content">
@@ -536,14 +536,14 @@
 </div>
 
 <style>
-  .stats-grid {
+  .traffic-stats-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 14px;
   }
 
   @media (max-width: 768px) {
-    .stats-grid {
+    .traffic-stats-grid {
       grid-template-columns: 1fr;
     }
   }
