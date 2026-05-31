@@ -29,10 +29,10 @@ type Profile struct {
 	ID           string      `json:"id"`
 	Name         string      `json:"name"`
 	Enabled      bool        `json:"enabled"`
-	Mode         ProfileMode `json:"mode"` // "time-based"
-	Schedule     [][]bool    `json:"schedule"` // 7x24 grid: [day][hour]
-	GroupName    string      `json:"group_name"` // Mihomo proxy group name
-	ProxyName    string      `json:"proxy_name"` // Primary proxy to select
+	Mode         ProfileMode `json:"mode"`         // "time-based"
+	Schedule     [][]bool    `json:"schedule"`     // 7x24 grid: [day][hour]
+	GroupName    string      `json:"group_name"`   // Mihomo proxy group name
+	ProxyName    string      `json:"proxy_name"`   // Primary proxy to select
 	LastApplied  int64       `json:"last_applied"` // Unix timestamp
 	ApplyCount   int         `json:"apply_count"`
 	CurrentProxy string      `json:"current_proxy"`

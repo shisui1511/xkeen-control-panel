@@ -111,12 +111,12 @@ type TrafficQuotaService struct {
 	connSubs   map[chan []byte]struct{}
 	connSubsMu sync.RWMutex
 
-	peaks             TrafficPeaks
-	activeConnsCount  int64
-	tcpConnsCount     int64
-	udpConnsCount     int64
-	trafficSubs       map[chan []byte]struct{}
-	trafficSubsMu     sync.RWMutex
+	peaks            TrafficPeaks
+	activeConnsCount int64
+	tcpConnsCount    int64
+	udpConnsCount    int64
+	trafficSubs      map[chan []byte]struct{}
+	trafficSubsMu    sync.RWMutex
 
 	httpClient         *http.Client
 	blockedProxies     map[string]string

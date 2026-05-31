@@ -705,21 +705,21 @@ func TestTraffic_TCPUDPAggregation(t *testing.T) {
 
 	snapshot := []mihomoConn{
 		{
-			ID: "conn1",
+			ID:     "conn1",
 			Chains: []string{"proxy-a"},
 			Metadata: mihomoConnMetadata{
 				Network: "TCP",
 			},
 		},
 		{
-			ID: "conn2",
+			ID:     "conn2",
 			Chains: []string{"proxy-a"},
 			Metadata: mihomoConnMetadata{
 				Network: "udp",
 			},
 		},
 		{
-			ID: "conn3",
+			ID:     "conn3",
 			Chains: []string{"proxy-b"},
 			Metadata: mihomoConnMetadata{
 				Network: "TCP",
@@ -938,4 +938,3 @@ func TestProcessConnSnapshot_FirstSnapshotNoDelta(t *testing.T) {
 		t.Fatalf("expected delta 50/50, got up=%d, down=%d", statsA2.UploadBytes, statsA2.DownloadBytes)
 	}
 }
-
