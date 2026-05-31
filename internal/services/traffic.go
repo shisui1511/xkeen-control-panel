@@ -118,9 +118,10 @@ type TrafficQuotaService struct {
 	trafficSubs       map[chan []byte]struct{}
 	trafficSubsMu     sync.RWMutex
 
-	httpClient     *http.Client
-	blockedProxies map[string]string
-	resetTime      int64
+	httpClient         *http.Client
+	blockedProxies     map[string]string
+	resetTime          int64
+	trackerInitialized bool
 }
 
 func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaService {
@@ -584,6 +585,8 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 	s.mu.Lock()
 
 	activeIDs := make(map[string]bool, len(connections))
+	isFirstSnapshot := !s.trackerInitialized
+	s.trackerInitialized = true
 
 	for _, conn := range connections {
 		if len(conn.Chains) == 0 {
@@ -602,9 +605,11 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 			deltaUp = conn.Upload - last.Upload
 			deltaDown = conn.Download - last.Download
 		} else {
-			// New connection: treat current bytes as the delta.
-			deltaUp = conn.Upload
-			deltaDown = conn.Download
+			if !isFirstSnapshot {
+				// New connection: treat current bytes as the delta.
+				deltaUp = conn.Upload
+				deltaDown = conn.Download
+			}
 		}
 
 		if deltaUp < 0 {

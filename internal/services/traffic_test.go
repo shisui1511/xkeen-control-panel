@@ -224,6 +224,7 @@ func TestSaveLocked_Throttle(t *testing.T) {
 func TestProcessConnSnapshot_Delta(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+	svc.trackerInitialized = true
 
 	// Seed the tracker with a connection that already has some bytes.
 	svc.connectionTracker.Store("conn1", connStats{Upload: 100, Download: 200})
@@ -287,6 +288,7 @@ func TestProcessConnSnapshot_ClosedConnectionCleanup(t *testing.T) {
 func TestProcessConnSnapshot_NegativeDeltaIgnored(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+	svc.trackerInitialized = true
 
 	svc.connectionTracker.Store("conn1", connStats{Upload: 500, Download: 500})
 
@@ -904,3 +906,53 @@ func TestTrafficQuotaService_BlockAndRedirect(t *testing.T) {
 		t.Error("expected US-Group to be removed from blockedProxies")
 	}
 }
+
+func TestProcessConnSnapshot_FirstSnapshotNoDelta(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	// Tracker is empty and trackerInitialized is false.
+	// First snapshot contains a connection with 100 Upload, 200 Download.
+	snapshot := []mihomoConn{
+		{ID: "conn1", Chains: []string{"proxy-a"}, Upload: 100, Download: 200},
+	}
+	svc.processConnSnapshot(snapshot)
+
+	svc.mu.RLock()
+	statsA := svc.proxyStats["proxy-a"]
+	svc.mu.RUnlock()
+
+	// It should NOT count these bytes as delta for the first snapshot.
+	if statsA != nil && (statsA.UploadBytes != 0 || statsA.DownloadBytes != 0) {
+		t.Fatalf("expected no traffic accumulated on the first snapshot, got up=%d, down=%d",
+			statsA.UploadBytes, statsA.DownloadBytes)
+	}
+
+	// The connection should be stored in the tracker.
+	val, ok := svc.connectionTracker.Load("conn1")
+	if !ok {
+		t.Fatal("expected conn1 to be stored in the connectionTracker")
+	}
+	stored := val.(connStats)
+	if stored.Upload != 100 || stored.Download != 200 {
+		t.Fatalf("expected stored stats 100/200, got %d/%d", stored.Upload, stored.Download)
+	}
+
+	// Second snapshot: conn1 increased. Now it should count delta.
+	snapshot2 := []mihomoConn{
+		{ID: "conn1", Chains: []string{"proxy-a"}, Upload: 150, Download: 250},
+	}
+	svc.processConnSnapshot(snapshot2)
+
+	svc.mu.RLock()
+	statsA2 := svc.proxyStats["proxy-a"]
+	svc.mu.RUnlock()
+
+	if statsA2 == nil {
+		t.Fatal("expected proxyStats for proxy-a after second snapshot")
+	}
+	if statsA2.UploadBytes != 50 || statsA2.DownloadBytes != 50 {
+		t.Fatalf("expected delta 50/50, got up=%d, down=%d", statsA2.UploadBytes, statsA2.DownloadBytes)
+	}
+}
+
