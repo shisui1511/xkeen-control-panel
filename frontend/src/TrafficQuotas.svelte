@@ -41,6 +41,7 @@
     total_upload: number;
     total_download: number;
     total: number;
+    reset_time?: number;
   } | null = null;
   let alerts: Alert[] = [];
   let loading = false;
@@ -270,6 +271,8 @@
         return 'badge tq-action-log';
       case 'block':
         return 'badge tq-action-block';
+      case 'redirect_direct':
+        return 'badge tq-action-redirect';
       default:
         return 'badge tq-action-notify';
     }
@@ -283,6 +286,8 @@
         return $t('trafficquotas.action_log_only');
       case 'block':
         return $t('trafficquotas.action_block');
+      case 'redirect_direct':
+        return $t('trafficquotas.action_redirect_direct');
       default:
         return $t('trafficquotas.action_notify');
     }
@@ -307,7 +312,40 @@
     }
   }
 
+  let dismissedBanner = false;
+
+  function dismissBanner() {
+    dismissedBanner = true;
+    localStorage.setItem('tq_banner_dismissed', 'true');
+  }
+
+  let forecastValue: number | null = null;
+  let showForecastCalculating = false;
+
+  $: {
+    if (stats && stats.reset_time) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const duration = nowSec - stats.reset_time;
+      if (duration > 0) {
+        if (duration < 600) {
+          showForecastCalculating = true;
+          forecastValue = null;
+        } else {
+          showForecastCalculating = false;
+          forecastValue = (stats.total / duration) * 30 * 24 * 3600;
+        }
+      } else {
+        showForecastCalculating = true;
+        forecastValue = null;
+      }
+    } else {
+      showForecastCalculating = false;
+      forecastValue = null;
+    }
+  }
+
   onMount(() => {
+    dismissedBanner = localStorage.getItem('tq_banner_dismissed') === 'true';
     fetchQuotas();
     fetchStats();
     fetchAlerts();
@@ -361,6 +399,24 @@
     <div class="alert alert-error mb-2">{error}</div>
   {/if}
 
+  <!-- Banner -->
+  {#if !dismissedBanner}
+    <div class="info-banner mb-3">
+      <div class="info-banner-content">
+        <div class="info-banner-icon">
+          <Icon name="warning" size={20} />
+        </div>
+        <div class="info-banner-text">
+          <h3 class="info-banner-title">{$t('trafficquotas.banner_title')}</h3>
+          <p class="info-banner-description">{$t('trafficquotas.banner_text')}</p>
+        </div>
+      </div>
+      <button class="info-banner-close" on:click={dismissBanner} aria-label="Dismiss banner">
+        &times;
+      </button>
+    </div>
+  {/if}
+
   <!-- Alerts -->
   {#if alerts.length > 0}
     <div class="card mb-3">
@@ -412,6 +468,19 @@
               {totalPct.toFixed(1)}% {$currentLang === 'ru' ? 'от лимита' : 'of limit'}
             </div>
           {/if}
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">{$t('trafficquotas.forecast_label')}</div>
+          <div class="stat-value">
+            {#if showForecastCalculating}
+              <span style="font-size: 16px; color: var(--fg-secondary);">{$t('trafficquotas.forecast_calculating')}</span>
+            {:else if forecastValue !== null}
+              {formatBytes(forecastValue)}
+            {:else}
+              —
+            {/if}
+          </div>
+          <div class="stat-sub">{$t('trafficquotas.forecast_subtext')}</div>
         </div>
         <div class="stat-box">
           <div class="stat-label">{$currentLang === 'ru' ? 'ЛИМИТЫ' : 'QUOTAS'}</div>
@@ -501,13 +570,15 @@
                 </td>
                 <td>
                   {#if percent(q) >= 100}
-                    <span class="badge badge-error"
-                      >{$currentLang === 'ru' ? 'Блокировка' : 'Block'}</span
-                    >
+                    {#if q.action === 'block'}
+                      <span class="badge badge-error">{$t('trafficquotas.badge_status_blocked')}</span>
+                    {:else if q.action === 'redirect_direct'}
+                      <span class="badge badge-redirected">{$t('trafficquotas.badge_status_redirected')}</span>
+                    {:else}
+                      <span class="badge badge-error">{$currentLang === 'ru' ? 'Превышен' : 'Exceeded'}</span>
+                    {/if}
                   {:else if percent(q) >= q.alert_threshold}
-                    <span class="badge badge-warning"
-                      >{$currentLang === 'ru' ? 'Предупреждение' : 'Warning'}</span
-                    >
+                    <span class="badge badge-warning">{$currentLang === 'ru' ? 'Предупреждение' : 'Warning'}</span>
                   {:else}
                     <span class="badge badge-success">OK</span>
                   {/if}
@@ -700,6 +771,7 @@
             <option value="throttle">{$t('trafficquotas.action_throttle')}</option>
             <option value="log_only">{$t('trafficquotas.action_log_only')}</option>
             <option value="block">{$t('trafficquotas.action_block')}</option>
+            <option value="redirect_direct">{$t('trafficquotas.action_redirect_direct')}</option>
           </select>
         </div>
 
@@ -1089,5 +1161,66 @@
     background: rgba(239, 91, 107, 0.15);
     color: var(--danger);
     border: 1px solid rgba(239, 91, 107, 0.3);
+  }
+  :global(.tq-action-redirect) {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+  }
+  .badge-redirected {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+  }
+  .info-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 16px 20px;
+    background: rgba(59, 130, 246, 0.08);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-radius: var(--radius-lg);
+    position: relative;
+  }
+  .info-banner-content {
+    display: flex;
+    gap: 12px;
+  }
+  .info-banner-icon {
+    color: var(--primary, #3b82f6);
+    display: flex;
+    align-items: center;
+  }
+  .info-banner-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .info-banner-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+  .info-banner-description {
+    margin: 0;
+    font-size: 13px;
+    color: var(--fg-secondary);
+    line-height: 1.4;
+  }
+  .info-banner-close {
+    background: none;
+    border: none;
+    color: var(--fg-dim);
+    font-size: 20px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 6px;
+    margin-top: -4px;
+    margin-right: -8px;
+    transition: color 0.2s;
+  }
+  .info-banner-close:hover {
+    color: var(--fg-primary);
   }
 </style>
