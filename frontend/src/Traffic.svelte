@@ -548,24 +548,21 @@
     }
   }
 
-  .stat-card-spark { /* hot-fix */
-    padding: 0;
+  .stat-card-spark,
+  .stat-card-normal { /* hot-fix */
+    padding: 20px 24px;
     position: relative;
-    height: 120px;
+    height: 130px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     overflow: hidden;
+    box-sizing: border-box;
   }
 
   .stat-card-content { /* hot-fix */
-    padding: 20px 24px 0 24px;
+    padding: 0;
     z-index: 2;
-  }
-
-  .stat-card-normal { /* hot-fix */
-    padding: 20px 24px;
-    height: 120px;
   }
 
   .stat-label {
@@ -610,8 +607,10 @@
     bottom: 0;
     left: 0;
     right: 0;
+    top: auto;
     z-index: 1;
     pointer-events: none;
+    overflow: hidden; /* clip any bleed/overflow */
   }
 
   /* Main Chart Card */
