@@ -532,6 +532,13 @@ const translations: Record<Lang, Record<string, string>> = {
     'traffic.realtime': 'Трафик в реальном времени',
     'traffic.upload': 'Отдача',
     'traffic.download': 'Загрузка',
+    'traffic.peak_load': 'Пиковая скорость',
+    'traffic.peak_load_desc': 'Максимальные показатели скорости за час, день и неделю',
+    'traffic.peak_hour': 'За час',
+    'traffic.peak_day': 'За день',
+    'traffic.peak_week': 'За неделю',
+    'traffic.reset_stats': 'Сбросить статистику',
+    'traffic.reset_confirm': 'Сброс статистики: Вы уверены, что хотите сбросить статистику и все пиковые показатели трафика? Это действие необратимо.',
 
     // DAT Manager
     'dat.title': 'DAT Manager',
@@ -1402,6 +1409,13 @@ const translations: Record<Lang, Record<string, string>> = {
     'traffic.realtime': 'Real-time traffic',
     'traffic.upload': 'Upload',
     'traffic.download': 'Download',
+    'traffic.peak_load': 'Peak Speed',
+    'traffic.peak_load_desc': 'Maximum speed rates for hour, day, and week',
+    'traffic.peak_hour': 'Hour',
+    'traffic.peak_day': 'Day',
+    'traffic.peak_week': 'Week',
+    'traffic.reset_stats': 'Reset Stats',
+    'traffic.reset_confirm': 'Reset statistics: Are you sure you want to reset statistics and all peak traffic values? This action is irreversible.',
 
     // DAT Manager
     'dat.title': 'DAT Manager',
