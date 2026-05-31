@@ -596,3 +596,150 @@ func TestSaveLocked_ThrottleExpiry(t *testing.T) {
 		t.Errorf("expected lastSave to be recent after throttle expiry, elapsed=%v", elapsed)
 	}
 }
+
+func TestTrafficPeaks_Calculation(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	// 1. Initial values are 0
+	if svc.peaks.PeakHourUp != 0 || svc.peaks.PeakHourDown != 0 {
+		t.Fatal("expected initial peaks to be 0")
+	}
+
+	// 2. Feed growing speeds
+	svc.processTrafficSnapshot(100, 200)
+	if svc.peaks.PeakHourUp != 100 || svc.peaks.PeakHourDown != 200 {
+		t.Fatalf("expected peaks to update to 100/200, got %d/%d", svc.peaks.PeakHourUp, svc.peaks.PeakHourDown)
+	}
+
+	// 3. Feed lower speeds, peaks should stay the same
+	svc.processTrafficSnapshot(50, 100)
+	if svc.peaks.PeakHourUp != 100 || svc.peaks.PeakHourDown != 200 {
+		t.Fatalf("expected peaks to remain 100/200, got %d/%d", svc.peaks.PeakHourUp, svc.peaks.PeakHourDown)
+	}
+
+	// 4. Feed higher speeds, peaks should increase
+	svc.processTrafficSnapshot(150, 250)
+	if svc.peaks.PeakHourUp != 150 || svc.peaks.PeakHourDown != 250 {
+		t.Fatalf("expected peaks to update to 150/250, got %d/%d", svc.peaks.PeakHourUp, svc.peaks.PeakHourDown)
+	}
+}
+
+func TestTrafficPeaks_ResetOnBoundaries(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	// Set initial peaks and starts
+	now := time.Now()
+	svc.peaks = TrafficPeaks{
+		PeakHourUp:   100,
+		PeakHourDown: 100,
+		PeakDayUp:    100,
+		PeakDayDown:  100,
+		PeakWeekUp:   100,
+		PeakWeekDown: 100,
+		HourStart:    now.Add(-2 * time.Hour).Unix(),
+		DayStart:     now.Add(-25 * time.Hour).Unix(),
+		WeekStart:    now.Add(-10 * 24 * time.Hour).Unix(),
+	}
+
+	// Process snapshot, which triggers calendar checks
+	svc.processTrafficSnapshot(10, 10)
+
+	// Since start hours/days/weeks are old, peaks should have reset and then updated to 10/10
+	if svc.peaks.PeakHourUp != 10 || svc.peaks.PeakHourDown != 10 {
+		t.Errorf("expected hour peaks to reset to 10, got up=%d, down=%d", svc.peaks.PeakHourUp, svc.peaks.PeakHourDown)
+	}
+	if svc.peaks.PeakDayUp != 10 || svc.peaks.PeakDayDown != 10 {
+		t.Errorf("expected day peaks to reset to 10, got up=%d, down=%d", svc.peaks.PeakDayUp, svc.peaks.PeakDayDown)
+	}
+	if svc.peaks.PeakWeekUp != 10 || svc.peaks.PeakWeekDown != 10 {
+		t.Errorf("expected week peaks to reset to 10, got up=%d, down=%d", svc.peaks.PeakWeekUp, svc.peaks.PeakWeekDown)
+	}
+}
+
+func TestTraffic_ResetStats(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	// Set some stats and peaks
+	svc.mu.Lock()
+	svc.proxyStats["test-proxy"] = &ProxyTraffic{
+		ProxyName:   "test-proxy",
+		UploadBytes: 1000,
+	}
+	svc.peaks = TrafficPeaks{
+		PeakHourUp: 500,
+	}
+	svc.mu.Unlock()
+
+	// Add a quota with non-zero CurrentBytes
+	quota := &TrafficQuota{
+		Name:         "QuotaToReset",
+		LimitBytes:   10000,
+		CurrentBytes: 5000,
+	}
+	if err := svc.AddQuota(quota); err != nil {
+		t.Fatalf("AddQuota: %v", err)
+	}
+
+	// Run ResetStats
+	if err := svc.ResetStats(); err != nil {
+		t.Fatalf("ResetStats failed: %v", err)
+	}
+
+	// Verify stats, peaks, and quota CurrentBytes are reset
+	svc.mu.RLock()
+	defer svc.mu.RUnlock()
+
+	if len(svc.proxyStats) != 0 {
+		t.Errorf("expected proxy stats to be empty, got %d", len(svc.proxyStats))
+	}
+	if svc.peaks.PeakHourUp != 0 {
+		t.Errorf("expected peaks to be reset, got %d", svc.peaks.PeakHourUp)
+	}
+	if svc.quotas[0].CurrentBytes != 0 {
+		t.Errorf("expected quota CurrentBytes to be 0, got %d", svc.quotas[0].CurrentBytes)
+	}
+}
+
+func TestTraffic_TCPUDPAggregation(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	snapshot := []mihomoConn{
+		{
+			ID: "conn1",
+			Chains: []string{"proxy-a"},
+			Metadata: mihomoConnMetadata{
+				Network: "TCP",
+			},
+		},
+		{
+			ID: "conn2",
+			Chains: []string{"proxy-a"},
+			Metadata: mihomoConnMetadata{
+				Network: "udp",
+			},
+		},
+		{
+			ID: "conn3",
+			Chains: []string{"proxy-b"},
+			Metadata: mihomoConnMetadata{
+				Network: "TCP",
+			},
+		},
+	}
+
+	svc.processConnSnapshot(snapshot)
+
+	if svc.activeConnsCount != 3 {
+		t.Errorf("expected activeConnsCount=3, got %d", svc.activeConnsCount)
+	}
+	if svc.tcpConnsCount != 2 {
+		t.Errorf("expected tcpConnsCount=2, got %d", svc.tcpConnsCount)
+	}
+	if svc.udpConnsCount != 1 {
+		t.Errorf("expected udpConnsCount=1, got %d", svc.udpConnsCount)
+	}
+}
