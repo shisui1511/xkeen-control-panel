@@ -291,3 +291,91 @@ func (a *API) ConnectionsWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+// TrafficWebSocket транслирует снимки real-time трафика и пиковых нагрузок
+// через WebSocket к браузеру. Данные берутся из fan-out TrafficQuotaService.
+func (a *API) TrafficWebSocket(w http.ResponseWriter, r *http.Request) {
+	if a.trafficQuotaSvc == nil {
+		http.Error(w, "Traffic Quota service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
+		return nil
+	})
+
+	ch, unsub := a.trafficQuotaSvc.SubscribeTraffic()
+	defer unsub()
+
+	ctx := r.Context()
+
+	// Ping-горутина
+	stopPing := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(wsPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					return
+				}
+			case <-stopPing:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	defer close(stopPing)
+
+	// Читаем входящие фреймы (close/ping) — необходимо для корректной работы pong handler
+	go func() {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case raw, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, raw); err != nil {
+				return
+			}
+		}
+	}
+}
+
+// TrafficReset сбрасывает накопленную статистику трафика и пиковых нагрузок.
+func (a *API) TrafficReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	if a.trafficQuotaSvc == nil {
+		a.errorResponse(w, "Traffic Quota service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := a.trafficQuotaSvc.ResetStats(); err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	JSONSuccess(w, nil)
+}
