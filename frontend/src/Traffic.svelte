@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t, currentLang } from './i18n';
+  import { showToast } from './stores';
 
   interface TrafficPoint {
     up: number;
@@ -8,9 +9,21 @@
     time: number;
   }
 
+  interface Peaks {
+    peak_hour_up: number;
+    peak_hour_down: number;
+    peak_day_up: number;
+    peak_day_down: number;
+    peak_week_up: number;
+    peak_week_down: number;
+    hour_start: number;
+    day_start: number;
+    week_start: number;
+  }
+
   let trafficData: TrafficPoint[] = [];
   let maxPoints = 60; // 60 points = 60 seconds (1 message/sec)
-  let es: EventSource | null = null;
+  let ws: WebSocket | null = null;
   let connected = false;
   let totalUp = 0;
   let totalDown = 0;
@@ -22,15 +35,27 @@
   let activeConnectionsCount = 0;
   let tcpConnectionsCount = 0;
   let udpConnectionsCount = 0;
-  let connInterval: any = null;
 
   // Connection history for stats
   const CONN_HISTORY_MAX = 3600; // 1 hour at 1 sample/sec
   let connHistory: { ts: number; count: number }[] = [];
 
+  let peaks: Peaks = {
+    peak_hour_up: 0,
+    peak_hour_down: 0,
+    peak_day_up: 0,
+    peak_day_down: 0,
+    peak_week_up: 0,
+    peak_week_down: 0,
+    hour_start: 0,
+    day_start: 0,
+    week_start: 0
+  };
+
   $: connDeltaPerMin = (() => {
-    if (connHistory.length < 2) return 0;
+    if (connHistory.length < 2) return null;
     const now = connHistory[connHistory.length - 1];
+    if (now.ts - connHistory[0].ts < 60000) return null;
     let minuteAgo = connHistory[0];
     for (let i = connHistory.length - 1; i >= 0; i--) {
       if (now.ts - connHistory[i].ts >= 60000) {
@@ -59,37 +84,18 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  async function fetchConnections() {
-    try {
-      const res = await fetch('/api/mihomo/proxy/connections');
-      if (res.ok) {
-        const data = await res.json();
-        const conns = data.connections || [];
-        activeConnectionsCount = conns.length;
-        tcpConnectionsCount = conns.filter((c: any) => c.metadata?.network === 'TCP').length;
-        udpConnectionsCount = conns.filter((c: any) => c.metadata?.network === 'UDP').length;
-        const now = Date.now();
-        connHistory.push({ ts: now, count: conns.length });
-        if (connHistory.length > CONN_HISTORY_MAX) connHistory.shift();
-        connHistory = connHistory;
-      }
-    } catch (e) {
-      // ignore
-    }
-  }
-
   function connect() {
-    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-    const url = `${protocol}//${window.location.host}/api/mihomo/proxy/traffic`;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${protocol}//${window.location.host}/api/traffic/ws`;
 
-    es = new EventSource(url);
+    ws = new WebSocket(url);
 
-    es.onopen = () => {
+    ws.onopen = () => {
       connected = true;
       lastTickTime = 0;
     };
 
-    es.onmessage = (event) => {
+    ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         const upSpeed = data.up || 0;
@@ -117,33 +123,80 @@
           sessionDown += downSpeed * elapsedSec;
         }
         lastTickTime = now;
+
+        activeConnectionsCount = data.connections || 0;
+        tcpConnectionsCount = data.tcp_connections || 0;
+        udpConnectionsCount = data.udp_connections || 0;
+
+        connHistory.push({ ts: now, count: activeConnectionsCount });
+        if (connHistory.length > CONN_HISTORY_MAX) connHistory.shift();
+        connHistory = connHistory;
+
+        if (data.peaks) {
+          peaks = data.peaks;
+        }
       } catch (e) {
         // ignore
       }
     };
 
-    es.onerror = () => {
+    ws.onclose = () => {
+      connected = false;
+    };
+
+    ws.onerror = () => {
       connected = false;
     };
   }
 
   function disconnect() {
-    if (es) {
-      es.close();
-      es = null;
+    if (ws) {
+      ws.close();
+      ws = null;
     }
     connected = false;
   }
 
+  async function resetStatistics() {
+    if (!confirm($t('traffic.reset_confirm'))) return;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/traffic/reset', {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken || ''
+        }
+      });
+      if (res.ok) {
+        sessionUp = 0;
+        sessionDown = 0;
+        trafficData = [];
+        peaks = {
+          peak_hour_up: 0,
+          peak_hour_down: 0,
+          peak_day_up: 0,
+          peak_day_down: 0,
+          peak_week_up: 0,
+          peak_week_down: 0,
+          hour_start: 0,
+          day_start: 0,
+          week_start: 0
+        };
+        showToast('success', $t('app.success') || 'Success');
+      } else {
+        showToast('error', 'Failed to reset statistics');
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+    }
+  }
+
   onMount(() => {
     connect();
-    fetchConnections();
-    connInterval = setInterval(fetchConnections, 5000);
   });
 
   onDestroy(() => {
     disconnect();
-    if (connInterval) clearInterval(connInterval);
   });
 
   // SVG Chart path generators
@@ -235,10 +288,17 @@
       <h1>{$t('traffic.title')}</h1>
       <p class="sub">{$t('traffic.realtime')}</p>
     </div>
-    <div class="ph-actions">
+    <div class="ph-actions" style="display: flex; gap: 12px; align-items: center;">
       <span class="status-indicator" class:connected class:live={connected}>
         ● {connected ? 'live' : 'offline'}
       </span>
+      <button
+        class="btn btn-secondary btn-reset"
+        style="color:var(--danger);"
+        on:click={resetStatistics}
+      >
+        {$t('traffic.reset_stats')}
+      </button>
     </div>
   </div>
 
@@ -298,15 +358,16 @@
       </div>
       <div class="stat-value active-connections-color">{activeConnectionsCount}</div>
       <div class="stat-session">{tcpConnectionsCount} TCP · {udpConnectionsCount} UDP</div>
-      {#if connHistory.length >= 2}
-        <div class="stat-session" style="margin-top: 2px; color: var(--fg-dim);">
-          {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$currentLang === 'ru'
-            ? 'мин'
-            : 'min'}
-          · {$currentLang === 'ru' ? 'пик' : 'peak'}
-          {connPeakHour}
-        </div>
-      {/if}
+      <div class="stat-session" style="margin-top: 2px; color: var(--fg-dim);">
+        {#if connDeltaPerMin === null}
+          — / {$currentLang === 'ru' ? 'мин' : 'min'}
+        {:else}
+          <span style={connDeltaPerMin < 0 ? 'color: var(--fg-dim);' : ''}>
+            {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$currentLang === 'ru' ? 'мин' : 'min'}
+          </span>
+        {/if}
+        · {$currentLang === 'ru' ? 'пик' : 'peak'} {connPeakHour}
+      </div>
     </div>
   </div>
 
@@ -389,6 +450,46 @@
       <span>-30 {$currentLang === 'ru' ? 'сек' : 'sec'}</span>
       <span>-15 {$currentLang === 'ru' ? 'сек' : 'sec'}</span>
       <span>{$currentLang === 'ru' ? 'сейчас' : 'now'}</span>
+    </div>
+  </div>
+
+  <!-- Peak Load Card -->
+  <div class="card" style="margin-top: 16px; padding: 24px;">
+    <div style="font-size: 13px; font-weight: 700; color: var(--fg-primary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em;">
+      {$t('traffic.peak_load')}
+    </div>
+    <div style="font-size: 12px; color: var(--fg-dim); margin-bottom: 16px;">
+      {$t('traffic.peak_load_desc')}
+    </div>
+    <div class="table-container" style="overflow-x: auto;">
+      <table class="connections-table" style="min-width: 100%; border-collapse: collapse;">
+        <thead>
+          <tr style="border-bottom: 1px solid var(--border); text-align: left;">
+            <th style="padding: 10px 12px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_hour')}</th>
+            <th style="padding: 10px 12px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_day')}</th>
+            <th style="padding: 10px 12px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_week')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding: 12px; font-family: var(--font-family-mono); font-size: 14px;">
+              <span class="upload-color">↑ {formatSpeed(peaks.peak_hour_up)}</span>
+              <span style="color: var(--fg-dim); margin: 0 6px;">/</span>
+              <span class="download-color">↓ {formatSpeed(peaks.peak_hour_down)}</span>
+            </td>
+            <td style="padding: 12px; font-family: var(--font-family-mono); font-size: 14px;">
+              <span class="upload-color">↑ {formatSpeed(peaks.peak_day_up)}</span>
+              <span style="color: var(--fg-dim); margin: 0 6px;">/</span>
+              <span class="download-color">↓ {formatSpeed(peaks.peak_day_down)}</span>
+            </td>
+            <td style="padding: 12px; font-family: var(--font-family-mono); font-size: 14px;">
+              <span class="upload-color">↑ {formatSpeed(peaks.peak_week_up)}</span>
+              <span style="color: var(--fg-dim); margin: 0 6px;">/</span>
+              <span class="download-color">↓ {formatSpeed(peaks.peak_week_down)}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </div>
