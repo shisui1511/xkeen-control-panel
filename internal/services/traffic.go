@@ -47,10 +47,24 @@ type TrafficAlert struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+// TrafficPeaks holds peak upload and download rates over calendar periods
+type TrafficPeaks struct {
+	PeakHourUp   int64 `json:"peak_hour_up"`
+	PeakHourDown int64 `json:"peak_hour_down"`
+	PeakDayUp    int64 `json:"peak_day_up"`
+	PeakDayDown  int64 `json:"peak_day_down"`
+	PeakWeekUp   int64 `json:"peak_week_up"`
+	PeakWeekDown int64 `json:"peak_week_down"`
+	HourStart    int64 `json:"hour_start"`
+	DayStart     int64 `json:"day_start"`
+	WeekStart    int64 `json:"week_start"`
+}
+
 // TrafficStore is the on-disk format
 type TrafficStore struct {
 	Quotas     []TrafficQuota           `json:"quotas"`
 	ProxyStats map[string]*ProxyTraffic `json:"proxy_stats"`
+	Peaks      TrafficPeaks             `json:"peaks"`
 }
 
 // saveLockThrottle is the minimum interval between background/periodic saves
@@ -60,12 +74,18 @@ const saveLockThrottle = 5 * time.Second
 // maxTrafficFileSize is the rotation threshold for traffic.json.
 const maxTrafficFileSize = 5 * 1024 * 1024 // 5 MB
 
+// mihomoConnMetadata holds metadata about connection protocol
+type mihomoConnMetadata struct {
+	Network string `json:"network"`
+}
+
 // mihomoConn is a single connection entry from the Mihomo /connections stream.
 type mihomoConn struct {
-	ID       string   `json:"id"`
-	Chains   []string `json:"chains"`
-	Upload   int64    `json:"upload"`
-	Download int64    `json:"download"`
+	ID       string             `json:"id"`
+	Chains   []string           `json:"chains"`
+	Upload   int64              `json:"upload"`
+	Download int64              `json:"download"`
+	Metadata mihomoConnMetadata `json:"metadata"`
 }
 
 // TrafficQuotaService manages traffic accounting and quotas
@@ -87,18 +107,26 @@ type TrafficQuotaService struct {
 	// fan-out: подписчики получают raw JSON-снимки подключений
 	connSubs   map[chan []byte]struct{}
 	connSubsMu sync.RWMutex
+
+	peaks             TrafficPeaks
+	activeConnsCount  int64
+	tcpConnsCount     int64
+	udpConnsCount     int64
+	trafficSubs       map[chan []byte]struct{}
+	trafficSubsMu     sync.RWMutex
 }
 
 func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaService {
 	svc := &TrafficQuotaService{
-		dataDir:    dataDir,
-		mihomoURL:  mihomoURL,
-		secret:     secret,
-		quotas:     []TrafficQuota{},
-		proxyStats: make(map[string]*ProxyTraffic),
-		alerts:     []TrafficAlert{},
-		stopCh:     make(chan struct{}),
-		connSubs:   make(map[chan []byte]struct{}),
+		dataDir:     dataDir,
+		mihomoURL:   mihomoURL,
+		secret:      secret,
+		quotas:      []TrafficQuota{},
+		proxyStats:  make(map[string]*ProxyTraffic),
+		alerts:      []TrafficAlert{},
+		stopCh:      make(chan struct{}),
+		connSubs:    make(map[chan []byte]struct{}),
+		trafficSubs: make(map[chan []byte]struct{}),
 	}
 	svc.load()
 	return svc
@@ -136,6 +164,7 @@ func (s *TrafficQuotaService) load() {
 	} else {
 		s.proxyStats = make(map[string]*ProxyTraffic)
 	}
+	s.peaks = store.Peaks
 	s.mu.Unlock()
 }
 
@@ -151,6 +180,7 @@ func (s *TrafficQuotaService) saveLocked(force bool) error {
 	store := TrafficStore{
 		Quotas:     s.quotas,
 		ProxyStats: s.proxyStats,
+		Peaks:      s.peaks,
 	}
 
 	data, err := json.MarshalIndent(store, "", "  ")
@@ -295,7 +325,33 @@ func (s *TrafficQuotaService) GetStats() map[string]interface{} {
 		"total_upload":   totalUpload,
 		"total_download": totalDownload,
 		"total":          totalUpload + totalDownload,
+		"peaks":          s.peaks,
 	}
+}
+
+func (s *TrafficQuotaService) ResetStats() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.proxyStats = make(map[string]*ProxyTraffic)
+
+	now := time.Now()
+	s.peaks = TrafficPeaks{
+		HourStart: now.Truncate(time.Hour).Unix(),
+		DayStart:  time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix(),
+	}
+	offset := int(now.Weekday() - time.Monday)
+	if offset < 0 {
+		offset += 7
+	}
+	s.peaks.WeekStart = time.Date(now.Year(), now.Month(), now.Day()-offset, 0, 0, 0, 0, now.Location()).Unix()
+
+	for i := range s.quotas {
+		s.quotas[i].CurrentBytes = 0
+		s.quotas[i].LastReset = now.Unix()
+	}
+
+	return s.saveLocked(true)
 }
 
 func (s *TrafficQuotaService) GetAlerts() []TrafficAlert {
@@ -335,8 +391,9 @@ func (s *TrafficQuotaService) collectorLoop() {
 	s.checkResets()
 
 	// WebSocket stream runs in its own goroutine with reconnect logic.
-	s.wg.Add(1)
+	s.wg.Add(2)
 	go s.connectionsWSLoop()
+	go s.trafficWSLoop()
 
 	for {
 		select {
@@ -524,8 +581,205 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 		return true
 	})
 
+	var activeCount, tcpCount, udpCount int64
+	activeCount = int64(len(connections))
+	for _, conn := range connections {
+		net := strings.ToUpper(conn.Metadata.Network)
+		if net == "TCP" {
+			tcpCount++
+		} else if net == "UDP" {
+			udpCount++
+		}
+	}
+	s.activeConnsCount = activeCount
+	s.tcpConnsCount = tcpCount
+	s.udpConnsCount = udpCount
+
 	if err := s.saveLocked(false); err != nil {
 		log.Printf("TrafficQuota: failed to save stats: %v", err)
+	}
+}
+
+// SubscribeTraffic регистрирует канал для получения снимков трафика.
+func (s *TrafficQuotaService) SubscribeTraffic() (ch chan []byte, unsub func()) {
+	ch = make(chan []byte, 4)
+	s.trafficSubsMu.Lock()
+	s.trafficSubs[ch] = struct{}{}
+	s.trafficSubsMu.Unlock()
+	unsub = func() {
+		s.trafficSubsMu.Lock()
+		delete(s.trafficSubs, ch)
+		s.trafficSubsMu.Unlock()
+	}
+	return
+}
+
+// broadcastTraffic рассылает raw JSON-снимок трафика всем подписчикам WebSocket.
+func (s *TrafficQuotaService) broadcastTraffic(raw []byte) {
+	s.trafficSubsMu.RLock()
+	defer s.trafficSubsMu.RUnlock()
+	for ch := range s.trafficSubs {
+		select {
+		case ch <- raw:
+		default: // медленный клиент — пропускаем
+		}
+	}
+}
+
+func (s *TrafficQuotaService) trafficWSLoop() {
+	defer s.wg.Done()
+
+	backoff := 5 * time.Second
+	const maxBackoff = 60 * time.Second
+
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		default:
+		}
+
+		start := time.Now()
+		err := s.streamTraffic()
+		if err == nil {
+			// Graceful shutdown via stopCh.
+			return
+		}
+
+		// If the session ran for more than 30 s it was healthy — reset backoff.
+		if time.Since(start) > 30*time.Second {
+			backoff = 5 * time.Second
+		}
+
+		log.Printf("TrafficQuota: WS traffic stream ended: %v — retry in %s", err, backoff)
+
+		select {
+		case <-time.After(backoff):
+		case <-s.stopCh:
+			return
+		}
+
+		if backoff < maxBackoff {
+			backoff *= 2
+		}
+	}
+}
+
+type mihomoTraffic struct {
+	Up   int64 `json:"up"`
+	Down int64 `json:"down"`
+}
+
+func (s *TrafficQuotaService) streamTraffic() error {
+	wsURL := httpToWS(strings.TrimRight(s.mihomoURL, "/")) + "/traffic"
+
+	header := http.Header{}
+	if s.secret != "" {
+		header.Set("Authorization", "Bearer "+s.secret)
+	}
+
+	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	conn, _, err := dialer.Dial(wsURL, header)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", wsURL, err)
+	}
+	defer conn.Close()
+
+	// Close the WebSocket when the service stops so ReadJSON unblocks.
+	go func() {
+		<-s.stopCh
+		conn.Close()
+	}()
+
+	log.Printf("TrafficQuota: WebSocket traffic connected to %s", wsURL)
+
+	for {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			select {
+			case <-s.stopCh:
+				return nil // graceful shutdown
+			default:
+				return fmt.Errorf("read: %w", err)
+			}
+		}
+		var payload mihomoTraffic
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			continue
+		}
+		s.processTrafficSnapshot(payload.Up, payload.Down)
+	}
+}
+
+func (s *TrafficQuotaService) processTrafficSnapshot(up, down int64) {
+	s.mu.Lock()
+
+	now := time.Now()
+	currentHourStart := now.Truncate(time.Hour).Unix()
+	currentDayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+
+	offset := int(now.Weekday() - time.Monday)
+	if offset < 0 {
+		offset += 7
+	}
+	currentWeekStart := time.Date(now.Year(), now.Month(), now.Day()-offset, 0, 0, 0, 0, now.Location()).Unix()
+
+	// Проверяем календарные интервалы
+	if s.peaks.HourStart != currentHourStart {
+		s.peaks.PeakHourUp = 0
+		s.peaks.PeakHourDown = 0
+		s.peaks.HourStart = currentHourStart
+	}
+	if s.peaks.DayStart != currentDayStart {
+		s.peaks.PeakDayUp = 0
+		s.peaks.PeakDayDown = 0
+		s.peaks.DayStart = currentDayStart
+	}
+	if s.peaks.WeekStart != currentWeekStart {
+		s.peaks.PeakWeekUp = 0
+		s.peaks.PeakWeekDown = 0
+		s.peaks.WeekStart = currentWeekStart
+	}
+
+	// Обновляем пики
+	if up > s.peaks.PeakHourUp {
+		s.peaks.PeakHourUp = up
+	}
+	if down > s.peaks.PeakHourDown {
+		s.peaks.PeakHourDown = down
+	}
+	if up > s.peaks.PeakDayUp {
+		s.peaks.PeakDayUp = up
+	}
+	if down > s.peaks.PeakDayDown {
+		s.peaks.PeakDayDown = down
+	}
+	if up > s.peaks.PeakWeekUp {
+		s.peaks.PeakWeekUp = up
+	}
+	if down > s.peaks.PeakWeekDown {
+		s.peaks.PeakWeekDown = down
+	}
+
+	conns := s.activeConnsCount
+	tcp := s.tcpConnsCount
+	udp := s.udpConnsCount
+	peaksCopy := s.peaks
+
+	_ = s.saveLocked(false)
+	s.mu.Unlock()
+
+	payload := map[string]interface{}{
+		"up":              up,
+		"down":            down,
+		"connections":     conns,
+		"tcp_connections": tcp,
+		"udp_connections": udp,
+		"peaks":           peaksCopy,
+	}
+	raw, err := json.Marshal(payload)
+	if err == nil {
+		s.broadcastTraffic(raw)
 	}
 }
 
