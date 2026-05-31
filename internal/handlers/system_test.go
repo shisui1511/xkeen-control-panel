@@ -61,6 +61,7 @@ func TestCountDirLines(t *testing.T) {
 	// 2. Dir with files
 	file1 := filepath.Join(tmpDir, "file1.txt")
 	file2 := filepath.Join(tmpDir, "file2.txt")
+	file3 := filepath.Join(tmpDir, "file3.txt") // Empty file (0 bytes)
 
 	if err := os.WriteFile(file1, []byte("line1\nline2"), 0644); err != nil {
 		t.Fatal(err)
@@ -68,16 +69,16 @@ func TestCountDirLines(t *testing.T) {
 	if err := os.WriteFile(file2, []byte("line1\nline2\nline3\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(file3, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
 
-	// File 1 has 1 newline -> 2 lines
-	// File 2 has 4 newlines -> 4 lines (due to trailing newline + 1 logic in code)
-	// Let's check how countDirLines computes it:
-	// countDirLines does: strings.Count(string(data), "\n") + 1
-	// file1 content "line1\nline2" has 1 newline -> count is 1 + 1 = 2 lines.
-	// file2 content "line1\nline2\nline3\n" has 3 newlines -> count is 3 + 1 = 4 lines.
-	// Total expected = 6 lines.
+	// File 1 has 1 newline, no trailing newline -> count is 2 lines.
+	// File 2 has 3 newlines, with trailing newline -> count is 3 lines.
+	// File 3 is empty -> count is 0 lines.
+	// Total expected = 5 lines.
 
-	expected := 6
+	expected := 5
 	if cnt := countDirLines(tmpDir); cnt != expected {
 		t.Errorf("expected %d lines, got %d", expected, cnt)
 	}
