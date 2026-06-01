@@ -942,9 +942,13 @@ func parseShareLinks(content string, sub *Subscription) ([]Outbound, []SkipReaso
 			if len(snippet) > 60 {
 				snippet = snippet[:57] + "..."
 			}
+			reason := skipReasonForScheme(line)
+			if strings.HasPrefix(line, "vmess://") && len(line) > maxVmessLinkBytes {
+				reason = "vmess:// link exceeds 8KB limit"
+			}
 			skipReasons = append(skipReasons, SkipReason{
 				Line:    idx + 1,
-				Reason:  skipReasonForScheme(line),
+				Reason:  reason,
 				Snippet: snippet,
 			})
 		}
@@ -1343,10 +1347,15 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 	return nodes, nil
 }
 
+const maxVmessLinkBytes = 8192
+
 // parseShareLink parses various share link formats
 func parseShareLink(link string) *Outbound {
 	// vmess://
 	if strings.HasPrefix(link, "vmess://") {
+		if len(link) > maxVmessLinkBytes {
+			return nil
+		}
 		return parseVMessLink(link)
 	}
 

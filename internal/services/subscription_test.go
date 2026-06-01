@@ -1309,3 +1309,79 @@ func TestSubscription_ConcurrencyRace(t *testing.T) {
 	close(stop)
 	wg.Wait()
 }
+
+func TestParseShareLink_VmessTooBig(t *testing.T) {
+	// 1. vmess:// link > 8192 bytes returns nil
+	tooBigLink := "vmess://" + strings.Repeat("A", 8200)
+	ob := parseShareLink(tooBigLink)
+	if ob != nil {
+		t.Error("expected nil for oversized vmess:// link")
+	}
+
+	// 2. vmess:// link <= 8192 bytes is not skipped on length (but can be invalid json/b64)
+	validJSON := `{"ps":"test","add":"1.2.3.4","port":"443","id":"uuid","net":"tcp"}`
+	b64Valid := base64.StdEncoding.EncodeToString([]byte(validJSON))
+	normalLink := "vmess://" + b64Valid
+	if len(normalLink) <= 8192 {
+		obNormal := parseShareLink(normalLink)
+		if obNormal == nil {
+			t.Error("expected non-nil for valid normal vmess:// link")
+		} else if obNormal.Tag != "test" {
+			t.Errorf("expected tag 'test', got %q", obNormal.Tag)
+		}
+	}
+
+	// 3. vless:// link of any length is not skipped on length
+	longVless := "vless://550e8400-e29b-41d4-a716-446655440000@host.example.com:443?security=none#" + strings.Repeat("A", 9000)
+	obVless := parseShareLink(longVless)
+	if obVless == nil {
+		t.Error("expected non-nil for long vless link")
+	} else if obVless.Tag != strings.Repeat("A", 9000) {
+		t.Error("long vless link parsed incorrectly")
+	}
+}
+
+func TestRefreshXray_DoesNotRestartXray(t *testing.T) {
+	t.Skip("NODE-02: refreshXray не вызывает xkeen -restart — deferred to Phase 13")
+	// TODO Phase 13: убрать t.Skip(), реализовать mock consoleSvc, подтвердить что Execute("-restart") НЕ вызван после refreshXray
+}
+
+func TestRefreshMihomo_ConcurrentRace(t *testing.T) {
+	yamlContent := `proxies:
+  - {name: node1, type: ss, server: 1.2.3.4, port: 443, cipher: chacha20-ietf-poly1305, password: test}
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/yaml")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(yamlContent))
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	svc.httpClient = srv.Client()
+
+	sub := Subscription{
+		ID:      "race-sub",
+		URL:     srv.URL,
+		Type:    "mihomo",
+		Enabled: true,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatalf("Add subscription failed: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			subCopy := svc.Get("race-sub")
+			if subCopy != nil {
+				_ = svc.refreshMihomo(subCopy)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
