@@ -5,11 +5,9 @@ test.use({ locale: 'ru-RU' });
 
 test.describe('Editor & Constructor integration test suite', () => {
   let fileContent = 'initial config content';
-  let insertCallbackCalled = false;
 
   test.beforeEach(async ({ page }) => {
     fileContent = 'initial config content';
-    insertCallbackCalled = false;
 
     // Отключаем Service Worker в тестах
     await page.addInitScript(() => {
