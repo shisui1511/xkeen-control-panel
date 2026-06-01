@@ -356,7 +356,9 @@ func TestCheckResets_MonthlyBoundary(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
-	lastMonth := time.Now().AddDate(0, 0, -45)
+	now := time.Now()
+	// Use the 1st of the previous month to avoid day-of-month normalization issues (e.g. May 31 - 1 month = May 1).
+	lastMonth := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, now.Location())
 	quota := &TrafficQuota{
 		Name:         "MonthlyQuota",
 		TargetType:   "global",
