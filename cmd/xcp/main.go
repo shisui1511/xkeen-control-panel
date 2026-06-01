@@ -93,7 +93,7 @@ func main() {
 	authSvc := srv.GetAuthService()
 	defer authSvc.Stop()
 	srv.Handle("/api/auth/login", authSvc.HandleLogin)
-	srv.Handle("/api/auth/logout", authSvc.HandleLogout)
+	srv.HandleProtected("/api/auth/logout", authSvc.HandleLogout)
 	srv.Handle("/api/auth/me", authSvc.HandleMe)
 	srv.Handle("/api/auth/setup", authSvc.HandleSetup)
 

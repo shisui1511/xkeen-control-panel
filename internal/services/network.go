@@ -2,12 +2,14 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +36,9 @@ type PingResult struct {
 
 // Ping executes ping command
 func (s *NetworkToolsService) Ping(host string, count int) (*PingResult, error) {
+	if err := validateHostname(host); err != nil {
+		return nil, err
+	}
 	if count <= 0 || count > 20 {
 		count = 4
 	}
@@ -66,6 +71,9 @@ type TracerouteResult struct {
 
 // Traceroute executes traceroute command
 func (s *NetworkToolsService) Traceroute(host string, maxHops int) (*TracerouteResult, error) {
+	if err := validateHostname(host); err != nil {
+		return nil, err
+	}
 	if maxHops <= 0 || maxHops > 30 {
 		maxHops = 20
 	}
@@ -98,6 +106,9 @@ type DNSResult struct {
 
 // DNSLookup performs DNS lookup
 func (s *NetworkToolsService) DNSLookup(host string, recordType string) (*DNSResult, error) {
+	if err := validateHostname(host); err != nil {
+		return nil, err
+	}
 	if recordType == "" {
 		recordType = "A"
 	}
@@ -164,16 +175,7 @@ func (s *NetworkToolsService) DNSLookup(host string, recordType string) (*DNSRes
 		result.Success = true
 
 	default:
-		// Try nslookup for other types
-		cmd := exec.Command("nslookup", "-type="+recordType, host)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			result.Success = false
-			result.Error = string(out)
-			return result, nil
-		}
-		result.Records = append(result.Records, string(out))
-		result.Success = true
+		return nil, fmt.Errorf("unsupported DNS record type: %q", recordType)
 	}
 
 	return result, nil
@@ -401,4 +403,19 @@ func (s *NetworkToolsService) PortCheck(host string, port int, timeout time.Dura
 	result.RTTMs = rtt
 	result.Output = fmt.Sprintf("Host: %s\nPort: %d\nStatus: Open\nRTT: %d ms", host, port, rtt)
 	return result, nil
+}
+
+var hostnameValidRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9.-]{0,253}[a-zA-Z0-9])?$`)
+
+func validateHostname(host string) error {
+	if host == "" {
+		return errors.New("empty hostname")
+	}
+	if net.ParseIP(host) != nil {
+		return nil
+	}
+	if !hostnameValidRe.MatchString(host) {
+		return fmt.Errorf("invalid hostname: %q", host)
+	}
+	return nil
 }

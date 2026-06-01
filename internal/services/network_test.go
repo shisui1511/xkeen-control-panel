@@ -67,24 +67,16 @@ func TestNetworkToolsService_Traceroute(t *testing.T) {
 }
 
 func TestNetworkToolsService_DNSLookup(t *testing.T) {
-	tmpDir := t.TempDir()
-	cmdPath := filepath.Join(tmpDir, "nslookup")
-	os.WriteFile(cmdPath, []byte("#!/bin/sh\necho \"Server: 8.8.8.8\"\n"), 0755)
-
-	oldPath := os.Getenv("PATH")
-	os.Setenv("PATH", tmpDir+":"+oldPath)
-	defer os.Setenv("PATH", oldPath)
-
 	svc := NewNetworkToolsService("http://127.0.0.1:9090")
-	res, err := svc.DNSLookup("test.com", "ANY")
+	res, err := svc.DNSLookup("127.0.0.1", "A")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Success {
 		t.Fatalf("expected success: %s", res.Error)
 	}
-	if len(res.Records) == 0 || !strings.Contains(res.Records[0], "8.8.8.8") {
-		t.Fatal("unexpected dns output")
+	if len(res.Records) == 0 || res.Records[0] != "127.0.0.1" {
+		t.Fatalf("unexpected dns output: %v", res.Records)
 	}
 }
 
@@ -235,3 +227,52 @@ func TestNetworkToolsService_ProxyDelayTest_Failure(t *testing.T) {
 		t.Errorf("expected error 'clash error details', got: %s", res.Error)
 	}
 }
+
+func TestValidateHostname_RejectsMetacharacters(t *testing.T) {
+	tests := []struct {
+		host    string
+		wantErr bool
+	}{
+		// Valid cases
+		{"example.com", false},
+		{"google.com", false},
+		{"1.2.3.4", false},
+		{"::1", false},
+		{"2001:db8::1", false},
+		{"a", false},
+		{"1", false},
+		{"my-host.local", false},
+
+		// Invalid cases (metacharacters, empty, overflow)
+		{"", true},
+		{"host;rm -rf /", true},
+		{"host|id", true},
+		{"host&cmd", true},
+		{"host$VAR", true},
+		{"host`cmd`", true},
+		{"$(reboot)", true},
+		{"host\ncmd", true},
+		{strings.Repeat("a", 256), true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.host, func(t *testing.T) {
+			err := validateHostname(tc.host)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("validateHostname(%q) error = %v, wantErr %v", tc.host, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDNSLookup_UnsupportedRecordType(t *testing.T) {
+	svc := NewNetworkToolsService("http://127.0.0.1:9090")
+	res, err := svc.DNSLookup("test.com", "INVALID")
+	if err == nil {
+		t.Fatal("expected error for unsupported DNS record type")
+	}
+	if res != nil {
+		t.Errorf("expected nil result, got %+v", res)
+	}
+}
+

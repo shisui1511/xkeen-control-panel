@@ -5,31 +5,28 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 func (s *ConfigService) resolvePath(path string) (string, error) {
-	if path == "" {
-		return "", errors.New("empty path")
+	if s.validator == nil {
+		return "", errors.New("path validator not configured")
 	}
-	clean := filepath.Clean(path)
-	if strings.Contains(clean, "..") {
-		return "", errors.New("path traversal detected")
-	}
-	// Note: We don't check against s.ConfigDir here anymore because the API handler
-	// uses PathValidator which checks against multiple AllowedRoots.
-	return clean, nil
+	return s.validator.Validate(path)
 }
 
 type ConfigService struct {
 	ConfigDir string
+	validator *utils.PathValidator
 }
 
-func NewConfigService(dir string) *ConfigService {
-	return &ConfigService{ConfigDir: dir}
+func NewConfigService(dir string, roots []string) *ConfigService {
+	return &ConfigService{
+		ConfigDir: dir,
+		validator: utils.NewPathValidator(roots),
+	}
 }
 
 func (s *ConfigService) List(dir string) ([]string, error) {

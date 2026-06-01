@@ -23,7 +23,7 @@ func newTestAPI(t *testing.T, allowedDir string) *API {
 	}
 	return &API{
 		cfg:       cfg,
-		configSvc: services.NewConfigService(allowedDir),
+		configSvc: services.NewConfigService(allowedDir, []string{allowedDir}),
 		pathVal:   utils.NewPathValidator(cfg.AllowedRoots),
 	}
 }
