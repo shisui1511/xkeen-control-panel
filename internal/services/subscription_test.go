@@ -76,6 +76,69 @@ func TestSubscriptionService_Delete(t *testing.T) {
 	}
 }
 
+func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
+	tmp := t.TempDir()
+	xrayDir := filepath.Join(tmp, "xray")
+	mihomoDir := filepath.Join(tmp, "mihomo")
+	_ = os.MkdirAll(xrayDir, 0755)
+	_ = os.MkdirAll(mihomoDir, 0755)
+
+	svc := NewSubscriptionService(tmp, xrayDir, mihomoDir)
+
+	sub := Subscription{
+		Name:    "Transition Test",
+		URL:     "https://example.com/sub",
+		Enabled: true,
+		Type:    "xray",
+	}
+	svc.Add(&sub)
+
+	id := svc.List()[0].ID
+
+	// Create a dummy fragment file for xray
+	fragmentPath := filepath.Join(xrayDir, fmt.Sprintf("04_outbounds.%s.json", id))
+	_ = os.WriteFile(fragmentPath, []byte(`[]`), 0600)
+
+	// Update type to mihomo
+	updatedSub := sub
+	updatedSub.Type = "mihomo"
+	err := svc.Update(id, &updatedSub)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Verify xray fragment was deleted
+	if _, err := os.Stat(fragmentPath); !os.IsNotExist(err) {
+		t.Error("xray fragment should have been deleted during transition to mihomo")
+	}
+
+	// Create dummy config.yaml and provider file for mihomo
+	configPath := filepath.Join(mihomoDir, "config.yaml")
+	_ = os.WriteFile(configPath, []byte("proxy-providers:\n  "+id+":\n    type: http\n"), 0600)
+	providerPath := filepath.Join(mihomoDir, "providers", fmt.Sprintf("%s.yaml", id))
+	_ = os.MkdirAll(filepath.Join(mihomoDir, "providers"), 0755)
+	_ = os.WriteFile(providerPath, []byte(""), 0600)
+
+	// Update type back to xray
+	updatedSub2 := updatedSub
+	updatedSub2.Type = "xray"
+	err = svc.Update(id, &updatedSub2)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Verify mihomo configuration was cleaned up
+	if _, err := os.Stat(providerPath); !os.IsNotExist(err) {
+		t.Error("mihomo provider file should have been deleted during transition to xray")
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err == nil && strings.Contains(string(data), "proxy-providers:") {
+		t.Error("mihomo config should have proxy-providers section cleared during transition to xray")
+	}
+}
+
+
 // TestBase64FallbackURLRaw: VMess link encoded with RawURLEncoding is parsed correctly.
 func TestBase64FallbackURLRaw(t *testing.T) {
 	vmess := map[string]interface{}{

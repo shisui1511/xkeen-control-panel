@@ -422,7 +422,47 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			existing.UseProviderInterval = sub.UseProviderInterval
 			// Type, RoutingMode, MihomoGroups — обновляем только если явно указаны.
 			if sub.Type != "" {
-				existing.Type = sub.Type
+				if sub.Type != existing.Type {
+					if existing.Type == "mihomo" && sub.Type == "xray" {
+						// Clean up Mihomo configurations
+						configDir := s.mihomoConfigDir
+						if configDir == "" {
+							configDir = "/opt/etc/mihomo"
+						}
+						configPath := filepath.Join(configDir, "config.yaml")
+
+						s.mihomoMu.Lock()
+						rawConfig, err := os.ReadFile(configPath)
+						if err == nil {
+							newConfig := ReplaceMihomoProxyProvider(string(rawConfig), id, "")
+							for _, group := range existing.MihomoGroups {
+								newConfig = UpdateMihomoGroupProviders(newConfig, group, id, true)
+							}
+							newConfig = ReplaceMihomoProxies(newConfig, existing.ProxyNames, nil)
+							for _, group := range existing.MihomoGroups {
+								newConfig = UpdateMihomoGroupProxies(newConfig, group, nil, existing.ProxyNames)
+							}
+							_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
+						}
+						s.mihomoMu.Unlock()
+
+						// Delete provider file
+						providerFilePath := filepath.Join(configDir, "providers", fmt.Sprintf("%s.yaml", id))
+						os.Remove(providerFilePath)
+
+						// Reset Mihomo specific fields in existing subscription
+						existing.ProxyNames = nil
+						existing.ManagedYAML = ""
+						existing.LastCount = 0
+						existing.LastHash = ""
+					} else if (existing.Type == "xray" || existing.Type == "") && sub.Type == "mihomo" {
+						// Clean up Xray fragment files
+						os.Remove(s.getFragmentPath(existing))
+						os.Remove(s.getRoutingFragmentPath(existing))
+						existing.LastHash = ""
+					}
+					existing.Type = sub.Type
+				}
 			}
 			if sub.RoutingMode != "" {
 				existing.RoutingMode = sub.RoutingMode
