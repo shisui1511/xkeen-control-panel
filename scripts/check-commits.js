@@ -52,7 +52,12 @@ commits.forEach((commitContent, idx) => {
 
   // 1. Проверяем формат Conventional Commits
   // Игнорируем мерж-коммиты
-  if (subject.startsWith('Merge pull request') || subject.startsWith('Merge branch') || subject.startsWith('Merge:')) {
+  if (
+    subject.startsWith('Merge pull request') ||
+    subject.startsWith('Merge branch') ||
+    subject.startsWith('Merge:') ||
+    subject.startsWith('chore: merge executor worktree')
+  ) {
     console.log('  - Игнорируется (коммит слияния)');
     return;
   }
