@@ -235,6 +235,16 @@ func UpdateMihomoGroupProxies(content, groupName string, addNames, removeNames [
 		}
 	}
 
+	if len(filtered) == 0 {
+		var out []string
+		if subStart != -1 {
+			out = append(out, lines[:subStart]...)
+			out = append(out, lines[subEnd:]...)
+			return strings.Join(out, "\n")
+		}
+		return content
+	}
+
 	subPad := strings.Repeat(" ", subIndent)
 	itemPad := strings.Repeat(" ", subIndent+2)
 	newSubLines := []string{subPad + "proxies:"}

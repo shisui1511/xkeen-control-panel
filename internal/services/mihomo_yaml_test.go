@@ -185,6 +185,24 @@ func TestUpdateMihomoGroupProxies_GroupNotFound(t *testing.T) {
 	}
 }
 
+func TestUpdateMihomoGroupProxies_EmptyProxies(t *testing.T) {
+	yaml := `proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - P1
+      - P2
+`
+	result := UpdateMihomoGroupProxies(yaml, "PROXY", nil, []string{"P1", "P2"})
+	if strings.Contains(result, "proxies:") {
+		t.Error("proxies: section should be completely removed if empty")
+	}
+	if !strings.Contains(result, "name: PROXY") {
+		t.Error("group name should be preserved")
+	}
+}
+
+
 func TestYamlSafeScalar(t *testing.T) {
 	tests := []struct {
 		in, want string
