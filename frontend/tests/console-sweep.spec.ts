@@ -32,7 +32,23 @@ async function setupMocks(
   await page.route('**/api/**', async (route) => {
     const url = route.request().url();
 
-    if (url.includes('/api/auth/me')) {
+    if (url.includes('/api/auth/logout')) {
+      const headers = route.request().headers();
+      const csrfHeader = headers['x-csrf-token'];
+      if (csrfHeader === 'mock-csrf-token') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true })
+        });
+      } else {
+        await route.fulfill({
+          status: 403,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: false, error: 'Forbidden (CSRF token missing or invalid)' })
+        });
+      }
+    } else if (url.includes('/api/auth/me')) {
       if (authMode === 'login') {
         await route.fulfill({
           status: 200,
@@ -619,5 +635,20 @@ test.describe('Xray mode — console sweep (8 pages)', () => {
       );
     }
     expect(errors, `console errors on xray:settings: ${JSON.stringify(errors)}`).toHaveLength(0);
+  });
+});
+
+test.describe('Logout CSRF Verification', () => {
+  test('logout request sends X-CSRF-Token and succeeds', async ({ page }) => {
+    await setupMocks(page, 'mihomo');
+    await visitPage(page, '/#/dashboard');
+    const token = await page.evaluate(() => localStorage.getItem('csrf_token'));
+    expect(token).toBe('mock-csrf-token');
+    const logoutBtn = page.locator('button.nav-item', { hasText: /Выйти|Logout/ });
+    await expect(logoutBtn).toBeVisible();
+    const logoutResponsePromise = page.waitForResponse('**/api/auth/logout');
+    await logoutBtn.click();
+    const logoutResponse = await logoutResponsePromise;
+    expect(logoutResponse.status()).toBe(200);
   });
 });

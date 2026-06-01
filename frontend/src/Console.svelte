@@ -144,7 +144,7 @@
         {#each categories as category}
           <div class="cmd-list mb-3">
             <div class="cmd-cat-head">
-              {$t('console.cat_' + category.name) || category.name}
+              {$t(`console.cat_${category.name}`) || category.name}
             </div>
             {#each category.commands as cmd}
               <button
