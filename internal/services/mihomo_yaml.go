@@ -567,7 +567,11 @@ func ReplaceMihomoProxyProvider(content string, providerID string, block string)
 		out = append(out, lines[end:]...)
 	}
 
-	return strings.Join(out, "\n")
+	res := strings.Join(out, "\n")
+	if strings.HasSuffix(content, "\n") && !strings.HasSuffix(res, "\n") {
+		res += "\n"
+	}
+	return res
 }
 
 // UpdateMihomoGroupProviders добавляет или удаляет providerID из секции use: указанной группы прокси.

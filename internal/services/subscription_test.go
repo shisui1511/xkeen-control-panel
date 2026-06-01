@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -920,14 +921,27 @@ func TestMihomoSubscriptionType(t *testing.T) {
 
 	got := svc.List()[0]
 
-	// config.yaml должен содержать блок прокси из подписки.
+	// config.yaml должен содержать proxy-providers и ID подписки.
 	configPath := filepath.Join(tmp, "config.yaml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("expected config.yaml at %s: %v", configPath, err)
 	}
-	if !strings.Contains(string(data), "TestProxy") {
-		t.Error("expected 'TestProxy' in config.yaml after refresh")
+	if !strings.Contains(string(data), "proxy-providers:") {
+		t.Error("expected 'proxy-providers:' in config.yaml after refresh")
+	}
+	if !strings.Contains(string(data), id) {
+		t.Errorf("expected subscription ID %q in config.yaml after refresh", id)
+	}
+
+	// Файл провайдера должен содержать TestProxy
+	providerPath := filepath.Join(tmp, "providers", id+".yaml")
+	providerData, err := os.ReadFile(providerPath)
+	if err != nil {
+		t.Fatalf("expected provider file at %s: %v", providerPath, err)
+	}
+	if !strings.Contains(string(providerData), "TestProxy") {
+		t.Error("expected 'TestProxy' in provider file after refresh")
 	}
 
 	// ProxyCount (via LastCount) must be 1.
@@ -1341,10 +1355,221 @@ func TestParseShareLink_VmessTooBig(t *testing.T) {
 	}
 }
 
-func TestRefreshXray_DoesNotRestartXray(t *testing.T) {
-	t.Skip("NODE-02: refreshXray не вызывает xkeen -restart — deferred to Phase 13")
-	// TODO Phase 13: убрать t.Skip(), реализовать mock consoleSvc, подтвердить что Execute("-restart") НЕ вызван после refreshXray
+func TestSubscriptionService_MihomoProxyProvider(t *testing.T) {
+	tmp := t.TempDir()
+
+	// 1. Настроить мок-сервер подписки
+	yamlContent := `proxies:
+  - name: node1
+    type: ss
+    server: 1.2.3.4
+    port: 443
+    cipher: chacha20-ietf-poly1305
+    password: test
+  - name: node2
+    type: vmess
+    server: 5.6.7.8
+    port: 443
+    uuid: uuid
+    alterId: 0
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/yaml")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(yamlContent))
+	}))
+	defer srv.Close()
+
+	// 2. Создать mock-xkeen скрипт для ConsoleService
+	logFile := filepath.Join(tmp, "xkeen_calls.log")
+	scriptContent := fmt.Sprintf("#!/bin/sh\necho \"$1\" >> %q\n", logFile)
+	mockXkeenPath := filepath.Join(tmp, "mock-xkeen")
+	if err := os.WriteFile(mockXkeenPath, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("failed to write mock script: %v", err)
+	}
+
+	// 3. Инициализировать сервис подписок
+	mihomoDir := filepath.Join(tmp, "mihomo")
+	if err := os.MkdirAll(mihomoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(mihomoDir, "config.yaml")
+	initialConfig := `port: 9090
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - DIRECT
+`
+	if err := os.WriteFile(configPath, []byte(initialConfig), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewSubscriptionService(tmp, tmp, mihomoDir)
+	svc.httpClient = srv.Client()
+
+	consoleSvc := NewConsoleService(mockXkeenPath)
+	svc.SetConsoleService(consoleSvc)
+
+	// 4. Добавить подписку Mihomo
+	sub := Subscription{
+		ID:           "mihomo-sub",
+		Name:         "Mihomo Sub Test",
+		URL:          srv.URL,
+		Type:         "mihomo",
+		Enabled:      true,
+		Interval:     1,
+		MihomoGroups: []string{"PROXY"},
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatalf("failed to add subscription: %v", err)
+	}
+
+	// 5. Запустить Refresh
+	if err := svc.Refresh("mihomo-sub"); err != nil {
+		t.Fatalf("Refresh failed: %v", err)
+	}
+
+	// 6. Проверить config.yaml
+	configBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configStr := string(configBytes)
+
+	if !strings.Contains(configStr, "proxy-providers:") {
+		t.Error("config.yaml should contain proxy-providers:")
+	}
+	if !strings.Contains(configStr, "mihomo-sub:") {
+		t.Error("config.yaml should contain provider ID 'mihomo-sub'")
+	}
+	if !strings.Contains(configStr, "use:\n      - mihomo-sub") {
+		t.Errorf("config.yaml group should use provider, got:\n%s", configStr)
+	}
+
+	// Проверить что файл провайдера записан
+	providerFilePath := filepath.Join(mihomoDir, "providers", "mihomo-sub.yaml")
+	if _, err := os.Stat(providerFilePath); err != nil {
+		t.Errorf("provider file should be written at %s: %v", providerFilePath, err)
+	}
+
+	// Проверить что произошел restart
+	callsBytes, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(callsBytes), "-restart") {
+		t.Error("xkeen -restart should be called")
+	}
+
+	// 7. Повторный Refresh без изменений не должен вызывать restart
+	if err := os.WriteFile(logFile, []byte(""), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Refresh("mihomo-sub"); err != nil {
+		t.Fatal(err)
+	}
+	callsBytes, _ = os.ReadFile(logFile)
+	if strings.Contains(string(callsBytes), "-restart") {
+		t.Error("xkeen -restart should NOT be called when no changes")
+	}
+
+	// 8. Удалить подписку и проверить очистку
+	if err := svc.Delete("mihomo-sub"); err != nil {
+		t.Fatalf("failed to delete subscription: %v", err)
+	}
+
+	configBytes, _ = os.ReadFile(configPath)
+	configStr = string(configBytes)
+	if strings.Contains(configStr, "mihomo-sub") {
+		t.Error("provider and references should be removed from config.yaml after deletion")
+	}
+	if _, err := os.Stat(providerFilePath); !os.IsNotExist(err) {
+		t.Error("provider file should be deleted")
+	}
 }
+
+func TestRefreshXray_DoesNotRestartXray(t *testing.T) {
+	tmp := t.TempDir()
+
+	// 1. Настроить мок-сервер
+	vmessJSON1 := `{"ps":"xray-node","add":"1.1.1.1","port":"443","id":"uuid","net":"tcp"}`
+	vmessJSON2 := `{"ps":"xray-node-new","add":"2.2.2.2","port":"443","id":"uuid","net":"tcp"}`
+	b64_1 := base64.StdEncoding.EncodeToString([]byte("vmess://" + base64.StdEncoding.EncodeToString([]byte(vmessJSON1))))
+	b64_2 := base64.StdEncoding.EncodeToString([]byte("vmess://" + base64.StdEncoding.EncodeToString([]byte(vmessJSON2))))
+
+	var responseContent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responseContent))
+	}))
+	defer srv.Close()
+
+	// 2. Создать mock-xkeen скрипт
+	logFile := filepath.Join(tmp, "xkeen_calls.log")
+	scriptContent := fmt.Sprintf("#!/bin/sh\necho \"$1\" >> %q\n", logFile)
+	mockXkeenPath := filepath.Join(tmp, "mock-xkeen")
+	if err := os.WriteFile(mockXkeenPath, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("failed to write mock script: %v", err)
+	}
+
+	xrayConfigDir := filepath.Join(tmp, "xray")
+	_ = os.MkdirAll(xrayConfigDir, 0755)
+
+	svc := NewSubscriptionService(tmp, xrayConfigDir, tmp)
+	svc.httpClient = srv.Client()
+
+	consoleSvc := NewConsoleService(mockXkeenPath)
+	svc.SetConsoleService(consoleSvc)
+
+	// 3. Добавить Xray подписку
+	sub := Subscription{
+		ID:        "xray-sub",
+		Name:      "Xray Sub Test",
+		URL:       srv.URL,
+		Type:      "xray",
+		Enabled:   true,
+		Interval:  1,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Первый Refresh (файл записывается впервые)
+	responseContent = b64_1
+	if err := svc.Refresh("xray-sub"); err != nil {
+		t.Fatalf("first Refresh failed: %v", err)
+	}
+
+	// Должен быть рестарт
+	callsBytes, _ := os.ReadFile(logFile)
+	if !strings.Contains(string(callsBytes), "-restart") {
+		t.Error("xkeen -restart should be called on first refresh")
+	}
+
+	// 5. Второй Refresh без изменений (хэш совпадает)
+	_ = os.WriteFile(logFile, []byte(""), 0600)
+	if err := svc.Refresh("xray-sub"); err != nil {
+		t.Fatalf("second Refresh failed: %v", err)
+	}
+	callsBytes, _ = os.ReadFile(logFile)
+	if strings.Contains(string(callsBytes), "-restart") {
+		t.Error("xkeen -restart should NOT be called if configuration has not changed")
+	}
+
+	// 6. Третий Refresh с изменениями (хэш отличается)
+	_ = os.WriteFile(logFile, []byte(""), 0600)
+	responseContent = b64_2
+	if err := svc.Refresh("xray-sub"); err != nil {
+		t.Fatalf("third Refresh failed: %v", err)
+	}
+	callsBytes, _ = os.ReadFile(logFile)
+	if !strings.Contains(string(callsBytes), "-restart") {
+		t.Error("xkeen -restart should be called when config changed")
+	}
+}
+
 
 func TestRefreshMihomo_ConcurrentRace(t *testing.T) {
 	yamlContent := `proxies:
