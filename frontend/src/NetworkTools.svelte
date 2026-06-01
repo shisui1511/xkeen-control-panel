@@ -103,9 +103,9 @@
       ...item,
       timestamp: Date.now()
     };
-    
+
     // Uniqueness constraint
-    historyList = historyList.filter(x => {
+    historyList = historyList.filter((x) => {
       if (x.type !== newItem.type) return true;
       if (newItem.type === 'ping' || newItem.type === 'traceroute' || newItem.type === 'dns') {
         return x.params.host !== newItem.params.host;
@@ -114,7 +114,9 @@
         return x.params.url !== newItem.params.url;
       }
       if (newItem.type === 'proxy') {
-        return x.params.proxy_name !== newItem.params.proxy_name || x.params.url !== newItem.params.url;
+        return (
+          x.params.proxy_name !== newItem.params.proxy_name || x.params.url !== newItem.params.url
+        );
       }
       if (newItem.type === 'port') {
         return x.params.host !== newItem.params.host || x.params.port !== newItem.params.port;
@@ -177,7 +179,12 @@
         const proxies: string[] = [];
         for (const [name, p] of Object.entries(data.proxies || {})) {
           const type = (p as any).type;
-          if (type === 'Selector' || type === 'Fallback' || type === 'URLTest' || type === 'LoadBalance') {
+          if (
+            type === 'Selector' ||
+            type === 'Fallback' ||
+            type === 'URLTest' ||
+            type === 'LoadBalance'
+          ) {
             groups.push(name);
           } else if (type !== 'Direct' && type !== 'Reject') {
             proxies.push(name);
@@ -209,8 +216,9 @@
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ host, count })
       });
-      result = await res.json();
-      if (res.ok && result.success) {
+      const data = await res.json();
+      result = data;
+      if (res.ok && data?.success) {
         saveHistory({
           type: 'ping',
           label: `[Ping] ${host}`,
@@ -240,8 +248,9 @@
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ host, max_hops: maxHops })
       });
-      result = await res.json();
-      if (res.ok && result.success) {
+      const data = await res.json();
+      result = data;
+      if (res.ok && data?.success) {
         saveHistory({
           type: 'traceroute',
           label: `[Traceroute] ${host}`,
@@ -271,8 +280,9 @@
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ host, record_type: recordType })
       });
-      result = await res.json();
-      if (res.ok && result.success) {
+      const data = await res.json();
+      result = data;
+      if (res.ok && data?.success) {
         saveHistory({
           type: 'dns',
           label: `[DNS ${recordType}] ${host}`,
@@ -302,8 +312,9 @@
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ url, timeout })
       });
-      result = await res.json();
-      if (res.ok && result.success) {
+      const data = await res.json();
+      result = data;
+      if (res.ok && data?.success) {
         saveHistory({
           type: 'http',
           label: `[HTTP] ${url}`,
@@ -349,7 +360,8 @@
       } else {
         result = {
           success: false,
-          error: data.error || $t('net.proxy_test_fail', { error: data.error || 'Connection failed' }),
+          error:
+            data.error || $t('net.proxy_test_fail', { error: data.error || 'Connection failed' }),
           output: data.output
         };
       }
@@ -394,7 +406,9 @@
       } else {
         result = {
           success: false,
-          error: data.error || $t('net.port_closed', { port: portNumber, error: data.error || 'Connection failed' }),
+          error:
+            data.error ||
+            $t('net.port_closed', { port: portNumber, error: data.error || 'Connection failed' }),
           output: data.output
         };
       }
@@ -469,7 +483,13 @@
         {$t('net.tab_ping')}
       </h3>
       <div class="form-group" style="margin-bottom:10px;">
-        <input bind:this={hostInput} class="input" bind:value={host} placeholder="cloudflare.com" disabled={loading} />
+        <input
+          bind:this={hostInput}
+          class="input"
+          bind:value={host}
+          placeholder="cloudflare.com"
+          disabled={loading}
+        />
       </div>
       {#if showSettings.ping}
         <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
@@ -603,7 +623,13 @@
         {$t('net.tab_http')}
       </h3>
       <div class="form-group" style="margin-bottom:10px;">
-        <input bind:this={urlInput} class="input" bind:value={url} placeholder="https://google.com" disabled={loading} />
+        <input
+          bind:this={urlInput}
+          class="input"
+          bind:value={url}
+          placeholder="https://google.com"
+          disabled={loading}
+        />
       </div>
       {#if showSettings.http}
         <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
@@ -639,9 +665,16 @@
         <Icon name="network" size={14} />
         {$t('net.tab_proxy_test')}
       </h3>
-      
-      <div class="form-group" style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;">
-        <label for="proxy-select" class="lbl" style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;">
+
+      <div
+        class="form-group"
+        style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;"
+      >
+        <label
+          for="proxy-select"
+          class="lbl"
+          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+        >
           {$t('net.proxy_select')}
         </label>
         <select id="proxy-select" class="input" bind:value={selectedProxy} disabled={loading}>
@@ -663,8 +696,15 @@
         </select>
       </div>
 
-      <div class="form-group" style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;">
-        <label for="proxy-target" class="lbl" style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;">
+      <div
+        class="form-group"
+        style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;"
+      >
+        <label
+          for="proxy-target"
+          class="lbl"
+          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+        >
           {$t('net.target_url')}
         </label>
         <select id="proxy-target" class="input" bind:value={proxyTargetPreset} disabled={loading}>
@@ -714,7 +754,7 @@
         </button>
         <button
           class="btn btn-secondary"
-          on:click={() => showProxySettings = !showProxySettings}
+          on:click={() => (showProxySettings = !showProxySettings)}
           title="Настройки"
         >
           ⋯
@@ -729,8 +769,15 @@
         {$t('net.tab_port_check')}
       </h3>
 
-      <div class="form-group" style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;">
-        <label for="port-host" class="lbl" style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;">
+      <div
+        class="form-group"
+        style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;"
+      >
+        <label
+          for="port-host"
+          class="lbl"
+          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+        >
           {$t('net.host_ip')}
         </label>
         <input
@@ -743,8 +790,15 @@
         />
       </div>
 
-      <div class="form-group" style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;">
-        <label for="port-number" class="lbl" style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;">
+      <div
+        class="form-group"
+        style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;"
+      >
+        <label
+          for="port-number"
+          class="lbl"
+          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+        >
           {$t('net.port')}
         </label>
         <input
@@ -767,10 +821,18 @@
             type="button"
             class="chip"
             style="background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:2px 8px; font-size:11px; color:var(--fg-secondary); cursor:pointer; transition:all 0.15s ease;"
-            on:click={() => portNumber = p}
+            on:click={() => (portNumber = p)}
             disabled={loading}
           >
-            {p === 22 ? '22 (SSH)' : p === 80 ? '80 (HTTP)' : p === 443 ? '443 (HTTPS)' : p === 1080 ? '1080 (Socks)' : `${p}`}
+            {p === 22
+              ? '22 (SSH)'
+              : p === 80
+                ? '80 (HTTP)'
+                : p === 443
+                  ? '443 (HTTPS)'
+                  : p === 1080
+                    ? '1080 (Socks)'
+                    : `${p}`}
           </button>
         {/each}
       </div>
@@ -801,7 +863,7 @@
         </button>
         <button
           class="btn btn-secondary"
-          on:click={() => showPortSettings = !showPortSettings}
+          on:click={() => (showPortSettings = !showPortSettings)}
           title="Настройки"
         >
           ⋯
@@ -848,8 +910,12 @@
 
   <!-- Test History Section -->
   <div class="card mb-3" style="padding: 16px 20px; margin-top: 16px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <h3 style="margin:0; font-size:14px; font-weight:700; color:var(--fg-primary); display:flex; align-items:center; gap:8px;">
+    <div
+      style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"
+    >
+      <h3
+        style="margin:0; font-size:14px; font-weight:700; color:var(--fg-primary); display:flex; align-items:center; gap:8px;"
+      >
         <Icon name="connections" size={14} />
         {$t('net.history')}
       </h3>
@@ -880,14 +946,22 @@
             on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectHistoryItem(item)}
           >
             <div style="display:flex; align-items:center; gap:8px;">
-              <span class="badge" class:badge-success={item.type === 'ping' || item.type === 'port' || item.type === 'proxy'} style="font-size:11px; text-transform:uppercase; font-weight:600;">
+              <span
+                class="badge"
+                class:badge-success={item.type === 'ping' ||
+                  item.type === 'port' ||
+                  item.type === 'proxy'}
+                style="font-size:11px; text-transform:uppercase; font-weight:600;"
+              >
                 {item.type}
               </span>
               <span style="color:var(--fg-primary); font-weight:500;">
                 {item.label}
               </span>
             </div>
-            <span style="color:var(--fg-dim); font-size:11.5px; font-family:var(--font-family-mono);">
+            <span
+              style="color:var(--fg-dim); font-size:11.5px; font-family:var(--font-family-mono);"
+            >
               {new Date(item.timestamp).toLocaleTimeString()}
             </span>
           </div>

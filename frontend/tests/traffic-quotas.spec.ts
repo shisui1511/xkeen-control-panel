@@ -17,7 +17,7 @@ async function setupRestMocks(page: Page) {
     }
   ];
 
-  let mockStats = {
+  const mockStats = {
     proxies: [],
     total_upload: 1048576, // 1 MB
     total_download: 4194304, // 4 MB
@@ -46,7 +46,12 @@ async function setupRestMocks(page: Page) {
           data: {
             kernels: { mihomo: { installed: true, version: '1.18.0', channel: 'stable' } },
             active_kernel: 'mihomo',
-            mihomo: { reachable: true, process_running: true, api_reachable: true, api_authenticated: true }
+            mihomo: {
+              reachable: true,
+              process_running: true,
+              api_reachable: true,
+              api_authenticated: true
+            }
           }
         })
       });
@@ -54,31 +59,67 @@ async function setupRestMocks(page: Page) {
       const q = route.request().postDataJSON();
       q.id = 'quota-added';
       mockQuotas.push(q);
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(q) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(q)
+      });
     } else if (url.includes('/api/traffic/quotas/delete') && method === 'POST') {
       const id = new URL(url).searchParams.get('id');
-      mockQuotas = mockQuotas.filter(q => q.id !== id);
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+      mockQuotas = mockQuotas.filter((q) => q.id !== id);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
     } else if (url.includes('/api/traffic/quotas/enabled') && method === 'POST') {
       const id = new URL(url).searchParams.get('id');
       const enabled = new URL(url).searchParams.get('enabled') === 'true';
-      mockQuotas = mockQuotas.map(q => q.id === id ? { ...q, enabled } : q);
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+      mockQuotas = mockQuotas.map((q) => (q.id === id ? { ...q, enabled } : q));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
     } else if (url.includes('/api/traffic/quotas/reset') && method === 'POST') {
       const id = new URL(url).searchParams.get('id');
-      mockQuotas = mockQuotas.map(q => q.id === id ? { ...q, current_bytes: 0 } : q);
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+      mockQuotas = mockQuotas.map((q) => (q.id === id ? { ...q, current_bytes: 0 } : q));
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
     } else if (url.includes('/api/traffic/quotas')) {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mockQuotas) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockQuotas)
+      });
     } else if (url.includes('/api/traffic/stats')) {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mockStats) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockStats)
+      });
     } else if (url.includes('/api/traffic/alerts/clear') && method === 'POST') {
       mockAlerts = [];
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
     } else if (url.includes('/api/traffic/alerts')) {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(mockAlerts) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockAlerts)
+      });
     } else {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
     }
   });
 }
