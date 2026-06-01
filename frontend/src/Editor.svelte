@@ -257,7 +257,7 @@
   }
 
   function checkDirty(): boolean {
-    const activeTab = tabs.find(t => t.path === activeTabPath);
+    const activeTab = tabs.find((t) => t.path === activeTabPath);
     if (activeTab) return activeTab.isDirty;
     if (!editorView) return false;
     return editorView.state.doc.toString() !== originalContent;
@@ -573,7 +573,7 @@
   }
 
   async function loadFile(path: string, isPreviewClick = true) {
-    console.log("loadFile called with path:", path, "isPreviewClick:", isPreviewClick);
+    console.log('loadFile called with path:', path, 'isPreviewClick:', isPreviewClick);
     if (!path) return;
 
     const existingTab = tabs.find((t) => t.path === path);
@@ -786,7 +786,7 @@
       await loadBackups(path);
       tabs = [...tabs];
     } catch (e: any) {
-      console.error("loadFile error:", e);
+      console.error('loadFile error:', e);
       showToast('error', $t('editor.file_load_error') + ': ' + (e?.message || e));
       loading = false;
       loadingPath = null;
@@ -827,7 +827,7 @@
     if (parts.length < 2) return backup;
     const tsStr = parts[1];
     const yyyymmdd = tsStr.slice(0, 8); // YYYYMMDD
-    const hhmmss = tsStr.slice(9, 15);   // HHMMSS
+    const hhmmss = tsStr.slice(9, 15); // HHMMSS
     if (yyyymmdd.length === 8 && hhmmss.length === 6) {
       const y = yyyymmdd.slice(0, 4);
       const m = yyyymmdd.slice(4, 6);
@@ -1054,7 +1054,12 @@
   }
 
   async function handleSaveAndApply() {
-    console.log("handleSaveAndApply called. selectedFile:", selectedFile, "editorView:", !!editorView);
+    console.log(
+      'handleSaveAndApply called. selectedFile:',
+      selectedFile,
+      'editorView:',
+      !!editorView
+    );
     if (!selectedFile || !editorView) return;
     applyLoading = true;
     await tick();
@@ -1129,7 +1134,7 @@
       // 4. Опрос статуса
       startBackgroundStatusCheck();
     } catch (e: any) {
-      console.error("handleSaveAndApply error:", e);
+      console.error('handleSaveAndApply error:', e);
       showToast('error', $t('editor.save_error') + ': ' + e.message);
       applyLoading = false;
       backgroundStatusText = '';
@@ -1153,7 +1158,10 @@
           const parsed = await res.json();
           if (parsed && parsed.success && parsed.data && parsed.data.is_running === true) {
             clearInterval(interval);
-            showToast('success', $t('editor.apply_success') || 'Конфигурация успешно применилась, служба запущена!');
+            showToast(
+              'success',
+              $t('editor.apply_success') || 'Конфигурация успешно применилась, служба запущена!'
+            );
             applyLoading = false;
             backgroundStatusText = '';
             return;
@@ -1165,7 +1173,10 @@
 
       if (attempts >= maxAttempts) {
         clearInterval(interval);
-        showToast('error', $t('editor.apply_timeout') || 'Служба не запустилась вовремя. Проверьте логи.');
+        showToast(
+          'error',
+          $t('editor.apply_timeout') || 'Служба не запустилась вовремя. Проверьте логи.'
+        );
         applyLoading = false;
         backgroundStatusText = '';
       }
@@ -1613,9 +1624,11 @@
                 stroke-width="2.5"
                 stroke-linecap="round"
                 stroke-linejoin="round"
-                ><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline
-                  points="17 21 17 13 7 13 7 21"
-                /><polyline points="7 3 7 8 15 8" /><path d="m14 11-2 2-2-2" /><path d="M12 7v6" /></svg
+                ><path
+                  d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"
+                /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /><path
+                  d="m14 11-2 2-2-2"
+                /><path d="M12 7v6" /></svg
               >
               {$t('editor.save_and_apply')}
             {/if}
@@ -1729,7 +1742,6 @@
               {/each}
             </div>
           </div>
-
         </div>
       {/if}
 
@@ -1744,234 +1756,67 @@
         </div>
       {:else}
         <div class="editor-main-card">
-        {#if tabs.length > 0}
-          <div class="editor-tab-strip">
-            {#each tabs as tab (tab.path)}
-              <button
-                class="editor-tab"
-                class:active={tab.path === activeTabPath}
-                class:preview={tab.isPreview}
-                on:click={() => switchTab(tab.path)}
-                on:dblclick={() => pinTab(tab.path)}
-              >
-                <span class="tab-name">{tab.name}</span>
-                {#if tab.isDirty}
-                  <span class="tab-dirty-dot">●</span>
-                {/if}
-                <span
-                  class="tab-close-btn"
-                  role="button"
-                  tabindex="-1"
-                  on:click|stopPropagation={() => closeTab(tab.path)}
-                  on:keydown|stopPropagation={(e) => (e.key === 'Enter' || e.key === ' ') && closeTab(tab.path)}
-                  title="Закрыть"
-                  aria-label="Закрыть"
+          {#if tabs.length > 0}
+            <div class="editor-tab-strip">
+              {#each tabs as tab (tab.path)}
+                <button
+                  class="editor-tab"
+                  class:active={tab.path === activeTabPath}
+                  class:preview={tab.isPreview}
+                  on:click={() => switchTab(tab.path)}
+                  on:dblclick={() => pinTab(tab.path)}
                 >
-                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                  </svg>
-                </span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-        {#if breadcrumbs.length > 0}
-          <div class="editor-breadcrumbs">
-            {#each breadcrumbs as segment, i}
-              {#if i > 0}
-                <span class="breadcrumb-divider">&gt;</span>
-              {/if}
-              <button class="breadcrumb-segment" on:click={() => jumpToSegment(segment.pos)}>
-                {segment.label}
-              </button>
-            {/each}
-          </div>
-        {/if}
-        <div class="editor-toolbar">
-          <button
-            class="btn btn-secondary"
-            style="padding: 6px 10px; margin-right: 8px;"
-            on:click={() => (showSidebar = !showSidebar)}
-            title={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
-            aria-label={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
-          >
-            {#if showSidebar}
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"><polyline points="15 18 9 12 15 6" /></svg
-              >
-            {:else}
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg
-              >
-            {/if}
-          </button>
-          <span class="file-name"
-            >{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span
-          >
-          {#if selectedFile}
-            <span class="file-meta" style="margin-left:8px;"
-              >{fileSize} · {fileType} · UTF‑8 · {fileLineEndings}</span
-            >
-          {/if}
-
-          {#if hasDraft}
-            <div
-              class="editor-draft-bar"
-              style="margin-left: 12px; display: inline-flex; align-items: center; gap: 6px;"
-            >
-              <span>{$t('editor.has_draft') || 'Есть черновик'}</span>
-              <button on:click={restoreDraft} class="btn btn-sm btn-warning">
-                {$t('editor.restore_draft') || 'Восстановить'}
-              </button>
-              <button
-                on:click={discardDraft}
-                class="btn btn-sm btn-secondary"
-                style="padding: 2px 8px;"
-              >
-                {$t('editor.discard_draft') || 'Сбросить'}
-              </button>
+                  <span class="tab-name">{tab.name}</span>
+                  {#if tab.isDirty}
+                    <span class="tab-dirty-dot">●</span>
+                  {/if}
+                  <span
+                    class="tab-close-btn"
+                    role="button"
+                    tabindex="-1"
+                    on:click|stopPropagation={() => closeTab(tab.path)}
+                    on:keydown|stopPropagation={(e) =>
+                      (e.key === 'Enter' || e.key === ' ') && closeTab(tab.path)}
+                    title="Закрыть"
+                    aria-label="Закрыть"
+                  >
+                    <svg
+                      width="8"
+                      height="8"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="3"
+                    >
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </span>
+                </button>
+              {/each}
             </div>
           {/if}
-
-          <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-            {#if selectedFile}
-              <label
-                class="toggle-label"
-                for="schema-toggle"
-                title="Enable schema validation, autocomplete and hover tooltips"
-              >
-                <label class="toggle-switch">
-                  <input
-                    id="schema-toggle"
-                    type="checkbox"
-                    bind:checked={schemaEnabled}
-                    on:change={toggleSchema}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
-                {$t('editor.schema')}
-              </label>
-
-              <label
-                class="toggle-label"
-                for="expert-toggle"
-                title="Expert mode: full schema assist / Beginner: simplified"
-              >
-                <label class="toggle-switch">
-                  <input
-                    id="expert-toggle"
-                    type="checkbox"
-                    bind:checked={expertMode}
-                    on:change={toggleExpertMode}
-                  />
-                  <span class="toggle-slider"></span>
-                </label>
-                {$t('editor.expert')}
-              </label>
-
-              <!-- Kebab actions -->
-              <div class="kebab-wrap">
-                <button
-                  class="btn btn-secondary"
-                  style="padding:6px 10px;"
-                  on:click={toggleKebab}
-                  title="Дополнительные действия"
-                  aria-label="Дополнительные действия"
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                    <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle
-                      cx="12"
-                      cy="19"
-                      r="2"
-                    />
-                  </svg>
-                </button>
-                {#if showKebabMenu}
-                  <!-- svelte-ignore a11y-click-events-have-key-events -->
-                  <!-- svelte-ignore a11y-no-static-element-interactions -->
-                  <div
-                    class="kebab-dropdown"
-                    style="right:0;top:calc(100% + 4px);"
-                    on:click|stopPropagation
-                  >
-                    <button
-                      class="kebab-item"
-                      on:click={() => {
-                        showKebabMenu = false;
-                        applyQuickFixes();
-                      }}
-                    >
-                      <Icon name="settings" size={14} />
-                      {$t('editor.quick_fix')}
-                    </button>
-                    <button
-                      class="kebab-item"
-                      on:click={() => {
-                        showKebabMenu = false;
-                        showTemplatesModal = true;
-                        loadTemplates();
-                      }}
-                    >
-                      <Icon name="editor" size={14} />
-                      {$t('editor.templates')}
-                    </button>
-                    <button
-                      class="kebab-item"
-                      on:click={() => {
-                        showKebabMenu = false;
-                        showGeneratorModal = true;
-                      }}
-                    >
-                      <Icon name="add" size={14} />
-                      {$t('editor.generator')}
-                    </button>
-                    <button
-                      class="kebab-item"
-                      on:click={() => {
-                        showKebabMenu = false;
-                        showRenameModal = true;
-                        renameTarget = selectedFile.split('/').pop() || '';
-                      }}
-                    >
-                      {$t('app.rename')}
-                    </button>
-                    <div class="kebab-divider"></div>
-                    <button
-                      class="kebab-item danger"
-                      on:click={() => {
-                        showKebabMenu = false;
-                        deleteFile();
-                      }}
-                    >
-                      <Icon name="trash" size={14} />
-                      {$t('app.delete')}
-                    </button>
-                  </div>
+          {#if breadcrumbs.length > 0}
+            <div class="editor-breadcrumbs">
+              {#each breadcrumbs as segment, i}
+                {#if i > 0}
+                  <span class="breadcrumb-divider">&gt;</span>
                 {/if}
-              </div>
-
-              <button
-                on:click={downloadFile}
-                class="btn btn-secondary"
-                style="padding: 6px 10px;"
-                title="Скачать файл"
-                aria-label="Скачать файл"
-              >
+                <button class="breadcrumb-segment" on:click={() => jumpToSegment(segment.pos)}>
+                  {segment.label}
+                </button>
+              {/each}
+            </div>
+          {/if}
+          <div class="editor-toolbar">
+            <button
+              class="btn btn-secondary"
+              style="padding: 6px 10px; margin-right: 8px;"
+              on:click={() => (showSidebar = !showSidebar)}
+              title={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
+              aria-label={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
+            >
+              {#if showSidebar}
                 <svg
                   width="13"
                   height="13"
@@ -1979,159 +1824,340 @@
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"><polyline points="15 18 9 12 15 6" /></svg
                 >
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                </svg>
-              </button>
-            {/if}
-          </span>
-        </div>
-
-        {#if isMihomoAutoEdited}
-          <div class="alert alert-warning" style="margin: 12px 14px 0;" role="status">
-            <span aria-hidden="true">⚠️</span>
-            <div>
-              <strong>{$t('editor.mihomo_autoedit_title')}</strong>
-              <div style="margin-top: 2px;">{$t('editor.mihomo_autoedit_body')}</div>
-            </div>
-          </div>
-        {/if}
-
-        {#if loading}
-          <div class="loading" style="min-height: 420px; display: grid; place-items: center;">
-            <div class="spinner"></div>
-          </div>
-        {:else if !selectedFile}
-          <div
-            class="empty-state"
-            style="min-height: 420px; display: grid; place-items: center; color: var(--fg-dim);"
-          >
-            <p>{$t('editor.select_file')}</p>
-          </div>
-        {:else}
-          <div class="editor-pane" style="display: block; padding: 0;">
-            <div class="editor-container" bind:this={editorContainer} style="height: 520px;"></div>
-          </div>
-        {/if}
-
-        <!-- Status Bar -->
-        {#if selectedFile}
-          <div
-            style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:14px;align-items:center;font-family:var(--font-family-mono);font-size:11px;color:var(--fg-dim);"
-          >
-            <span class:status-dirty={isDirty}>
-              <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
-              {isDirty ? $t('editor.unsaved') || 'Изменён' : $t('editor.saved') || 'Сохранён'}
-            </span>
-            <span>schema: {selectedFile.includes('xray') ? 'xray@latest' : 'mihomo@latest'}</span>
-            <span>{cursorLine}:{cursorCol}</span>
-
-            {#if applyLoading || backgroundStatusText}
-              <div class="status-apply-indicator">
-                <span class="ks-dot-spin">
-                  <span class="ks-dot" style="background-color: var(--accent);"></span>
-                  <span class="ks-dot" style="background-color: var(--accent);"></span>
-                  <span class="ks-dot" style="background-color: var(--accent);"></span>
-                </span>
-                <span>{backgroundStatusText}</span>
-              </div>
-            {/if}
-
-            {#if backups.length > 0}
-              <button
-                class="backups-toggle-btn"
-                on:click={() => drawerOpen = !drawerOpen}
-                title="История резервных копий"
-                aria-label="История резервных копий"
-              >
+              {:else}
                 <svg
-                  class="chevron-icon"
-                  class:rotated={drawerOpen}
-                  width="10"
-                  height="10"
+                  width="13"
+                  height="13"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  stroke-width="2.5"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg
                 >
-                  <polyline points="18 15 12 9 6 15"></polyline>
-                </svg>
-                {$t('editor.backups') || 'Бэкапы'} ({backups.length})
-              </button>
+              {/if}
+            </button>
+            <span class="file-name"
+              >{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span
+            >
+            {#if selectedFile}
+              <span class="file-meta" style="margin-left:8px;"
+                >{fileSize} · {fileType} · UTF‑8 · {fileLineEndings}</span
+              >
             {/if}
 
-            <span style="margin-left:auto;">Ctrl+S — сохранить · Ctrl+Z — отменить</span>
-          </div>
+            {#if hasDraft}
+              <div
+                class="editor-draft-bar"
+                style="margin-left: 12px; display: inline-flex; align-items: center; gap: 6px;"
+              >
+                <span>{$t('editor.has_draft') || 'Есть черновик'}</span>
+                <button on:click={restoreDraft} class="btn btn-sm btn-warning">
+                  {$t('editor.restore_draft') || 'Восстановить'}
+                </button>
+                <button
+                  on:click={discardDraft}
+                  class="btn btn-sm btn-secondary"
+                  style="padding: 2px 8px;"
+                >
+                  {$t('editor.discard_draft') || 'Сбросить'}
+                </button>
+              </div>
+            {/if}
 
-          {#if drawerOpen && backups.length > 0}
-            <div class="editor-bottom-drawer" transition:slide={{ duration: 200 }}>
-              <div class="drawer-layout">
-                <!-- Список бэкапов слева -->
-                <div class="drawer-sidebar">
-                  {#each backups as backup}
+            <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+              {#if selectedFile}
+                <label
+                  class="toggle-label"
+                  for="schema-toggle"
+                  title="Enable schema validation, autocomplete and hover tooltips"
+                >
+                  <label class="toggle-switch">
+                    <input
+                      id="schema-toggle"
+                      type="checkbox"
+                      bind:checked={schemaEnabled}
+                      on:change={toggleSchema}
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  {$t('editor.schema')}
+                </label>
+
+                <label
+                  class="toggle-label"
+                  for="expert-toggle"
+                  title="Expert mode: full schema assist / Beginner: simplified"
+                >
+                  <label class="toggle-switch">
+                    <input
+                      id="expert-toggle"
+                      type="checkbox"
+                      bind:checked={expertMode}
+                      on:change={toggleExpertMode}
+                    />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  {$t('editor.expert')}
+                </label>
+
+                <!-- Kebab actions -->
+                <div class="kebab-wrap">
+                  <button
+                    class="btn btn-secondary"
+                    style="padding:6px 10px;"
+                    on:click={toggleKebab}
+                    title="Дополнительные действия"
+                    aria-label="Дополнительные действия"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                      <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle
+                        cx="12"
+                        cy="19"
+                        r="2"
+                      />
+                    </svg>
+                  </button>
+                  {#if showKebabMenu}
+                    <!-- svelte-ignore a11y-click-events-have-key-events -->
+                    <!-- svelte-ignore a11y-no-static-element-interactions -->
                     <div
-                      class="backup-item"
-                      class:active={selectedBackup === backup}
-                      role="button"
-                      tabindex="0"
-                      on:click={() => selectBackup(backup)}
-                      on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), selectBackup(backup))}
+                      class="kebab-dropdown"
+                      style="right:0;top:calc(100% + 4px);"
+                      on:click|stopPropagation
                     >
-                      <span class="backup-time">{formatBackupDate(backup)}</span>
                       <button
-                        class="btn btn-sm btn-secondary restore-inline-btn"
-                        on:click|stopPropagation={() => restoreBackup(backup)}
+                        class="kebab-item"
+                        on:click={() => {
+                          showKebabMenu = false;
+                          applyQuickFixes();
+                        }}
                       >
-                        Восстановить
+                        <Icon name="settings" size={14} />
+                        {$t('editor.quick_fix')}
                       </button>
-                    </div>
-                  {/each}
-                </div>
-
-                <!-- Зона diff-viewer справа -->
-                <div class="drawer-main">
-                  {#if selectedBackup}
-                    <div class="diff-viewer-container">
-                      <div class="diff-header">
-                        <span>Сравнение с бэкапом от {formatBackupDate(selectedBackup)}</span>
-                      </div>
-                      <div class="diff-body">
-                        {#if backupLoading}
-                          <div style="display:grid;place-items:center;height:100px;">
-                            <div class="spinner"></div>
-                          </div>
-                        {:else}
-                          {#each diffGroups as group}
-                            {#if group.type === 'added'}
-                              {#each group.lines as line}
-                                <div class="diff-line diff-line-added">+ {line}</div>
-                              {/each}
-                            {:else if group.type === 'removed'}
-                              {#each group.lines as line}
-                                <div class="diff-line diff-line-removed">- {line}</div>
-                              {/each}
-                            {:else if group.type === 'collapsed'}
-                              <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
-                            {:else}
-                              {#each group.lines as line}
-                                <div class="diff-line diff-line-unchanged">{line}</div>
-                              {/each}
-                            {/if}
-                          {/each}
-                        {/if}
-                      </div>
-                    </div>
-                  {:else}
-                    <div class="drawer-empty-state">
-                      Выберите резервную копию слева для сравнения изменений
+                      <button
+                        class="kebab-item"
+                        on:click={() => {
+                          showKebabMenu = false;
+                          showTemplatesModal = true;
+                          loadTemplates();
+                        }}
+                      >
+                        <Icon name="editor" size={14} />
+                        {$t('editor.templates')}
+                      </button>
+                      <button
+                        class="kebab-item"
+                        on:click={() => {
+                          showKebabMenu = false;
+                          showGeneratorModal = true;
+                        }}
+                      >
+                        <Icon name="add" size={14} />
+                        {$t('editor.generator')}
+                      </button>
+                      <button
+                        class="kebab-item"
+                        on:click={() => {
+                          showKebabMenu = false;
+                          showRenameModal = true;
+                          renameTarget = selectedFile.split('/').pop() || '';
+                        }}
+                      >
+                        {$t('app.rename')}
+                      </button>
+                      <div class="kebab-divider"></div>
+                      <button
+                        class="kebab-item danger"
+                        on:click={() => {
+                          showKebabMenu = false;
+                          deleteFile();
+                        }}
+                      >
+                        <Icon name="trash" size={14} />
+                        {$t('app.delete')}
+                      </button>
                     </div>
                   {/if}
                 </div>
+
+                <button
+                  on:click={downloadFile}
+                  class="btn btn-secondary"
+                  style="padding: 6px 10px;"
+                  title="Скачать файл"
+                  aria-label="Скачать файл"
+                >
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                  </svg>
+                </button>
+              {/if}
+            </span>
+          </div>
+
+          {#if isMihomoAutoEdited}
+            <div class="alert alert-warning" style="margin: 12px 14px 0;" role="status">
+              <span aria-hidden="true">⚠️</span>
+              <div>
+                <strong>{$t('editor.mihomo_autoedit_title')}</strong>
+                <div style="margin-top: 2px;">{$t('editor.mihomo_autoedit_body')}</div>
               </div>
             </div>
           {/if}
-        {/if}
-      </div>
+
+          {#if loading}
+            <div class="loading" style="min-height: 420px; display: grid; place-items: center;">
+              <div class="spinner"></div>
+            </div>
+          {:else if !selectedFile}
+            <div
+              class="empty-state"
+              style="min-height: 420px; display: grid; place-items: center; color: var(--fg-dim);"
+            >
+              <p>{$t('editor.select_file')}</p>
+            </div>
+          {:else}
+            <div class="editor-pane" style="display: block; padding: 0;">
+              <div
+                class="editor-container"
+                bind:this={editorContainer}
+                style="height: 520px;"
+              ></div>
+            </div>
+          {/if}
+
+          <!-- Status Bar -->
+          {#if selectedFile}
+            <div
+              style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:14px;align-items:center;font-family:var(--font-family-mono);font-size:11px;color:var(--fg-dim);"
+            >
+              <span class:status-dirty={isDirty}>
+                <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
+                {isDirty ? $t('editor.unsaved') || 'Изменён' : $t('editor.saved') || 'Сохранён'}
+              </span>
+              <span>schema: {selectedFile.includes('xray') ? 'xray@latest' : 'mihomo@latest'}</span>
+              <span>{cursorLine}:{cursorCol}</span>
+
+              {#if applyLoading || backgroundStatusText}
+                <div class="status-apply-indicator">
+                  <span class="ks-dot-spin">
+                    <span class="ks-dot" style="background-color: var(--accent);"></span>
+                    <span class="ks-dot" style="background-color: var(--accent);"></span>
+                    <span class="ks-dot" style="background-color: var(--accent);"></span>
+                  </span>
+                  <span>{backgroundStatusText}</span>
+                </div>
+              {/if}
+
+              {#if backups.length > 0}
+                <button
+                  class="backups-toggle-btn"
+                  on:click={() => (drawerOpen = !drawerOpen)}
+                  title="История резервных копий"
+                  aria-label="История резервных копий"
+                >
+                  <svg
+                    class="chevron-icon"
+                    class:rotated={drawerOpen}
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                  >
+                    <polyline points="18 15 12 9 6 15"></polyline>
+                  </svg>
+                  {$t('editor.backups') || 'Бэкапы'} ({backups.length})
+                </button>
+              {/if}
+
+              <span style="margin-left:auto;">Ctrl+S — сохранить · Ctrl+Z — отменить</span>
+            </div>
+
+            {#if drawerOpen && backups.length > 0}
+              <div class="editor-bottom-drawer" transition:slide={{ duration: 200 }}>
+                <div class="drawer-layout">
+                  <!-- Список бэкапов слева -->
+                  <div class="drawer-sidebar">
+                    {#each backups as backup}
+                      <div
+                        class="backup-item"
+                        class:active={selectedBackup === backup}
+                        role="button"
+                        tabindex="0"
+                        on:click={() => selectBackup(backup)}
+                        on:keydown={(e) =>
+                          (e.key === 'Enter' || e.key === ' ') &&
+                          (e.preventDefault(), selectBackup(backup))}
+                      >
+                        <span class="backup-time">{formatBackupDate(backup)}</span>
+                        <button
+                          class="btn btn-sm btn-secondary restore-inline-btn"
+                          on:click|stopPropagation={() => restoreBackup(backup)}
+                        >
+                          Восстановить
+                        </button>
+                      </div>
+                    {/each}
+                  </div>
+
+                  <!-- Зона diff-viewer справа -->
+                  <div class="drawer-main">
+                    {#if selectedBackup}
+                      <div class="diff-viewer-container">
+                        <div class="diff-header">
+                          <span>Сравнение с бэкапом от {formatBackupDate(selectedBackup)}</span>
+                        </div>
+                        <div class="diff-body">
+                          {#if backupLoading}
+                            <div style="display:grid;place-items:center;height:100px;">
+                              <div class="spinner"></div>
+                            </div>
+                          {:else}
+                            {#each diffGroups as group}
+                              {#if group.type === 'added'}
+                                {#each group.lines as line}
+                                  <div class="diff-line diff-line-added">+ {line}</div>
+                                {/each}
+                              {:else if group.type === 'removed'}
+                                {#each group.lines as line}
+                                  <div class="diff-line diff-line-removed">- {line}</div>
+                                {/each}
+                              {:else if group.type === 'collapsed'}
+                                <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
+                              {:else}
+                                {#each group.lines as line}
+                                  <div class="diff-line diff-line-unchanged">{line}</div>
+                                {/each}
+                              {/if}
+                            {/each}
+                          {/if}
+                        </div>
+                      </div>
+                    {:else}
+                      <div class="drawer-empty-state">
+                        Выберите резервную копию слева для сравнения изменений
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+            {/if}
+          {/if}
+        </div>
       {/if}
     </div>
   {:else if activeTab === 'generator'}
@@ -2254,7 +2280,11 @@
 
       <div class="template-list">
         {#each templates as template}
-          <button class="template-item" on:click={() => applyTemplate(template)} disabled={templateLoading}>
+          <button
+            class="template-item"
+            on:click={() => applyTemplate(template)}
+            disabled={templateLoading}
+          >
             <div class="template-info">
               <span class="template-name">{template.name}</span>
               <span class="template-desc">{template.description}</span>
@@ -3008,8 +3038,12 @@
   }
 
   @keyframes line-flash {
-    0% { background: var(--accent-dim); }
-    100% { background: transparent; }
+    0% {
+      background: var(--accent-dim);
+    }
+    100% {
+      background: transparent;
+    }
   }
 
   :global(.line-highlight-flash) {
@@ -3124,7 +3158,7 @@
 
   .diff-header {
     padding: 8px 14px;
-    background: rgba(255,255,255,0.01);
+    background: rgba(255, 255, 255, 0.01);
     border-bottom: 1px solid var(--border);
     font-size: 11px;
     color: var(--fg-dim);
@@ -3162,7 +3196,7 @@
   }
 
   .diff-line-collapsed {
-    background: rgba(255,255,255,0.02);
+    background: rgba(255, 255, 255, 0.02);
     color: var(--fg-faint);
     text-align: center;
     font-style: italic;
@@ -3199,7 +3233,7 @@
     opacity: 0.6;
     cursor: not-allowed;
   }
-  
+
   /* Loading dots spinner style */
   .ks-dot-spin {
     display: inline-flex;
@@ -3214,14 +3248,24 @@
     border-radius: 50%;
     animation: ks-dot-bounce 1.4s infinite ease-in-out both;
   }
-  .ks-dot:nth-child(1) { animation-delay: -0.32s; }
-  .ks-dot:nth-child(2) { animation-delay: -0.16s; }
-  
-  @keyframes ks-dot-bounce {
-    0%, 80%, 100% { transform: scale(0); }
-    40% { transform: scale(1); }
+  .ks-dot:nth-child(1) {
+    animation-delay: -0.32s;
   }
-  
+  .ks-dot:nth-child(2) {
+    animation-delay: -0.16s;
+  }
+
+  @keyframes ks-dot-bounce {
+    0%,
+    80%,
+    100% {
+      transform: scale(0);
+    }
+    40% {
+      transform: scale(1);
+    }
+  }
+
   /* Status bar apply loader styles */
   .status-apply-indicator {
     display: flex;

@@ -26,7 +26,10 @@ export function buildPathAtCursor(state: EditorState, pos: number, isYaml: boole
         if (nameNode) {
           let key = state.doc.sliceString(nameNode.from, nameNode.to);
           // Очистка от кавычек
-          if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+          if (
+            (key.startsWith('"') && key.endsWith('"')) ||
+            (key.startsWith("'") && key.endsWith("'"))
+          ) {
             key = key.slice(1, -1);
           }
           segments.unshift({ label: key, pos: nameNode.from });
@@ -59,7 +62,10 @@ export function buildPathAtCursor(state: EditorState, pos: number, isYaml: boole
           if (key.endsWith(':')) {
             key = key.slice(0, -1).trim();
           }
-          if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+          if (
+            (key.startsWith('"') && key.endsWith('"')) ||
+            (key.startsWith("'") && key.endsWith("'"))
+          ) {
             key = key.slice(1, -1);
           }
           segments.unshift({ label: key, pos: keyNode.from });

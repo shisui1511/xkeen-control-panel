@@ -43,7 +43,8 @@ async function setupRestMocks(page: Page) {
         body: JSON.stringify({
           success: true,
           delay: 150,
-          output: 'Proxy: US-01\nTarget URL: https://www.google.com\nDelay: 150 ms\nStatus: Reachable'
+          output:
+            'Proxy: US-01\nTarget URL: https://www.google.com\nDelay: 150 ms\nStatus: Reachable'
         })
       });
     } else if (url.includes('/api/network/port-check')) {

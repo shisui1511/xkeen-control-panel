@@ -12,9 +12,18 @@ const MOCK_PROXIES_RESPONSE = {
       type: 'Selector',
       now: 'proxy-03',
       all: [
-        'proxy-01', 'proxy-02', 'proxy-03', 'proxy-04',
-        'proxy-05', 'proxy-06', 'proxy-07', 'proxy-08',
-        'proxy-09', 'proxy-10', 'proxy-11', 'proxy-12'
+        'proxy-01',
+        'proxy-02',
+        'proxy-03',
+        'proxy-04',
+        'proxy-05',
+        'proxy-06',
+        'proxy-07',
+        'proxy-08',
+        'proxy-09',
+        'proxy-10',
+        'proxy-11',
+        'proxy-12'
       ],
       alive: true,
       history: [{ delay: 120, time: '2024-01-01T00:00:00Z' }]
@@ -130,13 +139,12 @@ const MOCK_PROXIES_RESPONSE = {
 };
 
 test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12', () => {
-
   test.beforeEach(async ({ page }) => {
     // Логируем консоль браузера для отладки
-    page.on('console', msg => {
+    page.on('console', (msg) => {
       console.log(`BROWSER [${msg.type()}]: ${msg.text()}`);
     });
-    page.on('pageerror', err => {
+    page.on('pageerror', (err) => {
       console.log(`BROWSER ERROR: ${err.message}`);
     });
 
@@ -289,9 +297,12 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     await expect(largeGroup.locator('.proxy-row')).toHaveCount(12);
 
     // Получаем computed style первой строки прокси
-    const paddingTop = await largeGroup.locator('.proxy-row').first().evaluate((el: Element) => {
-      return window.getComputedStyle(el).paddingTop;
-    });
+    const paddingTop = await largeGroup
+      .locator('.proxy-row')
+      .first()
+      .evaluate((el: Element) => {
+        return window.getComputedStyle(el).paddingTop;
+      });
 
     expect(paddingTop).toBe('4px');
   });
@@ -314,7 +325,9 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
     // LargeGroup должна остаться видимой, SmallGroup — скрыться
     await expect(largeCard).toBeVisible();
-    const smallDisplay = await smallCard.evaluate((el: Element) => window.getComputedStyle(el).display);
+    const smallDisplay = await smallCard.evaluate(
+      (el: Element) => window.getComputedStyle(el).display
+    );
     expect(smallDisplay).toBe('none');
 
     // Очищаем поле поиска — обе группы снова видны
@@ -322,5 +335,4 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     await expect(largeCard).toBeVisible();
     await expect(smallCard).toBeVisible();
   });
-
 });

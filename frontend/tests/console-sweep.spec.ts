@@ -309,7 +309,10 @@ test.describe('Mihomo mode — console sweep (16 pages)', () => {
     const { errors, warnings } = attachConsoleCollectors(page);
     await visitPage(page, '/');
     if (warnings.length > 0) {
-      console.log('[console-sweep] mihomo:login warnings:', warnings.map((w) => w.text).join(' | '));
+      console.log(
+        '[console-sweep] mihomo:login warnings:',
+        warnings.map((w) => w.text).join(' | ')
+      );
     }
     expect(errors, `console errors on mihomo:login: ${JSON.stringify(errors)}`).toHaveLength(0);
   });
@@ -319,7 +322,10 @@ test.describe('Mihomo mode — console sweep (16 pages)', () => {
     const { errors, warnings } = attachConsoleCollectors(page);
     await visitPage(page, '/');
     if (warnings.length > 0) {
-      console.log('[console-sweep] mihomo:setup warnings:', warnings.map((w) => w.text).join(' | '));
+      console.log(
+        '[console-sweep] mihomo:setup warnings:',
+        warnings.map((w) => w.text).join(' | ')
+      );
     }
     expect(errors, `console errors on mihomo:setup: ${JSON.stringify(errors)}`).toHaveLength(0);
   });
@@ -360,10 +366,9 @@ test.describe('Mihomo mode — console sweep (16 pages)', () => {
         warnings.map((w) => w.text).join(' | ')
       );
     }
-    expect(
-      errors,
-      `console errors on mihomo:connections: ${JSON.stringify(errors)}`
-    ).toHaveLength(0);
+    expect(errors, `console errors on mihomo:connections: ${JSON.stringify(errors)}`).toHaveLength(
+      0
+    );
   });
 
   test('mihomo:proxies has no console errors', async ({ page }) => {
@@ -441,10 +446,7 @@ test.describe('Mihomo mode — console sweep (16 pages)', () => {
     const { errors, warnings } = attachConsoleCollectors(page);
     await visitPage(page, '/#/logs');
     if (warnings.length > 0) {
-      console.log(
-        '[console-sweep] mihomo:logs warnings:',
-        warnings.map((w) => w.text).join(' | ')
-      );
+      console.log('[console-sweep] mihomo:logs warnings:', warnings.map((w) => w.text).join(' | '));
     }
     expect(errors, `console errors on mihomo:logs: ${JSON.stringify(errors)}`).toHaveLength(0);
   });
@@ -467,10 +469,7 @@ test.describe('Mihomo mode — console sweep (16 pages)', () => {
     const { errors, warnings } = attachConsoleCollectors(page);
     await visitPage(page, '/#/dat');
     if (warnings.length > 0) {
-      console.log(
-        '[console-sweep] mihomo:dat warnings:',
-        warnings.map((w) => w.text).join(' | ')
-      );
+      console.log('[console-sweep] mihomo:dat warnings:', warnings.map((w) => w.text).join(' | '));
     }
     expect(errors, `console errors on mihomo:dat: ${JSON.stringify(errors)}`).toHaveLength(0);
   });
@@ -556,10 +555,7 @@ test.describe('Xray mode — console sweep (8 pages)', () => {
     const { errors, warnings } = attachConsoleCollectors(page);
     await visitPage(page, '/#/logs');
     if (warnings.length > 0) {
-      console.log(
-        '[console-sweep] xray:logs warnings:',
-        warnings.map((w) => w.text).join(' | ')
-      );
+      console.log('[console-sweep] xray:logs warnings:', warnings.map((w) => w.text).join(' | '));
     }
     expect(errors, `console errors on xray:logs: ${JSON.stringify(errors)}`).toHaveLength(0);
   });
@@ -569,10 +565,7 @@ test.describe('Xray mode — console sweep (8 pages)', () => {
     const { errors, warnings } = attachConsoleCollectors(page);
     await visitPage(page, '/#/editor');
     if (warnings.length > 0) {
-      console.log(
-        '[console-sweep] xray:editor warnings:',
-        warnings.map((w) => w.text).join(' | ')
-      );
+      console.log('[console-sweep] xray:editor warnings:', warnings.map((w) => w.text).join(' | '));
     }
     expect(errors, `console errors on xray:editor: ${JSON.stringify(errors)}`).toHaveLength(0);
   });
@@ -582,10 +575,7 @@ test.describe('Xray mode — console sweep (8 pages)', () => {
     const { errors, warnings } = attachConsoleCollectors(page);
     await visitPage(page, '/#/dat');
     if (warnings.length > 0) {
-      console.log(
-        '[console-sweep] xray:dat warnings:',
-        warnings.map((w) => w.text).join(' | ')
-      );
+      console.log('[console-sweep] xray:dat warnings:', warnings.map((w) => w.text).join(' | '));
     }
     expect(errors, `console errors on xray:dat: ${JSON.stringify(errors)}`).toHaveLength(0);
   });
@@ -613,10 +603,9 @@ test.describe('Xray mode — console sweep (8 pages)', () => {
         warnings.map((w) => w.text).join(' | ')
       );
     }
-    expect(
-      errors,
-      `console errors on xray:subscriptions: ${JSON.stringify(errors)}`
-    ).toHaveLength(0);
+    expect(errors, `console errors on xray:subscriptions: ${JSON.stringify(errors)}`).toHaveLength(
+      0
+    );
   });
 
   test('xray:settings has no console errors', async ({ page }) => {

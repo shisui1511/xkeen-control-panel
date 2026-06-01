@@ -36,10 +36,10 @@ proxies:
     statusChecksCount = 0;
 
     // Включаем логирование консоли браузера для отладки
-    page.on('console', msg => {
+    page.on('console', (msg) => {
       console.log(`BROWSER CONSOLE [${msg.type()}]: ${msg.text()}`);
     });
-    page.on('pageerror', err => {
+    page.on('pageerror', (err) => {
       console.log(`BROWSER PAGE ERROR: ${err.message}\nStack: ${err.stack}`);
     });
 
@@ -290,7 +290,7 @@ proxies:
     // Проверяем, что отображается Diff-Viewer
     const diffContainer = page.locator('.diff-viewer-container');
     await expect(diffContainer).toBeVisible();
-    
+
     // Должны быть удаленные и добавленные строки с подсветкой
     await expect(page.locator('.diff-line-removed').first()).toBeVisible();
     await expect(page.locator('.diff-line-added').first()).toBeVisible();

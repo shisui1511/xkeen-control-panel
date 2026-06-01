@@ -160,7 +160,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.configs': 'Конфиги',
     'editor.backups': 'Backups',
     'editor.select_file': 'Выберите файл для редактирования',
-    'editor.empty_state_body': 'Откройте конфигурационный файл из боковой панели слева, чтобы начать редактирование или просмотр бэкапов.',
+    'editor.empty_state_body':
+      'Откройте конфигурационный файл из боковой панели слева, чтобы начать редактирование или просмотр бэкапов.',
     'editor.file_saved': 'Файл сохранён',
     'editor.backup_restored': 'Backup восстановлен (не забудьте сохранить)',
     'editor.restore_confirm': 'Восстановить backup? Не забудьте сохранить после восстановления.',
@@ -434,19 +435,22 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.preset_fill': 'Заполнить все',
     'smartproxy.preset_clear': 'Очистить все',
     'smartproxy.preset_workdays': 'Будни 9-18',
-    'smartproxy.preset_workday_desc': 'VPN активен в рабочие часы с понедельника по пятницу (09:00 - 18:00)',
+    'smartproxy.preset_workday_desc':
+      'VPN активен в рабочие часы с понедельника по пятницу (09:00 - 18:00)',
     'smartproxy.step_1': 'Шаг 1: Режим',
     'smartproxy.step_2': 'Шаг 2: Выбор целей',
     'smartproxy.step_3': 'Шаг 3: Настройка',
     'smartproxy.no_profiles_title': 'Нет профилей умного прокси',
-    'smartproxy.no_profiles_desc': 'Создайте свой первый профиль по расписанию, чтобы автоматически переключать прокси в зависимости от времени суток.',
+    'smartproxy.no_profiles_desc':
+      'Создайте свой первый профиль по расписанию, чтобы автоматически переключать прокси в зависимости от времени суток.',
     'smartproxy.preset_night_title': 'Ночной VPN',
     'smartproxy.preset_night_desc': 'VPN-прокси активен только ночью с 23:00 до 07:00',
     'smartproxy.save_error': 'Ошибка сохранения: {message}',
     'smartproxy.from_template': 'Из шаблона',
     'smartproxy.select': 'Выбрать',
     'smartproxy.preset_always_title': 'Круглосуточный VPN',
-    'smartproxy.preset_always_desc': 'VPN-прокси работает непрерывно 24 часа в сутки, 7 дней в неделю',
+    'smartproxy.preset_always_desc':
+      'VPN-прокси работает непрерывно 24 часа в сутки, 7 дней в неделю',
     'smartproxy.create_manually': 'Создать вручную',
     'smartproxy.disabled': 'ВЫКЛ',
     'smartproxy.target_group': 'Целевая группа',
@@ -457,8 +461,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.profile_active': 'Профиль активен',
     'smartproxy.select_group': 'Выбрать группу',
     'smartproxy.select_proxy': 'Выбрать прокси',
-    'smartproxy.grid_paint_hint': 'Зажмите мышь и ведите (Click-and-Drag), чтобы быстро рисовать или стирать интервалы.',
-    'smartproxy.schedule_mode_hint': 'Режим расписания переключает прокси на основе заданной недельной сетки.',
+    'smartproxy.grid_paint_hint':
+      'Зажмите мышь и ведите (Click-and-Drag), чтобы быстро рисовать или стирать интервалы.',
+    'smartproxy.schedule_mode_hint':
+      'Режим расписания переключает прокси на основе заданной недельной сетки.',
     'smartproxy.fill_required': 'Заполните обязательные поля',
 
     // Traffic Quotas
@@ -562,7 +568,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'traffic.peak_day': 'За день',
     'traffic.peak_week': 'За неделю',
     'traffic.reset_stats': 'Сбросить статистику',
-    'traffic.reset_confirm': 'Сброс статистики: Вы уверены, что хотите сбросить статистику и все пиковые показатели трафика? Это действие необратимо.',
+    'traffic.reset_confirm':
+      'Сброс статистики: Вы уверены, что хотите сбросить статистику и все пиковые показатели трафика? Это действие необратимо.',
     'traffic.session': 'сессии',
     'traffic.active_connections': 'Активные соединения',
     'traffic.per_min': 'мин',
@@ -1091,7 +1098,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.configs': 'Configs',
     'editor.backups': 'Backups',
     'editor.select_file': 'Select a file to edit',
-    'editor.empty_state_body': 'Open a configuration file from the left sidebar to start editing or viewing backups.',
+    'editor.empty_state_body':
+      'Open a configuration file from the left sidebar to start editing or viewing backups.',
     'editor.file_saved': 'File saved',
     'editor.backup_restored': "Backup restored (don't forget to save)",
     'editor.restore_confirm': 'Restore backup? Remember to save after restoring.',
@@ -1366,7 +1374,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.step_2': 'Step 2: Target Select',
     'smartproxy.step_3': 'Step 3: Setup',
     'smartproxy.no_profiles_title': 'No Smart Proxy profiles',
-    'smartproxy.no_profiles_desc': 'Create your first scheduled profile to automatically switch proxies based on the time of day.',
+    'smartproxy.no_profiles_desc':
+      'Create your first scheduled profile to automatically switch proxies based on the time of day.',
     'smartproxy.preset_night_title': 'Night VPN',
     'smartproxy.preset_night_desc': 'VPN proxy active only at night from 23:00 to 07:00',
     'smartproxy.save_error': 'Save error: {message}',
@@ -1385,7 +1394,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'smartproxy.select_group': 'Select Group',
     'smartproxy.select_proxy': 'Select Proxy',
     'smartproxy.grid_paint_hint': 'Click and drag to easily paint or erase time intervals.',
-    'smartproxy.schedule_mode_hint': 'Schedule mode switches proxies based on the weekly grid setup.',
+    'smartproxy.schedule_mode_hint':
+      'Schedule mode switches proxies based on the weekly grid setup.',
     'smartproxy.fill_required': 'Fill required fields',
 
     // Traffic Quotas
@@ -1489,7 +1499,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'traffic.peak_day': 'Day',
     'traffic.peak_week': 'Week',
     'traffic.reset_stats': 'Reset Stats',
-    'traffic.reset_confirm': 'Reset statistics: Are you sure you want to reset statistics and all peak traffic values? This action is irreversible.',
+    'traffic.reset_confirm':
+      'Reset statistics: Are you sure you want to reset statistics and all peak traffic values? This action is irreversible.',
     'traffic.session': 'session',
     'traffic.active_connections': 'Active Connections',
     'traffic.per_min': 'min',

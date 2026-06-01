@@ -576,9 +576,13 @@
                 <td>
                   {#if percent(q) >= 100}
                     {#if q.action === 'block'}
-                      <span class="badge badge-error">{$t('trafficquotas.badge_status_blocked')}</span>
+                      <span class="badge badge-error"
+                        >{$t('trafficquotas.badge_status_blocked')}</span
+                      >
                     {:else if q.action === 'redirect_direct'}
-                      <span class="badge badge-redirected">{$t('trafficquotas.badge_status_redirected')}</span>
+                      <span class="badge badge-redirected"
+                        >{$t('trafficquotas.badge_status_redirected')}</span
+                      >
                     {:else}
                       <span class="badge badge-error">{$t('trafficquotas.status_exceeded')}</span>
                     {/if}
@@ -775,7 +779,11 @@
           <label for="form-action" class="form-label">{$t('trafficquotas.action')}</label>
           <select id="form-action" class="input" bind:value={formAction}>
             <option value="notify">{$t('trafficquotas.action_notify')}</option>
-            <option value="throttle" disabled>{$t('trafficquotas.action_throttle')} ({$t('trafficquotas.action_unsupported')})</option>
+            <option value="throttle" disabled
+              >{$t('trafficquotas.action_throttle')} ({$t(
+                'trafficquotas.action_unsupported'
+              )})</option
+            >
             <option value="log_only">{$t('trafficquotas.action_log_only')}</option>
             <option value="block">{$t('trafficquotas.action_block')}</option>
             <option value="redirect_direct">{$t('trafficquotas.action_redirect_direct')}</option>
@@ -1241,7 +1249,8 @@
     animation: toggle-pulse 1.2s infinite ease-in-out;
   }
   @keyframes toggle-pulse {
-    0%, 100% {
+    0%,
+    100% {
       background-color: rgba(255, 255, 255, 0.1);
     }
     50% {

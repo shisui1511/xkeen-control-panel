@@ -71,9 +71,7 @@
   $: filteredGroups =
     filterQuery.trim() === ''
       ? groups
-      : groups.filter((g) =>
-          g.name.toLowerCase().includes(filterQuery.trim().toLowerCase())
-        );
+      : groups.filter((g) => g.name.toLowerCase().includes(filterQuery.trim().toLowerCase()));
 
   function getLastDelay(proxy: Proxy): number | undefined {
     if (proxy.history && proxy.history.length > 0) {

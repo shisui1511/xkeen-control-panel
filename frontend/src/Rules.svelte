@@ -93,7 +93,7 @@
     updatingAll = true;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      const beforeTimestamps = new Map(ruleProviders.map(p => [p.name, p.updatedAt]));
+      const beforeTimestamps = new Map(ruleProviders.map((p) => [p.name, p.updatedAt]));
       for (const provider of ruleProviders) {
         await fetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(provider.name)}`, {
           method: 'PUT',
@@ -102,7 +102,7 @@
       }
       await fetchRuleProviders();
       // Mihomo's PUT is async — determine success by comparing actual updatedAt timestamps
-      const failed = ruleProviders.filter(p => p.updatedAt === beforeTimestamps.get(p.name));
+      const failed = ruleProviders.filter((p) => p.updatedAt === beforeTimestamps.get(p.name));
       if (failed.length === 0) {
         showToast('success', $t('rules.update_all_success'));
       } else {
@@ -182,7 +182,9 @@
   let mihomoLaunching = false;
   let _launchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  onDestroy(() => { if (_launchTimer) clearTimeout(_launchTimer); });
+  onDestroy(() => {
+    if (_launchTimer) clearTimeout(_launchTimer);
+  });
 
   async function launchMihomo() {
     mihomoLaunching = true;
@@ -266,8 +268,8 @@
     if (proxyFilter && rule.proxy !== proxyFilter) return false;
     return true;
   });
-  $: nonMatchRules = filteredRules.filter(r => r.type.toUpperCase() !== 'MATCH');
-  $: matchRules = filteredRules.filter(r => r.type.toUpperCase() === 'MATCH');
+  $: nonMatchRules = filteredRules.filter((r) => r.type.toUpperCase() !== 'MATCH');
+  $: matchRules = filteredRules.filter((r) => r.type.toUpperCase() === 'MATCH');
 
   let _didFetchProviders = false;
   $: if ($capabilities?.mihomo.reachable && !_didFetchProviders) {
@@ -293,20 +295,26 @@
         {$t('nav.rules')}
       </div>
       <h1>{$t('rules.title')}</h1>
-      <p class="sub">{activeTab === 'rules' ? $t('rules.subtitle') : $t('rules.providers_subtitle')}</p>
+      <p class="sub">
+        {activeTab === 'rules' ? $t('rules.subtitle') : $t('rules.providers_subtitle')}
+      </p>
     </div>
     <div class="ph-actions">
       {#if activeTab === 'providers' && ruleProviders.length > 0}
-        <button
-          class="btn btn-primary"
-          on:click={updateAllProviders}
-          disabled={updatingAll}
-        >
+        <button class="btn btn-primary" on:click={updateAllProviders} disabled={updatingAll}>
           {#if updatingAll}
             <span class="spinner-sm"></span>
             {$t('rules.updating')}
           {:else}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+            >
             {$t('rules.update_all')}
           {/if}
         </button>
@@ -318,13 +326,13 @@
     <button
       class="tab-btn"
       class:active={activeTab === 'rules'}
-      on:click={() => (activeTab = 'rules')}
-    >{$t('rules.tab_rules')}</button>
+      on:click={() => (activeTab = 'rules')}>{$t('rules.tab_rules')}</button
+    >
     <button
       class="tab-btn"
       class:active={activeTab === 'providers'}
-      on:click={() => (activeTab = 'providers')}
-    >{$t('rules.tab_providers')}</button>
+      on:click={() => (activeTab = 'providers')}>{$t('rules.tab_providers')}</button
+    >
   </div>
 
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
@@ -340,105 +348,73 @@
     />
   {:else if activeTab === 'rules'}
     {#if error}
-    <EmptyState
-      title={$t('ds.empty.error_title')}
-      description={error}
-      icon={WarningIcon}
-      ctaText={$t('app.refresh')}
-      oncta={fetchRules}
-    />
+      <EmptyState
+        title={$t('ds.empty.error_title')}
+        description={error}
+        icon={WarningIcon}
+        ctaText={$t('app.refresh')}
+        oncta={fetchRules}
+      />
     {:else}
-    <div class="toolbar mb-2">
-      <div class="filters">
-        <input
-          type="text"
-          placeholder={$t('rules.search')}
-          bind:value={searchQuery}
-          class="filter-input"
-          style="flex: 1;"
-        />
-        <select bind:value={typeFilter} class="source-select">
-          <option value="">{$t('rules.all_types')}</option>
-          {#each getUniqueTypes() as type}
-            <option value={type}>{type}</option>
-          {/each}
-        </select>
-        <select bind:value={proxyFilter} class="source-select">
-          <option value="">{$t('rules.all_targets')}</option>
-          {#each getUniqueProxies() as proxy}
-            <option value={proxy}>{proxy}</option>
-          {/each}
-        </select>
+      <div class="toolbar mb-2">
+        <div class="filters">
+          <input
+            type="text"
+            placeholder={$t('rules.search')}
+            bind:value={searchQuery}
+            class="filter-input"
+            style="flex: 1;"
+          />
+          <select bind:value={typeFilter} class="source-select">
+            <option value="">{$t('rules.all_types')}</option>
+            {#each getUniqueTypes() as type}
+              <option value={type}>{type}</option>
+            {/each}
+          </select>
+          <select bind:value={proxyFilter} class="source-select">
+            <option value="">{$t('rules.all_targets')}</option>
+            {#each getUniqueProxies() as proxy}
+              <option value={proxy}>{proxy}</option>
+            {/each}
+          </select>
+        </div>
       </div>
-    </div>
 
-    <div class="stats mb-2">
-      <span class="stat"><b>{rules.length}</b> {$currentLang === 'ru' ? 'всего' : 'total'}</span>
-      <span class="stat"
-        ><b>{filteredRules.length}</b> {$currentLang === 'ru' ? 'показано' : 'shown'}</span
-      >
-    </div>
+      <div class="stats mb-2">
+        <span class="stat"><b>{rules.length}</b> {$currentLang === 'ru' ? 'всего' : 'total'}</span>
+        <span class="stat"
+          ><b>{filteredRules.length}</b> {$currentLang === 'ru' ? 'показано' : 'shown'}</span
+        >
+      </div>
 
-    <div class="table-container">
-      <table>
-        <thead>
-          <tr>
-            <th class="col-num" style="width:60px;">#</th>
-            <th>{$t('rules.type_col')}</th>
-            <th>Payload</th>
-            <th>{$t('rules.target')}</th>
-            <th style="width:50px;"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each nonMatchRules as rule, i}
+      <div class="table-container">
+        <table>
+          <thead>
             <tr>
-              <td class="mono col-num" style="color:var(--fg-dim);"
-                >{String(i + 1).padStart(3, '0')}</td
-              >
-              <td>
-                <span class={getRuleBadgeClass(rule.type)}>
-                  {rule.type}
-                </span>
-              </td>
-              <td class="mono">{rule.payload}</td>
-              <td>
-                <span class={getTargetBadgeClass(rule.proxy)}>
-                  {rule.proxy}
-                </span>
-              </td>
-              <td style="position: relative; text-align: right;">
-                <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
-                {#if activeDropdownRule === rule}
-                  <div class="dropdown-menu">
-                    <button on:click={() => copyPayload(rule)}>
-                      {$t('rules.copy_payload')}
-                    </button>
-                    <button on:click={() => copyFullRule(rule)}>
-                      {$t('rules.copy_rule')}
-                    </button>
-                  </div>
-                {/if}
-              </td>
+              <th class="col-num" style="width:60px;">#</th>
+              <th>{$t('rules.type_col')}</th>
+              <th>Payload</th>
+              <th>{$t('rules.target')}</th>
+              <th style="width:50px;"></th>
             </tr>
-          {:else}
-            <tr>
-              <td
-                colspan="5"
-                class="empty-cell"
-                style="text-align: center; padding: 2rem; color: var(--fg-dim);"
-              >
-                {$t('rules.no_rules')}
-              </td>
-            </tr>
-          {/each}
-          {#if matchRules.length > 0}
-            {#each matchRules as rule}
-              <tr class="match-fallback-row">
-                <td class="mono col-num" style="color:var(--fg-dim);">—</td>
-                <td><span class={getRuleBadgeClass(rule.type)}>{rule.type}</span></td>
-                <td class="mono" style="color:var(--fg-dim);">{$t('rules.match_fallback')}</td>
-                <td><span class={getTargetBadgeClass(rule.proxy)}>{rule.proxy}</span></td>
+          </thead>
+          <tbody>
+            {#each nonMatchRules as rule, i}
+              <tr>
+                <td class="mono col-num" style="color:var(--fg-dim);"
+                  >{String(i + 1).padStart(3, '0')}</td
+                >
+                <td>
+                  <span class={getRuleBadgeClass(rule.type)}>
+                    {rule.type}
+                  </span>
+                </td>
+                <td class="mono">{rule.payload}</td>
+                <td>
+                  <span class={getTargetBadgeClass(rule.proxy)}>
+                    {rule.proxy}
+                  </span>
+                </td>
                 <td style="position: relative; text-align: right;">
                   <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
                   {#if activeDropdownRule === rule}
@@ -453,11 +429,43 @@
                   {/if}
                 </td>
               </tr>
+            {:else}
+              <tr>
+                <td
+                  colspan="5"
+                  class="empty-cell"
+                  style="text-align: center; padding: 2rem; color: var(--fg-dim);"
+                >
+                  {$t('rules.no_rules')}
+                </td>
+              </tr>
             {/each}
-          {/if}
-        </tbody>
-      </table>
-    </div>
+            {#if matchRules.length > 0}
+              {#each matchRules as rule}
+                <tr class="match-fallback-row">
+                  <td class="mono col-num" style="color:var(--fg-dim);">—</td>
+                  <td><span class={getRuleBadgeClass(rule.type)}>{rule.type}</span></td>
+                  <td class="mono" style="color:var(--fg-dim);">{$t('rules.match_fallback')}</td>
+                  <td><span class={getTargetBadgeClass(rule.proxy)}>{rule.proxy}</span></td>
+                  <td style="position: relative; text-align: right;">
+                    <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
+                    {#if activeDropdownRule === rule}
+                      <div class="dropdown-menu">
+                        <button on:click={() => copyPayload(rule)}>
+                          {$t('rules.copy_payload')}
+                        </button>
+                        <button on:click={() => copyFullRule(rule)}>
+                          {$t('rules.copy_rule')}
+                        </button>
+                      </div>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            {/if}
+          </tbody>
+        </table>
+      </div>
     {/if}
   {:else}
     {#if loadingProviders}
@@ -466,14 +474,26 @@
       </div>
     {:else if ruleProviders.length === 0}
       <div class="empty-providers">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity: 0.4; margin-bottom: 12px;">
+        <svg
+          width="40"
+          height="40"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          style="opacity: 0.4; margin-bottom: 12px;"
+        >
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
           <polyline points="14 2 14 8 20 8" />
           <line x1="16" y1="13" x2="8" y2="13" />
           <line x1="16" y1="17" x2="8" y2="17" />
           <polyline points="10 9 9 9 8 9" />
         </svg>
-        <p style="font-size: 14px; font-weight: 500; color: var(--fg-secondary); margin-bottom: 4px;">{$t('rules.no_providers')}</p>
+        <p
+          style="font-size: 14px; font-weight: 500; color: var(--fg-secondary); margin-bottom: 4px;"
+        >
+          {$t('rules.no_providers')}
+        </p>
       </div>
     {:else}
       <div class="providers-list">
@@ -486,7 +506,9 @@
                 {#if provider.behavior}
                   <span class="provider-badge">{provider.behavior}</span>
                 {/if}
-                <span class="provider-count">{provider.ruleCount} {$t('rules.provider_rules_count')}</span>
+                <span class="provider-count"
+                  >{provider.ruleCount} {$t('rules.provider_rules_count')}</span
+                >
               </div>
             </div>
             <div class="provider-actions">
@@ -501,7 +523,16 @@
                 {#if updatingProvider === provider.name}
                   <span class="spinner-sm"></span>
                 {:else}
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg>
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    style="margin-right: 4px;"
+                    ><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+                  >
                 {/if}
                 {$t('rules.update')}
               </button>
@@ -667,7 +698,9 @@
     padding: 6px 14px;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast);
   }
 
   .tab-btn:hover {
@@ -774,7 +807,9 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .empty-providers {

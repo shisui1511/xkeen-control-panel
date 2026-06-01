@@ -50,7 +50,10 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
             }
           })
         });
-      } else if (url.includes('/api/smart-proxy/profiles/add') || url.includes('/api/smart-proxy/profiles/update')) {
+      } else if (
+        url.includes('/api/smart-proxy/profiles/add') ||
+        url.includes('/api/smart-proxy/profiles/update')
+      ) {
         lastSavePayload = route.request().postDataJSON();
         const newProfile = {
           id: 'profile_' + Date.now(),
@@ -141,7 +144,11 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
     const proxySelect = page.locator('#sp-proxy');
 
     await expect(groupSelect.locator('option')).toContainText(['PROXY-GROUP-1']);
-    await expect(proxySelect.locator('option')).toContainText(['DIRECT', 'proxy-node-1', 'proxy-node-2']);
+    await expect(proxySelect.locator('option')).toContainText([
+      'DIRECT',
+      'proxy-node-1',
+      'proxy-node-2'
+    ]);
 
     // Select target options
     await groupSelect.selectOption('PROXY-GROUP-1');
@@ -175,7 +182,7 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
     expect(lastSavePayload.name).toBe('Manual Profile');
     expect(lastSavePayload.group_name).toBe('PROXY-GROUP-1');
     expect(lastSavePayload.proxy_name).toBe('proxy-node-1');
-    expect(lastSavePayload.schedule[1][9]).toBe(true);  // Monday 9:00 active
+    expect(lastSavePayload.schedule[1][9]).toBe(true); // Monday 9:00 active
     expect(lastSavePayload.schedule[0][0]).toBe(false); // Sunday 0:00 inactive
   });
 

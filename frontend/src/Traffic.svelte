@@ -66,7 +66,7 @@
     return now.count - minuteAgo.count;
   })();
 
-  $: connPeakHour = connHistory.reduce((max, h) => h.count > max ? h.count : max, 0);
+  $: connPeakHour = connHistory.reduce((max, h) => (h.count > max ? h.count : max), 0);
 
   function formatSpeed(bytesPerSecond: number): string {
     if (bytesPerSecond === 0) return '0 B/s';
@@ -344,11 +344,18 @@
         <div class="stat-label">{$t('traffic.upload')}</div>
         <div class="stat-value upload-color">{formatSpeed(totalUp)}</div>
         <div class="stat-session">
-          Σ {$t('traffic.session')} {formatBytes(sessionUp)}
+          Σ {$t('traffic.session')}
+          {formatBytes(sessionUp)}
         </div>
       </div>
       {#if trafficData.length >= 2}
-        <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none" role="img" aria-label={$t('traffic.upload_sparkline')}>
+        <svg
+          class="sparkline"
+          viewBox="0 0 200 42"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={$t('traffic.upload_sparkline')}
+        >
           <defs>
             <linearGradient id="sg-upload" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="var(--success)" stop-opacity="0.4" />
@@ -367,11 +374,18 @@
         <div class="stat-label">{$t('traffic.download')}</div>
         <div class="stat-value download-color">{formatSpeed(totalDown)}</div>
         <div class="stat-session">
-          Σ {$t('traffic.session')} {formatBytes(sessionDown)}
+          Σ {$t('traffic.session')}
+          {formatBytes(sessionDown)}
         </div>
       </div>
       {#if trafficData.length >= 2}
-        <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none" role="img" aria-label={$t('traffic.download_sparkline')}>
+        <svg
+          class="sparkline"
+          viewBox="0 0 200 42"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={$t('traffic.download_sparkline')}
+        >
           <defs>
             <linearGradient id="sg-download" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4" />
@@ -399,7 +413,8 @@
             {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$t('traffic.per_min')}
           </span>
         {/if}
-        · {$t('traffic.peak')} {connPeakHour}
+        · {$t('traffic.peak')}
+        {connPeakHour}
       </div>
     </div>
   </div>
@@ -433,7 +448,13 @@
           <span class="y-label">0 B/s</span>
         </div>
         <div class="chart-svg-container">
-          <svg viewBox="0 0 1000 240" preserveAspectRatio="none" style="width: 100%; height: 100%;" role="img" aria-label={$t('traffic.main_chart')}>
+          <svg
+            viewBox="0 0 1000 240"
+            preserveAspectRatio="none"
+            style="width: 100%; height: 100%;"
+            role="img"
+            aria-label={$t('traffic.main_chart')}
+          >
             <defs>
               <linearGradient id="cg-download-main" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25" />
@@ -496,7 +517,9 @@
 
   <!-- Peak Load Card -->
   <div class="card" style="margin-top: 16px; padding: 24px;">
-    <div style="font-size: 11px; font-weight: 700; color: var(--fg-primary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.1em;">
+    <div
+      style="font-size: 11px; font-weight: 700; color: var(--fg-primary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.1em;"
+    >
       {$t('traffic.peak_load')}
     </div>
     <div style="font-size: 11px; color: var(--fg-dim); margin-bottom: 16px;">
@@ -506,9 +529,18 @@
       <table class="connections-table" style="min-width: 100%; border-collapse: collapse;">
         <thead>
           <tr style="border-bottom: 1px solid var(--border); text-align: left;">
-            <th style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_hour')}</th>
-            <th style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_day')}</th>
-            <th style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;">{$t('traffic.peak_week')}</th>
+            <th
+              style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;"
+              >{$t('traffic.peak_hour')}</th
+            >
+            <th
+              style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;"
+              >{$t('traffic.peak_day')}</th
+            >
+            <th
+              style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;"
+              >{$t('traffic.peak_week')}</th
+            >
           </tr>
         </thead>
         <tbody>
@@ -549,7 +581,8 @@
   }
 
   .stat-card-spark,
-  .stat-card-normal { /* hot-fix */
+  .stat-card-normal {
+    /* hot-fix */
     padding: 20px 24px;
     position: relative;
     height: 130px;
@@ -560,7 +593,8 @@
     box-sizing: border-box;
   }
 
-  .stat-card-content { /* hot-fix */
+  .stat-card-content {
+    /* hot-fix */
     padding: 0;
     z-index: 2;
   }
@@ -593,7 +627,8 @@
     color: var(--fg-primary);
   }
 
-  .stat-session { /* hot-fix */
+  .stat-session {
+    /* hot-fix */
     font-size: 11px;
     color: var(--fg-secondary);
     margin-top: 2px;

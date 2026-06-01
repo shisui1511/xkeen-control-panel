@@ -89,7 +89,12 @@
         const proxies: string[] = [];
         for (const [name, p] of Object.entries(data.proxies || {})) {
           const type = (p as any).type;
-          if (type === 'Selector' || type === 'Fallback' || type === 'URLTest' || type === 'LoadBalance') {
+          if (
+            type === 'Selector' ||
+            type === 'Fallback' ||
+            type === 'URLTest' ||
+            type === 'LoadBalance'
+          ) {
             groups.push(name);
           } else if (type !== 'Direct' && type !== 'Reject') {
             proxies.push(name);
@@ -130,7 +135,7 @@
 
     // Load or convert schedule
     if (p.schedule && p.schedule.length === 7) {
-      formSchedule = p.schedule.map(row => [...row]);
+      formSchedule = p.schedule.map((row) => [...row]);
     } else {
       formSchedule = Array.from({ length: 7 }, () => Array(24).fill(false));
       if (p.days_of_week && p.start_time && p.end_time) {
@@ -151,11 +156,12 @@
 
   function createFromTemplate(templateName: string) {
     startCreate();
-    formName = templateName === 'night'
-      ? $t('smartproxy.preset_night_title')
-      : templateName === 'workday'
-        ? $t('smartproxy.preset_workdays')
-        : $t('smartproxy.preset_always_title');
+    formName =
+      templateName === 'night'
+        ? $t('smartproxy.preset_night_title')
+        : templateName === 'workday'
+          ? $t('smartproxy.preset_workdays')
+          : $t('smartproxy.preset_always_title');
 
     formSchedule = Array.from({ length: 7 }, () => Array(24).fill(false));
 
@@ -436,10 +442,22 @@
 
       <div class="template-cards-grid">
         <!-- Card 1: Night VPN -->
-        <div class="card template-card" on:click={() => createFromTemplate('night')} role="button" tabindex="0">
+        <div
+          class="card template-card"
+          on:click={() => createFromTemplate('night')}
+          role="button"
+          tabindex="0"
+        >
           <div class="template-icon text-accent">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
             </svg>
           </div>
           <h3>{$t('smartproxy.preset_night_title')}</h3>
@@ -450,13 +468,25 @@
         </div>
 
         <!-- Card 2: Workdays -->
-        <div class="card template-card" on:click={() => createFromTemplate('workday')} role="button" tabindex="0">
+        <div
+          class="card template-card"
+          on:click={() => createFromTemplate('workday')}
+          role="button"
+          tabindex="0"
+        >
           <div class="template-icon text-success">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-              <line x1="16" y1="2" x2="16" y2="6"/>
-              <line x1="8" y1="2" x2="8" y2="6"/>
-              <line x1="3" y1="10" x2="21" y2="10"/>
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
             </svg>
           </div>
           <h3>{$t('smartproxy.preset_workdays')}</h3>
@@ -467,11 +497,23 @@
         </div>
 
         <!-- Card 3: 24/7 -->
-        <div class="card template-card" on:click={() => createFromTemplate('always')} role="button" tabindex="0">
+        <div
+          class="card template-card"
+          on:click={() => createFromTemplate('always')}
+          role="button"
+          tabindex="0"
+        >
           <div class="template-icon text-warning">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
             </svg>
           </div>
           <h3>{$t('smartproxy.preset_always_title')}</h3>
@@ -752,7 +794,11 @@
         {/if}
         <button class="btn btn-secondary" on:click={cancelEdit}>{$t('app.cancel')}</button>
         {#if currentStep < 3}
-          <button class="btn btn-primary" on:click={nextStep} disabled={currentStep === 2 && (!formGroupName || !formProxyName)}>
+          <button
+            class="btn btn-primary"
+            on:click={nextStep}
+            disabled={currentStep === 2 && (!formGroupName || !formProxyName)}
+          >
             {$t('app.continue')}
           </button>
         {:else}
@@ -1034,7 +1080,8 @@
     min-width: 600px;
   }
 
-  .grid-row-header, .grid-row-day {
+  .grid-row-header,
+  .grid-row-day {
     display: grid;
     grid-template-columns: 80px repeat(24, 1fr);
   }
@@ -1147,7 +1194,9 @@
     gap: 12px;
     text-align: left;
     cursor: pointer;
-    transition: border-color var(--transition-fast), transform var(--transition-fast);
+    transition:
+      border-color var(--transition-fast),
+      transform var(--transition-fast);
   }
 
   .template-card:hover {
@@ -1179,9 +1228,15 @@
     margin: 0;
   }
 
-  .text-accent { color: var(--accent); }
-  .text-success { color: #10b981; }
-  .text-warning { color: #f59e0b; }
+  .text-accent {
+    color: var(--accent);
+  }
+  .text-success {
+    color: #10b981;
+  }
+  .text-warning {
+    color: #f59e0b;
+  }
 
   /* Mode color badges */
   :global(.sp-mode-badge) {
