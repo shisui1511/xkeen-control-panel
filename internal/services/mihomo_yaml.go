@@ -470,3 +470,199 @@ func ParseClashProxyNode(blockStr string) SubscriptionNode {
 
 	return node
 }
+
+var providerIDRe = regexp.MustCompile(`^(\s*)['"]?([^'"#:\r\n]+?)['"]?:\s*(?:#.*)?$`)
+
+type providerBlock struct {
+	ID        string
+	StartLine int
+	EndLine   int
+}
+
+func extractProviderBlocks(lines []string, sectionStart, sectionEnd, baseIndent int) []providerBlock {
+	var blocks []providerBlock
+	var current *providerBlock
+
+	for i := sectionStart + 1; i < sectionEnd; i++ {
+		line := lines[i]
+		trimmed := strings.TrimLeft(line, " \t")
+		indent := len(line) - len(trimmed)
+
+		if indent == baseIndent {
+			m := providerIDRe.FindStringSubmatch(line)
+			if len(m) >= 3 {
+				if current != nil {
+					current.EndLine = i
+					blocks = append(blocks, *current)
+				}
+				id := strings.TrimSpace(m[2])
+				current = &providerBlock{ID: id, StartLine: i}
+				continue
+			}
+		}
+	}
+	if current != nil {
+		current.EndLine = sectionEnd
+		blocks = append(blocks, *current)
+	}
+	return blocks
+}
+
+// ReplaceMihomoProxyProvider добавляет или обновляет блок провайдера в секции proxy-providers:.
+// Если block пустой, провайдер удаляется.
+func ReplaceMihomoProxyProvider(content string, providerID string, block string) string {
+	lines := strings.Split(content, "\n")
+	start, end, indent := findTopLevelSection(lines, "proxy-providers")
+
+	if start == -1 {
+		if block == "" {
+			return content
+		}
+		appended := "\nproxy-providers:\n" + block
+		if strings.HasSuffix(content, "\n") {
+			return content + strings.TrimPrefix(appended, "\n")
+		}
+		return content + appended
+	}
+
+	for i := start + 1; i < end; i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		raw := strings.TrimLeft(line, " \t")
+		ind := len(line) - len(raw)
+		if ind > 0 {
+			indent = ind
+			break
+		}
+	}
+
+	blocks := extractProviderBlocks(lines, start, end, indent)
+
+	var out []string
+	out = append(out, lines[:start+1]...)
+
+	replaced := false
+	for _, b := range blocks {
+		if b.ID == providerID {
+			if block != "" {
+				blockLines := strings.Split(strings.TrimRight(block, "\n"), "\n")
+				out = append(out, blockLines...)
+			}
+			replaced = true
+			continue
+		}
+		blockEnd := trimTrailingEmpty(lines, b.StartLine, b.EndLine)
+		out = append(out, lines[b.StartLine:blockEnd]...)
+	}
+
+	if !replaced && block != "" {
+		blockLines := strings.Split(strings.TrimRight(block, "\n"), "\n")
+		out = append(out, blockLines...)
+	}
+
+	if end < len(lines) {
+		out = append(out, lines[end:]...)
+	}
+
+	return strings.Join(out, "\n")
+}
+
+// UpdateMihomoGroupProviders добавляет или удаляет providerID из секции use: указанной группы прокси.
+func UpdateMihomoGroupProviders(content, groupName string, providerID string, remove bool) string {
+	lines := strings.Split(content, "\n")
+	gStart, gEnd, gIndent := findGroupBlock(lines, groupName)
+	if gStart == -1 {
+		return content
+	}
+
+	subIndent := gIndent + 2
+	subStart, subEnd := -1, -1
+	for i := gStart + 1; i < gEnd; i++ {
+		line := lines[i]
+		trimmed := strings.TrimLeft(line, " \t")
+		ind := len(line) - len(trimmed)
+		if ind == subIndent && strings.HasPrefix(trimmed, "use:") {
+			subStart = i
+			subEnd = gEnd
+			for j := i + 1; j < gEnd; j++ {
+				l := lines[j]
+				t := strings.TrimLeft(l, " \t")
+				if strings.TrimSpace(l) == "" {
+					continue
+				}
+				if len(l)-len(t) <= subIndent {
+					subEnd = j
+					break
+				}
+			}
+			break
+		}
+	}
+
+	existing := []string{}
+	if subStart != -1 {
+		itemIndent := subIndent + 2
+		for i := subStart + 1; i < subEnd; i++ {
+			l := lines[i]
+			t := strings.TrimLeft(l, " \t")
+			if len(l)-len(t) >= itemIndent && strings.HasPrefix(t, "- ") {
+				name := strings.TrimSpace(strings.TrimPrefix(t, "- "))
+				name = strings.Trim(name, `"'`)
+				existing = append(existing, name)
+			}
+		}
+	}
+
+	filtered := existing[:0]
+	for _, n := range existing {
+		if n != providerID {
+			filtered = append(filtered, n)
+		}
+	}
+
+	if !remove {
+		found := false
+		for _, n := range filtered {
+			if n == providerID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			filtered = append(filtered, providerID)
+		}
+	}
+
+	if len(filtered) == 0 {
+		var out []string
+		if subStart != -1 {
+			out = append(out, lines[:subStart]...)
+			out = append(out, lines[subEnd:]...)
+			return strings.Join(out, "\n")
+		}
+		return content
+	}
+
+	subPad := strings.Repeat(" ", subIndent)
+	itemPad := strings.Repeat(" ", subIndent+2)
+	newSubLines := []string{subPad + "use:"}
+	for _, n := range filtered {
+		newSubLines = append(newSubLines, fmt.Sprintf("%s- %s", itemPad, yamlSafeScalar(n)))
+	}
+
+	var out []string
+	if subStart != -1 {
+		out = append(out, lines[:subStart]...)
+		out = append(out, newSubLines...)
+		out = append(out, lines[subEnd:]...)
+	} else {
+		out = append(out, lines[:gStart+1]...)
+		out = append(out, newSubLines...)
+		out = append(out, lines[gStart+1:]...)
+	}
+
+	return strings.Join(out, "\n")
+}
