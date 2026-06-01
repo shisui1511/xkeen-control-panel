@@ -137,6 +137,7 @@ func main() {
 
 	// Subscription endpoints
 	srv.HandleProtected("/api/outbound/parse", api.OutboundParse)
+	srv.HandleProtected("/api/outbound/import", api.OutboundImport)
 	srv.HandleProtected("/api/subscriptions", api.SubscriptionList)
 	srv.HandleProtected("/api/subscriptions/add", api.SubscriptionAdd)
 	srv.HandleProtected("/api/subscriptions/update", api.SubscriptionUpdate)
