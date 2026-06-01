@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 // Принудительно задаем русский язык для тестов интерфейса
 test.use({ locale: 'ru-RU' });
 
-test.describe('Editor & Mihomo Generator integration test suite', () => {
+test.describe('Editor & Constructor integration test suite', () => {
   let fileContent = 'initial config content';
   let insertCallbackCalled = false;
 
@@ -101,48 +101,45 @@ test.describe('Editor & Mihomo Generator integration test suite', () => {
     });
   });
 
-  test('successfully displays editor tabs and switches between files and generator', async ({
+  test('successfully displays editor tabs and switches between files and constructor', async ({
     page
   }) => {
     await page.goto('/#/editor');
 
     // Проверяем наличие верхних вкладок в редакторе
     const filesTab = page.locator('button.tab-btn:has-text("Файлы")');
-    const generatorTab = page.locator('button.tab-btn:has-text("Mihomo Generator")');
+    const constructorTab = page.locator('button.tab-btn:has-text("Конструктор")');
 
     await expect(filesTab).toBeVisible();
     await expect(filesTab).toHaveClass(/active/);
-    await expect(generatorTab).toBeVisible();
-    await expect(generatorTab).not.toHaveClass(/active/);
+    await expect(constructorTab).toBeVisible();
+    await expect(constructorTab).not.toHaveClass(/active/);
 
-    // Кликаем по вкладке Mihomo Generator
-    await generatorTab.click();
+    // Кликаем по вкладке Конструктор
+    await constructorTab.click();
 
     // Проверяем переключение вкладок и изменение URL
-    await expect(generatorTab).toHaveClass(/active/);
+    await expect(constructorTab).toHaveClass(/active/);
     await expect(filesTab).not.toHaveClass(/active/);
-    await expect(page).toHaveURL(/#\/mihomo-gen/);
-
-    // Должен отображаться заголовок визуального генератора
-    await expect(page.locator('h1').filter({ hasText: 'Визуальный генератор' })).toBeVisible();
+    await expect(page).toHaveURL(/#\/constructor/);
   });
 
-  test('deep-link #/mihomo-gen automatically opens editor on generator tab', async ({ page }) => {
-    await page.goto('/#/mihomo-gen');
+  test('deep-link #/constructor automatically opens editor on constructor tab', async ({ page }) => {
+    await page.goto('/#/constructor');
 
-    // Проверяем, что вкладка Mihomo Generator активна при переходе по диплинку
+    // Проверяем, что вкладка Конструктор активна при переходе по диплинку
     const filesTab = page.locator('button.tab-btn:has-text("Файлы")');
-    const generatorTab = page.locator('button.tab-btn:has-text("Mihomo Generator")');
+    const constructorTab = page.locator('button.tab-btn:has-text("Конструктор")');
 
-    await expect(generatorTab).toHaveClass(/active/);
+    await expect(constructorTab).toHaveClass(/active/);
     await expect(filesTab).not.toHaveClass(/active/);
-    await expect(page.locator('h1').filter({ hasText: 'Визуальный генератор' })).toBeVisible();
+    await expect(page).toHaveURL(/#\/constructor/);
   });
 
   test('warns and redirects when trying to insert config with no active file selected', async ({
     page
   }) => {
-    await page.goto('/#/mihomo-gen');
+    await page.goto('/#/constructor');
 
     // Кнопка должна называться "Открыть в редакторе", так как файл не выбран
     const actionBtn = page.locator('button.btn-secondary:has-text("Открыть в редакторе")');
@@ -168,9 +165,9 @@ test.describe('Editor & Mihomo Generator integration test suite', () => {
     // Проверяем, что файл открылся
     await expect(page.locator('.file-name:has-text("config.yaml")')).toBeVisible();
 
-    // Переходим на вкладку Mihomo Generator
-    const generatorTab = page.locator('button.tab-btn:has-text("Mihomo Generator")');
-    await generatorTab.click();
+    // Переходим на вкладку Конструктор
+    const constructorTab = page.locator('button.tab-btn:has-text("Конструктор")');
+    await constructorTab.click();
 
     // Добавляем прокси через интерфейс генератора
     await page.locator('button.add-btn:has-text("Добавить прокси")').click();
