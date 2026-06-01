@@ -56,7 +56,6 @@ func TestTemplateService_FetchByName(t *testing.T) {
 func TestTemplateService_FetchByName_Mocked(t *testing.T) {
 	svc := NewTemplateService()
 
-
 	mockContent := "mock config content"
 	svc.httpClient = &http.Client{
 		Transport: &mockRoundTripper{

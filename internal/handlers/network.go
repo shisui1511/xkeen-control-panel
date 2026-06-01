@@ -15,11 +15,11 @@ var (
 	hostRegex = regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9]$`)
 
 	privateRanges = []string{
-		"10.0.0.0/8",      // RFC 1918
-		"172.16.0.0/12",   // RFC 1918
-		"192.168.0.0/16",  // RFC 1918
-		"100.64.0.0/10",   // Carrier-Grade NAT (RFC 6598)
-		"fc00::/7",        // IPv6 Unique Local Address (RFC 4193)
+		"10.0.0.0/8",     // RFC 1918
+		"172.16.0.0/12",  // RFC 1918
+		"192.168.0.0/16", // RFC 1918
+		"100.64.0.0/10",  // Carrier-Grade NAT (RFC 6598)
+		"fc00::/7",       // IPv6 Unique Local Address (RFC 4193)
 	}
 	privateNets []*net.IPNet
 )

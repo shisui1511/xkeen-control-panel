@@ -517,4 +517,3 @@ func newTrafficWSAPI(t *testing.T, mihomoURL string) (*API, *services.TrafficQuo
 		pathVal:         utils.NewPathValidator(cfg.AllowedRoots),
 	}, tqSvc
 }
-
