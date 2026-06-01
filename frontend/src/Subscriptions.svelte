@@ -209,10 +209,18 @@
   }
 
   async function parseImportLink() {
-    if (!importLink.trim()) {
+    const trimmed = importLink.trim();
+    if (!trimmed) {
       importErrorMsg = $t('subscr.import_error_empty');
       return;
     }
+
+    const lines = trimmed.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length > 1) {
+      importErrorMsg = $t('subscr.import_error_single_only');
+      return;
+    }
+
     importErrorMsg = '';
     importLoading = true;
 

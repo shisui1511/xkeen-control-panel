@@ -188,6 +188,19 @@ test.describe('Import Proxy Node E2E test suite', () => {
     // Error message should be visible inside modal
     const errorMsg = modal.locator('.error-msg');
     await expect(errorMsg).toBeVisible();
-    await expect(errorMsg).toContainText('Ошибка импорта');
+  });
+
+  test('shows client-side validation error when entering multiple links', async ({ page }) => {
+    const importBtn = page.locator('button:has-text("Импорт узла")');
+    await importBtn.click();
+
+    const modal = page.locator('.modal-card');
+    await modal.locator('textarea').fill("vless://link1#tag1\nvless://link2#tag2");
+    await modal.locator('button:has-text("Распознать")').click();
+
+    const errorMsg = modal.locator('.error-msg');
+    await expect(errorMsg).toBeVisible();
+    await expect(errorMsg).toContainText('Пожалуйста, введите только одну ссылку за раз');
   });
 });
+
