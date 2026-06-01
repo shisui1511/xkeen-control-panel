@@ -286,6 +286,24 @@ rules: []
 	}
 }
 
+func TestReplaceMihomoProxyProvider_DeleteLast(t *testing.T) {
+	yaml := `port: 7890
+proxy-providers:
+  sub_1:
+    type: http
+    url: http://example.com/1
+rules: []
+`
+	result := ReplaceMihomoProxyProvider(yaml, "sub_1", "")
+	if strings.Contains(result, "proxy-providers:") {
+		t.Error("proxy-providers section should be completely removed if empty")
+	}
+	if !strings.Contains(result, "port: 7890") {
+		t.Error("other options should be preserved")
+	}
+}
+
+
 func TestUpdateMihomoGroupProviders(t *testing.T) {
 	yaml := `proxy-groups:
   - name: PROXY

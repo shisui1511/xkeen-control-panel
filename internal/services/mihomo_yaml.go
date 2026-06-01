@@ -551,6 +551,29 @@ func ReplaceMihomoProxyProvider(content string, providerID string, block string)
 
 	blocks := extractProviderBlocks(lines, start, end, indent)
 
+	remainingCount := 0
+	for _, b := range blocks {
+		if b.ID != providerID {
+			remainingCount++
+		}
+	}
+	if block != "" {
+		remainingCount++
+	}
+
+	if remainingCount == 0 {
+		var out []string
+		out = append(out, lines[:start]...)
+		if end < len(lines) {
+			out = append(out, lines[end:]...)
+		}
+		res := strings.Join(out, "\n")
+		if strings.HasSuffix(content, "\n") && !strings.HasSuffix(res, "\n") {
+			res += "\n"
+		}
+		return res
+	}
+
 	var out []string
 	out = append(out, lines[:start+1]...)
 
