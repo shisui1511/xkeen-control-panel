@@ -83,6 +83,11 @@ func (a *API) OutboundImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(link) > 16384 {
+		a.errorResponse(w, a.t(r, "subscr.import_error_too_long"), http.StatusBadRequest)
+		return
+	}
+
 	if strings.HasPrefix(strings.ToLower(link), "vmess://") && len(link) > 8192 {
 		a.errorResponse(w, a.t(r, "subscr.import_error_too_long"), http.StatusBadRequest)
 		return
@@ -112,7 +117,10 @@ func (a *API) OutboundImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := json.Unmarshal(data, &wrapper); err != nil {
-			// If JSON is malformed, we will start fresh with an empty wrapper
+			if len(strings.TrimSpace(string(data))) > 0 {
+				a.errorResponse(w, "Failed to parse manual outbounds file: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 			wrapper.Outbounds = []services.Outbound{}
 		}
 	} else {

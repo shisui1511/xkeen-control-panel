@@ -443,3 +443,75 @@ func TestOutboundImport_InvalidLink(t *testing.T) {
 		t.Errorf("expected 400, got %d", rr.Code)
 	}
 }
+
+func TestOutboundImport_TooLongGeneric(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &config.Config{
+		XRayConfigDir: tmp,
+		AllowedRoots:  []string{tmp},
+	}
+	configSvc := services.NewConfigService(tmp, []string{tmp})
+	subSvc := services.NewSubscriptionService(tmp, tmp, tmp)
+	
+	api := &API{
+		cfg:             cfg,
+		configSvc:       configSvc,
+		subscriptionSvc: subSvc,
+	}
+
+	// Create long non-vmess link
+	longLink := "vless://" + strings.Repeat("a", 16385)
+	body, _ := json.Marshal(OutboundImportRequest{
+		Link: longLink,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/outbound/import", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	api.OutboundImport(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestOutboundImport_MalformedManualJSON(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &config.Config{
+		XRayConfigDir: tmp,
+		AllowedRoots:  []string{tmp},
+	}
+	configSvc := services.NewConfigService(tmp, []string{tmp})
+	subSvc := services.NewSubscriptionService(tmp, tmp, tmp)
+	
+	api := &API{
+		cfg:             cfg,
+		configSvc:       configSvc,
+		subscriptionSvc: subSvc,
+	}
+
+	// Create a malformed 04_outbounds.manual.json file
+	manualPath := filepath.Join(tmp, "04_outbounds.manual.json")
+	if err := os.WriteFile(manualPath, []byte("invalid-json{"), 0644); err != nil {
+		t.Fatalf("failed to write malformed file: %v", err)
+	}
+
+	body, _ := json.Marshal(OutboundImportRequest{
+		Link: "vless://550e8400-e29b-41d4-a716-446655440000@host.example.com:443?security=none#test-node",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/outbound/import", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	api.OutboundImport(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify that the file content was NOT overwritten
+	data, err := os.ReadFile(manualPath)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	if string(data) != "invalid-json{" {
+		t.Errorf("expected file content to remain 'invalid-json{', but got: %s", string(data))
+	}
+}
+
