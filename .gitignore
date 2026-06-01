@@ -17,10 +17,11 @@ CLAUDE.md
 GEMINI.md
 
 .agent
+.agents
 .planning
 .claude
 .gemini
-
+graphify-out
 # Node.js files (frontend build)
 node_modules/
 frontend/dist/

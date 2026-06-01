@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t, currentLang } from './i18n';
+  import { showToast } from './stores';
 
   interface TrafficPoint {
     up: number;
@@ -8,9 +9,21 @@
     time: number;
   }
 
+  interface Peaks {
+    peak_hour_up: number;
+    peak_hour_down: number;
+    peak_day_up: number;
+    peak_day_down: number;
+    peak_week_up: number;
+    peak_week_down: number;
+    hour_start: number;
+    day_start: number;
+    week_start: number;
+  }
+
   let trafficData: TrafficPoint[] = [];
   let maxPoints = 60; // 60 points = 60 seconds (1 message/sec)
-  let es: EventSource | null = null;
+  let ws: WebSocket | null = null;
   let connected = false;
   let totalUp = 0;
   let totalDown = 0;
@@ -22,15 +35,27 @@
   let activeConnectionsCount = 0;
   let tcpConnectionsCount = 0;
   let udpConnectionsCount = 0;
-  let connInterval: any = null;
 
   // Connection history for stats
   const CONN_HISTORY_MAX = 3600; // 1 hour at 1 sample/sec
   let connHistory: { ts: number; count: number }[] = [];
 
+  let peaks: Peaks = {
+    peak_hour_up: 0,
+    peak_hour_down: 0,
+    peak_day_up: 0,
+    peak_day_down: 0,
+    peak_week_up: 0,
+    peak_week_down: 0,
+    hour_start: 0,
+    day_start: 0,
+    week_start: 0
+  };
+
   $: connDeltaPerMin = (() => {
-    if (connHistory.length < 2) return 0;
+    if (connHistory.length < 2) return null;
     const now = connHistory[connHistory.length - 1];
+    if (now.ts - connHistory[0].ts < 60000) return null;
     let minuteAgo = connHistory[0];
     for (let i = connHistory.length - 1; i >= 0; i--) {
       if (now.ts - connHistory[i].ts >= 60000) {
@@ -41,7 +66,7 @@
     return now.count - minuteAgo.count;
   })();
 
-  $: connPeakHour = connHistory.length > 0 ? Math.max(...connHistory.map((h) => h.count)) : 0;
+  $: connPeakHour = connHistory.reduce((max, h) => (h.count > max ? h.count : max), 0);
 
   function formatSpeed(bytesPerSecond: number): string {
     if (bytesPerSecond === 0) return '0 B/s';
@@ -59,37 +84,28 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  async function fetchConnections() {
-    try {
-      const res = await fetch('/api/mihomo/proxy/connections');
-      if (res.ok) {
-        const data = await res.json();
-        const conns = data.connections || [];
-        activeConnectionsCount = conns.length;
-        tcpConnectionsCount = conns.filter((c: any) => c.metadata?.network === 'TCP').length;
-        udpConnectionsCount = conns.filter((c: any) => c.metadata?.network === 'UDP').length;
-        const now = Date.now();
-        connHistory.push({ ts: now, count: conns.length });
-        if (connHistory.length > CONN_HISTORY_MAX) connHistory.shift();
-        connHistory = connHistory;
-      }
-    } catch (e) {
-      // ignore
-    }
-  }
+  let reconnectTimeout: any = null;
+  let reconnectDelay = 1000;
+  const MAX_RECONNECT_DELAY = 16000;
 
   function connect() {
-    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-    const url = `${protocol}//${window.location.host}/api/mihomo/proxy/traffic`;
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
 
-    es = new EventSource(url);
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = `${protocol}//${window.location.host}/api/traffic/ws`;
 
-    es.onopen = () => {
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
       connected = true;
       lastTickTime = 0;
+      reconnectDelay = 1000; // сбросить задержку при успешном подключении
     };
 
-    es.onmessage = (event) => {
+    ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         const upSpeed = data.up || 0;
@@ -117,33 +133,98 @@
           sessionDown += downSpeed * elapsedSec;
         }
         lastTickTime = now;
+
+        activeConnectionsCount = data.connections || 0;
+        tcpConnectionsCount = data.tcp_connections || 0;
+        udpConnectionsCount = data.udp_connections || 0;
+
+        connHistory.push({ ts: now, count: activeConnectionsCount });
+        if (connHistory.length > CONN_HISTORY_MAX) connHistory.shift();
+        connHistory = connHistory;
+
+        if (data.peaks) {
+          peaks = data.peaks;
+        }
       } catch (e) {
         // ignore
       }
     };
 
-    es.onerror = () => {
+    ws.onclose = () => {
+      connected = false;
+      scheduleReconnect();
+    };
+
+    ws.onerror = () => {
       connected = false;
     };
   }
 
+  function scheduleReconnect() {
+    if (ws && ws.readyState !== WebSocket.CLOSED) return;
+    if (reconnectTimeout) return;
+
+    reconnectTimeout = setTimeout(() => {
+      reconnectTimeout = null;
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+      connect();
+    }, reconnectDelay);
+  }
+
   function disconnect() {
-    if (es) {
-      es.close();
-      es = null;
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
+    if (ws) {
+      ws.onclose = null; // предотвратить повторное подключение при явном закрытии
+      ws.onerror = null;
+      ws.close();
+      ws = null;
     }
     connected = false;
   }
 
+  async function resetStatistics() {
+    if (!confirm($t('traffic.reset_confirm'))) return;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/traffic/reset', {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken || ''
+        }
+      });
+      if (res.ok) {
+        sessionUp = 0;
+        sessionDown = 0;
+        trafficData = [];
+        peaks = {
+          peak_hour_up: 0,
+          peak_hour_down: 0,
+          peak_day_up: 0,
+          peak_day_down: 0,
+          peak_week_up: 0,
+          peak_week_down: 0,
+          hour_start: 0,
+          day_start: 0,
+          week_start: 0
+        };
+        showToast('success', $t('app.success') || 'Success');
+      } else {
+        showToast('error', 'Failed to reset statistics');
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+    }
+  }
+
   onMount(() => {
     connect();
-    fetchConnections();
-    connInterval = setInterval(fetchConnections, 5000);
   });
 
   onDestroy(() => {
     disconnect();
-    if (connInterval) clearInterval(connInterval);
   });
 
   // SVG Chart path generators
@@ -168,17 +249,24 @@
     const startIdx = maxPoints - points.length;
     const getX = (idx: number) => (startIdx + idx) * step;
 
+    const getDownloadY = (val: number) => height - (val / maxVal) * (height - 20);
+    const getUploadY = (valUp: number, valDown: number) => {
+      const y = height - (valUp / maxVal) * (height - 20);
+      // Сдвигаем линию Upload чуть выше при совпадении для видимости обеих линий
+      return valUp === valDown ? y - 1.5 : y;
+    };
+
     // Download path
-    let dLinePath = `M ${getX(0)} ${height - (points[0].down / maxVal) * (height - 20)}`;
+    let dLinePath = `M ${getX(0)} ${getDownloadY(points[0].down)}`;
     for (let i = 1; i < points.length; i++) {
-      dLinePath += ` L ${getX(i)} ${height - (points[i].down / maxVal) * (height - 20)}`;
+      dLinePath += ` L ${getX(i)} ${getDownloadY(points[i].down)}`;
     }
     const dAreaPath = `${dLinePath} L ${getX(points.length - 1)} ${height} L ${getX(0)} ${height} Z`;
 
     // Upload path
-    let uLinePath = `M ${getX(0)} ${height - (points[0].up / maxVal) * (height - 20)}`;
+    let uLinePath = `M ${getX(0)} ${getUploadY(points[0].up, points[0].down)}`;
     for (let i = 1; i < points.length; i++) {
-      uLinePath += ` L ${getX(i)} ${height - (points[i].up / maxVal) * (height - 20)}`;
+      uLinePath += ` L ${getX(i)} ${getUploadY(points[i].up, points[i].down)}`;
     }
     const uAreaPath = `${uLinePath} L ${getX(points.length - 1)} ${height} L ${getX(0)} ${height} Z`;
 
@@ -202,9 +290,9 @@
     const maxDown = Math.max(...points.map((p) => p.down)) || 1;
     const width = 200;
     const height = 42;
-    const step = width / 19; // 20 points, 19 steps
-
-    const startX = width - (points.length - 1) * step;
+    // Динамически растягиваем спарклайн на всю ширину карточки при малом числе точек
+    const step = width / (points.length - 1);
+    const startX = 0;
 
     // Up
     let uLine = `M ${startX} ${height - (points[0].up / maxUp) * (height - 8)}`;
@@ -229,32 +317,45 @@
     <div>
       <div class="crumbs">
         {$t('nav.group_tools')}
-        <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        <span style="color:var(--fg-faint);margin:0 8px;">/</span>
         {$t('traffic.title')}
       </div>
       <h1>{$t('traffic.title')}</h1>
       <p class="sub">{$t('traffic.realtime')}</p>
     </div>
-    <div class="ph-actions">
+    <div class="ph-actions" style="display: flex; gap: 12px; align-items: center;">
       <span class="status-indicator" class:connected class:live={connected}>
-        ● {connected ? 'live' : 'offline'}
+        {connected ? 'live' : 'offline'}
       </span>
+      <button
+        class="btn btn-secondary btn-reset"
+        style="color:var(--danger);"
+        on:click={resetStatistics}
+      >
+        {$t('traffic.reset_stats')}
+      </button>
     </div>
   </div>
 
-  <div class="stats-grid mb-2">
+  <div class="traffic-stats-grid mb-2">
     <!-- Upload Card -->
     <div class="card stat-card-spark">
       <div class="stat-card-content">
-        <div class="stat-label">Upload</div>
+        <div class="stat-label">{$t('traffic.upload')}</div>
         <div class="stat-value upload-color">{formatSpeed(totalUp)}</div>
         <div class="stat-session">
-          Σ {$currentLang === 'ru' ? 'сессии' : 'session'}
+          Σ {$t('traffic.session')}
           {formatBytes(sessionUp)}
         </div>
       </div>
       {#if trafficData.length >= 2}
-        <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
+        <svg
+          class="sparkline"
+          viewBox="0 0 200 42"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={$t('traffic.upload_sparkline')}
+        >
           <defs>
             <linearGradient id="sg-upload" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="var(--success)" stop-opacity="0.4" />
@@ -270,15 +371,21 @@
     <!-- Download Card -->
     <div class="card stat-card-spark">
       <div class="stat-card-content">
-        <div class="stat-label">Download</div>
+        <div class="stat-label">{$t('traffic.download')}</div>
         <div class="stat-value download-color">{formatSpeed(totalDown)}</div>
         <div class="stat-session">
-          Σ {$currentLang === 'ru' ? 'сессии' : 'session'}
+          Σ {$t('traffic.session')}
           {formatBytes(sessionDown)}
         </div>
       </div>
       {#if trafficData.length >= 2}
-        <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
+        <svg
+          class="sparkline"
+          viewBox="0 0 200 42"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={$t('traffic.download_sparkline')}
+        >
           <defs>
             <linearGradient id="sg-download" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.4" />
@@ -294,37 +401,44 @@
     <!-- Active Connections Card -->
     <div class="card stat-card-normal">
       <div class="stat-label">
-        {$currentLang === 'ru' ? 'Активные соединения' : 'Active Connections'}
+        {$t('traffic.active_connections')}
       </div>
       <div class="stat-value active-connections-color">{activeConnectionsCount}</div>
       <div class="stat-session">{tcpConnectionsCount} TCP · {udpConnectionsCount} UDP</div>
-      {#if connHistory.length >= 2}
-        <div class="stat-session" style="margin-top: 2px; color: var(--fg-dim);">
-          {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$currentLang === 'ru'
-            ? 'мин'
-            : 'min'}
-          · {$currentLang === 'ru' ? 'пик' : 'peak'}
-          {connPeakHour}
-        </div>
-      {/if}
+      <div class="stat-session" style="margin-top: 4px; color: var(--fg-dim);">
+        {#if connDeltaPerMin === null}
+          — / {$t('traffic.per_min')}
+        {:else}
+          <span style={connDeltaPerMin < 0 ? 'color: var(--fg-dim);' : ''}>
+            {connDeltaPerMin >= 0 ? '+' : ''}{connDeltaPerMin} / {$t('traffic.per_min')}
+          </span>
+        {/if}
+        · {$t('traffic.peak')}
+        {connPeakHour}
+      </div>
     </div>
   </div>
 
   <!-- Main Chart Card -->
   <div class="card chart-card">
     <div class="chart-legend">
-      <span class="key"><span class="sw download-bg"></span>Download</span>
-      <span class="key"><span class="sw upload-bg"></span>Upload</span>
+      <span class="key"><span class="sw download-bg"></span>{$t('traffic.download')}</span>
+      <span class="key"><span class="sw upload-bg"></span>{$t('traffic.upload')}</span>
       <span class="chart-time-label">
-        {$currentLang === 'ru' ? 'последняя минута · 1 точка/с' : 'last minute · 1 point/s'}
+        {$t('traffic.chart_legend_time')}
       </span>
     </div>
 
     <div class="chart-area-wrapper">
       {#if trafficData.length < 2}
-        <div class="chart-empty">
-          <span class="spinner" style="margin-right: 8px;">...</span>
-          {$currentLang === 'ru' ? 'Ожидание данных трафика...' : 'Waiting for traffic data...'}
+        <div class="chart-empty" style="flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <span class="spinner">...</span>
+            <span style="font-weight: 700;">{$t('traffic.waiting')}</span>
+          </div>
+          <p style="font-size: 14px; color: var(--fg-dim); margin: 0;">
+            {$t('traffic.empty_state_body')}
+          </p>
         </div>
       {:else}
         <div class="chart-y-axis">
@@ -334,7 +448,13 @@
           <span class="y-label">0 B/s</span>
         </div>
         <div class="chart-svg-container">
-          <svg viewBox="0 0 1000 240" preserveAspectRatio="none" style="width: 100%; height: 100%;">
+          <svg
+            viewBox="0 0 1000 240"
+            preserveAspectRatio="none"
+            style="width: 100%; height: 100%;"
+            role="img"
+            aria-label={$t('traffic.main_chart')}
+          >
             <defs>
               <linearGradient id="cg-download-main" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.25" />
@@ -351,7 +471,8 @@
               y1="60"
               x2="1000"
               y2="60"
-              stroke="rgba(255,255,255,.03)"
+              stroke="var(--border)"
+              opacity="0.3"
               stroke-dasharray="4"
             />
             <line
@@ -359,7 +480,8 @@
               y1="120"
               x2="1000"
               y2="120"
-              stroke="rgba(255,255,255,.03)"
+              stroke="var(--border)"
+              opacity="0.3"
               stroke-dasharray="4"
             />
             <line
@@ -367,7 +489,8 @@
               y1="180"
               x2="1000"
               y2="180"
-              stroke="rgba(255,255,255,.03)"
+              stroke="var(--border)"
+              opacity="0.3"
               stroke-dasharray="4"
             />
 
@@ -384,49 +507,96 @@
     </div>
 
     <div class="chart-x">
-      <span>60 {$currentLang === 'ru' ? 'сек назад' : 'sec ago'}</span>
-      <span>-45 {$currentLang === 'ru' ? 'сек' : 'sec'}</span>
-      <span>-30 {$currentLang === 'ru' ? 'сек' : 'sec'}</span>
-      <span>-15 {$currentLang === 'ru' ? 'сек' : 'sec'}</span>
-      <span>{$currentLang === 'ru' ? 'сейчас' : 'now'}</span>
+      <span>60 {$t('traffic.sec_ago')}</span>
+      <span>-45 {$t('traffic.sec')}</span>
+      <span>-30 {$t('traffic.sec')}</span>
+      <span>-15 {$t('traffic.sec')}</span>
+      <span>{$t('traffic.now')}</span>
+    </div>
+  </div>
+
+  <!-- Peak Load Card -->
+  <div class="card" style="margin-top: 16px; padding: 24px;">
+    <div
+      style="font-size: 11px; font-weight: 700; color: var(--fg-primary); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.1em;"
+    >
+      {$t('traffic.peak_load')}
+    </div>
+    <div style="font-size: 11px; color: var(--fg-dim); margin-bottom: 16px;">
+      {$t('traffic.peak_load_desc')}
+    </div>
+    <div class="table-container" style="overflow-x: auto;">
+      <table class="connections-table" style="min-width: 100%; border-collapse: collapse;">
+        <thead>
+          <tr style="border-bottom: 1px solid var(--border); text-align: left;">
+            <th
+              style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;"
+              >{$t('traffic.peak_hour')}</th
+            >
+            <th
+              style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;"
+              >{$t('traffic.peak_day')}</th
+            >
+            <th
+              style="padding: 8px 16px; color: var(--fg-dim); font-size: 11px; font-weight: 700; text-transform: uppercase;"
+              >{$t('traffic.peak_week')}</th
+            >
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding: 8px 16px; font-family: var(--font-family-mono); font-size: 14px;">
+              <span class="upload-color">↑ {formatSpeed(peaks.peak_hour_up)}</span>
+              <span style="color: var(--fg-dim); margin: 0 8px;">/</span>
+              <span class="download-color">↓ {formatSpeed(peaks.peak_hour_down)}</span>
+            </td>
+            <td style="padding: 8px 16px; font-family: var(--font-family-mono); font-size: 14px;">
+              <span class="upload-color">↑ {formatSpeed(peaks.peak_day_up)}</span>
+              <span style="color: var(--fg-dim); margin: 0 8px;">/</span>
+              <span class="download-color">↓ {formatSpeed(peaks.peak_day_down)}</span>
+            </td>
+            <td style="padding: 8px 16px; font-family: var(--font-family-mono); font-size: 14px;">
+              <span class="upload-color">↑ {formatSpeed(peaks.peak_week_up)}</span>
+              <span style="color: var(--fg-dim); margin: 0 8px;">/</span>
+              <span class="download-color">↓ {formatSpeed(peaks.peak_week_down)}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
 </div>
 
 <style>
-  .stats-grid {
+  .traffic-stats-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 14px;
   }
 
   @media (max-width: 768px) {
-    .stats-grid {
+    .traffic-stats-grid {
       grid-template-columns: 1fr;
     }
   }
 
-  .stat-card-spark {
-    padding: 0;
+  .stat-card-spark,
+  .stat-card-normal {
+    /* hot-fix */
+    padding: 20px 24px;
     position: relative;
-    height: 110px;
+    height: 130px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     overflow: hidden;
+    box-sizing: border-box;
   }
 
   .stat-card-content {
-    padding: 20px 20px 0 20px;
+    /* hot-fix */
+    padding: 0;
     z-index: 2;
-  }
-
-  .stat-card-normal {
-    padding: 20px;
-    height: 110px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
   }
 
   .stat-label {
@@ -458,10 +628,11 @@
   }
 
   .stat-session {
-    font-size: 12px;
+    /* hot-fix */
+    font-size: 11px;
     color: var(--fg-secondary);
-    margin-top: 4px;
-    margin-bottom: 8px;
+    margin-top: 2px;
+    margin-bottom: 0;
   }
 
   .sparkline {
@@ -471,8 +642,10 @@
     bottom: 0;
     left: 0;
     right: 0;
+    top: auto;
     z-index: 1;
     pointer-events: none;
+    overflow: hidden; /* clip any bleed/overflow */
   }
 
   /* Main Chart Card */
@@ -546,11 +719,11 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    padding: 10px 8px;
+    padding: 12px 8px;
     border-right: 1px solid var(--border);
     background: rgba(0, 0, 0, 0.1);
     font-family: var(--font-family-mono);
-    font-size: 10px;
+    font-size: 11px;
     color: var(--fg-dim);
     text-align: right;
     z-index: 5;
@@ -569,7 +742,7 @@
   .chart-x {
     display: flex;
     justify-content: space-between;
-    padding: 0 10px 0 80px;
+    padding: 0 8px 0 80px;
     font-size: 11px;
     color: var(--fg-dim);
   }
@@ -580,6 +753,9 @@
     background: rgba(41, 194, 240, 0.08);
   }
   :global(.status-indicator.live::before) {
-    display: none;
+    display: inline-block !important;
+    background: var(--accent) !important;
+    box-shadow: 0 0 8px var(--accent) !important;
+    animation: ledPulse 2.4s infinite !important;
   }
 </style>

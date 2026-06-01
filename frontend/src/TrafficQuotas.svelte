@@ -41,10 +41,12 @@
     total_upload: number;
     total_download: number;
     total: number;
+    reset_time?: number;
   } | null = null;
   let alerts: Alert[] = [];
   let loading = false;
   let error = '';
+  let togglingQuotas: Record<string, boolean> = {};
 
   // Form state
   let showForm = false;
@@ -208,6 +210,7 @@
   }
 
   async function toggleEnabled(q: Quota) {
+    togglingQuotas[q.id] = true;
     const csrfToken = localStorage.getItem('csrf_token');
     try {
       const res = await fetch(`/api/traffic/quotas/enabled?id=${q.id}&enabled=${!q.enabled}`, {
@@ -218,6 +221,9 @@
       await fetchQuotas();
     } catch (e: any) {
       error = e.message;
+    } finally {
+      delete togglingQuotas[q.id];
+      togglingQuotas = togglingQuotas;
     }
   }
 
@@ -270,6 +276,8 @@
         return 'badge tq-action-log';
       case 'block':
         return 'badge tq-action-block';
+      case 'redirect_direct':
+        return 'badge tq-action-redirect';
       default:
         return 'badge tq-action-notify';
     }
@@ -283,6 +291,8 @@
         return $t('trafficquotas.action_log_only');
       case 'block':
         return $t('trafficquotas.action_block');
+      case 'redirect_direct':
+        return $t('trafficquotas.action_redirect_direct');
       default:
         return $t('trafficquotas.action_notify');
     }
@@ -307,7 +317,40 @@
     }
   }
 
+  let dismissedBanner = false;
+
+  function dismissBanner() {
+    dismissedBanner = true;
+    localStorage.setItem('tq_banner_dismissed', 'true');
+  }
+
+  let forecastValue: number | null = null;
+  let showForecastCalculating = false;
+
+  $: {
+    if (stats && stats.reset_time) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const duration = nowSec - stats.reset_time;
+      if (duration > 0) {
+        if (duration < 600) {
+          showForecastCalculating = true;
+          forecastValue = null;
+        } else {
+          showForecastCalculating = false;
+          forecastValue = (stats.total / duration) * 30 * 24 * 3600;
+        }
+      } else {
+        showForecastCalculating = true;
+        forecastValue = null;
+      }
+    } else {
+      showForecastCalculating = false;
+      forecastValue = null;
+    }
+  }
+
   onMount(() => {
+    dismissedBanner = localStorage.getItem('tq_banner_dismissed') === 'true';
     fetchQuotas();
     fetchStats();
     fetchAlerts();
@@ -361,6 +404,24 @@
     <div class="alert alert-error mb-2">{error}</div>
   {/if}
 
+  <!-- Banner -->
+  {#if !dismissedBanner}
+    <div class="alert alert-info-banner info-banner mb-3">
+      <div class="info-banner-content">
+        <div class="info-banner-icon">
+          <Icon name="info" size={16} />
+        </div>
+        <div class="info-banner-text">
+          <h3 class="info-banner-title">{$t('trafficquotas.banner_title')}</h3>
+          <p class="info-banner-description">{$t('trafficquotas.banner_text')}</p>
+        </div>
+      </div>
+      <button class="info-banner-close" on:click={dismissBanner} aria-label="Dismiss banner">
+        &times;
+      </button>
+    </div>
+  {/if}
+
   <!-- Alerts -->
   {#if alerts.length > 0}
     <div class="card mb-3">
@@ -384,17 +445,17 @@
   <!-- Stats Summaries -->
   {#if stats}
     <div class="card mb-3">
-      <h2 class="card-title">{$currentLang === 'ru' ? 'СВОДКА' : 'SUMMARY'}</h2>
-      <div class="stats-grid">
+      <h2 class="card-title">{$t('trafficquotas.summary')}</h2>
+      <div class="tq-stats-grid">
         <div class="stat-box">
           <div class="stat-label">{$t('trafficquotas.total_download')}</div>
           <div class="stat-value">{formatBytes(stats.total_download)}</div>
-          <div class="stat-sub">{$currentLang === 'ru' ? 'загружено' : 'received'}</div>
+          <div class="stat-sub">{$t('trafficquotas.received')}</div>
         </div>
         <div class="stat-box">
           <div class="stat-label">{$t('trafficquotas.total_upload')}</div>
           <div class="stat-value">{formatBytes(stats.total_upload)}</div>
-          <div class="stat-sub">{$currentLang === 'ru' ? 'отправлено' : 'sent'}</div>
+          <div class="stat-sub">{$t('trafficquotas.sent')}</div>
         </div>
         <div class="stat-box">
           <div class="stat-label">Σ {$t('trafficquotas.total')}</div>
@@ -409,16 +470,29 @@
               ></div>
             </div>
             <div class="stat-sub">
-              {totalPct.toFixed(1)}% {$currentLang === 'ru' ? 'от лимита' : 'of limit'}
+              {totalPct.toFixed(1)}% {$t('trafficquotas.of_limit')}
             </div>
           {/if}
         </div>
         <div class="stat-box">
-          <div class="stat-label">{$currentLang === 'ru' ? 'ЛИМИТЫ' : 'QUOTAS'}</div>
+          <div class="stat-label">{$t('trafficquotas.forecast_label')}</div>
+          <div class="stat-value">
+            {#if showForecastCalculating}
+              <span class="forecast-calculating">{$t('trafficquotas.forecast_calculating')}</span>
+            {:else if forecastValue !== null}
+              {formatBytes(forecastValue)}
+            {:else}
+              —
+            {/if}
+          </div>
+          <div class="stat-sub">{$t('trafficquotas.forecast_subtext')}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">{$t('trafficquotas.quotas_caps')}</div>
           <div class="stat-value">
             {activeQuotas.length}<span class="stat-value-unit"> / {quotas.length}</span>
           </div>
-          <div class="stat-sub">{$currentLang === 'ru' ? 'активных' : 'active'}</div>
+          <div class="stat-sub">{$t('trafficquotas.active_count')}</div>
         </div>
       </div>
     </div>
@@ -440,11 +514,11 @@
               <th>{$t('trafficquotas.name')}</th>
               <th>{$t('trafficquotas.target_type')}</th>
               <th>{$t('trafficquotas.period')}</th>
-              <th>Использовано</th>
+              <th>{$t('trafficquotas.col_used')}</th>
               <th>{$t('trafficquotas.limit')}</th>
               <th>{$t('trafficquotas.action')}</th>
-              <th>Состояние</th>
-              <th>Статус</th>
+              <th>{$t('trafficquotas.col_state')}</th>
+              <th>{$t('trafficquotas.col_status')}</th>
               <th style="width: 50px;"></th>
             </tr>
           </thead>
@@ -490,24 +564,30 @@
                   {#if q.enabled}
                     <span class="status-badge active">
                       <span class="status-dot success" style="margin: 0 4px 0 0;"></span>
-                      {$currentLang === 'ru' ? 'активен' : 'active'}
+                      {$t('trafficquotas.status_active')}
                     </span>
                   {:else}
                     <span class="status-badge stopped">
                       <span class="status-dot error" style="margin: 0 4px 0 0;"></span>
-                      {$currentLang === 'ru' ? 'выключен' : 'disabled'}
+                      {$t('trafficquotas.status_disabled')}
                     </span>
                   {/if}
                 </td>
                 <td>
                   {#if percent(q) >= 100}
-                    <span class="badge badge-error"
-                      >{$currentLang === 'ru' ? 'Блокировка' : 'Block'}</span
-                    >
+                    {#if q.action === 'block'}
+                      <span class="badge badge-error"
+                        >{$t('trafficquotas.badge_status_blocked')}</span
+                      >
+                    {:else if q.action === 'redirect_direct'}
+                      <span class="badge badge-redirected"
+                        >{$t('trafficquotas.badge_status_redirected')}</span
+                      >
+                    {:else}
+                      <span class="badge badge-error">{$t('trafficquotas.status_exceeded')}</span>
+                    {/if}
                   {:else if percent(q) >= q.alert_threshold}
-                    <span class="badge badge-warning"
-                      >{$currentLang === 'ru' ? 'Предупреждение' : 'Warning'}</span
-                    >
+                    <span class="badge badge-warning">{$t('trafficquotas.status_warning')}</span>
                   {:else}
                     <span class="badge badge-success">OK</span>
                   {/if}
@@ -516,12 +596,14 @@
                   <div class="actions-wrapper">
                     <label
                       class="toggle-switch"
+                      class:loading={togglingQuotas[q.id]}
                       style="margin-right: 12px;"
                       title="Включить/выключить лимит"
                     >
                       <input
                         type="checkbox"
                         checked={q.enabled}
+                        disabled={togglingQuotas[q.id]}
                         on:change={() => toggleEnabled(q)}
                       />
                       <span class="toggle-slider"></span>
@@ -580,7 +662,7 @@
               <th>{$t('trafficquotas.proxy_name')}</th>
               <th>Upload</th>
               <th>Download</th>
-              <th>Всего</th>
+              <th>{$t('trafficquotas.total')}</th>
             </tr>
           </thead>
           <tbody>
@@ -697,9 +779,14 @@
           <label for="form-action" class="form-label">{$t('trafficquotas.action')}</label>
           <select id="form-action" class="input" bind:value={formAction}>
             <option value="notify">{$t('trafficquotas.action_notify')}</option>
-            <option value="throttle">{$t('trafficquotas.action_throttle')}</option>
+            <option value="throttle" disabled
+              >{$t('trafficquotas.action_throttle')} ({$t(
+                'trafficquotas.action_unsupported'
+              )})</option
+            >
             <option value="log_only">{$t('trafficquotas.action_log_only')}</option>
             <option value="block">{$t('trafficquotas.action_block')}</option>
+            <option value="redirect_direct">{$t('trafficquotas.action_redirect_direct')}</option>
           </select>
         </div>
 
@@ -709,7 +796,7 @@
             <span class="toggle-slider"></span>
           </label>
           <label for="form-enabled" class="checkbox-label">
-            {$currentLang === 'ru' ? 'Активен' : 'Enabled'}
+            {$t('trafficquotas.status_enabled')}
           </label>
         </div>
       </div>
@@ -739,7 +826,7 @@
     gap: 8px;
   }
 
-  .stats-grid {
+  .tq-stats-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 16px;
@@ -1071,14 +1158,14 @@
   }
 
   :global(.tq-action-notify) {
-    background: rgba(251, 191, 36, 0.15);
-    color: #fbbf24;
-    border: 1px solid rgba(251, 191, 36, 0.3);
+    background: rgba(240, 180, 80, 0.15);
+    color: var(--warning);
+    border: 1px solid rgba(240, 180, 80, 0.3);
   }
   :global(.tq-action-throttle) {
-    background: rgba(251, 146, 60, 0.15);
-    color: #fb923c;
-    border: 1px solid rgba(251, 146, 60, 0.3);
+    background: rgba(201, 162, 58, 0.15);
+    color: var(--idle);
+    border: 1px solid rgba(201, 162, 58, 0.3);
   }
   :global(.tq-action-log) {
     background: rgba(148, 163, 184, 0.12);
@@ -1089,5 +1176,85 @@
     background: rgba(239, 91, 107, 0.15);
     color: var(--danger);
     border: 1px solid rgba(239, 91, 107, 0.3);
+  }
+  :global(.tq-action-redirect) {
+    background: rgba(70, 209, 138, 0.15);
+    color: var(--success);
+    border: 1px solid rgba(70, 209, 138, 0.3);
+  }
+  .badge-redirected {
+    background: rgba(70, 209, 138, 0.2);
+    color: var(--success);
+    border: 1px solid rgba(70, 209, 138, 0.4);
+  }
+  .alert-info-banner {
+    background: var(--hover);
+    border-color: var(--border);
+    border-left: 3px solid var(--accent) !important;
+    border-radius: var(--radius-lg);
+    padding: 16px 20px;
+    position: relative;
+  }
+  .info-banner-content {
+    display: flex;
+    gap: 12px;
+  }
+  .info-banner-icon {
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+  }
+  .info-banner-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .info-banner-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+  .info-banner-description {
+    margin: 0;
+    font-size: 13px;
+    color: var(--fg-secondary);
+    line-height: 1.4;
+  }
+  .info-banner-close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: var(--fg-dim);
+    font-size: 20px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px 8px;
+    transition: color 0.2s;
+  }
+  .info-banner-close:hover {
+    color: var(--fg-primary);
+  }
+  .forecast-calculating {
+    font-size: 16px;
+    color: var(--fg-secondary);
+  }
+  .toggle-switch.loading {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+  .toggle-switch.loading .toggle-slider {
+    animation: toggle-pulse 1.2s infinite ease-in-out;
+  }
+  @keyframes toggle-pulse {
+    0%,
+    100% {
+      background-color: rgba(255, 255, 255, 0.1);
+    }
+    50% {
+      background-color: var(--primary);
+    }
   }
 </style>

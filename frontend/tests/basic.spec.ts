@@ -1,5 +1,39 @@
 import { test, expect } from '@playwright/test';
 
+test.beforeEach(async ({ page }) => {
+  // Отключаем Service Worker в тестах, чтобы запросы к API перехватывались через page.route
+  await page.addInitScript(() => {
+    Object.defineProperty(window.navigator, 'serviceWorker', {
+      value: undefined,
+      writable: false,
+      configurable: true
+    });
+  });
+
+  // Перехватываем все запросы к API
+  await page.route('**/api/**', async (route) => {
+    const url = route.request().url();
+
+    if (url.includes('/api/auth/me')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          authenticated: false,
+          setup_required: false,
+          csrf_token: 'mock-csrf-token'
+        })
+      });
+    } else {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, data: {} })
+      });
+    }
+  });
+});
+
 test('has title', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveTitle(/XKeen Control Panel/);

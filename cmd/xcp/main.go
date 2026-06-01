@@ -155,6 +155,8 @@ func main() {
 	srv.HandleProtected("/api/network/dns", api.NetworkDNS)
 	srv.HandleProtected("/api/network/http", api.NetworkHTTPTest)
 	srv.HandleProtected("/api/network/ip", api.NetworkIP)
+	srv.HandleProtected("/api/network/proxy-test", api.NetworkProxyTest)
+	srv.HandleProtected("/api/network/port-check", api.NetworkPortCheck)
 
 	// Smart Proxy Manager endpoints
 	srv.HandleProtected("/api/smart-proxy/profiles", api.SmartProxyList)
@@ -176,6 +178,8 @@ func main() {
 	srv.HandleProtected("/api/traffic/stats", api.TrafficStats)
 	srv.HandleProtected("/api/traffic/alerts", api.TrafficAlerts)
 	srv.HandleProtected("/api/traffic/alerts/clear", api.TrafficAlertsClear)
+	srv.HandleProtected("/api/traffic/ws", api.TrafficWebSocket)
+	srv.HandleProtected("/api/traffic/reset", api.TrafficReset)
 	srv.HandleProtected("/api/mihomo/connections/ws", api.ConnectionsWebSocket)
 
 	// Start background services
@@ -235,7 +239,7 @@ func main() {
 	defer healthSvc.Stop()
 
 	// Network Tools
-	networkSvc := services.NewNetworkToolsService()
+	networkSvc := services.NewNetworkToolsService(cfg.MihomoAPIURL)
 	api.SetNetworkToolsService(networkSvc)
 
 	// Kernels

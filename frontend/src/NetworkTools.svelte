@@ -33,6 +33,38 @@
     http: false
   };
 
+  // New tools state
+  let selectedProxy = '';
+  let proxyTargetPreset = 'https://www.google.com';
+  let customProxyURL = 'https://';
+  let proxyTimeout = 5000;
+  let showProxySettings = false;
+
+  let portHost = '';
+  let portNumber: number | null = null;
+  let portTimeout = 5000;
+  let showPortSettings = false;
+
+  let mihomoGroups: string[] = [];
+  let mihomoProxies: string[] = [];
+
+  // Local storage history state
+  interface HistoryItem {
+    type: 'ping' | 'traceroute' | 'dns' | 'http' | 'proxy' | 'port';
+    label: string;
+    params: any;
+    timestamp: number;
+  }
+
+  let historyList: HistoryItem[] = [];
+
+  // DOM elements for focus
+  let hostInput: HTMLInputElement;
+  let urlInput: HTMLInputElement;
+  let proxyTargetInput: HTMLInputElement;
+  let portHostInput: HTMLInputElement;
+  let portNumberInput: HTMLInputElement;
+
   const recordTypes = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT'];
 
   function validateHost(h: string): boolean {
@@ -53,6 +85,121 @@
     showSettings[tool] = !showSettings[tool];
   }
 
+  // Load history from localStorage
+  function loadHistory() {
+    try {
+      const stored = localStorage.getItem('net_history');
+      if (stored) {
+        historyList = JSON.parse(stored);
+      }
+    } catch (e) {
+      historyList = [];
+    }
+  }
+
+  // Save item to history
+  function saveHistory(item: Omit<HistoryItem, 'timestamp'>) {
+    const newItem: HistoryItem = {
+      ...item,
+      timestamp: Date.now()
+    };
+
+    // Uniqueness constraint
+    historyList = historyList.filter((x) => {
+      if (x.type !== newItem.type) return true;
+      if (newItem.type === 'ping' || newItem.type === 'traceroute' || newItem.type === 'dns') {
+        return x.params.host !== newItem.params.host;
+      }
+      if (newItem.type === 'http') {
+        return x.params.url !== newItem.params.url;
+      }
+      if (newItem.type === 'proxy') {
+        return (
+          x.params.proxy_name !== newItem.params.proxy_name || x.params.url !== newItem.params.url
+        );
+      }
+      if (newItem.type === 'port') {
+        return x.params.host !== newItem.params.host || x.params.port !== newItem.params.port;
+      }
+      return true;
+    });
+
+    historyList = [newItem, ...historyList].slice(0, 5);
+    try {
+      localStorage.setItem('net_history', JSON.stringify(historyList));
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function clearHistory() {
+    historyList = [];
+    try {
+      localStorage.removeItem('net_history');
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  function selectHistoryItem(item: HistoryItem) {
+    activeTool = item.type;
+    result = null;
+    if (item.type === 'ping' || item.type === 'traceroute' || item.type === 'dns') {
+      host = item.params.host;
+      if (item.type === 'dns' && item.params.record_type) {
+        recordType = item.params.record_type;
+      }
+      setTimeout(() => hostInput?.focus(), 50);
+    } else if (item.type === 'http') {
+      url = item.params.url;
+      setTimeout(() => urlInput?.focus(), 50);
+    } else if (item.type === 'proxy') {
+      selectedProxy = item.params.proxy_name;
+      proxyTargetPreset = item.params.preset || 'custom';
+      customProxyURL = item.params.url;
+      setTimeout(() => {
+        if (proxyTargetPreset === 'custom') {
+          proxyTargetInput?.focus();
+        }
+      }, 50);
+    } else if (item.type === 'port') {
+      portHost = item.params.host;
+      portNumber = item.params.port;
+      setTimeout(() => portHostInput?.focus(), 50);
+    }
+  }
+
+  // Fetch Mihomo proxies to populate proxy selection dropdown
+  async function fetchClashProxies() {
+    try {
+      const res = await fetch('/api/mihomo/proxy/proxies');
+      if (res.ok) {
+        const data = await res.json();
+        const groups: string[] = [];
+        const proxies: string[] = [];
+        for (const [name, p] of Object.entries(data.proxies || {})) {
+          const type = (p as any).type;
+          if (
+            type === 'Selector' ||
+            type === 'Fallback' ||
+            type === 'URLTest' ||
+            type === 'LoadBalance'
+          ) {
+            groups.push(name);
+          } else if (type !== 'Direct' && type !== 'Reject') {
+            proxies.push(name);
+          }
+        }
+        mihomoGroups = groups.sort();
+        mihomoProxies = proxies.sort();
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  $: finalProxyURL = proxyTargetPreset === 'custom' ? customProxyURL : proxyTargetPreset;
+
   async function runPing() {
     if (!host) return;
     if (!validateHost(host)) {
@@ -69,7 +216,15 @@
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ host, count })
       });
-      result = await res.json();
+      const data = await res.json();
+      result = data;
+      if (res.ok && data?.success) {
+        saveHistory({
+          type: 'ping',
+          label: `[Ping] ${host}`,
+          params: { host }
+        });
+      }
     } catch (e) {
       result = { success: false, error: 'Request failed' };
     } finally {
@@ -93,7 +248,15 @@
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ host, max_hops: maxHops })
       });
-      result = await res.json();
+      const data = await res.json();
+      result = data;
+      if (res.ok && data?.success) {
+        saveHistory({
+          type: 'traceroute',
+          label: `[Traceroute] ${host}`,
+          params: { host }
+        });
+      }
     } catch (e) {
       result = { success: false, error: 'Request failed' };
     } finally {
@@ -117,7 +280,15 @@
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ host, record_type: recordType })
       });
-      result = await res.json();
+      const data = await res.json();
+      result = data;
+      if (res.ok && data?.success) {
+        saveHistory({
+          type: 'dns',
+          label: `[DNS ${recordType}] ${host}`,
+          params: { host, record_type: recordType }
+        });
+      }
     } catch (e) {
       result = { success: false, error: 'Request failed' };
     } finally {
@@ -141,7 +312,106 @@
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ url, timeout })
       });
-      result = await res.json();
+      const data = await res.json();
+      result = data;
+      if (res.ok && data?.success) {
+        saveHistory({
+          type: 'http',
+          label: `[HTTP] ${url}`,
+          params: { url }
+        });
+      }
+    } catch (e) {
+      result = { success: false, error: 'Request failed' };
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function runProxyTest() {
+    if (!selectedProxy) return;
+    const target = finalProxyURL;
+    if (!target) return;
+    if (!validateURL(target)) {
+      result = { success: false, error: $t('net.invalid_url') };
+      return;
+    }
+    loading = true;
+    activeTool = 'proxy';
+    result = null;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/network/proxy-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        body: JSON.stringify({ proxy_name: selectedProxy, url: target, timeout: proxyTimeout })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        result = {
+          success: true,
+          output: data.output || $t('net.proxy_test_ok', { rtt: data.delay })
+        };
+        saveHistory({
+          type: 'proxy',
+          label: `[Proxy ${selectedProxy}] ${target}`,
+          params: { proxy_name: selectedProxy, url: target, preset: proxyTargetPreset }
+        });
+      } else {
+        result = {
+          success: false,
+          error:
+            data.error || $t('net.proxy_test_fail', { error: data.error || 'Connection failed' }),
+          output: data.output
+        };
+      }
+    } catch (e) {
+      result = { success: false, error: 'Request failed' };
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function runPortCheck() {
+    if (!portHost || portNumber === null) return;
+    if (!validateHost(portHost)) {
+      result = { success: false, error: $t('net.invalid_host') };
+      return;
+    }
+    if (portNumber < 1 || portNumber > 65535) {
+      result = { success: false, error: 'Port must be 1-65535' };
+      return;
+    }
+    loading = true;
+    activeTool = 'port';
+    result = null;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/network/port-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        body: JSON.stringify({ host: portHost, port: portNumber, timeout: portTimeout })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        result = {
+          success: true,
+          output: data.output || $t('net.port_open', { port: portNumber })
+        };
+        saveHistory({
+          type: 'port',
+          label: `[Port ${portNumber}] ${portHost}`,
+          params: { host: portHost, port: portNumber }
+        });
+      } else {
+        result = {
+          success: false,
+          error:
+            data.error ||
+            $t('net.port_closed', { port: portNumber, error: data.error || 'Connection failed' }),
+          output: data.output
+        };
+      }
     } catch (e) {
       result = { success: false, error: 'Request failed' };
     } finally {
@@ -166,10 +436,14 @@
     else if (tool === 'traceroute') runTraceroute();
     else if (tool === 'dns') runDNS();
     else if (tool === 'http') runHTTP();
+    else if (tool === 'proxy') runProxyTest();
+    else if (tool === 'port') runPortCheck();
   }
 
   onMount(() => {
     fetchIP();
+    fetchClashProxies();
+    loadHistory();
   });
 </script>
 
@@ -209,7 +483,13 @@
         {$t('net.tab_ping')}
       </h3>
       <div class="form-group" style="margin-bottom:10px;">
-        <input class="input" bind:value={host} placeholder="cloudflare.com" disabled={loading} />
+        <input
+          bind:this={hostInput}
+          class="input"
+          bind:value={host}
+          placeholder="cloudflare.com"
+          disabled={loading}
+        />
       </div>
       {#if showSettings.ping}
         <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
@@ -343,7 +623,13 @@
         {$t('net.tab_http')}
       </h3>
       <div class="form-group" style="margin-bottom:10px;">
-        <input class="input" bind:value={url} placeholder="https://google.com" disabled={loading} />
+        <input
+          bind:this={urlInput}
+          class="input"
+          bind:value={url}
+          placeholder="https://google.com"
+          disabled={loading}
+        />
       </div>
       {#if showSettings.http}
         <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
@@ -370,6 +656,218 @@
         <button class="btn btn-secondary" on:click={() => toggleSettings('http')} title="Настройки"
           >⋯</button
         >
+      </div>
+    </div>
+
+    <!-- Proxy Test -->
+    <div class="nt-card">
+      <h3 style="display:flex;align-items:center;gap:8px;">
+        <Icon name="network" size={14} />
+        {$t('net.tab_proxy_test')}
+      </h3>
+
+      <div
+        class="form-group"
+        style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;"
+      >
+        <label
+          for="proxy-select"
+          class="lbl"
+          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+        >
+          {$t('net.proxy_select')}
+        </label>
+        <select id="proxy-select" class="input" bind:value={selectedProxy} disabled={loading}>
+          <option value="">-- {$t('net.proxy_select')} --</option>
+          {#if mihomoGroups.length > 0}
+            <optgroup label="Groups">
+              {#each mihomoGroups as g}
+                <option value={g}>{g}</option>
+              {/each}
+            </optgroup>
+          {/if}
+          {#if mihomoProxies.length > 0}
+            <optgroup label="Proxies">
+              {#each mihomoProxies as p}
+                <option value={p}>{p}</option>
+              {/each}
+            </optgroup>
+          {/if}
+        </select>
+      </div>
+
+      <div
+        class="form-group"
+        style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;"
+      >
+        <label
+          for="proxy-target"
+          class="lbl"
+          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+        >
+          {$t('net.target_url')}
+        </label>
+        <select id="proxy-target" class="input" bind:value={proxyTargetPreset} disabled={loading}>
+          <option value="https://www.google.com">Google</option>
+          <option value="https://www.youtube.com">YouTube</option>
+          <option value="https://chatgpt.com">ChatGPT</option>
+          <option value="https://github.com">GitHub</option>
+          <option value="custom">{$t('net.presets')}: Свой URL...</option>
+        </select>
+      </div>
+
+      {#if proxyTargetPreset === 'custom'}
+        <div class="form-group" style="margin-bottom:10px;" transition:slide={{ duration: 180 }}>
+          <input
+            bind:this={proxyTargetInput}
+            class="input"
+            bind:value={customProxyURL}
+            placeholder="https://..."
+            disabled={loading}
+          />
+        </div>
+      {/if}
+
+      {#if showProxySettings}
+        <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
+          <label for="proxy-timeout" class="lbl">{$t('net.timeout_sec')}</label>
+          <input
+            id="proxy-timeout"
+            type="number"
+            class="input input-sm"
+            bind:value={proxyTimeout}
+            min="100"
+            max="15000"
+            step="100"
+          />
+        </div>
+      {/if}
+
+      <div style="display:flex;gap:8px;margin-top:auto;">
+        <button
+          class="btn btn-primary"
+          style="flex:1;"
+          on:click={() => runTool('proxy')}
+          disabled={loading || !selectedProxy}
+        >
+          {loading && activeTool === 'proxy' ? $t('net.running') : $t('net.run')}
+        </button>
+        <button
+          class="btn btn-secondary"
+          on:click={() => (showProxySettings = !showProxySettings)}
+          title="Настройки"
+        >
+          ⋯
+        </button>
+      </div>
+    </div>
+
+    <!-- Port Checker -->
+    <div class="nt-card">
+      <h3 style="display:flex;align-items:center;gap:8px;">
+        <Icon name="network" size={14} />
+        {$t('net.tab_port_check')}
+      </h3>
+
+      <div
+        class="form-group"
+        style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;"
+      >
+        <label
+          for="port-host"
+          class="lbl"
+          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+        >
+          {$t('net.host_ip')}
+        </label>
+        <input
+          id="port-host"
+          bind:this={portHostInput}
+          class="input"
+          bind:value={portHost}
+          placeholder="vpn.server.com"
+          disabled={loading}
+        />
+      </div>
+
+      <div
+        class="form-group"
+        style="margin-bottom:10px; display:flex; flex-direction:column; gap:4px;"
+      >
+        <label
+          for="port-number"
+          class="lbl"
+          style="font-size: 11px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;"
+        >
+          {$t('net.port')}
+        </label>
+        <input
+          id="port-number"
+          bind:this={portNumberInput}
+          type="number"
+          class="input"
+          bind:value={portNumber}
+          placeholder="443"
+          disabled={loading}
+          min="1"
+          max="65535"
+        />
+      </div>
+
+      <!-- Quick presets chips -->
+      <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;">
+        {#each [22, 80, 443, 1080, 8080] as p}
+          <button
+            type="button"
+            class="chip"
+            style="background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:2px 8px; font-size:11px; color:var(--fg-secondary); cursor:pointer; transition:all 0.15s ease;"
+            on:click={() => (portNumber = p)}
+            disabled={loading}
+          >
+            {p === 22
+              ? '22 (SSH)'
+              : p === 80
+                ? '80 (HTTP)'
+                : p === 443
+                  ? '443 (HTTPS)'
+                  : p === 1080
+                    ? '1080 (Socks)'
+                    : `${p}`}
+          </button>
+        {/each}
+      </div>
+
+      {#if showPortSettings}
+        <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
+          <label for="port-timeout" class="lbl">{$t('net.timeout_sec')}</label>
+          <input
+            id="port-timeout"
+            type="number"
+            class="input input-sm"
+            bind:value={portTimeout}
+            min="100"
+            max="15000"
+            step="100"
+          />
+        </div>
+      {/if}
+
+      <div style="display:flex;gap:8px;margin-top:auto;">
+        <button
+          class="btn btn-primary"
+          style="flex:1;"
+          on:click={() => runTool('port')}
+          disabled={loading || !portHost || portNumber === null}
+        >
+          {loading && activeTool === 'port' ? $t('net.running') : $t('net.run')}
+        </button>
+        <button
+          class="btn btn-secondary"
+          on:click={() => (showPortSettings = !showPortSettings)}
+          title="Настройки"
+        >
+          ⋯
+        </button>
       </div>
     </div>
   </div>
@@ -409,13 +907,80 @@
       </div>
     </div>
   {/if}
+
+  <!-- Test History Section -->
+  <div class="card mb-3" style="padding: 16px 20px; margin-top: 16px;">
+    <div
+      style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;"
+    >
+      <h3
+        style="margin:0; font-size:14px; font-weight:700; color:var(--fg-primary); display:flex; align-items:center; gap:8px;"
+      >
+        <Icon name="connections" size={14} />
+        {$t('net.history')}
+      </h3>
+      {#if historyList.length > 0}
+        <button
+          class="btn btn-secondary btn-sm"
+          style="padding: 2px 8px; font-size: 11px;"
+          on:click={clearHistory}
+        >
+          {$t('console.clear')}
+        </button>
+      {/if}
+    </div>
+
+    {#if historyList.length === 0}
+      <div style="color:var(--fg-dim); font-size:12.5px; text-align:center; padding:12px 0;">
+        {$t('net.no_history')}
+      </div>
+    {:else}
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        {#each historyList as item}
+          <div
+            role="button"
+            tabindex="0"
+            class="history-row"
+            style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; cursor:pointer; font-size:13px; transition:all 0.2s ease;"
+            on:click={() => selectHistoryItem(item)}
+            on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectHistoryItem(item)}
+          >
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span
+                class="badge"
+                class:badge-success={item.type === 'ping' ||
+                  item.type === 'port' ||
+                  item.type === 'proxy'}
+                style="font-size:11px; text-transform:uppercase; font-weight:600;"
+              >
+                {item.type}
+              </span>
+              <span style="color:var(--fg-primary); font-weight:500;">
+                {item.label}
+              </span>
+            </div>
+            <span
+              style="color:var(--fg-dim); font-size:11.5px; font-family:var(--font-family-mono);"
+            >
+              {new Date(item.timestamp).toLocaleTimeString()}
+            </span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </div>
 </div>
 
 <style>
   .nt-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+  }
+
+  .history-row:hover {
+    border-color: var(--accent) !important;
+    background: rgba(41, 194, 240, 0.03) !important;
   }
 
   .nt-card {
@@ -467,6 +1032,26 @@
     overflow: auto;
     white-space: pre-wrap;
     word-break: break-all;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) var(--bg-card);
+  }
+
+  .term-output::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .term-output::-webkit-scrollbar-track {
+    background: var(--bg-card);
+  }
+
+  .term-output::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .term-output::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-dim);
   }
 
   @media (max-width: 1024px) {

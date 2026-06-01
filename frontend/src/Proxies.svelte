@@ -6,6 +6,7 @@
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
+  import ChevronDown from './lib/components/icons/ChevronDown.svelte';
 
   interface Proxy {
     name: string;
@@ -56,6 +57,21 @@
   let testingLatency = false;
   let testingProxy = '';
   let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  let collapsedGroups = new Set<string>();
+  let filterQuery = '';
+  let seenGroups = new Set<string>();
+  const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
+
+  function safeTimeout(fn: () => void | Promise<void>, ms: number): ReturnType<typeof setTimeout> {
+    const id = setTimeout(fn, ms);
+    pendingTimeouts.push(id);
+    return id;
+  }
+
+  $: filteredGroups =
+    filterQuery.trim() === ''
+      ? groups
+      : groups.filter((g) => g.name.toLowerCase().includes(filterQuery.trim().toLowerCase()));
 
   function getLastDelay(proxy: Proxy): number | undefined {
     if (proxy.history && proxy.history.length > 0) {
@@ -69,6 +85,53 @@
       return proxy.history[proxy.history.length - 1].delay > 0;
     }
     return proxy.alive ?? false;
+  }
+
+  function updateCollapsed() {
+    const current = new Set(groups.map((g) => g.name));
+    // Удалять устаревшие записи для исчезнувших групп
+    for (const name of [...collapsedGroups]) {
+      if (!current.has(name)) collapsedGroups.delete(name);
+    }
+    // Авто-сворачивать новые большие группы
+    for (const g of groups) {
+      if (g.all.length > 8 && !seenGroups.has(g.name)) {
+        collapsedGroups.add(g.name);
+      }
+      seenGroups.add(g.name);
+    }
+    collapsedGroups = collapsedGroups;
+  }
+
+  function toggleCollapse(groupName: string) {
+    if (collapsedGroups.has(groupName)) {
+      collapsedGroups.delete(groupName);
+    } else {
+      collapsedGroups.add(groupName);
+    }
+    collapsedGroups = collapsedGroups;
+  }
+
+  function getCollapsedProxies(group: ProxyGroup): string[] {
+    const active = group.now && proxies[group.now] ? group.now : '';
+    const others = group.all.filter((name) => name !== active);
+
+    const sortByDelay = (names: string[]) =>
+      [...names].sort((a, b) => {
+        const da = proxies[a] ? (getLastDelay(proxies[a]) ?? Infinity) : Infinity;
+        const db = proxies[b] ? (getLastDelay(proxies[b]) ?? Infinity) : Infinity;
+        return da - db;
+      });
+
+    const alive = others.filter((n) => proxies[n] && isProxyAlive(proxies[n]));
+    const dead = others.filter((n) => !proxies[n] || !isProxyAlive(proxies[n]));
+
+    const top3 = sortByDelay(alive).slice(0, 3);
+    if (top3.length < 3) {
+      top3.push(...sortByDelay(dead).slice(0, 3 - top3.length));
+    }
+
+    return active ? [active, ...top3] : top3.slice(0, 4);
   }
 
   function computeStats(): ObservatoryStats {
@@ -143,6 +206,7 @@
           proxies[name].history = data.proxies[name].history;
         }
       });
+      updateCollapsed();
     } catch (e: any) {
       error = e.message;
     } finally {
@@ -191,15 +255,16 @@
           )
         );
       } else {
-        await fetch(
+        const res = await fetch(
           '/api/mihomo/proxy/proxies/delay?url=http://www.gstatic.com/generate_204&timeout=5000',
           {
             method: 'GET',
             headers: { 'X-CSRF-Token': csrfToken || '' }
           }
         );
+        if (!res.ok) throw new Error($t('proxies.load_error'));
       }
-      setTimeout(async () => {
+      safeTimeout(async () => {
         await fetchProxies();
         testingLatency = false;
       }, 2000);
@@ -213,14 +278,15 @@
     testingProxy = proxyName;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      await fetch(
+      const res = await fetch(
         `/api/mihomo/proxy/proxies/${encodeURIComponent(proxyName)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`,
         {
           method: 'GET',
           headers: { 'X-CSRF-Token': csrfToken || '' }
         }
       );
-      setTimeout(async () => {
+      if (!res.ok) throw new Error($t('proxies.load_error'));
+      safeTimeout(async () => {
         await fetchProxies();
         testingProxy = '';
       }, 1500);
@@ -238,6 +304,17 @@
       LoadBalance: 'LoadBalance'
     };
     return labels[type] || type;
+  }
+
+  function nodesLabel(count: number): string {
+    if ($currentLang === 'ru') {
+      const m10 = count % 10;
+      const m100 = count % 100;
+      if (m10 === 1 && m100 !== 11) return `${count} узел`;
+      if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return `${count} узла`;
+      return `${count} узлов`;
+    }
+    return count === 1 ? `1 node` : `${count} nodes`;
   }
 
   function getProxyDelay(proxyName: string): number | undefined {
@@ -288,12 +365,12 @@
         body: JSON.stringify({ action: 'start' })
       });
       if (!res.ok) throw new Error('Failed to start Mihomo');
-      setTimeout(async () => {
+      safeTimeout(async () => {
         await fetchCapabilities();
         await fetchProxies();
         mihomoLaunching = false;
       }, 1500);
-      setTimeout(async () => {
+      safeTimeout(async () => {
         await fetchCapabilities();
         await fetchProxies();
       }, 4000);
@@ -306,7 +383,11 @@
   onMount(() => {
     fetchProxies();
     const interval = setInterval(fetchProxies, 10000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (loadTimeoutId) clearTimeout(loadTimeoutId);
+      pendingTimeouts.forEach(clearTimeout);
+    };
   });
 </script>
 
@@ -321,6 +402,13 @@
       <p class="sub">{$t('proxies.subtitle')}</p>
     </div>
     <div class="ph-actions">
+      <input
+        class="group-search"
+        type="search"
+        bind:value={filterQuery}
+        placeholder={$t('proxies.filter_placeholder')}
+        aria-label={$t('proxies.filter_placeholder')}
+      />
       <button class="btn btn-secondary" on:click={fetchProxies} disabled={loading}>
         <svg
           width="14"
@@ -424,23 +512,48 @@
     {:else}
       <div class="group-grid">
         {#each groups as group}
-          <div class="group-card">
-            <div class="gc-head">
+          {@const isFiltered =
+            filterQuery.trim() !== '' &&
+            !group.name.toLowerCase().includes(filterQuery.trim().toLowerCase())}
+          {@const isCollapsed = collapsedGroups.has(group.name)}
+          {@const collapsible = group.all.length > 8}
+          {@const shownProxies = isCollapsed ? getCollapsedProxies(group) : group.all}
+          {@const hiddenCount = isCollapsed ? group.all.length - shownProxies.length : 0}
+          {@const ROW_HEIGHT_PX = 44}
+          <div class="group-card" style={isFiltered ? 'display:none;' : ''}>
+            <div
+              class="gc-head"
+              class:collapsible
+              role={collapsible ? 'button' : undefined}
+              tabindex={collapsible ? 0 : undefined}
+              aria-expanded={collapsible ? !isCollapsed : undefined}
+              on:click={() => collapsible && toggleCollapse(group.name)}
+              on:keydown={(e) =>
+                (e.key === 'Enter' || e.key === ' ') && collapsible && toggleCollapse(group.name)}
+            >
               <span class="name">{group.name}</span>
               <span class="type">{getGroupTypeLabel(group.type)}</span>
               {#if group.type !== 'Fallback'}
                 <span style="margin-left:auto;" class="status-badge active">
-                  {$currentLang === 'ru'
-                    ? `${group.all.length} узлов`
-                    : `${group.all.length} nodes`}
+                  {nodesLabel(group.all.length)}
                 </span>
               {:else}
                 <span style="margin-left:auto;" class="status-badge active">{group.now || '—'}</span
                 >
               {/if}
+              {#if collapsible}
+                <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
+                  <ChevronDown size={14} color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'} />
+                </span>
+              {/if}
             </div>
-            <div class="gc-body">
-              {#each group.all as proxyName}
+            <div
+              class="gc-body"
+              style="max-height: {isCollapsed
+                ? shownProxies.length * ROW_HEIGHT_PX + (hiddenCount > 0 ? 30 : 4) + 'px'
+                : '2000px'};"
+            >
+              {#each shownProxies as proxyName}
                 {@const isActive = group.now === proxyName}
                 {@const healthClass = getLatencyClass(proxyName)}
                 {@const healthText = getLatencyText(proxyName)}
@@ -507,6 +620,20 @@
                   {/if}
                 </div>
               {/each}
+              {#if isCollapsed}
+                {#if hiddenCount > 0}
+                  <div
+                    class="more-hint"
+                    role="button"
+                    tabindex="0"
+                    on:click={() => toggleCollapse(group.name)}
+                    on:keydown={(e) =>
+                      (e.key === 'Enter' || e.key === ' ') && toggleCollapse(group.name)}
+                  >
+                    {$t('proxies.more_hint', { count: hiddenCount })}
+                  </div>
+                {/if}
+              {/if}
             </div>
           </div>
         {/each}
@@ -516,16 +643,16 @@
 </div>
 
 <style>
+  /* Observatory: compact padding for this page only */
+  .stat-box {
+    padding: 12px 18px 14px;
+  }
+
   /* proxies: group cards grid */
   .group-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 14px;
-  }
-  @media (max-width: 1024px) {
-    .group-grid {
-      grid-template-columns: 1fr;
-    }
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
   }
   .group-card {
     background: var(--bg-card);
@@ -539,6 +666,13 @@
     align-items: center;
     gap: 10px;
     border-bottom: 1px solid var(--border);
+  }
+  .group-card .gc-head.collapsible {
+    cursor: pointer;
+    user-select: none;
+  }
+  .group-card .gc-head.collapsible:hover {
+    background: var(--hover);
   }
   .group-card .gc-head .name {
     font-weight: 700;
@@ -554,13 +688,17 @@
   }
   .group-card .gc-body {
     padding: 0;
+    overflow: hidden;
+    transition: max-height var(--transition-normal);
   }
   .proxy-row {
+    position: relative;
     display: grid;
     grid-template-columns: 1fr auto auto;
     gap: 14px;
     align-items: center;
-    padding: 11px 18px;
+    padding: 4px 8px;
+    min-height: 36px;
     border-bottom: 1px solid var(--border-light);
   }
   .proxy-row:last-child {
@@ -571,15 +709,16 @@
   }
   .proxy-row.now {
     background: var(--accent-soft);
+    padding-left: 20px;
   }
   .proxy-row.now::before {
     content: '→';
     color: var(--accent);
     font-weight: 700;
-    margin-right: -8px;
-    grid-column: 1;
     position: absolute;
-    transform: translateX(-16px);
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
   }
   .proxy-row .p-name {
     font-weight: 500;
@@ -624,6 +763,49 @@
     opacity: 1 !important;
   }
 
+  .group-search {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
+    font-size: 13px;
+    font-family: var(--font-family-sans);
+    padding: 4px 12px;
+    width: 200px;
+    outline: none;
+    transition: border-color var(--transition-fast);
+  }
+  .group-search:focus {
+    border-color: var(--accent);
+  }
+  .group-search::placeholder {
+    color: var(--fg-dim);
+  }
+  .group-search::-webkit-search-cancel-button {
+    display: none;
+  }
+
+  .chevron-wrap {
+    display: inline-flex;
+    flex-shrink: 0;
+    transition: transform var(--transition-fast);
+  }
+  .chevron-wrap.rotated {
+    transform: rotate(180deg);
+  }
+
+  .more-hint {
+    padding: 4px 16px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--fg-dim);
+    font-size: 12px;
+    border-top: 1px solid var(--border-light);
+  }
+  .more-hint:hover {
+    background: var(--hover);
+  }
+
   /* Mobile: proxy cards stack, observatory stats handled globally at 768px */
   @media (max-width: 640px) {
     .group-grid {
@@ -644,6 +826,9 @@
     .lat {
       font-size: 11px;
       padding: 2px 5px;
+    }
+    .group-search {
+      width: 100%;
     }
   }
 </style>

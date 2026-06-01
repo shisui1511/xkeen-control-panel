@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -47,25 +48,47 @@ type TrafficAlert struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
+// TrafficPeaks holds peak upload and download rates over calendar periods
+type TrafficPeaks struct {
+	PeakHourUp   int64 `json:"peak_hour_up"`
+	PeakHourDown int64 `json:"peak_hour_down"`
+	PeakDayUp    int64 `json:"peak_day_up"`
+	PeakDayDown  int64 `json:"peak_day_down"`
+	PeakWeekUp   int64 `json:"peak_week_up"`
+	PeakWeekDown int64 `json:"peak_week_down"`
+	HourStart    int64 `json:"hour_start"`
+	DayStart     int64 `json:"day_start"`
+	WeekStart    int64 `json:"week_start"`
+}
+
 // TrafficStore is the on-disk format
 type TrafficStore struct {
-	Quotas     []TrafficQuota           `json:"quotas"`
-	ProxyStats map[string]*ProxyTraffic `json:"proxy_stats"`
+	Quotas         []TrafficQuota           `json:"quotas"`
+	ProxyStats     map[string]*ProxyTraffic `json:"proxy_stats"`
+	Peaks          TrafficPeaks             `json:"peaks"`
+	ResetTime      int64                    `json:"reset_time"`
+	BlockedProxies map[string]string        `json:"blocked_proxies"`
 }
 
 // saveLockThrottle is the minimum interval between background/periodic saves
 // (CRUD-triggered saves always use force=true and bypass throttling).
-const saveLockThrottle = 5 * time.Second
+const saveLockThrottle = 1 * time.Minute
 
 // maxTrafficFileSize is the rotation threshold for traffic.json.
 const maxTrafficFileSize = 5 * 1024 * 1024 // 5 MB
 
+// mihomoConnMetadata holds metadata about connection protocol
+type mihomoConnMetadata struct {
+	Network string `json:"network"`
+}
+
 // mihomoConn is a single connection entry from the Mihomo /connections stream.
 type mihomoConn struct {
-	ID       string   `json:"id"`
-	Chains   []string `json:"chains"`
-	Upload   int64    `json:"upload"`
-	Download int64    `json:"download"`
+	ID       string             `json:"id"`
+	Chains   []string           `json:"chains"`
+	Upload   int64              `json:"upload"`
+	Download int64              `json:"download"`
+	Metadata mihomoConnMetadata `json:"metadata"`
 }
 
 // TrafficQuotaService manages traffic accounting and quotas
@@ -87,18 +110,33 @@ type TrafficQuotaService struct {
 	// fan-out: подписчики получают raw JSON-снимки подключений
 	connSubs   map[chan []byte]struct{}
 	connSubsMu sync.RWMutex
+
+	peaks            TrafficPeaks
+	activeConnsCount int64
+	tcpConnsCount    int64
+	udpConnsCount    int64
+	trafficSubs      map[chan []byte]struct{}
+	trafficSubsMu    sync.RWMutex
+
+	httpClient         *http.Client
+	blockedProxies     map[string]string
+	resetTime          int64
+	trackerInitialized bool
 }
 
 func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaService {
 	svc := &TrafficQuotaService{
-		dataDir:    dataDir,
-		mihomoURL:  mihomoURL,
-		secret:     secret,
-		quotas:     []TrafficQuota{},
-		proxyStats: make(map[string]*ProxyTraffic),
-		alerts:     []TrafficAlert{},
-		stopCh:     make(chan struct{}),
-		connSubs:   make(map[chan []byte]struct{}),
+		dataDir:        dataDir,
+		mihomoURL:      mihomoURL,
+		secret:         secret,
+		quotas:         []TrafficQuota{},
+		proxyStats:     make(map[string]*ProxyTraffic),
+		alerts:         []TrafficAlert{},
+		stopCh:         make(chan struct{}),
+		connSubs:       make(map[chan []byte]struct{}),
+		trafficSubs:    make(map[chan []byte]struct{}),
+		httpClient:     &http.Client{Timeout: 5 * time.Second},
+		blockedProxies: make(map[string]string),
 	}
 	svc.load()
 	return svc
@@ -112,6 +150,10 @@ func (s *TrafficQuotaService) Start() {
 func (s *TrafficQuotaService) Stop() {
 	close(s.stopCh)
 	s.wg.Wait()
+
+	s.mu.Lock()
+	_ = s.saveLocked(true)
+	s.mu.Unlock()
 }
 
 func (s *TrafficQuotaService) storePath() string {
@@ -123,10 +165,16 @@ func (s *TrafficQuotaService) storePath() string {
 func (s *TrafficQuotaService) load() {
 	data, err := os.ReadFile(s.storePath())
 	if err != nil {
+		s.mu.Lock()
+		s.resetTime = time.Now().Unix()
+		s.mu.Unlock()
 		return
 	}
 	var store TrafficStore
 	if err := json.Unmarshal(data, &store); err != nil {
+		s.mu.Lock()
+		s.resetTime = time.Now().Unix()
+		s.mu.Unlock()
 		return
 	}
 	s.mu.Lock()
@@ -135,6 +183,16 @@ func (s *TrafficQuotaService) load() {
 		s.proxyStats = store.ProxyStats
 	} else {
 		s.proxyStats = make(map[string]*ProxyTraffic)
+	}
+	s.peaks = store.Peaks
+	s.resetTime = store.ResetTime
+	if s.resetTime == 0 {
+		s.resetTime = time.Now().Unix()
+	}
+	if store.BlockedProxies != nil {
+		s.blockedProxies = store.BlockedProxies
+	} else {
+		s.blockedProxies = make(map[string]string)
 	}
 	s.mu.Unlock()
 }
@@ -149,8 +207,11 @@ func (s *TrafficQuotaService) saveLocked(force bool) error {
 		return nil
 	}
 	store := TrafficStore{
-		Quotas:     s.quotas,
-		ProxyStats: s.proxyStats,
+		Quotas:         s.quotas,
+		ProxyStats:     s.proxyStats,
+		Peaks:          s.peaks,
+		ResetTime:      s.resetTime,
+		BlockedProxies: s.blockedProxies,
 	}
 
 	data, err := json.MarshalIndent(store, "", "  ")
@@ -191,6 +252,24 @@ func (s *TrafficQuotaService) rotateIfNeeded() {
 		if !active[name] {
 			delete(s.proxyStats, name)
 		}
+	}
+
+	// Write pruned state back to disk immediately so traffic.json exists
+	store := TrafficStore{
+		Quotas:         s.quotas,
+		ProxyStats:     s.proxyStats,
+		Peaks:          s.peaks,
+		ResetTime:      s.resetTime,
+		BlockedProxies: s.blockedProxies,
+	}
+	data, marshalErr := json.MarshalIndent(store, "", "  ")
+	if marshalErr != nil {
+		log.Printf("traffic: rotate marshal failed: %v", marshalErr)
+		return
+	}
+	if writeErr := utils.AtomicWriteFile(s.storePath(), data, 0600); writeErr != nil {
+		log.Printf("traffic: rotate write failed: %v", writeErr)
+		return
 	}
 }
 
@@ -295,7 +374,35 @@ func (s *TrafficQuotaService) GetStats() map[string]interface{} {
 		"total_upload":   totalUpload,
 		"total_download": totalDownload,
 		"total":          totalUpload + totalDownload,
+		"peaks":          s.peaks,
+		"reset_time":     s.resetTime,
 	}
+}
+
+func (s *TrafficQuotaService) ResetStats() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.proxyStats = make(map[string]*ProxyTraffic)
+
+	now := time.Now()
+	s.resetTime = now.Unix()
+	s.peaks = TrafficPeaks{
+		HourStart: now.Truncate(time.Hour).Unix(),
+		DayStart:  time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix(),
+	}
+	offset := int(now.Weekday() - time.Monday)
+	if offset < 0 {
+		offset += 7
+	}
+	s.peaks.WeekStart = time.Date(now.Year(), now.Month(), now.Day()-offset, 0, 0, 0, 0, now.Location()).Unix()
+
+	for i := range s.quotas {
+		s.quotas[i].CurrentBytes = 0
+		s.quotas[i].LastReset = now.Unix()
+	}
+
+	return s.saveLocked(true)
 }
 
 func (s *TrafficQuotaService) GetAlerts() []TrafficAlert {
@@ -335,8 +442,9 @@ func (s *TrafficQuotaService) collectorLoop() {
 	s.checkResets()
 
 	// WebSocket stream runs in its own goroutine with reconnect logic.
-	s.wg.Add(1)
+	s.wg.Add(2)
 	go s.connectionsWSLoop()
+	go s.trafficWSLoop()
 
 	for {
 		select {
@@ -409,10 +517,16 @@ func (s *TrafficQuotaService) streamConnections() error {
 	}
 	defer conn.Close()
 
-	// Close the WebSocket when the service stops so ReadJSON unblocks.
+	done := make(chan struct{})
+	defer close(done)
+
+	// Close the WebSocket when the service stops so ReadJSON/ReadMessage unblocks.
 	go func() {
-		<-s.stopCh
-		conn.Close()
+		select {
+		case <-s.stopCh:
+			conn.Close()
+		case <-done:
+		}
 	}()
 
 	log.Printf("TrafficQuota: WebSocket connected to %s", wsURL)
@@ -469,9 +583,10 @@ func (s *TrafficQuotaService) SubscribeConnections() (ch chan []byte, unsub func
 // connections snapshot and accumulates them into proxyStats.
 func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	activeIDs := make(map[string]bool, len(connections))
+	isFirstSnapshot := !s.trackerInitialized
+	s.trackerInitialized = true
 
 	for _, conn := range connections {
 		if len(conn.Chains) == 0 {
@@ -490,9 +605,11 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 			deltaUp = conn.Upload - last.Upload
 			deltaDown = conn.Download - last.Download
 		} else {
-			// New connection: treat current bytes as the delta.
-			deltaUp = conn.Upload
-			deltaDown = conn.Download
+			if !isFirstSnapshot {
+				// New connection: treat current bytes as the delta.
+				deltaUp = conn.Upload
+				deltaDown = conn.Download
+			}
 		}
 
 		if deltaUp < 0 {
@@ -511,6 +628,22 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 			stat.UploadBytes += deltaUp
 			stat.DownloadBytes += deltaDown
 			stat.TotalBytes = stat.UploadBytes + stat.DownloadBytes
+
+			for i := range s.quotas {
+				q := &s.quotas[i]
+				if !q.Enabled {
+					continue
+				}
+				match := false
+				if q.TargetType == "global" {
+					match = true
+				} else if q.TargetType == "proxy" && q.TargetID == proxyName {
+					match = true
+				}
+				if match {
+					q.CurrentBytes += (deltaUp + deltaDown)
+				}
+			}
 		}
 
 		s.connectionTracker.Store(conn.ID, connStats{Upload: conn.Upload, Download: conn.Download})
@@ -524,8 +657,214 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 		return true
 	})
 
+	var activeCount, tcpCount, udpCount int64
+	activeCount = int64(len(connections))
+	for _, conn := range connections {
+		net := strings.ToUpper(conn.Metadata.Network)
+		if net == "TCP" {
+			tcpCount++
+		} else if net == "UDP" {
+			udpCount++
+		}
+	}
+	s.activeConnsCount = activeCount
+	s.tcpConnsCount = tcpCount
+	s.udpConnsCount = udpCount
+
 	if err := s.saveLocked(false); err != nil {
 		log.Printf("TrafficQuota: failed to save stats: %v", err)
+	}
+	s.mu.Unlock()
+
+	s.checkQuotas()
+}
+
+// SubscribeTraffic регистрирует канал для получения снимков трафика.
+func (s *TrafficQuotaService) SubscribeTraffic() (ch chan []byte, unsub func()) {
+	ch = make(chan []byte, 4)
+	s.trafficSubsMu.Lock()
+	s.trafficSubs[ch] = struct{}{}
+	s.trafficSubsMu.Unlock()
+	unsub = func() {
+		s.trafficSubsMu.Lock()
+		delete(s.trafficSubs, ch)
+		s.trafficSubsMu.Unlock()
+	}
+	return
+}
+
+// broadcastTraffic рассылает raw JSON-снимок трафика всем подписчикам WebSocket.
+func (s *TrafficQuotaService) broadcastTraffic(raw []byte) {
+	s.trafficSubsMu.RLock()
+	defer s.trafficSubsMu.RUnlock()
+	for ch := range s.trafficSubs {
+		select {
+		case ch <- raw:
+		default: // медленный клиент — пропускаем
+		}
+	}
+}
+
+func (s *TrafficQuotaService) trafficWSLoop() {
+	defer s.wg.Done()
+
+	backoff := 5 * time.Second
+	const maxBackoff = 60 * time.Second
+
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		default:
+		}
+
+		start := time.Now()
+		err := s.streamTraffic()
+		if err == nil {
+			// Graceful shutdown via stopCh.
+			return
+		}
+
+		// If the session ran for more than 30 s it was healthy — reset backoff.
+		if time.Since(start) > 30*time.Second {
+			backoff = 5 * time.Second
+		}
+
+		log.Printf("TrafficQuota: WS traffic stream ended: %v — retry in %s", err, backoff)
+
+		select {
+		case <-time.After(backoff):
+		case <-s.stopCh:
+			return
+		}
+
+		if backoff < maxBackoff {
+			backoff *= 2
+		}
+	}
+}
+
+type mihomoTraffic struct {
+	Up   int64 `json:"up"`
+	Down int64 `json:"down"`
+}
+
+func (s *TrafficQuotaService) streamTraffic() error {
+	wsURL := httpToWS(strings.TrimRight(s.mihomoURL, "/")) + "/traffic"
+
+	header := http.Header{}
+	if s.secret != "" {
+		header.Set("Authorization", "Bearer "+s.secret)
+	}
+
+	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	conn, _, err := dialer.Dial(wsURL, header)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", wsURL, err)
+	}
+	defer conn.Close()
+
+	done := make(chan struct{})
+	defer close(done)
+
+	// Close the WebSocket when the service stops so ReadMessage unblocks.
+	go func() {
+		select {
+		case <-s.stopCh:
+			conn.Close()
+		case <-done:
+		}
+	}()
+
+	log.Printf("TrafficQuota: WebSocket traffic connected to %s", wsURL)
+
+	for {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			select {
+			case <-s.stopCh:
+				return nil // graceful shutdown
+			default:
+				return fmt.Errorf("read: %w", err)
+			}
+		}
+		var payload mihomoTraffic
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			continue
+		}
+		s.processTrafficSnapshot(payload.Up, payload.Down)
+	}
+}
+
+func (s *TrafficQuotaService) processTrafficSnapshot(up, down int64) {
+	s.mu.Lock()
+
+	now := time.Now()
+	currentHourStart := now.Truncate(time.Hour).Unix()
+	currentDayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+
+	offset := int(now.Weekday() - time.Monday)
+	if offset < 0 {
+		offset += 7
+	}
+	currentWeekStart := time.Date(now.Year(), now.Month(), now.Day()-offset, 0, 0, 0, 0, now.Location()).Unix()
+
+	// Проверяем календарные интервалы
+	if s.peaks.HourStart != currentHourStart {
+		s.peaks.PeakHourUp = 0
+		s.peaks.PeakHourDown = 0
+		s.peaks.HourStart = currentHourStart
+	}
+	if s.peaks.DayStart != currentDayStart {
+		s.peaks.PeakDayUp = 0
+		s.peaks.PeakDayDown = 0
+		s.peaks.DayStart = currentDayStart
+	}
+	if s.peaks.WeekStart != currentWeekStart {
+		s.peaks.PeakWeekUp = 0
+		s.peaks.PeakWeekDown = 0
+		s.peaks.WeekStart = currentWeekStart
+	}
+
+	// Обновляем пики
+	if up > s.peaks.PeakHourUp {
+		s.peaks.PeakHourUp = up
+	}
+	if down > s.peaks.PeakHourDown {
+		s.peaks.PeakHourDown = down
+	}
+	if up > s.peaks.PeakDayUp {
+		s.peaks.PeakDayUp = up
+	}
+	if down > s.peaks.PeakDayDown {
+		s.peaks.PeakDayDown = down
+	}
+	if up > s.peaks.PeakWeekUp {
+		s.peaks.PeakWeekUp = up
+	}
+	if down > s.peaks.PeakWeekDown {
+		s.peaks.PeakWeekDown = down
+	}
+
+	conns := s.activeConnsCount
+	tcp := s.tcpConnsCount
+	udp := s.udpConnsCount
+	peaksCopy := s.peaks
+
+	_ = s.saveLocked(false)
+	s.mu.Unlock()
+
+	payload := map[string]interface{}{
+		"up":              up,
+		"down":            down,
+		"connections":     conns,
+		"tcp_connections": tcp,
+		"udp_connections": udp,
+		"peaks":           peaksCopy,
+	}
+	raw, err := json.Marshal(payload)
+	if err == nil {
+		s.broadcastTraffic(raw)
 	}
 }
 
@@ -547,7 +886,20 @@ func (s *TrafficQuotaService) checkResets() {
 		case "daily":
 			shouldReset = lastReset.Year() != now.Year() || lastReset.YearDay() != now.YearDay()
 		case "weekly":
-			shouldReset = lastReset.AddDate(0, 0, 7).Before(now)
+			// Reset on calendar week boundary (Monday 00:00).
+			lastOffset := int(lastReset.Weekday() - time.Monday)
+			if lastOffset < 0 {
+				lastOffset += 7
+			}
+			lastWeekStart := time.Date(lastReset.Year(), lastReset.Month(), lastReset.Day()-lastOffset, 0, 0, 0, 0, lastReset.Location()).Unix()
+
+			nowOffset := int(now.Weekday() - time.Monday)
+			if nowOffset < 0 {
+				nowOffset += 7
+			}
+			nowWeekStart := time.Date(now.Year(), now.Month(), now.Day()-nowOffset, 0, 0, 0, 0, now.Location()).Unix()
+
+			shouldReset = lastWeekStart != nowWeekStart
 		case "monthly":
 			shouldReset = lastReset.Year() != now.Year() || lastReset.Month() != now.Month()
 		}
@@ -556,22 +908,6 @@ func (s *TrafficQuotaService) checkResets() {
 			q.CurrentBytes = 0
 			q.LastReset = now.Unix()
 			changed = true
-			// Reset accumulated proxy stats so checkQuotas reads from zero
-			// after the period boundary, not from historical cumulative totals.
-			switch q.TargetType {
-			case "proxy":
-				if stat, ok := s.proxyStats[q.TargetID]; ok {
-					stat.UploadBytes = 0
-					stat.DownloadBytes = 0
-					stat.TotalBytes = 0
-				}
-			case "global":
-				for _, stat := range s.proxyStats {
-					stat.UploadBytes = 0
-					stat.DownloadBytes = 0
-					stat.TotalBytes = 0
-				}
-			}
 		}
 	}
 
@@ -589,39 +925,243 @@ type connStats struct {
 	Download int64
 }
 
-func (s *TrafficQuotaService) checkQuotas() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func contains(slice []string, val string) bool {
+	for _, item := range slice {
+		if item == val {
+			return true
+		}
+	}
+	return false
+}
 
-	for i := range s.quotas {
-		q := &s.quotas[i]
+type mihomoProxy struct {
+	Name string   `json:"name"`
+	Type string   `json:"type"`
+	Now  string   `json:"now"`
+	All  []string `json:"all"`
+}
+
+func (s *TrafficQuotaService) getMihomoProxies() (map[string]mihomoProxy, error) {
+	url := fmt.Sprintf("%s/proxies", strings.TrimRight(s.mihomoURL, "/"))
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if s.secret != "" {
+		req.Header.Set("Authorization", "Bearer "+s.secret)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("mihomo API returned %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Proxies map[string]mihomoProxy `json:"proxies"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return payload.Proxies, nil
+}
+
+func (s *TrafficQuotaService) applyProxyToGroup(groupName, proxyName string) error {
+	url := fmt.Sprintf("%s/proxies/%s", strings.TrimRight(s.mihomoURL, "/"), groupName)
+	bodyMap := map[string]string{"name": proxyName}
+	bodyBytes, err := json.Marshal(bodyMap)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if s.secret != "" {
+		req.Header.Set("Authorization", "Bearer "+s.secret)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("mihomo API returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func (s *TrafficQuotaService) checkQuotas() {
+	s.mu.RLock()
+	quotasCopy := make([]TrafficQuota, len(s.quotas))
+	copy(quotasCopy, s.quotas)
+
+	proxyStatsCopy := make(map[string]int64)
+	for name, stat := range s.proxyStats {
+		proxyStatsCopy[name] = stat.TotalBytes
+	}
+	s.mu.RUnlock()
+
+	mihomoProxies, err := s.getMihomoProxies()
+	hasMihomo := err == nil
+	if err != nil {
+		log.Printf("TrafficQuota: failed to fetch Mihomo proxies: %v", err)
+	}
+
+	shouldBlock := make(map[string]string)
+	alertsToCreate := make([]struct {
+		quotaID  string
+		severity string
+		message  string
+	}, 0)
+
+	for i := range quotasCopy {
+		q := &quotasCopy[i]
 		if !q.Enabled || q.LimitBytes <= 0 {
 			continue
 		}
 
-		var current int64
-		switch q.TargetType {
-		case "proxy":
-			if stat, ok := s.proxyStats[q.TargetID]; ok {
-				current = stat.TotalBytes
-			}
-		case "global":
-			for _, stat := range s.proxyStats {
-				current += stat.TotalBytes
-			}
-		}
-
-		q.CurrentBytes = current
+		current := q.CurrentBytes
 		percent := float64(current) / float64(q.LimitBytes) * 100
 
 		if percent >= 100 {
-			s.addAlert(q, "critical", fmt.Sprintf("Лимит '%s' превышен: %s из %s (%.0f%%)",
-				q.Name, formatBytes(current), formatBytes(q.LimitBytes), percent))
+			alertsToCreate = append(alertsToCreate, struct {
+				quotaID  string
+				severity string
+				message  string
+			}{
+				quotaID:  q.ID,
+				severity: "critical",
+				message:  fmt.Sprintf("Лимит '%s' превышен: %s из %s (%.0f%%)", q.Name, formatBytes(current), formatBytes(q.LimitBytes), percent),
+			})
+
+			var fallback string
+			if q.Action == "block" {
+				fallback = "REJECT"
+			} else if q.Action == "redirect_direct" {
+				fallback = "DIRECT"
+			}
+
+			if fallback != "" && hasMihomo {
+				var groupName string
+				if q.TargetType == "proxy" {
+					groupName = q.TargetID
+				} else {
+					groupName = "GLOBAL"
+				}
+
+				if group, ok := mihomoProxies[groupName]; ok {
+					if contains(group.All, fallback) {
+						shouldBlock[groupName] = fallback
+					} else {
+						if globalGroup, ok := mihomoProxies["GLOBAL"]; ok && contains(globalGroup.All, fallback) {
+							shouldBlock["GLOBAL"] = fallback
+						}
+					}
+				}
+			}
 		} else if q.AlertThreshold > 0 && percent >= float64(q.AlertThreshold) {
-			s.addAlert(q, "warning", fmt.Sprintf("Лимит '%s' на %.0f%%: %s из %s",
-				q.Name, percent, formatBytes(current), formatBytes(q.LimitBytes)))
+			alertsToCreate = append(alertsToCreate, struct {
+				quotaID  string
+				severity string
+				message  string
+			}{
+				quotaID:  q.ID,
+				severity: "warning",
+				message:  fmt.Sprintf("Лимит '%s' на %.0f%%: %s из %s", q.Name, percent, formatBytes(current), formatBytes(q.LimitBytes)),
+			})
 		}
 	}
+
+	s.mu.Lock()
+
+	var restoreActions []struct {
+		groupName     string
+		originalProxy string
+	}
+	if hasMihomo {
+		for groupName, originalProxy := range s.blockedProxies {
+			if _, needed := shouldBlock[groupName]; !needed {
+				restoreActions = append(restoreActions, struct {
+					groupName     string
+					originalProxy string
+				}{groupName, originalProxy})
+			}
+		}
+	}
+
+	var blockActions []struct {
+		groupName string
+		fallback  string
+	}
+	if hasMihomo {
+		for groupName, fallback := range shouldBlock {
+			group, ok := mihomoProxies[groupName]
+			if !ok {
+				continue
+			}
+			if group.Now != fallback {
+				if _, saved := s.blockedProxies[groupName]; !saved {
+					if group.Now != "DIRECT" && group.Now != "REJECT" {
+						s.blockedProxies[groupName] = group.Now
+					}
+				}
+				blockActions = append(blockActions, struct {
+					groupName string
+					fallback  string
+				}{groupName, fallback})
+			}
+		}
+	}
+
+	s.mu.Unlock()
+
+	successfulRestores := make([]string, 0)
+	if hasMihomo {
+		for _, action := range restoreActions {
+			if err := s.applyProxyToGroup(action.groupName, action.originalProxy); err != nil {
+				log.Printf("TrafficQuota: failed to restore group %s to %s: %v", action.groupName, action.originalProxy, err)
+			} else {
+				successfulRestores = append(successfulRestores, action.groupName)
+			}
+		}
+
+		for _, action := range blockActions {
+			if err := s.applyProxyToGroup(action.groupName, action.fallback); err != nil {
+				log.Printf("TrafficQuota: failed to block group %s with %s: %v", action.groupName, action.fallback, err)
+			}
+		}
+	}
+
+	s.mu.Lock()
+	if hasMihomo {
+		for _, groupName := range successfulRestores {
+			delete(s.blockedProxies, groupName)
+		}
+	}
+
+	for _, alert := range alertsToCreate {
+		var quotaPtr *TrafficQuota
+		for i := range s.quotas {
+			if s.quotas[i].ID == alert.quotaID {
+				quotaPtr = &s.quotas[i]
+				break
+			}
+		}
+		if quotaPtr != nil {
+			s.addAlert(quotaPtr, alert.severity, alert.message)
+		}
+	}
+
+	s.mu.Unlock()
 }
 
 func (s *TrafficQuotaService) addAlert(q *TrafficQuota, severity, message string) {

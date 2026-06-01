@@ -359,7 +359,14 @@ func countDirLines(dir string) int {
 		if err != nil {
 			continue
 		}
-		total += strings.Count(string(data), "\n") + 1
+		if len(data) == 0 {
+			continue
+		}
+		lines := strings.Count(string(data), "\n")
+		if !strings.HasSuffix(string(data), "\n") {
+			lines++
+		}
+		total += lines
 	}
 	return total
 }

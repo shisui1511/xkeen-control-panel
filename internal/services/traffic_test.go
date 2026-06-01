@@ -1,6 +1,10 @@
 package services
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -220,6 +224,7 @@ func TestSaveLocked_Throttle(t *testing.T) {
 func TestProcessConnSnapshot_Delta(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+	svc.trackerInitialized = true
 
 	// Seed the tracker with a connection that already has some bytes.
 	svc.connectionTracker.Store("conn1", connStats{Upload: 100, Download: 200})
@@ -283,6 +288,7 @@ func TestProcessConnSnapshot_ClosedConnectionCleanup(t *testing.T) {
 func TestProcessConnSnapshot_NegativeDeltaIgnored(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+	svc.trackerInitialized = true
 
 	svc.connectionTracker.Store("conn1", connStats{Upload: 500, Download: 500})
 
@@ -414,20 +420,21 @@ func TestCheckResets_NoResetWithinPeriod(t *testing.T) {
 	}
 }
 
-// TestCheckResets_ProxyStatsReset verifies that proxyStats for the target proxy
-// are zeroed when the quota resets.
-func TestCheckResets_ProxyStatsReset(t *testing.T) {
+// TestCheckResets_QuotaResetOnly verifies that a quota reset zeroes CurrentBytes
+// but leaves the shared proxyStats intact.
+func TestCheckResets_QuotaResetOnly(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
 	// Add and backdate the quota.
 	quota := &TrafficQuota{
-		Name:       "ProxyQuota",
-		TargetType: "proxy",
-		TargetID:   "proxy-x",
-		LimitBytes: 2000,
-		Period:     "daily",
-		Enabled:    true,
+		Name:         "ProxyQuota",
+		TargetType:   "proxy",
+		TargetID:     "proxy-x",
+		LimitBytes:   2000,
+		Period:       "daily",
+		Enabled:      true,
+		CurrentBytes: 1000,
 	}
 	if err := svc.AddQuota(quota); err != nil {
 		t.Fatalf("AddQuota: %v", err)
@@ -458,8 +465,15 @@ func TestCheckResets_ProxyStatsReset(t *testing.T) {
 	if stat == nil {
 		t.Fatal("expected proxyStats entry to still exist")
 	}
-	if stat.TotalBytes != 0 {
-		t.Errorf("expected proxyStats zeroed after reset, got TotalBytes=%d", stat.TotalBytes)
+	// proxyStats must NOT be zeroed.
+	if stat.TotalBytes != 1000 {
+		t.Errorf("expected proxyStats intact (1000), got TotalBytes=%d", stat.TotalBytes)
+	}
+
+	// Quota CurrentBytes must be reset to 0.
+	quotas := svc.ListQuotas()
+	if quotas[0].CurrentBytes != 0 {
+		t.Errorf("expected quota CurrentBytes to be reset to 0, got %d", quotas[0].CurrentBytes)
 	}
 }
 
@@ -470,20 +484,14 @@ func TestCheckQuotas_CriticalAlert(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
-	svc.mu.Lock()
-	svc.proxyStats["proxy-z"] = &ProxyTraffic{
-		ProxyName:  "proxy-z",
-		TotalBytes: 1200, // over limit
-	}
-	svc.mu.Unlock()
-
 	quota := &TrafficQuota{
-		Name:       "OverLimit",
-		TargetType: "proxy",
-		TargetID:   "proxy-z",
-		LimitBytes: 1000,
-		Period:     "daily",
-		Enabled:    true,
+		Name:         "OverLimit",
+		TargetType:   "proxy",
+		TargetID:     "proxy-z",
+		LimitBytes:   1000,
+		Period:       "daily",
+		Enabled:      true,
+		CurrentBytes: 1200, // over limit
 	}
 	if err := svc.AddQuota(quota); err != nil {
 		t.Fatalf("AddQuota: %v", err)
@@ -512,13 +520,6 @@ func TestCheckQuotas_WarningAlert(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
-	svc.mu.Lock()
-	svc.proxyStats["proxy-w"] = &ProxyTraffic{
-		ProxyName:  "proxy-w",
-		TotalBytes: 850, // 85% of 1000
-	}
-	svc.mu.Unlock()
-
 	quota := &TrafficQuota{
 		Name:           "WarnQuota",
 		TargetType:     "proxy",
@@ -527,6 +528,7 @@ func TestCheckQuotas_WarningAlert(t *testing.T) {
 		AlertThreshold: 80, // warn at 80%
 		Period:         "daily",
 		Enabled:        true,
+		CurrentBytes:   850, // 85% of 1000
 	}
 	if err := svc.AddQuota(quota); err != nil {
 		t.Fatalf("AddQuota: %v", err)
@@ -548,13 +550,6 @@ func TestCheckQuotas_NoAlertBelowThreshold(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
 
-	svc.mu.Lock()
-	svc.proxyStats["proxy-ok"] = &ProxyTraffic{
-		ProxyName:  "proxy-ok",
-		TotalBytes: 500, // 50% of 1000, threshold at 80%
-	}
-	svc.mu.Unlock()
-
 	quota := &TrafficQuota{
 		Name:           "OkQuota",
 		TargetType:     "proxy",
@@ -563,6 +558,7 @@ func TestCheckQuotas_NoAlertBelowThreshold(t *testing.T) {
 		AlertThreshold: 80,
 		Period:         "daily",
 		Enabled:        true,
+		CurrentBytes:   500, // 50% of 1000, threshold at 80%
 	}
 	if err := svc.AddQuota(quota); err != nil {
 		t.Fatalf("AddQuota: %v", err)
@@ -596,5 +592,351 @@ func TestSaveLocked_ThrottleExpiry(t *testing.T) {
 	svc.mu.RUnlock()
 	if elapsed > time.Second {
 		t.Errorf("expected lastSave to be recent after throttle expiry, elapsed=%v", elapsed)
+	}
+}
+
+func TestTrafficPeaks_Calculation(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	// 1. Initial values are 0
+	if svc.peaks.PeakHourUp != 0 || svc.peaks.PeakHourDown != 0 {
+		t.Fatal("expected initial peaks to be 0")
+	}
+
+	// 2. Feed growing speeds
+	svc.processTrafficSnapshot(100, 200)
+	if svc.peaks.PeakHourUp != 100 || svc.peaks.PeakHourDown != 200 {
+		t.Fatalf("expected peaks to update to 100/200, got %d/%d", svc.peaks.PeakHourUp, svc.peaks.PeakHourDown)
+	}
+
+	// 3. Feed lower speeds, peaks should stay the same
+	svc.processTrafficSnapshot(50, 100)
+	if svc.peaks.PeakHourUp != 100 || svc.peaks.PeakHourDown != 200 {
+		t.Fatalf("expected peaks to remain 100/200, got %d/%d", svc.peaks.PeakHourUp, svc.peaks.PeakHourDown)
+	}
+
+	// 4. Feed higher speeds, peaks should increase
+	svc.processTrafficSnapshot(150, 250)
+	if svc.peaks.PeakHourUp != 150 || svc.peaks.PeakHourDown != 250 {
+		t.Fatalf("expected peaks to update to 150/250, got %d/%d", svc.peaks.PeakHourUp, svc.peaks.PeakHourDown)
+	}
+}
+
+func TestTrafficPeaks_ResetOnBoundaries(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	// Set initial peaks and starts
+	now := time.Now()
+	svc.peaks = TrafficPeaks{
+		PeakHourUp:   100,
+		PeakHourDown: 100,
+		PeakDayUp:    100,
+		PeakDayDown:  100,
+		PeakWeekUp:   100,
+		PeakWeekDown: 100,
+		HourStart:    now.Add(-2 * time.Hour).Unix(),
+		DayStart:     now.Add(-25 * time.Hour).Unix(),
+		WeekStart:    now.Add(-10 * 24 * time.Hour).Unix(),
+	}
+
+	// Process snapshot, which triggers calendar checks
+	svc.processTrafficSnapshot(10, 10)
+
+	// Since start hours/days/weeks are old, peaks should have reset and then updated to 10/10
+	if svc.peaks.PeakHourUp != 10 || svc.peaks.PeakHourDown != 10 {
+		t.Errorf("expected hour peaks to reset to 10, got up=%d, down=%d", svc.peaks.PeakHourUp, svc.peaks.PeakHourDown)
+	}
+	if svc.peaks.PeakDayUp != 10 || svc.peaks.PeakDayDown != 10 {
+		t.Errorf("expected day peaks to reset to 10, got up=%d, down=%d", svc.peaks.PeakDayUp, svc.peaks.PeakDayDown)
+	}
+	if svc.peaks.PeakWeekUp != 10 || svc.peaks.PeakWeekDown != 10 {
+		t.Errorf("expected week peaks to reset to 10, got up=%d, down=%d", svc.peaks.PeakWeekUp, svc.peaks.PeakWeekDown)
+	}
+}
+
+func TestTraffic_ResetStats(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	// Set some stats and peaks
+	svc.mu.Lock()
+	svc.proxyStats["test-proxy"] = &ProxyTraffic{
+		ProxyName:   "test-proxy",
+		UploadBytes: 1000,
+	}
+	svc.peaks = TrafficPeaks{
+		PeakHourUp: 500,
+	}
+	svc.mu.Unlock()
+
+	// Add a quota with non-zero CurrentBytes
+	quota := &TrafficQuota{
+		Name:         "QuotaToReset",
+		LimitBytes:   10000,
+		CurrentBytes: 5000,
+	}
+	if err := svc.AddQuota(quota); err != nil {
+		t.Fatalf("AddQuota: %v", err)
+	}
+
+	// Run ResetStats
+	if err := svc.ResetStats(); err != nil {
+		t.Fatalf("ResetStats failed: %v", err)
+	}
+
+	// Verify stats, peaks, and quota CurrentBytes are reset
+	svc.mu.RLock()
+	defer svc.mu.RUnlock()
+
+	if len(svc.proxyStats) != 0 {
+		t.Errorf("expected proxy stats to be empty, got %d", len(svc.proxyStats))
+	}
+	if svc.peaks.PeakHourUp != 0 {
+		t.Errorf("expected peaks to be reset, got %d", svc.peaks.PeakHourUp)
+	}
+	if svc.quotas[0].CurrentBytes != 0 {
+		t.Errorf("expected quota CurrentBytes to be 0, got %d", svc.quotas[0].CurrentBytes)
+	}
+}
+
+func TestTraffic_TCPUDPAggregation(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	snapshot := []mihomoConn{
+		{
+			ID:     "conn1",
+			Chains: []string{"proxy-a"},
+			Metadata: mihomoConnMetadata{
+				Network: "TCP",
+			},
+		},
+		{
+			ID:     "conn2",
+			Chains: []string{"proxy-a"},
+			Metadata: mihomoConnMetadata{
+				Network: "udp",
+			},
+		},
+		{
+			ID:     "conn3",
+			Chains: []string{"proxy-b"},
+			Metadata: mihomoConnMetadata{
+				Network: "TCP",
+			},
+		},
+	}
+
+	svc.processConnSnapshot(snapshot)
+
+	if svc.activeConnsCount != 3 {
+		t.Errorf("expected activeConnsCount=3, got %d", svc.activeConnsCount)
+	}
+	if svc.tcpConnsCount != 2 {
+		t.Errorf("expected tcpConnsCount=2, got %d", svc.tcpConnsCount)
+	}
+	if svc.udpConnsCount != 1 {
+		t.Errorf("expected udpConnsCount=1, got %d", svc.udpConnsCount)
+	}
+}
+
+func TestTrafficQuotaService_BlockAndRedirect(t *testing.T) {
+	var requestCount int
+	var lastMethod, lastPath string
+	var lastBody map[string]string
+
+	// 1. Setup mock Mihomo server
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		lastMethod = r.Method
+		lastPath = r.URL.Path
+
+		if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/proxies/") {
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				lastBody = body
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		if r.Method == http.MethodGet && r.URL.Path == "/proxies" {
+			proxiesJSON := `{
+				"proxies": {
+					"GLOBAL": {
+						"name": "GLOBAL",
+						"type": "Selector",
+						"now": "US-Group",
+						"all": ["US-Group", "DIRECT", "REJECT"]
+					},
+					"US-Group": {
+						"name": "US-Group",
+						"type": "Selector",
+						"now": "us-node-1",
+						"all": ["us-node-1", "us-node-2", "DIRECT", "REJECT"]
+					}
+				}
+			}`
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(proxiesJSON))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	// 2. Initialize Service with Mock Server URL
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, ts.URL, "test-secret")
+
+	// 3. Add Quota (redirect_direct, target: US-Group)
+	quota := &TrafficQuota{
+		ID:         "quota-us",
+		Name:       "US Quota",
+		TargetType: "proxy",
+		TargetID:   "US-Group",
+		LimitBytes: 1000,
+		Enabled:    true,
+		Action:     "redirect_direct",
+	}
+	if err := svc.AddQuota(quota); err != nil {
+		t.Fatalf("AddQuota failed: %v", err)
+	}
+
+	// 4. Simulate usage exceeding the limit (1200 bytes)
+	svc.mu.Lock()
+	svc.quotas[0].CurrentBytes = 1200
+	svc.mu.Unlock()
+
+	// 5. Run checkQuotas()
+	svc.checkQuotas()
+
+	// Verify group switch API request was sent to Mihomo
+	if lastMethod != http.MethodPut || lastPath != "/proxies/US-Group" {
+		t.Errorf("expected PUT to /proxies/US-Group, got %s %s", lastMethod, lastPath)
+	}
+	if lastBody["name"] != "DIRECT" {
+		t.Errorf("expected switch to DIRECT, got %s", lastBody["name"])
+	}
+
+	// Verify original proxy is saved in blockedProxies
+	svc.mu.RLock()
+	orig := svc.blockedProxies["US-Group"]
+	svc.mu.RUnlock()
+	if orig != "us-node-1" {
+		t.Errorf("expected original proxy to be saved as us-node-1, got %s", orig)
+	}
+
+	// 6. Reset Quota and run checkQuotas() again -> should restore original proxy
+	if err := svc.ResetQuota("quota-us"); err != nil {
+		t.Fatalf("ResetQuota failed: %v", err)
+	}
+
+	// Re-mock proxies with current status (which was DIRECT after block)
+	// so that checkQuotas sees the current state in Mihomo
+	ts.Close() // close previous server
+	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastMethod = r.Method
+		lastPath = r.URL.Path
+		if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/proxies/") {
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				lastBody = body
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/proxies" {
+			proxiesJSON := `{
+				"proxies": {
+					"GLOBAL": {
+						"name": "GLOBAL",
+						"type": "Selector",
+						"now": "US-Group",
+						"all": ["US-Group", "DIRECT", "REJECT"]
+					},
+					"US-Group": {
+						"name": "US-Group",
+						"type": "Selector",
+						"now": "DIRECT",
+						"all": ["us-node-1", "us-node-2", "DIRECT", "REJECT"]
+					}
+				}
+			}`
+			w.Write([]byte(proxiesJSON))
+			return
+		}
+	}))
+	defer ts.Close()
+	svc.mihomoURL = ts.URL
+
+	svc.checkQuotas()
+
+	// Verify restore API request was sent
+	if lastMethod != http.MethodPut || lastPath != "/proxies/US-Group" {
+		t.Errorf("expected restore PUT to /proxies/US-Group, got %s %s", lastMethod, lastPath)
+	}
+	if lastBody["name"] != "us-node-1" {
+		t.Errorf("expected restore to us-node-1, got %s", lastBody["name"])
+	}
+
+	// Verify original proxy was removed from blockedProxies
+	svc.mu.RLock()
+	_, saved := svc.blockedProxies["US-Group"]
+	svc.mu.RUnlock()
+	if saved {
+		t.Error("expected US-Group to be removed from blockedProxies")
+	}
+}
+
+func TestProcessConnSnapshot_FirstSnapshotNoDelta(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewTrafficQuotaService(tmp, "http://localhost:9090", "")
+
+	// Tracker is empty and trackerInitialized is false.
+	// First snapshot contains a connection with 100 Upload, 200 Download.
+	snapshot := []mihomoConn{
+		{ID: "conn1", Chains: []string{"proxy-a"}, Upload: 100, Download: 200},
+	}
+	svc.processConnSnapshot(snapshot)
+
+	svc.mu.RLock()
+	statsA := svc.proxyStats["proxy-a"]
+	svc.mu.RUnlock()
+
+	// It should NOT count these bytes as delta for the first snapshot.
+	if statsA != nil && (statsA.UploadBytes != 0 || statsA.DownloadBytes != 0) {
+		t.Fatalf("expected no traffic accumulated on the first snapshot, got up=%d, down=%d",
+			statsA.UploadBytes, statsA.DownloadBytes)
+	}
+
+	// The connection should be stored in the tracker.
+	val, ok := svc.connectionTracker.Load("conn1")
+	if !ok {
+		t.Fatal("expected conn1 to be stored in the connectionTracker")
+	}
+	stored := val.(connStats)
+	if stored.Upload != 100 || stored.Download != 200 {
+		t.Fatalf("expected stored stats 100/200, got %d/%d", stored.Upload, stored.Download)
+	}
+
+	// Second snapshot: conn1 increased. Now it should count delta.
+	snapshot2 := []mihomoConn{
+		{ID: "conn1", Chains: []string{"proxy-a"}, Upload: 150, Download: 250},
+	}
+	svc.processConnSnapshot(snapshot2)
+
+	svc.mu.RLock()
+	statsA2 := svc.proxyStats["proxy-a"]
+	svc.mu.RUnlock()
+
+	if statsA2 == nil {
+		t.Fatal("expected proxyStats for proxy-a after second snapshot")
+	}
+	if statsA2.UploadBytes != 50 || statsA2.DownloadBytes != 50 {
+		t.Fatalf("expected delta 50/50, got up=%d, down=%d", statsA2.UploadBytes, statsA2.DownloadBytes)
 	}
 }
