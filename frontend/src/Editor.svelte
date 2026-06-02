@@ -214,7 +214,7 @@
 
   function handleInsertIntoEditor(yamlContent: string) {
     if (selectedFile) {
-      if (editorView) {
+      if (editorView && editorView.dom.isConnected) {
         editorView.dispatch({
           changes: {
             from: 0,
@@ -223,8 +223,9 @@
           }
         });
         isDirty = true;
-        // Save draft to local storage
-        localStorage.setItem(`editor.draft.${selectedFile}`, yamlContent);
+      } else {
+        // Editor DOM detached (on constructor tab) — apply when it re-mounts
+        pendingInsert = yamlContent;
       }
       activeTab = 'files';
       window.location.hash = '#/editor';
@@ -247,6 +248,8 @@
   // Draft state tracking
   let hasDraft = false;
   let draftContent = '';
+  // Pending insert from constructor tab (applied immediately when editor re-mounts)
+  let pendingInsert = '';
 
   function restoreDraft() {
     if (!editorView || !draftContent) return;
@@ -526,6 +529,17 @@
         editorView = new EditorView({ state, parent: editorContainer });
       }
 
+      // Apply pending insert from constructor tab (seamless, no prompt needed)
+      if (pendingInsert && editorView) {
+        editorView.dispatch({
+          changes: { from: 0, to: editorView.state.doc.length, insert: pendingInsert }
+        });
+        isDirty = true;
+        hasDraft = false;
+        draftContent = '';
+        pendingInsert = '';
+      }
+
       // Восстановить позицию прокрутки и курсора
       if (editorView) {
         if (targetTab.cursorPos !== undefined) {
@@ -792,6 +806,17 @@
           state,
           parent: editorContainer
         });
+      }
+
+      // Apply pending insert from constructor tab (seamless, no prompt needed)
+      if (pendingInsert && editorView) {
+        editorView.dispatch({
+          changes: { from: 0, to: editorView.state.doc.length, insert: pendingInsert }
+        });
+        isDirty = true;
+        hasDraft = false;
+        draftContent = '';
+        pendingInsert = '';
       }
 
       await loadBackups(path);

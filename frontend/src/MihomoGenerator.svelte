@@ -499,7 +499,14 @@
     return lines.join('\n').trimEnd();
   }
 
-  $: yaml = generateYAML();
+  let yaml = '';
+  $: {
+    // Explicit deps so Svelte 5 legacy mode tracks them across the function call
+    void proxies; void groups; void rules; void activeRuleProvider;
+    void dns.enabled; void dns.nameservers; void dns.fallback;
+    void tun.enabled; void tun.stack;
+    yaml = generateYAML();
+  }
 
   async function copyYAML() {
     await navigator.clipboard.writeText(yaml);
