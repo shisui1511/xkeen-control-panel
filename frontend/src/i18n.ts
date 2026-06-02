@@ -292,6 +292,15 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // Editor extras
     'editor.no_templates': 'Шаблоны не найдены',
+    'editor.no_templates_hint': 'Нажмите «Обновить шаблоны» для загрузки шаблонов из репозитория',
+    'editor.templates_update': 'Обновить шаблоны',
+    'editor.templates_updated': 'Шаблоны обновлены из репозитория',
+    'editor.templates_update_error': 'Не удалось обновить шаблоны. Проверьте соединение.',
+    'editor.apply_template': 'Применить шаблон',
+    'editor.confirm_apply_action': 'Применить шаблон',
+    'editor.no_file_for_template': 'Откройте файл для применения шаблона',
+    'editor.templates_tab_xray': 'Xray',
+    'editor.templates_tab_mihomo': 'Mihomo',
 
     // Settings
     'settings.title': 'Настройки',
@@ -633,9 +642,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.back_to_dashboard': 'Вернуться на Dashboard',
     'editor.templates': 'Шаблоны',
     'editor.templates_desc':
-      'Выберите готовый шаблон для быстрой настройки. Внимание: текущий контент будет заменен!',
+      'Выберите готовый шаблон. Текущее содержимое файла будет заменено.',
     'editor.confirm_template':
-      'Вы уверены, что хотите применить этот шаблон? Текущее содержимое файла будет заменено.',
+      'Текущее содержимое файла будет заменено. Продолжить?',
     'editor.generator': 'Генератор',
     'editor.protocol': 'Протокол',
     'editor.address': 'Адрес',
@@ -1251,6 +1260,15 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // Editor extras
     'editor.no_templates': 'No templates found',
+    'editor.no_templates_hint': 'Click "Update templates" to load templates from the repository',
+    'editor.templates_update': 'Update templates',
+    'editor.templates_updated': 'Templates updated from repository',
+    'editor.templates_update_error': 'Failed to update templates. Check your connection.',
+    'editor.apply_template': 'Apply template',
+    'editor.confirm_apply_action': 'Apply template',
+    'editor.no_file_for_template': 'Open a file to apply a template',
+    'editor.templates_tab_xray': 'Xray',
+    'editor.templates_tab_mihomo': 'Mihomo',
 
     // Settings
     'settings.title': 'Settings',
@@ -1584,9 +1602,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.back_to_dashboard': 'Back to Dashboard',
     'editor.templates': 'Templates',
     'editor.templates_desc':
-      'Select a pre-made template for quick setup. Warning: current content will be replaced!',
+      'Select a pre-made template. Current file content will be replaced.',
     'editor.confirm_template':
-      'Are you sure you want to apply this template? Current file content will be replaced.',
+      'Current file content will be replaced. Continue?',
     'editor.generator': 'Generator',
     'editor.protocol': 'Protocol',
     'editor.address': 'Address',
