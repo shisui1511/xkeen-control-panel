@@ -217,10 +217,12 @@ func main() {
 	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)
 
 	// Templates
-	templateSvc := services.NewTemplateService()
+	templatesFS, _ := xkeencontrolpanel.GetTemplatesFS()
+	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir)
 	api.SetTemplateService(templateSvc)
 	srv.HandleProtected("/api/templates/list", api.TemplateList)
 	srv.HandleProtected("/api/templates/fetch", api.TemplateFetch)
+	srv.HandleProtected("/api/templates/update", api.TemplateUpdate)
 
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
