@@ -107,50 +107,56 @@ test.describe('Templates modal integration test suite', () => {
     });
   });
 
-  test('modal opens and shows Xray/Mihomo tabs', async ({ page }) => {
+  // Вспомогательная функция: открыть файл и затем модалку шаблонов через kebab-меню
+  async function openTemplatesModal(page: any) {
     await page.goto('/#/editor');
+    // Ждём загрузки списка файлов
+    await page.waitForSelector('.file-row', { timeout: 8000 });
+    // Кликнуть на первый файл в списке чтобы появился toolbar с kebab
+    const fileRow = page.locator('.file-row').first();
+    await expect(fileRow).toBeVisible({ timeout: 5000 });
+    await fileRow.click();
+    // Ждём появления kebab-кнопки (отображается только когда файл выбран)
+    const kebabBtn = page.locator('button[aria-label="Дополнительные действия"], button[title="Дополнительные действия"]').first();
+    await expect(kebabBtn).toBeVisible({ timeout: 5000 });
+    await kebabBtn.click();
+    // Кликаем на кнопку «Шаблоны» в раскрывшемся меню
+    const templatesMenuItem = page.locator('.kebab-item:has-text("Шаблоны"), .kebab-dropdown button:has-text("Шаблоны")').first();
+    await expect(templatesMenuItem).toBeVisible({ timeout: 3000 });
+    await templatesMenuItem.click();
+    // Ждём открытия модалки
+    await expect(page.locator('.templates-wide-modal')).toBeVisible({ timeout: 3000 });
+  }
 
-    // Открываем модалку шаблонов через кнопку в тулбаре
-    const templatesBtn = page.locator('button:has-text("Шаблоны"), button[title*="шаблон"], button[aria-label*="шаблон"]').first();
-    await expect(templatesBtn).toBeVisible();
-    await templatesBtn.click();
+  test('modal opens and shows Xray/Mihomo tabs', async ({ page }) => {
+    await openTemplatesModal(page);
 
     // Проверяем, что модалка открылась с табами Xray/Mihomo
-    const xrayTab = page.locator('.templates-tabs button:has-text("Xray"), [role="tab"]:has-text("Xray")').first();
-    const mihomoTab = page.locator('.templates-tabs button:has-text("Mihomo"), [role="tab"]:has-text("Mihomo")').first();
+    const xrayTab = page.locator('.templates-kernel-tabs button:has-text("Xray")').first();
+    const mihomoTab = page.locator('.templates-kernel-tabs button:has-text("Mihomo")').first();
 
     await expect(xrayTab).toBeVisible();
     await expect(mihomoTab).toBeVisible();
   });
 
   test('selecting template shows preview', async ({ page }) => {
-    await page.goto('/#/editor');
-
-    // Открываем модалку шаблонов
-    const templatesBtn = page.locator('button:has-text("Шаблоны"), button[title*="шаблон"], button[aria-label*="шаблон"]').first();
-    await expect(templatesBtn).toBeVisible();
-    await templatesBtn.click();
+    await openTemplatesModal(page);
 
     // Кликаем на элемент списка шаблонов
     const templateItem = page.locator('.template-item, .template-list button').first();
-    await expect(templateItem).toBeVisible();
+    await expect(templateItem).toBeVisible({ timeout: 3000 });
     await templateItem.click();
 
     // Проверяем, что preview-панель содержит текст
-    const preview = page.locator('.template-preview-code, .templates-col-preview, .template-preview').first();
+    const preview = page.locator('.template-preview-code, .templates-col-preview').first();
     await expect(preview).toBeVisible();
   });
 
   test('update button is visible in modal header', async ({ page }) => {
-    await page.goto('/#/editor');
-
-    // Открываем модалку шаблонов
-    const templatesBtn = page.locator('button:has-text("Шаблоны"), button[title*="шаблон"], button[aria-label*="шаблон"]').first();
-    await expect(templatesBtn).toBeVisible();
-    await templatesBtn.click();
+    await openTemplatesModal(page);
 
     // Кнопка «Обновить шаблоны» видна в хедере модалки
-    const updateBtn = page.locator('button:has-text("Обновить")').first();
+    const updateBtn = page.locator('.templates-update-btn, button:has-text("Обновить")').first();
     await expect(updateBtn).toBeVisible();
   });
 });
