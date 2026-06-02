@@ -212,7 +212,7 @@
     }
   }
 
-  function handleInsertIntoEditor(yamlContent: string) {
+  async function handleInsertIntoEditor(yamlContent: string) {
     if (selectedFile) {
       if (editorView && editorView.dom.isConnected) {
         editorView.dispatch({
@@ -223,12 +223,28 @@
           }
         });
         isDirty = true;
+        activeTab = 'files';
+        window.location.hash = '#/editor';
       } else {
-        // Editor DOM detached (on constructor tab) — apply when it re-mounts
-        pendingInsert = yamlContent;
+        // Editor DOM detached (on constructor tab).
+        // Switch to files tab, await tick so Svelte re-binds editorContainer,
+        // then re-mount the editor in-place (preserving state/extensions) and insert.
+        activeTab = 'files';
+        window.location.hash = '#/editor';
+        await tick();
+        if (editorView && !editorView.dom.isConnected && editorContainer) {
+          // Re-attach to the freshly-mounted container while keeping all extensions
+          const state = editorView.state;
+          editorView.destroy();
+          editorView = new EditorView({ state, parent: editorContainer });
+        }
+        if (editorView) {
+          editorView.dispatch({
+            changes: { from: 0, to: editorView.state.doc.length, insert: yamlContent }
+          });
+          isDirty = true;
+        }
       }
-      activeTab = 'files';
-      window.location.hash = '#/editor';
       showToast(
         'success',
         $t('editor.yaml_inserted') || 'Конфигурация вставлена в редактор. Не забудьте сохранить её!'
@@ -248,8 +264,6 @@
   // Draft state tracking
   let hasDraft = false;
   let draftContent = '';
-  // Pending insert from constructor tab (applied immediately when editor re-mounts)
-  let pendingInsert = '';
 
   function restoreDraft() {
     if (!editorView || !draftContent) return;
@@ -529,17 +543,6 @@
         editorView = new EditorView({ state, parent: editorContainer });
       }
 
-      // Apply pending insert from constructor tab (seamless, no prompt needed)
-      if (pendingInsert && editorView) {
-        editorView.dispatch({
-          changes: { from: 0, to: editorView.state.doc.length, insert: pendingInsert }
-        });
-        isDirty = true;
-        hasDraft = false;
-        draftContent = '';
-        pendingInsert = '';
-      }
-
       // Восстановить позицию прокрутки и курсора
       if (editorView) {
         if (targetTab.cursorPos !== undefined) {
@@ -806,17 +809,6 @@
           state,
           parent: editorContainer
         });
-      }
-
-      // Apply pending insert from constructor tab (seamless, no prompt needed)
-      if (pendingInsert && editorView) {
-        editorView.dispatch({
-          changes: { from: 0, to: editorView.state.doc.length, insert: pendingInsert }
-        });
-        isDirty = true;
-        hasDraft = false;
-        draftContent = '';
-        pendingInsert = '';
       }
 
       await loadBackups(path);
