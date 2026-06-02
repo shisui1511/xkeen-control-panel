@@ -188,21 +188,25 @@
   let originalContent = '';
   let isDirty = false;
 
-  // Local active tab: 'files' or 'generator'
-  let activeTab: 'files' | 'generator' = 'files';
+  // Local active tab: 'files' | 'constructor'
+  let activeTab: 'files' | 'constructor' = 'files';
 
   function checkHashTab() {
-    if (window.location.hash === '#/mihomo-gen') {
-      activeTab = 'generator';
+    if (window.location.hash === '#/constructor') {
+      activeTab = 'constructor';
+    } else if (window.location.hash === '#/mihomo-gen') {
+      // backward-compat: старый deep-link редиректит на Constructor
+      activeTab = 'constructor';
+      window.location.hash = '#/constructor';
     } else {
       activeTab = 'files';
     }
   }
 
-  function setTab(tab: 'files' | 'generator') {
+  function setTab(tab: 'files' | 'constructor') {
     activeTab = tab;
-    if (tab === 'generator') {
-      window.location.hash = '#/mihomo-gen';
+    if (tab === 'constructor') {
+      window.location.hash = '#/constructor';
     } else {
       window.location.hash = '#/editor';
     }
@@ -1580,14 +1584,14 @@
       <div class="crumbs">
         {$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
         {$t('nav.editor')}
-        {#if activeTab === 'generator'}
+        {#if activeTab === 'constructor'}
           <span style="color:var(--fg-faint);margin:0 6px;">/</span>
-          {$t('editor.crumbs_generator')}
+          {$t('editor.tab_constructor')}
         {/if}
       </div>
-      <h1>{activeTab === 'generator' ? $t('editor.generator_title') : $t('editor.h1')}</h1>
+      <h1>{activeTab === 'constructor' ? $t('editor.constructor_title') : $t('editor.h1')}</h1>
       <p class="sub">
-        {activeTab === 'generator' ? $t('editor.generator_subtitle') : $t('editor.h1_sub')}
+        {activeTab === 'constructor' ? $t('editor.constructor_subtitle') : $t('editor.h1_sub')}
       </p>
     </div>
     {#if activeTab === 'files'}
@@ -1697,11 +1701,11 @@
     </button>
     <button
       class="tab-btn"
-      class:active={activeTab === 'generator'}
-      on:click={() => setTab('generator')}
+      class:active={activeTab === 'constructor'}
+      on:click={() => setTab('constructor')}
     >
       <Icon name="settings" size={14} />
-      {$t('editor.tab_generator')}
+      {$t('editor.tab_constructor')}
     </button>
   </div>
 
@@ -2212,7 +2216,7 @@
         </div>
       {/if}
     </div>
-  {:else if activeTab === 'generator'}
+  {:else if activeTab === 'constructor'}
     <div transition:fade={{ duration: 150 }} style="margin-top: 16px;">
       <MihomoGenerator
         {onSwitchTab}
