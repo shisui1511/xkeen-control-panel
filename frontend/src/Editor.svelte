@@ -163,6 +163,13 @@
   let newFileName = '';
   let renameTarget = '';
   let templates: Template[] = [];
+  let templateTab: 'xray' | 'mihomo' = 'xray';
+  let selectedTemplate: Template | null = null;
+  let templatePreview = '';
+  let updatingTemplates = false;
+  let loadingPreview = false;
+
+  $: filteredTemplates = templates.filter((t) => t.type === templateTab);
 
   // Generator state
   let showGeneratorModal = false;
@@ -1391,6 +1398,51 @@
     }
   }
 
+  async function loadTemplatePreview(template: Template) {
+    selectedTemplate = template;
+    templatePreview = '';
+    loadingPreview = true;
+    try {
+      const res = await fetch(`/api/templates/fetch?name=${encodeURIComponent(template.name)}`);
+      if (res.ok) {
+        const data = await res.json();
+        templatePreview = (data.content || '').split('\n').slice(0, 50).join('\n');
+      }
+    } catch (e) {
+      templatePreview = '';
+    } finally {
+      loadingPreview = false;
+    }
+  }
+
+  async function updateTemplates() {
+    updatingTemplates = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/templates/update', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (!res.ok) throw new Error((await res.text()) || 'Failed');
+      await loadTemplates();
+      // После обновления авто-выбрать первый шаблон текущего таба
+      const first = templates.find((t) => t.type === templateTab);
+      if (first) await loadTemplatePreview(first);
+      showToast('success', $t('editor.templates_updated'));
+    } catch (e: any) {
+      showToast('error', $t('editor.templates_update_error'));
+    } finally {
+      updatingTemplates = false;
+    }
+  }
+
+  function openTemplatesModal() {
+    templateTab = 'xray';
+    selectedTemplate = null;
+    templatePreview = '';
+    showTemplatesModal = true;
+  }
+
   async function applyTemplate(template: Template) {
     if (!editorView) return;
     if (isDirty && !confirmUnsaved()) return;
@@ -1943,7 +1995,7 @@
                         class="kebab-item"
                         on:click={() => {
                           showKebabMenu = false;
-                          showTemplatesModal = true;
+                          openTemplatesModal();
                           loadTemplates();
                         }}
                       >
@@ -2260,40 +2312,128 @@
     on:keydown={(e) => e.key === 'Escape' && (showTemplatesModal = false)}
   >
     <div
-      class="confirm-modal"
-      style="max-width: 600px;"
+      class="confirm-modal templates-wide-modal"
       role="presentation"
+      aria-modal="true"
       on:click|stopPropagation
       on:keydown|stopPropagation
     >
+      <!-- Header -->
       <div class="modal-header">
-        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
-          {$t('editor.templates')}
-        </h3>
-        <button class="btn-close" on:click={() => (showTemplatesModal = false)}>
-          <Icon name="cross" size={14} />
-        </button>
-      </div>
-      <p style="margin: 8px 0 16px; color: var(--fg-dim); font-size: 13px;">
-        {$t('editor.templates_desc')}
-      </p>
-
-      <div class="template-list">
-        {#each templates as template}
+        <div class="templates-modal-title-block">
+          <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
+            {$t('editor.templates')}
+          </h3>
+          <p class="templates-modal-subtitle">{$t('editor.templates_desc')}</p>
+        </div>
+        <div class="templates-modal-header-actions">
           <button
-            class="template-item"
-            on:click={() => applyTemplate(template)}
-            disabled={templateLoading}
+            class="btn btn-secondary templates-update-btn"
+            on:click={updateTemplates}
+            disabled={updatingTemplates}
+            title={$t('editor.templates_update')}
           >
-            <div class="template-info">
-              <span class="template-name">{template.name}</span>
-              <span class="template-desc">{template.description}</span>
-            </div>
-            <span class="template-type">{template.type}</span>
+            <span class="templates-update-icon" class:spinning={updatingTemplates}>
+              <Icon name="refresh" size={14} />
+            </span>
+            {$t('editor.templates_update')}
           </button>
-        {:else}
-          <p class="text-center p-3" style="color: var(--fg-dim);">{$t('editor.no_templates')}</p>
-        {/each}
+          <button
+            class="btn-close"
+            aria-label="Закрыть"
+            on:click={() => (showTemplatesModal = false)}
+          >
+            <Icon name="cross" size={14} />
+          </button>
+        </div>
+      </div>
+
+      <!-- 2-column body -->
+      <div class="templates-body-grid">
+        <!-- Left column: tabs + list -->
+        <div class="templates-col-list">
+          <div class="templates-kernel-tabs">
+            <button
+              class="tab-btn"
+              class:active={templateTab === 'xray'}
+              aria-pressed={templateTab === 'xray'}
+              on:click={async () => {
+                templateTab = 'xray';
+                selectedTemplate = null;
+                templatePreview = '';
+                const first = filteredTemplates[0];
+                if (first) await loadTemplatePreview(first);
+              }}
+            >
+              {$t('editor.templates_tab_xray')}
+            </button>
+            <button
+              class="tab-btn"
+              class:active={templateTab === 'mihomo'}
+              aria-pressed={templateTab === 'mihomo'}
+              on:click={async () => {
+                templateTab = 'mihomo';
+                selectedTemplate = null;
+                templatePreview = '';
+                const first = filteredTemplates[0];
+                if (first) await loadTemplatePreview(first);
+              }}
+            >
+              {$t('editor.templates_tab_mihomo')}
+            </button>
+          </div>
+
+          <div class="template-list">
+            {#each filteredTemplates as template (template.name)}
+              <button
+                class="template-item"
+                class:selected={selectedTemplate?.name === template.name}
+                on:click={() => loadTemplatePreview(template)}
+                disabled={templateLoading}
+              >
+                <div class="template-info">
+                  <span class="template-name">{template.name}</span>
+                  <span class="template-desc">{template.description}</span>
+                </div>
+                <span class="template-type">{template.type}</span>
+              </button>
+            {:else}
+              <div class="templates-empty-state">
+                <p class="templates-empty-title">{$t('editor.no_templates')}</p>
+                <p class="templates-empty-hint">{$t('editor.no_templates_hint')}</p>
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <!-- Right column: preview -->
+        <div class="templates-col-preview">
+          {#if loadingPreview}
+            <div class="templates-preview-loading">
+              <span class="spinning"><Icon name="refresh" size={16} /></span>
+            </div>
+          {:else if templatePreview}
+            <pre class="template-preview-code">{templatePreview}</pre>
+          {:else}
+            <div class="templates-preview-placeholder">
+              <p style="color: var(--fg-dim); font-size: 13px; text-align: center;">
+                {selectedTemplate ? '' : 'Выберите шаблон для предпросмотра'}
+              </p>
+            </div>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="templates-modal-footer">
+        <button
+          class="btn btn-primary"
+          disabled={!selectedTemplate || !editorView || templateLoading}
+          title={!editorView ? $t('editor.no_file_for_template') : undefined}
+          on:click={() => selectedTemplate && applyTemplate(selectedTemplate)}
+        >
+          {$t('editor.apply_template')}
+        </button>
       </div>
     </div>
   </div>
@@ -2668,8 +2808,19 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 360px;
     overflow-y: auto;
+    flex: 1;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  .template-list::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .template-list::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 2px;
   }
 
   .template-item {
@@ -2718,6 +2869,175 @@
     border: 1px solid var(--border);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
+  }
+
+  .template-item.selected {
+    border-color: var(--accent);
+    background: var(--hover);
+  }
+
+  /* Templates wide modal — 2-column layout */
+  .templates-wide-modal {
+    max-width: 900px !important;
+    width: 90vw !important;
+    padding: 0 !important;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .templates-wide-modal .modal-header {
+    padding: 20px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-shrink: 0;
+  }
+
+  .templates-modal-title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .templates-modal-subtitle {
+    margin: 0;
+    color: var(--fg-dim);
+    font-size: 11.5px;
+  }
+
+  .templates-modal-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .templates-update-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 6px 10px;
+    height: 32px;
+  }
+
+  .templates-update-icon {
+    display: flex;
+    align-items: center;
+  }
+
+  .spinning {
+    display: inline-flex;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .templates-body-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    max-height: 460px;
+  }
+
+  .templates-col-list {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .templates-kernel-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 12px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .templates-kernel-tabs .tab-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .templates-col-list .template-list {
+    padding: 12px;
+  }
+
+  .templates-col-preview {
+    background: var(--bg-deep);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .template-preview-code {
+    margin: 0;
+    padding: 16px;
+    font-family: var(--font-family-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--fg-secondary);
+    overflow-y: auto;
+    overflow-x: auto;
+    white-space: pre;
+    height: 100%;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  .template-preview-code::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .template-preview-code::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 2px;
+  }
+
+  .templates-preview-loading,
+  .templates-preview-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 200px;
+    color: var(--fg-dim);
+  }
+
+  .templates-empty-state {
+    padding: 24px 16px;
+    text-align: center;
+  }
+
+  .templates-empty-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-secondary);
+    margin: 0 0 6px;
+  }
+
+  .templates-empty-hint {
+    font-size: 11.5px;
+    color: var(--fg-dim);
+    margin: 0;
+  }
+
+  .templates-modal-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    flex-shrink: 0;
   }
 
   .modal-header {
