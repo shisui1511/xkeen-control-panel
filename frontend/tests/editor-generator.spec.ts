@@ -167,6 +167,11 @@ test.describe('Editor & Constructor integration test suite', () => {
     const constructorTab = page.locator('button.tab-btn:has-text("Конструктор")');
     await constructorTab.click();
 
+    // Переключаемся на Mihomo-сторону конструктора (по умолчанию открыт Xray)
+    const mihomoKernelBtn = page.locator('.constructor-kernel-toggle button:has-text("Mihomo")');
+    await expect(mihomoKernelBtn).toBeVisible();
+    await mihomoKernelBtn.click();
+
     // Добавляем прокси через интерфейс генератора
     await page.locator('button.add-btn:has-text("Добавить прокси")').click();
     await page.locator('input.form-input[placeholder="my-proxy"]').fill('test-reality-proxy');

@@ -56,7 +56,7 @@
   import { mihomoSchema } from './schemas/mihomo';
 
   import { xraySnippetSource, mihomoSnippetSource } from './lib/snippets';
-  import MihomoGenerator from './MihomoGenerator.svelte';
+  import Constructor from './Constructor.svelte';
   import { buildPathAtCursor, type PathSegment } from './lib/editor-utils';
 
   export let onSwitchTab: (tab: string) => void = () => {};
@@ -2218,7 +2218,7 @@
     </div>
   {:else if activeTab === 'constructor'}
     <div transition:fade={{ duration: 150 }} style="margin-top: 16px;">
-      <MihomoGenerator
+      <Constructor
         {onSwitchTab}
         onInsertIntoEditor={handleInsertIntoEditor}
         {selectedFile}

@@ -320,7 +320,7 @@
         window.location.hash = '#/subscriptions';
         return 'subscriptions';
       }
-      if (path === 'mihomo-gen') {
+      if (path === 'mihomo-gen' || path === 'constructor') {
         return 'editor';
       }
       return path;
