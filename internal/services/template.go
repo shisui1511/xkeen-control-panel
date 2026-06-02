@@ -63,25 +63,33 @@ func (s *TemplateService) storePath() string {
 
 // loadCatalog загружает каталог шаблонов. Приоритет: DataDir-кэш → embedded catalog.json.
 func (s *TemplateService) loadCatalog() {
+	var templates []Template
+
 	// Попробовать DataDir-кэш сначала (D-03)
 	if cached, err := os.ReadFile(s.storePath()); err == nil {
 		var c cachedTemplates
 		if json.Unmarshal(cached, &c) == nil && len(c.Templates) > 0 {
-			s.templates = c.Templates
-			return
+			templates = c.Templates
 		}
 	}
-	// Fallback: embedded catalog.json
-	data, err := fs.ReadFile(s.embeddedFS, "catalog.json")
-	if err != nil {
-		return
+
+	if templates == nil {
+		// Fallback: embedded catalog.json
+		data, err := fs.ReadFile(s.embeddedFS, "catalog.json")
+		if err != nil {
+			return
+		}
+		var catalog struct {
+			Templates []Template `json:"templates"`
+		}
+		if json.Unmarshal(data, &catalog) == nil {
+			templates = catalog.Templates
+		}
 	}
-	var catalog struct {
-		Templates []Template `json:"templates"`
-	}
-	if json.Unmarshal(data, &catalog) == nil {
-		s.templates = catalog.Templates
-	}
+
+	s.mu.Lock()
+	s.templates = templates
+	s.mu.Unlock()
 }
 
 // List возвращает список доступных шаблонов.
@@ -112,6 +120,11 @@ func (s *TemplateService) FetchByName(name string) (string, error) {
 	// Санитизация filename через filepath.Base — блокирует path traversal (T-15-05).
 	safeName := filepath.Base(filename)
 
+	// Валидация type по allowlist — дополнительная защита от path traversal (CR-01).
+	if templateType != "xray" && templateType != "mihomo" {
+		return "", fmt.Errorf("invalid template type: %s", templateType)
+	}
+
 	// Читать из embedded FS по пути type/filename.
 	content, err := fs.ReadFile(s.embeddedFS, templateType+"/"+safeName)
 	if err != nil {
@@ -140,10 +153,17 @@ func (s *TemplateService) FetchOnlineUpdates() (int, error) {
 		return 0, fmt.Errorf("failed to parse online catalog: %w", err)
 	}
 
+	// allowedTypes — разрешённые значения type из каталога (CR-01: предотвращает path traversal через поле type).
+	allowedTypes := map[string]bool{"xray": true, "mihomo": true}
+
 	// Скачать содержимое каждого шаблона
 	updated := make([]Template, 0, len(catalog.Templates))
 	for _, tmpl := range catalog.Templates {
 		if tmpl.Filename == "" || tmpl.Type == "" {
+			continue
+		}
+		// Валидация type по allowlist (CR-01)
+		if !allowedTypes[tmpl.Type] {
 			continue
 		}
 		// Санитизация filename (T-15-05)

@@ -83,8 +83,8 @@ func TestTemplateService_PathTraversal(t *testing.T) {
 	svc := NewTemplateService(maliciousFS, t.TempDir())
 
 	content, err := svc.FetchByName("Evil")
-	// Ожидаем либо ошибку, либо пустой контент — но не "SECRET_CONTENT"
-	if err == nil && content == "SECRET_CONTENT" {
-		t.Error("path traversal vulnerability: FetchByName returned content outside templates directory")
+	// filepath.Base("../secret") == "secret"; xray/secret не существует в FS → обязана быть ошибка.
+	if err == nil {
+		t.Errorf("expected error for path traversal filename, got content: %q", content)
 	}
 }

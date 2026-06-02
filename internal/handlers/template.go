@@ -54,7 +54,7 @@ func (a *API) TemplateFetch(w http.ResponseWriter, r *http.Request) {
 
 	content, err := a.templateSvc.FetchByName(name)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		a.errorResponse(w, err.Error(), http.StatusNotFound)
 		return
 	}
 
