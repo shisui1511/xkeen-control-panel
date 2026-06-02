@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { currentLang } from './i18n';
+  import { currentLang, t } from './i18n';
   import { showToast } from './stores';
 
   export let onSwitchTab: (tab: string) => void = () => {};
   export let selectedFile: string = '';
   export let onInsertIntoEditor: (content: string) => void = () => {};
   export let embedded: boolean = false;
+  export let initialPreset: string = '';
 
   type ProxyType = 'vless' | 'hysteria2' | 'tuic' | 'ss' | 'vmess';
   type GroupType = 'select' | 'url-test' | 'fallback' | 'load-balance';
@@ -83,6 +84,8 @@
   let proxies: Proxy[] = [];
   let groups: ProxyGroup[] = [];
   let rules: Rule[] = [];
+  let activePreset: string = '';
+  let activeRuleProvider: 'none' | 'zkeen' | 'acl4ssr' | 'loyalsoldier' = 'none';
   let dns: DNSConfig = {
     enabled: false,
     nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],
@@ -141,6 +144,154 @@
 
   // New rule form
   let nr: Omit<Rule, 'id'> = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
+
+  // ── Rule-provider URL constants ─────────────────────────────────────────
+  const RULE_PROVIDERS: Record<string, Array<{ name: string; url: string; behavior: string; outbound: string }>> = {
+    zkeen: [
+      {
+        name: 'zkeen-geosite-category-ads',
+        url: 'https://raw.githubusercontent.com/nicetomytyuk/relaylist/refs/heads/main/mihomo/category-ads-all.yaml',
+        behavior: 'domain',
+        outbound: 'REJECT'
+      },
+      {
+        name: 'zkeen-geosite-ru',
+        url: 'https://raw.githubusercontent.com/nicetomytyuk/relaylist/refs/heads/main/mihomo/ru.yaml',
+        behavior: 'domain',
+        outbound: 'DIRECT'
+      },
+      {
+        name: 'zkeen-geoip-ru',
+        url: 'https://raw.githubusercontent.com/nicetomytyuk/relaylist/refs/heads/main/mihomo/geoip-ru.yaml',
+        behavior: 'ipcidr',
+        outbound: 'DIRECT'
+      }
+    ],
+    acl4ssr: [
+      {
+        name: 'acl4ssr-ban-ads',
+        url: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/BanAD.yaml',
+        behavior: 'domain',
+        outbound: 'REJECT'
+      },
+      {
+        name: 'acl4ssr-direct-cn',
+        url: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/ChinaMax.yaml',
+        behavior: 'classical',
+        outbound: 'DIRECT'
+      },
+      {
+        name: 'acl4ssr-proxy',
+        url: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/ProxyGFWlist.yaml',
+        behavior: 'domain',
+        outbound: 'Proxy'
+      }
+    ],
+    loyalsoldier: [
+      {
+        name: 'loyalsoldier-reject',
+        url: 'https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/reject.txt',
+        behavior: 'domain',
+        outbound: 'REJECT'
+      },
+      {
+        name: 'loyalsoldier-direct',
+        url: 'https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/direct.txt',
+        behavior: 'domain',
+        outbound: 'DIRECT'
+      },
+      {
+        name: 'loyalsoldier-proxy',
+        url: 'https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/proxy.txt',
+        behavior: 'domain',
+        outbound: 'Proxy'
+      },
+      {
+        name: 'loyalsoldier-cncidr',
+        url: 'https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/cncidr.txt',
+        behavior: 'ipcidr',
+        outbound: 'DIRECT'
+      }
+    ]
+  };
+
+  // ── Presets ──────────────────────────────────────────────────────────────
+  function applyPreset(id: 'bypass-ru' | 'full-vpn' | 'minimal') {
+    activePreset = id;
+    if (id === 'bypass-ru') {
+      groups = [
+        { id: crypto.randomUUID(), name: 'VPN', type: 'select', proxies: ['DIRECT', ...proxies.map(p => p.name)], url: 'https://www.gstatic.com/generate_204', interval: 300 },
+        { id: crypto.randomUUID(), name: 'Auto', type: 'url-test', proxies: proxies.map(p => p.name), url: 'https://www.gstatic.com/generate_204', interval: 300 }
+      ];
+      rules = [
+        { id: crypto.randomUUID(), type: 'GEOSITE', value: 'category-ads', outbound: 'REJECT' },
+        { id: crypto.randomUUID(), type: 'GEOIP', value: 'ru', outbound: 'DIRECT' },
+        { id: crypto.randomUUID(), type: 'GEOSITE', value: 'category-gov-ru', outbound: 'DIRECT' },
+        { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'VPN' }
+      ];
+    } else if (id === 'full-vpn') {
+      groups = [
+        { id: crypto.randomUUID(), name: 'VPN', type: 'select', proxies: ['DIRECT', ...proxies.map(p => p.name)], url: 'https://www.gstatic.com/generate_204', interval: 300 },
+        { id: crypto.randomUUID(), name: '⚡️ Fastest', type: 'url-test', proxies: proxies.map(p => p.name), url: 'https://www.gstatic.com/generate_204', interval: 300 }
+      ];
+      rules = [
+        { id: crypto.randomUUID(), type: 'GEOIP', value: 'private', outbound: 'DIRECT' },
+        { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'VPN' }
+      ];
+    } else if (id === 'minimal') {
+      groups = [
+        { id: crypto.randomUUID(), name: 'Proxy', type: 'select', proxies: ['DIRECT', ...proxies.map(p => p.name)], url: 'https://www.gstatic.com/generate_204', interval: 300 }
+      ];
+      rules = [
+        { id: crypto.randomUUID(), type: 'GEOIP', value: 'private', outbound: 'DIRECT' },
+        { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'Proxy' }
+      ];
+    }
+    showToast('success', $t('editor.preset_applied'));
+  }
+
+  // ── Import proxies from subscriptions ───────────────────────────────────
+  async function loadSubscriptionProxies() {
+    try {
+      const res = await fetch('/api/subscriptions');
+      if (!res.ok) return;
+      const subs: any[] = await res.json();
+      if (!subs || subs.length === 0) {
+        showToast('info', $t('editor.import_proxies_empty'));
+        return;
+      }
+      let imported = 0;
+      for (const sub of subs) {
+        const nr = await fetch(`/api/subscriptions/nodes?id=${sub.id}`);
+        if (!nr.ok) continue;
+        const nodes: any[] = await nr.json();
+        if (!nodes || nodes.length === 0) continue;
+        const mapped = nodes.map((n: any) => {
+          const serverRaw: string = n.server || '';
+          const lastColon = serverRaw.lastIndexOf(':');
+          const server = lastColon > 0 ? serverRaw.substring(0, lastColon) : serverRaw;
+          const portStr = lastColon > 0 ? serverRaw.substring(lastColon + 1) : '443';
+          const port = parseInt(portStr) || 443;
+          return {
+            id: crypto.randomUUID(),
+            name: n.name || n.tag || `proxy-${imported}`,
+            type: ((n.protocol || 'vless') as ProxyType),
+            server,
+            port
+          };
+        });
+        proxies = [...proxies, ...mapped];
+        imported += mapped.length;
+      }
+      if (imported > 0) {
+        showToast('success', $t('editor.import_proxies_done'));
+      } else {
+        showToast('info', $t('editor.import_proxies_empty'));
+      }
+    } catch (e: any) {
+      showToast('error', $t('editor.import_proxies_error'));
+    }
+  }
 
   function addProxy() {
     if (!np.name.trim() || !np.server.trim()) return;
@@ -211,6 +362,22 @@
   function generateYAML(): string {
     const lines: string[] = [];
 
+    // Rule-providers (if selected)
+    if (activeRuleProvider !== 'none') {
+      const providers = RULE_PROVIDERS[activeRuleProvider];
+      if (providers && providers.length > 0) {
+        lines.push('rule-providers:');
+        for (const rp of providers) {
+          lines.push(`  ${rp.name}:`);
+          lines.push(`    type: http`);
+          lines.push(`    behavior: ${rp.behavior}`);
+          lines.push(`    url: "${rp.url}"`);
+          lines.push(`    interval: 86400`);
+        }
+        lines.push('');
+      }
+    }
+
     // Proxies
     if (proxies.length > 0) {
       lines.push('proxies:');
@@ -275,14 +442,27 @@
     }
 
     // Rules
-    if (rules.length > 0) {
+    if (rules.length > 0 || activeRuleProvider !== 'none') {
       lines.push('rules:');
+      // Rule-set entries from rule-providers (before user rules, before MATCH)
+      if (activeRuleProvider !== 'none') {
+        const providers = RULE_PROVIDERS[activeRuleProvider];
+        if (providers) {
+          for (const rp of providers) {
+            lines.push(`  - RULE-SET,${rp.name},${rp.outbound}`);
+          }
+        }
+      }
       for (const r of rules) {
         if (r.type === 'MATCH') {
           lines.push(`  - MATCH,${r.outbound}`);
         } else {
           lines.push(`  - ${r.type},${r.value},${r.outbound}`);
         }
+      }
+      // If only rule-providers active but no manual rules, add a default MATCH
+      if (rules.length === 0 && activeRuleProvider !== 'none') {
+        lines.push(`  - MATCH,DIRECT`);
       }
       lines.push('');
     }
@@ -415,6 +595,38 @@
   <div class="gen-layout">
     <!-- Left: sections -->
     <div class="gen-left">
+      <!-- Scenario chips -->
+      <div class="constructor-scenario-bar">
+        <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
+        {#each [
+          ['bypass-ru', $t('editor.scenario_ru_bypass')],
+          ['full-vpn', $t('editor.scenario_full_vpn')],
+          ['minimal', $t('editor.scenario_minimal')]
+        ] as [id, label]}
+          <button
+            class="scenario-chip"
+            aria-pressed={activePreset === id}
+            class:active={activePreset === id}
+            on:click={() => applyPreset(id as 'bypass-ru' | 'full-vpn' | 'minimal')}
+          >{label}</button>
+        {/each}
+      </div>
+
+      <!-- Rule providers -->
+      <div class="rule-providers-row">
+        <label class="form-label" for="rp-select">{$t('editor.constructor_rule_providers')}:</label>
+        <select
+          id="rp-select"
+          class="form-select rp-select"
+          bind:value={activeRuleProvider}
+        >
+          <option value="none">{$t('editor.rp_none')}</option>
+          <option value="zkeen">{$t('editor.rp_zkeen')}</option>
+          <option value="acl4ssr">{$t('editor.rp_acl4ssr')}</option>
+          <option value="loyalsoldier">{$t('editor.rp_loyalsoldier')}</option>
+        </select>
+      </div>
+
       <!-- Section tabs -->
       <div class="sec-tabs">
         {#each [['proxies', ru ? 'Прокси' : 'Proxies'], ['groups', ru ? 'Группы' : 'Groups'], ['rules', ru ? 'Правила' : 'Rules'], ['dns', 'DNS'], ['tun', 'TUN']] as [id, label]}
@@ -607,9 +819,14 @@
               </div>
             </div>
           {:else}
-            <button class="add-btn" on:click={() => (showProxyForm = true)}>
-              + {ru ? 'Добавить прокси' : 'Add proxy'}
-            </button>
+            <div class="constructor-proxy-list">
+              <button class="add-btn" on:click={() => (showProxyForm = true)}>
+                + {ru ? 'Добавить прокси' : 'Add proxy'}
+              </button>
+              <button class="add-btn import-btn" on:click={loadSubscriptionProxies}>
+                ↓ {$t('editor.constructor_import_proxies')}
+              </button>
+            </div>
           {/if}
         </div>
       {/if}
@@ -1356,5 +1573,86 @@
       position: static;
       max-height: 300px;
     }
+  }
+
+  /* Scenario bar */
+  .constructor-scenario-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+
+  .scenario-label {
+    font-size: 11px;
+    color: var(--fg-dim);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .scenario-chip {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--fg-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 12px;
+    cursor: pointer;
+    transition:
+      background var(--transition-fast),
+      border-color var(--transition-fast),
+      color var(--transition-fast);
+    line-height: 1.4;
+  }
+
+  .scenario-chip:hover {
+    background: rgba(41, 194, 240, 0.08);
+    border-color: rgba(41, 194, 240, 0.35);
+    color: var(--primary);
+  }
+
+  .scenario-chip.active {
+    background: rgba(41, 194, 240, 0.15);
+    border-color: rgba(41, 194, 240, 0.5);
+    color: var(--primary);
+  }
+
+  /* Rule providers row */
+  .rule-providers-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .rule-providers-row .form-label {
+    flex-shrink: 0;
+  }
+
+  .rp-select {
+    width: auto;
+    min-width: 160px;
+    font-size: 12px;
+    padding: 5px 8px;
+  }
+
+  /* Proxy list action group */
+  .constructor-proxy-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .import-btn {
+    border-style: dashed;
+    color: var(--fg-dim);
+  }
+
+  .import-btn:hover {
+    background: rgba(70, 209, 138, 0.05);
+    border-color: rgba(70, 209, 138, 0.3);
+    color: var(--success);
   }
 </style>
