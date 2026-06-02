@@ -60,8 +60,11 @@ func TestTemplateService_NoURLTemplates(t *testing.T) {
 
 	list := svc.List()
 	for _, tmpl := range list {
-		if strings.HasPrefix(tmpl.URL, "http") {
-			t.Errorf("template %q contains HTTP URL %q — embedded templates must not have network URLs (TMPL-02)", tmpl.Name, tmpl.URL)
+		// Template struct не содержит поля URL (D-07, TMPL-02) —
+		// embedded шаблоны никогда не хранят сетевые адреса.
+		// Проверяем что поле Content не содержит хардкоженных URL шаблонов.
+		if strings.HasPrefix(tmpl.Content, "http") {
+			t.Errorf("template %q has unexpected http content prefix — embedded templates must not have network URLs (TMPL-02)", tmpl.Name)
 		}
 	}
 }
