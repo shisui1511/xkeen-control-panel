@@ -354,9 +354,9 @@
   // ── YAML generation ─────────────────────────────────────────────────────
 
   function q(v: string | number | boolean) {
-    return typeof v === 'string' && (v.includes(':') || v.includes('#') || v === '')
-      ? `"${v}"`
-      : String(v);
+    if (typeof v !== 'string') return String(v);
+    const escaped = v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return v.includes(':') || v.includes('#') || v === '' ? `"${escaped}"` : escaped;
   }
 
   function generateYAML(): string {
@@ -1013,23 +1013,21 @@
               <label class="form-label">Nameservers</label>
               <textarea
                 class="form-textarea"
-                bind:value={dns.nameservers}
+                value={dns.nameservers.join('\n')}
                 rows="3"
                 on:change={(e) =>
                   (dns.nameservers = e.currentTarget.value.split('\n').filter(Boolean))}
-                >{dns.nameservers.join('\n')}</textarea
-              >
+              ></textarea>
             </div>
             <div class="form-row">
               <label class="form-label">Fallback</label>
               <textarea
                 class="form-textarea"
-                bind:value={dns.fallback}
+                value={dns.fallback.join('\n')}
                 rows="2"
                 on:change={(e) =>
                   (dns.fallback = e.currentTarget.value.split('\n').filter(Boolean))}
-                >{dns.fallback.join('\n')}</textarea
-              >
+              ></textarea>
             </div>
           {/if}
         </div>
