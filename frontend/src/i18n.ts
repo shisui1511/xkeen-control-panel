@@ -2094,10 +2094,21 @@ export const t = derived(currentLang, ($lang: Lang) => {
 });
 
 /**
- * Хелпер для русского склонения числительных.
- * Правила: 1 → one (подписка), 2-4 → few (подписки), 5+ и 11-19 → many (подписок).
+ * Хелпер для выбора правильной формы числительного.
+ * По умолчанию применяет правила русского языка (CLDR Russian rules).
+ * Для lang === 'en' применяет двухформенное правило английского (singular / plural).
+ *
+ * @param n - число для проверки
+ * @param one - форма для единственного числа (рус: 1, 21, 101…; англ: 1)
+ * @param few - форма для малого числа (рус: 2–4, 22–24…; для англ: не используется)
+ * @param many - форма для множественного числа (рус: 0, 5–20…; англ: 0, 2, 3…)
+ * @param lang - язык для применения правил ('ru' по умолчанию, поддерживает 'en')
  */
-export function pluralize(n: number, one: string, few: string, many: string): string {
+export function pluralize(n: number, one: string, few: string, many: string, lang: Lang = 'ru'): string {
+  if (lang === 'en') {
+    return n === 1 ? one : many;
+  }
+  // Русские правила CLDR
   const abs = Math.abs(Math.floor(n));
   if (abs % 10 === 1 && abs % 100 !== 11) return one;
   if (abs % 10 >= 2 && abs % 10 <= 4 && (abs % 100 < 10 || abs % 100 >= 20)) return few;
