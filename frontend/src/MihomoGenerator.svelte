@@ -1613,7 +1613,15 @@
                         src={g.icon}
                         alt={g.name}
                         class="zkeen-group-icon"
-                        on:error={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png'; }}
+                        on:error={() => {
+                          const fallback = 'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png';
+                          if (g.icon !== fallback) {
+                            g.icon = fallback;
+                          } else {
+                            g.icon = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                          }
+                          groups = [...groups];
+                        }}
                       />
                     </div>
                     <div class="zkeen-group-title">
