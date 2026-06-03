@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { t, setLang } from './i18n';
+  import { t, setLang, pluralize } from './i18n';
   import { isSidebarOpen, capabilities, fetchCapabilities, showToast } from './stores';
   import Sidebar from './components/Sidebar.svelte';
   import Toast from './components/Toast.svelte';
@@ -795,7 +795,7 @@
                   {systemStats?.config_path || '/opt/etc/xkeen/'}
                   {#if systemStats?.config_lines}
                     <span class="info-badge info-badge-orange"
-                      >{systemStats.config_lines} строк</span
+                      >{pluralize(systemStats.config_lines, $t('dash.info_lines_one', { count: String(systemStats.config_lines) }), $t('dash.info_lines_few', { count: String(systemStats.config_lines) }), $t('dash.info_lines_many', { count: String(systemStats.config_lines) }))}</span
                     >
                   {/if}
                 </div>

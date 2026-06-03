@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t, currentLang } from './i18n';
+  import { t, currentLang, pluralize } from './i18n';
   import {
     showConfirm,
     capabilities,
@@ -753,8 +753,7 @@
   {:else}
     <div class="stats-chips-row mb-3">
       <span class="chip chip-default">
-        <b>{stats.total}</b>
-        {$currentLang === 'ru' ? 'подписки' : 'subscriptions'}
+        {pluralize(stats.total, $t('subscr.total_one', { count: String(stats.total) }), $t('subscr.total_few', { count: String(stats.total) }), $t('subscr.total_many', { count: String(stats.total) }))}
       </span>
       <span class="chip chip-default">
         <b>{stats.nodes}</b>

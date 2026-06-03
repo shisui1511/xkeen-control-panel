@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t, currentLang } from './i18n';
+  import { t, currentLang, pluralize } from './i18n';
   import Icon from './lib/components/Icon.svelte';
   import { showToast, capabilities } from './stores';
 
@@ -390,8 +390,7 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {file.record_count.toLocaleString()}
-                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                    {pluralize(file.record_count, $t('dat.record_count_one', { count: file.record_count.toLocaleString() }), $t('dat.record_count_few', { count: file.record_count.toLocaleString() }), $t('dat.record_count_many', { count: file.record_count.toLocaleString() }))} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·
@@ -505,8 +504,7 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {file.record_count.toLocaleString()}
-                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                    {pluralize(file.record_count, $t('dat.record_count_one', { count: file.record_count.toLocaleString() }), $t('dat.record_count_few', { count: file.record_count.toLocaleString() }), $t('dat.record_count_many', { count: file.record_count.toLocaleString() }))} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·
@@ -606,8 +604,7 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {file.record_count.toLocaleString()}
-                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                    {pluralize(file.record_count, $t('dat.record_count_one', { count: file.record_count.toLocaleString() }), $t('dat.record_count_few', { count: file.record_count.toLocaleString() }), $t('dat.record_count_many', { count: file.record_count.toLocaleString() }))} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·

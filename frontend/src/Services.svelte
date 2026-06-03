@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t } from './i18n';
+  import { t, pluralize } from './i18n';
   import { showToast, fetchCapabilities, showConfirm } from './stores';
   import Skeleton from './components/Skeleton.svelte';
 
@@ -961,7 +961,12 @@
         {/each}
         {#if !restartLogExpanded && restartLog.length > 5}
           <div class="log-more" on:click={() => (restartLogExpanded = true)}>
-            {$t('svc.log_show_more', { count: restartLog.length - 5 })}
+            {pluralize(
+              restartLog.length - 5,
+              $t('svc.log_show_more_one', { count: String(restartLog.length - 5) }),
+              $t('svc.log_show_more_few', { count: String(restartLog.length - 5) }),
+              $t('svc.log_show_more_many', { count: String(restartLog.length - 5) })
+            )}
           </div>
         {/if}
       </div>

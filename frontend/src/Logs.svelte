@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { t } from './i18n';
+  import { t, pluralize } from './i18n';
 
   interface LogEntry {
     timestamp: string;
@@ -466,9 +466,7 @@
       >
       <span class="stat"
         ><b>{availableSources.length}</b>
-        {$t('logs.source_count', { count: availableSources.length })
-          .replace(String(availableSources.length), '')
-          .trim()}</span
+        {pluralize(availableSources.length, $t('logs.source_count_one', { count: '' }).trim(), $t('logs.source_count_few', { count: '' }).trim(), $t('logs.source_count_many', { count: '' }).trim())}</span
       >
       <span class="stat">{$t('logs.realtime_label')}</span>
     </div>

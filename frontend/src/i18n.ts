@@ -117,7 +117,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.info_gateway': 'Шлюз по умолчанию',
     'dash.info_dns': 'DNS серверы',
     'dash.info_latest': 'latest',
-    'dash.info_lines': '{count} строк',
+    'dash.info_lines_one': '{count} строка',
+    'dash.info_lines_few': '{count} строки',
+    'dash.info_lines_many': '{count} строк',
     'dash.uptime_since': 'с {time}',
     'dash.uptime_stable': 'стабильно',
     'dash.uptime_restarts': '0 рестартов',
@@ -217,6 +219,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.constructor_scenario': 'Сценарий',
     'editor.scenario_rule_based': 'Selective Routing',
     'editor.scenario_global_proxy': 'Global Proxy',
+    'editor.scenario_zkeen_selective': 'ZKeen (СНГ выборочный)',
     'editor.scenario_mihomo_only': 'Только Mihomo',
     'editor.open_in_editor': 'Открыть в редакторе',
     'editor.constructor_invalid': 'Конфигурация содержит ошибки',
@@ -308,7 +311,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.log_fail': 'Ошибка',
     'svc.log_expand': 'Показать все',
     'svc.log_collapse': 'Свернуть',
-    'svc.log_show_more': 'Показать ещё {count} записей',
+    'svc.log_show_more_one': 'Показать ещё {count} запись',
+    'svc.log_show_more_few': 'Показать ещё {count} записи',
+    'svc.log_show_more_many': 'Показать ещё {count} записей',
     'svc.section_autostart': 'Авто‑запуск и расписание',
     'svc.xkeen_module': 'главный модуль',
     'svc.xray_core': 'core · v2ray-compatible',
@@ -647,6 +652,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.title': 'DAT Manager',
     'dat.h1': 'DAT файлы',
     'dat.h1_sub': 'Базы данных GeoIP и GeoSite для фильтрации трафика.',
+    'dat.record_count_one': '{count} запись',
+    'dat.record_count_few': '{count} записи',
+    'dat.record_count_many': '{count} записей',
     'dat.section_xray': 'XRAY',
     'dat.section_mihomo': 'MIHOMO',
     'dat.total_files': 'Файлов',
@@ -768,6 +776,9 @@ const translations: Record<Lang, Record<string, string>> = {
     // Subscriptions
     'subscr.title': 'Подписки',
     'subscr.subtitle': 'Управление ссылками на подписки прокси',
+    'subscr.total_one': '{count} подписка',
+    'subscr.total_few': '{count} подписки',
+    'subscr.total_many': '{count} подписок',
     'subscr.refresh_all': 'Обновить все',
     'subscr.add': 'Добавить',
     'subscr.empty': 'Нет подписок.',
@@ -884,7 +895,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.disconnected': 'Отключено от сервера логов',
     'logs.status_connected': 'Подключено',
     'logs.status_disconnected': 'Отключено',
-    'logs.source_count': '{count} источников',
+    'logs.source_count_one': '{count} источник',
+    'logs.source_count_few': '{count} источника',
+    'logs.source_count_many': '{count} источников',
     'logs.all_sources': 'Все источники',
     'logs.all_levels': 'Все уровни',
     'logs.autoscroll': 'Автопрокрутка',
@@ -898,7 +911,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.disconnected_title': 'Соединение разорвано',
     'logs.disconnected_desc': 'Потеряно подключение к WebSocket серверу логов.',
     'logs.buffer_count': '{count} строк в буфере',
-    'logs.active_sources_count': '{count} активных источника',
+    'logs.active_sources_count_one': '{count} активный источник',
+    'logs.active_sources_count_few': '{count} активных источника',
+    'logs.active_sources_count_many': '{count} активных источников',
     'logs.realtime_label': 'обновление в реальном времени',
 
     // Proxies
@@ -1132,7 +1147,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.info_gateway': 'Default Gateway',
     'dash.info_dns': 'DNS Servers',
     'dash.info_latest': 'latest',
-    'dash.info_lines': '{count} lines',
+    'dash.info_lines_one': '{count} line',
+    'dash.info_lines_few': '{count} lines',
+    'dash.info_lines_many': '{count} lines',
     'dash.uptime_since': 'since {time}',
     'dash.uptime_stable': 'stable',
     'dash.uptime_restarts': '0 restarts',
@@ -1232,6 +1249,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.constructor_scenario': 'Scenario',
     'editor.scenario_rule_based': 'Selective Routing',
     'editor.scenario_global_proxy': 'Global Proxy',
+    'editor.scenario_zkeen_selective': 'ZKeen CIS Selective',
     'editor.scenario_mihomo_only': 'Mihomo Only',
     'editor.open_in_editor': 'Open in editor',
     'editor.constructor_invalid': 'Configuration contains errors',
@@ -1323,7 +1341,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.log_fail': 'Error',
     'svc.log_expand': 'Show all',
     'svc.log_collapse': 'Collapse',
-    'svc.log_show_more': 'Show {count} more',
+    'svc.log_show_more_one': 'Show {count} more entry',
+    'svc.log_show_more_few': 'Show {count} more entries',
+    'svc.log_show_more_many': 'Show {count} more entries',
     'svc.section_autostart': 'Auto-start & schedule',
     'svc.xkeen_module': 'main module',
     'svc.xray_core': 'core · v2ray-compatible',
@@ -1655,6 +1675,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.title': 'DAT Manager',
     'dat.h1': 'DAT Files',
     'dat.h1_sub': 'GeoIP and GeoSite databases for traffic filtering.',
+    'dat.record_count_one': '{count} record',
+    'dat.record_count_few': '{count} records',
+    'dat.record_count_many': '{count} records',
     'dat.section_xray': 'XRAY',
     'dat.section_mihomo': 'MIHOMO',
     'dat.total_files': 'Files',
@@ -1775,6 +1798,9 @@ const translations: Record<Lang, Record<string, string>> = {
     // Subscriptions
     'subscr.title': 'Subscriptions',
     'subscr.subtitle': 'Manage proxy subscription links',
+    'subscr.total_one': '{count} subscription',
+    'subscr.total_few': '{count} subscriptions',
+    'subscr.total_many': '{count} subscriptions',
     'subscr.refresh_all': 'Refresh All',
     'subscr.add': 'Add',
     'subscr.empty': 'No subscriptions.',
@@ -1890,7 +1916,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.disconnected': 'Disconnected from logs server',
     'logs.status_connected': 'Connected',
     'logs.status_disconnected': 'Disconnected',
-    'logs.source_count': '{count} sources',
+    'logs.source_count_one': '{count} source',
+    'logs.source_count_few': '{count} sources',
+    'logs.source_count_many': '{count} sources',
     'logs.all_sources': 'All sources',
     'logs.all_levels': 'All levels',
     'logs.autoscroll': 'Auto-scroll',
@@ -1904,7 +1932,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.disconnected_title': 'Connection lost',
     'logs.disconnected_desc': 'Lost connection to the WebSocket log server.',
     'logs.buffer_count': '{count} lines in buffer',
-    'logs.active_sources_count': '{count} active sources',
+    'logs.active_sources_count_one': '{count} active source',
+    'logs.active_sources_count_few': '{count} active sources',
+    'logs.active_sources_count_many': '{count} active sources',
     'logs.realtime_label': 'live update',
 
     // Proxies
@@ -2056,6 +2086,17 @@ export const t = derived(currentLang, ($lang: Lang) => {
     return text;
   };
 });
+
+/**
+ * Хелпер для русского склонения числительных.
+ * Правила: 1 → one (подписка), 2-4 → few (подписки), 5+ и 11-19 → many (подписок).
+ */
+export function pluralize(n: number, one: string, few: string, many: string): string {
+  const abs = Math.abs(Math.floor(n));
+  if (abs % 10 === 1 && abs % 100 !== 11) return one;
+  if (abs % 10 >= 2 && abs % 10 <= 4 && (abs % 100 < 10 || abs % 100 >= 20)) return few;
+  return many;
+}
 
 // Switch language
 export function setLang(lang: Lang) {
