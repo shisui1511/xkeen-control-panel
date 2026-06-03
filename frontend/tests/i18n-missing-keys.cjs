@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/no-require-imports */
 // Аудит отсутствующих i18n-ключей (Phase 12, AUDIT-01, D-10).
 // Собирает все t('a.b.c') / $t('a.b.c') из *.svelte и проверяет, что каждый
 // присутствует в frontend/src/i18n.ts. Exit 1 + список, если есть missing.

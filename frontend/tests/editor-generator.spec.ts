@@ -341,12 +341,12 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     const yamlText = await previewPane.textContent() || '';
 
     // Считаем proxy-groups — каждая группа начинается с '  - name:'
-    const proxyGroupMatches = yamlText.match(/^  - name:/gm);
+    const proxyGroupMatches = yamlText.match(/^ {2}- name:/gm);
     const proxyGroupCount = proxyGroupMatches ? proxyGroupMatches.length : 0;
 
     // Считаем rule-providers — каждый провайдер — строка вида '  name@type:'
     // (или считаем вхождения 'type: http' в секции rule-providers)
-    const ruleProviderMatches = yamlText.match(/\n  [a-z][^:\n]+@[a-z]+:/g);
+    const ruleProviderMatches = yamlText.match(/\n {2}[a-z][^:\n]+@[a-z]+:/g);
     const ruleProviderCount = ruleProviderMatches ? ruleProviderMatches.length : 0;
 
     // D-13: 16 групп
