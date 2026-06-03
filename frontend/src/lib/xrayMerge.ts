@@ -35,7 +35,7 @@ export function mergeXrayFile(
       return {
         ...existing,
         log: {
-          ...(existing.log as Record<string, any>),
+          ...(existing.log ?? {}),
           loglevel: managed.loglevel,
           dnsLog: managed.dnsLog
         }
@@ -44,7 +44,7 @@ export function mergeXrayFile(
       return {
         ...existing,
         dns: {
-          ...(existing.dns as Record<string, any>),
+          ...(existing.dns ?? {}),
           servers: managed.servers,
           queryStrategy: managed.queryStrategy,
           hosts: managed.hosts
@@ -65,7 +65,7 @@ export function mergeXrayFile(
       return {
         ...existing,
         routing: {
-          ...(existing.routing as Record<string, any>),
+          ...(existing.routing ?? {}),
           rules
         }
       };
@@ -74,7 +74,7 @@ export function mergeXrayFile(
       return {
         ...existing,
         policy: {
-          ...(existing.policy as Record<string, any>),
+          ...(existing.policy ?? {}),
           levels: {
             ...((existing.policy as Record<string, any>)?.levels ?? {}),
             '0': managed.level0
