@@ -71,3 +71,19 @@ describe('pluralize() — русские правила склонения', () 
     expect(pluralize(32727, ONE, FEW, MANY)).toBe(MANY);
   });
 });
+
+describe('pluralize() — английские правила склонения', () => {
+  const ONE = 'entry';
+  const MANY = 'entries';
+
+  it('1 → one', () => {
+    expect(pluralize(1, ONE, '', MANY, 'en')).toBe(ONE);
+  });
+
+  it('0, 2, 5, 21 → many', () => {
+    expect(pluralize(0, ONE, '', MANY, 'en')).toBe(MANY);
+    expect(pluralize(2, ONE, '', MANY, 'en')).toBe(MANY);
+    expect(pluralize(5, ONE, '', MANY, 'en')).toBe(MANY);
+    expect(pluralize(21, ONE, '', MANY, 'en')).toBe(MANY);
+  });
+});
