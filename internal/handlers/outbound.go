@@ -71,8 +71,13 @@ func (a *API) OutboundImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
 	var req OutboundImportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err.Error() == "http: request body too large" {
+			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1 MB)")
+			return
+		}
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
