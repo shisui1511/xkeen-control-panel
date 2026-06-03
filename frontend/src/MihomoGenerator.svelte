@@ -196,7 +196,7 @@
     zkeen: ZKEEN_RULE_PROVIDERS
   };
 
-  const ZKEEN_16_GROUPS = [
+  const ZKEEN_16_GROUPS: Omit<ProxyGroup, 'id'>[] = [
     { name: 'Заблок. сервисы', type: 'select', includeAll: true, proxies: [] as string[], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Reject.png' },
     { name: 'YouTube', type: 'select', includeAll: true, proxies: ['Заблок. сервисы', 'DIRECT'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png' },
     { name: 'Discord', type: 'select', includeAll: true, proxies: ['Заблок. сервисы', 'DIRECT'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png' },
@@ -1005,7 +1005,10 @@
     }
 
     // Rules
-    if (rules.length > 0 || activeRuleProvider !== 'none' || (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0)) {
+    const hasRules = rules.length > 0 ||
+      activeRuleProvider === 'zkeen' ||
+      (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0);
+    if (hasRules) {
       lines.push('rules:');
       if (activeRuleProvider === 'zkeen') {
         const zkeenRules = [
@@ -1095,7 +1098,7 @@
           }
         }
         // If only rule-providers active but no manual rules, add a default MATCH
-        if (rules.length === 0 && (activeRuleProvider !== 'none' || (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0))) {
+        if (rules.length === 0 && activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0) {
           lines.push(`  - MATCH,DIRECT`);
         }
       }
@@ -1340,8 +1343,8 @@
           data-testid="preset-select"
           value={activePreset}
           on:change={(e) => {
-            const val = e.target.value;
-            applyPreset(val);
+            const val = e.currentTarget.value;
+            applyPreset(val as any);
             if (val === 'rule-based') {
               activeSection = 'rulesets';
             } else if (val === 'zkeen-selective') {
@@ -1610,7 +1613,7 @@
                         src={g.icon}
                         alt={g.name}
                         class="zkeen-group-icon"
-                        on:error={(e) => { e.currentTarget.src = 'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png'; }}
+                        on:error={(e) => { (e.currentTarget as HTMLImageElement).src = 'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png'; }}
                       />
                     </div>
                     <div class="zkeen-group-title">
@@ -1629,7 +1632,7 @@
                         type="checkbox"
                         checked={g.enabled !== false}
                         on:change={(e) => {
-                          g.enabled = e.target.checked;
+                          g.enabled = e.currentTarget.checked;
                           groups = [...groups];
                         }}
                       />
@@ -1644,7 +1647,7 @@
                         class="form-select"
                         value={g.proxies[0] || 'DIRECT'}
                         on:change={(e) => {
-                          const val = e.target.value;
+                          const val = e.currentTarget.value;
                           g.proxies = [val, ...g.proxies.slice(1).filter(p => p !== val)];
                           groups = [...groups];
                         }}
