@@ -106,8 +106,16 @@ test.describe('Import Proxy Node E2E test suite', () => {
   test.beforeEach(async ({ page }) => {
     await disableServiceWorker(page);
     await setupRestMocks(page);
-    await page.goto('/#/subscriptions');
-    await page.waitForSelector('h1:has-text("Подписки")');
+    await page.route('**/api/config/**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ outbounds: [] })
+      });
+    });
+    await page.goto('/#/constructor');
+    // Переключаемся на вкладку Исходящие (outbounds)
+    await page.locator('.sec-tab[data-tab="outbounds"]').click();
   });
 
   test('successfully imports proxy node with custom tag', async ({ page }) => {
@@ -219,9 +227,15 @@ test.describe('Import Node из конструкторов (D-15, D-16, D-17)', 
     });
     await page.goto('/#/constructor');
     await page.locator('.constructor-kernel-toggle button:has-text("Xray")').click();
+    await page.locator('.sec-tab[data-tab="outbounds"]').click();
   });
 
   test('кнопка «Импорт узла» присутствует в Xray-конструкторе (D-15)', async ({ page }) => {
+    await expect(page.locator('button:has-text("Импорт узла")')).toBeVisible();
+  });
+
+  test('кнопка «Импорт узла» присутствует в Mihomo-конструкторе (D-15)', async ({ page }) => {
+    await page.locator('.constructor-kernel-toggle button:has-text("Mihomo")').click();
     await expect(page.locator('button:has-text("Импорт узла")')).toBeVisible();
   });
 

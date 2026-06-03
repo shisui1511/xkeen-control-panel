@@ -107,6 +107,15 @@
     dnsHijack: ['any:53']
   };
 
+  // Import Node states
+  let showImportModal = false;
+  let importLink = '';
+  let importTag = '';
+  let importStep = 1; // 1: Input link, 2: Preview & Confirm tag
+  let importLoading = false;
+  let parsedNode: any = null;
+  let importErrorMsg = '';
+
   // Form visibility
   let showProxyForm = false;
   let showGroupForm = false;
@@ -329,6 +338,183 @@
       }
     } catch (e: any) {
       showToast('error', $t('editor.import_proxies_error'));
+    }
+  }
+
+  function openImportModal() {
+    showImportModal = true;
+    importLink = '';
+    importTag = '';
+    importStep = 1;
+    importLoading = false;
+    parsedNode = null;
+    importErrorMsg = '';
+  }
+
+  function closeImportModal() {
+    showImportModal = false;
+  }
+
+  function getNodeServer(node: any): string {
+    if (!node || !node.settings) return '';
+    if (node.settings.vnext && node.settings.vnext[0]) {
+      return node.settings.vnext[0].address || '';
+    }
+    if (node.settings.servers && node.settings.servers[0]) {
+      return node.settings.servers[0].address || '';
+    }
+    return '';
+  }
+
+  function getNodePort(node: any): string {
+    if (!node || !node.settings) return '';
+    if (node.settings.vnext && node.settings.vnext[0]) {
+      return String(node.settings.vnext[0].port || '');
+    }
+    if (node.settings.servers && node.settings.servers[0]) {
+      return String(node.settings.servers[0].port || '');
+    }
+    return '';
+  }
+
+  async function parseImportLink() {
+    const trimmed = importLink.trim();
+    if (!trimmed) {
+      importErrorMsg = $t('subscr.import_error_empty');
+      return;
+    }
+
+    const lines = trimmed.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (lines.length > 1) {
+      importErrorMsg = $t('subscr.import_error_single_only');
+      return;
+    }
+
+    importErrorMsg = '';
+    importLoading = true;
+
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/outbound/parse', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({ links: [importLink.trim()] })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        importErrorMsg = data.error || $t('subscr.import_error_invalid');
+        return;
+      }
+
+      if (data.data && data.data.length > 0) {
+        const result = data.data[0];
+        if (result.error) {
+          importErrorMsg = result.error;
+        } else if (result.outbound) {
+          parsedNode = result.outbound;
+          importTag = parsedNode.tag || '';
+          importStep = 2;
+        } else {
+          importErrorMsg = $t('subscr.import_error_invalid');
+        }
+      } else {
+        importErrorMsg = $t('subscr.import_error_invalid');
+      }
+    } catch (e: any) {
+      importErrorMsg = e.message || $t('subscr.import_error_invalid');
+    } finally {
+      importLoading = false;
+    }
+  }
+
+  function mapParsedOutboundToMihomoProxy(parsed: any, customTag?: string): Proxy {
+    const proto = parsed.protocol || 'vless';
+    const tag = customTag || parsed.tag || 'imported-node';
+    const p: Proxy = {
+      id: crypto.randomUUID(),
+      name: tag,
+      type: 'vless',
+      server: '',
+      port: 443
+    };
+
+    if (proto === 'vless' || proto === 'vmess') {
+      p.type = proto;
+      const vnext = parsed.settings?.vnext?.[0];
+      if (vnext) {
+        p.server = vnext.address || '';
+        p.port = vnext.port || 443;
+        p.uuid = vnext.users?.[0]?.id || '';
+        p.flow = vnext.users?.[0]?.flow || '';
+      }
+      const ss = parsed.streamSettings;
+      if (ss) {
+        p.tls = ss.security === 'tls' || ss.security === 'reality';
+        p.network = ss.network || 'tcp';
+        if (ss.wsSettings?.path) {
+          p.wsPath = ss.wsSettings.path;
+        }
+        if (ss.security === 'reality') {
+          const rOpts = ss.realitySettings;
+          if (rOpts) {
+            p.publicKey = rOpts.publicKey || '';
+            p.shortId = rOpts.shortId || '';
+            p.servername = rOpts.serverName || '';
+            p.fingerprint = rOpts.fingerprint || 'chrome';
+          }
+        } else if (ss.security === 'tls') {
+          const tOpts = ss.tlsSettings;
+          if (tOpts) {
+            p.servername = tOpts.serverName || '';
+          }
+        }
+      }
+    } else if (proto === 'shadowsocks' || proto === 'ss') {
+      p.type = 'ss';
+      const server = parsed.settings?.servers?.[0];
+      if (server) {
+        p.server = server.address || '';
+        p.port = server.port || 443;
+        p.cipher = server.method || 'aes-256-gcm';
+        p.password = server.password || '';
+      }
+    } else if (proto === 'hysteria2' || proto === 'hy2') {
+      p.type = 'hysteria2';
+      const server = parsed.settings?.servers?.[0];
+      if (server) {
+        p.server = server.address || '';
+        p.port = server.port || 443;
+        p.password = server.password || '';
+        p.sni = parsed.streamSettings?.tlsSettings?.serverName || '';
+      }
+    } else if (proto === 'tuic') {
+      p.type = 'tuic';
+      const server = parsed.settings?.servers?.[0];
+      if (server) {
+        p.server = server.address || '';
+        p.port = server.port || 443;
+        p.uuid = server.uuid || '';
+        p.password = server.password || '';
+        p.congestion = 'bbr';
+        p.sni = parsed.streamSettings?.tlsSettings?.serverName || '';
+      }
+    }
+    return p;
+  }
+
+  function confirmImportNode() {
+    if (!parsedNode) return;
+    try {
+      const mapped = mapParsedOutboundToMihomoProxy(parsedNode, importTag);
+      proxies = [...proxies, mapped];
+      showToast('success', $t('subscr.import_success'));
+      showImportModal = false;
+    } catch (e: any) {
+      importErrorMsg = e.message || $t('subscr.import_error');
     }
   }
 
@@ -1384,12 +1570,26 @@
               </div>
             </div>
           {:else}
-            <div class="constructor-proxy-list">
-              <button class="add-btn" on:click={() => (showProxyForm = true)}>
+            <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
+              <button class="add-btn" style="flex: 1;" on:click={() => (showProxyForm = true)}>
                 + {ru ? 'Добавить прокси' : 'Add proxy'}
               </button>
-              <button class="add-btn import-btn" on:click={loadSubscriptionProxies}>
+              <button class="add-btn import-btn" style="flex: 1;" on:click={loadSubscriptionProxies}>
                 ↓ {$t('editor.constructor_import_proxies')}
+              </button>
+              <button class="add-btn import-btn" style="flex: 1;" on:click={openImportModal}>
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  style="margin-right: 4px; display: inline-block; vertical-align: middle;"
+                >
+                  <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"/>
+                </svg>
+                {$t('subscr.import_node')}
               </button>
             </div>
           {/if}
@@ -1879,6 +2079,102 @@
         <button class="btn btn-primary" on:click={handleApplyMihomo} disabled={applyLoading}>
           {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
         </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showImportModal}
+  <div
+    class="modal-overlay"
+    role="button"
+    tabindex="0"
+    on:click={closeImportModal}
+    on:keydown={(e) => e.key === 'Escape' && closeImportModal()}
+  >
+    <div class="modal-card" role="presentation" on:click|stopPropagation>
+      <div class="modal-card-header">
+        <h2>{$t('subscr.import_modal_title')}</h2>
+        <button class="modal-close-btn" on:click={closeImportModal}>&times;</button>
+      </div>
+      <div class="modal-card-body">
+        {#if importErrorMsg}
+          <div class="error-msg" style="color: var(--danger); margin-bottom: 12px; font-size: 13px;">
+            {importErrorMsg}
+          </div>
+        {/if}
+
+        {#if importStep === 1}
+          <div class="form-group">
+            <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
+            <textarea
+              id="import-link"
+              class="input textarea-link"
+              bind:value={importLink}
+              placeholder={$t('subscr.import_link_placeholder')}
+              rows="4"
+              style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
+            ></textarea>
+          </div>
+        {:else if importStep === 2 && parsedNode}
+          <div class="preview-section">
+            <h3 class="preview-title" style="margin: 0 0 8px 0; font-size: 14px;">{$t('subscr.import_preview_title')}</h3>
+            <div class="preview-table" style="display: flex; flex-direction: column; gap: 6px;">
+              <div class="preview-row" style="display: flex; justify-content: space-between;">
+                <span class="preview-label" style="color: var(--fg-secondary);">{$t('subscr.import_proto')}</span>
+                <span class="preview-value code" style="font-family: monospace;">{parsedNode.protocol}</span>
+              </div>
+              <div class="preview-row" style="display: flex; justify-content: space-between;">
+                <span class="preview-label" style="color: var(--fg-secondary);">{$t('subscr.import_server')}</span>
+                <span class="preview-value code" style="font-family: monospace;">{getNodeServer(parsedNode)}</span>
+              </div>
+              <div class="preview-row" style="display: flex; justify-content: space-between;">
+                <span class="preview-label" style="color: var(--fg-secondary);">{$t('subscr.import_port')}</span>
+                <span class="preview-value code" style="font-family: monospace;">{getNodePort(parsedNode)}</span>
+              </div>
+            </div>
+
+            <div class="form-group" style="margin-top: 16px;">
+              <label for="import-tag" class="form-label" style="display: block; margin-bottom: 6px;">{$t('subscr.import_tag_custom')}</label>
+              <input
+                id="import-tag"
+                type="text"
+                class="input"
+                bind:value={importTag}
+                placeholder={$t('subscr.import_tag_placeholder')}
+                style="width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
+              />
+            </div>
+          </div>
+        {/if}
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn btn-secondary" on:click={closeImportModal} disabled={importLoading}>
+          {$t('app.cancel')}
+        </button>
+        {#if importStep === 1}
+          <button
+            class="btn btn-primary"
+            on:click={parseImportLink}
+            disabled={!importLink.trim() || importLoading}
+          >
+            {#if importLoading}
+              <span class="spinner-xs" style="margin-right: 6px;"></span>
+            {/if}
+            {$t('subscr.import_btn_parse')}
+          </button>
+        {:else}
+          <button
+            class="btn btn-primary"
+            on:click={confirmImportNode}
+            disabled={importLoading}
+          >
+            {#if importLoading}
+              <span class="spinner-xs" style="margin-right: 6px;"></span>
+            {/if}
+            {$t('subscr.import_btn_confirm')}
+          </button>
+        {/if}
       </div>
     </div>
   </div>
