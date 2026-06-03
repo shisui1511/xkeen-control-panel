@@ -130,8 +130,8 @@ test.describe('Xray Constructor integration test suite', () => {
     await expect(outboundSelect).toBeVisible({ timeout: 3000 });
     await outboundSelect.selectOption('my-proxy');
 
-    // Кликаем по кнопке Добавить для подтверждения добавления правила
-    const saveRuleBtn = page.locator('.form-card button.btn-primary:has-text("Добавить"), .form-card button:has-text("Add")').first();
+    // Кликаем по кнопке Создать для подтверждения добавления правила
+    const saveRuleBtn = page.locator('.form-card button.btn-primary:has-text("Создать"), .form-card button:has-text("Create")').first();
     await expect(saveRuleBtn).toBeVisible({ timeout: 3000 });
     await saveRuleBtn.click();
 
@@ -141,7 +141,7 @@ test.describe('Xray Constructor integration test suite', () => {
     await expect(rulesList).toContainText('my-proxy');
   });
 
-  test('generated JSON contains PROXY_TAG and does NOT contain real outbound parameters (server/uuid)', async ({
+  test('generated JSON contains my-proxy and does NOT contain real outbound parameters (server/uuid)', async ({
     page
   }) => {
     await page.goto('/#/constructor');
@@ -159,8 +159,8 @@ test.describe('Xray Constructor integration test suite', () => {
 
     const previewText = await previewPane.textContent();
 
-    // JSON должен содержать PROXY_TAG
-    expect(previewText).toContain('PROXY_TAG');
+    // JSON должен содержать my-proxy
+    expect(previewText).toContain('my-proxy');
 
     // JSON не должен содержать реальных параметров outbound (server, uuid, address)
     expect(previewText).not.toMatch(/"server"\s*:/);
