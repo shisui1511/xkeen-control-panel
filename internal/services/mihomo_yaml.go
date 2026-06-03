@@ -703,3 +703,46 @@ func UpdateMihomoGroupProviders(content, groupName string, providerID string, re
 
 	return strings.Join(out, "\n")
 }
+
+// ReplaceMihomoTopLevelSection заменяет всю секцию sectionName: ... до следующего
+// top-level ключа. Используется для "rule-providers:", "rules:", "proxy-groups:".
+// Сохраняет комментарии и ключи вне управляемой секции.
+func ReplaceMihomoTopLevelSection(content string, sectionName string, newContent string) string {
+	lines := strings.Split(content, "\n")
+	start, end, _ := findTopLevelSection(lines, sectionName)
+
+	var newLines []string
+	if strings.TrimSpace(newContent) != "" {
+		newLines = strings.Split(strings.TrimRight(newContent, "\n"), "\n")
+	}
+
+	if start == -1 {
+		// Секции нет — добавить в конец
+		var sb strings.Builder
+		sb.WriteString("\n")
+		sb.WriteString(sectionName)
+		sb.WriteString(":\n")
+		for _, l := range newLines {
+			sb.WriteString(l)
+			sb.WriteString("\n")
+		}
+		
+		appended := sb.String()
+		if strings.HasSuffix(content, "\n") {
+			return content + strings.TrimPrefix(appended, "\n")
+		}
+		return content + appended
+	}
+
+	var out []string
+	out = append(out, lines[:start]...)
+	out = append(out, sectionName+":")
+	for _, l := range newLines {
+		out = append(out, l)
+	}
+	if end < len(lines) {
+		out = append(out, lines[end:]...)
+	}
+	return strings.Join(out, "\n")
+}
+

@@ -349,3 +349,68 @@ rules: []
 		t.Error("use: section should be completely removed if empty")
 	}
 }
+
+func TestReplaceMihomoTopLevelSection(t *testing.T) {
+	yaml := `port: 7890
+geox-url:
+  geoip: http://example.com/geoip
+proxies:
+  - name: P1
+    type: ss
+proxy-providers:
+  sub_1:
+    type: http
+rule-providers:
+  rp_1:
+    type: http
+rules:
+  - RULE-SET,rp_1,DIRECT
+`
+
+	// Test 1: замена существующей секции rule-providers сохраняет секцию proxies без изменений (D-04)
+	newRp := `  rp_2:
+    type: http
+    url: http://new.com`
+	res1 := ReplaceMihomoTopLevelSection(yaml, "rule-providers", newRp)
+	if !strings.Contains(res1, "rp_2:") || !strings.Contains(res1, "http://new.com") {
+		t.Error("rule-providers section should be updated with new Content")
+	}
+	if strings.Contains(res1, "rp_1:") {
+		t.Error("old rule-providers should be removed")
+	}
+	if !strings.Contains(res1, "proxies:\n  - name: P1") {
+		t.Error("proxies section should be preserved")
+	}
+
+	// Test 2: замена секции rules сохраняет proxy-providers и geox-url (D-04)
+	newRules := `  - GEOSITE,youtube,PROXY
+  - MATCH,DIRECT`
+	res2 := ReplaceMihomoTopLevelSection(yaml, "rules", newRules)
+	if !strings.Contains(res2, "GEOSITE,youtube") {
+		t.Error("rules section should be updated")
+	}
+	if !strings.Contains(res2, "proxy-providers:") || !strings.Contains(res2, "geox-url:") {
+		t.Error("proxy-providers and geox-url sections should be preserved")
+	}
+
+	// Test 3: при отсутствии секции — она добавляется в конец, остальной контент не тронут
+	yamlNoRules := `port: 7890
+proxies:
+  - name: P1
+`
+	res3 := ReplaceMihomoTopLevelSection(yamlNoRules, "rules", "  - MATCH,DIRECT")
+	if !strings.Contains(res3, "rules:\n  - MATCH,DIRECT") {
+		t.Error("rules section should be added to the end of file")
+	}
+	if !strings.Contains(res3, "proxies:\n  - name: P1") {
+		t.Error("proxies should be preserved")
+	}
+
+	// Test 4: вызов с тем же newContent дважды даёт идентичный результат (идемпотентность)
+	res4First := ReplaceMihomoTopLevelSection(yaml, "rule-providers", newRp)
+	res4Second := ReplaceMihomoTopLevelSection(res4First, "rule-providers", newRp)
+	if res4First != res4Second {
+		t.Error("ReplaceMihomoTopLevelSection should be idempotent")
+	}
+}
+
