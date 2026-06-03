@@ -52,6 +52,7 @@
     name: string;
     type: GroupType;
     proxies: string[];
+    includeAll?: boolean;
     url?: string;
     interval?: number;
   }
@@ -80,12 +81,13 @@
   }
 
   // State
-  let activeSection: 'proxies' | 'groups' | 'rules' | 'dns' | 'tun' = 'proxies';
+  let activeSection: 'proxies' | 'groups' | 'rules' | 'dns' | 'tun' | 'rulesets' = 'proxies';
   let proxies: Proxy[] = [];
   let groups: ProxyGroup[] = [];
   let rules: Rule[] = [];
   let activePreset: string = '';
-  let activeRuleProvider: 'none' | 'zkeen' | 'acl4ssr' | 'loyalsoldier' = 'none';
+  let activeRuleProvider: 'none' | 'zkeen' | 'metacubex' = 'none';
+  let subscriptions: any[] = [];
   let dns: DNSConfig = {
     enabled: false,
     nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],
@@ -137,6 +139,7 @@
     name: '',
     type: 'select',
     proxies: [],
+    includeAll: false,
     url: 'https://www.gstatic.com/generate_204',
     interval: 300
   };
@@ -146,106 +149,102 @@
   let nr: Omit<Rule, 'id'> = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
 
   // ── Rule-provider URL constants ─────────────────────────────────────────
-  const RULE_PROVIDERS: Record<string, Array<{ name: string; url: string; behavior: string; outbound: string }>> = {
+  const META_BASE_URL = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
+
+  const RULE_PROVIDERS: Record<string, Array<{ name: string; url: string; behavior: string; outbound: string; format?: string }>> = {
     zkeen: [
       {
         name: 'zkeen-geosite-category-ads',
-        url: 'https://raw.githubusercontent.com/nicetomytyuk/relaylist/refs/heads/main/mihomo/category-ads-all.yaml',
+        url: `${META_BASE_URL}/geosite/category-ads-all.mrs`,
         behavior: 'domain',
+        format: 'mrs',
         outbound: 'REJECT'
       },
       {
         name: 'zkeen-geosite-ru',
-        url: 'https://raw.githubusercontent.com/nicetomytyuk/relaylist/refs/heads/main/mihomo/ru.yaml',
+        url: `${META_BASE_URL}/geosite/ru.mrs`,
         behavior: 'domain',
+        format: 'mrs',
         outbound: 'DIRECT'
       },
       {
         name: 'zkeen-geoip-ru',
-        url: 'https://raw.githubusercontent.com/nicetomytyuk/relaylist/refs/heads/main/mihomo/geoip-ru.yaml',
+        url: `${META_BASE_URL}/geoip/ru.mrs`,
         behavior: 'ipcidr',
-        outbound: 'DIRECT'
-      }
-    ],
-    acl4ssr: [
-      {
-        name: 'acl4ssr-ban-ads',
-        url: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/BanAD.yaml',
-        behavior: 'domain',
-        outbound: 'REJECT'
-      },
-      {
-        name: 'acl4ssr-direct-cn',
-        url: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/ChinaMax.yaml',
-        behavior: 'classical',
-        outbound: 'DIRECT'
-      },
-      {
-        name: 'acl4ssr-proxy',
-        url: 'https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Providers/ProxyGFWlist.yaml',
-        behavior: 'domain',
-        outbound: 'Proxy'
-      }
-    ],
-    loyalsoldier: [
-      {
-        name: 'loyalsoldier-reject',
-        url: 'https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/reject.txt',
-        behavior: 'domain',
-        outbound: 'REJECT'
-      },
-      {
-        name: 'loyalsoldier-direct',
-        url: 'https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/direct.txt',
-        behavior: 'domain',
-        outbound: 'DIRECT'
-      },
-      {
-        name: 'loyalsoldier-proxy',
-        url: 'https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/proxy.txt',
-        behavior: 'domain',
-        outbound: 'Proxy'
-      },
-      {
-        name: 'loyalsoldier-cncidr',
-        url: 'https://cdn.jsdelivr.net/gh/Loyalsoldier/clash-rules@release/cncidr.txt',
-        behavior: 'ipcidr',
+        format: 'mrs',
         outbound: 'DIRECT'
       }
     ]
   };
 
+  const META_RULE_SETS_BY_CATEGORY: Record<string, Array<{ id: string; label: string; type: 'geosite' | 'geoip'; defaultOutbound: string }>> = {
+    'Социальные сети': [
+      { id: 'youtube', label: 'YouTube', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'telegram', label: 'Telegram', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'discord', label: 'Discord', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'twitter', label: 'Twitter/X', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'instagram', label: 'Instagram', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'reddit', label: 'Reddit', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'vk', label: 'VK', type: 'geosite', defaultOutbound: 'DIRECT' },
+      { id: 'tiktok', label: 'TikTok', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'twitch', label: 'Twitch', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'facebook', label: 'Facebook', type: 'geosite', defaultOutbound: 'Proxy' }
+    ],
+    'Сервисы': [
+      { id: 'spotify', label: 'Spotify', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'steam', label: 'Steam', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'github', label: 'GitHub', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'openai', label: 'OpenAI', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'netflix', label: 'Netflix', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'google', label: 'Google', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'amazon', label: 'Amazon', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'speedtest', label: 'Speedtest', type: 'geosite', defaultOutbound: 'Proxy' }
+    ],
+    'Сети/CDN': [
+      { id: 'cloudflare', label: 'Cloudflare', type: 'geosite', defaultOutbound: 'DIRECT' },
+      { id: 'akamai', label: 'Akamai', type: 'geosite', defaultOutbound: 'DIRECT' },
+      { id: 'fastly', label: 'Fastly', type: 'geosite', defaultOutbound: 'DIRECT' },
+      { id: 'digitalocean', label: 'DigitalOcean', type: 'geosite', defaultOutbound: 'DIRECT' },
+      { id: 'private', label: 'Private Network', type: 'geoip', defaultOutbound: 'DIRECT' },
+      { id: 'telegram', label: 'Telegram IP', type: 'geoip', defaultOutbound: 'Proxy' }
+    ],
+    'Блокировки': [
+      { id: 'category-ads-all', label: 'Ads & Trackers', type: 'geosite', defaultOutbound: 'REJECT' },
+      { id: 'category-ai-!cn', label: 'AI Services (non-CN)', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'category-anticensorship', label: 'Anti-Censorship', type: 'geosite', defaultOutbound: 'Proxy' }
+    ]
+  };
+
+  let selectedMetaRuleSets: Map<string, string> = new Map();
+
+  function buildMetaRuleSetUrl(id: string, type: 'geosite' | 'geoip'): string {
+    return `${META_BASE_URL}/${type}/${id}.mrs`;
+  }
+
   // ── Presets ──────────────────────────────────────────────────────────────
-  function applyPreset(id: 'bypass-ru' | 'full-vpn' | 'minimal') {
+  function applyPreset(id: 'rule-based' | 'global-proxy') {
     activePreset = id;
-    if (id === 'bypass-ru') {
+    if (id === 'rule-based') {
       groups = [
-        { id: crypto.randomUUID(), name: 'VPN', type: 'select', proxies: ['DIRECT', ...proxies.map(p => p.name)], url: 'https://www.gstatic.com/generate_204', interval: 300 },
-        { id: crypto.randomUUID(), name: 'Auto', type: 'url-test', proxies: proxies.map(p => p.name), url: 'https://www.gstatic.com/generate_204', interval: 300 }
+        { id: crypto.randomUUID(), name: 'Selective', type: 'select', proxies: ['DIRECT', ...proxies.map(p => p.name)], includeAll: true, url: 'https://www.gstatic.com/generate_204', interval: 300 }
       ];
-      rules = [
-        { id: crypto.randomUUID(), type: 'GEOSITE', value: 'category-ads', outbound: 'REJECT' },
-        { id: crypto.randomUUID(), type: 'GEOIP', value: 'ru', outbound: 'DIRECT' },
-        { id: crypto.randomUUID(), type: 'GEOSITE', value: 'category-gov-ru', outbound: 'DIRECT' },
-        { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'VPN' }
-      ];
-    } else if (id === 'full-vpn') {
+      rules = [];
+      activeRuleProvider = 'metacubex';
+      selectedMetaRuleSets = new Map([
+        ['category-ads-all|geosite', 'REJECT'],
+        ['telegram|geoip', 'Selective'],
+        ['private|geoip', 'DIRECT']
+      ]);
+    } else if (id === 'global-proxy') {
       groups = [
-        { id: crypto.randomUUID(), name: 'VPN', type: 'select', proxies: ['DIRECT', ...proxies.map(p => p.name)], url: 'https://www.gstatic.com/generate_204', interval: 300 },
-        { id: crypto.randomUUID(), name: '⚡️ Fastest', type: 'url-test', proxies: proxies.map(p => p.name), url: 'https://www.gstatic.com/generate_204', interval: 300 }
-      ];
-      rules = [
-        { id: crypto.randomUUID(), type: 'GEOIP', value: 'private', outbound: 'DIRECT' },
-        { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'VPN' }
-      ];
-    } else if (id === 'minimal') {
-      groups = [
-        { id: crypto.randomUUID(), name: 'Proxy', type: 'select', proxies: ['DIRECT', ...proxies.map(p => p.name)], url: 'https://www.gstatic.com/generate_204', interval: 300 }
+        { id: crypto.randomUUID(), name: 'Proxy', type: 'select', proxies: ['DIRECT', ...proxies.map(p => p.name)], includeAll: true, url: 'https://www.gstatic.com/generate_204', interval: 300 }
       ];
       rules = [
         { id: crypto.randomUUID(), type: 'GEOIP', value: 'private', outbound: 'DIRECT' },
         { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'Proxy' }
       ];
+      activeRuleProvider = 'none';
+      selectedMetaRuleSets = new Map();
     }
     showToast('success', $t('editor.preset_applied'));
   }
@@ -256,12 +255,14 @@
       const res = await fetch('/api/subscriptions');
       if (!res.ok) return;
       const subs: any[] = await res.json();
+      subscriptions = subs.filter(s => s.enabled);
       if (!subs || subs.length === 0) {
         showToast('info', $t('editor.import_proxies_empty'));
         return;
       }
       let imported = 0;
       for (const sub of subs) {
+        if (!sub.enabled) continue;
         const nr = await fetch(`/api/subscriptions/nodes?id=${sub.id}`);
         if (!nr.ok) continue;
         const nodes: any[] = await nr.json();
@@ -362,14 +363,48 @@
   function generateYAML(): string {
     const lines: string[] = [];
 
+    // Proxy-providers (if we have subscriptions)
+    if (subscriptions.length > 0) {
+      lines.push('proxy-providers:');
+      for (const sub of subscriptions) {
+        const providerName = sub.name.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+        lines.push(`  ${providerName}:`);
+        lines.push(`    type: http`);
+        lines.push(`    path: ./providers/${providerName}.yaml`);
+        lines.push(`    url: ${q(sub.url)}`);
+        lines.push(`    interval: ${sub.interval * 3600 || 86400}`);
+        lines.push(`    health-check:`);
+        lines.push(`      enable: true`);
+        lines.push(`      url: http://www.gstatic.com/generate_204`);
+        lines.push(`      interval: 300`);
+      }
+      lines.push('');
+    }
+
     // Rule-providers (if selected)
-    if (activeRuleProvider !== 'none') {
+    if (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0) {
+      lines.push('rule-providers:');
+      for (const [key, outbound] of selectedMetaRuleSets) {
+        const [id, type] = key.split('|') as [string, 'geosite' | 'geoip'];
+        const behavior = type === 'geoip' ? 'ipcidr' : 'domain';
+        lines.push(`  ${type}-${id.replace(/[^a-z0-9-]/g, '-')}:`);
+        lines.push(`    type: http`);
+        lines.push(`    format: mrs`);
+        lines.push(`    behavior: ${behavior}`);
+        lines.push(`    url: "${buildMetaRuleSetUrl(id, type)}"`);
+        lines.push(`    interval: 86400`);
+      }
+      lines.push('');
+    } else if (activeRuleProvider !== 'none' && activeRuleProvider !== 'metacubex') {
       const providers = RULE_PROVIDERS[activeRuleProvider];
       if (providers && providers.length > 0) {
         lines.push('rule-providers:');
         for (const rp of providers) {
           lines.push(`  ${rp.name}:`);
           lines.push(`    type: http`);
+          if (rp.format) {
+            lines.push(`    format: ${rp.format}`);
+          }
           lines.push(`    behavior: ${rp.behavior}`);
           lines.push(`    url: "${rp.url}"`);
           lines.push(`    interval: 86400`);
@@ -429,6 +464,9 @@
       for (const g of groups) {
         lines.push(`  - name: ${q(g.name)}`);
         lines.push(`    type: ${g.type}`);
+        if (g.includeAll || subscriptions.length > 0) {
+          lines.push(`    include-all: true`);
+        }
         if (g.proxies.length > 0) {
           lines.push(`    proxies:`);
           for (const p of g.proxies) lines.push(`      - ${q(p)}`);
@@ -442,10 +480,15 @@
     }
 
     // Rules
-    if (rules.length > 0 || activeRuleProvider !== 'none') {
+    if (rules.length > 0 || activeRuleProvider !== 'none' || (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0)) {
       lines.push('rules:');
       // Rule-set entries from rule-providers (before user rules, before MATCH)
-      if (activeRuleProvider !== 'none') {
+      if (activeRuleProvider === 'metacubex') {
+        for (const [key, outbound] of selectedMetaRuleSets) {
+          const [id, type] = key.split('|') as [string, 'geosite' | 'geoip'];
+          lines.push(`  - RULE-SET,${type}-${id.replace(/[^a-z0-9-]/g, '-')},${outbound}`);
+        }
+      } else if (activeRuleProvider !== 'none') {
         const providers = RULE_PROVIDERS[activeRuleProvider];
         if (providers) {
           for (const rp of providers) {
@@ -461,7 +504,7 @@
         }
       }
       // If only rule-providers active but no manual rules, add a default MATCH
-      if (rules.length === 0 && activeRuleProvider !== 'none') {
+      if (rules.length === 0 && (activeRuleProvider !== 'none' || (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0))) {
         lines.push(`  - MATCH,DIRECT`);
       }
       lines.push('');
@@ -502,7 +545,7 @@
   let yaml = '';
   $: {
     // Explicit deps so Svelte 5 legacy mode tracks them across the function call
-    void proxies; void groups; void rules; void activeRuleProvider;
+    void proxies; void groups; void rules; void activeRuleProvider; void selectedMetaRuleSets; void subscriptions;
     void dns.enabled; void dns.nameservers; void dns.fallback;
     void tun.enabled; void tun.stack;
     yaml = generateYAML();
@@ -537,12 +580,27 @@
   ];
   const CIPHERS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-poly1305', '2022-blake3-aes-256-gcm'];
 
+  let allProxyNames: string[] = [];
   $: allProxyNames = [
     'DIRECT',
     'REJECT',
     ...proxies.map((p) => p.name),
     ...groups.map((g) => g.name)
   ];
+
+  // Dynamic tabs calculation and auto-switch
+  $: tabs = [
+    ['proxies', ru ? 'Прокси' : 'Proxies'],
+    ['groups', ru ? 'Группы' : 'Groups'],
+    ...(activeRuleProvider === 'metacubex' ? [['rulesets', ru ? 'Наборы' : 'Rule Sets']] : []),
+    ['rules', ru ? 'Правила' : 'Rules'],
+    ['dns', 'DNS'],
+    ['tun', 'TUN']
+  ];
+
+  $: if (activeRuleProvider === 'metacubex' && activeSection !== 'rulesets' && activeSection !== 'proxies' && activeSection !== 'groups' && activeSection !== 'rules' && activeSection !== 'dns' && activeSection !== 'tun') {
+    activeSection = 'rulesets';
+  }
 </script>
 
 <div class="container">
@@ -606,15 +664,19 @@
       <div class="constructor-scenario-bar">
         <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
         {#each [
-          ['bypass-ru', $t('editor.scenario_ru_bypass')],
-          ['full-vpn', $t('editor.scenario_full_vpn')],
-          ['minimal', $t('editor.scenario_minimal')]
+          ['rule-based', $t('editor.scenario_rule_based')],
+          ['global-proxy', $t('editor.scenario_global_proxy')]
         ] as [id, label]}
           <button
             class="scenario-chip"
             aria-pressed={activePreset === id}
             class:active={activePreset === id}
-            on:click={() => applyPreset(id as 'bypass-ru' | 'full-vpn' | 'minimal')}
+            on:click={() => {
+              applyPreset(id as 'rule-based' | 'global-proxy');
+              if (id === 'rule-based') {
+                activeSection = 'rulesets';
+              }
+            }}
           >{label}</button>
         {/each}
       </div>
@@ -626,17 +688,21 @@
           id="rp-select"
           class="form-select rp-select"
           bind:value={activeRuleProvider}
+          on:change={(e) => {
+            if (e.currentTarget.value === 'metacubex') {
+              activeSection = 'rulesets';
+            }
+          }}
         >
           <option value="none">{$t('editor.rp_none')}</option>
           <option value="zkeen">{$t('editor.rp_zkeen')}</option>
-          <option value="acl4ssr">{$t('editor.rp_acl4ssr')}</option>
-          <option value="loyalsoldier">{$t('editor.rp_loyalsoldier')}</option>
+          <option value="metacubex">{$t('editor.rp_metacubex')}</option>
         </select>
       </div>
 
       <!-- Section tabs -->
       <div class="sec-tabs">
-        {#each [['proxies', ru ? 'Прокси' : 'Proxies'], ['groups', ru ? 'Группы' : 'Groups'], ['rules', ru ? 'Правила' : 'Rules'], ['dns', 'DNS'], ['tun', 'TUN']] as [id, label]}
+        {#each tabs as [id, label]}
           <button
             class="sec-tab"
             class:active={activeSection === id}
@@ -652,6 +718,9 @@
                 >{proxies.length}</span
               >{/if}
             {#if id === 'groups' && groups.length > 0}<span class="sec-count">{groups.length}</span
+              >{/if}
+            {#if id === 'rulesets' && selectedMetaRuleSets.size > 0}<span class="sec-count"
+                >{selectedMetaRuleSets.size}</span
               >{/if}
             {#if id === 'rules' && rules.length > 0}<span class="sec-count">{rules.length}</span
               >{/if}
@@ -845,6 +914,9 @@
             <div class="item-row">
               <span class="item-badge type-group">{g.type}</span>
               <span class="item-name">{g.name}</span>
+              {#if g.includeAll}
+                <span class="item-badge" style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; font-size: 10px; text-transform: none;">include-all</span>
+              {/if}
               <span class="item-meta">{g.proxies.length} {ru ? 'прокси' : 'proxies'}</span>
               <button class="item-del" on:click={() => removeGroup(g.id)}>✕</button>
             </div>
@@ -861,6 +933,12 @@
               <div class="form-row">
                 <label class="form-label">{ru ? 'Имя группы' : 'Group name'}</label>
                 <input class="form-input" bind:value={ng.name} placeholder="Выбор прокси" />
+              </div>
+              <div class="form-row">
+                <label class="toggle-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+                  <input type="checkbox" bind:checked={ng.includeAll} />
+                  <span>{ru ? 'Включить все провайдеры (include-all)' : 'Include all providers'}</span>
+                </label>
               </div>
               <div class="form-row">
                 <label class="form-label">{ru ? 'Прокси' : 'Proxies'}</label>
@@ -907,10 +985,82 @@
               </div>
             </div>
           {:else}
-            <button class="add-btn" on:click={() => (showGroupForm = true)}>
-              + {ru ? 'Добавить группу' : 'Add group'}
-            </button>
+            <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
+              <button class="add-btn" style="flex: 1;" on:click={() => (showGroupForm = true)}>
+                + {ru ? 'Добавить группу' : 'Add group'}
+              </button>
+            </div>
           {/if}
+        </div>
+      {/if}
+
+      <!-- RULESETS -->
+      {#if activeSection === 'rulesets'}
+        <div class="sec-body" data-testid="rulesets-picker">
+          <div class="card rulesets-card" style="padding:16px;">
+            <div class="rulesets-header">
+              <h3 style="margin-top:0; margin-bottom:4px; font-size:16px;">{$t('editor.rulesets_picker')}</h3>
+              <p class="sub" style="margin-top:0; margin-bottom:16px; font-size:12px; color:var(--fg-dim);">
+                {ru ? 'Выберите наборы правил и укажите группу для каждого.' : 'Select rule sets and assign a group for each.'}
+              </p>
+            </div>
+
+            {#each Object.entries(META_RULE_SETS_BY_CATEGORY) as [category, items]}
+              <div class="rulesets-category-group" style="margin-top:16px;">
+                <h4 class="category-title" style="font-size:13px; font-weight:600; color:var(--fg-secondary); margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.05);">{category}</h4>
+                <div class="rulesets-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:8px;">
+                  {#each items as item}
+                    {@const key = `${item.id}|${item.type}`}
+                    {@const isChecked = selectedMetaRuleSets.has(key)}
+                    <div class="ruleset-item-row" class:selected={isChecked} style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:var(--radius); transition:background var(--transition-fast), border-color var(--transition-fast);">
+                      <label class="ruleset-label" for="ruleset-{item.type}-{item.id}" style="display:flex; align-items:center; gap:8px; cursor:pointer; flex:1; user-select:none;">
+                        <input
+                          type="checkbox"
+                          id="ruleset-{item.type}-{item.id}"
+                          value={key}
+                          checked={isChecked}
+                          on:change={(e) => {
+                            if (e.currentTarget.checked) {
+                              let outbound = item.defaultOutbound;
+                              if (outbound === 'Proxy' && groups.some(g => g.name === 'Selective')) {
+                                outbound = 'Selective';
+                              } else if (outbound === 'Proxy' && groups.some(g => g.name === 'Proxy')) {
+                                outbound = 'Proxy';
+                              } else if (!allProxyNames.includes(outbound)) {
+                                outbound = allProxyNames[0] || 'DIRECT';
+                              }
+                              selectedMetaRuleSets.set(key, outbound);
+                            } else {
+                              selectedMetaRuleSets.delete(key);
+                            }
+                            selectedMetaRuleSets = new Map(selectedMetaRuleSets);
+                          }}
+                        />
+                        <span class="ruleset-name" style="font-size:13px; font-weight:500; color:var(--fg-primary);">{item.label}</span>
+                        <span class="ruleset-type-badge" style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--fg-dim); background:rgba(255,255,255,0.05); padding:1px 4px; border-radius:4px;">{item.type}</span>
+                      </label>
+                      
+                      {#if isChecked}
+                        <select
+                          class="ruleset-outbound-select"
+                          style="font-size:12px; background:var(--bg-surface); border:1px solid var(--border); color:var(--fg-primary); border-radius:var(--radius-sm); padding:2px 6px; max-width:120px; outline:none;"
+                          value={selectedMetaRuleSets.get(key)}
+                          on:change={(e) => {
+                            selectedMetaRuleSets.set(key, e.currentTarget.value);
+                            selectedMetaRuleSets = selectedMetaRuleSets;
+                          }}
+                        >
+                          {#each allProxyNames as n}
+                            <option value={n}>{n}</option>
+                          {/each}
+                        </select>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          </div>
         </div>
       {/if}
 
