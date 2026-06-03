@@ -514,8 +514,62 @@
     <div class="gen-right">
       <div class="preview-header">
         <span class="preview-title">JSON {ru ? 'превью' : 'preview'}</span>
+        {#if json}
+          <button class="btn btn-secondary btn-sm" on:click={copyJSON} title={ru ? 'Копировать JSON' : 'Copy JSON'}>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              /></svg
+            >
+          </button>
+        {/if}
       </div>
       <pre class="constructor-preview-pane" data-testid="xray-json-preview">{json}</pre>
+
+      {#if embedded}
+        <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px; padding: 0 16px 16px 16px;">
+          <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right:5px"
+              ><path d="M12 20h9" /><path
+                d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
+              /></svg
+            >
+            {#if selectedFile}
+              {ru ? 'Вставить в редактор' : 'Insert into Editor'}
+            {:else}
+              {ru ? 'Открыть в редакторе' : 'Open in Editor'}
+            {/if}
+          </button>
+          <button class="btn btn-primary" on:click={copyJSON} disabled={!json} style="flex: 1;">
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right:5px"
+              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              /></svg
+            >
+            {ru ? 'Копировать' : 'Copy'}
+          </button>
+        </div>
+      {/if}
     </div>
   </div>
 </div>
