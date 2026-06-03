@@ -135,12 +135,12 @@
   let xrayFiles: ConfigFileInfo[] = [];
   let mihomoFiles: ConfigFileInfo[] = [];
   let fileSearchQuery = '';
-  $: filteredXrayFiles = xrayFiles.filter((file) =>
+  $: filteredXrayFiles = Array.isArray(xrayFiles) ? xrayFiles.filter((file) =>
     file.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
-  );
-  $: filteredMihomoFiles = mihomoFiles.filter((file) =>
+  ) : [];
+  $: filteredMihomoFiles = Array.isArray(mihomoFiles) ? mihomoFiles.filter((file) =>
     file.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
-  );
+  ) : [];
   $: isMihomoAutoEdited =
     selectedFile.includes('/mihomo/') &&
     (selectedFile.endsWith('config.yaml') ||
