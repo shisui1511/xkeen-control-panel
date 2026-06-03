@@ -606,7 +606,7 @@
         ctx.fillText('🇺🇸', 0, 0);
         const widthFlag = ctx.measureText('🇺🇸').width;
         const widthLetters = ctx.measureText('US').width;
-        flagsSupported = widthFlag < widthLetters;
+        flagsSupported = widthFlag > widthLetters;
       }
     } catch (e) {
       flagsSupported = false;
