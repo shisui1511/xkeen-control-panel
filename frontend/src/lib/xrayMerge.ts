@@ -30,12 +30,70 @@ export interface XrayMergeOptions {
  */
 export function mergeXrayFile(
   fileName: string,
-  existing: Record<string, unknown>,
-  managed: Record<string, unknown>
-): Record<string, unknown> {
-  // TODO: реализовать в Plan 15.2-02/04
-  // Stub-заглушка — возвращает existing без изменений
-  void fileName;
-  void managed;
-  return { ...existing };
+  existing: Record<string, any>,
+  managed: Record<string, any>
+): Record<string, any> {
+  switch (fileName) {
+    case '01_log.json':
+      return {
+        ...existing,
+        log: {
+          ...(existing.log as Record<string, any>),
+          loglevel: managed.loglevel,
+          dnsLog: managed.dnsLog
+        }
+      };
+    case '02_dns.json':
+      return {
+        ...existing,
+        dns: {
+          ...(existing.dns as Record<string, any>),
+          servers: managed.servers,
+          queryStrategy: managed.queryStrategy,
+          hosts: managed.hosts
+        }
+      };
+    case '03_inbounds.json': {
+      const existingInbounds = (existing.inbounds ?? []) as Record<string, any>[];
+      const nonDns = existingInbounds.filter(
+        (ib) => !String(ib.tag || '').startsWith('dns-in-')
+      );
+      return {
+        ...existing,
+        inbounds: [...nonDns, ...(managed.dnsInbounds ?? [])]
+      };
+    }
+    case '05_routing.json': {
+      const rules = ((managed.rules ?? []) as Record<string, any>[]).map((r) => {
+        if (r.outboundTag === 'PROXY_TAG') {
+          return { ...r, outboundTag: managed.proxyTag };
+        }
+        return r;
+      });
+      return {
+        ...existing,
+        routing: {
+          ...(existing.routing as Record<string, any>),
+          rules
+        }
+      };
+    }
+    case '06_policy.json':
+      return {
+        ...existing,
+        policy: {
+          ...(existing.policy as Record<string, any>),
+          levels: {
+            ...((existing.policy as Record<string, any>)?.levels ?? {}),
+            '0': managed.level0
+          },
+          system: {
+            ...((existing.policy as Record<string, any>)?.system ?? {}),
+            ...managed.system
+          }
+        }
+      };
+    default:
+      return existing;
+  }
 }

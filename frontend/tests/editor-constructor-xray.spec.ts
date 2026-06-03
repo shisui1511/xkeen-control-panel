@@ -202,8 +202,8 @@ test.describe('Xray Constructor integration test suite', () => {
     await expect(tabs).toBeVisible({ timeout: 5000 });
 
     // Все 6 разделов должны быть доступны: Log, DNS, Inbounds, Outbounds, Routing, Policy
-    for (const label of ['Log', 'DNS', 'Routing']) {
-      await expect(tabs.locator(`button:has-text("${label}")`).first()).toBeVisible();
+    for (const tab of ['log', 'dns', 'inbounds', 'outbounds', 'routing', 'policy']) {
+      await expect(tabs.locator(`[data-tab="${tab}"]`).first()).toBeVisible();
     }
   });
 

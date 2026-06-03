@@ -1,12 +1,21 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { currentLang, t } from './i18n';
   import { showToast } from './stores';
+  import { mergeXrayFile } from './lib/xrayMerge';
 
-  export let onSwitchTab: (tab: string) => void = () => {};
-  export let selectedFile: string = '';
-  export let onInsertIntoEditor: (content: string) => void = () => {};
-  export let embedded: boolean = false;
+  let {
+    onSwitchTab = () => {},
+    selectedFile = '',
+    onInsertIntoEditor = () => {},
+    embedded = false
+  } = $props<{
+    onSwitchTab?: (tab: string) => void;
+    selectedFile?: string;
+    onInsertIntoEditor?: (content: string) => void;
+    embedded?: boolean;
+  }>();
+
 
   interface XrayRoutingRule {
     id: string;
@@ -15,94 +24,296 @@
     domain?: string[];
     ip?: string[];
     port?: string;
-    network?: 'tcp' | 'udp' | 'tcp,udp';
+    network?: string;
+    protocol?: string[];
+    inboundTag?: string[];
   }
 
-  // State
-  let activeSection: 'routing' | 'inbounds' | 'dns' = 'routing';
-  let outboundTags: string[] = ['direct', 'block'];
-  let routingRules: XrayRoutingRule[] = [
-    {
-      id: crypto.randomUUID(),
-      type: 'field',
-      outboundTag: 'direct',
-      ip: ['geoip:private']
-    },
-    {
-      id: crypto.randomUUID(),
-      type: 'field',
-      outboundTag: 'block',
-      domain: ['geosite:category-ads-all']
-    }
-  ];
+  interface DNSServer {
+    address: string;
+    port?: number;
+    tag?: string;
+    domains?: string[];
+    skipFallback?: boolean;
+    inboundPort?: number;
+  }
 
-  let dnsConfig = {
-    domainStrategy: 'IPIfNonMatch',
-    servers: ['77.88.8.8', '1.1.1.1', '8.8.8.8', '94.140.14.14']
-  };
+  interface XrayInbound {
+    tag: string;
+    port: number;
+    listen?: string;
+    protocol: string;
+    settings?: Record<string, any>;
+    sniffing?: Record<string, any>;
+    streamSettings?: Record<string, any>;
+  }
 
-  let inbounds = [
-    {
-      tag: 'socks',
-      port: 10808,
-      listen: '127.0.0.1',
-      protocol: 'socks',
-      settings: { auth: 'noauth', udp: true }
-    },
-    {
-      tag: 'http',
-      port: 10809,
-      listen: '127.0.0.1',
-      protocol: 'http',
-      settings: {}
-    }
-  ];
+  // Runes State (Svelte 5)
+  let activeSection = $state<'log' | 'dns' | 'inbounds' | 'outbounds' | 'routing' | 'policy'>('routing');
+  let logConfig = $state({ loglevel: 'warning', dnsLog: false });
+  let dnsConfig = $state<{ tag: string; servers: (string | DNSServer)[]; queryStrategy: string; hosts: Record<string, string> }>({
+    tag: 'dns-in',
+    servers: [],
+    queryStrategy: 'UseIP',
+    hosts: {}
+  });
+  let inbounds = $state<XrayInbound[]>([]);
+  let outboundTags = $state<string[]>(['direct', 'block', 'dns-out']);
+  let proxyTag = $state<string>('');
+  let routingRules = $state<XrayRoutingRule[]>([]);
+  let policyConfig = $state<{ levels: Record<string, any>; system: Record<string, any> }>({
+    levels: { '0': { handshake: 4, connIdle: 300, uplinkOnly: 2, downlinkOnly: 5 } },
+    system: {}
+  });
 
-  // Forms values
-  let newRule = {
+  let isDirty = $state(false);
+  let applyLoading = $state(false);
+  let showApplyConfirm = $state(false);
+  let loadErrors = $state<Record<string, string>>({});
+  let xrayFiles = $state<Record<string, any>>({});
+
+  // Form states
+  let showRuleForm = $state(false);
+  let newRule = $state({
     outboundTag: 'direct',
     domainRaw: '',
     ipRaw: '',
     port: '',
-    network: 'tcp,udp' as const
-  };
+    network: 'tcp,udp',
+    inboundTagRaw: ''
+  });
 
-  let newServer = '';
-  let showRuleForm = false;
+  let showDnsForm = $state(false);
+  let newDns = $state({
+    address: '',
+    port: 53,
+    tag: '',
+    domainsRaw: '',
+    skipFallback: false,
+    inboundPort: 1053
+  });
+
+  let showInboundForm = $state(false);
+  let newInbound = $state({
+    tag: '',
+    port: 10808,
+    listen: '127.0.0.1',
+    protocol: 'socks',
+    udp: true
+  });
+
+  const XRAY_DIR = '/opt/etc/xray/configs';
+  const XRAY_FILES = [
+    '01_log.json', '02_dns.json', '03_inbounds.json',
+    '04_outbounds.json', '05_routing.json', '06_policy.json'
+  ];
 
   onMount(async () => {
-    outboundTags = await loadXrayOutboundTags();
-    if (outboundTags.length > 0 && !outboundTags.includes(newRule.outboundTag)) {
-      newRule.outboundTag = outboundTags[0];
-    }
+    await loadAllConfigs();
   });
+
+  async function loadAllConfigs() {
+    loadErrors = {};
+    const promises = XRAY_FILES.map(async (name) => {
+      try {
+        const path = `${XRAY_DIR}/${name}`;
+        const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        xrayFiles[name] = data;
+      } catch (e: any) {
+        loadErrors[name] = e.message;
+        xrayFiles[name] = {};
+      }
+    });
+
+    await Promise.allSettled(promises);
+    populateFromFiles();
+    outboundTags = await loadXrayOutboundTags();
+    if (outboundTags.length > 0) {
+      if (!proxyTag) {
+        const systemTags = ['direct', 'block', 'dns-out'];
+        const custom = outboundTags.find(t => !systemTags.includes(t));
+        proxyTag = custom || outboundTags[0];
+      }
+      if (!newRule.outboundTag) {
+        newRule.outboundTag = outboundTags[0];
+      }
+    }
+    isDirty = false;
+  }
+
+  function populateFromFiles() {
+    // 01_log.json
+    const logFile = xrayFiles['01_log.json'] || {};
+    logConfig = {
+      loglevel: logFile.log?.loglevel || 'warning',
+      dnsLog: logFile.log?.dnsLog ?? false
+    };
+
+    // 02_dns.json
+    const dnsFile = xrayFiles['02_dns.json'] || {};
+    dnsConfig = {
+      tag: dnsFile.dns?.tag || 'dns-in',
+      servers: dnsFile.dns?.servers || [],
+      queryStrategy: dnsFile.dns?.queryStrategy || 'UseIP',
+      hosts: dnsFile.dns?.hosts || {}
+    };
+
+    // 03_inbounds.json
+    const inboundsFile = xrayFiles['03_inbounds.json'] || {};
+    inbounds = inboundsFile.inbounds || [];
+
+    // 05_routing.json
+    const routingFile = xrayFiles['05_routing.json'] || {};
+    routingRules = (routingFile.routing?.rules || []).map((r: any) => ({
+      id: r.id || crypto.randomUUID(),
+      type: r.type || 'field',
+      outboundTag: r.outboundTag || 'direct',
+      domain: r.domain,
+      ip: r.ip,
+      port: r.port,
+      network: r.network,
+      protocol: r.protocol,
+      inboundTag: r.inboundTag
+    }));
+
+    const proxyRule = routingRules.find((r: any) => r.outboundTag !== 'direct' && r.outboundTag !== 'block' && r.outboundTag !== 'dns-out');
+    proxyTag = proxyRule ? proxyRule.outboundTag : '';
+
+    // 06_policy.json
+    const policyFile = xrayFiles['06_policy.json'] || {};
+    policyConfig = {
+      levels: policyFile.policy?.levels || { '0': { handshake: 4, connIdle: 300, uplinkOnly: 2, downlinkOnly: 5 } },
+      system: policyFile.policy?.system || {}
+    };
+  }
 
   async function loadXrayOutboundTags(): Promise<string[]> {
     const tags: string[] = [];
     try {
-      const files: Array<{ name: string; path: string }> = await fetch('/api/config/list').then(r => r.json());
-      const outboundFiles = files.filter(f => f.name.toLowerCase().includes('outbound'));
-      for (const file of outboundFiles) {
-        const content = await fetch('/api/config/read', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: file.path })
-        }).then(r => r.text());
+      for (const name of ['04_outbounds.json', '04_outbounds.manual.json']) {
         try {
-          const json = JSON.parse(content);
+          const path = `${XRAY_DIR}/${name}`;
+          const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+          if (!res.ok) continue;
+          const json = await res.json();
           const fileTags = (json.outbounds ?? [])
             .filter((o: any) => o.tag)
             .map((o: any) => o.tag as string);
           tags.push(...fileTags);
-        } catch { /* skip malformed */ }
+        } catch { /* skip missing */ }
       }
-    } catch { /* fallback below */ }
-    return [...new Set([...tags, 'direct', 'block'])];
+    } catch { /* fallback */ }
+    return [...new Set([...tags, 'direct', 'block', 'dns-out'])];
   }
 
+  function getDnsInbounds(): XrayInbound[] {
+    const list: XrayInbound[] = [];
+    for (const srv of dnsConfig.servers) {
+      if (typeof srv === 'object' && srv.tag) {
+        list.push({
+          port: srv.inboundPort || 1053,
+          protocol: 'dokodemo-door',
+          settings: { network: 'tcp,udp', followRedirect: true },
+          sniffing: { enabled: true, routeOnly: true, destOverride: ['http', 'tls', 'quic'] },
+          streamSettings: { sockopt: { tproxy: 'tproxy' } },
+          tag: srv.tag
+        });
+      }
+    }
+    return list;
+  }
+
+  function getManagedRules(): XrayRoutingRule[] {
+    const rules = [...routingRules];
+    for (const srv of dnsConfig.servers) {
+      if (typeof srv === 'object' && srv.tag) {
+        const exists = rules.some((r) => r.inboundTag && r.inboundTag.includes(srv.tag));
+        if (!exists) {
+          rules.unshift({
+            id: crypto.randomUUID(),
+            type: 'field',
+            inboundTag: [srv.tag],
+            outboundTag: srv.tag.includes('direct') ? 'direct' : 'PROXY_TAG'
+          });
+        }
+      }
+    }
+    return rules;
+  }
+
+  function getChangedFiles(): Array<[string, any]> {
+    const list: Array<[string, any]> = [];
+    
+    // 01_log.json
+    list.push(['01_log.json', { loglevel: logConfig.loglevel, dnsLog: logConfig.dnsLog }]);
+    
+    // 02_dns.json
+    list.push(['02_dns.json', { servers: dnsConfig.servers, queryStrategy: dnsConfig.queryStrategy, hosts: dnsConfig.hosts }]);
+    
+    // 03_inbounds.json
+    const dnsIn = getDnsInbounds();
+    list.push(['03_inbounds.json', { dnsInbounds: dnsIn }]);
+    
+    // 05_routing.json
+    const rules = getManagedRules();
+    list.push(['05_routing.json', { rules, proxyTag }]);
+    
+    // 06_policy.json
+    const lvl0 = policyConfig.levels?.['0'] || { handshake: 4, connIdle: 300, uplinkOnly: 2, downlinkOnly: 5 };
+    list.push(['06_policy.json', { level0: lvl0, system: policyConfig.system }]);
+    
+    return list;
+  }
+
+  async function handleApplyChanges() {
+    if (!showApplyConfirm) {
+      showApplyConfirm = true;
+      return;
+    }
+    showApplyConfirm = false;
+    applyLoading = true;
+    await tick();
+
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+
+      // 1. Сохранить изменённые файлы
+      for (const [name, managed] of getChangedFiles()) {
+        const existing = xrayFiles[name] ?? {};
+        const merged = mergeXrayFile(name, existing, managed);
+        const path = `${XRAY_DIR}/${name}`;
+        const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+          body: JSON.stringify(merged, null, 2)
+        });
+        if (!saveRes.ok) throw new Error(`Failed to save ${name}`);
+      }
+
+      // 2. Рестарт XKeen
+      const restartRes = await fetch('/api/service/control?action=restart', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (!restartRes.ok) throw new Error('Failed to restart service');
+
+      isDirty = false;
+      showToast('success', $t('editor.file_saved'));
+      await loadAllConfigs();
+    } catch (e: any) {
+      showToast('error', $t('editor.save_error') + ': ' + e.message);
+    } finally {
+      applyLoading = false;
+    }
+  }
+
+  // CRUD для правил
   function addRule() {
     const domains = newRule.domainRaw.trim() ? newRule.domainRaw.split(/[\s,]+/).filter(Boolean) : undefined;
     const ips = newRule.ipRaw.trim() ? newRule.ipRaw.split(/[\s,]+/).filter(Boolean) : undefined;
+    const inbounds = newRule.inboundTagRaw.trim() ? newRule.inboundTagRaw.split(/[\s,]+/).filter(Boolean) : undefined;
 
     routingRules = [
       ...routingRules,
@@ -113,7 +324,8 @@
         domain: domains,
         ip: ips,
         port: newRule.port.trim() || undefined,
-        network: newRule.network !== 'tcp,udp' ? newRule.network : undefined
+        network: newRule.network !== 'tcp,udp' ? newRule.network : undefined,
+        inboundTag: inbounds
       }
     ];
 
@@ -122,10 +334,13 @@
     newRule.ipRaw = '';
     newRule.port = '';
     newRule.network = 'tcp,udp';
+    newRule.inboundTagRaw = '';
+    isDirty = true;
   }
 
   function removeRule(id: string) {
     routingRules = routingRules.filter(r => r.id !== id);
+    isDirty = true;
   }
 
   function moveRule(id: string, dir: -1 | 1) {
@@ -136,69 +351,151 @@
     const arr = [...routingRules];
     [arr[idx], arr[next]] = [arr[next], arr[idx]];
     routingRules = arr;
+    isDirty = true;
   }
 
+  // CRUD для DNS серверов
   function addDNSServer() {
-    const s = newServer.trim();
-    if (s && !dnsConfig.servers.includes(s)) {
-      dnsConfig.servers = [...dnsConfig.servers, s];
+    if (!newDns.address.trim()) return;
+    if (newDns.tag.trim()) {
+      const serverObj: DNSServer = {
+        address: newDns.address.trim(),
+        port: Number(newDns.port) || 53,
+        tag: newDns.tag.trim(),
+        domains: newDns.domainsRaw.trim() ? newDns.domainsRaw.split(/[\s,]+/).filter(Boolean) : undefined,
+        skipFallback: newDns.skipFallback,
+        inboundPort: Number(newDns.inboundPort) || 1053
+      };
+      dnsConfig.servers = [...dnsConfig.servers, serverObj];
+    } else {
+      dnsConfig.servers = [...dnsConfig.servers, newDns.address.trim()];
     }
-    newServer = '';
+
+    newDns.address = '';
+    newDns.port = 53;
+    newDns.tag = '';
+    newDns.domainsRaw = '';
+    newDns.skipFallback = false;
+    newDns.inboundPort = 1053;
+    showDnsForm = false;
+    isDirty = true;
   }
 
-  function removeDNSServer(s: string) {
-    dnsConfig.servers = dnsConfig.servers.filter(srv => srv !== s);
+  function removeDNSServer(index: number) {
+    dnsConfig.servers = dnsConfig.servers.filter((_, idx) => idx !== index);
+    isDirty = true;
   }
 
-  function buildXrayConfig(rules: XrayRoutingRule[], inboundsList: any[], nameserversList: string[], domainStrategy: string): object {
-    return {
-      log: { loglevel: 'warning' },
-      inbounds: inboundsList.map(i => ({
-        tag: i.tag,
-        port: Number(i.port),
-        listen: i.listen,
-        protocol: i.protocol,
-        settings: i.settings
-      })),
-      outbounds: [
-        { tag: 'PROXY_TAG', protocol: 'freedom' },
-        { tag: 'direct', protocol: 'freedom' },
-        { tag: 'block', protocol: 'blackhole' }
-      ],
-      routing: {
-        domainStrategy,
-        rules: rules.map(r => {
-          const cleaned: any = { type: 'field', outboundTag: r.outboundTag };
-          if (r.domain && r.domain.length > 0) cleaned.domain = r.domain;
-          if (r.ip && r.ip.length > 0) cleaned.ip = r.ip;
-          if (r.port && r.port.trim()) cleaned.port = r.port.trim();
-          if (r.network && r.network !== 'tcp,udp') cleaned.network = r.network;
-          return cleaned;
-        })
-      },
-      dns: {
-        servers: nameserversList
+  // CRUD для Inbounds
+  function addInbound() {
+    if (!newInbound.tag.trim()) return;
+    inbounds = [
+      ...inbounds,
+      {
+        tag: newInbound.tag.trim(),
+        port: Number(newInbound.port),
+        listen: newInbound.listen.trim(),
+        protocol: newInbound.protocol,
+        settings: newInbound.protocol === 'socks' ? { auth: 'noauth', udp: newInbound.udp } : {}
       }
-    };
+    ];
+    newInbound.tag = '';
+    newInbound.port = 10808;
+    newInbound.listen = '127.0.0.1';
+    showInboundForm = false;
+    isDirty = true;
   }
 
-  let json = '';
-  $: json = JSON.stringify(buildXrayConfig(routingRules, inbounds, dnsConfig.servers, dnsConfig.domainStrategy), null, 2);
+  function removeInbound(tag: string) {
+    inbounds = inbounds.filter(ib => ib.tag !== tag);
+    isDirty = true;
+  }
 
-  async function copyJSON() {
-    await navigator.clipboard.writeText(json);
-    showToast('success', ru ? 'JSON скопирован' : 'JSON copied');
+  // Пресеты
+  function applyPreset(presetId: 'selective-routing' | 'all-proxy-routing' | 'selective-no-quic') {
+    if (presetId === 'selective-routing') {
+      dnsConfig.servers = [
+        '1.1.1.1',
+        {
+          address: '8.8.8.8',
+          port: 53,
+          tag: 'dns-in-ytb',
+          domains: ['geosite:youtube', 'geosite:google'],
+          skipFallback: true,
+          inboundPort: 1053
+        }
+      ];
+      routingRules = [
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'direct',
+          ip: ['geoip:private']
+        },
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'block',
+          domain: ['geosite:category-ads-all']
+        }
+      ];
+    } else if (presetId === 'all-proxy-routing') {
+      dnsConfig.servers = ['1.1.1.1', '8.8.8.8'];
+      routingRules = [
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'direct',
+          ip: ['geoip:private']
+        },
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'PROXY_TAG'
+        }
+      ];
+    } else if (presetId === 'selective-no-quic') {
+      dnsConfig.servers = ['1.1.1.1', '8.8.8.8'];
+      routingRules = [
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'block',
+          network: 'udp',
+          port: '443'
+        },
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'direct',
+          ip: ['geoip:private']
+        }
+      ];
+    }
+    isDirty = true;
+    showToast('success', $t('editor.preset_applied'));
   }
 
   function openInEditor() {
     if (onInsertIntoEditor) {
-      onInsertIntoEditor(json);
+      onInsertIntoEditor(previewJson);
     } else {
       onSwitchTab('editor');
     }
   }
 
-  const ru = $currentLang === 'ru';
+  // Превью
+  let previewJson = $derived.by(() => {
+    const list = getChangedFiles();
+    const result: Record<string, any> = {};
+    for (const [name, managed] of list) {
+      const existing = xrayFiles[name] ?? {};
+      result[name] = mergeXrayFile(name, existing, managed);
+    }
+    return JSON.stringify(result, null, 2);
+  });
+
+  const ru = $derived($currentLang === 'ru');
 </script>
 
 <div class="container">
@@ -212,8 +509,8 @@
         <h1>{ru ? 'Визуальный конструктор Xray' : 'Xray Visual Constructor'}</h1>
         <p class="sub">
           {ru
-            ? 'Сборка routing rules, DNS и inbounds для Xray без ручного редактирования JSON.'
-            : 'Build routing rules, DNS and inbounds for Xray without hand-editing JSON.'}
+            ? 'Настройка логирования, DNS, inbounds, outbounds, routing и policy для Xray.'
+            : 'Configure logging, DNS, inbounds, outbounds, routing and policy for Xray.'}
         </p>
       </div>
       <div class="ph-actions">
@@ -236,81 +533,89 @@
             {ru ? 'Открыть в редакторе' : 'Open in Editor'}
           {/if}
         </button>
-        <button class="btn btn-primary" on:click={copyJSON} disabled={!json}>
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right:5px"
-            ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-              d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-            /></svg
-          >
-          {ru ? 'Копировать JSON' : 'Copy JSON'}
+        <button class="btn btn-primary" data-testid="apply-changes-btn" on:click={handleApplyChanges}>
+          {ru ? 'Применить изменения' : 'Apply Changes'}
         </button>
       </div>
     </div>
   {/if}
 
   <div class="gen-layout">
-    <!-- Left Panel: Form / Rules list -->
+    <!-- Left Panel -->
     <div class="gen-left">
+      <!-- Scenario chips -->
+      <div class="constructor-scenario-bar">
+        <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
+        {#each [
+          ['selective-routing', $t('editor.scenario_rule_based')],
+          ['all-proxy-routing', $t('editor.scenario_global_proxy')],
+          ['selective-no-quic', ru ? 'Блокировка QUIC' : 'Block QUIC']
+        ] as [id, label]}
+          <button
+            class="scenario-chip"
+            on:click={() => applyPreset(id as any)}
+          >{label}</button>
+        {/each}
+      </div>
+
+      <!-- Outbound Tag selection -->
+      <div class="rule-providers-row">
+        <label class="form-label" for="proxy-tag-select">{ru ? 'Основной прокси-выход' : 'Main proxy outbound'}:</label>
+        <select
+          id="proxy-tag-select"
+          class="form-select"
+          bind:value={proxyTag}
+          on:change={() => isDirty = true}
+        >
+          {#each outboundTags.filter(t => t !== 'direct' && t !== 'block' && t !== 'dns-out') as tag}
+            <option value={tag}>{tag}</option>
+          {/each}
+        </select>
+      </div>
+
       <!-- Section tabs -->
-      <div class="sec-tabs">
-        <button
-          class="sec-tab"
-          class:active={activeSection === 'routing'}
-          on:click={() => {
-            activeSection = 'routing';
-            showRuleForm = false;
-          }}
-        >
-          {ru ? 'Маршрутизация' : 'Routing'}
-          {#if routingRules.length > 0}<span class="sec-count">{routingRules.length}</span>{/if}
-        </button>
-        <button
-          class="sec-tab"
-          class:active={activeSection === 'inbounds'}
-          on:click={() => {
-            activeSection = 'inbounds';
-            showRuleForm = false;
-          }}
-        >
-          {ru ? 'Входящие (Inbounds)' : 'Inbounds'}
-        </button>
-        <button
-          class="sec-tab"
-          class:active={activeSection === 'dns'}
-          on:click={() => {
-            activeSection = 'dns';
-            showRuleForm = false;
-          }}
-        >
-          DNS
-        </button>
+      <div class="sec-tabs" data-testid="xray-section-tabs">
+        {#each [
+          ['routing', ru ? 'Маршрутизация' : 'Routing'],
+          ['inbounds', ru ? 'Входящие' : 'Inbounds'],
+          ['dns', 'DNS'],
+          ['outbounds', ru ? 'Исходящие' : 'Outbounds'],
+          ['log', ru ? 'Логирование' : 'Log'],
+          ['policy', ru ? 'Политики' : 'Policy']
+        ] as [id, label]}
+          <button
+            class="sec-tab"
+            class:active={activeSection === id}
+            data-tab={id}
+            on:click={() => { activeSection = id as any; showRuleForm = false; showDnsForm = false; showInboundForm = false; }}
+          >
+            {label}
+            {#if id === 'routing' && routingRules.length > 0}
+              <span class="sec-count">{routingRules.length}</span>
+            {/if}
+          </button>
+        {/each}
       </div>
 
       <!-- ROUTING SECTION -->
       {#if activeSection === 'routing'}
         <div class="sec-body">
-          <div class="form-row" style="margin-bottom: var(--spacing-4, 16px);">
+          <div class="form-row">
             <label class="form-label" for="domain-strategy">{$t('editor.xray_domain_strategy')}</label>
             <select
               id="domain-strategy"
               class="form-select"
-              bind:value={dnsConfig.domainStrategy}
+              bind:value={dnsConfig.queryStrategy}
+              on:change={() => isDirty = true}
             >
-              <option value="IPIfNonMatch">IPIfNonMatch</option>
-              <option value="IPOnDemand">IPOnDemand</option>
-              <option value="AsIs">AsIs</option>
+              <option value="UseIP">UseIP</option>
+              <option value="UseIPv4">UseIPv4</option>
+              <option value="UseIPv6">UseIPv6</option>
             </select>
           </div>
 
           <div class="section-title">{$t('editor.xray_routing_rules')}</div>
-          
+
           <div class="routing-rules-list" data-testid="routing-rules-list">
             {#each routingRules as rule, idx (rule.id)}
               <div class="card rule-card">
@@ -322,8 +627,19 @@
                     <button class="rule-del" on:click={() => removeRule(rule.id)}>✕</button>
                   </div>
                 </div>
-                
+
                 <div class="rule-details">
+                  {#if rule.inboundTag && rule.inboundTag.length > 0}
+                    <div class="rule-detail-item">
+                      <strong>{ru ? 'Входящие теги' : 'Inbound Tags'}:</strong>
+                      <span class="rule-chips">
+                        {#each rule.inboundTag as ib}
+                          <span class="chip chip-ip">{ib}</span>
+                        {/each}
+                      </span>
+                    </div>
+                  {/if}
+
                   {#if rule.domain && rule.domain.length > 0}
                     <div class="rule-detail-item">
                       <strong>{ru ? 'Домены' : 'Domains'}:</strong>
@@ -334,7 +650,7 @@
                       </span>
                     </div>
                   {/if}
-                  
+
                   {#if rule.ip && rule.ip.length > 0}
                     <div class="rule-detail-item">
                       <strong>IP:</strong>
@@ -345,13 +661,13 @@
                       </span>
                     </div>
                   {/if}
-                  
+
                   {#if rule.port}
                     <div class="rule-detail-item">
                       <strong>{ru ? 'Порты' : 'Ports'}:</strong> <code>{rule.port}</code>
                     </div>
                   {/if}
-                  
+
                   {#if rule.network}
                     <div class="rule-detail-item">
                       <strong>{ru ? 'Сеть' : 'Network'}:</strong> <span class="badge">{rule.network}</span>
@@ -375,7 +691,13 @@
                   {#each outboundTags as tag}
                     <option value={tag}>{tag}</option>
                   {/each}
+                  <option value="PROXY_TAG">PROXY_TAG</option>
                 </select>
+              </div>
+
+              <div class="form-row">
+                <label class="form-label" for="rule-inbounds">{ru ? 'Входящие теги (через запятую)' : 'Inbound tags (comma separated)'}</label>
+                <input id="rule-inbounds" class="form-input" bind:value={newRule.inboundTagRaw} placeholder="dns-in-ytb, socks" />
               </div>
 
               <div class="form-row">
@@ -391,31 +713,17 @@
 
               <div class="form-row">
                 <label class="form-label" for="rule-ips">{$t('editor.xray_ip_list')} ({ru ? 'через запятую' : 'comma separated'})</label>
-                <input
-                  id="rule-ips"
-                  class="form-input"
-                  bind:value={newRule.ipRaw}
-                  placeholder="geoip:private, 1.1.1.1"
-                />
+                <input id="rule-ips" class="form-input" bind:value={newRule.ipRaw} placeholder="geoip:private, 1.1.1.1" />
               </div>
 
               <div class="form-row2">
                 <div class="form-col">
                   <label class="form-label" for="rule-ports">{$t('editor.xray_port_range')}</label>
-                  <input
-                    id="rule-ports"
-                    class="form-input"
-                    bind:value={newRule.port}
-                    placeholder="80,443,1000-2000"
-                  />
+                  <input id="rule-ports" class="form-input" bind:value={newRule.port} placeholder="80,443,1000-2000" />
                 </div>
                 <div class="form-col">
                   <label class="form-label" for="rule-network">{$t('editor.xray_network')}</label>
-                  <select
-                    id="rule-network"
-                    class="form-select"
-                    bind:value={newRule.network}
-                  >
+                  <select id="rule-network" class="form-select" bind:value={newRule.network}>
                     <option value="tcp,udp">tcp+udp</option>
                     <option value="tcp">tcp</option>
                     <option value="udp">udp</option>
@@ -424,20 +732,12 @@
               </div>
 
               <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => (showRuleForm = false)}>
-                  {ru ? 'Отмена' : 'Cancel'}
-                </button>
-                <button class="btn btn-primary" on:click={addRule}>
-                  {ru ? 'Добавить' : 'Add'}
-                </button>
+                <button class="btn btn-secondary" on:click={() => (showRuleForm = false)}>{$t('app.cancel')}</button>
+                <button class="btn btn-primary" on:click={addRule}>{$t('app.create')}</button>
               </div>
             </div>
           {:else}
-            <button
-              class="add-btn"
-              data-testid="add-routing-rule"
-              on:click={() => (showRuleForm = true)}
-            >
+            <button class="add-btn" data-testid="add-routing-rule" on:click={() => (showRuleForm = true)}>
               + {$t('editor.xray_routing_add_rule')}
             </button>
           {/if}
@@ -453,6 +753,7 @@
               <div class="inbound-title">
                 <span class="badge type-{inbound.protocol}">{inbound.protocol}</span>
                 <strong>{inbound.tag}</strong>
+                <button class="item-del" style="margin-left:auto" on:click={() => removeInbound(inbound.tag)}>✕</button>
               </div>
               <div class="form-row2" style="margin-top:var(--spacing-2, 8px)">
                 <div class="form-col">
@@ -461,20 +762,57 @@
                     class="form-input"
                     type="number"
                     bind:value={inbound.port}
+                    on:input={() => isDirty = true}
                     min="1"
                     max="65535"
                   />
                 </div>
                 <div class="form-col">
                   <label class="form-label">{ru ? 'Адрес прослушивания' : 'Listen address'}</label>
-                  <input
-                    class="form-input"
-                    bind:value={inbound.listen}
-                  />
+                  <input class="form-input" bind:value={inbound.listen} on:input={() => isDirty = true} />
                 </div>
               </div>
             </div>
           {/each}
+
+          {#if showInboundForm}
+            <div class="form-card">
+              <div class="form-row">
+                <label class="form-label">{ru ? 'Тег' : 'Tag'}</label>
+                <input class="form-input" bind:value={newInbound.tag} placeholder="socks-in" />
+              </div>
+              <div class="form-row2">
+                <div class="form-col">
+                  <label class="form-label">{ru ? 'Порт' : 'Port'}</label>
+                  <input class="form-input" type="number" bind:value={newInbound.port} />
+                </div>
+                <div class="form-col">
+                  <label class="form-label">{ru ? 'Протокол' : 'Protocol'}</label>
+                  <select class="form-select" bind:value={newInbound.protocol}>
+                    <option value="socks">socks</option>
+                    <option value="http">http</option>
+                  </select>
+                </div>
+              </div>
+              {#if newInbound.protocol === 'socks'}
+                <div class="form-row">
+                  <label class="checkbox-container">
+                    <input type="checkbox" bind:checked={newInbound.udp} />
+                    <span class="checkmark"></span>
+                    Включить UDP в Socks
+                  </label>
+                </div>
+              {/if}
+              <div class="form-actions">
+                <button class="btn btn-secondary" on:click={() => (showInboundForm = false)}>{$t('app.cancel')}</button>
+                <button class="btn btn-primary" on:click={addInbound}>{$t('app.create')}</button>
+              </div>
+            </div>
+          {:else}
+            <button class="add-btn" on:click={() => (showInboundForm = true)}>
+              + {ru ? 'Добавить входящее соединение' : 'Add Inbound'}
+            </button>
+          {/if}
         </div>
       {/if}
 
@@ -484,56 +822,191 @@
           <div class="section-title">{$t('editor.xray_dns')}</div>
           
           <div class="dns-servers-list">
-            {#each dnsConfig.servers as srv}
-              <div class="item-row">
-                <span class="item-name">{srv}</span>
-                <button class="item-del" on:click={() => removeDNSServer(srv)}>✕</button>
+            {#each dnsConfig.servers as srv, idx}
+              <div class="item-row card" style="margin-bottom: 8px;">
+                {#if typeof srv === 'string'}
+                  <span class="item-name">{srv}</span>
+                {:else}
+                  <div style="flex: 1;">
+                    <div style="font-weight: 600; color: var(--fg);">{srv.address}:{srv.port || 53}</div>
+                    <div style="font-size: 0.75rem; color: var(--fg-secondary);">
+                      Tag: <span class="badge">{srv.tag}</span> | 
+                      Inbound Port: <code>{srv.inboundPort || 1053}</code> |
+                      Domains: {srv.domains?.join(', ') || 'none'}
+                    </div>
+                  </div>
+                {/if}
+                <button class="item-del" on:click={() => removeDNSServer(idx)}>✕</button>
               </div>
             {/each}
           </div>
 
-          <div class="form-card" style="margin-top:var(--spacing-4, 16px)">
-            <div class="form-row">
-              <label class="form-label" for="new-dns-server">{ru ? 'Добавить DNS Сервер' : 'Add DNS Server'}</label>
-              <div class="input-with-btn">
-                <input
-                  id="new-dns-server"
-                  class="form-input"
-                  bind:value={newServer}
-                  placeholder="8.8.8.8"
-                />
-                <button class="btn btn-primary" on:click={addDNSServer}>{ru ? 'Добавить' : 'Add'}</button>
+          {#if showDnsForm}
+            <div class="form-card">
+              <div class="form-row">
+                <label class="form-label">{ru ? 'Адрес сервера' : 'Server address'}</label>
+                <input class="form-input" bind:value={newDns.address} placeholder="8.8.8.8" />
               </div>
+              <div class="form-row2">
+                <div class="form-col">
+                  <label class="form-label">{ru ? 'Порт' : 'Port'}</label>
+                  <input class="form-input" type="number" bind:value={newDns.port} />
+                </div>
+                <div class="form-col">
+                  <label class="form-label">{ru ? 'Тег (опционально)' : 'Tag (optional)'}</label>
+                  <input class="form-input" bind:value={newDns.tag} placeholder="dns-in-ytb" />
+                </div>
+              </div>
+              {#if newDns.tag.trim()}
+                <div class="form-row">
+                  <label class="form-label">{ru ? 'Домены для перенаправления' : 'Domains for redirect'}</label>
+                  <input class="form-input" bind:value={newDns.domainsRaw} placeholder="geosite:youtube, google.com" />
+                </div>
+                <div class="form-row2">
+                  <div class="form-col">
+                    <label class="form-label">{ru ? 'Порт входящего соединения' : 'Inbound connection port'}</label>
+                    <input class="form-input" type="number" bind:value={newDns.inboundPort} />
+                  </div>
+                  <div class="form-col" style="justify-content: flex-end;">
+                    <label class="checkbox-container" style="margin-bottom: 10px;">
+                      <input type="checkbox" bind:checked={newDns.skipFallback} />
+                      <span class="checkmark"></span>
+                      Skip Fallback
+                    </label>
+                  </div>
+                </div>
+              {/if}
+              <div class="form-actions">
+                <button class="btn btn-secondary" on:click={() => (showDnsForm = false)}>{$t('app.cancel')}</button>
+                <button class="btn btn-primary" on:click={addDNSServer}>{$t('app.create')}</button>
+              </div>
+            </div>
+          {:else}
+            <button class="add-btn" on:click={() => (showDnsForm = true)}>
+              + {ru ? 'Добавить DNS-сервер' : 'Add DNS Server'}
+            </button>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- OUTBOUNDS SECTION -->
+      {#if activeSection === 'outbounds'}
+        <div class="sec-body">
+          <div class="section-title">{$t('editor.xray_section_outbounds')}</div>
+          <p class="section-desc">{ru ? 'Доступные исходящие теги (read-only):' : 'Available outbound tags (read-only):'}</p>
+          <div class="outbounds-list">
+            {#each outboundTags as tag}
+              <div class="card tag-card" style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between;">
+                <span class="badge badge-tag">{tag}</span>
+                <span class="tag-desc" style="font-size: 0.8125rem; color: var(--fg-secondary);">
+                  {tag === 'direct' ? (ru ? 'Прямое подключение (freedom)' : 'Direct connection (freedom)') : ''}
+                  {tag === 'block' ? (ru ? 'Блокировка трафика (blackhole)' : 'Block traffic (blackhole)') : ''}
+                  {tag === 'dns-out' ? (ru ? 'Запросы DNS' : 'DNS requests') : ''}
+                  {tag !== 'direct' && tag !== 'block' && tag !== 'dns-out' ? (ru ? 'Пользовательский outbound' : 'Custom outbound') : ''}
+                </span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      <!-- LOG SECTION -->
+      {#if activeSection === 'log'}
+        <div class="sec-body">
+          <div class="section-title">{$t('editor.xray_section_log')}</div>
+          
+          <div class="form-row">
+            <label class="form-label" for="log-level">{ru ? 'Уровень логирования' : 'Loglevel'}</label>
+            <select id="log-level" class="form-select" bind:value={logConfig.loglevel} on:change={() => isDirty = true}>
+              <option value="none">none</option>
+              <option value="error">error</option>
+              <option value="warning">warning</option>
+              <option value="info">info</option>
+              <option value="debug">debug</option>
+            </select>
+          </div>
+
+          <div class="form-row" style="margin-top: 8px;">
+            <label class="checkbox-container">
+              <input type="checkbox" bind:checked={logConfig.dnsLog} on:change={() => isDirty = true} />
+              <span class="checkmark"></span>
+              {ru ? 'Включить логирование DNS' : 'Enable DNS Logging'}
+            </label>
+          </div>
+
+          {#if xrayFiles['01_log.json']?.log?.access || xrayFiles['01_log.json']?.log?.error}
+            <div class="logs-paths card" style="margin-top: 12px; padding: 12px;">
+              <h4 style="margin: 0 0 8px 0; font-size: 0.875rem;">{ru ? 'Пути к логам:' : 'Logs paths:'}</h4>
+              {#if xrayFiles['01_log.json']?.log?.access}
+                <div style="font-size: 0.8125rem;"><strong>Access:</strong> <code>{xrayFiles['01_log.json'].log.access}</code></div>
+              {/if}
+              {#if xrayFiles['01_log.json']?.log?.error}
+                <div style="font-size: 0.8125rem; margin-top: 4px;"><strong>Error:</strong> <code>{xrayFiles['01_log.json'].log.error}</code></div>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- POLICY SECTION -->
+      {#if activeSection === 'policy'}
+        <div class="sec-body">
+          <div class="section-title">{$t('editor.xray_section_policy')}</div>
+          
+          <div class="card" style="padding: 16px;">
+            <h4 style="margin: 0 0 12px 0;">Level 0 (Default)</h4>
+            <div class="form-row2">
+              <div class="form-col">
+                <label class="form-label" for="policy-handshake">Handshake</label>
+                <input id="policy-handshake" class="form-input" type="number" bind:value={policyConfig.levels['0'].handshake} on:input={() => isDirty = true} />
+              </div>
+              <div class="form-col">
+                <label class="form-label" for="policy-connidle">ConnIdle</label>
+                <input id="policy-connidle" class="form-input" type="number" bind:value={policyConfig.levels['0'].connIdle} on:input={() => isDirty = true} />
+              </div>
+            </div>
+            <div class="form-row2" style="margin-top: 12px;">
+              <div class="form-col">
+                <label class="form-label" for="policy-uplink">UplinkOnly</label>
+                <input id="policy-uplink" class="form-input" type="number" bind:value={policyConfig.levels['0'].uplinkOnly} on:input={() => isDirty = true} />
+              </div>
+              <div class="form-col">
+                <label class="form-label" for="policy-downlink">DownlinkOnly</label>
+                <input id="policy-downlink" class="form-input" type="number" bind:value={policyConfig.levels['0'].downlinkOnly} on:input={() => isDirty = true} />
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="padding: 16px; margin-top: 12px;">
+            <h4 style="margin: 0 0 12px 0;">System</h4>
+            <div class="form-row">
+              <label class="checkbox-container">
+                <input type="checkbox" bind:checked={policyConfig.system.statsInboundUplink} on:change={() => isDirty = true} />
+                <span class="checkmark"></span>
+                Stats Inbound Uplink
+              </label>
+            </div>
+            <div class="form-row" style="margin-top: 8px;">
+              <label class="checkbox-container">
+                <input type="checkbox" bind:checked={policyConfig.system.statsInboundDownlink} on:change={() => isDirty = true} />
+                <span class="checkmark"></span>
+                Stats Inbound Downlink
+              </label>
             </div>
           </div>
         </div>
       {/if}
     </div>
 
-    <!-- Right Panel: Preview -->
+    <!-- Right Panel (Preview) -->
     <div class="gen-right">
       <div class="preview-header">
         <span class="preview-title">JSON {ru ? 'превью' : 'preview'}</span>
-        {#if json}
-          <button class="btn btn-secondary btn-sm" on:click={copyJSON} title={ru ? 'Копировать JSON' : 'Copy JSON'}>
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-              /></svg
-            >
-          </button>
-        {/if}
       </div>
-      <pre class="constructor-preview-pane" data-testid="xray-json-preview">{json}</pre>
+      <pre class="constructor-preview-pane" data-testid="xray-json-preview">{previewJson}</pre>
 
       {#if embedded}
-        <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px; padding: 0 16px 16px 16px;">
+        <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
           <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
             <svg
               width="13"
@@ -553,26 +1026,46 @@
               {ru ? 'Открыть в редакторе' : 'Open in Editor'}
             {/if}
           </button>
-          <button class="btn btn-primary" on:click={copyJSON} disabled={!json} style="flex: 1;">
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              style="margin-right:5px"
-              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-              /></svg
-            >
-            {ru ? 'Копировать' : 'Copy'}
+          <button class="btn btn-primary" data-testid="apply-changes-btn" on:click={handleApplyChanges} style="flex: 1;">
+            {ru ? 'Применить изменения' : 'Apply Changes'}
           </button>
         </div>
       {/if}
     </div>
   </div>
 </div>
+
+{#if showApplyConfirm}
+  <div class="modal-overlay" role="button" tabindex="0" data-testid="apply-confirm-dialog"
+    on:click={() => showApplyConfirm = false}
+    on:keydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}>
+    <div class="modal-card" role="presentation" on:click|stopPropagation>
+      <div class="modal-card-header">
+        <h2>{$t('editor.apply_confirm_title')}</h2>
+        <button class="modal-close-btn" on:click={() => showApplyConfirm = false}>&times;</button>
+      </div>
+      <div class="modal-card-body">
+        <p>{$t('editor.apply_confirm_body')}</p>
+        <div class="changed-files-list" style="margin-top: 12px;">
+          <strong>{ru ? 'Будут изменены файлы:' : 'Files to be modified:'}</strong>
+          <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+            {#each XRAY_FILES.filter(f => f !== '04_outbounds.json') as file}
+              <li><code>{XRAY_DIR}/{file}</code></li>
+            {/each}
+          </ul>
+        </div>
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn btn-secondary" on:click={() => showApplyConfirm = false}>
+          {$t('app.cancel')}
+        </button>
+        <button class="btn btn-primary" on:click={handleApplyChanges} disabled={applyLoading}>
+          {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .container {
@@ -626,11 +1119,53 @@
     }
   }
 
+  .constructor-scenario-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .scenario-label {
+    font-size: 0.8125rem;
+    color: var(--fg-secondary);
+    font-weight: 500;
+  }
+
+  .scenario-chip {
+    padding: 4px 10px;
+    background: var(--bg-surface-hover);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--fg);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: background-color var(--transition-fast);
+  }
+
+  .scenario-chip:hover {
+    background: var(--bg-surface-active);
+  }
+
+  .rule-providers-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
   .sec-tabs {
     display: flex;
     gap: var(--spacing-2, 8px);
     border-bottom: 1px solid var(--border);
     margin-bottom: var(--spacing-4, 16px);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .sec-tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .sec-tab {
@@ -646,6 +1181,7 @@
     gap: 6px;
     margin-bottom: -1px;
     min-height: 36px;
+    white-space: nowrap;
   }
 
   .sec-tab.active {
@@ -676,7 +1212,6 @@
     margin-bottom: var(--spacing-2, 8px);
   }
 
-  /* Rules list */
   .routing-rules-list {
     display: flex;
     flex-direction: column;
@@ -775,7 +1310,6 @@
     color: #198754;
   }
 
-  /* Form controls */
   .form-card {
     background: var(--bg-surface);
     border: 1px solid var(--border);
@@ -893,7 +1427,6 @@
     color: var(--accent);
   }
 
-  /* Inbounds */
   .inbound-card {
     padding: var(--spacing-4, 16px);
     background: var(--bg-surface);
@@ -918,7 +1451,6 @@
     color: #6f42c1;
   }
 
-  /* DNS List */
   .dns-servers-list {
     display: flex;
     flex-direction: column;
@@ -951,7 +1483,6 @@
     color: var(--fg);
   }
 
-  /* Preview Pane */
   .gen-right {
     display: flex;
     flex-direction: column;
@@ -988,5 +1519,127 @@
     overflow: auto;
     scrollbar-width: thin;
     max-height: 500px;
+  }
+
+  .checkbox-container {
+    display: block;
+    position: relative;
+    padding-left: 28px;
+    cursor: pointer;
+    font-size: var(--font-size-sm, 0.8125rem);
+    user-select: none;
+    color: var(--fg);
+  }
+
+  .checkbox-container input {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+    height: 0;
+    width: 0;
+  }
+
+  .checkmark {
+    position: absolute;
+    top: 2px;
+    left: 0;
+    height: 16px;
+    width: 16px;
+    background-color: var(--bg-surface-hover);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+
+  .checkbox-container:hover input ~ .checkmark {
+    background-color: var(--bg-surface-active);
+  }
+
+  .checkbox-container input:checked ~ .checkmark {
+    background-color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .checkmark:after {
+    content: "";
+    position: absolute;
+    display: none;
+  }
+
+  .checkbox-container input:checked ~ .checkmark:after {
+    display: block;
+  }
+
+  .checkbox-container .checkmark:after {
+    left: 5px;
+    top: 2px;
+    width: 4px;
+    height: 8px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+
+  /* Modal styles */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg, 8px);
+    width: 500px;
+    max-width: 90%;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  }
+
+  .modal-card-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .modal-card-header h2 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--fg);
+  }
+
+  .modal-close-btn {
+    background: transparent;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--fg-secondary);
+    cursor: pointer;
+  }
+
+  .modal-card-body {
+    padding: 16px;
+    font-size: var(--font-size-sm, 0.8125rem);
+    color: var(--fg);
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .modal-card-footer {
+    padding: 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
   }
 </style>
