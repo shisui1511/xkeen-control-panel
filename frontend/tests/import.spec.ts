@@ -106,8 +106,16 @@ test.describe('Import Proxy Node E2E test suite', () => {
   test.beforeEach(async ({ page }) => {
     await disableServiceWorker(page);
     await setupRestMocks(page);
-    await page.goto('/#/subscriptions');
-    await page.waitForSelector('h1:has-text("Подписки")');
+    await page.route('**/api/config/**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ outbounds: [] })
+      });
+    });
+    await page.goto('/#/constructor');
+    // Переключаемся на вкладку Исходящие (outbounds)
+    await page.locator('.sec-tab[data-tab="outbounds"]').click();
   });
 
   test('successfully imports proxy node with custom tag', async ({ page }) => {
@@ -201,6 +209,59 @@ test.describe('Import Proxy Node E2E test suite', () => {
     const errorMsg = modal.locator('.error-msg');
     await expect(errorMsg).toBeVisible();
     await expect(errorMsg).toContainText('Пожалуйста, введите только одну ссылку за раз');
+  });
+});
+
+// RED-тесты: D-15, D-16, D-17 — падают до реализации (Wave 2/3)
+test.describe('Import Node из конструкторов (D-15, D-16, D-17)', () => {
+  test.beforeEach(async ({ page }) => {
+    await disableServiceWorker(page);
+    await setupRestMocks(page);
+    // Дополнительный мок для config/read и config/list в конструкторе
+    await page.route('**/api/config/**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ outbounds: [] })
+      });
+    });
+    await page.goto('/#/constructor');
+    await page.locator('.constructor-kernel-toggle button:has-text("Xray")').click();
+    await page.locator('.sec-tab[data-tab="outbounds"]').click();
+  });
+
+  test('кнопка «Импорт узла» присутствует в Xray-конструкторе (D-15)', async ({ page }) => {
+    await expect(page.locator('button:has-text("Импорт узла")')).toBeVisible();
+  });
+
+  test('кнопка «Импорт узла» присутствует в Mihomo-конструкторе (D-15)', async ({ page }) => {
+    await page.locator('.constructor-kernel-toggle button:has-text("Mihomo")').click();
+    await expect(page.locator('button:has-text("Импорт узла")')).toBeVisible();
+  });
+
+  test('кнопка «Импорт узла» отсутствует в Subscriptions (D-16)', async ({ page }) => {
+    await page.goto('/#/subscriptions');
+    await expect(page.locator('button:has-text("Импорт узла")')).not.toBeVisible();
+  });
+
+  test('импорт в Xray-конструкторе вызывает POST /api/outbound/import (D-17)', async ({ page }) => {
+    let importCalled = false;
+    await page.route('**/api/outbound/import', async (route) => {
+      importCalled = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
+    });
+
+    await page.locator('button:has-text("Импорт узла")').click();
+    const modal = page.locator('.modal-card');
+    await modal.locator('textarea').fill('vless://test-link#tag');
+    await modal.locator('button:has-text("Распознать")').click();
+    await expect(modal.locator('.preview-section')).toBeVisible();
+    await modal.locator('button:has-text("Импортировать")').click();
+    expect(importCalled).toBe(true);
   });
 });
 

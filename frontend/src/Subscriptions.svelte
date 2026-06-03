@@ -108,14 +108,6 @@
   let showAddModal = $state(false);
   let editingSub = $state<Subscription | null>(null);
 
-  // Import Node states (Svelte 5)
-  let showImportModal = $state(false);
-  let importLink = $state('');
-  let importTag = $state('');
-  let importStep = $state(1); // 1: Input link, 2: Preview & Confirm tag
-  let importLoading = $state(false);
-  let parsedNode = $state<any>(null);
-  let importErrorMsg = $state('');
   let activeDropdownId = $state<string | null>(null);
 
   // Состояние для inline раскрытия узлов
@@ -194,106 +186,7 @@
     return '';
   }
 
-  function openImportModal() {
-    showImportModal = true;
-    importLink = '';
-    importTag = '';
-    importStep = 1;
-    importLoading = false;
-    parsedNode = null;
-    importErrorMsg = '';
-  }
 
-  function closeImportModal() {
-    showImportModal = false;
-  }
-
-  async function parseImportLink() {
-    const trimmed = importLink.trim();
-    if (!trimmed) {
-      importErrorMsg = $t('subscr.import_error_empty');
-      return;
-    }
-
-    const lines = trimmed.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    if (lines.length > 1) {
-      importErrorMsg = $t('subscr.import_error_single_only');
-      return;
-    }
-
-    importErrorMsg = '';
-    importLoading = true;
-
-    try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/outbound/parse', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
-        },
-        body: JSON.stringify({ links: [importLink.trim()] })
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        importErrorMsg = data.error || $t('subscr.import_error_invalid');
-        return;
-      }
-
-      if (data.data && data.data.length > 0) {
-        const result = data.data[0];
-        if (result.error) {
-          importErrorMsg = result.error;
-        } else if (result.outbound) {
-          parsedNode = result.outbound;
-          importTag = parsedNode.tag || '';
-          importStep = 2;
-        } else {
-          importErrorMsg = $t('subscr.import_error_invalid');
-        }
-      } else {
-        importErrorMsg = $t('subscr.import_error_invalid');
-      }
-    } catch (e: any) {
-      importErrorMsg = e.message || $t('subscr.import_error_invalid');
-    } finally {
-      importLoading = false;
-    }
-  }
-
-  async function confirmImportNode() {
-    importErrorMsg = '';
-    importLoading = true;
-
-    try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/outbound/import', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
-        },
-        body: JSON.stringify({
-          link: importLink.trim(),
-          tag: importTag.trim()
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        importErrorMsg = data.error || $t('subscr.import_error');
-        return;
-      }
-
-      showToast('success', $t('subscr.import_success'));
-      showImportModal = false;
-    } catch (e: any) {
-      importErrorMsg = e.message || $t('subscr.import_error');
-    } finally {
-      importLoading = false;
-    }
-  }
 
   // Form fields
   let formName = $state('');
@@ -539,7 +432,6 @@
     if (e.key === 'Escape') {
       closeModal();
       closeDiagnosticModal();
-      closeImportModal();
       activeDropdownId = null;
     }
   }
@@ -805,20 +697,7 @@
         >
         {$t('subscr.refresh_all')}
       </button>
-      <button class="btn btn-secondary" on:click={openImportModal}>
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          style="margin-right: 6px;"
-        >
-          <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"/>
-        </svg>
-        {$t('subscr.import_node')}
-      </button>
+
       <button class="btn btn-primary" on:click={openAddModal}>
         <svg
           width="14"
@@ -1476,100 +1355,7 @@
   </div>
 {/if}
 
-{#if showImportModal}
-  <div
-    class="modal-overlay"
-    role="button"
-    tabindex="0"
-    on:click={closeImportModal}
-    on:keydown={handleKeydown}
-  >
-    <div class="modal-card" role="presentation" on:click|stopPropagation>
-      <div class="modal-card-header">
-        <h2>{$t('subscr.import_modal_title')}</h2>
-        <button class="modal-close-btn" on:click={closeImportModal}>&times;</button>
-      </div>
-      <div class="modal-card-body">
-        {#if importErrorMsg}
-          <div class="error-msg" style="color: var(--danger); margin-bottom: 12px; font-size: 13px;">
-            {importErrorMsg}
-          </div>
-        {/if}
 
-        {#if importStep === 1}
-          <div class="form-group">
-            <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
-            <textarea
-              id="import-link"
-              class="input textarea-link"
-              bind:value={importLink}
-              placeholder={$t('subscr.import_link_placeholder')}
-              rows="4"
-              style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px;"
-            ></textarea>
-          </div>
-        {:else if importStep === 2 && parsedNode}
-          <div class="preview-section">
-            <h3 class="preview-title">{$t('subscr.import_preview_title')}</h3>
-            <div class="preview-table">
-              <div class="preview-row">
-                <span class="preview-label">{$t('subscr.import_proto')}</span>
-                <span class="preview-value code">{parsedNode.protocol}</span>
-              </div>
-              <div class="preview-row">
-                <span class="preview-label">{$t('subscr.import_server')}</span>
-                <span class="preview-value code">{getNodeServer(parsedNode)}</span>
-              </div>
-              <div class="preview-row">
-                <span class="preview-label">{$t('subscr.import_port')}</span>
-                <span class="preview-value code">{getNodePort(parsedNode)}</span>
-              </div>
-            </div>
-
-            <div class="form-group" style="margin-top: 16px;">
-              <label for="import-tag" class="form-label">{$t('subscr.import_tag_custom')}</label>
-              <input
-                id="import-tag"
-                type="text"
-                class="input"
-                bind:value={importTag}
-                placeholder={$t('subscr.import_tag_placeholder')}
-              />
-            </div>
-          </div>
-        {/if}
-      </div>
-      <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={closeImportModal} disabled={importLoading}>
-          {$t('app.cancel')}
-        </button>
-        {#if importStep === 1}
-          <button
-            class="btn btn-primary"
-            on:click={parseImportLink}
-            disabled={!importLink.trim() || importLoading}
-          >
-            {#if importLoading}
-              <span class="spinner-xs" style="margin-right: 6px;"></span>
-            {/if}
-            {$t('subscr.import_btn_parse')}
-          </button>
-        {:else}
-          <button
-            class="btn btn-primary"
-            on:click={confirmImportNode}
-            disabled={importLoading}
-          >
-            {#if importLoading}
-              <span class="spinner-xs" style="margin-right: 6px;"></span>
-            {/if}
-            {$t('subscr.import_btn_confirm')}
-          </button>
-        {/if}
-      </div>
-    </div>
-  </div>
-{/if}
 
 {#if showDiagnosticModal && diagnosticSub}
   <div
