@@ -611,7 +611,7 @@
                   </span>
                   <span class="status-badge-value">
                     <span class="status-{statusColor(serviceStatus.xkeen)}">
-                      {serviceStatus.xkeen === 'running' ? $t('app.running') : $t('app.stop')}
+                      {serviceStatus.xkeen === 'running' ? $t('app.running') : $t('kernel.status.stopped')}
                     </span>
                   </span>
                 </div>
