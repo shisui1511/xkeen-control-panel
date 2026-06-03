@@ -1,6 +1,5 @@
 <script lang="ts">
   import { t } from './i18n';
-  import XrayConstructor from './XrayConstructor.svelte';
   import MihomoGenerator from './MihomoGenerator.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
@@ -33,12 +32,7 @@
 
   <div class="constructor-body">
     {#if kernel === 'xray'}
-      <XrayConstructor
-        {onSwitchTab}
-        {selectedFile}
-        {onInsertIntoEditor}
-        {embedded}
-      />
+      <div>{$t('editor.xray_routing_rules')} в разработке</div>
     {:else}
       <MihomoGenerator
         {onSwitchTab}
