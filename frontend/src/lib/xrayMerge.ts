@@ -3,9 +3,6 @@
  *
  * Стратегия: обновлять только управляемые ключи в каждом файле,
  * сохраняя все остальные ключи без изменений (D-04).
- *
- * Stub для Plan 15.2-01 (тестовая инфраструктура).
- * Реализация — Plan 15.2-02/04.
  */
 
 export interface XrayMergeOptions {
@@ -64,12 +61,7 @@ export function mergeXrayFile(
       };
     }
     case '05_routing.json': {
-      const rules = ((managed.rules ?? []) as Record<string, any>[]).map((r) => {
-        if (r.outboundTag === 'PROXY_TAG') {
-          return { ...r, outboundTag: managed.proxyTag };
-        }
-        return r;
-      });
+      const rules = substituteProxyTag((managed.rules ?? []) as Record<string, any>[], managed.proxyTag);
       return {
         ...existing,
         routing: {
@@ -96,4 +88,55 @@ export function mergeXrayFile(
     default:
       return existing;
   }
+}
+
+/**
+ * syncDnsPipeline — генерирует inbounds (dokodemo-door) и routing rules для тегированных DNS серверов.
+ *
+ * @param dnsServers - список DNS-серверов
+ * @param proxyTag   - основной прокси-выход
+ */
+export function syncDnsPipeline(
+  dnsServers: any[],
+  proxyTag: string
+): { dnsInbounds: any[]; routingRules: any[] } {
+  const dnsInbounds: any[] = [];
+  const routingRules: any[] = [];
+  let portCounter = 1082;
+
+  for (const srv of dnsServers) {
+    if (srv && typeof srv === 'object' && srv.tag) {
+      dnsInbounds.push({
+        port: portCounter++,
+        protocol: 'dokodemo-door',
+        settings: { network: 'tcp,udp', followRedirect: true },
+        sniffing: { enabled: true, routeOnly: true, destOverride: ['http', 'tls', 'quic'] },
+        streamSettings: { sockopt: { tproxy: 'tproxy' } },
+        tag: srv.tag
+      });
+
+      routingRules.push({
+        type: 'field',
+        inboundTag: [srv.tag],
+        outboundTag: srv.tag === 'dns-in-direct' ? 'direct' : 'PROXY_TAG'
+      });
+    }
+  }
+
+  return { dnsInbounds, routingRules };
+}
+
+/**
+ * substituteProxyTag — заменяет PROXY_TAG на выбранный outbound тег во всех правилах.
+ *
+ * @param rules - массив правил маршрутизации
+ * @param tag   - реальный тег исходящего соединения
+ */
+export function substituteProxyTag(rules: any[], tag: string): any[] {
+  return rules.map((r) => {
+    if (r.outboundTag === 'PROXY_TAG') {
+      return { ...r, outboundTag: tag };
+    }
+    return r;
+  });
 }

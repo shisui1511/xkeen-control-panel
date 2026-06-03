@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { currentLang, t } from './i18n';
   import { showToast } from './stores';
-  import { mergeXrayFile } from './lib/xrayMerge';
+  import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
 
   let {
     onSwitchTab = () => {},
@@ -15,7 +15,6 @@
     onInsertIntoEditor?: (content: string) => void;
     embedded?: boolean;
   }>();
-
 
   interface XrayRoutingRule {
     id: string;
@@ -48,6 +47,12 @@
     streamSettings?: Record<string, any>;
   }
 
+  interface OutboundDetail {
+    tag: string;
+    protocol: string;
+    server?: string;
+  }
+
   // Runes State (Svelte 5)
   let activeSection = $state<'log' | 'dns' | 'inbounds' | 'outbounds' | 'routing' | 'policy'>('routing');
   let logConfig = $state({ loglevel: 'warning', dnsLog: false });
@@ -57,8 +62,12 @@
     queryStrategy: 'UseIP',
     hosts: {}
   });
+  let routingConfig = $state<{ domainStrategy: string }>({
+    domainStrategy: 'IPIfNonMatch'
+  });
   let inbounds = $state<XrayInbound[]>([]);
   let outboundTags = $state<string[]>(['direct', 'block', 'dns-out']);
+  let outboundDetails = $state<OutboundDetail[]>([]);
   let proxyTag = $state<string>('');
   let routingRules = $state<XrayRoutingRule[]>([]);
   let policyConfig = $state<{ levels: Record<string, any>; system: Record<string, any> }>({
@@ -93,6 +102,12 @@
     inboundPort: 1053
   });
 
+  let showHostForm = $state(false);
+  let newHost = $state({
+    domain: '',
+    ip: ''
+  });
+
   let showInboundForm = $state(false);
   let newInbound = $state({
     tag: '',
@@ -101,6 +116,8 @@
     protocol: 'socks',
     udp: true
   });
+
+  let ruleFilterTag = $state<string>('');
 
   const XRAY_DIR = '/opt/etc/xray/configs';
   const XRAY_FILES = [
@@ -166,6 +183,9 @@
 
     // 05_routing.json
     const routingFile = xrayFiles['05_routing.json'] || {};
+    routingConfig = {
+      domainStrategy: routingFile.routing?.domainStrategy || 'IPIfNonMatch'
+    };
     routingRules = (routingFile.routing?.rules || []).map((r: any) => ({
       id: r.id || crypto.randomUUID(),
       type: r.type || 'field',
@@ -191,6 +211,12 @@
 
   async function loadXrayOutboundTags(): Promise<string[]> {
     const tags: string[] = [];
+    const details: OutboundDetail[] = [];
+    
+    details.push({ tag: 'direct', protocol: 'freedom' });
+    details.push({ tag: 'block', protocol: 'blackhole' });
+    details.push({ tag: 'dns-out', protocol: 'dns' });
+
     try {
       for (const name of ['04_outbounds.json', '04_outbounds.manual.json']) {
         try {
@@ -198,49 +224,38 @@
           const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
           if (!res.ok) continue;
           const json = await res.json();
-          const fileTags = (json.outbounds ?? [])
-            .filter((o: any) => o.tag)
-            .map((o: any) => o.tag as string);
-          tags.push(...fileTags);
+          const fileOutbounds = (json.outbounds ?? []) as any[];
+          for (const o of fileOutbounds) {
+            if (o.tag) {
+              tags.push(o.tag);
+              let server = '';
+              if (o.settings?.vnext?.[0]?.address) {
+                server = o.settings.vnext[0].address;
+              } else if (o.settings?.servers?.[0]?.address) {
+                server = o.settings.servers[0].address;
+              }
+              details.push({
+                tag: o.tag,
+                protocol: o.protocol || 'unknown',
+                server: server || undefined
+              });
+            }
+          }
         } catch { /* skip missing */ }
       }
     } catch { /* fallback */ }
+    
+    const uniqueDetails: OutboundDetail[] = [];
+    const seen = new Set<string>();
+    for (const d of details) {
+      if (!seen.has(d.tag)) {
+        seen.add(d.tag);
+        uniqueDetails.push(d);
+      }
+    }
+    outboundDetails = uniqueDetails;
+
     return [...new Set([...tags, 'direct', 'block', 'dns-out'])];
-  }
-
-  function getDnsInbounds(): XrayInbound[] {
-    const list: XrayInbound[] = [];
-    for (const srv of dnsConfig.servers) {
-      if (typeof srv === 'object' && srv.tag) {
-        list.push({
-          port: srv.inboundPort || 1053,
-          protocol: 'dokodemo-door',
-          settings: { network: 'tcp,udp', followRedirect: true },
-          sniffing: { enabled: true, routeOnly: true, destOverride: ['http', 'tls', 'quic'] },
-          streamSettings: { sockopt: { tproxy: 'tproxy' } },
-          tag: srv.tag
-        });
-      }
-    }
-    return list;
-  }
-
-  function getManagedRules(): XrayRoutingRule[] {
-    const rules = [...routingRules];
-    for (const srv of dnsConfig.servers) {
-      if (typeof srv === 'object' && srv.tag) {
-        const exists = rules.some((r) => r.inboundTag && r.inboundTag.includes(srv.tag));
-        if (!exists) {
-          rules.unshift({
-            id: crypto.randomUUID(),
-            type: 'field',
-            inboundTag: [srv.tag],
-            outboundTag: srv.tag.includes('direct') ? 'direct' : 'PROXY_TAG'
-          });
-        }
-      }
-    }
-    return rules;
   }
 
   function getChangedFiles(): Array<[string, any]> {
@@ -252,13 +267,24 @@
     // 02_dns.json
     list.push(['02_dns.json', { servers: dnsConfig.servers, queryStrategy: dnsConfig.queryStrategy, hosts: dnsConfig.hosts }]);
     
+    // Синхронизируем DNS c inbounds и routing
+    const { dnsInbounds, routingRules: generatedRules } = syncDnsPipeline(dnsConfig.servers, proxyTag);
+    
     // 03_inbounds.json
-    const dnsIn = getDnsInbounds();
-    list.push(['03_inbounds.json', { dnsInbounds: dnsIn }]);
+    list.push(['03_inbounds.json', { dnsInbounds }]);
     
     // 05_routing.json
-    const rules = getManagedRules();
-    list.push(['05_routing.json', { rules, proxyTag }]);
+    const rules = [...routingRules];
+    for (const r of generatedRules) {
+      const exists = rules.some((ex) => ex.inboundTag && ex.inboundTag.includes(r.inboundTag[0]));
+      if (!exists) {
+        rules.unshift({
+          id: crypto.randomUUID(),
+          ...r
+        });
+      }
+    }
+    list.push(['05_routing.json', { rules, proxyTag, domainStrategy: routingConfig.domainStrategy }]);
     
     // 06_policy.json
     const lvl0 = policyConfig.levels?.['0'] || { handshake: 4, connIdle: 300, uplinkOnly: 2, downlinkOnly: 5 };
@@ -363,8 +389,7 @@
         port: Number(newDns.port) || 53,
         tag: newDns.tag.trim(),
         domains: newDns.domainsRaw.trim() ? newDns.domainsRaw.split(/[\s,]+/).filter(Boolean) : undefined,
-        skipFallback: newDns.skipFallback,
-        inboundPort: Number(newDns.inboundPort) || 1053
+        skipFallback: newDns.skipFallback
       };
       dnsConfig.servers = [...dnsConfig.servers, serverObj];
     } else {
@@ -383,6 +408,26 @@
 
   function removeDNSServer(index: number) {
     dnsConfig.servers = dnsConfig.servers.filter((_, idx) => idx !== index);
+    isDirty = true;
+  }
+
+  // Hosts CRUD
+  function addHost() {
+    if (!newHost.domain.trim() || !newHost.ip.trim()) return;
+    dnsConfig.hosts = {
+      ...dnsConfig.hosts,
+      [newHost.domain.trim()]: newHost.ip.trim()
+    };
+    newHost.domain = '';
+    newHost.ip = '';
+    showHostForm = false;
+    isDirty = true;
+  }
+
+  function removeHost(domain: string) {
+    const updated = { ...dnsConfig.hosts };
+    delete updated[domain];
+    dnsConfig.hosts = updated;
     isDirty = true;
   }
 
@@ -421,8 +466,14 @@
           port: 53,
           tag: 'dns-in-ytb',
           domains: ['geosite:youtube', 'geosite:google'],
-          skipFallback: true,
-          inboundPort: 1053
+          skipFallback: true
+        },
+        {
+          address: '77.88.8.8',
+          port: 53,
+          tag: 'dns-in-direct',
+          domains: ['geosite:ru'],
+          skipFallback: false
         }
       ];
       routingRules = [
@@ -437,6 +488,12 @@
           type: 'field',
           outboundTag: 'block',
           domain: ['geosite:category-ads-all']
+        },
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'PROXY_TAG',
+          network: 'tcp,udp'
         }
       ];
     } else if (presetId === 'all-proxy-routing') {
@@ -451,11 +508,21 @@
         {
           id: crypto.randomUUID(),
           type: 'field',
-          outboundTag: 'PROXY_TAG'
+          outboundTag: 'PROXY_TAG',
+          network: 'tcp,udp'
         }
       ];
     } else if (presetId === 'selective-no-quic') {
-      dnsConfig.servers = ['1.1.1.1', '8.8.8.8'];
+      dnsConfig.servers = [
+        '1.1.1.1',
+        {
+          address: '8.8.8.8',
+          port: 53,
+          tag: 'dns-in-ytb',
+          domains: ['geosite:youtube', 'geosite:google'],
+          skipFallback: true
+        }
+      ];
       routingRules = [
         {
           id: crypto.randomUUID(),
@@ -469,6 +536,18 @@
           type: 'field',
           outboundTag: 'direct',
           ip: ['geoip:private']
+        },
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'block',
+          domain: ['geosite:category-ads-all']
+        },
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'PROXY_TAG',
+          network: 'tcp,udp'
         }
       ];
     }
@@ -483,6 +562,40 @@
       onSwitchTab('editor');
     }
   }
+
+  function countDiffKeys(existing: any, merged: any): number {
+    let count = 0;
+    const allKeys = new Set([...Object.keys(existing || {}), ...Object.keys(merged || {})]);
+    for (const k of allKeys) {
+      if (JSON.stringify(existing?.[k]) !== JSON.stringify(merged?.[k])) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  interface FileChangeInfo {
+    name: string;
+    path: string;
+    changesCount: number;
+  }
+
+  let filesToModify = $derived.by<FileChangeInfo[]>(() => {
+    const list = getChangedFiles();
+    return list.map(([name, managed]) => {
+      const existing = xrayFiles[name] ?? {};
+      const merged = mergeXrayFile(name, existing, managed);
+      return {
+        name,
+        path: `${XRAY_DIR}/${name}`,
+        changesCount: countDiffKeys(existing, merged)
+      };
+    });
+  });
+
+  let filteredRules = $derived(
+    routingRules.filter(r => !ruleFilterTag || r.outboundTag === ruleFilterTag)
+  );
 
   // Превью
   let previewJson = $derived.by(() => {
@@ -605,25 +718,41 @@
             <select
               id="domain-strategy"
               class="form-select"
-              bind:value={dnsConfig.queryStrategy}
+              bind:value={routingConfig.domainStrategy}
               on:change={() => isDirty = true}
             >
-              <option value="UseIP">UseIP</option>
-              <option value="UseIPv4">UseIPv4</option>
-              <option value="UseIPv6">UseIPv6</option>
+              <option value="AsIs">AsIs</option>
+              <option value="IPIfNonMatch">IPIfNonMatch</option>
+              <option value="IPOnDemand">IPOnDemand</option>
+            </select>
+          </div>
+
+          <!-- Filter rules -->
+          <div class="form-row" style="margin-bottom: 12px;">
+            <label class="form-label" for="rule-filter-select">{ru ? 'Фильтр по исходящему тегу' : 'Filter by outbound tag'}:</label>
+            <select
+              id="rule-filter-select"
+              class="form-select"
+              bind:value={ruleFilterTag}
+            >
+              <option value="">{ru ? 'Все правила' : 'All rules'}</option>
+              {#each outboundTags as tag}
+                <option value={tag}>{tag}</option>
+              {/each}
+              <option value="PROXY_TAG">PROXY_TAG</option>
             </select>
           </div>
 
           <div class="section-title">{$t('editor.xray_routing_rules')}</div>
 
           <div class="routing-rules-list" data-testid="routing-rules-list">
-            {#each routingRules as rule, idx (rule.id)}
+            {#each filteredRules as rule, idx (rule.id)}
               <div class="card rule-card">
                 <div class="rule-header">
                   <span class="badge badge-tag">{rule.outboundTag}</span>
                   <div class="rule-actions">
-                    <button class="rule-move" on:click={() => moveRule(rule.id, -1)} disabled={idx === 0}>▲</button>
-                    <button class="rule-move" on:click={() => moveRule(rule.id, 1)} disabled={idx === routingRules.length - 1}>▼</button>
+                    <button class="rule-move" on:click={() => moveRule(rule.id, -1)} disabled={routingRules.findIndex(r => r.id === rule.id) === 0}>▲</button>
+                    <button class="rule-move" on:click={() => moveRule(rule.id, 1)} disabled={routingRules.findIndex(r => r.id === rule.id) === routingRules.length - 1}>▼</button>
                     <button class="rule-del" on:click={() => removeRule(rule.id)}>✕</button>
                   </div>
                 </div>
@@ -819,6 +948,20 @@
       <!-- DNS SECTION -->
       {#if activeSection === 'dns'}
         <div class="sec-body">
+          <div class="form-row">
+            <label class="form-label" for="dns-query-strategy">{ru ? 'Стратегия запросов DNS' : 'DNS Query Strategy'}</label>
+            <select
+              id="dns-query-strategy"
+              class="form-select"
+              bind:value={dnsConfig.queryStrategy}
+              on:change={() => isDirty = true}
+            >
+              <option value="UseIP">UseIP</option>
+              <option value="UseIPv4">UseIPv4</option>
+              <option value="UseIPv6">UseIPv6</option>
+            </select>
+          </div>
+
           <div class="section-title">{$t('editor.xray_dns')}</div>
           
           <div class="dns-servers-list">
@@ -831,8 +974,8 @@
                     <div style="font-weight: 600; color: var(--fg);">{srv.address}:{srv.port || 53}</div>
                     <div style="font-size: 0.75rem; color: var(--fg-secondary);">
                       Tag: <span class="badge">{srv.tag}</span> | 
-                      Inbound Port: <code>{srv.inboundPort || 1053}</code> |
                       Domains: {srv.domains?.join(', ') || 'none'}
+                      {#if srv.skipFallback} | <span class="badge">Skip Fallback</span>{/if}
                     </div>
                   </div>
                 {/if}
@@ -862,18 +1005,12 @@
                   <label class="form-label">{ru ? 'Домены для перенаправления' : 'Domains for redirect'}</label>
                   <input class="form-input" bind:value={newDns.domainsRaw} placeholder="geosite:youtube, google.com" />
                 </div>
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label">{ru ? 'Порт входящего соединения' : 'Inbound connection port'}</label>
-                    <input class="form-input" type="number" bind:value={newDns.inboundPort} />
-                  </div>
-                  <div class="form-col" style="justify-content: flex-end;">
-                    <label class="checkbox-container" style="margin-bottom: 10px;">
-                      <input type="checkbox" bind:checked={newDns.skipFallback} />
-                      <span class="checkmark"></span>
-                      Skip Fallback
-                    </label>
-                  </div>
+                <div class="form-row" style="margin-top: 8px;">
+                  <label class="checkbox-container">
+                    <input type="checkbox" bind:checked={newDns.skipFallback} />
+                    <span class="checkmark"></span>
+                    Skip Fallback
+                  </label>
                 </div>
               {/if}
               <div class="form-actions">
@@ -886,6 +1023,41 @@
               + {ru ? 'Добавить DNS-сервер' : 'Add DNS Server'}
             </button>
           {/if}
+
+          <div class="section-title" style="margin-top: 16px;">Hosts</div>
+          <div class="hosts-list">
+            {#each Object.entries(dnsConfig.hosts) as [domain, ip]}
+              <div class="item-row card" style="margin-bottom: 8px;">
+                <div style="flex: 1;">
+                  <code>{domain}</code> &rarr; <code>{ip}</code>
+                </div>
+                <button class="item-del" on:click={() => removeHost(domain)}>✕</button>
+              </div>
+            {/each}
+          </div>
+
+          {#if showHostForm}
+            <div class="form-card" style="margin-top: 8px;">
+              <div class="form-row2">
+                <div class="form-col">
+                  <label class="form-label">{ru ? 'Домен' : 'Domain'}</label>
+                  <input class="form-input" bind:value={newHost.domain} placeholder="dns.google" />
+                </div>
+                <div class="form-col">
+                  <label class="form-label">IP</label>
+                  <input class="form-input" bind:value={newHost.ip} placeholder="8.8.8.8" />
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-secondary" on:click={() => (showHostForm = false)}>{$t('app.cancel')}</button>
+                <button class="btn btn-primary" on:click={addHost}>{$t('app.create')}</button>
+              </div>
+            </div>
+          {:else}
+            <button class="add-btn" style="margin-top: 8px;" on:click={() => (showHostForm = true)}>
+              + {ru ? 'Добавить Host' : 'Add Host'}
+            </button>
+          {/if}
         </div>
       {/if}
 
@@ -895,14 +1067,21 @@
           <div class="section-title">{$t('editor.xray_section_outbounds')}</div>
           <p class="section-desc">{ru ? 'Доступные исходящие теги (read-only):' : 'Available outbound tags (read-only):'}</p>
           <div class="outbounds-list">
-            {#each outboundTags as tag}
+            {#each outboundDetails as item}
               <div class="card tag-card" style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between;">
-                <span class="badge badge-tag">{tag}</span>
+                <div>
+                  <span class="badge badge-tag">{item.tag}</span>
+                  {#if item.server}
+                    <span style="font-size: 0.75rem; color: var(--fg-secondary); margin-left: 8px;">
+                      ({item.protocol} &bull; {item.server})
+                    </span>
+                  {/if}
+                </div>
                 <span class="tag-desc" style="font-size: 0.8125rem; color: var(--fg-secondary);">
-                  {tag === 'direct' ? (ru ? 'Прямое подключение (freedom)' : 'Direct connection (freedom)') : ''}
-                  {tag === 'block' ? (ru ? 'Блокировка трафика (blackhole)' : 'Block traffic (blackhole)') : ''}
-                  {tag === 'dns-out' ? (ru ? 'Запросы DNS' : 'DNS requests') : ''}
-                  {tag !== 'direct' && tag !== 'block' && tag !== 'dns-out' ? (ru ? 'Пользовательский outbound' : 'Custom outbound') : ''}
+                  {item.tag === 'direct' ? (ru ? 'Прямое подключение (freedom)' : 'Direct connection (freedom)') : ''}
+                  {item.tag === 'block' ? (ru ? 'Блокировка трафика (blackhole)' : 'Block traffic (blackhole)') : ''}
+                  {item.tag === 'dns-out' ? (ru ? 'Запросы DNS' : 'DNS requests') : ''}
+                  {item.tag !== 'direct' && item.tag !== 'block' && item.tag !== 'dns-out' ? (ru ? 'Пользовательский outbound' : 'Custom outbound') : ''}
                 </span>
               </div>
             {/each}
@@ -1049,10 +1228,24 @@
         <div class="changed-files-list" style="margin-top: 12px;">
           <strong>{ru ? 'Будут изменены файлы:' : 'Files to be modified:'}</strong>
           <ul style="margin: 8px 0 0 0; padding-left: 20px;">
-            {#each XRAY_FILES.filter(f => f !== '04_outbounds.json') as file}
-              <li><code>{XRAY_DIR}/{file}</code></li>
+            {#each filesToModify as file}
+              {#if file.changesCount > 0}
+                <li>
+                  <code>{file.name}</code>: 
+                  <span class="badge" style="background-color: var(--color-warning-bg); color: var(--color-warning-fg);">
+                    {ru ? `Изменено ${file.changesCount} секций` : `Modified ${file.changesCount} sections`}
+                  </span>
+                </li>
+              {:else}
+                <li><code>{file.name}</code>: {ru ? 'Без изменений' : 'No changes'}</li>
+              {/if}
             {/each}
           </ul>
+          <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
+            {ru 
+              ? '* Автоматически будет создана резервная копия (хранится до 5 последних бэкапов)' 
+              : '* A backup will be created automatically (up to 5 copies stored)'}
+          </p>
         </div>
       </div>
       <div class="modal-card-footer">
