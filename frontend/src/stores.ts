@@ -48,7 +48,7 @@ export const isSidebarOpen = writable(false);
 
 export interface ToastItem {
   id: number;
-  type: 'success' | 'error' | 'info';
+  type: 'success' | 'error' | 'info' | 'warning';
   message: string;
   duration?: number;
 }
