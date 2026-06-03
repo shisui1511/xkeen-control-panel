@@ -1007,6 +1007,84 @@
   $: if (activeRuleProvider === 'metacubex' && activeSection !== 'rulesets' && activeSection !== 'proxies' && activeSection !== 'groups' && activeSection !== 'rules' && activeSection !== 'dns' && activeSection !== 'tun') {
     activeSection = 'rulesets';
   }
+
+  let showApplyConfirm = false;
+  let applyLoading = false;
+
+  function extractSection(yamlText: string, sectionName: string): string {
+    const lines = yamlText.split('\n');
+    let start = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith(sectionName + ':')) {
+        start = i;
+        break;
+      }
+    }
+    if (start === -1) return '';
+    const resultLines: string[] = [];
+    for (let i = start + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trim() !== '' && !line.startsWith(' ') && !line.startsWith('\t') && !line.startsWith('#')) {
+        break;
+      }
+      resultLines.push(line);
+    }
+    return resultLines.join('\n').trimEnd();
+  }
+
+  async function handleApplyMihomo() {
+    if (!showApplyConfirm) {
+      showApplyConfirm = true;
+      return;
+    }
+    showApplyConfirm = false;
+    applyLoading = true;
+
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const sections = {
+        'proxy-groups': extractSection(yaml, 'proxy-groups'),
+        'rule-providers': extractSection(yaml, 'rule-providers'),
+        'rules': extractSection(yaml, 'rules')
+      };
+
+      const path = selectedFile || '/opt/etc/mihomo/config.yaml';
+      const mergeRes = await fetch('/api/config/mihomo-merge', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({
+          path: path,
+          sections: sections
+        })
+      });
+
+      if (!mergeRes.ok) {
+        const errorText = await mergeRes.text();
+        throw new Error(errorText || 'Failed to merge config');
+      }
+
+      const restartRes = await fetch('/api/service/control?action=restart', {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken || ''
+        }
+      });
+
+      if (!restartRes.ok) {
+        throw new Error('Failed to restart service');
+      }
+
+      showToast('success', ru ? 'Конфигурация Mihomo обновлена и перезапущена' : 'Mihomo configuration updated and restarted');
+    } catch (err: any) {
+      console.error(err);
+      showToast('error', err.message || (ru ? 'Ошибка сохранения' : 'Save error'));
+    } finally {
+      applyLoading = false;
+    }
+  }
 </script>
 
 <div class="container">
@@ -1751,26 +1829,60 @@
               {ru ? 'Открыть в редакторе' : 'Open in Editor'}
             {/if}
           </button>
-          <button class="btn btn-primary" on:click={copyYAML} disabled={!yaml} style="flex: 1;">
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              style="margin-right:5px"
-              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-              /></svg
-            >
-            {ru ? 'Копировать' : 'Copy'}
+          <button
+            class="btn btn-primary"
+            data-testid="apply-changes-btn"
+            on:click={handleApplyMihomo}
+            disabled={applyLoading || !yaml}
+            style="flex: 1;"
+          >
+            {applyLoading ? (ru ? 'Сохранение...' : 'Saving...') : (ru ? 'Применить изменения' : 'Apply Changes')}
           </button>
         </div>
       {/if}
     </div>
   </div>
 </div>
+
+{#if showApplyConfirm}
+  <div class="modal-overlay" role="button" tabindex="0" data-testid="apply-confirm-dialog"
+    on:click={() => showApplyConfirm = false}
+    on:keydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}>
+    <div class="modal-card" role="presentation" on:click|stopPropagation>
+      <div class="modal-card-header">
+        <h2>{$t('editor.apply_confirm_title')}</h2>
+        <button class="modal-close-btn" on:click={() => showApplyConfirm = false}>&times;</button>
+      </div>
+      <div class="modal-card-body">
+        <p>{$t('editor.apply_confirm_body')}</p>
+        <div class="changed-files-list" style="margin-top: 12px;">
+          <strong>{ru ? 'Будут обновлены секции в файле:' : 'Sections to be updated in file:'}</strong>
+          <div style="margin: 8px 0; font-family: monospace; font-size: 13px;">
+            <code>{selectedFile || '/opt/etc/mihomo/config.yaml'}</code>
+          </div>
+          <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+            <li><code>proxy-groups</code></li>
+            <li><code>rule-providers</code></li>
+            <li><code>rules</code></li>
+          </ul>
+          <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
+            {ru 
+              ? '* Автоматически будет создана резервная копия (хранится до 5 последних бэкапов)' 
+              : '* A backup will be created automatically (up to 5 copies stored)'}
+          </p>
+        </div>
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn btn-secondary" on:click={() => showApplyConfirm = false}>
+          {$t('app.cancel')}
+        </button>
+        <button class="btn btn-primary" on:click={handleApplyMihomo} disabled={applyLoading}>
+          {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .crumb-sep {
@@ -2425,5 +2537,69 @@
 
   .slider.round:before {
     border-radius: 50%;
+  }
+
+  /* Modal styles */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg, 8px);
+    width: 500px;
+    max-width: 90%;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  }
+
+  .modal-card-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .modal-card-header h2 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--fg);
+  }
+
+  .modal-close-btn {
+    background: transparent;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--fg-secondary);
+    cursor: pointer;
+  }
+
+  .modal-card-body {
+    padding: 16px;
+    font-size: var(--font-size-sm, 0.8125rem);
+    color: var(--fg);
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .modal-card-footer {
+    padding: 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
   }
 </style>

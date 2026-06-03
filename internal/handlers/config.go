@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
@@ -451,3 +453,63 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 		Valid: true,
 	})
 }
+
+type MihomoMergeRequest struct {
+	Path     string            `json:"path"`
+	Sections map[string]string `json:"sections"`
+}
+
+func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req MihomoMergeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.errorResponse(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		a.errorResponse(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	cleanPath, err := a.pathVal.Validate(req.Path)
+	if err != nil {
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	ext := filepath.Ext(cleanPath)
+	if ext != ".yaml" && ext != ".yml" {
+		a.errorResponse(w, "only .yaml, .yml files are allowed for merge", http.StatusForbidden)
+		return
+	}
+
+	data, err := a.configSvc.Read(cleanPath)
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	content := string(data)
+
+	for sectionName, newSecContent := range req.Sections {
+		if sectionName != "proxy-groups" && sectionName != "rule-providers" && sectionName != "rules" {
+			a.errorResponse(w, "invalid section name: "+sectionName, http.StatusBadRequest)
+			return
+		}
+		content = services.ReplaceMihomoTopLevelSection(content, sectionName, newSecContent)
+	}
+
+	err = a.configSvc.Save(cleanPath, []byte(content))
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	JSONSuccess(w, nil)
+}
+

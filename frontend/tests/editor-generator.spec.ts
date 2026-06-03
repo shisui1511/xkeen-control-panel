@@ -360,5 +360,55 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     expect(yamlText).toContain('GEOSITE');
     expect(yamlText).toContain('MATCH');
   });
+
+  test('применение изменений Mihomo (Apply) требует подтверждения и отправляет запрос на merge + restart (D-05, D-19)', async ({
+    page
+  }) => {
+    const postRequests: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST') {
+        postRequests.push(request.url());
+      }
+    });
+
+    await page.goto('/#/editor');
+
+    const fileRow = page.locator('.file-row:has-text("config.yaml")').first();
+    await expect(fileRow).toBeVisible();
+    await fileRow.click();
+
+    await expect(page.locator('.file-name:has-text("config.yaml")').first()).toBeVisible();
+
+    const constructorTab = page.locator('button.tab-btn:has-text("Конструктор")');
+    await constructorTab.click();
+
+    const mihomoKernelBtn = page.locator('.constructor-kernel-toggle button:has-text("Mihomo")');
+    await expect(mihomoKernelBtn).toBeVisible();
+    await mihomoKernelBtn.click();
+
+    // Выбираем пресет zkeen-selective, чтобы сгенерировать YAML и активировать кнопку применить
+    const presetSelect = page.locator('select.preset-select, [data-testid="preset-select"], select#preset-select');
+    await expect(presetSelect).toBeVisible();
+    await presetSelect.selectOption('zkeen-selective');
+
+    const applyBtn = page.locator('[data-testid="apply-changes-btn"]');
+    await expect(applyBtn).toBeVisible();
+    await applyBtn.click();
+
+    const confirmDialog = page.locator('[data-testid="apply-confirm-dialog"]');
+    await expect(confirmDialog).toBeVisible();
+
+    const confirmActionBtn = confirmDialog.locator('button.btn-primary');
+    await expect(confirmActionBtn).toBeVisible();
+    await confirmActionBtn.click();
+
+    await expect(confirmDialog).not.toBeVisible();
+
+    const mergeCall = postRequests.some(url => url.includes('/api/config/mihomo-merge'));
+    const restartCall = postRequests.some(url => url.includes('/api/service/control') && url.includes('action=restart'));
+
+    expect(mergeCall).toBe(true);
+    expect(restartCall).toBe(true);
+  });
 });
 

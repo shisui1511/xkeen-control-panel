@@ -177,3 +177,100 @@ func TestConfigValidation(t *testing.T) {
 		t.Errorf("expected 'validator binary not found' error, got %s", rr.Body.String())
 	}
 }
+
+func TestMihomoMergeSave(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	targetPath := filepath.Join(tmpDir, "mihomo-config.yaml")
+	initialContent := `
+proxies:
+  - name: "my-proxy"
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+    cipher: aes-128-gcm
+    password: pass
+
+proxy-providers:
+  provider1:
+    type: http
+    url: "http://example.com"
+    path: ./provider1.yaml
+
+geox-url:
+  geoip: "http://example.com/geoip.dat"
+
+proxy-groups:
+  - name: "original-group"
+    type: select
+    proxies:
+      - DIRECT
+
+rule-providers:
+  original-rp:
+    type: http
+    behavior: domain
+    url: "http://example.com"
+    path: ./original-rp.yaml
+
+rules:
+  - MATCH,DIRECT
+`
+	if err := os.WriteFile(targetPath, []byte(initialContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	body := `{
+		"path": "` + strings.ReplaceAll(targetPath, "\\", "\\\\") + `",
+		"sections": {
+			"proxy-groups": "  - name: \"new-group\"\n    type: select\n    proxies:\n      - DIRECT",
+			"rule-providers": "  new-rp:\n    type: http\n    behavior: domain\n    url: \"http://new.com\"\n    path: ./new-rp.yaml",
+			"rules": "  - DOMAIN,google.com,new-group\n  - MATCH,DIRECT"
+		}
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/mihomo-merge", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	api.MihomoMergeSave(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	mergedData, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergedStr := string(mergedData)
+
+	if !strings.Contains(mergedStr, "new-group") {
+		t.Error("expected new-group to be in merged config")
+	}
+	if !strings.Contains(mergedStr, "new-rp:") {
+		t.Error("expected new-rp to be in merged config")
+	}
+	if !strings.Contains(mergedStr, "DOMAIN,google.com,new-group") {
+		t.Error("expected new rules to be in merged config")
+	}
+
+	if !strings.Contains(mergedStr, "my-proxy") {
+		t.Error("expected proxies section to be preserved")
+	}
+	if !strings.Contains(mergedStr, "provider1:") {
+		t.Error("expected proxy-providers section to be preserved")
+	}
+	if !strings.Contains(mergedStr, "geoip: \"http://example.com/geoip.dat\"") {
+		t.Error("expected geox-url section to be preserved")
+	}
+
+	invalidBody := `{"path": "/etc/passwd", "sections": {}}`
+	req = httptest.NewRequest(http.MethodPost, "/api/config/mihomo-merge", strings.NewReader(invalidBody))
+	rr = httptest.NewRecorder()
+	api.MihomoMergeSave(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for forbidden path, got %d", rr.Code)
+	}
+}
+
