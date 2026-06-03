@@ -1,48 +1,42 @@
 {
-  "version": "1.0.0",
-  "updated_at": "2026-06-02",
+  "version": "2.0.0",
+  "updated_at": "2026-06-03",
   "templates": [
     {
-      "name": "Xray: VLESS + Reality",
-      "description": "VLESS + XTLS Vision Reality — обходит DPI без SNI-индикатора (приоритет для РФ)",
+      "name": "Xray: Routing — Selective (GeoSite/GeoIP)",
+      "description": "Selective routing: GeoSite/GeoIP → PROXY_TAG, private → direct, ads → block",
       "type": "xray",
-      "filename": "vless-reality.json"
+      "filename": "selective-routing.json"
     },
     {
-      "name": "Xray: VLESS + WS + TLS",
-      "description": "VLESS через WebSocket + TLS — CDN-совместимый (Cloudflare)",
+      "name": "Xray: Routing — All Proxy",
+      "description": "Весь трафик через PROXY_TAG, кроме private и рекламы",
       "type": "xray",
-      "filename": "vless-ws-tls.json"
+      "filename": "all-proxy-routing.json"
     },
     {
-      "name": "Xray: VMess + WS + TLS",
-      "description": "VMess через WebSocket + TLS — широко поддерживается провайдерами",
+      "name": "Xray: Routing — Block QUIC + Selective",
+      "description": "Selective routing + блокировка QUIC (UDP 443) для стабильности",
       "type": "xray",
-      "filename": "vmess-ws-tls.json"
+      "filename": "selective-no-quic.json"
     },
     {
-      "name": "Xray: Trojan + TLS",
-      "description": "Trojan minimal — маскируется под HTTPS, лёгкий протокол",
+      "name": "Xray: Routing — Minimal (Direct)",
+      "description": "Минимальная конфигурация: inbounds SOCKS+HTTP, весь трафик direct",
       "type": "xray",
-      "filename": "trojan-tls.json"
+      "filename": "minimal-routing.json"
     },
     {
-      "name": "Mihomo: RU Bypass (ZKeen)",
-      "description": "CIS-oriented: GEOSITE/GEOIP правила для заблокированных сервисов РФ с proxy-providers",
+      "name": "Mihomo: Rule-Based Routing",
+      "description": "Selective routing: MetaCubeX rule-sets, fake-ip DNS, proxy-providers",
       "type": "mihomo",
-      "filename": "ru-bypass.yaml"
+      "filename": "rule-based.yaml"
     },
     {
-      "name": "Mihomo: Full VPN",
-      "description": "Весь трафик через прокси (1 proxy-provider, группы VPN + Fastest)",
+      "name": "Mihomo: Global Proxy",
+      "description": "Весь трафик через прокси (mode: global), private → direct",
       "type": "mihomo",
-      "filename": "full-vpn.yaml"
-    },
-    {
-      "name": "Mihomo: Minimal",
-      "description": "Минимальный рабочий конфиг для начинающих (1 proxy-provider, базовые правила)",
-      "type": "mihomo",
-      "filename": "minimal.yaml"
+      "filename": "global-proxy.yaml"
     }
   ]
 }

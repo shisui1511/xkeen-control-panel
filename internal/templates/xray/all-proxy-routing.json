@@ -22,25 +22,8 @@
   ],
   "outbounds": [
     {
-      "tag": "proxy",
-      "protocol": "trojan",
-      "settings": {
-        "servers": [
-          {
-            "address": "YOUR_SERVER",
-            "port": 443,
-            "password": "REPLACE_ME"
-          }
-        ]
-      },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "YOUR_SERVER",
-          "allowInsecure": false
-        }
-      }
+      "tag": "PROXY_TAG",
+      "protocol": "freedom"
     },
     {
       "tag": "direct",
@@ -56,13 +39,22 @@
     "rules": [
       {
         "type": "field",
-        "ip": ["geoip:private"],
+        "ip": [
+          "geoip:private"
+        ],
         "outboundTag": "direct"
       },
       {
         "type": "field",
-        "domain": ["geosite:category-ads-all"],
+        "domain": [
+          "geosite:category-ads-all"
+        ],
         "outboundTag": "block"
+      },
+      {
+        "type": "field",
+        "port": "0-65535",
+        "outboundTag": "PROXY_TAG"
       }
     ]
   }

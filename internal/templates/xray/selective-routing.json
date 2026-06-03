@@ -22,36 +22,8 @@
   ],
   "outbounds": [
     {
-      "tag": "proxy",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [
-          {
-            "address": "YOUR_SERVER",
-            "port": 443,
-            "users": [
-              {
-                "id": "REPLACE_ME",
-                "encryption": "none"
-              }
-            ]
-          }
-        ]
-      },
-      "streamSettings": {
-        "network": "ws",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "YOUR_SERVER",
-          "allowInsecure": false
-        },
-        "wsSettings": {
-          "path": "/",
-          "headers": {
-            "Host": "YOUR_SERVER"
-          }
-        }
-      }
+      "tag": "PROXY_TAG",
+      "protocol": "freedom"
     },
     {
       "tag": "direct",
@@ -67,13 +39,24 @@
     "rules": [
       {
         "type": "field",
-        "ip": ["geoip:private"],
+        "ip": [
+          "geoip:private"
+        ],
         "outboundTag": "direct"
       },
       {
         "type": "field",
-        "domain": ["geosite:category-ads-all"],
+        "domain": [
+          "geosite:category-ads-all"
+        ],
         "outboundTag": "block"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "geosite:geolocation-!cn"
+        ],
+        "outboundTag": "PROXY_TAG"
       }
     ]
   }
