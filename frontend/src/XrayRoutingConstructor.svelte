@@ -67,6 +67,7 @@
   });
   let inbounds = $state<XrayInbound[]>([]);
   let outboundTags = $state<string[]>(['direct', 'block', 'dns-out']);
+  let outboundTagsLoading = $state(false);
   let outboundDetails = $state<OutboundDetail[]>([]);
   let proxyTag = $state<string>('');
   let routingRules = $state<XrayRoutingRule[]>([]);
@@ -219,6 +220,7 @@
   }
 
   async function loadXrayOutboundTags(): Promise<string[]> {
+    outboundTagsLoading = true;
     const tags: string[] = [];
     const details: OutboundDetail[] = [];
     
@@ -227,30 +229,63 @@
     details.push({ tag: 'dns-out', protocol: 'dns' });
 
     try {
-      for (const name of ['04_outbounds.json', '04_outbounds.manual.json']) {
-        try {
-          const path = `${XRAY_DIR}/${name}`;
-          const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
-          if (!res.ok) continue;
-          const json = await res.json();
-          const fileOutbounds = (json.outbounds ?? []) as any[];
-          for (const o of fileOutbounds) {
-            if (o.tag) {
-              tags.push(o.tag);
-              let server = '';
-              if (o.settings?.vnext?.[0]?.address) {
-                server = o.settings.vnext[0].address;
-              } else if (o.settings?.servers?.[0]?.address) {
-                server = o.settings.servers[0].address;
+      const listRes = await fetch(`/api/config/list?dir=${encodeURIComponent(XRAY_DIR)}`);
+      if (listRes.ok) {
+        const files: { name: string; path: string; size: number }[] = await listRes.json();
+        const outboundFiles = files.filter(
+          (f) => f.name.startsWith('04_outbounds') && f.name.endsWith('.json')
+        );
+        for (const f of outboundFiles) {
+          try {
+            const res = await fetch(`/api/config/read?path=${encodeURIComponent(f.path)}`);
+            if (!res.ok) continue;
+            const json = await res.json();
+            const fileOutbounds = (json.outbounds ?? []) as any[];
+            for (const o of fileOutbounds) {
+              if (o.tag) {
+                tags.push(o.tag);
+                let server = '';
+                if (o.settings?.vnext?.[0]?.address) {
+                  server = o.settings.vnext[0].address;
+                } else if (o.settings?.servers?.[0]?.address) {
+                  server = o.settings.servers[0].address;
+                }
+                details.push({
+                  tag: o.tag,
+                  protocol: o.protocol || 'unknown',
+                  server: server || undefined
+                });
               }
-              details.push({
-                tag: o.tag,
-                protocol: o.protocol || 'unknown',
-                server: server || undefined
-              });
             }
-          }
-        } catch { /* skip missing */ }
+          } catch { /* skip missing/corrupted file */ }
+        }
+      } else {
+        // Fallback to static array read if /api/config/list fails
+        for (const name of ['04_outbounds.json', '04_outbounds.manual.json']) {
+          try {
+            const path = `${XRAY_DIR}/${name}`;
+            const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+            if (!res.ok) continue;
+            const json = await res.json();
+            const fileOutbounds = (json.outbounds ?? []) as any[];
+            for (const o of fileOutbounds) {
+              if (o.tag) {
+                tags.push(o.tag);
+                let server = '';
+                if (o.settings?.vnext?.[0]?.address) {
+                  server = o.settings.vnext[0].address;
+                } else if (o.settings?.servers?.[0]?.address) {
+                  server = o.settings.servers[0].address;
+                }
+                details.push({
+                  tag: o.tag,
+                  protocol: o.protocol || 'unknown',
+                  server: server || undefined
+                });
+              }
+            }
+          } catch { /* skip missing */ }
+        }
       }
     } catch { /* fallback */ }
     
@@ -263,6 +298,7 @@
       }
     }
     outboundDetails = uniqueDetails;
+    outboundTagsLoading = false;
 
     return [...new Set([...tags, 'direct', 'block', 'dns-out'])];
   }
@@ -310,6 +346,11 @@
     showApplyConfirm = false;
     applyLoading = true;
     await tick();
+
+    // Мягкая валидация proxyTag
+    if (proxyTag && !outboundTags.includes(proxyTag)) {
+      showToast('warning', $t('editor.proxy_tag_warning'));
+    }
 
     try {
       const csrfToken = localStorage.getItem('csrf_token');
@@ -811,11 +852,18 @@
           id="proxy-tag-select"
           class="form-select"
           bind:value={proxyTag}
+          disabled={outboundTagsLoading}
           on:change={() => isDirty = true}
         >
-          {#each outboundTags.filter(t => t !== 'direct' && t !== 'block' && t !== 'dns-out') as tag}
-            <option value={tag}>{tag}</option>
-          {/each}
+          {#if outboundTagsLoading}
+            <option value="" disabled>{$t('editor.loading_tags')}</option>
+          {:else if outboundTags.filter(t => t !== 'direct' && t !== 'block' && t !== 'dns-out').length === 0}
+            <option value="" disabled>{ru ? 'Исходящие подключения не найдены' : 'No outbounds configured'}</option>
+          {:else}
+            {#each outboundTags.filter(t => t !== 'direct' && t !== 'block' && t !== 'dns-out') as tag}
+              <option value={tag}>{tag}</option>
+            {/each}
+          {/if}
         </select>
       </div>
 
