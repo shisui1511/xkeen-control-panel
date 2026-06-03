@@ -304,6 +304,143 @@ rules: []
 }
 
 
+// ─── ReplaceMihomoTopLevelSection tests (D-04) ────────────────────────────
+
+func TestReplaceMihomoTopLevelSection_ReplacesExistingSection(t *testing.T) {
+	yaml := `port: 7890
+proxies:
+  - name: MyProxy
+    type: vless
+    server: a.com
+rule-providers:
+  old-set:
+    type: http
+    url: http://old.example.com
+rules:
+  - RULE-SET,old-set,REJECT
+geox-url:
+  geoip: https://example.com/geoip.dat
+`
+	newContent := `  new-set:
+    type: http
+    format: mrs
+    behavior: domain
+    interval: 86400
+    url: https://new.example.com/list.mrs`
+
+	result := ReplaceMihomoTopLevelSection(yaml, "rule-providers", newContent)
+
+	// rule-providers заменена
+	if !strings.Contains(result, "new-set:") {
+		t.Error("new rule-provider should be present")
+	}
+	if strings.Contains(result, "old-set:") {
+		t.Error("old rule-provider should be replaced")
+	}
+	if strings.Contains(result, "http://old.example.com") {
+		t.Error("old url should be replaced")
+	}
+
+	// proxies сохранён
+	if !strings.Contains(result, "- name: MyProxy") {
+		t.Error("proxies section should be preserved (D-04)")
+	}
+	if !strings.Contains(result, "server: a.com") {
+		t.Error("proxy server should be preserved (D-04)")
+	}
+
+	// geox-url сохранён
+	if !strings.Contains(result, "geox-url:") {
+		t.Error("geox-url section should be preserved (D-04)")
+	}
+	if !strings.Contains(result, "example.com/geoip.dat") {
+		t.Error("geox-url content should be preserved (D-04)")
+	}
+}
+
+func TestReplaceMihomoTopLevelSection_ReplacesRules(t *testing.T) {
+	yaml := `port: 7890
+proxy-providers:
+  sub_1:
+    type: http
+    url: http://example.com/sub
+rules:
+  - RULE-SET,old-rules,DIRECT
+  - MATCH,DIRECT
+`
+	newContent := `  - RULE-SET,new-rules,REJECT
+  - MATCH,DIRECT`
+
+	result := ReplaceMihomoTopLevelSection(yaml, "rules", newContent)
+
+	// rules заменены
+	if !strings.Contains(result, "RULE-SET,new-rules,REJECT") {
+		t.Error("new rules should be present")
+	}
+	if strings.Contains(result, "RULE-SET,old-rules,DIRECT") {
+		t.Error("old rules should be replaced")
+	}
+
+	// proxy-providers сохранён
+	if !strings.Contains(result, "proxy-providers:") {
+		t.Error("proxy-providers section should be preserved (D-04)")
+	}
+	if !strings.Contains(result, "http://example.com/sub") {
+		t.Error("proxy-providers content should be preserved (D-04)")
+	}
+}
+
+func TestReplaceMihomoTopLevelSection_SectionAbsent_AddsAtEnd(t *testing.T) {
+	yaml := `port: 7890
+proxies:
+  - name: A
+    type: vless
+    server: a.com
+`
+	newContent := `  new-set:
+    type: http
+    url: https://example.com/list.mrs`
+
+	result := ReplaceMihomoTopLevelSection(yaml, "rule-providers", newContent)
+
+	// секция добавлена
+	if !strings.Contains(result, "rule-providers:") {
+		t.Error("rule-providers section should be added")
+	}
+	if !strings.Contains(result, "new-set:") {
+		t.Error("new-set should be present")
+	}
+
+	// остальной контент не тронут
+	if !strings.Contains(result, "port: 7890") {
+		t.Error("port should be preserved")
+	}
+	if !strings.Contains(result, "- name: A") {
+		t.Error("proxies section should be preserved")
+	}
+}
+
+func TestReplaceMihomoTopLevelSection_Idempotent(t *testing.T) {
+	yaml := `port: 7890
+rule-providers:
+  old-set:
+    type: http
+    url: http://old.example.com
+rules:
+  - MATCH,DIRECT
+`
+	newContent := `  new-set:
+    type: http
+    url: https://new.example.com`
+
+	result1 := ReplaceMihomoTopLevelSection(yaml, "rule-providers", newContent)
+	result2 := ReplaceMihomoTopLevelSection(result1, "rule-providers", newContent)
+
+	if result1 != result2 {
+		t.Errorf("function should be idempotent:\nFirst:  %q\nSecond: %q", result1, result2)
+	}
+}
+
 func TestUpdateMihomoGroupProviders(t *testing.T) {
 	yaml := `proxy-groups:
   - name: PROXY
