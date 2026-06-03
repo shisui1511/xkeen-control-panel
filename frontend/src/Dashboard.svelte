@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { t, setLang, pluralize } from './i18n';
+  import { t, currentLang, setLang, pluralize } from './i18n';
   import { isSidebarOpen, capabilities, fetchCapabilities, showToast } from './stores';
   import Sidebar from './components/Sidebar.svelte';
   import Toast from './components/Toast.svelte';
@@ -116,9 +116,9 @@
           const d = new Date(latest);
           const today = new Date();
           if (d.toDateString() === today.toDateString()) {
-            subsLastUpdated = 'обновлено сегодня';
+            subsLastUpdated = $t('dash.updated_today');
           } else {
-            subsLastUpdated = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+            subsLastUpdated = d.toLocaleDateString($currentLang === 'ru' ? 'ru-RU' : 'en-US', { day: '2-digit', month: '2-digit' });
           }
         }
       }
@@ -844,7 +844,7 @@
                   ><b>{$t('nav.subscriptions')}</b><span class="s"
                     >{totalSubsCount > 0
                       ? `${totalSubsCount} источника${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
-                      : 'Подписки на прокси'}</span
+                      : $t('dash.subs_empty')}</span
                   ></span
                 >
               </div>
@@ -858,7 +858,7 @@
                 onkeydown={(e) => e.key === 'Enter' && switchTab('editor')}
               >
                 <span class="qa-mini-ico"><Icon name="editor" size={18} /></span>
-                <span><b>{$t('nav.editor')}</b><span class="s">правка config.yaml</span></span>
+                <span><b>{$t('nav.editor')}</b><span class="s">{$t('dash.editor_subtitle')}</span></span>
               </div>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->

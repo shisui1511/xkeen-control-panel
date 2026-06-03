@@ -152,6 +152,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.problems.kernel_missing_desc':
       'Ни одно ядро (Xray или Mihomo) не установлено. Пожалуйста, установите ядро в разделе управления сервисами.',
     'dash.problems.kernel_missing_cta': 'Установить ядро',
+    'dash.updated_today': 'обновлено сегодня',
+    'dash.subs_empty': 'Подписки на прокси',
+    'dash.editor_subtitle': 'правка config.yaml',
 
     // Editor
     'editor.title': 'Управление сервисами',
@@ -1182,6 +1185,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.problems.kernel_missing_desc':
       'No kernels (Xray or Mihomo) are currently installed. Please install a kernel in the services management section.',
     'dash.problems.kernel_missing_cta': 'Install Kernel',
+    'dash.updated_today': 'updated today',
+    'dash.subs_empty': 'Proxy subscriptions',
+    'dash.editor_subtitle': 'edit config.yaml',
 
     // Editor
     'editor.title': 'Service Management',
