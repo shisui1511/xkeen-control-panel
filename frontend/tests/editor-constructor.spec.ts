@@ -130,6 +130,11 @@ test.describe('Xray Constructor integration test suite', () => {
     await expect(outboundSelect).toBeVisible({ timeout: 3000 });
     await outboundSelect.selectOption('my-proxy');
 
+    // Кликаем по кнопке Добавить для подтверждения добавления правила
+    const saveRuleBtn = page.locator('.form-card button.btn-primary:has-text("Добавить"), .form-card button:has-text("Add")').first();
+    await expect(saveRuleBtn).toBeVisible({ timeout: 3000 });
+    await saveRuleBtn.click();
+
     // Правило должно появиться в списке с выбранным тегом
     const rulesList = page.locator('[data-testid="routing-rules-list"], .routing-rules-list');
     await expect(rulesList).toBeVisible({ timeout: 3000 });
