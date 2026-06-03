@@ -91,9 +91,9 @@
       if (['info', 'inf', 'information'].includes(lowerTag)) {
         level = 'info';
       } else if (['warning', 'warn', 'wrn'].includes(lowerTag)) {
-        level = 'warning';
+        level = 'warn';
       } else if (['error', 'err'].includes(lowerTag)) {
-        level = 'error';
+        level = 'err';
       } else if (['debug', 'dbg'].includes(lowerTag)) {
         level = 'debug';
       } else if (!source) {
@@ -120,9 +120,9 @@
     if (!level) {
       const lowerText = text.toLowerCase();
       if (lowerText.includes('error') || lowerText.includes('err:')) {
-        level = 'error';
+        level = 'err';
       } else if (lowerText.includes('warning') || lowerText.includes('warn:')) {
-        level = 'warning';
+        level = 'warn';
       } else if (lowerText.includes('debug') || lowerText.includes('dbg:')) {
         level = 'debug';
       } else {
