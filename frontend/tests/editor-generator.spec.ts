@@ -227,3 +227,145 @@ test.describe('Editor & Constructor integration test suite', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// RED-тест D-13: zkeen-selective generateYAML создаёт 16 групп + 15 rule-providers + rules
+// Падает до реализации пресета в Plan 15.2-05
+// ---------------------------------------------------------------------------
+test.describe('zkeen-selective generateYAML (D-13)', () => {
+  test.beforeEach(async ({ page }) => {
+    // Отключаем Service Worker
+    await page.addInitScript(() => {
+      Object.defineProperty(window.navigator, 'serviceWorker', {
+        value: undefined,
+        writable: false,
+        configurable: true
+      });
+      window.localStorage.setItem('lang', 'ru');
+    });
+
+    // Перехватываем API запросы
+    await page.route('**/api/**', async (route) => {
+      const url = route.request().url();
+
+      if (url.includes('/api/auth/me')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf-token'
+          })
+        });
+      } else if (url.includes('/api/capabilities')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              kernels: {
+                xray: { installed: true, version: '1.8.4', channel: 'stable' },
+                mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
+              },
+              active_kernel: 'mihomo',
+              mihomo: {
+                reachable: true,
+                process_running: true,
+                api_reachable: true,
+                api_authenticated: true
+              }
+            }
+          })
+        });
+      } else if (url.includes('/api/config/list')) {
+        const isMihomo = url.includes('mihomo');
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(
+            isMihomo
+              ? [{ name: 'config.yaml', path: '/opt/etc/mihomo/config.yaml', size: 100 }]
+              : [{ name: 'xray-config.json', path: '/opt/etc/xray/configs/xray-config.json', size: 100 }]
+          )
+        });
+      } else if (url.includes('/api/config/read') && route.request().method() === 'GET') {
+        // Возвращаем минимальный config.yaml для Mihomo
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/plain',
+          body: 'mixed-port: 7890\nallow-lan: false\n'
+        });
+      } else if (url.includes('/api/templates/list')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([])
+        });
+      } else if (url.includes('/api/subscriptions')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([])
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: {} })
+        });
+      }
+    });
+  });
+
+  test('пресет zkeen-selective генерирует ровно 16 proxy-groups и 15 rule-providers (D-13)', async ({
+    page
+  }) => {
+    await page.goto('/#/constructor');
+
+    // Переключиться на Mihomo-конструктор
+    const mihomoBtn = page.locator('.constructor-kernel-toggle button:has-text("Mihomo")');
+    await expect(mihomoBtn).toBeVisible({ timeout: 5000 });
+    await mihomoBtn.click();
+
+    // Выбрать пресет zkeen-selective
+    const presetSelect = page.locator('select.preset-select, [data-testid="preset-select"], select#preset-select');
+    await expect(presetSelect).toBeVisible({ timeout: 5000 });
+    await presetSelect.selectOption('zkeen-selective');
+
+    // Нажать кнопку генерации / вставки YAML
+    const generateBtn = page.locator(
+      'button:has-text("Генерировать"), button:has-text("Вставить в редактор"), button:has-text("Generate")'
+    ).first();
+    await expect(generateBtn).toBeVisible({ timeout: 3000 });
+    await generateBtn.click();
+
+    // Получить сгенерированный YAML из превью
+    const previewPane = page.locator(
+      '.constructor-preview-pane, pre.constructor-preview, textarea[readonly], .yaml-preview'
+    ).first();
+    await expect(previewPane).toBeVisible({ timeout: 3000 });
+    const yamlText = await previewPane.textContent() || '';
+
+    // Считаем proxy-groups — каждая группа начинается с '  - name:'
+    const proxyGroupMatches = yamlText.match(/^  - name:/gm);
+    const proxyGroupCount = proxyGroupMatches ? proxyGroupMatches.length : 0;
+
+    // Считаем rule-providers — каждый провайдер — строка вида '  name@type:'
+    // (или считаем вхождения 'type: http' в секции rule-providers)
+    const ruleProviderMatches = yamlText.match(/\n  [a-z][^:\n]+@[a-z]+:/g);
+    const ruleProviderCount = ruleProviderMatches ? ruleProviderMatches.length : 0;
+
+    // D-13: 16 групп
+    expect(proxyGroupCount).toBe(16);
+
+    // D-13: 15 rule-providers
+    expect(ruleProviderCount).toBe(15);
+
+    // Ключевые правила должны присутствовать
+    expect(yamlText).toContain('RULE-SET');
+    expect(yamlText).toContain('GEOSITE');
+    expect(yamlText).toContain('MATCH');
+  });
+});
+
