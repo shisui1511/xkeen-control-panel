@@ -858,7 +858,7 @@
           {#if outboundTagsLoading}
             <option value="" disabled>{$t('editor.loading_tags')}</option>
           {:else if outboundTags.filter(t => t !== 'direct' && t !== 'block' && t !== 'dns-out').length === 0}
-            <option value="" disabled>{ru ? 'Исходящие подключения не найдены' : 'No outbounds configured'}</option>
+            <option value="" disabled>{$t('editor.no_outbounds_configured')}</option>
           {:else}
             {#each outboundTags.filter(t => t !== 'direct' && t !== 'block' && t !== 'dns-out') as tag}
               <option value={tag}>{tag}</option>

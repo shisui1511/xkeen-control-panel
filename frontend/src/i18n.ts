@@ -272,6 +272,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.apply_timeout': 'Служба не запустилась вовремя. Проверьте логи.',
     'editor.proxy_tag_warning': 'Выбранный прокси-выход не найден в списке исходящих подключений. Конфигурация сохранена, но маршрутизация может работать некорректно.',
     'editor.loading_tags': 'Загрузка тегов...',
+    'editor.no_outbounds_configured': 'Исходящие подключения не найдены',
 
     // Services
     'svc.title': 'Управление сервисами',
@@ -1307,6 +1308,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.apply_timeout': 'Service did not start in time. Check logs.',
     'editor.proxy_tag_warning': 'Selected proxy outbound not found in available outbounds. Config saved, but routing may not work correctly.',
     'editor.loading_tags': 'Loading tags...',
+    'editor.no_outbounds_configured': 'No outbounds configured',
 
     // Services
     'svc.title': 'Service Management',
