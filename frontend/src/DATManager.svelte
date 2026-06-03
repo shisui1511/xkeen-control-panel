@@ -189,7 +189,7 @@
     if (s === 'outdated')
       return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕЛО' : 'OUTDATED' };
     if (s === 'warning')
-      return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕЛО' : 'OUTDATED' };
+      return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕВАЕТ' : 'AGING' };
     return { cls: 'badge badge-success', label: 'OK' };
   }
 
