@@ -625,13 +625,9 @@
             <Skeleton type="text-line" width="120px" />
           {:else if xray}
             {#if xray.process_status === 'running'}
-              v{xray.current_version} · PID {xray.pid || '—'} · uptime {xray.uptime || '—'} · {xray.binary_path}
-            {:else if xray.has_update}
-              v{xray.current_version} &rarr; {xray.latest_version} · {xray.binary_path}
-              {#if xray.message}
-                · {xray.message}{/if}
+              PID {xray.pid || '—'} · uptime {xray.uptime || '—'} · {xray.binary_path}
             {:else}
-              v{xray.current_version} · {xray.binary_path}
+              {xray.binary_path}
               {#if xray.message}
                 · {xray.message}{/if}
             {/if}
@@ -778,8 +774,7 @@
             <Skeleton type="text-line" width="120px" />
           {:else if mihomo}
             {#if mihomo.process_status === 'running'}
-              API {mihomo.api_addr || '127.0.0.1:9090'} · clash-meta (v{mihomo.current_version}) ·
-              uptime {mihomo.uptime || '—'} · {mihomo.binary_path}
+              API {mihomo.api_addr || '127.0.0.1:9090'} · uptime {mihomo.uptime || '—'} · {mihomo.binary_path}
             {:else}
               {mihomo.binary_path}
               {#if mihomo.message}
@@ -931,15 +926,16 @@
   <!-- Restart log card -->
   {#if restartLog.length > 0}
     <div class="card">
-      <div class="card-title-row">
-        <h2 class="card-title">{$t('svc.restart_log_title')}</h2>
-        <button
-          class="btn btn-ghost btn-sm"
-          on:click={() => (restartLogExpanded = !restartLogExpanded)}
-        >
-          {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
-        </button>
-      </div>
+      <h2 class="card-title">
+        {$t('svc.restart_log_title')}
+        <span class="ct-actions">
+          <button
+            on:click={() => (restartLogExpanded = !restartLogExpanded)}
+          >
+            {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
+          </button>
+        </span>
+      </h2>
       <div class="restart-log">
         {#each restartLogExpanded ? restartLog : restartLog.slice(0, 5) as entry}
           <div class="log-entry" class:log-success={entry.success} class:log-fail={!entry.success}>

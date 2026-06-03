@@ -235,9 +235,18 @@
   $: xrayFiles = files.filter((f) => f.type === 'xray');
   $: mihomoFiles = files.filter((f) => f.type === 'mihomo');
   $: otherFiles = files.filter((f) => f.type !== 'xray' && f.type !== 'mihomo');
-  $: totalSize = files.reduce((sum, f) => sum + f.size, 0);
-  $: lastUpdated = files.reduce((max, f) => Math.max(max, f.last_update || 0), 0);
-  $: missingCount = files.filter((f) => !f.exists).length;
+
+  $: activeKernel = $capabilities?.active_kernel || null;
+  $: displayedFiles = files.filter((f) => {
+    if (f.type === 'xray') return activeKernel === null || activeKernel === 'xray';
+    if (f.type === 'mihomo') return activeKernel === null || activeKernel === 'mihomo';
+    return true; // Прочие файлы всегда показываются
+  });
+
+  $: actualCount = displayedFiles.filter((f) => getFileStatus(f) === 'ok').length;
+  $: missingCount = displayedFiles.filter((f) => !f.exists).length;
+  $: totalSize = displayedFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+  $: lastUpdated = displayedFiles.reduce((max, f) => Math.max(max, f.last_update || 0), 0);
 
   onMount(fetchFiles);
 </script>
@@ -316,11 +325,11 @@
   {/if}
 
   <!-- Stats -->
-  {#if !loading && files.length > 0}
+  {#if !loading && displayedFiles.length > 0}
     <div class="stats mb-3">
-      <span class="stat"><b>{files.length}</b> {$t('dat.total_files')}</span>
+      <span class="stat"><b>{displayedFiles.length}</b> {$t('dat.total_files')}</span>
       <span class="stat"
-        ><b>{files.length - missingCount}</b>
+        ><b>{actualCount}</b>
         {$currentLang === 'ru' ? 'актуальных' : 'active'}</span
       >
       {#if missingCount > 0}
