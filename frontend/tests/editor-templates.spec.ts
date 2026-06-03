@@ -72,16 +72,16 @@ test.describe('Templates modal integration test suite', () => {
           contentType: 'application/json',
           body: JSON.stringify([
             {
-              name: 'Xray: VLESS + Reality',
-              description: 'VLESS + XTLS Vision Reality — обходит DPI без SNI-индикатора',
+              name: 'Xray: Routing — Selective (GeoSite/GeoIP)',
+              description: 'Selective routing: GeoSite/GeoIP → PROXY_TAG, private → direct, ads → block',
               type: 'xray',
-              filename: 'vless-reality.json'
+              filename: 'selective-routing.json'
             },
             {
-              name: 'Mihomo: RU Bypass (ZKeen)',
-              description: 'CIS-oriented: GEOSITE/GEOIP правила для заблокированных сервисов РФ',
+              name: 'Mihomo: Rule-Based Routing',
+              description: 'Selective routing: MetaCubeX rule-sets, fake-ip DNS, proxy-providers',
               type: 'mihomo',
-              filename: 'ru-bypass.yaml'
+              filename: 'rule-based.yaml'
             }
           ])
         });

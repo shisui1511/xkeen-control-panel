@@ -38,38 +38,29 @@ test.describe('Xray Constructor integration test suite', () => {
                 xray: { installed: true, version: '1.8.4', channel: 'stable' },
                 mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
               },
-              active_kernel: 'mihomo',
-              mihomo: {
-                reachable: true,
-                process_running: true,
-                api_reachable: true,
-                api_authenticated: true
-              }
+              active_kernel: 'mihomo'
             }
           })
         });
       } else if (url.includes('/api/config/list')) {
-        const isMihomo = url.includes('mihomo');
+        // Возвращаем файл с outbound-тегами для XrayRoutingConstructor
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(
-            isMihomo
-              ? [{ name: 'config.yaml', path: '/opt/etc/mihomo/config.yaml', size: 1500 }]
-              : [{ name: 'xray-config.json', path: '/opt/etc/xray/configs/xray-config.json', size: 1200 }]
-          )
+          body: JSON.stringify([
+            {
+              name: '04_outbounds.manual.json',
+              path: '/opt/etc/xray/configs/04_outbounds.manual.json',
+              size: 800
+            }
+          ])
         });
       } else if (url.includes('/api/config/read')) {
+        // Mock возвращает конфиг с тегами outbounds
         await route.fulfill({
           status: 200,
           contentType: 'text/plain',
-          body: 'initial config content'
-        });
-      } else if (url.includes('/api/templates/list')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([])
+          body: JSON.stringify({ outbounds: [{ tag: 'my-proxy', protocol: 'vless' }] })
         });
       } else {
         await route.fulfill({
@@ -92,28 +83,113 @@ test.describe('Xray Constructor integration test suite', () => {
     await expect(page).toHaveURL(/#\/constructor/);
   });
 
-  test('Xray Constructor generates valid JSON', async ({ page }) => {
+  test('tab navigation: switching to Конструктор activates the tab', async ({ page }) => {
+    await page.goto('/#/editor');
+
+    const filesTab = page.locator('button.tab-btn:has-text("Файлы")');
+    const constructorTab = page.locator('button.tab-btn:has-text("Конструктор")');
+
+    await expect(filesTab).toBeVisible();
+    await expect(filesTab).toHaveClass(/active/);
+    await expect(constructorTab).toBeVisible();
+    await expect(constructorTab).not.toHaveClass(/active/);
+
+    await constructorTab.click();
+
+    await expect(constructorTab).toHaveClass(/active/);
+    await expect(filesTab).not.toHaveClass(/active/);
+    await expect(page).toHaveURL(/#\/constructor/);
+  });
+
+  test('adding a routing rule with domain and outboundTag shows it in the rules list', async ({
+    page
+  }) => {
     await page.goto('/#/constructor');
 
-    // Переключиться на Xray-сторону конструктора
-    const xrayKernelBtn = page.locator('button:has-text("Xray")').first();
-    await expect(xrayKernelBtn).toBeVisible();
+    // Переключаемся на Xray-конструктор
+    const xrayKernelBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+    await expect(xrayKernelBtn).toBeVisible({ timeout: 5000 });
     await xrayKernelBtn.click();
 
-    // Заполнить поле сервера
-    const serverInput = page.locator('input[placeholder*="example.com"], input[placeholder*="сервер"], input[name="server"]').first();
-    await expect(serverInput).toBeVisible();
-    await serverInput.fill('my-server.com');
+    // Добавляем новое правило маршрутизации
+    const addRuleBtn = page.locator('[data-testid="add-routing-rule"], button:has-text("Добавить правило")').first();
+    await expect(addRuleBtn).toBeVisible({ timeout: 5000 });
+    await addRuleBtn.click();
 
-    // Проверить, что preview-панель содержит валидный JSON
-    const previewPane = page.locator('.json-preview, .constructor-preview-pane, .xray-preview').first();
-    await expect(previewPane).toBeVisible();
+    // Заполняем домены в новом правиле
+    const domainInput = page
+      .locator('[data-testid="rule-domain-input"], input[placeholder*="домен"], input[placeholder*="domain"]')
+      .first();
+    await expect(domainInput).toBeVisible({ timeout: 3000 });
+    await domainInput.fill('geosite:youtube');
+
+    // Выбираем outbound tag из dropdown
+    const outboundSelect = page
+      .locator('[data-testid="rule-outbound-select"], select[data-testid="outbound-tag"], .rule-outbound-select')
+      .first();
+    await expect(outboundSelect).toBeVisible({ timeout: 3000 });
+    await outboundSelect.selectOption('my-proxy');
+
+    // Правило должно появиться в списке с выбранным тегом
+    const rulesList = page.locator('[data-testid="routing-rules-list"], .routing-rules-list');
+    await expect(rulesList).toBeVisible({ timeout: 3000 });
+    await expect(rulesList).toContainText('my-proxy');
+  });
+
+  test('generated JSON contains PROXY_TAG and does NOT contain real outbound parameters (server/uuid)', async ({
+    page
+  }) => {
+    await page.goto('/#/constructor');
+
+    // Переключаемся на Xray-конструктор
+    const xrayKernelBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+    await expect(xrayKernelBtn).toBeVisible({ timeout: 5000 });
+    await xrayKernelBtn.click();
+
+    // Находим JSON preview-панель
+    const previewPane = page
+      .locator('[data-testid="xray-json-preview"], .xray-routing-preview, .json-preview, .constructor-preview-pane')
+      .first();
+    await expect(previewPane).toBeVisible({ timeout: 5000 });
 
     const previewText = await previewPane.textContent();
-    expect(() => JSON.parse(previewText || '')).not.toThrow();
 
-    // Кнопка «Открыть в редакторе» не должна быть задизейблена
-    const openBtn = page.locator('button:has-text("Открыть в редакторе")').first();
-    await expect(openBtn).not.toBeDisabled();
+    // JSON должен содержать PROXY_TAG
+    expect(previewText).toContain('PROXY_TAG');
+
+    // JSON не должен содержать реальных параметров outbound (server, uuid, address)
+    expect(previewText).not.toMatch(/"server"\s*:/);
+    expect(previewText).not.toMatch(/"uuid"\s*:/);
+
+    // Preview должен быть валидным JSON
+    expect(() => JSON.parse(previewText || '')).not.toThrow();
+  });
+
+  test('dropdown outbound tags shows my-proxy, direct and block options', async ({ page }) => {
+    await page.goto('/#/constructor');
+
+    // Переключаемся на Xray-конструктор
+    const xrayKernelBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+    await expect(xrayKernelBtn).toBeVisible({ timeout: 5000 });
+    await xrayKernelBtn.click();
+
+    // Добавляем правило, чтобы dropdown появился
+    const addRuleBtn = page
+      .locator('[data-testid="add-routing-rule"], button:has-text("Добавить правило")')
+      .first();
+    await expect(addRuleBtn).toBeVisible({ timeout: 5000 });
+    await addRuleBtn.click();
+
+    // Проверяем, что dropdown содержит теги из mock-файла + системные теги
+    const outboundSelect = page
+      .locator('[data-testid="rule-outbound-select"], select[data-testid="outbound-tag"], .rule-outbound-select')
+      .first();
+    await expect(outboundSelect).toBeVisible({ timeout: 3000 });
+
+    // Должны присутствовать: my-proxy (из mock), direct, block
+    const options = await outboundSelect.locator('option').allTextContents();
+    expect(options).toContain('my-proxy');
+    expect(options).toContain('direct');
+    expect(options).toContain('block');
   });
 });

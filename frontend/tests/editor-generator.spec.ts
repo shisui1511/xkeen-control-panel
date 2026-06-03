@@ -193,4 +193,37 @@ test.describe('Editor & Constructor integration test suite', () => {
     // Проверяем, что статус файла изменился на "Изменён" (isDirty)
     await expect(page.locator('.status-dirty')).toBeVisible();
   });
+
+  test('metacubex rule-provider selector displays checkbox picker with categories and meta-rules-dat URL', async ({ page }) => {
+    await page.goto('/#/constructor');
+
+    // Переключаемся на Mihomo-сторону конструктора
+    const mihomoKernelBtn = page.locator('.constructor-kernel-toggle button:has-text("Mihomo")');
+    await expect(mihomoKernelBtn).toBeVisible({ timeout: 5000 });
+    await mihomoKernelBtn.click();
+
+    // Находим select для выбора rule-provider и выбираем "metacubex"
+    const rpSelect = page.locator('select.rp-select, #rp-select');
+    await expect(rpSelect).toBeVisible();
+    await rpSelect.selectOption('metacubex');
+
+    // Проверяем, что отображается checkbox-пикер с категориями
+    const picker = page.locator('[data-testid="rulesets-picker"], .rulesets-picker');
+    await expect(picker).toBeVisible({ timeout: 5000 });
+
+    // Проверяем наличие категорий
+    await expect(picker).toContainText('Социальные сети');
+
+    // Находим чекбокс с YouTube или другим правилом и отмечаем его
+    const youtubeCheckbox = page.locator('input[type="checkbox"][value="youtube|geosite"], input[type="checkbox"]#ruleset-geosite-youtube').first();
+    await expect(youtubeCheckbox).toBeVisible();
+    await youtubeCheckbox.check();
+
+    // Проверяем, что в YAML-превью генерируется rule-provider с URL meta-rules-dat
+    const previewPane = page.locator('.constructor-preview-pane, pre.constructor-preview, textarea[readonly], .yaml-preview').first();
+    await expect(previewPane).toBeVisible();
+    await expect(previewPane).toContainText('https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo');
+    await expect(previewPane).toContainText('format: mrs');
+  });
 });
+
