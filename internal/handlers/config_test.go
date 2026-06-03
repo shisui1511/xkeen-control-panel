@@ -274,3 +274,53 @@ rules:
 	}
 }
 
+// TestConfigRead_FileNotFound verifies that ConfigRead returns 404 when file does not exist.
+func TestConfigRead_FileNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	// A path that is within allowed roots, but the file does not exist
+	nonExistentPath := filepath.Join(tmpDir, "does-not-exist.json")
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config/read?path="+nonExistentPath, nil)
+	rr := httptest.NewRecorder()
+
+	api.ConfigRead(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", rr.Code)
+	}
+
+	// The error response should contain the translated error message (or the key/default translation)
+	body := rr.Body.String()
+	if !strings.Contains(body, "not found") && !strings.Contains(body, "найден") {
+		t.Errorf("expected 'not found' or 'найден' in response body, got: %s", body)
+	}
+}
+
+// TestConfigRead_Success verifies that ConfigRead successfully reads an existing config file.
+func TestConfigRead_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	targetPath := filepath.Join(tmpDir, "test.json")
+	content := []byte(`{"hello": "world"}`)
+	if err := os.WriteFile(targetPath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config/read?path="+targetPath, nil)
+	rr := httptest.NewRecorder()
+
+	api.ConfigRead(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	if rr.Body.String() != string(content) {
+		t.Errorf("expected content %q, got %q", string(content), rr.Body.String())
+	}
+}
+
+

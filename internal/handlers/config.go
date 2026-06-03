@@ -92,6 +92,10 @@ func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {
 
 	data, err := a.configSvc.Read(cleanPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			a.errorResponse(w, a.t(r, "config.file_not_found"), http.StatusNotFound)
+			return
+		}
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
