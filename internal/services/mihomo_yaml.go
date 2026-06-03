@@ -607,6 +607,43 @@ func ReplaceMihomoProxyProvider(content string, providerID string, block string)
 	return res
 }
 
+// ReplaceMihomoTopLevelSection заменяет всю top-level секцию sectionName: (например,
+// "rule-providers", "rules", "proxy-groups") новым содержимым newContent.
+// Сохраняет все остальные ключи файла без изменений (D-04).
+// newContent передаётся с корректным отступом от вызывающей стороны (2 пробела).
+// Если секция отсутствует, она добавляется в конец файла.
+// Функция работает с готовым текстом (не интерпретирует YAML-анкоры).
+func ReplaceMihomoTopLevelSection(content string, sectionName string, newContent string) string {
+	lines := strings.Split(content, "\n")
+	start, end, _ := findTopLevelSection(lines, sectionName)
+
+	newLines := strings.Split(strings.TrimRight(newContent, "\n"), "\n")
+
+	if start == -1 {
+		// Секции нет — добавить в конец
+		base := strings.TrimRight(content, "\n")
+		result := base + "\n" + sectionName + ":\n"
+		for _, l := range newLines {
+			result += l + "\n"
+		}
+		return result
+	}
+
+	var out []string
+	out = append(out, lines[:start]...)
+	out = append(out, sectionName+":")
+	out = append(out, newLines...)
+	if end < len(lines) {
+		out = append(out, lines[end:]...)
+	}
+
+	res := strings.Join(out, "\n")
+	if strings.HasSuffix(content, "\n") && !strings.HasSuffix(res, "\n") {
+		res += "\n"
+	}
+	return res
+}
+
 // UpdateMihomoGroupProviders добавляет или удаляет providerID из секции use: указанной группы прокси.
 func UpdateMihomoGroupProviders(content, groupName string, providerID string, remove bool) string {
 	lines := strings.Split(content, "\n")
