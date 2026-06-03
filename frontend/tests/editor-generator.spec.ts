@@ -333,13 +333,6 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await expect(presetSelect).toBeVisible({ timeout: 5000 });
     await presetSelect.selectOption('zkeen-selective');
 
-    // Нажать кнопку генерации / вставки YAML
-    const generateBtn = page.locator(
-      'button:has-text("Генерировать"), button:has-text("Вставить в редактор"), button:has-text("Generate")'
-    ).first();
-    await expect(generateBtn).toBeVisible({ timeout: 3000 });
-    await generateBtn.click();
-
     // Получить сгенерированный YAML из превью
     const previewPane = page.locator(
       '.constructor-preview-pane, pre.constructor-preview, textarea[readonly], .yaml-preview'
