@@ -55,11 +55,11 @@ test.describe('Xray Constructor integration test suite', () => {
             }
           ])
         });
-      } else if (url.includes('/api/config/read')) {
-        // Mock возвращает конфиг с тегами outbounds
+      } else if (url.includes('/api/config/read') && route.request().method() === 'GET') {
+        // Mock возвращает конфиг с тегами outbounds (исправление бага Phase 15.1 — проверяем GET)
         await route.fulfill({
           status: 200,
-          contentType: 'text/plain',
+          contentType: 'application/json',
           body: JSON.stringify({ outbounds: [{ tag: 'my-proxy', protocol: 'vless' }] })
         });
       } else {
