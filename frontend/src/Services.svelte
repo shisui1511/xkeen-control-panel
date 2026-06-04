@@ -232,6 +232,11 @@
   }
 
   async function checkKernelUpdate(name: string) {
+    const idx = kernels.findIndex((k) => k.name === name);
+    if (idx >= 0) {
+      kernels[idx] = { ...kernels[idx], status: 'checking' };
+      kernels = [...kernels];
+    }
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       await fetch(`/api/kernels/${name}/check`, {
@@ -309,6 +314,7 @@
 
   $: xray = kernels.find((k) => k.name === 'xray');
   $: mihomo = kernels.find((k) => k.name === 'mihomo');
+  $: isAnyKernelChecking = kernels.some((k) => k.status === 'checking');
   $: activeKernel = (() => {
     if (xray?.process_status === 'running') return 'xray';
     if (mihomo?.process_status === 'running') return 'mihomo';
@@ -377,6 +383,8 @@
           checkKernelUpdate('xray');
           checkKernelUpdate('mihomo');
         }}
+        disabled={isAnyKernelChecking}
+        class:btn-loading={isAnyKernelChecking}
         title={$t('svc.check_updates')}
       >
         <svg
@@ -606,11 +614,15 @@
                 )}</span
               >
             {/if}
-            {#if xray.has_update}
-              <span class="badge badge-warning">{$t('svc.update_badge')} {xray.latest_version}</span
-              >
-            {:else if xray.current_version && xray.current_version !== 'not installed'}
-              <span class="badge">v{xray.current_version} · {$t('svc.actual_badge')}</span>
+            {#if xray.status === 'checking'}
+              <span class="badge badge-info">{$t('kernels.checking')}</span>
+            {:else}
+              {#if xray.has_update}
+                <span class="badge badge-warning">{$t('svc.update_badge')} {xray.latest_version}</span
+                >
+              {:else if xray.current_version && xray.current_version !== 'not installed'}
+                <span class="badge">v{xray.current_version} · {$t('svc.actual_badge')}</span>
+              {/if}
             {/if}
           {:else}
             <span class="status-badge stopped"
@@ -754,12 +766,16 @@
                 )}</span
               >
             {/if}
-            {#if mihomo.has_update}
-              <span class="badge badge-warning"
-                >{$t('svc.update_badge')} {mihomo.latest_version}</span
-              >
-            {:else if mihomo.current_version && mihomo.current_version !== 'not installed'}
-              <span class="badge">v{mihomo.current_version} · {$t('svc.actual_badge')}</span>
+            {#if mihomo.status === 'checking'}
+              <span class="badge badge-info">{$t('kernels.checking')}</span>
+            {:else}
+              {#if mihomo.has_update}
+                <span class="badge badge-warning"
+                  >{$t('svc.update_badge')} {mihomo.latest_version}</span
+                >
+              {:else if mihomo.current_version && mihomo.current_version !== 'not installed'}
+                <span class="badge">v{mihomo.current_version} · {$t('svc.actual_badge')}</span>
+              {/if}
             {/if}
           {:else}
             <span class="status-badge stopped"
@@ -1230,5 +1246,26 @@
   }
   .log-more:hover {
     text-decoration: underline;
+  }
+
+  @media (max-width: 768px) {
+    .kernel-card {
+      grid-template-columns: 60px 1fr;
+      grid-template-rows: auto auto;
+    }
+
+    .kernel-card .k-actions {
+      grid-column: 1 / span 2;
+      border-top: 1px solid var(--border);
+      background: var(--bg-secondary);
+      padding: 12px 18px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .kernel-card .k-name {
+      flex-wrap: wrap;
+    }
   }
 </style>
