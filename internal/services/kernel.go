@@ -121,6 +121,77 @@ type versionCache struct {
 	expires time.Time
 }
 
+var semverRegexp = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$`)
+
+func isValidSemver(v string) bool {
+	v = strings.TrimPrefix(strings.TrimPrefix(v, "v"), "V")
+	return semverRegexp.MatchString(v)
+}
+
+func compareSemver(v1, v2 string) int {
+	v1 = strings.TrimPrefix(strings.TrimPrefix(v1, "v"), "V")
+	v2 = strings.TrimPrefix(strings.TrimPrefix(v2, "v"), "V")
+
+	m1 := semverRegexp.FindStringSubmatch(v1)
+	m2 := semverRegexp.FindStringSubmatch(v2)
+
+	if m1 == nil && m2 == nil {
+		return 0
+	}
+	if m1 == nil {
+		return -1
+	}
+	if m2 == nil {
+		return 1
+	}
+
+	// Compare major
+	major1, _ := strconv.Atoi(m1[1])
+	major2, _ := strconv.Atoi(m2[1])
+	if major1 != major2 {
+		if major1 > major2 {
+			return 1
+		}
+		return -1
+	}
+
+	// Compare minor
+	minor1, _ := strconv.Atoi(m1[2])
+	minor2, _ := strconv.Atoi(m2[2])
+	if minor1 != minor2 {
+		if minor1 > minor2 {
+			return 1
+		}
+		return -1
+	}
+
+	// Compare patch
+	patch1, _ := strconv.Atoi(m1[3])
+	patch2, _ := strconv.Atoi(m2[3])
+	if patch1 != patch2 {
+		if patch1 > patch2 {
+			return 1
+		}
+		return -1
+	}
+
+	// Compare prerelease
+	pre1 := m1[4]
+	pre2 := m2[4]
+
+	if pre1 != "" && pre2 == "" {
+		return -1
+	}
+	if pre1 == "" && pre2 != "" {
+		return 1
+	}
+	if pre1 != "" && pre2 != "" {
+		return strings.Compare(pre1, pre2)
+	}
+
+	return 0
+}
+
 // KernelInfo holds info about an installed kernel
 type KernelInfo struct {
 	Name           string `json:"name"`
@@ -272,6 +343,9 @@ type KernelService struct {
 	// statFunc is used to check if a file exists; defaults to os.Stat.
 	// Overridable in tests to verify TTL caching without touching the filesystem.
 	statFunc func(string) (os.FileInfo, error)
+
+	testClient    *http.Client
+	githubAPIBase string
 }
 
 func NewKernelService() *KernelService {
@@ -512,12 +586,22 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	currentVersion := k.CurrentVersion
 	s.mu.Unlock()
 
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
-	if channel != "stable" {
-		apiURL = fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=5", repo)
+	githubBase := "https://api.github.com"
+	if s.githubAPIBase != "" {
+		githubBase = s.githubAPIBase
 	}
 
-	client := utils.SafeHTTPClient(15 * time.Second)
+	apiURL := fmt.Sprintf("%s/repos/%s/releases/latest", githubBase, repo)
+	if channel != "stable" {
+		apiURL = fmt.Sprintf("%s/repos/%s/releases?per_page=5", githubBase, repo)
+	}
+
+	var client *http.Client
+	if s.testClient != nil {
+		client = s.testClient
+	} else {
+		client = utils.SafeHTTPClient(15 * time.Second)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		s.mu.Lock()
@@ -580,7 +664,11 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	s.mu.Lock()
 	if kk := s.kernels[name]; kk != nil {
 		kk.LatestVersion = latestVersion
-		kk.HasUpdate = latestVersion != "" && latestVersion != currentVersion
+		if isValidSemver(currentVersion) {
+			kk.HasUpdate = latestVersion != "" && compareSemver(latestVersion, currentVersion) > 0
+		} else {
+			kk.HasUpdate = latestVersion != ""
+		}
 		kk.Status = "idle"
 		kk.Message = ""
 	}
@@ -760,7 +848,11 @@ func (s *KernelService) Install(name string) error {
 		// Re-resolve path immediately so we report the correct location
 		s.resolveBinaryPath(kk)
 		kk.CurrentVersion = s.detectVersion(kk)
-		kk.HasUpdate = kk.CurrentVersion != latestVersion
+		if isValidSemver(kk.CurrentVersion) {
+			kk.HasUpdate = latestVersion != "" && compareSemver(latestVersion, kk.CurrentVersion) > 0
+		} else {
+			kk.HasUpdate = latestVersion != ""
+		}
 		kk.Status = "done"
 		kk.Message = "Updated to " + kk.CurrentVersion
 	}
