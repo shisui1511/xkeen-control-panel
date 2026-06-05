@@ -514,3 +514,138 @@ func TestOutboundImport_MalformedManualJSON(t *testing.T) {
 		t.Errorf("expected file content to remain 'invalid-json{', but got: %s", string(data))
 	}
 }
+
+func TestOutboundImportBulk_Success(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &config.Config{
+		XRayConfigDir: tmp,
+		AllowedRoots:  []string{tmp},
+	}
+	configSvc := services.NewConfigService(tmp, []string{tmp})
+	subSvc := services.NewSubscriptionService(tmp, tmp, tmp)
+
+	api := &API{
+		cfg:             cfg,
+		configSvc:       configSvc,
+		subscriptionSvc: subSvc,
+	}
+
+	body, _ := json.Marshal(OutboundImportBulkRequest{
+		Items: []OutboundImportBulkItem{
+			{Link: "vless://550e8400-e29b-41d4-a716-446655440000@host1.example.com:443?security=none#test-node-1"},
+			{Link: "vless://550e8400-e29b-41d4-a716-446655440000@host2.example.com:443?security=none#test-node-2", Tag: "custom-tag-2"},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/outbound/import-bulk", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	api.OutboundImportBulk(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify that the file 04_outbounds.manual.json was created and has the outbounds
+	manualPath := filepath.Join(tmp, "04_outbounds.manual.json")
+	data, err := os.ReadFile(manualPath)
+	if err != nil {
+		t.Fatalf("failed to read manual file: %v", err)
+	}
+
+	var wrapper struct {
+		Outbounds []services.Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if len(wrapper.Outbounds) != 2 {
+		t.Fatalf("expected 2 outbounds, got %d", len(wrapper.Outbounds))
+	}
+	if wrapper.Outbounds[0].Tag != "test-node-1" {
+		t.Errorf("expected tag test-node-1, got %s", wrapper.Outbounds[0].Tag)
+	}
+	if wrapper.Outbounds[1].Tag != "custom-tag-2" {
+		t.Errorf("expected tag custom-tag-2, got %s", wrapper.Outbounds[1].Tag)
+	}
+}
+
+func TestOutboundImportBulk_TransactionSafety(t *testing.T) {
+	tmp := t.TempDir()
+	cfg := &config.Config{
+		XRayConfigDir: tmp,
+		AllowedRoots:  []string{tmp},
+	}
+	configSvc := services.NewConfigService(tmp, []string{tmp})
+	subSvc := services.NewSubscriptionService(tmp, tmp, tmp)
+
+	api := &API{
+		cfg:             cfg,
+		configSvc:       configSvc,
+		subscriptionSvc: subSvc,
+	}
+
+	// Case 1: File doesn't exist yet, import has an invalid link. No file should be created.
+	body, _ := json.Marshal(OutboundImportBulkRequest{
+		Items: []OutboundImportBulkItem{
+			{Link: "vless://550e8400-e29b-41d4-a716-446655440000@host1.example.com:443?security=none#test-node-1"},
+			{Link: "invalid-link-format"},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/outbound/import-bulk", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	api.OutboundImportBulk(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	manualPath := filepath.Join(tmp, "04_outbounds.manual.json")
+	if _, err := os.Stat(manualPath); !os.IsNotExist(err) {
+		t.Fatalf("expected file 04_outbounds.manual.json to not exist due to transaction safety, but it does")
+	}
+
+	// Case 2: File exists with an existing outbound. Import has one valid and one invalid link. File should remain unchanged.
+	// Write initial manual outbound
+	initialWrapper := struct {
+		Outbounds []services.Outbound `json:"outbounds"`
+	}{
+		Outbounds: []services.Outbound{
+			{Tag: "initial-tag", Protocol: "vless"},
+		},
+	}
+	initialData, _ := json.MarshalIndent(initialWrapper, "", "  ")
+	if err := os.WriteFile(manualPath, initialData, 0644); err != nil {
+		t.Fatalf("failed to write initial file: %v", err)
+	}
+
+	body2, _ := json.Marshal(OutboundImportBulkRequest{
+		Items: []OutboundImportBulkItem{
+			{Link: "vless://550e8400-e29b-41d4-a716-446655440000@host1.example.com:443?security=none#test-node-1"},
+			{Link: "invalid-link-format"},
+		},
+	})
+	req2 := httptest.NewRequest(http.MethodPost, "/api/outbound/import-bulk", bytes.NewReader(body2))
+	rr2 := httptest.NewRecorder()
+	api.OutboundImportBulk(rr2, req2)
+
+	if rr2.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr2.Code)
+	}
+
+	// Verify that the file content was NOT modified
+	data, err := os.ReadFile(manualPath)
+	if err != nil {
+		t.Fatalf("failed to read manual file: %v", err)
+	}
+
+	var wrapper struct {
+		Outbounds []services.Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if len(wrapper.Outbounds) != 1 || wrapper.Outbounds[0].Tag != "initial-tag" {
+		t.Errorf("expected manual outbounds file to remain unchanged (1 outbound with tag 'initial-tag'), but got: %s", string(data))
+	}
+}
