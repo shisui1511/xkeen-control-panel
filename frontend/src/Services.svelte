@@ -481,8 +481,7 @@
         <div class="k-meta">
           {#if isRunning}
             {#if xkeenInfo.pid}
-              PID {xkeenInfo.pid} · uptime {xkeenInfo.uptime || '—'} · {xkeenInfo.binaryPath ||
-                '/opt/sbin/xkeen'}
+              PID {xkeenInfo.pid} · uptime {xkeenInfo.uptime || '—'}
             {:else if xkeenStatus}
               {xkeenStatus}
             {:else}
@@ -490,8 +489,7 @@
                 · {$t('svc.active_kernel')}: {activeKernel}{/if}
             {/if}
           {:else}
-            {$t('svc.xkeen_module')}{#if xkeenInfo.binaryPath}
-              · {xkeenInfo.binaryPath}{/if}
+            {$t('svc.xkeen_module')}
           {/if}
         </div>
       </div>
@@ -690,11 +688,11 @@
             <Skeleton type="text-line" width="120px" />
           {:else if xray}
             {#if xray.process_status === 'running'}
-              PID {xray.pid || '—'} · uptime {xray.uptime || '—'} · {xray.binary_path}
+              PID {xray.pid || '—'} · uptime {xray.uptime || '—'}
             {:else}
-              {xray.binary_path}
               {#if xray.message}
-                · {xray.message}{/if}
+                {xray.message}
+              {/if}
             {/if}
           {:else}
             {$t('kernel.status.not_installed')}
@@ -843,11 +841,11 @@
             <Skeleton type="text-line" width="120px" />
           {:else if mihomo}
             {#if mihomo.process_status === 'running'}
-              API {mihomo.api_addr || '127.0.0.1:9090'} · uptime {mihomo.uptime || '—'} · {mihomo.binary_path}
+              API {mihomo.api_addr || '127.0.0.1:9090'} · uptime {mihomo.uptime || '—'}
             {:else}
-              {mihomo.binary_path}
               {#if mihomo.message}
-                · {mihomo.message}{/if}
+                {mihomo.message}
+              {/if}
             {/if}
           {:else}
             {$t('kernel.status.not_installed')}

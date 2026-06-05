@@ -31,6 +31,7 @@
   let error = '';
   let globalUpdating = false;
   let rollbacking = false;
+  let updatingFile: string | null = null;
 
   // Tag browser state
   let tagDrawer: {
@@ -62,8 +63,12 @@
     }
   }
 
-  async function updateAll() {
-    globalUpdating = true;
+  async function updateAll(filename?: string) {
+    if (filename) {
+      updatingFile = filename;
+    } else {
+      globalUpdating = true;
+    }
     error = '';
     try {
       const csrfToken = localStorage.getItem('csrf_token');
@@ -80,6 +85,7 @@
       error = e.message;
     } finally {
       globalUpdating = false;
+      updatingFile = null;
     }
   }
 
@@ -265,7 +271,7 @@
       <button
         class="btn btn-secondary"
         on:click={rollbackAll}
-        disabled={rollbacking || loading || globalUpdating}
+        disabled={rollbacking || loading || globalUpdating || updatingFile !== null}
         title={$currentLang === 'ru'
           ? 'Откатить DAT-файлы из бэкапа'
           : 'Rollback DAT files from backup'}
@@ -295,7 +301,7 @@
       <button
         class="btn btn-primary"
         on:click={updateAll}
-        disabled={globalUpdating || loading}
+        disabled={globalUpdating || loading || updatingFile !== null}
         title={$t('dat.update_all')}
       >
         {#if globalUpdating}
@@ -446,20 +452,30 @@
                 {#if getFileStatus(file) === 'outdated' || getFileStatus(file) === 'warning'}
                   <button
                     class="btn btn-primary"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
                   >
-                    {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {#if updatingFile === file.name}
+                      {$currentLang === 'ru' ? 'Обновление...' : 'Updating...'}
+                    {:else}
+                      {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {/if}
                   </button>
                 {:else}
                   <button
                     class="btn btn-secondary btn-icon-only"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_all')}
                   >
-                    ↓
+                    {#if updatingFile === file.name}
+                      …
+                    {:else}
+                      ↓
+                    {/if}
                   </button>
                 {/if}
               </div>
@@ -566,20 +582,30 @@
                 {#if getFileStatus(file) === 'outdated' || getFileStatus(file) === 'warning'}
                   <button
                     class="btn btn-primary"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
                   >
-                    {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {#if updatingFile === file.name}
+                      {$currentLang === 'ru' ? 'Обновление...' : 'Updating...'}
+                    {:else}
+                      {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {/if}
                   </button>
                 {:else}
                   <button
                     class="btn btn-secondary btn-icon-only"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_all')}
                   >
-                    ↓
+                    {#if updatingFile === file.name}
+                      …
+                    {:else}
+                      ↓
+                    {/if}
                   </button>
                 {/if}
               </div>
@@ -653,20 +679,30 @@
                 {#if getFileStatus(file) === 'outdated' || getFileStatus(file) === 'warning'}
                   <button
                     class="btn btn-primary"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
                   >
-                    {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {#if updatingFile === file.name}
+                      {$currentLang === 'ru' ? 'Обновление...' : 'Updating...'}
+                    {:else}
+                      {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {/if}
                   </button>
                 {:else}
                   <button
                     class="btn btn-secondary btn-icon-only"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_all')}
                   >
-                    ↓
+                    {#if updatingFile === file.name}
+                      …
+                    {:else}
+                      ↓
+                    {/if}
                   </button>
                 {/if}
               </div>

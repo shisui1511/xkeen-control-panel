@@ -13,6 +13,7 @@
   --bg: #0c2237;
   --bg-page: #0c2237;
   --bg-card: #102a44;
+  --bg-surface: var(--bg-card);
   --card-bg: #102a44;
   --bg-elevated: #14334f;
   --bg-deep: #07182a; /* sidebar / topbar */
@@ -98,6 +99,7 @@
   --bg: #f3f6fa;
   --bg-page: #f3f6fa;
   --bg-card: #ffffff;
+  --bg-surface: var(--bg-card);
   --card-bg: #ffffff;
   --bg-elevated: #ffffff;
   --bg-deep: #07182a; /* sidebar stays dark for character */
