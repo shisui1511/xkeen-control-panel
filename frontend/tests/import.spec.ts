@@ -35,44 +35,61 @@ async function setupRestMocks(page: Page) {
       });
     } else if (url.includes('/api/outbound/parse') && method === 'POST') {
       const body = route.request().postDataJSON();
-      const link = body.links?.[0] || '';
+      const links = body.links || [];
+      const hasInvalid = links.some((link: string) => link.includes('invalid'));
 
-      if (link.includes('invalid')) {
+      if (hasInvalid || links.length === 0) {
         await route.fulfill({
           status: 400,
           contentType: 'application/json',
           body: JSON.stringify({ success: false, error: 'Не удалось распознать ссылку' })
         });
       } else {
+        const parsedData = links.map((link: string, idx: number) => ({
+          link: link,
+          outbound: {
+            tag: idx === 0 ? 'test-parsed-tag' : `test-parsed-tag-${idx}`,
+            protocol: 'vless',
+            settings: {
+              vnext: [
+                {
+                  address: 'server.example.com',
+                  port: 443
+                }
+              ]
+            }
+          }
+        }));
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
             success: true,
-            data: [
-              {
-                link: link,
-                outbound: {
-                  tag: 'test-parsed-tag',
-                  protocol: 'vless',
-                  settings: {
-                    vnext: [
-                      {
-                        address: 'server.example.com',
-                        port: 443
-                      }
-                    ]
-                  }
-                }
-              }
-            ]
+            data: parsedData
           })
+        });
+      }
+    } else if (url.includes('/api/outbound/import-bulk') && method === 'POST') {
+      const body = route.request().postDataJSON();
+      const hasError = body.items?.some((item: any) => item.link.includes('error-import'));
+
+      if (hasError) {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: false, error: 'Ошибка импорта' })
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true })
         });
       }
     } else if (url.includes('/api/outbound/import') && method === 'POST') {
       const body = route.request().postDataJSON();
 
-      if (body.link.includes('error-import')) {
+      if (body.link && body.link.includes('error-import')) {
         await route.fulfill({
           status: 400,
           contentType: 'application/json',
@@ -146,14 +163,11 @@ test.describe('Import Proxy Node E2E test suite', () => {
 
     // 3. Step 2: preview should be visible
     await expect(modal.locator('.preview-section')).toBeVisible();
-    await expect(modal.locator('.preview-row:has-text("Протокол")')).toContainText('vless');
-    await expect(modal.locator('.preview-row:has-text("Сервер")')).toContainText(
-      'server.example.com'
-    );
-    await expect(modal.locator('.preview-row:has-text("Порт")')).toContainText('443');
+    await expect(modal.locator('.preview-item-card')).toContainText('vless');
+    await expect(modal.locator('.preview-item-card')).toContainText('server.example.com:443');
 
     // Custom tag input should be pre-filled with original tag
-    const tagInput = modal.locator('input#import-tag');
+    const tagInput = modal.locator('input#import-tag-0');
     await expect(tagInput).toHaveValue('test-parsed-tag');
 
     // Change tag to custom
@@ -169,7 +183,7 @@ test.describe('Import Proxy Node E2E test suite', () => {
     // In our app layout, showToast adds a toast to the screen
     const toast = page.locator('.toast--success');
     await expect(toast).toBeVisible();
-    await expect(toast).toContainText('Узел успешно импортирован');
+    await expect(toast).toContainText('Успешно импортировано 1 узлов');
   });
 
   test('shows parse error message on invalid link', async ({ page }) => {
@@ -204,7 +218,7 @@ test.describe('Import Proxy Node E2E test suite', () => {
     await expect(errorMsg).toBeVisible();
   });
 
-  test('shows client-side validation error when entering multiple links', async ({ page }) => {
+  test('successfully imports multiple proxy nodes', async ({ page }) => {
     const importBtn = page.locator('button:has-text("Импорт узла")');
     await importBtn.click();
 
@@ -212,9 +226,20 @@ test.describe('Import Proxy Node E2E test suite', () => {
     await modal.locator('textarea').fill('vless://link1#tag1\nvless://link2#tag2');
     await modal.locator('button:has-text("Распознать")').click();
 
-    const errorMsg = modal.locator('.error-msg');
-    await expect(errorMsg).toBeVisible();
-    await expect(errorMsg).toContainText('Пожалуйста, введите только одну ссылку за раз');
+    // 3. Step 2: preview should be visible and list multiple items
+    await expect(modal.locator('.preview-section')).toBeVisible();
+    await expect(modal.locator('input#import-tag-0')).toBeVisible();
+    await expect(modal.locator('input#import-tag-1')).toBeVisible();
+
+    // Click Import
+    const confirmBtn = modal.locator('button:has-text("Импортировать (2)")');
+    await confirmBtn.click();
+
+    // Modal closes, success toast
+    await expect(modal).not.toBeVisible();
+    const toast = page.locator('.toast--success');
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText('Успешно импортировано 2 узлов');
   });
 });
 
@@ -250,9 +275,9 @@ test.describe('Import Node из конструкторов (D-15, D-16, D-17)', 
     await expect(page.locator('button:has-text("Импорт узла")')).not.toBeVisible();
   });
 
-  test('импорт в Xray-конструкторе вызывает POST /api/outbound/import (D-17)', async ({ page }) => {
+  test('импорт в Xray-конструкторе вызывает POST /api/outbound/import-bulk (D-17)', async ({ page }) => {
     let importCalled = false;
-    await page.route('**/api/outbound/import', async (route) => {
+    await page.route('**/api/outbound/import-bulk', async (route) => {
       importCalled = true;
       await route.fulfill({
         status: 200,
