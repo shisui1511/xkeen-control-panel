@@ -333,11 +333,9 @@ func kernelProcessStatus(binaryPath string) string {
 	for _, link := range matches {
 		target, err := os.Readlink(link)
 		if err == nil && filepath.Base(target) == base {
-			parts := strings.Split(link, "/")
-			if len(parts) >= 3 {
-				if isShortLivedOrHelperProcess(parts[2]) {
-					continue
-				}
+			pidStr := filepath.Base(filepath.Dir(link))
+			if isShortLivedOrHelperProcess(pidStr) {
+				continue
 			}
 			return "running"
 		}
@@ -388,16 +386,13 @@ func kernelProcessStatusDetailed(binaryPath string) (status string, pid int, upt
 	for _, link := range matches {
 		target, err := os.Readlink(link)
 		if err == nil && filepath.Base(target) == base {
-			parts := strings.Split(link, "/")
-			if len(parts) >= 3 {
-				pidStr := parts[2]
-				if isShortLivedOrHelperProcess(pidStr) {
-					continue
-				}
-				if p, err := strconv.Atoi(pidStr); err == nil {
-					uptimeStr := getProcUptime(pidStr)
-					return "running", p, uptimeStr
-				}
+			pidStr := filepath.Base(filepath.Dir(link))
+			if isShortLivedOrHelperProcess(pidStr) {
+				continue
+			}
+			if p, err := strconv.Atoi(pidStr); err == nil {
+				uptimeStr := getProcUptime(pidStr)
+				return "running", p, uptimeStr
 			}
 			return "running", 0, ""
 		}
