@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 
 // --- Capabilities store ---
 
@@ -26,6 +26,9 @@ export interface CapabilitiesData {
 }
 
 export const capabilities = writable<CapabilitiesData | null>(null);
+export const isKernelChecking = writable(false);
+
+let lastValidActiveKernel = '';
 
 export async function fetchCapabilities(): Promise<void> {
   try {
@@ -34,7 +37,26 @@ export async function fetchCapabilities(): Promise<void> {
       const envelope = await res.json();
       // Capabilities uses JSONSuccess envelope: {success, data: {...}}
       const data: CapabilitiesData = envelope.data ?? envelope;
-      capabilities.set(data);
+
+      if (data.active_kernel) {
+        lastValidActiveKernel = data.active_kernel;
+      } else if (lastValidActiveKernel) {
+        data.active_kernel = lastValidActiveKernel;
+      }
+
+      if (get(isKernelChecking)) {
+        capabilities.update((current) => {
+          if (current) {
+            return {
+              ...data,
+              active_kernel: current.active_kernel
+            };
+          }
+          return data;
+        });
+      } else {
+        capabilities.set(data);
+      }
     }
   } catch (_) {
     // Silently ignore — capabilities will remain null

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
-  import { showToast, fetchCapabilities, showConfirm } from './stores';
+  import { showToast, fetchCapabilities, showConfirm, isKernelChecking } from './stores';
   import Skeleton from './components/Skeleton.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
@@ -188,6 +188,7 @@
   }
 
   async function controlService(action: string) {
+    isKernelChecking.set(false);
     const key = `xkeen-${action}`;
     actionLoading[key] = true;
     try {
@@ -210,6 +211,7 @@
   }
 
   async function switchKernel(kernel: string) {
+    isKernelChecking.set(false);
     switchingKernelTo = kernel;
     actionLoading[`switch-${kernel}`] = true;
     try {
@@ -232,6 +234,7 @@
   }
 
   async function checkKernelUpdate(name: string) {
+    isKernelChecking.set(true);
     const idx = kernels.findIndex((k) => k.name === name);
     if (idx >= 0) {
       kernels[idx] = { ...kernels[idx], status: 'checking' };
@@ -294,6 +297,13 @@
     } catch (e) {}
   }
 
+  function checkIfFinishedChecking() {
+    const isAnyChecking = Object.keys(statusIntervals).length > 0 || kernels.some((k) => k.status === 'checking');
+    if (!isAnyChecking) {
+      isKernelChecking.set(false);
+    }
+  }
+
   async function fetchKernelStatus(name: string) {
     try {
       const res = await fetch(`/api/kernels/${name}/status`);
@@ -309,6 +319,7 @@
           clearInterval(statusIntervals[name]);
           delete statusIntervals[name];
           fetchKernels();
+          checkIfFinishedChecking();
         }
       } else {
         clearInterval(statusIntervals[name]);
@@ -318,6 +329,7 @@
           kernels[idx] = { ...kernels[idx], status: 'failed' };
           kernels = [...kernels];
         }
+        checkIfFinishedChecking();
       }
     } catch (e) {
       clearInterval(statusIntervals[name]);
@@ -327,6 +339,7 @@
         kernels[idx] = { ...kernels[idx], status: 'failed' };
         kernels = [...kernels];
       }
+      checkIfFinishedChecking();
     }
   }
 
@@ -411,8 +424,8 @@
           checkKernelUpdate('xray');
           checkKernelUpdate('mihomo');
         }}
-        disabled={isAnyKernelChecking}
-        class:btn-loading={isAnyKernelChecking}
+        disabled={$isKernelChecking}
+        class:btn-loading={$isKernelChecking}
         title={$t('svc.check_updates')}
       >
         <svg
