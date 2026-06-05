@@ -186,8 +186,6 @@
     return '';
   }
 
-
-
   // Form fields
   let formName = $state('');
   let formURL = $state('');
@@ -753,7 +751,12 @@
   {:else}
     <div class="stats-chips-row mb-3">
       <span class="chip chip-default">
-        {pluralize(stats.total, $t('subscr.total_one', { count: String(stats.total) }), $t('subscr.total_few', { count: String(stats.total) }), $t('subscr.total_many', { count: String(stats.total) }))}
+        {pluralize(
+          stats.total,
+          $t('subscr.total_one', { count: String(stats.total) }),
+          $t('subscr.total_few', { count: String(stats.total) }),
+          $t('subscr.total_many', { count: String(stats.total) })
+        )}
       </span>
       <span class="chip chip-default">
         <b>{stats.nodes}</b>
@@ -1353,8 +1356,6 @@
     </div>
   </div>
 {/if}
-
-
 
 {#if showDiagnosticModal && diagnosticSub}
   <div

@@ -399,7 +399,13 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {pluralize(file.record_count, $t('dat.record_count_one', { count: file.record_count.toLocaleString() }), $t('dat.record_count_few', { count: file.record_count.toLocaleString() }), $t('dat.record_count_many', { count: file.record_count.toLocaleString() }), $currentLang)} ·
+                    {pluralize(
+                      file.record_count,
+                      $t('dat.record_count_one', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_few', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_many', { count: file.record_count.toLocaleString() }),
+                      $currentLang
+                    )} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·
@@ -513,7 +519,13 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {pluralize(file.record_count, $t('dat.record_count_one', { count: file.record_count.toLocaleString() }), $t('dat.record_count_few', { count: file.record_count.toLocaleString() }), $t('dat.record_count_many', { count: file.record_count.toLocaleString() }), $currentLang)} ·
+                    {pluralize(
+                      file.record_count,
+                      $t('dat.record_count_one', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_few', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_many', { count: file.record_count.toLocaleString() }),
+                      $currentLang
+                    )} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·
@@ -613,7 +625,13 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {pluralize(file.record_count, $t('dat.record_count_one', { count: file.record_count.toLocaleString() }), $t('dat.record_count_few', { count: file.record_count.toLocaleString() }), $t('dat.record_count_many', { count: file.record_count.toLocaleString() }), $currentLang)} ·
+                    {pluralize(
+                      file.record_count,
+                      $t('dat.record_count_one', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_few', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_many', { count: file.record_count.toLocaleString() }),
+                      $currentLang
+                    )} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·

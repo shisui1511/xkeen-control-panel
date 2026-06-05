@@ -571,5 +571,3 @@ func TestKernelService_List_Order(t *testing.T) {
 		t.Errorf("expected second kernel to be mihomo, got %s", list[1].Name)
 	}
 }
-
-

@@ -461,7 +461,12 @@
       <span class="stat">{$t('logs.buffer_count', { count: String(logs.length) })}</span>
       <span class="stat"
         ><b>{availableSources.length}</b>
-        {pluralize(availableSources.length, $t('logs.source_count_one', { count: '' }).trim(), $t('logs.source_count_few', { count: '' }).trim(), $t('logs.source_count_many', { count: '' }).trim())}</span
+        {pluralize(
+          availableSources.length,
+          $t('logs.source_count_one', { count: '' }).trim(),
+          $t('logs.source_count_few', { count: '' }).trim(),
+          $t('logs.source_count_many', { count: '' }).trim()
+        )}</span
       >
       <span class="stat">{$t('logs.realtime_label')}</span>
     </div>

@@ -118,7 +118,10 @@
           if (d.toDateString() === today.toDateString()) {
             subsLastUpdated = $t('dash.updated_today');
           } else {
-            subsLastUpdated = d.toLocaleDateString($currentLang === 'ru' ? 'ru-RU' : 'en-US', { day: '2-digit', month: '2-digit' });
+            subsLastUpdated = d.toLocaleDateString($currentLang === 'ru' ? 'ru-RU' : 'en-US', {
+              day: '2-digit',
+              month: '2-digit'
+            });
           }
         }
       }
@@ -611,7 +614,9 @@
                   </span>
                   <span class="status-badge-value">
                     <span class="status-{statusColor(serviceStatus.xkeen)}">
-                      {serviceStatus.xkeen === 'running' ? $t('app.running') : $t('kernel.status.stopped')}
+                      {serviceStatus.xkeen === 'running'
+                        ? $t('app.running')
+                        : $t('kernel.status.stopped')}
                     </span>
                   </span>
                 </div>
@@ -795,7 +800,12 @@
                   {systemStats?.config_path || '/opt/etc/xkeen/'}
                   {#if systemStats?.config_lines}
                     <span class="info-badge info-badge-orange"
-                      >{pluralize(systemStats.config_lines, $t('dash.info_lines_one', { count: String(systemStats.config_lines) }), $t('dash.info_lines_few', { count: String(systemStats.config_lines) }), $t('dash.info_lines_many', { count: String(systemStats.config_lines) }))}</span
+                      >{pluralize(
+                        systemStats.config_lines,
+                        $t('dash.info_lines_one', { count: String(systemStats.config_lines) }),
+                        $t('dash.info_lines_few', { count: String(systemStats.config_lines) }),
+                        $t('dash.info_lines_many', { count: String(systemStats.config_lines) })
+                      )}</span
                     >
                   {/if}
                 </div>
@@ -858,7 +868,10 @@
                 onkeydown={(e) => e.key === 'Enter' && switchTab('editor')}
               >
                 <span class="qa-mini-ico"><Icon name="editor" size={18} /></span>
-                <span><b>{$t('nav.editor')}</b><span class="s">{$t('dash.editor_subtitle')}</span></span>
+                <span
+                  ><b>{$t('nav.editor')}</b><span class="s">{$t('dash.editor_subtitle')}</span
+                  ></span
+                >
               </div>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->

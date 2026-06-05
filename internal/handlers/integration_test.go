@@ -291,7 +291,7 @@ func TestOutboundImport_Success(t *testing.T) {
 	}
 	configSvc := services.NewConfigService(tmp, []string{tmp})
 	subSvc := services.NewSubscriptionService(tmp, tmp, tmp)
-	
+
 	api := &API{
 		cfg:             cfg,
 		configSvc:       configSvc,
@@ -339,7 +339,7 @@ func TestOutboundImport_DuplicateTag(t *testing.T) {
 	}
 	configSvc := services.NewConfigService(tmp, []string{tmp})
 	subSvc := services.NewSubscriptionService(tmp, tmp, tmp)
-	
+
 	api := &API{
 		cfg:             cfg,
 		configSvc:       configSvc,
@@ -396,7 +396,7 @@ func TestOutboundImport_TooLongVmess(t *testing.T) {
 	}
 	configSvc := services.NewConfigService(tmp, []string{tmp})
 	subSvc := services.NewSubscriptionService(tmp, tmp, tmp)
-	
+
 	api := &API{
 		cfg:             cfg,
 		configSvc:       configSvc,
@@ -425,7 +425,7 @@ func TestOutboundImport_InvalidLink(t *testing.T) {
 	}
 	configSvc := services.NewConfigService(tmp, []string{tmp})
 	subSvc := services.NewSubscriptionService(tmp, tmp, tmp)
-	
+
 	api := &API{
 		cfg:             cfg,
 		configSvc:       configSvc,
@@ -452,7 +452,7 @@ func TestOutboundImport_TooLongGeneric(t *testing.T) {
 	}
 	configSvc := services.NewConfigService(tmp, []string{tmp})
 	subSvc := services.NewSubscriptionService(tmp, tmp, tmp)
-	
+
 	api := &API{
 		cfg:             cfg,
 		configSvc:       configSvc,
@@ -481,7 +481,7 @@ func TestOutboundImport_MalformedManualJSON(t *testing.T) {
 	}
 	configSvc := services.NewConfigService(tmp, []string{tmp})
 	subSvc := services.NewSubscriptionService(tmp, tmp, tmp)
-	
+
 	api := &API{
 		cfg:             cfg,
 		configSvc:       configSvc,
@@ -514,4 +514,3 @@ func TestOutboundImport_MalformedManualJSON(t *testing.T) {
 		t.Errorf("expected file content to remain 'invalid-json{', but got: %s", string(data))
 	}
 }
-

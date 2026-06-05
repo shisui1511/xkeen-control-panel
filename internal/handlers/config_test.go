@@ -322,5 +322,3 @@ func TestConfigRead_Success(t *testing.T) {
 		t.Errorf("expected content %q, got %q", string(content), rr.Body.String())
 	}
 }
-
-

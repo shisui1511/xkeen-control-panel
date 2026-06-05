@@ -252,7 +252,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.xray_section_policy': 'Политики (Policy)',
     'editor.apply_confirm_title': 'Подтверждение применения изменений',
     'editor.apply_and_restart': 'Применить и перезапустить',
-    'editor.apply_confirm_body': 'Вы действительно хотите применить изменения в конфигурационных файлах и перезапустить ядро?',
+    'editor.apply_confirm_body':
+      'Вы действительно хотите применить изменения в конфигурационных файлах и перезапустить ядро?',
     'editor.rulesets_picker': 'Наборы правил MetaCubeX',
     'editor.rulesets_category': 'Категория',
     'editor.rp_metacubex': 'MetaCubeX',
@@ -270,7 +271,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.checking_status': 'Проверка статуса...',
     'editor.apply_success': 'Конфигурация успешно применилась, служба запущена!',
     'editor.apply_timeout': 'Служба не запустилась вовремя. Проверьте логи.',
-    'editor.proxy_tag_warning': 'Выбранный прокси-выход не найден в списке исходящих подключений. Конфигурация сохранена, но маршрутизация может работать некорректно.',
+    'editor.proxy_tag_warning':
+      'Выбранный прокси-выход не найден в списке исходящих подключений. Конфигурация сохранена, но маршрутизация может работать некорректно.',
     'editor.loading_tags': 'Загрузка тегов...',
     'editor.no_outbounds_configured': 'Исходящие подключения не найдены',
 
@@ -702,10 +704,8 @@ const translations: Record<Lang, Record<string, string>> = {
     // Editor Extras
     'editor.back_to_dashboard': 'Вернуться на Dashboard',
     'editor.templates': 'Шаблоны',
-    'editor.templates_desc':
-      'Выберите готовый шаблон. Текущее содержимое файла будет заменено.',
-    'editor.confirm_template':
-      'Текущее содержимое файла будет заменено. Продолжить?',
+    'editor.templates_desc': 'Выберите готовый шаблон. Текущее содержимое файла будет заменено.',
+    'editor.confirm_template': 'Текущее содержимое файла будет заменено. Продолжить?',
     'editor.generator': 'Генератор',
     'editor.protocol': 'Протокол',
     'editor.address': 'Адрес',
@@ -864,7 +864,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.import_node': 'Импорт узла',
     'subscr.import_modal_title': 'Импорт прокси-узла',
     'subscr.import_link_label': 'Ссылка share-link (одна)',
-    'subscr.import_link_placeholder': 'Вставьте одну ссылку (например, vless://, vmess://, trojan://, ss://)',
+    'subscr.import_link_placeholder':
+      'Вставьте одну ссылку (например, vless://, vmess://, trojan://, ss://)',
     'subscr.import_btn_parse': 'Распознать',
     'subscr.import_btn_confirm': 'Импортировать',
     'subscr.import_preview_title': 'Параметры узла',
@@ -1288,7 +1289,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.xray_section_policy': 'Policy',
     'editor.apply_confirm_title': 'Confirm Changes Application',
     'editor.apply_and_restart': 'Apply and Restart',
-    'editor.apply_confirm_body': 'Are you sure you want to apply the configuration changes and restart the core?',
+    'editor.apply_confirm_body':
+      'Are you sure you want to apply the configuration changes and restart the core?',
     'editor.rulesets_picker': 'MetaCubeX Rule Sets',
     'editor.rulesets_category': 'Category',
     'editor.rp_metacubex': 'MetaCubeX',
@@ -1306,7 +1308,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.checking_status': 'Checking status...',
     'editor.apply_success': 'Configuration applied successfully, service started!',
     'editor.apply_timeout': 'Service did not start in time. Check logs.',
-    'editor.proxy_tag_warning': 'Selected proxy outbound not found in available outbounds. Config saved, but routing may not work correctly.',
+    'editor.proxy_tag_warning':
+      'Selected proxy outbound not found in available outbounds. Config saved, but routing may not work correctly.',
     'editor.loading_tags': 'Loading tags...',
     'editor.no_outbounds_configured': 'No outbounds configured',
 
@@ -1730,10 +1733,8 @@ const translations: Record<Lang, Record<string, string>> = {
     // Editor Extras
     'editor.back_to_dashboard': 'Back to Dashboard',
     'editor.templates': 'Templates',
-    'editor.templates_desc':
-      'Select a pre-made template. Current file content will be replaced.',
-    'editor.confirm_template':
-      'Current file content will be replaced. Continue?',
+    'editor.templates_desc': 'Select a pre-made template. Current file content will be replaced.',
+    'editor.confirm_template': 'Current file content will be replaced. Continue?',
     'editor.generator': 'Generator',
     'editor.protocol': 'Protocol',
     'editor.address': 'Address',
@@ -1893,7 +1894,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.import_node': 'Import Node',
     'subscr.import_modal_title': 'Import Proxy Node',
     'subscr.import_link_label': 'Share Link (single)',
-    'subscr.import_link_placeholder': 'Paste a single link (e.g. vless://, vmess://, trojan://, ss://)',
+    'subscr.import_link_placeholder':
+      'Paste a single link (e.g. vless://, vmess://, trojan://, ss://)',
     'subscr.import_btn_parse': 'Parse Link',
     'subscr.import_btn_confirm': 'Import Node',
     'subscr.import_preview_title': 'Node Parameters',
@@ -2110,7 +2112,13 @@ export const t = derived(currentLang, ($lang: Lang) => {
  * @param many - форма для множественного числа (рус: 0, 5–20…; англ: 0, 2, 3…)
  * @param lang - язык для применения правил ('ru' по умолчанию, поддерживает 'en')
  */
-export function pluralize(n: number, one: string, few: string, many: string, lang: Lang = 'ru'): string {
+export function pluralize(
+  n: number,
+  one: string,
+  few: string,
+  many: string,
+  lang: Lang = 'ru'
+): string {
   if (lang === 'en') {
     return n === 1 ? one : many;
   }

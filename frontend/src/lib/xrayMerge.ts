@@ -52,16 +52,17 @@ export function mergeXrayFile(
       };
     case '03_inbounds.json': {
       const existingInbounds = (existing.inbounds ?? []) as Record<string, any>[];
-      const nonDns = existingInbounds.filter(
-        (ib) => !String(ib.tag || '').startsWith('dns-in-')
-      );
+      const nonDns = existingInbounds.filter((ib) => !String(ib.tag || '').startsWith('dns-in-'));
       return {
         ...existing,
         inbounds: [...nonDns, ...(managed.dnsInbounds ?? [])]
       };
     }
     case '05_routing.json': {
-      const rules = substituteProxyTag((managed.rules ?? []) as Record<string, any>[], managed.proxyTag);
+      const rules = substituteProxyTag(
+        (managed.rules ?? []) as Record<string, any>[],
+        managed.proxyTag
+      );
       return {
         ...existing,
         routing: {

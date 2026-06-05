@@ -358,10 +358,8 @@ func kernelProcessStatus(binaryPath string) string {
 			}
 			return "stopped"
 		}
-		if err != nil {
-			// pidof itself unavailable — cannot determine state
-			return "unknown"
-		}
+		// pidof itself unavailable — cannot determine state
+		return "unknown"
 	}
 
 	return "stopped"

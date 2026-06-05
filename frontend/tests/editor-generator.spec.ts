@@ -122,7 +122,9 @@ test.describe('Editor & Constructor integration test suite', () => {
     await expect(page).toHaveURL(/#\/constructor/);
   });
 
-  test('deep-link #/constructor automatically opens editor on constructor tab', async ({ page }) => {
+  test('deep-link #/constructor automatically opens editor on constructor tab', async ({
+    page
+  }) => {
     await page.goto('/#/constructor');
 
     // Проверяем, что вкладка Конструктор активна при переходе по диплинку
@@ -194,7 +196,9 @@ test.describe('Editor & Constructor integration test suite', () => {
     await expect(page.locator('.status-dirty')).toBeVisible();
   });
 
-  test('metacubex rule-provider selector displays checkbox picker with categories and meta-rules-dat URL', async ({ page }) => {
+  test('metacubex rule-provider selector displays checkbox picker with categories and meta-rules-dat URL', async ({
+    page
+  }) => {
     await page.goto('/#/constructor');
 
     // Переключаемся на Mihomo-сторону конструктора
@@ -215,14 +219,24 @@ test.describe('Editor & Constructor integration test suite', () => {
     await expect(picker).toContainText('Социальные сети');
 
     // Находим чекбокс с YouTube или другим правилом и отмечаем его
-    const youtubeCheckbox = page.locator('input[type="checkbox"][value="youtube|geosite"], input[type="checkbox"]#ruleset-geosite-youtube').first();
+    const youtubeCheckbox = page
+      .locator(
+        'input[type="checkbox"][value="youtube|geosite"], input[type="checkbox"]#ruleset-geosite-youtube'
+      )
+      .first();
     await expect(youtubeCheckbox).toBeVisible();
     await youtubeCheckbox.check();
 
     // Проверяем, что в YAML-превью генерируется rule-provider с URL meta-rules-dat
-    const previewPane = page.locator('.constructor-preview-pane, pre.constructor-preview, textarea[readonly], .yaml-preview').first();
+    const previewPane = page
+      .locator(
+        '.constructor-preview-pane, pre.constructor-preview, textarea[readonly], .yaml-preview'
+      )
+      .first();
     await expect(previewPane).toBeVisible();
-    await expect(previewPane).toContainText('https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo');
+    await expect(previewPane).toContainText(
+      'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo'
+    );
     await expect(previewPane).toContainText('format: mrs');
   });
 });
@@ -286,7 +300,13 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
           body: JSON.stringify(
             isMihomo
               ? [{ name: 'config.yaml', path: '/opt/etc/mihomo/config.yaml', size: 100 }]
-              : [{ name: 'xray-config.json', path: '/opt/etc/xray/configs/xray-config.json', size: 100 }]
+              : [
+                  {
+                    name: 'xray-config.json',
+                    path: '/opt/etc/xray/configs/xray-config.json',
+                    size: 100
+                  }
+                ]
           )
         });
       } else if (url.includes('/api/config/read') && route.request().method() === 'GET') {
@@ -329,16 +349,20 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await mihomoBtn.click();
 
     // Выбрать пресет zkeen-selective
-    const presetSelect = page.locator('select.preset-select, [data-testid="preset-select"], select#preset-select');
+    const presetSelect = page.locator(
+      'select.preset-select, [data-testid="preset-select"], select#preset-select'
+    );
     await expect(presetSelect).toBeVisible({ timeout: 5000 });
     await presetSelect.selectOption('zkeen-selective');
 
     // Получить сгенерированный YAML из превью
-    const previewPane = page.locator(
-      '.constructor-preview-pane, pre.constructor-preview, textarea[readonly], .yaml-preview'
-    ).first();
+    const previewPane = page
+      .locator(
+        '.constructor-preview-pane, pre.constructor-preview, textarea[readonly], .yaml-preview'
+      )
+      .first();
     await expect(previewPane).toBeVisible({ timeout: 3000 });
-    const yamlText = await previewPane.textContent() || '';
+    const yamlText = (await previewPane.textContent()) || '';
 
     // Считаем proxy-groups — каждая группа начинается с '  - name:'
     const proxyGroupMatches = yamlText.match(/^ {2}- name:/gm);
@@ -387,7 +411,9 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await mihomoKernelBtn.click();
 
     // Выбираем пресет zkeen-selective, чтобы сгенерировать YAML и активировать кнопку применить
-    const presetSelect = page.locator('select.preset-select, [data-testid="preset-select"], select#preset-select');
+    const presetSelect = page.locator(
+      'select.preset-select, [data-testid="preset-select"], select#preset-select'
+    );
     await expect(presetSelect).toBeVisible();
     await presetSelect.selectOption('zkeen-selective');
 
@@ -404,11 +430,12 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
 
     await expect(confirmDialog).not.toBeVisible();
 
-    const mergeCall = postRequests.some(url => url.includes('/api/config/mihomo-merge'));
-    const restartCall = postRequests.some(url => url.includes('/api/service/control') && url.includes('action=restart'));
+    const mergeCall = postRequests.some((url) => url.includes('/api/config/mihomo-merge'));
+    const restartCall = postRequests.some(
+      (url) => url.includes('/api/service/control') && url.includes('action=restart')
+    );
 
     expect(mergeCall).toBe(true);
     expect(restartCall).toBe(true);
   });
 });
-

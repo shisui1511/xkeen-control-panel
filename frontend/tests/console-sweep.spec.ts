@@ -45,7 +45,10 @@ async function setupMocks(
         await route.fulfill({
           status: 403,
           contentType: 'application/json',
-          body: JSON.stringify({ success: false, error: 'Forbidden (CSRF token missing or invalid)' })
+          body: JSON.stringify({
+            success: false,
+            error: 'Forbidden (CSRF token missing or invalid)'
+          })
         });
       }
     } else if (url.includes('/api/auth/me')) {

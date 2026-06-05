@@ -202,7 +202,6 @@ func TestUpdateMihomoGroupProxies_EmptyProxies(t *testing.T) {
 	}
 }
 
-
 func TestYamlSafeScalar(t *testing.T) {
 	tests := []struct {
 		in, want string
@@ -302,7 +301,6 @@ rules: []
 		t.Error("other options should be preserved")
 	}
 }
-
 
 func TestUpdateMihomoGroupProviders(t *testing.T) {
 	yaml := `proxy-groups:
@@ -413,4 +411,3 @@ proxies:
 		t.Error("ReplaceMihomoTopLevelSection should be idempotent")
 	}
 }
-

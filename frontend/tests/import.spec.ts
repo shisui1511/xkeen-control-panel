@@ -9,7 +9,11 @@ async function setupRestMocks(page: Page) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ authenticated: true, setup_required: false, csrf_token: 'mock-csrf-token' })
+        body: JSON.stringify({
+          authenticated: true,
+          setup_required: false,
+          csrf_token: 'mock-csrf-token'
+        })
       });
     } else if (url.includes('/api/capabilities')) {
       await route.fulfill({
@@ -32,7 +36,7 @@ async function setupRestMocks(page: Page) {
     } else if (url.includes('/api/outbound/parse') && method === 'POST') {
       const body = route.request().postDataJSON();
       const link = body.links?.[0] || '';
-      
+
       if (link.includes('invalid')) {
         await route.fulfill({
           status: 400,
@@ -67,7 +71,7 @@ async function setupRestMocks(page: Page) {
       }
     } else if (url.includes('/api/outbound/import') && method === 'POST') {
       const body = route.request().postDataJSON();
-      
+
       if (body.link.includes('error-import')) {
         await route.fulfill({
           status: 400,
@@ -143,7 +147,9 @@ test.describe('Import Proxy Node E2E test suite', () => {
     // 3. Step 2: preview should be visible
     await expect(modal.locator('.preview-section')).toBeVisible();
     await expect(modal.locator('.preview-row:has-text("Протокол")')).toContainText('vless');
-    await expect(modal.locator('.preview-row:has-text("Сервер")')).toContainText('server.example.com');
+    await expect(modal.locator('.preview-row:has-text("Сервер")')).toContainText(
+      'server.example.com'
+    );
     await expect(modal.locator('.preview-row:has-text("Порт")')).toContainText('443');
 
     // Custom tag input should be pre-filled with original tag
@@ -159,7 +165,7 @@ test.describe('Import Proxy Node E2E test suite', () => {
 
     // 4. Modal closes, success toast should appear
     await expect(modal).not.toBeVisible();
-    
+
     // In our app layout, showToast adds a toast to the screen
     const toast = page.locator('.toast--success');
     await expect(toast).toBeVisible();
@@ -189,7 +195,7 @@ test.describe('Import Proxy Node E2E test suite', () => {
     await modal.locator('button:has-text("Распознать")').click();
 
     await expect(modal.locator('.preview-section')).toBeVisible();
-    
+
     // Click Import
     await modal.locator('button:has-text("Импортировать")').click();
 
@@ -203,7 +209,7 @@ test.describe('Import Proxy Node E2E test suite', () => {
     await importBtn.click();
 
     const modal = page.locator('.modal-card');
-    await modal.locator('textarea').fill("vless://link1#tag1\nvless://link2#tag2");
+    await modal.locator('textarea').fill('vless://link1#tag1\nvless://link2#tag2');
     await modal.locator('button:has-text("Распознать")').click();
 
     const errorMsg = modal.locator('.error-msg');
@@ -264,4 +270,3 @@ test.describe('Import Node из конструкторов (D-15, D-16, D-17)', 
     expect(importCalled).toBe(true);
   });
 });
-

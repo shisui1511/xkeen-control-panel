@@ -175,47 +175,249 @@
   }
 
   const ZKEEN_RULE_PROVIDERS: RuleProvider[] = [
-    { name: 'adlist@domain', url: 'https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs', behavior: 'domain', format: 'mrs', outbound: 'REJECT' },
-    { name: 'category-ai@domain', url: `${METACUBEX_BASE}/geosite/category-ai.mrs`, behavior: 'domain', format: 'mrs', outbound: 'AI' },
-    { name: 'steam@domain', url: `${METACUBEX_BASE}/geosite/steam.mrs`, behavior: 'domain', format: 'mrs', outbound: 'Steam' },
-    { name: 'spotify@domain', url: `${METACUBEX_BASE}/geosite/spotify.mrs`, behavior: 'domain', format: 'mrs', outbound: 'Spotify' },
-    { name: 'speedtest@domain', url: `${METACUBEX_BASE}/geosite/speedtest.mrs`, behavior: 'domain', format: 'mrs', outbound: 'Speedtest' },
-    { name: 'reddit@domain', url: `${METACUBEX_BASE}/geosite/reddit.mrs`, behavior: 'domain', format: 'mrs', outbound: 'Reddit' },
-    { name: 'twitch@domain', url: `${METACUBEX_BASE}/geosite/twitch.mrs`, behavior: 'domain', format: 'mrs', outbound: 'Twitch' },
-    { name: 'twitter@domain', url: `${METACUBEX_BASE}/geosite/twitter.mrs`, behavior: 'domain', format: 'mrs', outbound: 'Twitter' },
-    { name: 'meta@domain', url: `${METACUBEX_BASE}/geosite/meta.mrs`, behavior: 'domain', format: 'mrs', outbound: 'Meta' },
-    { name: 'discord@classical', url: `${METACUBEX_BASE}/classical/discord.txt`, behavior: 'classical', format: 'text', outbound: 'Discord' },
-    { name: 'refilter@domain', url: 'https://raw.githubusercontent.com/1andrevich/Re-filter-lists/release/refilter_domains.mrs', behavior: 'domain', format: 'mrs', outbound: 'Заблок. сервисы' },
-    { name: 'telegram@ipcidr', url: `${METACUBEX_BASE}/geoip/telegram.mrs`, behavior: 'ipcidr', format: 'mrs', outbound: 'Telegram' },
-    { name: 'github@domain', url: `${METACUBEX_BASE}/geosite/github.mrs`, behavior: 'domain', format: 'mrs', outbound: 'GitHub' },
-    { name: 'private@ip', url: `${METACUBEX_BASE}/geoip/private.mrs`, behavior: 'ipcidr', format: 'mrs', outbound: 'DIRECT' },
-    { name: 'quic@inline', url: '', behavior: 'classical', format: 'inline', outbound: 'QUIC', payload: ['AND,((DST-PORT,443),(NETWORK,UDP))'] }
+    {
+      name: 'adlist@domain',
+      url: 'https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs',
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'REJECT'
+    },
+    {
+      name: 'category-ai@domain',
+      url: `${METACUBEX_BASE}/geosite/category-ai.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'AI'
+    },
+    {
+      name: 'steam@domain',
+      url: `${METACUBEX_BASE}/geosite/steam.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Steam'
+    },
+    {
+      name: 'spotify@domain',
+      url: `${METACUBEX_BASE}/geosite/spotify.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Spotify'
+    },
+    {
+      name: 'speedtest@domain',
+      url: `${METACUBEX_BASE}/geosite/speedtest.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Speedtest'
+    },
+    {
+      name: 'reddit@domain',
+      url: `${METACUBEX_BASE}/geosite/reddit.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Reddit'
+    },
+    {
+      name: 'twitch@domain',
+      url: `${METACUBEX_BASE}/geosite/twitch.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Twitch'
+    },
+    {
+      name: 'twitter@domain',
+      url: `${METACUBEX_BASE}/geosite/twitter.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Twitter'
+    },
+    {
+      name: 'meta@domain',
+      url: `${METACUBEX_BASE}/geosite/meta.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Meta'
+    },
+    {
+      name: 'discord@classical',
+      url: `${METACUBEX_BASE}/classical/discord.txt`,
+      behavior: 'classical',
+      format: 'text',
+      outbound: 'Discord'
+    },
+    {
+      name: 'refilter@domain',
+      url: 'https://raw.githubusercontent.com/1andrevich/Re-filter-lists/release/refilter_domains.mrs',
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Заблок. сервисы'
+    },
+    {
+      name: 'telegram@ipcidr',
+      url: `${METACUBEX_BASE}/geoip/telegram.mrs`,
+      behavior: 'ipcidr',
+      format: 'mrs',
+      outbound: 'Telegram'
+    },
+    {
+      name: 'github@domain',
+      url: `${METACUBEX_BASE}/geosite/github.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'GitHub'
+    },
+    {
+      name: 'private@ip',
+      url: `${METACUBEX_BASE}/geoip/private.mrs`,
+      behavior: 'ipcidr',
+      format: 'mrs',
+      outbound: 'DIRECT'
+    },
+    {
+      name: 'quic@inline',
+      url: '',
+      behavior: 'classical',
+      format: 'inline',
+      outbound: 'QUIC',
+      payload: ['AND,((DST-PORT,443),(NETWORK,UDP))']
+    }
   ];
 
-  const RULE_PROVIDERS: Record<string, Array<{ name: string; url: string; behavior: string; outbound: string; format?: string; payload?: string[] }>> = {
+  const RULE_PROVIDERS: Record<
+    string,
+    Array<{
+      name: string;
+      url: string;
+      behavior: string;
+      outbound: string;
+      format?: string;
+      payload?: string[];
+    }>
+  > = {
     zkeen: ZKEEN_RULE_PROVIDERS
   };
 
   const ZKEEN_16_GROUPS: Omit<ProxyGroup, 'id'>[] = [
-    { name: 'Заблок. сервисы', type: 'select', includeAll: true, proxies: [] as string[], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Reject.png' },
-    { name: 'YouTube', type: 'select', includeAll: true, proxies: ['Заблок. сервисы', 'DIRECT'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png' },
-    { name: 'Discord', type: 'select', includeAll: true, proxies: ['Заблок. сервисы', 'DIRECT'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png' },
-    { name: 'Twitch', type: 'select', includeAll: true, proxies: ['DIRECT', 'Заблок. сервисы'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png' },
-    { name: 'Reddit', type: 'select', includeAll: true, proxies: ['DIRECT', 'Заблок. сервисы'], icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png' },
-    { name: 'Meta', type: 'select', includeAll: true, proxies: ['Заблок. сервисы', 'DIRECT'], icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png' },
-    { name: 'Spotify', type: 'select', includeAll: true, excludeFilter: '🇷🇺', proxies: ['Заблок. сервисы', 'DIRECT'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png' },
-    { name: 'Speedtest', type: 'select', includeAll: true, proxies: ['Заблок. сервисы', 'DIRECT'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png' },
-    { name: 'Telegram', type: 'select', includeAll: true, proxies: ['Заблок. сервисы', 'DIRECT'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png' },
-    { name: 'Steam', type: 'select', includeAll: true, proxies: ['DIRECT', 'Забlock. сервисы'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png' },
-    { name: 'CDN', type: 'select', includeAll: true, proxies: ['Заблок. сервисы', 'PASS'], icon: 'https://www.svgrepo.com/show/396567/globe-with-meridians.svg' },
-    { name: 'Google', type: 'select', includeAll: true, proxies: ['PASS', 'Заблок. сервисы'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png' },
-    { name: 'GitHub', type: 'select', includeAll: true, proxies: ['PASS', 'Заблок. сервисы'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png' },
-    { name: 'AI', type: 'select', includeAll: true, excludeFilter: '🇷🇺', proxies: ['Заблок. сервисы'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png' },
-    { name: 'Twitter', type: 'select', includeAll: true, proxies: ['Заблок. сервисы', 'DIRECT'], icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png' },
-    { name: 'QUIC', type: 'select', includeAll: false, proxies: ['REJECT', 'PASS'], icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/quic.png' }
+    {
+      name: 'Заблок. сервисы',
+      type: 'select',
+      includeAll: true,
+      proxies: [] as string[],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Reject.png'
+    },
+    {
+      name: 'YouTube',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png'
+    },
+    {
+      name: 'Discord',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png'
+    },
+    {
+      name: 'Twitch',
+      type: 'select',
+      includeAll: true,
+      proxies: ['DIRECT', 'Заблок. сервисы'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png'
+    },
+    {
+      name: 'Reddit',
+      type: 'select',
+      includeAll: true,
+      proxies: ['DIRECT', 'Заблок. сервисы'],
+      icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png'
+    },
+    {
+      name: 'Meta',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png'
+    },
+    {
+      name: 'Spotify',
+      type: 'select',
+      includeAll: true,
+      excludeFilter: '🇷🇺',
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png'
+    },
+    {
+      name: 'Speedtest',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png'
+    },
+    {
+      name: 'Telegram',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png'
+    },
+    {
+      name: 'Steam',
+      type: 'select',
+      includeAll: true,
+      proxies: ['DIRECT', 'Забlock. сервисы'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png'
+    },
+    {
+      name: 'CDN',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'PASS'],
+      icon: 'https://www.svgrepo.com/show/396567/globe-with-meridians.svg'
+    },
+    {
+      name: 'Google',
+      type: 'select',
+      includeAll: true,
+      proxies: ['PASS', 'Заблок. сервисы'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png'
+    },
+    {
+      name: 'GitHub',
+      type: 'select',
+      includeAll: true,
+      proxies: ['PASS', 'Заблок. сервисы'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png'
+    },
+    {
+      name: 'AI',
+      type: 'select',
+      includeAll: true,
+      excludeFilter: '🇷🇺',
+      proxies: ['Заблок. сервисы'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png'
+    },
+    {
+      name: 'Twitter',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png'
+    },
+    {
+      name: 'QUIC',
+      type: 'select',
+      includeAll: false,
+      proxies: ['REJECT', 'PASS'],
+      icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/quic.png'
+    }
   ];
 
-  const META_RULE_SETS_BY_CATEGORY: Record<string, Array<{ id: string; label: string; type: 'geosite' | 'geoip'; defaultOutbound: string }>> = {
+  const META_RULE_SETS_BY_CATEGORY: Record<
+    string,
+    Array<{ id: string; label: string; type: 'geosite' | 'geoip'; defaultOutbound: string }>
+  > = {
     'Социальные сети': [
       { id: 'youtube', label: 'YouTube', type: 'geosite', defaultOutbound: 'Proxy' },
       { id: 'telegram', label: 'Telegram', type: 'geosite', defaultOutbound: 'Proxy' },
@@ -228,7 +430,7 @@
       { id: 'twitch', label: 'Twitch', type: 'geosite', defaultOutbound: 'Proxy' },
       { id: 'facebook', label: 'Facebook', type: 'geosite', defaultOutbound: 'Proxy' }
     ],
-    'Сервисы': [
+    Сервисы: [
       { id: 'spotify', label: 'Spotify', type: 'geosite', defaultOutbound: 'Proxy' },
       { id: 'steam', label: 'Steam', type: 'geosite', defaultOutbound: 'Proxy' },
       { id: 'github', label: 'GitHub', type: 'geosite', defaultOutbound: 'Proxy' },
@@ -246,10 +448,25 @@
       { id: 'private', label: 'Private Network', type: 'geoip', defaultOutbound: 'DIRECT' },
       { id: 'telegram', label: 'Telegram IP', type: 'geoip', defaultOutbound: 'Proxy' }
     ],
-    'Блокировки': [
-      { id: 'category-ads-all', label: 'Ads & Trackers', type: 'geosite', defaultOutbound: 'REJECT' },
-      { id: 'category-ai-!cn', label: 'AI Services (non-CN)', type: 'geosite', defaultOutbound: 'Proxy' },
-      { id: 'category-anticensorship', label: 'Anti-Censorship', type: 'geosite', defaultOutbound: 'Proxy' }
+    Блокировки: [
+      {
+        id: 'category-ads-all',
+        label: 'Ads & Trackers',
+        type: 'geosite',
+        defaultOutbound: 'REJECT'
+      },
+      {
+        id: 'category-ai-!cn',
+        label: 'AI Services (non-CN)',
+        type: 'geosite',
+        defaultOutbound: 'Proxy'
+      },
+      {
+        id: 'category-anticensorship',
+        label: 'Anti-Censorship',
+        type: 'geosite',
+        defaultOutbound: 'Proxy'
+      }
     ]
   };
 
@@ -264,7 +481,15 @@
     activePreset = id;
     if (id === 'rule-based') {
       groups = [
-        { id: crypto.randomUUID(), name: 'Selective', type: 'select', proxies: ['DIRECT', ...proxies.map(p => p.name)], includeAll: true, url: 'https://www.gstatic.com/generate_204', interval: 300 }
+        {
+          id: crypto.randomUUID(),
+          name: 'Selective',
+          type: 'select',
+          proxies: ['DIRECT', ...proxies.map((p) => p.name)],
+          includeAll: true,
+          url: 'https://www.gstatic.com/generate_204',
+          interval: 300
+        }
       ];
       rules = [];
       activeRuleProvider = 'metacubex';
@@ -275,7 +500,15 @@
       ]);
     } else if (id === 'global-proxy') {
       groups = [
-        { id: crypto.randomUUID(), name: 'Proxy', type: 'select', proxies: ['DIRECT', ...proxies.map(p => p.name)], includeAll: true, url: 'https://www.gstatic.com/generate_204', interval: 300 }
+        {
+          id: crypto.randomUUID(),
+          name: 'Proxy',
+          type: 'select',
+          proxies: ['DIRECT', ...proxies.map((p) => p.name)],
+          includeAll: true,
+          url: 'https://www.gstatic.com/generate_204',
+          interval: 300
+        }
       ];
       rules = [
         { id: crypto.randomUUID(), type: 'GEOIP', value: 'private', outbound: 'DIRECT' },
@@ -284,7 +517,7 @@
       activeRuleProvider = 'none';
       selectedMetaRuleSets = new Map();
     } else if (id === 'zkeen-selective') {
-      groups = ZKEEN_16_GROUPS.map(g => ({
+      groups = ZKEEN_16_GROUPS.map((g) => ({
         ...g,
         id: crypto.randomUUID(),
         enabled: true
@@ -302,7 +535,7 @@
       const res = await fetch('/api/subscriptions');
       if (!res.ok) return;
       const subs: any[] = await res.json();
-      subscriptions = subs.filter(s => s.enabled);
+      subscriptions = subs.filter((s) => s.enabled);
       if (!subs || subs.length === 0) {
         showToast('info', $t('editor.import_proxies_empty'));
         return;
@@ -323,7 +556,7 @@
           return {
             id: crypto.randomUUID(),
             name: n.name || n.tag || `proxy-${imported}`,
-            type: ((n.protocol || 'vless') as ProxyType),
+            type: (n.protocol || 'vless') as ProxyType,
             server,
             port
           };
@@ -384,7 +617,10 @@
       return;
     }
 
-    const lines = trimmed.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    const lines = trimmed
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
     if (lines.length > 1) {
       importErrorMsg = $t('subscr.import_error_single_only');
       return;
@@ -526,14 +762,14 @@
       let currentGroup: any = null;
       let currentProxy: any = null;
       let inProxiesList = false;
-      
+
       const parsedGroups: ProxyGroup[] = [];
       const parsedProxies: Proxy[] = [];
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const trimmed = line.trim();
-        
+
         // Detect top-level sections
         if (/^[a-zA-Z0-9_-]+:/.test(line) && !line.startsWith(' ') && !line.startsWith('-')) {
           if (trimmed.startsWith('proxy-groups:')) {
@@ -602,8 +838,8 @@
           if (proxiesInlineMatch) {
             currentGroup.proxies = proxiesInlineMatch[1]
               .split(',')
-              .map(p => unquote(p.trim()))
-              .filter(p => p.length > 0);
+              .map((p) => unquote(p.trim()))
+              .filter((p) => p.length > 0);
             inProxiesList = false;
             continue;
           }
@@ -742,12 +978,12 @@
 
       if (parsedGroups.length > 0) {
         groups = parsedGroups;
-        const hasZkeenGroup = parsedGroups.some(g => g.name === 'Заблок. сервисы');
+        const hasZkeenGroup = parsedGroups.some((g) => g.name === 'Заблок. сервисы');
         if (hasZkeenGroup) {
           activePreset = 'zkeen-selective';
           activeRuleProvider = 'zkeen';
-          groups = groups.map(g => {
-            const zG = ZKEEN_16_GROUPS.find(zg => zg.name === g.name);
+          groups = groups.map((g) => {
+            const zG = ZKEEN_16_GROUPS.find((zg) => zg.name === g.name);
             if (zG) {
               return {
                 ...g,
@@ -968,7 +1204,7 @@
     // Helper to check if a target outbound group is enabled
     const isOutboundEnabled = (outbound: string) => {
       if (activeRuleProvider === 'zkeen') {
-        const g = groups.find(x => x.name === outbound);
+        const g = groups.find((x) => x.name === outbound);
         if (g && g.enabled === false) return false;
       }
       return true;
@@ -1005,7 +1241,8 @@
     }
 
     // Rules
-    const hasRules = rules.length > 0 ||
+    const hasRules =
+      rules.length > 0 ||
       activeRuleProvider === 'zkeen' ||
       (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0);
     if (hasRules) {
@@ -1014,7 +1251,11 @@
         const zkeenRules = [
           { type: 'RULE-SET', val: 'adlist@domain', outbound: 'REJECT' },
           { type: 'RULE-SET', val: 'quic@inline', outbound: 'QUIC' },
-          { type: 'OR', val: '((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),Заблок. сервисы', outbound: 'Заблок. сервисы' },
+          {
+            type: 'OR',
+            val: '((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),Заблок. сервисы',
+            outbound: 'Заблок. сервисы'
+          },
           { type: 'RULE-SET', val: 'category-ai@domain', outbound: 'AI' },
           { type: 'RULE-SET', val: 'steam@domain', outbound: 'Steam' },
           { type: 'RULE-SET', val: 'spotify@domain', outbound: 'Spotify' },
@@ -1098,7 +1339,11 @@
           }
         }
         // If only rule-providers active but no manual rules, add a default MATCH
-        if (rules.length === 0 && activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0) {
+        if (
+          rules.length === 0 &&
+          activeRuleProvider === 'metacubex' &&
+          selectedMetaRuleSets.size > 0
+        ) {
           lines.push(`  - MATCH,DIRECT`);
         }
       }
@@ -1140,9 +1385,17 @@
   let yaml = '';
   $: {
     // Explicit deps so Svelte 5 legacy mode tracks them across the function call
-    void proxies; void groups; void rules; void activeRuleProvider; void selectedMetaRuleSets; void subscriptions;
-    void dns.enabled; void dns.nameservers; void dns.fallback;
-    void tun.enabled; void tun.stack;
+    void proxies;
+    void groups;
+    void rules;
+    void activeRuleProvider;
+    void selectedMetaRuleSets;
+    void subscriptions;
+    void dns.enabled;
+    void dns.nameservers;
+    void dns.fallback;
+    void tun.enabled;
+    void tun.stack;
     yaml = generateYAML();
   }
 
@@ -1193,7 +1446,15 @@
     ['tun', 'TUN']
   ];
 
-  $: if (activeRuleProvider === 'metacubex' && activeSection !== 'rulesets' && activeSection !== 'proxies' && activeSection !== 'groups' && activeSection !== 'rules' && activeSection !== 'dns' && activeSection !== 'tun') {
+  $: if (
+    activeRuleProvider === 'metacubex' &&
+    activeSection !== 'rulesets' &&
+    activeSection !== 'proxies' &&
+    activeSection !== 'groups' &&
+    activeSection !== 'rules' &&
+    activeSection !== 'dns' &&
+    activeSection !== 'tun'
+  ) {
     activeSection = 'rulesets';
   }
 
@@ -1213,7 +1474,12 @@
     const resultLines: string[] = [];
     for (let i = start + 1; i < lines.length; i++) {
       const line = lines[i];
-      if (line.trim() !== '' && !line.startsWith(' ') && !line.startsWith('\t') && !line.startsWith('#')) {
+      if (
+        line.trim() !== '' &&
+        !line.startsWith(' ') &&
+        !line.startsWith('\t') &&
+        !line.startsWith('#')
+      ) {
         break;
       }
       resultLines.push(line);
@@ -1234,7 +1500,7 @@
       const sections = {
         'proxy-groups': extractSection(yaml, 'proxy-groups'),
         'rule-providers': extractSection(yaml, 'rule-providers'),
-        'rules': extractSection(yaml, 'rules')
+        rules: extractSection(yaml, 'rules')
       };
 
       const path = selectedFile || '/opt/etc/mihomo/config.yaml';
@@ -1266,7 +1532,12 @@
         throw new Error('Failed to restart service');
       }
 
-      showToast('success', ru ? 'Конфигурация Mihomo обновлена и перезапущена' : 'Mihomo configuration updated and restarted');
+      showToast(
+        'success',
+        ru
+          ? 'Конфигурация Mihomo обновлена и перезапущена'
+          : 'Mihomo configuration updated and restarted'
+      );
     } catch (err: any) {
       console.error(err);
       showToast('error', err.message || (ru ? 'Ошибка сохранения' : 'Save error'));
@@ -1334,7 +1605,10 @@
     <!-- Left: sections -->
     <div class="gen-left">
       <!-- Scenario selection -->
-      <div class="constructor-scenario-bar" style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;">
+      <div
+        class="constructor-scenario-bar"
+        style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;"
+      >
         <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
         <select
           id="preset-select"
@@ -1577,7 +1851,11 @@
               <button class="add-btn" style="flex: 1;" on:click={() => (showProxyForm = true)}>
                 + {ru ? 'Добавить прокси' : 'Add proxy'}
               </button>
-              <button class="add-btn import-btn" style="flex: 1;" on:click={loadSubscriptionProxies}>
+              <button
+                class="add-btn import-btn"
+                style="flex: 1;"
+                on:click={loadSubscriptionProxies}
+              >
                 ↓ {$t('editor.constructor_import_proxies')}
               </button>
               <button class="add-btn import-btn" style="flex: 1;" on:click={openImportModal}>
@@ -1590,7 +1868,9 @@
                   stroke-width="2"
                   style="margin-right: 4px; display: inline-block; vertical-align: middle;"
                 >
-                  <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"/>
+                  <path
+                    d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"
+                  />
                 </svg>
                 {$t('subscr.import_node')}
               </button>
@@ -1614,11 +1894,13 @@
                         alt={g.name}
                         class="zkeen-group-icon"
                         on:error={() => {
-                          const fallback = 'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png';
+                          const fallback =
+                            'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png';
                           if (g.icon !== fallback) {
                             g.icon = fallback;
                           } else {
-                            g.icon = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                            g.icon =
+                              'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
                           }
                           groups = [...groups];
                         }}
@@ -1650,20 +1932,22 @@
 
                   {#if g.enabled !== false}
                     <div class="zkeen-group-body">
-                      <label class="form-label" style="font-size: 11px; margin-bottom: 2px;">{ru ? 'Исходящий канал по умолчанию' : 'Default outbound'}</label>
+                      <label class="form-label" style="font-size: 11px; margin-bottom: 2px;"
+                        >{ru ? 'Исходящий канал по умолчанию' : 'Default outbound'}</label
+                      >
                       <select
                         class="form-select"
                         value={g.proxies[0] || 'DIRECT'}
                         on:change={(e) => {
                           const val = e.currentTarget.value;
-                          g.proxies = [val, ...g.proxies.slice(1).filter(p => p !== val)];
+                          g.proxies = [val, ...g.proxies.slice(1).filter((p) => p !== val)];
                           groups = [...groups];
                         }}
                       >
                         <option value="DIRECT">DIRECT</option>
                         <option value="REJECT">REJECT</option>
                         <option value="PASS">PASS</option>
-                        {#each allProxyNames.filter(n => n !== 'DIRECT' && n !== 'REJECT' && n !== 'PASS' && n !== g.name) as n}
+                        {#each allProxyNames.filter((n) => n !== 'DIRECT' && n !== 'REJECT' && n !== 'PASS' && n !== g.name) as n}
                           <option value={n}>{n}</option>
                         {/each}
                       </select>
@@ -1678,7 +1962,11 @@
                 <span class="item-badge type-group">{g.type}</span>
                 <span class="item-name">{g.name}</span>
                 {#if g.includeAll}
-                  <span class="item-badge" style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; font-size: 10px; text-transform: none;">include-all</span>
+                  <span
+                    class="item-badge"
+                    style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; font-size: 10px; text-transform: none;"
+                    >include-all</span
+                  >
                 {/if}
                 <span class="item-meta">{g.proxies.length} {ru ? 'прокси' : 'proxies'}</span>
                 <button class="item-del" on:click={() => removeGroup(g.id)}>✕</button>
@@ -1698,9 +1986,16 @@
                   <input class="form-input" bind:value={ng.name} placeholder="Выбор прокси" />
                 </div>
                 <div class="form-row">
-                  <label class="toggle-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+                  <label
+                    class="toggle-label"
+                    style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;"
+                  >
                     <input type="checkbox" bind:checked={ng.includeAll} />
-                    <span>{ru ? 'Включить все провайдеры (include-all)' : 'Include all providers'}</span>
+                    <span
+                      >{ru
+                        ? 'Включить все провайдеры (include-all)'
+                        : 'Include all providers'}</span
+                    >
                   </label>
                 </div>
                 <div class="form-row">
@@ -1763,21 +2058,44 @@
         <div class="sec-body" data-testid="rulesets-picker">
           <div class="card rulesets-card" style="padding:16px;">
             <div class="rulesets-header">
-              <h3 style="margin-top:0; margin-bottom:4px; font-size:16px;">{$t('editor.rulesets_picker')}</h3>
-              <p class="sub" style="margin-top:0; margin-bottom:16px; font-size:12px; color:var(--fg-dim);">
-                {ru ? 'Выберите наборы правил и укажите группу для каждого.' : 'Select rule sets and assign a group for each.'}
+              <h3 style="margin-top:0; margin-bottom:4px; font-size:16px;">
+                {$t('editor.rulesets_picker')}
+              </h3>
+              <p
+                class="sub"
+                style="margin-top:0; margin-bottom:16px; font-size:12px; color:var(--fg-dim);"
+              >
+                {ru
+                  ? 'Выберите наборы правил и укажите группу для каждого.'
+                  : 'Select rule sets and assign a group for each.'}
               </p>
             </div>
 
             {#each Object.entries(META_RULE_SETS_BY_CATEGORY) as [category, items]}
               <div class="rulesets-category-group" style="margin-top:16px;">
-                <h4 class="category-title" style="font-size:13px; font-weight:600; color:var(--fg-secondary); margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.05);">{category}</h4>
-                <div class="rulesets-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:8px;">
+                <h4
+                  class="category-title"
+                  style="font-size:13px; font-weight:600; color:var(--fg-secondary); margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.05);"
+                >
+                  {category}
+                </h4>
+                <div
+                  class="rulesets-grid"
+                  style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:8px;"
+                >
                   {#each items as item}
                     {@const key = `${item.id}|${item.type}`}
                     {@const isChecked = selectedMetaRuleSets.has(key)}
-                    <div class="ruleset-item-row" class:selected={isChecked} style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:var(--radius); transition:background var(--transition-fast), border-color var(--transition-fast);">
-                      <label class="ruleset-label" for="ruleset-{item.type}-{item.id}" style="display:flex; align-items:center; gap:8px; cursor:pointer; flex:1; user-select:none;">
+                    <div
+                      class="ruleset-item-row"
+                      class:selected={isChecked}
+                      style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:var(--radius); transition:background var(--transition-fast), border-color var(--transition-fast);"
+                    >
+                      <label
+                        class="ruleset-label"
+                        for="ruleset-{item.type}-{item.id}"
+                        style="display:flex; align-items:center; gap:8px; cursor:pointer; flex:1; user-select:none;"
+                      >
                         <input
                           type="checkbox"
                           id="ruleset-{item.type}-{item.id}"
@@ -1786,9 +2104,15 @@
                           on:change={(e) => {
                             if (e.currentTarget.checked) {
                               let outbound = item.defaultOutbound;
-                              if (outbound === 'Proxy' && groups.some(g => g.name === 'Selective')) {
+                              if (
+                                outbound === 'Proxy' &&
+                                groups.some((g) => g.name === 'Selective')
+                              ) {
                                 outbound = 'Selective';
-                              } else if (outbound === 'Proxy' && groups.some(g => g.name === 'Proxy')) {
+                              } else if (
+                                outbound === 'Proxy' &&
+                                groups.some((g) => g.name === 'Proxy')
+                              ) {
                                 outbound = 'Proxy';
                               } else if (!allProxyNames.includes(outbound)) {
                                 outbound = allProxyNames[0] || 'DIRECT';
@@ -1800,10 +2124,18 @@
                             selectedMetaRuleSets = new Map(selectedMetaRuleSets);
                           }}
                         />
-                        <span class="ruleset-name" style="font-size:13px; font-weight:500; color:var(--fg-primary);">{item.label}</span>
-                        <span class="ruleset-type-badge" style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--fg-dim); background:rgba(255,255,255,0.05); padding:1px 4px; border-radius:4px;">{item.type}</span>
+                        <span
+                          class="ruleset-name"
+                          style="font-size:13px; font-weight:500; color:var(--fg-primary);"
+                          >{item.label}</span
+                        >
+                        <span
+                          class="ruleset-type-badge"
+                          style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--fg-dim); background:rgba(255,255,255,0.05); padding:1px 4px; border-radius:4px;"
+                          >{item.type}</span
+                        >
                       </label>
-                      
+
                       {#if isChecked}
                         <select
                           class="ruleset-outbound-select"
@@ -2047,7 +2379,13 @@
             disabled={applyLoading || !yaml}
             style="flex: 1;"
           >
-            {applyLoading ? (ru ? 'Сохранение...' : 'Saving...') : (ru ? 'Применить изменения' : 'Apply Changes')}
+            {applyLoading
+              ? ru
+                ? 'Сохранение...'
+                : 'Saving...'
+              : ru
+                ? 'Применить изменения'
+                : 'Apply Changes'}
           </button>
         </div>
       {/if}
@@ -2056,18 +2394,25 @@
 </div>
 
 {#if showApplyConfirm}
-  <div class="modal-overlay" role="button" tabindex="0" data-testid="apply-confirm-dialog"
-    on:click={() => showApplyConfirm = false}
-    on:keydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}>
+  <div
+    class="modal-overlay"
+    role="button"
+    tabindex="0"
+    data-testid="apply-confirm-dialog"
+    on:click={() => (showApplyConfirm = false)}
+    on:keydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}
+  >
     <div class="modal-card" role="presentation" on:click|stopPropagation>
       <div class="modal-card-header">
         <h2>{$t('editor.apply_confirm_title')}</h2>
-        <button class="modal-close-btn" on:click={() => showApplyConfirm = false}>&times;</button>
+        <button class="modal-close-btn" on:click={() => (showApplyConfirm = false)}>&times;</button>
       </div>
       <div class="modal-card-body">
         <p>{$t('editor.apply_confirm_body')}</p>
         <div class="changed-files-list" style="margin-top: 12px;">
-          <strong>{ru ? 'Будут обновлены секции в файле:' : 'Sections to be updated in file:'}</strong>
+          <strong
+            >{ru ? 'Будут обновлены секции в файле:' : 'Sections to be updated in file:'}</strong
+          >
           <div style="margin: 8px 0; font-family: monospace; font-size: 13px;">
             <code>{selectedFile || '/opt/etc/mihomo/config.yaml'}</code>
           </div>
@@ -2077,14 +2422,14 @@
             <li><code>rules</code></li>
           </ul>
           <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
-            {ru 
-              ? '* Автоматически будет создана резервная копия (хранится до 5 последних бэкапов)' 
+            {ru
+              ? '* Автоматически будет создана резервная копия (хранится до 5 последних бэкапов)'
               : '* A backup will be created automatically (up to 5 copies stored)'}
           </p>
         </div>
       </div>
       <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={() => showApplyConfirm = false}>
+        <button class="btn btn-secondary" on:click={() => (showApplyConfirm = false)}>
           {$t('app.cancel')}
         </button>
         <button class="btn btn-primary" on:click={handleApplyMihomo} disabled={applyLoading}>
@@ -2110,7 +2455,10 @@
       </div>
       <div class="modal-card-body">
         {#if importErrorMsg}
-          <div class="error-msg" style="color: var(--danger); margin-bottom: 12px; font-size: 13px;">
+          <div
+            class="error-msg"
+            style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
+          >
             {importErrorMsg}
           </div>
         {/if}
@@ -2129,24 +2477,40 @@
           </div>
         {:else if importStep === 2 && parsedNode}
           <div class="preview-section">
-            <h3 class="preview-title" style="margin: 0 0 8px 0; font-size: 14px;">{$t('subscr.import_preview_title')}</h3>
+            <h3 class="preview-title" style="margin: 0 0 8px 0; font-size: 14px;">
+              {$t('subscr.import_preview_title')}
+            </h3>
             <div class="preview-table" style="display: flex; flex-direction: column; gap: 6px;">
               <div class="preview-row" style="display: flex; justify-content: space-between;">
-                <span class="preview-label" style="color: var(--fg-secondary);">{$t('subscr.import_proto')}</span>
-                <span class="preview-value code" style="font-family: monospace;">{parsedNode.protocol}</span>
+                <span class="preview-label" style="color: var(--fg-secondary);"
+                  >{$t('subscr.import_proto')}</span
+                >
+                <span class="preview-value code" style="font-family: monospace;"
+                  >{parsedNode.protocol}</span
+                >
               </div>
               <div class="preview-row" style="display: flex; justify-content: space-between;">
-                <span class="preview-label" style="color: var(--fg-secondary);">{$t('subscr.import_server')}</span>
-                <span class="preview-value code" style="font-family: monospace;">{getNodeServer(parsedNode)}</span>
+                <span class="preview-label" style="color: var(--fg-secondary);"
+                  >{$t('subscr.import_server')}</span
+                >
+                <span class="preview-value code" style="font-family: monospace;"
+                  >{getNodeServer(parsedNode)}</span
+                >
               </div>
               <div class="preview-row" style="display: flex; justify-content: space-between;">
-                <span class="preview-label" style="color: var(--fg-secondary);">{$t('subscr.import_port')}</span>
-                <span class="preview-value code" style="font-family: monospace;">{getNodePort(parsedNode)}</span>
+                <span class="preview-label" style="color: var(--fg-secondary);"
+                  >{$t('subscr.import_port')}</span
+                >
+                <span class="preview-value code" style="font-family: monospace;"
+                  >{getNodePort(parsedNode)}</span
+                >
               </div>
             </div>
 
             <div class="form-group" style="margin-top: 16px;">
-              <label for="import-tag" class="form-label" style="display: block; margin-bottom: 6px;">{$t('subscr.import_tag_custom')}</label>
+              <label for="import-tag" class="form-label" style="display: block; margin-bottom: 6px;"
+                >{$t('subscr.import_tag_custom')}</label
+              >
               <input
                 id="import-tag"
                 type="text"
@@ -2175,11 +2539,7 @@
             {$t('subscr.import_btn_parse')}
           </button>
         {:else}
-          <button
-            class="btn btn-primary"
-            on:click={confirmImportNode}
-            disabled={importLoading}
-          >
+          <button class="btn btn-primary" on:click={confirmImportNode} disabled={importLoading}>
             {#if importLoading}
               <span class="spinner-xs" style="margin-right: 6px;"></span>
             {/if}
@@ -2721,7 +3081,9 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    transition: opacity var(--transition-fast), border-color var(--transition-fast);
+    transition:
+      opacity var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .zkeen-group-card.disabled {
@@ -2813,19 +3175,19 @@
     right: 0;
     bottom: 0;
     background-color: rgba(255, 255, 255, 0.1);
-    transition: .4s;
+    transition: 0.4s;
     border: 1px solid var(--border);
   }
 
   .slider:before {
     position: absolute;
-    content: "";
+    content: '';
     height: 12px;
     width: 12px;
     left: 2px;
     bottom: 2px;
     background-color: var(--fg-secondary);
-    transition: .4s;
+    transition: 0.4s;
   }
 
   input:checked + .slider {

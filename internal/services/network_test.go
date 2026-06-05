@@ -275,4 +275,3 @@ func TestDNSLookup_UnsupportedRecordType(t *testing.T) {
 		t.Errorf("expected nil result, got %+v", res)
 	}
 }
-

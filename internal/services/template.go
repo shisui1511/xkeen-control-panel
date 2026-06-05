@@ -23,7 +23,7 @@ const templatesRepoBase = "https://raw.githubusercontent.com/shisui1511/xkeen-te
 type Template struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Type        string `json:"type"`     // "xray" или "mihomo"
+	Type        string `json:"type"` // "xray" или "mihomo"
 	Filename    string `json:"filename,omitempty"`
 	Content     string `json:"content,omitempty"`
 }

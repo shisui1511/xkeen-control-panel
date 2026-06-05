@@ -135,12 +135,12 @@
   let xrayFiles: ConfigFileInfo[] = [];
   let mihomoFiles: ConfigFileInfo[] = [];
   let fileSearchQuery = '';
-  $: filteredXrayFiles = Array.isArray(xrayFiles) ? xrayFiles.filter((file) =>
-    file.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
-  ) : [];
-  $: filteredMihomoFiles = Array.isArray(mihomoFiles) ? mihomoFiles.filter((file) =>
-    file.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
-  ) : [];
+  $: filteredXrayFiles = Array.isArray(xrayFiles)
+    ? xrayFiles.filter((file) => file.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
+    : [];
+  $: filteredMihomoFiles = Array.isArray(mihomoFiles)
+    ? mihomoFiles.filter((file) => file.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
+    : [];
   $: isMihomoAutoEdited =
     selectedFile.includes('/mihomo/') &&
     (selectedFile.endsWith('config.yaml') ||
@@ -2955,8 +2955,12 @@
   }
 
   @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .templates-body-grid {

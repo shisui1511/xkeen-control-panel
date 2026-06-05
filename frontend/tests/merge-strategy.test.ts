@@ -20,18 +20,14 @@ test.describe('mergeXrayFile (D-04) — сохранение неуправля�
     const existing = {
       routing: {
         domainStrategy: 'IPIfNonMatch',
-        rules: [
-          { type: 'field', domain: ['geosite:private'], outboundTag: 'custom-outbound' }
-        ]
+        rules: [{ type: 'field', domain: ['geosite:private'], outboundTag: 'custom-outbound' }]
       },
       // Неуправляемый ключ — конструктор не должен его удалять
       _custom_meta: { createdBy: 'manual', version: 2 }
     };
 
     const managed = {
-      rules: [
-        { type: 'field', port: '53', outboundTag: 'dns-out' }
-      ]
+      rules: [{ type: 'field', port: '53', outboundTag: 'dns-out' }]
     };
 
     const result = mergeXrayFile('05_routing.json', existing, managed);
@@ -145,11 +141,13 @@ test.describe('mergeXrayFile (D-09) — автогенерация dokodemo-door
     const inbounds = result.inbounds as unknown[];
 
     // socks-in сохраняется (неуправляемый)
-    const socksInbound = (inbounds as Record<string, unknown>[]).find(ib => ib.tag === 'socks-in');
+    const socksInbound = (inbounds as Record<string, unknown>[]).find(
+      (ib) => ib.tag === 'socks-in'
+    );
     expect(socksInbound).toBeDefined();
 
     // dns-in-ytb добавляется
-    const dnsIn = (inbounds as Record<string, unknown>[]).find(ib => ib.tag === 'dns-in-ytb');
+    const dnsIn = (inbounds as Record<string, unknown>[]).find((ib) => ib.tag === 'dns-in-ytb');
     expect(dnsIn).toBeDefined();
     expect(dnsIn?.protocol).toBe('dokodemo-door');
     expect(dnsIn?.port).toBe(1082);
@@ -180,8 +178,8 @@ test.describe('mergeXrayFile (D-09) — автогенерация dokodemo-door
     const firstResult = mergeXrayFile('03_inbounds.json', existing, managed);
     const secondResult = mergeXrayFile('03_inbounds.json', firstResult, managed);
 
-    const countDnsIn = (secondResult.inbounds as Record<string, unknown>[]).filter(
-      (ib) => String(ib.tag || '').startsWith('dns-in-')
+    const countDnsIn = (secondResult.inbounds as Record<string, unknown>[]).filter((ib) =>
+      String(ib.tag || '').startsWith('dns-in-')
     ).length;
 
     expect(countDnsIn).toBe(1);
@@ -215,11 +213,11 @@ test.describe('mergeXrayFile (D-11) — замена PROXY_TAG', () => {
     const rules = (result.routing as Record<string, unknown>)?.rules as Record<string, unknown>[];
 
     // Ни одно правило не должно содержать PROXY_TAG после merge
-    const proxyTagRule = rules.find(r => r.outboundTag === 'PROXY_TAG');
+    const proxyTagRule = rules.find((r) => r.outboundTag === 'PROXY_TAG');
     expect(proxyTagRule).toBeUndefined();
 
     // Правило с network tcp,udp должно использовать реальный тег
-    const networkRule = rules.find(r => r.network === 'tcp,udp');
+    const networkRule = rules.find((r) => r.network === 'tcp,udp');
     expect(networkRule?.outboundTag).toBe('my-vless-proxy');
   });
 });

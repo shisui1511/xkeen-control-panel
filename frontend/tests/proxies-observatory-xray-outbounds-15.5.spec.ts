@@ -33,7 +33,7 @@ const MOCK_CAPABILITIES_OFFLINE = {
 
 const MOCK_PROXIES_WITH_GROUPS = {
   proxies: {
-    'SelectorGroup': {
+    SelectorGroup: {
       name: 'SelectorGroup',
       type: 'Selector',
       now: 'ss-node',
@@ -73,14 +73,30 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ authenticated: true, setup_required: false, csrf_token: 'mock-csrf' })
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf'
+          })
         });
       } else if (url.includes('/api/capabilities')) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: MOCK_CAPABILITIES_ONLINE }) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: MOCK_CAPABILITIES_ONLINE })
+        });
       } else if (url.includes('/api/mihomo/proxy/proxies')) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_PROXIES_EMPTY) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(MOCK_PROXIES_EMPTY)
+        });
       } else {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true })
+        });
       }
     });
 
@@ -99,14 +115,30 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ authenticated: true, setup_required: false, csrf_token: 'mock-csrf' })
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf'
+          })
         });
       } else if (url.includes('/api/capabilities')) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: MOCK_CAPABILITIES_OFFLINE }) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: MOCK_CAPABILITIES_OFFLINE })
+        });
       } else if (url.includes('/api/mihomo/proxy/proxies')) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_PROXIES_WITH_GROUPS) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(MOCK_PROXIES_WITH_GROUPS)
+        });
       } else {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true })
+        });
       }
     });
 
@@ -121,21 +153,39 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
     await expect(offlineText).toBeVisible();
   });
 
-  test('Observatory card is visible when there are groups and Mihomo is online', async ({ page }) => {
+  test('Observatory card is visible when there are groups and Mihomo is online', async ({
+    page
+  }) => {
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
       if (url.includes('/api/auth/me')) {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ authenticated: true, setup_required: false, csrf_token: 'mock-csrf' })
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf'
+          })
         });
       } else if (url.includes('/api/capabilities')) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: MOCK_CAPABILITIES_ONLINE }) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: MOCK_CAPABILITIES_ONLINE })
+        });
       } else if (url.includes('/api/mihomo/proxy/proxies')) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_PROXIES_WITH_GROUPS) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify(MOCK_PROXIES_WITH_GROUPS)
+        });
       } else {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true })
+        });
       }
     });
 
@@ -147,7 +197,9 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
     await expect(observatoryHeader).toBeVisible();
   });
 
-  test('Xray select "Основной прокси-выход" is populated dynamically from config/list', async ({ page }) => {
+  test('Xray select "Основной прокси-выход" is populated dynamically from config/list', async ({
+    page
+  }) => {
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
       const method = route.request().method();
@@ -155,7 +207,11 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ authenticated: true, setup_required: false, csrf_token: 'mock-csrf' })
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf'
+          })
         });
       } else if (url.includes('/api/capabilities')) {
         await route.fulfill({
@@ -177,8 +233,16 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify([
-            { name: '04_outbounds.json', path: '/opt/etc/xray/configs/04_outbounds.json', size: 100 },
-            { name: '04_outbounds.manual.json', path: '/opt/etc/xray/configs/04_outbounds.manual.json', size: 100 }
+            {
+              name: '04_outbounds.json',
+              path: '/opt/etc/xray/configs/04_outbounds.json',
+              size: 100
+            },
+            {
+              name: '04_outbounds.manual.json',
+              path: '/opt/etc/xray/configs/04_outbounds.manual.json',
+              size: 100
+            }
           ])
         });
       } else if (url.includes('/api/config/read')) {
@@ -207,18 +271,24 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
             body: JSON.stringify({
               routing: {
                 domainStrategy: 'IPIfNonMatch',
-                rules: [
-                  { type: 'field', network: 'tcp,udp', outboundTag: 'auto-trojan' }
-                ]
+                rules: [{ type: 'field', network: 'tcp,udp', outboundTag: 'auto-trojan' }]
               }
             })
           });
         } else {
           // Empty other config files
-          await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({})
+          });
         }
       } else {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true })
+        });
       }
     });
 
@@ -234,7 +304,7 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
 
     const options = select.locator('option');
     await expect(options).toHaveCount(2); // manual-vless and auto-trojan (system outbounds like 'direct', 'block', 'dns-out' are filtered out)
-    
+
     const optionTexts = await options.allInnerTexts();
     expect(optionTexts).toContain('auto-trojan');
     expect(optionTexts).toContain('manual-vless');
@@ -250,7 +320,11 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ authenticated: true, setup_required: false, csrf_token: 'mock-csrf' })
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf'
+          })
         });
       } else if (url.includes('/api/capabilities')) {
         await route.fulfill({
@@ -272,7 +346,11 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify([
-            { name: '04_outbounds.json', path: '/opt/etc/xray/configs/04_outbounds.json', size: 100 }
+            {
+              name: '04_outbounds.json',
+              path: '/opt/etc/xray/configs/04_outbounds.json',
+              size: 100
+            }
           ])
         });
       } else if (url.includes('/api/config/read')) {
@@ -300,16 +378,28 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
             })
           });
         } else {
-          await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({})
+          });
         }
       } else if (url.includes('/api/config/save') && method === 'POST') {
         const reqUrl = new URL(url);
         const path = reqUrl.searchParams.get('path') || '';
         const body = route.request().postDataJSON();
         savedFiles[path] = body;
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true })
+        });
       } else {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true })
+        });
       }
     });
 

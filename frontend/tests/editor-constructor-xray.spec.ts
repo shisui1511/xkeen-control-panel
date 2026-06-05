@@ -101,7 +101,6 @@ test.describe('Xray Constructor integration test suite', () => {
             csrf_token: 'mock-csrf'
           })
         });
-
       } else if (url.includes('/api/capabilities')) {
         await route.fulfill({
           status: 200,
@@ -117,7 +116,6 @@ test.describe('Xray Constructor integration test suite', () => {
             }
           })
         });
-
       } else if (url.includes('/api/config/read') && method === 'GET') {
         // ВАЖНО: проверяем именно GET (исправление бага Phase 15.1)
         const reqUrl = new URL(url);
@@ -127,7 +125,6 @@ test.describe('Xray Constructor integration test suite', () => {
           contentType: 'application/json',
           body: getMockXrayFile(path)
         });
-
       } else if (url.includes('/api/config/list')) {
         await route.fulfill({
           status: 200,
@@ -140,28 +137,24 @@ test.describe('Xray Constructor integration test suite', () => {
             }
           ])
         });
-
       } else if (url.includes('/api/config/save') && method === 'POST') {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({ success: true })
         });
-
       } else if (url.includes('/api/service/control') && method === 'POST') {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({ success: true })
         });
-
       } else if (url.includes('/api/templates/list')) {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify([])
         });
-
       } else {
         await route.fulfill({
           status: 200,
@@ -187,7 +180,9 @@ test.describe('Xray Constructor integration test suite', () => {
     await expect(page.locator('[data-testid="xray-section-tabs"]')).toBeVisible({ timeout: 5000 });
 
     // Вкладка Routing должна быть видима и активна по умолчанию
-    const routingTab = page.locator('[data-tab="routing"], button:has-text("Routing"), button:has-text("Маршрутизация")').first();
+    const routingTab = page
+      .locator('[data-tab="routing"], button:has-text("Routing"), button:has-text("Маршрутизация")')
+      .first();
     await expect(routingTab).toBeVisible({ timeout: 3000 });
   });
 
@@ -210,7 +205,9 @@ test.describe('Xray Constructor integration test suite', () => {
   // -------------------------------------------------------------------------
   // D-05 + D-19: Apply показывает confirm-диалог, restart не без подтверждения
   // -------------------------------------------------------------------------
-  test('Apply Changes показывает confirm-диалог перед сохранением (D-05, D-19)', async ({ page }) => {
+  test('Apply Changes показывает confirm-диалог перед сохранением (D-05, D-19)', async ({
+    page
+  }) => {
     await page.goto('/#/constructor');
 
     const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
@@ -256,7 +253,9 @@ test.describe('Xray Constructor integration test suite', () => {
     await expect(confirmDialog).toBeVisible({ timeout: 3000 });
 
     // Закрыть диалог без подтверждения
-    const cancelBtn = confirmDialog.locator('button:has-text("Отмена"), button:has-text("Cancel")').first();
+    const cancelBtn = confirmDialog
+      .locator('button:has-text("Отмена"), button:has-text("Cancel")')
+      .first();
     await cancelBtn.click();
 
     // service/control НЕ должен был быть вызван
@@ -274,9 +273,11 @@ test.describe('Xray Constructor integration test suite', () => {
     await xrayBtn.click();
 
     // Перейти на вкладку Outbounds
-    const outboundsTab = page.locator(
-      '[data-testid="xray-section-tabs"] button:has-text("Outbounds"), [data-tab="outbounds"]'
-    ).first();
+    const outboundsTab = page
+      .locator(
+        '[data-testid="xray-section-tabs"] button:has-text("Outbounds"), [data-tab="outbounds"]'
+      )
+      .first();
     await expect(outboundsTab).toBeVisible({ timeout: 5000 });
     await outboundsTab.click();
 

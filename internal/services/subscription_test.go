@@ -138,7 +138,6 @@ func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 	}
 }
 
-
 // TestBase64FallbackURLRaw: VMess link encoded with RawURLEncoding is parsed correctly.
 func TestBase64FallbackURLRaw(t *testing.T) {
 	vmess := map[string]interface{}{
@@ -1588,12 +1587,12 @@ func TestRefreshXray_DoesNotRestartXray(t *testing.T) {
 
 	// 3. Добавить Xray подписку
 	sub := Subscription{
-		ID:        "xray-sub",
-		Name:      "Xray Sub Test",
-		URL:       srv.URL,
-		Type:      "xray",
-		Enabled:   true,
-		Interval:  1,
+		ID:       "xray-sub",
+		Name:     "Xray Sub Test",
+		URL:      srv.URL,
+		Type:     "xray",
+		Enabled:  true,
+		Interval: 1,
 	}
 	if err := svc.Add(&sub); err != nil {
 		t.Fatal(err)
@@ -1633,7 +1632,6 @@ func TestRefreshXray_DoesNotRestartXray(t *testing.T) {
 	}
 }
 
-
 func TestRefreshMihomo_ConcurrentRace(t *testing.T) {
 	yamlContent := `proxies:
   - {name: node1, type: ss, server: 1.2.3.4, port: 443, cipher: chacha20-ietf-poly1305, password: test}
@@ -1672,4 +1670,3 @@ func TestRefreshMihomo_ConcurrentRace(t *testing.T) {
 	}
 	wg.Wait()
 }
-

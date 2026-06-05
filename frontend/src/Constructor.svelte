@@ -17,7 +17,9 @@
       class="tab-btn"
       class:active={kernel === 'xray'}
       aria-pressed={kernel === 'xray'}
-      on:click={() => { kernel = 'xray'; }}
+      on:click={() => {
+        kernel = 'xray';
+      }}
     >
       {$t('editor.kernel_xray')}
     </button>
@@ -25,7 +27,9 @@
       class="tab-btn"
       class:active={kernel === 'mihomo'}
       aria-pressed={kernel === 'mihomo'}
-      on:click={() => { kernel = 'mihomo'; }}
+      on:click={() => {
+        kernel = 'mihomo';
+      }}
     >
       {$t('editor.kernel_mihomo')}
     </button>
@@ -33,19 +37,9 @@
 
   <div class="constructor-body">
     {#if kernel === 'xray'}
-      <XrayRoutingConstructor
-        {onSwitchTab}
-        {selectedFile}
-        {onInsertIntoEditor}
-        {embedded}
-      />
+      <XrayRoutingConstructor {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} />
     {:else}
-      <MihomoGenerator
-        {onSwitchTab}
-        {selectedFile}
-        {onInsertIntoEditor}
-        {embedded}
-      />
+      <MihomoGenerator {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} />
     {/if}
   </div>
 </div>
@@ -73,7 +67,9 @@
     font-size: var(--font-size-sm, 0.8125rem);
     font-family: inherit;
     cursor: pointer;
-    transition: color var(--transition-fast), border-color var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      border-color var(--transition-fast);
     margin-bottom: -1px;
     min-height: 36px;
   }

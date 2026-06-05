@@ -726,7 +726,7 @@ func ReplaceMihomoTopLevelSection(content string, sectionName string, newContent
 			sb.WriteString(l)
 			sb.WriteString("\n")
 		}
-		
+
 		appended := sb.String()
 		if strings.HasSuffix(content, "\n") {
 			return content + strings.TrimPrefix(appended, "\n")
@@ -737,12 +737,9 @@ func ReplaceMihomoTopLevelSection(content string, sectionName string, newContent
 	var out []string
 	out = append(out, lines[:start]...)
 	out = append(out, sectionName+":")
-	for _, l := range newLines {
-		out = append(out, l)
-	}
+	out = append(out, newLines...)
 	if end < len(lines) {
 		out = append(out, lines[end:]...)
 	}
 	return strings.Join(out, "\n")
 }
-

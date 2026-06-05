@@ -298,7 +298,8 @@
   }
 
   function checkIfFinishedChecking() {
-    const isAnyChecking = Object.keys(statusIntervals).length > 0 || kernels.some((k) => k.status === 'checking');
+    const isAnyChecking =
+      Object.keys(statusIntervals).length > 0 || kernels.some((k) => k.status === 'checking');
     if (!isAnyChecking) {
       isKernelChecking.set(false);
     }
@@ -325,7 +326,12 @@
         clearInterval(statusIntervals[name]);
         delete statusIntervals[name];
         const idx = kernels.findIndex((k) => k.name === name);
-        if (idx >= 0 && (kernels[idx].status === 'checking' || kernels[idx].status === 'downloading' || kernels[idx].status === 'installing')) {
+        if (
+          idx >= 0 &&
+          (kernels[idx].status === 'checking' ||
+            kernels[idx].status === 'downloading' ||
+            kernels[idx].status === 'installing')
+        ) {
           kernels[idx] = { ...kernels[idx], status: 'failed' };
           kernels = [...kernels];
         }
@@ -335,7 +341,12 @@
       clearInterval(statusIntervals[name]);
       delete statusIntervals[name];
       const idx = kernels.findIndex((k) => k.name === name);
-      if (idx >= 0 && (kernels[idx].status === 'checking' || kernels[idx].status === 'downloading' || kernels[idx].status === 'installing')) {
+      if (
+        idx >= 0 &&
+        (kernels[idx].status === 'checking' ||
+          kernels[idx].status === 'downloading' ||
+          kernels[idx].status === 'installing')
+      ) {
         kernels[idx] = { ...kernels[idx], status: 'failed' };
         kernels = [...kernels];
       }
@@ -659,7 +670,8 @@
               <span class="badge badge-info">{$t('kernels.checking')}</span>
             {:else}
               {#if xray.has_update}
-                <span class="badge badge-warning">{$t('svc.update_badge')} {xray.latest_version}</span
+                <span class="badge badge-warning"
+                  >{$t('svc.update_badge')} {xray.latest_version}</span
                 >
               {:else if xray.current_version && xray.current_version !== 'not installed'}
                 <span class="badge">v{xray.current_version} · {$t('svc.actual_badge')}</span>
@@ -986,9 +998,7 @@
       <h2 class="card-title">
         {$t('svc.restart_log_title')}
         <span class="ct-actions">
-          <button
-            on:click={() => (restartLogExpanded = !restartLogExpanded)}
-          >
+          <button on:click={() => (restartLogExpanded = !restartLogExpanded)}>
             {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
           </button>
         </span>

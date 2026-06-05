@@ -112,26 +112,36 @@ test.describe('Xray Constructor integration test suite', () => {
     await xrayKernelBtn.click();
 
     // Добавляем новое правило маршрутизации
-    const addRuleBtn = page.locator('[data-testid="add-routing-rule"], button:has-text("Добавить правило")').first();
+    const addRuleBtn = page
+      .locator('[data-testid="add-routing-rule"], button:has-text("Добавить правило")')
+      .first();
     await expect(addRuleBtn).toBeVisible({ timeout: 5000 });
     await addRuleBtn.click();
 
     // Заполняем домены в новом правиле
     const domainInput = page
-      .locator('[data-testid="rule-domain-input"], input[placeholder*="домен"], input[placeholder*="domain"]')
+      .locator(
+        '[data-testid="rule-domain-input"], input[placeholder*="домен"], input[placeholder*="domain"]'
+      )
       .first();
     await expect(domainInput).toBeVisible({ timeout: 3000 });
     await domainInput.fill('geosite:youtube');
 
     // Выбираем outbound tag из dropdown
     const outboundSelect = page
-      .locator('[data-testid="rule-outbound-select"], select[data-testid="outbound-tag"], .rule-outbound-select')
+      .locator(
+        '[data-testid="rule-outbound-select"], select[data-testid="outbound-tag"], .rule-outbound-select'
+      )
       .first();
     await expect(outboundSelect).toBeVisible({ timeout: 3000 });
     await outboundSelect.selectOption('my-proxy');
 
     // Кликаем по кнопке Создать для подтверждения добавления правила
-    const saveRuleBtn = page.locator('.form-card button.btn-primary:has-text("Создать"), .form-card button:has-text("Create")').first();
+    const saveRuleBtn = page
+      .locator(
+        '.form-card button.btn-primary:has-text("Создать"), .form-card button:has-text("Create")'
+      )
+      .first();
     await expect(saveRuleBtn).toBeVisible({ timeout: 3000 });
     await saveRuleBtn.click();
 
@@ -153,7 +163,9 @@ test.describe('Xray Constructor integration test suite', () => {
 
     // Находим JSON preview-панель
     const previewPane = page
-      .locator('[data-testid="xray-json-preview"], .xray-routing-preview, .json-preview, .constructor-preview-pane')
+      .locator(
+        '[data-testid="xray-json-preview"], .xray-routing-preview, .json-preview, .constructor-preview-pane'
+      )
       .first();
     await expect(previewPane).toBeVisible({ timeout: 5000 });
 
@@ -187,7 +199,9 @@ test.describe('Xray Constructor integration test suite', () => {
 
     // Проверяем, что dropdown содержит теги из mock-файла + системные теги
     const outboundSelect = page
-      .locator('[data-testid="rule-outbound-select"], select[data-testid="outbound-tag"], .rule-outbound-select')
+      .locator(
+        '[data-testid="rule-outbound-select"], select[data-testid="outbound-tag"], .rule-outbound-select'
+      )
       .first();
     await expect(outboundSelect).toBeVisible({ timeout: 3000 });
 

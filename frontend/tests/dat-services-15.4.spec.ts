@@ -12,14 +12,20 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
     });
   });
 
-  test('Services page: restart log has ct-actions wrapper and kernels do not duplicate versions', async ({ page }) => {
+  test('Services page: restart log has ct-actions wrapper and kernels do not duplicate versions', async ({
+    page
+  }) => {
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
       if (url.includes('/api/auth/me')) {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ authenticated: true, setup_required: false, csrf_token: 'mock-csrf-token' })
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf-token'
+          })
         });
       } else if (url.includes('/api/capabilities')) {
         await route.fulfill({
@@ -42,7 +48,13 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
           contentType: 'application/json',
           body: JSON.stringify({
             success: true,
-            data: { is_running: true, active_kernel: 'xray', pid: 1234, uptime: '2h', binary_path: '/opt/sbin/xkeen' }
+            data: {
+              is_running: true,
+              active_kernel: 'xray',
+              pid: 1234,
+              uptime: '2h',
+              binary_path: '/opt/sbin/xkeen'
+            }
           })
         });
       } else if (url.includes('/api/kernels')) {
@@ -82,11 +94,20 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify([
-            { action: 'restart', success: true, timestamp: Math.floor(Date.now() / 1000) - 60, output: 'log output' }
+            {
+              action: 'restart',
+              success: true,
+              timestamp: Math.floor(Date.now() / 1000) - 60,
+              output: 'log output'
+            }
           ])
         });
       } else {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {} }) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: {} })
+        });
       }
     });
 
@@ -94,7 +115,9 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
     await page.waitForLoadState('networkidle');
 
     // Проверяем наличие .ct-actions обертки вокруг кнопки в заголовке истории перезапусков
-    const restartHeader = page.locator('h2.card-title').filter({ hasText: /(История запусков|Restart History)/ });
+    const restartHeader = page
+      .locator('h2.card-title')
+      .filter({ hasText: /(История запусков|Restart History)/ });
     await expect(restartHeader).toBeVisible();
     const ctActions = restartHeader.locator('.ct-actions');
     await expect(ctActions).toBeVisible();
@@ -117,9 +140,11 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
     expect(mihomoText).toContain('/opt/bin/mihomo');
   });
 
-  test('DAT Manager: dynamically filters files and counts stats correctly based on active kernel', async ({ page }) => {
+  test('DAT Manager: dynamically filters files and counts stats correctly based on active kernel', async ({
+    page
+  }) => {
     let currentActiveKernel = 'xray';
-    page.on('console', msg => console.log('PAGE LOG:', msg.text()));
+    page.on('console', (msg) => console.log('PAGE LOG:', msg.text()));
 
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
@@ -127,10 +152,16 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ authenticated: true, setup_required: false, csrf_token: 'mock-csrf-token' })
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf-token'
+          })
         });
       } else if (url.includes('/api/capabilities')) {
-        console.log(`[mock] /api/capabilities requested, returning active_kernel = ${currentActiveKernel}`);
+        console.log(
+          `[mock] /api/capabilities requested, returning active_kernel = ${currentActiveKernel}`
+        );
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -150,14 +181,46 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify([
-            { name: 'geoip.dat', path: '/xray/geoip.dat', size: 1024 * 1024, last_update: Math.floor(Date.now() / 1000) - 3600, exists: true, type: 'xray' },
-            { name: 'geosite.dat', path: '/xray/geosite.dat', size: 2 * 1024 * 1024, last_update: Math.floor(Date.now() / 1000) - 3600, exists: true, type: 'xray' },
-            { name: 'geoip.metadb', path: '/mihomo/geoip.metadb', size: 5 * 1024 * 1024, last_update: Math.floor(Date.now() / 1000) - 86400 * 45, exists: true, type: 'mihomo' }, // outdated
-            { name: 'custom.dat', path: '/custom.dat', size: 512, last_update: Math.floor(Date.now() / 1000) - 3600, exists: true, type: 'other' }
+            {
+              name: 'geoip.dat',
+              path: '/xray/geoip.dat',
+              size: 1024 * 1024,
+              last_update: Math.floor(Date.now() / 1000) - 3600,
+              exists: true,
+              type: 'xray'
+            },
+            {
+              name: 'geosite.dat',
+              path: '/xray/geosite.dat',
+              size: 2 * 1024 * 1024,
+              last_update: Math.floor(Date.now() / 1000) - 3600,
+              exists: true,
+              type: 'xray'
+            },
+            {
+              name: 'geoip.metadb',
+              path: '/mihomo/geoip.metadb',
+              size: 5 * 1024 * 1024,
+              last_update: Math.floor(Date.now() / 1000) - 86400 * 45,
+              exists: true,
+              type: 'mihomo'
+            }, // outdated
+            {
+              name: 'custom.dat',
+              path: '/custom.dat',
+              size: 512,
+              last_update: Math.floor(Date.now() / 1000) - 3600,
+              exists: true,
+              type: 'other'
+            }
           ])
         });
       } else {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, data: {} }) });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: {} })
+        });
       }
     });
 

@@ -57,7 +57,13 @@ test.describe('Templates modal integration test suite', () => {
           body: JSON.stringify(
             isMihomo
               ? [{ name: 'config.yaml', path: '/opt/etc/mihomo/config.yaml', size: 1500 }]
-              : [{ name: 'xray-config.json', path: '/opt/etc/xray/configs/xray-config.json', size: 1200 }]
+              : [
+                  {
+                    name: 'xray-config.json',
+                    path: '/opt/etc/xray/configs/xray-config.json',
+                    size: 1200
+                  }
+                ]
           )
         });
       } else if (url.includes('/api/config/read')) {
@@ -73,7 +79,8 @@ test.describe('Templates modal integration test suite', () => {
           body: JSON.stringify([
             {
               name: 'Xray: Routing — Selective (GeoSite/GeoIP)',
-              description: 'Selective routing: GeoSite/GeoIP → PROXY_TAG, private → direct, ads → block',
+              description:
+                'Selective routing: GeoSite/GeoIP → PROXY_TAG, private → direct, ads → block',
               type: 'xray',
               filename: 'selective-routing.json'
             },
@@ -117,11 +124,17 @@ test.describe('Templates modal integration test suite', () => {
     await expect(fileRow).toBeVisible({ timeout: 5000 });
     await fileRow.click();
     // Ждём появления kebab-кнопки (отображается только когда файл выбран)
-    const kebabBtn = page.locator('button[aria-label="Дополнительные действия"], button[title="Дополнительные действия"]').first();
+    const kebabBtn = page
+      .locator(
+        'button[aria-label="Дополнительные действия"], button[title="Дополнительные действия"]'
+      )
+      .first();
     await expect(kebabBtn).toBeVisible({ timeout: 5000 });
     await kebabBtn.click();
     // Кликаем на кнопку «Шаблоны» в раскрывшемся меню
-    const templatesMenuItem = page.locator('.kebab-item:has-text("Шаблоны"), .kebab-dropdown button:has-text("Шаблоны")').first();
+    const templatesMenuItem = page
+      .locator('.kebab-item:has-text("Шаблоны"), .kebab-dropdown button:has-text("Шаблоны")')
+      .first();
     await expect(templatesMenuItem).toBeVisible({ timeout: 3000 });
     await templatesMenuItem.click();
     // Ждём открытия модалки
