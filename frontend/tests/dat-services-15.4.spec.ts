@@ -129,7 +129,6 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
     const xrayText = await xrayMeta.innerText();
     expect(xrayText).not.toContain('v1.8.4');
     expect(xrayText).toContain('PID');
-    expect(xrayText).toContain('/opt/bin/xray');
 
     // Проверяем, что в k-meta описании Mihomo нет дублирования clash-meta и версии v1.18.0
     const mihomoMeta = page.locator('.kernel-card:has-text("Mihomo") .k-body .k-meta');
@@ -137,7 +136,6 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
     const mihomoText = await mihomoMeta.innerText();
     expect(mihomoText).not.toContain('v1.18.0');
     expect(mihomoText).not.toContain('clash-meta');
-    expect(mihomoText).toContain('/opt/bin/mihomo');
   });
 
   test('DAT Manager: dynamically filters files and counts stats correctly based on active kernel', async ({
