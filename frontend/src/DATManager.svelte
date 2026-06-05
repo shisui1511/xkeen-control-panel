@@ -300,7 +300,7 @@
       </button>
       <button
         class="btn btn-primary"
-        on:click={updateAll}
+        on:click={() => updateAll()}
         disabled={globalUpdating || loading || updatingFile !== null}
         title={$t('dat.update_all')}
       >
