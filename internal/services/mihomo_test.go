@@ -47,13 +47,28 @@ func TestMihomoService_Status_Stopped(t *testing.T) {
 func TestMihomoService_Status_Running(t *testing.T) {
 	svc := NewMihomoService("/opt/bin/mihomo", "", "/opt/etc/mihomo")
 
-	// Create dummy pidof that returns a pid
+	// Redirect procDir to a temp dir so isShortLivedOrHelperProcess won't fail to read cmdline
 	tmpDir := t.TempDir()
-	pidofPath := filepath.Join(tmpDir, "pidof")
+	origProcDir := procDir
+	procDir = tmpDir
+	defer func() { procDir = origProcDir }()
+
+	// Create a dummy cmdline for PID 12345
+	pidDir := filepath.Join(tmpDir, "12345")
+	if err := os.MkdirAll(pidDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte("/opt/bin/mihomo\x00-c\x00/opt/etc/mihomo/config.yaml\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create dummy pidof that returns a pid
+	binDir := t.TempDir()
+	pidofPath := filepath.Join(binDir, "pidof")
 	os.WriteFile(pidofPath, []byte("#!/bin/sh\necho \"12345\"\n"), 0755)
 
 	oldPath := os.Getenv("PATH")
-	os.Setenv("PATH", tmpDir+":"+oldPath)
+	os.Setenv("PATH", binDir+":"+oldPath)
 	defer os.Setenv("PATH", oldPath)
 
 	status, err := svc.Status()

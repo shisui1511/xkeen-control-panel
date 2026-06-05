@@ -30,8 +30,15 @@ func (s *MihomoService) Status() (string, error) {
 	if err != nil {
 		return "stopped", nil
 	}
-	if len(out) > 0 {
-		return "running (pid: " + strings.TrimSpace(string(out)) + ")", nil
+	pids := strings.Fields(strings.TrimSpace(string(out)))
+	var activePids []string
+	for _, pidStr := range pids {
+		if !isShortLivedOrHelperProcess(pidStr) {
+			activePids = append(activePids, pidStr)
+		}
+	}
+	if len(activePids) > 0 {
+		return "running (pid: " + strings.Join(activePids, " ") + ")", nil
 	}
 	return "stopped", nil
 }

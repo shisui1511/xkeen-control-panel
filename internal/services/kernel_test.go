@@ -508,3 +508,68 @@ func TestCheckLatest_SemverHasUpdate(t *testing.T) {
 	}
 }
 
+func TestIsShortLivedOrHelperProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+	origProcDir := procDir
+	procDir = tmpDir
+	defer func() { procDir = origProcDir }()
+
+	// Case 1: Helper process with "version" flag
+	pid1 := "123"
+	if err := os.MkdirAll(filepath.Join(tmpDir, pid1), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, pid1, "cmdline"), []byte("/opt/sbin/xray\x00version\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Case 2: Helper process with "-v" flag
+	pid2 := "456"
+	if err := os.MkdirAll(filepath.Join(tmpDir, pid2), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, pid2, "cmdline"), []byte("/opt/sbin/mihomo\x00-v\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Case 3: Regular daemon process
+	pid3 := "789"
+	if err := os.MkdirAll(filepath.Join(tmpDir, pid3), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, pid3, "cmdline"), []byte("/opt/sbin/xray\x00-config\x00/opt/etc/xray.json\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Case 4: Non-existent PID
+	pid4 := "999"
+
+	if !isShortLivedOrHelperProcess(pid1) {
+		t.Errorf("expected PID %s to be classified as short lived/helper", pid1)
+	}
+	if !isShortLivedOrHelperProcess(pid2) {
+		t.Errorf("expected PID %s to be classified as short lived/helper", pid2)
+	}
+	if isShortLivedOrHelperProcess(pid3) {
+		t.Errorf("expected PID %s to be classified as daemon process", pid3)
+	}
+	if !isShortLivedOrHelperProcess(pid4) {
+		t.Errorf("expected PID %s (non-existent) to return true", pid4)
+	}
+}
+
+func TestKernelService_List_Order(t *testing.T) {
+	svc := NewKernelService()
+	list := svc.List()
+	if len(list) < 2 {
+		t.Fatalf("expected at least 2 kernels, got %d", len(list))
+	}
+	if list[0].Name != "xray" {
+		t.Errorf("expected first kernel to be xray, got %s", list[0].Name)
+	}
+	if list[1].Name != "mihomo" {
+		t.Errorf("expected second kernel to be mihomo, got %s", list[1].Name)
+	}
+}
+
+

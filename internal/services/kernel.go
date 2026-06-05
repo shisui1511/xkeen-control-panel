@@ -23,6 +23,8 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
+var procDir = "/proc"
+
 // allowedKernelRoots are the only directories where kernel binaries and backups may live.
 var allowedKernelRoots = []string{
 	"/opt/sbin/",
@@ -280,9 +282,34 @@ type KernelInfo struct {
 	verCache *versionCache
 }
 
+func isShortLivedOrHelperProcess(pidStr string) bool {
+	cmdlinePath := filepath.Join(procDir, pidStr, "cmdline")
+	data, err := os.ReadFile(cmdlinePath)
+	if err != nil {
+		return true
+	}
+	args := strings.Split(string(data), "\x00")
+	blacklist := map[string]bool{
+		"version":   true,
+		"-v":        true,
+		"-t":        true,
+		"-test":     true,
+		"--version": true,
+		"-version":  true,
+		"-h":        true,
+		"--help":    true,
+	}
+	for _, arg := range args {
+		if blacklist[strings.TrimSpace(arg)] {
+			return true
+		}
+	}
+	return false
+}
+
 // kernelProcessStatus detects whether the kernel process is running.
-// Method 1: scan /proc/*/exe readlinks for the binary basename.
-// Method 2 (fallback): run pidof <basename> if /proc appears empty.
+// Method 1: scan procDir/*/exe readlinks for the binary basename.
+// Method 2 (fallback): run pidof <basename> if procDir appears empty.
 // Returns "not_installed", "not_accessible", "running", "stopped", or "unknown".
 func kernelProcessStatus(binaryPath string) string {
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
@@ -301,20 +328,37 @@ func kernelProcessStatus(binaryPath string) string {
 
 	base := filepath.Base(binaryPath)
 
-	// Method 1: /proc/*/exe readlink (no external tools required)
-	matches, _ := filepath.Glob("/proc/*/exe")
+	// Method 1: procDir/*/exe readlink (no external tools required)
+	matches, _ := filepath.Glob(filepath.Join(procDir, "*/exe"))
 	for _, link := range matches {
 		target, err := os.Readlink(link)
 		if err == nil && filepath.Base(target) == base {
+			parts := strings.Split(link, "/")
+			if len(parts) >= 3 {
+				if isShortLivedOrHelperProcess(parts[2]) {
+					continue
+				}
+			}
 			return "running"
 		}
 	}
 
-	// Method 2: pidof fallback when /proc gives no entries
+	// Method 2: pidof fallback when procDir gives no entries
 	if len(matches) == 0 {
 		out, err := exec.Command("pidof", base).Output()
-		if err == nil && len(strings.TrimSpace(string(out))) > 0 {
-			return "running"
+		if err == nil {
+			pids := strings.Fields(strings.TrimSpace(string(out)))
+			hasRunning := false
+			for _, pidStr := range pids {
+				if !isShortLivedOrHelperProcess(pidStr) {
+					hasRunning = true
+					break
+				}
+			}
+			if hasRunning {
+				return "running"
+			}
+			return "stopped"
 		}
 		if err != nil {
 			// pidof itself unavailable — cannot determine state
@@ -339,15 +383,19 @@ func kernelProcessStatusDetailed(binaryPath string) (status string, pid int, upt
 
 	base := filepath.Base(binaryPath)
 
-	// Method 1: /proc/*/exe readlink (no external tools required)
-	matches, _ := filepath.Glob("/proc/*/exe")
+	// Method 1: procDir/*/exe readlink (no external tools required)
+	matches, _ := filepath.Glob(filepath.Join(procDir, "*/exe"))
 	for _, link := range matches {
 		target, err := os.Readlink(link)
 		if err == nil && filepath.Base(target) == base {
 			parts := strings.Split(link, "/")
 			if len(parts) >= 3 {
-				if p, err := strconv.Atoi(parts[2]); err == nil {
-					uptimeStr := getProcUptime(parts[2])
+				pidStr := parts[2]
+				if isShortLivedOrHelperProcess(pidStr) {
+					continue
+				}
+				if p, err := strconv.Atoi(pidStr); err == nil {
+					uptimeStr := getProcUptime(pidStr)
 					return "running", p, uptimeStr
 				}
 			}
@@ -355,15 +403,18 @@ func kernelProcessStatusDetailed(binaryPath string) (status string, pid int, upt
 		}
 	}
 
-	// Method 2: pidof fallback when /proc gives no entries
+	// Method 2: pidof fallback when procDir gives no entries
 	if len(matches) == 0 {
 		out, err := exec.Command("pidof", base).Output()
 		if err == nil {
-			pidStr := strings.TrimSpace(string(out))
-			firstPid := strings.Split(pidStr, " ")[0]
-			if p, err := strconv.Atoi(firstPid); err == nil {
-				uptimeStr := getProcUptime(firstPid)
-				return "running", p, uptimeStr
+			pids := strings.Fields(strings.TrimSpace(string(out)))
+			for _, pidStr := range pids {
+				if !isShortLivedOrHelperProcess(pidStr) {
+					if p, err := strconv.Atoi(pidStr); err == nil {
+						uptimeStr := getProcUptime(pidStr)
+						return "running", p, uptimeStr
+					}
+				}
 			}
 		}
 	}
@@ -372,7 +423,7 @@ func kernelProcessStatusDetailed(binaryPath string) (status string, pid int, upt
 }
 
 func getProcUptime(pidStr string) string {
-	procPath := filepath.Join("/proc", pidStr)
+	procPath := filepath.Join(procDir, pidStr)
 	st, err := os.Stat(procPath)
 	if err != nil {
 		return ""
@@ -504,9 +555,12 @@ func (s *KernelService) List() []KernelInfo {
 	for _, k := range s.kernels {
 		s.resolveBinaryPath(k)
 	}
-	snapshots := make([]KernelInfo, 0, len(s.kernels))
-	for _, k := range s.kernels {
-		snapshots = append(snapshots, *k)
+	order := []string{"xray", "mihomo"}
+	snapshots := make([]KernelInfo, 0, len(order))
+	for _, name := range order {
+		if k, ok := s.kernels[name]; ok {
+			snapshots = append(snapshots, *k)
+		}
 	}
 	s.mu.Unlock()
 
