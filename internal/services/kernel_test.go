@@ -424,6 +424,12 @@ func TestCompareSemver(t *testing.T) {
 		{"error", "1.18.0", -1},
 		{"1.18.0", "not installed", 1},
 		{"garbage", "garbage", 0},
+		{"1.18.0+entware", "1.18.0", 0},
+		{"1.18.0", "1.18.0+entware", 0},
+		{"1.18.0-rc.10", "1.18.0-rc.2", 1},
+		{"1.18.0-rc.2", "1.18.0-rc.10", -1},
+		{"1.18.0-rc.2", "1.18.0-rc.2", 0},
+		{"1.18.0-rc.2+build1", "1.18.0-rc.2+build2", 0},
 	}
 
 	sign := func(n int) int {

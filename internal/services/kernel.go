@@ -121,11 +121,72 @@ type versionCache struct {
 	expires time.Time
 }
 
-var semverRegexp = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:-(.+))?$`)
+var semverRegexp = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+(.+))?$`)
 
 func isValidSemver(v string) bool {
 	v = strings.TrimPrefix(strings.TrimPrefix(v, "v"), "V")
 	return semverRegexp.MatchString(v)
+}
+
+func comparePrerelease(pre1, pre2 string) int {
+	parts1 := strings.Split(pre1, ".")
+	parts2 := strings.Split(pre2, ".")
+
+	isNumeric := func(s string) bool {
+		if s == "" {
+			return false
+		}
+		for _, r := range s {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+		return true
+	}
+
+	minLen := len(parts1)
+	if len(parts2) < minLen {
+		minLen = len(parts2)
+	}
+
+	for i := 0; i < minLen; i++ {
+		p1 := parts1[i]
+		p2 := parts2[i]
+
+		if p1 == p2 {
+			continue
+		}
+
+		num1 := isNumeric(p1)
+		num2 := isNumeric(p2)
+
+		if num1 && num2 {
+			val1, _ := strconv.Atoi(p1)
+			val2, _ := strconv.Atoi(p2)
+			if val1 != val2 {
+				if val1 > val2 {
+					return 1
+				}
+				return -1
+			}
+		} else if num1 {
+			return -1
+		} else if num2 {
+			return 1
+		} else {
+			res := strings.Compare(p1, p2)
+			if res != 0 {
+				return res
+			}
+		}
+	}
+
+	if len(parts1) > len(parts2) {
+		return 1
+	} else if len(parts1) < len(parts2) {
+		return -1
+	}
+	return 0
 }
 
 func compareSemver(v1, v2 string) int {
@@ -186,7 +247,7 @@ func compareSemver(v1, v2 string) int {
 		return 1
 	}
 	if pre1 != "" && pre2 != "" {
-		return strings.Compare(pre1, pre2)
+		return comparePrerelease(pre1, pre2)
 	}
 
 	return 0
