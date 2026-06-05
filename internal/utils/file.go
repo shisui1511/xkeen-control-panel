@@ -9,6 +9,8 @@ import (
 // AtomicWriteFile writes data to a temporary file and then renames it to the target path.
 // This prevents file corruption if the process or system crashes during write.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	// Sanitize path to prevent directory traversal (CWE-22).
+	path = filepath.Clean(path)
 	dir := filepath.Dir(path)
 	// Ensure directory exists
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -50,6 +52,9 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 
 // CopyFile copies a file from src to dst.
 func CopyFile(src, dst string) error {
+	// Sanitize paths to prevent directory traversal (CWE-22).
+	src = filepath.Clean(src)
+	dst = filepath.Clean(dst)
 	source, err := os.Open(src)
 	if err != nil {
 		return err

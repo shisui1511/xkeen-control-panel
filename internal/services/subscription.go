@@ -446,8 +446,9 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 						}
 						s.mihomoMu.Unlock()
 
-						// Delete provider file
-						providerFilePath := filepath.Join(configDir, "providers", fmt.Sprintf("%s.yaml", id))
+						// Delete provider file; sanitize id to prevent path traversal (CWE-22).
+						safeID := filepath.Base(id)
+						providerFilePath := filepath.Join(configDir, "providers", fmt.Sprintf("%s.yaml", safeID))
 						os.Remove(providerFilePath)
 
 						// Reset Mihomo specific fields in existing subscription
