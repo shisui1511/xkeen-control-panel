@@ -401,10 +401,13 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 }
 
 func (s *SubscriptionService) Update(id string, sub *Subscription) error {
+	safeID := filepath.Base(id)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.subscriptions {
-		if s.subscriptions[i].ID == id {
+		if s.subscriptions[i].ID == safeID {
 			// Partial update: preserve ID and all runtime-fetched data.
 			// Only overwrite user-editable config fields from the form.
 			existing := &s.subscriptions[i]
@@ -434,9 +437,9 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 						s.mihomoMu.Lock()
 						rawConfig, err := os.ReadFile(configPath)
 						if err == nil {
-							newConfig := ReplaceMihomoProxyProvider(string(rawConfig), id, "")
+							newConfig := ReplaceMihomoProxyProvider(string(rawConfig), safeID, "")
 							for _, group := range existing.MihomoGroups {
-								newConfig = UpdateMihomoGroupProviders(newConfig, group, id, true)
+								newConfig = UpdateMihomoGroupProviders(newConfig, group, safeID, true)
 							}
 							newConfig = ReplaceMihomoProxies(newConfig, existing.ProxyNames, nil)
 							for _, group := range existing.MihomoGroups {
@@ -447,7 +450,6 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 						s.mihomoMu.Unlock()
 
 						// Delete provider file; sanitize id to prevent path traversal (CWE-22).
-						safeID := filepath.Base(id)
 						providersDir := filepath.Join(configDir, "providers")
 						providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", safeID))
 						// Explicit guard: path must be within providersDir (CWE-22).
@@ -485,12 +487,15 @@ func (s *SubscriptionService) Delete(id string) error {
 	if strings.Contains(id, "..") || strings.Contains(id, "/") || strings.Contains(id, "\\") {
 		return fmt.Errorf("invalid subscription ID format")
 	}
+	safeID := filepath.Base(id)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Find subscription
 	var sub *Subscription
 	for i := range s.subscriptions {
-		if s.subscriptions[i].ID == id {
+		if s.subscriptions[i].ID == safeID {
 			sub = &s.subscriptions[i]
 			break
 		}
@@ -502,7 +507,7 @@ func (s *SubscriptionService) Delete(id string) error {
 	// Remove from list
 	newList := make([]Subscription, 0, len(s.subscriptions)-1)
 	for _, s := range s.subscriptions {
-		if s.ID != id {
+		if s.ID != safeID {
 			newList = append(newList, s)
 		}
 	}
@@ -522,9 +527,9 @@ func (s *SubscriptionService) Delete(id string) error {
 		s.mihomoMu.Lock()
 		rawConfig, err := os.ReadFile(configPath)
 		if err == nil {
-			newConfig := ReplaceMihomoProxyProvider(string(rawConfig), id, "")
+			newConfig := ReplaceMihomoProxyProvider(string(rawConfig), safeID, "")
 			for _, group := range sub.MihomoGroups {
-				newConfig = UpdateMihomoGroupProviders(newConfig, group, id, true)
+				newConfig = UpdateMihomoGroupProviders(newConfig, group, safeID, true)
 			}
 			// Также почистим старые прокси на всякий случай
 			newConfig = ReplaceMihomoProxies(newConfig, sub.ProxyNames, nil)
@@ -535,30 +540,36 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 		s.mihomoMu.Unlock()
 
-		// Удалить файл провайдера
-		providerFilePath := filepath.Join(configDir, "providers", fmt.Sprintf("%s.yaml", id))
-		os.Remove(providerFilePath)
+		// Удалить файл провайдера; санитизируем путь к файлу провайдера (CWE-22)
+		providersDir := filepath.Join(configDir, "providers")
+		providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", safeID))
+		if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
+			os.Remove(providerFilePath)
+		}
 	}
 
 	// Delete diagnostic files
-	os.Remove(s.subPath("sub_" + id + "_raw.txt"))
-	os.Remove(s.subPath("sub_" + id + "_headers.json"))
-	os.Remove(s.subPath("sub_" + id + "_parse_report.json"))
+	os.Remove(s.subPath("sub_" + safeID + "_raw.txt"))
+	os.Remove(s.subPath("sub_" + safeID + "_headers.json"))
+	os.Remove(s.subPath("sub_" + safeID + "_parse_report.json"))
 
 	return s.save()
 }
 
 func (s *SubscriptionService) Refresh(id string) error {
+	safeID := filepath.Base(id)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+
 	// Prevent concurrent refreshes for the same ID
-	if _, loaded := s.ongoing.LoadOrStore(id, struct{}{}); loaded {
+	if _, loaded := s.ongoing.LoadOrStore(safeID, struct{}{}); loaded {
 		return fmt.Errorf("refresh already in progress for this subscription")
 	}
-	defer s.ongoing.Delete(id)
+	defer s.ongoing.Delete(safeID)
 
 	subCopy, ok := func() (Subscription, bool) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		sub := s.GetLocked(id)
+		sub := s.GetLocked(safeID)
 		if sub == nil {
 			return Subscription{}, false
 		}
@@ -578,7 +589,7 @@ func (s *SubscriptionService) Refresh(id string) error {
 	// Persist last_error so frontend can show error state
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if live := s.GetLocked(id); live != nil {
+	if live := s.GetLocked(safeID); live != nil {
 		if refreshErr != nil {
 			live.LastError = refreshErr.Error()
 		} else {
@@ -1125,7 +1136,10 @@ func skipReasonForScheme(line string) string {
 }
 
 func (s *SubscriptionService) saveDebugFiles(id string, body []byte, headers http.Header, report *ParseReport) {
-	rawPath := s.subPath("sub_" + id + "_raw.txt")
+	safeID := filepath.Base(id)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+
+	rawPath := s.subPath("sub_" + safeID + "_raw.txt")
 	_ = utils.AtomicWriteFile(rawPath, body, 0600)
 
 	hdrMap := make(map[string][]string)
@@ -1134,14 +1148,14 @@ func (s *SubscriptionService) saveDebugFiles(id string, body []byte, headers htt
 	}
 	hdrData, err := json.MarshalIndent(hdrMap, "", "  ")
 	if err == nil {
-		hdrPath := s.subPath("sub_" + id + "_headers.json")
+		hdrPath := s.subPath("sub_" + safeID + "_headers.json")
 		_ = utils.AtomicWriteFile(hdrPath, hdrData, 0600)
 	}
 
 	if report != nil {
 		repData, err := json.MarshalIndent(report, "", "  ")
 		if err == nil {
-			repPath := s.subPath("sub_" + id + "_parse_report.json")
+			repPath := s.subPath("sub_" + safeID + "_parse_report.json")
 			_ = utils.AtomicWriteFile(repPath, repData, 0600)
 		}
 	}
@@ -1152,12 +1166,15 @@ func (s *SubscriptionService) GetRaw(id string) (string, map[string][]string, er
 	if strings.Contains(id, "..") || strings.Contains(id, "/") || strings.Contains(id, "\\") {
 		return "", nil, fmt.Errorf("invalid subscription ID format")
 	}
+	safeID := filepath.Base(id)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	exists := false
 	for _, sub := range s.subscriptions {
-		if sub.ID == id {
+		if sub.ID == safeID {
 			exists = true
 			break
 		}
@@ -1166,13 +1183,13 @@ func (s *SubscriptionService) GetRaw(id string) (string, map[string][]string, er
 		return "", nil, fmt.Errorf("subscription not found")
 	}
 
-	rawPath := s.subPath("sub_" + id + "_raw.txt")
+	rawPath := s.subPath("sub_" + safeID + "_raw.txt")
 	bodyBytes, err := os.ReadFile(rawPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("raw response not found: %w", err)
 	}
 
-	hdrPath := s.subPath("sub_" + id + "_headers.json")
+	hdrPath := s.subPath("sub_" + safeID + "_headers.json")
 	hdrBytes, err := os.ReadFile(hdrPath)
 	if err != nil {
 		return string(bodyBytes), nil, nil
@@ -1191,12 +1208,15 @@ func (s *SubscriptionService) GetParseReport(id string) (*ParseReport, error) {
 	if strings.Contains(id, "..") || strings.Contains(id, "/") || strings.Contains(id, "\\") {
 		return nil, fmt.Errorf("invalid subscription ID format")
 	}
+	safeID := filepath.Base(id)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	exists := false
 	for _, sub := range s.subscriptions {
-		if sub.ID == id {
+		if sub.ID == safeID {
 			exists = true
 			break
 		}
@@ -1205,7 +1225,7 @@ func (s *SubscriptionService) GetParseReport(id string) (*ParseReport, error) {
 		return nil, fmt.Errorf("subscription not found")
 	}
 
-	repPath := s.subPath("sub_" + id + "_parse_report.json")
+	repPath := s.subPath("sub_" + safeID + "_parse_report.json")
 	repBytes, err := os.ReadFile(repPath)
 	if err != nil {
 		return nil, fmt.Errorf("parse report not found: %w", err)
@@ -1336,11 +1356,15 @@ func (s *SubscriptionService) applyFilters(outbounds []Outbound, sub *Subscripti
 }
 
 func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {
-	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", sub.ID))
+	safeID := filepath.Base(sub.ID)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", safeID))
 }
 
 func (s *SubscriptionService) getRoutingFragmentPath(sub *Subscription) string {
-	return filepath.Join(s.configDir, fmt.Sprintf("05_routing.%s.json", sub.ID))
+	safeID := filepath.Base(sub.ID)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+	return filepath.Join(s.configDir, fmt.Sprintf("05_routing.%s.json", safeID))
 }
 
 // writeRoutingFragment записывает XRay confdir-фрагмент с balancer и routing-правилом.
