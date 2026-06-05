@@ -3,7 +3,7 @@
   import { fade, slide } from 'svelte/transition';
   import { t, currentLang } from './i18n';
   $: ru = $currentLang === 'ru';
-  import { showToast } from './stores';
+  import { showToast, capabilities } from './stores';
   import Icon from './lib/components/Icon.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import EditorIcon from './lib/components/icons/Editor.svelte';
@@ -1751,17 +1751,14 @@
           </div>
 
           <!-- Xray Section -->
-          <div class="editor-files" style="margin-bottom:12px;">
-            <div
-              class="editor-files-head"
-              style="display:flex;align-items:center;justify-content:space-between;"
-            >
-              <span>Xray</span>
-              <span
-                style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
-                >{xrayDir}</span
-              >
-            </div>
+          <details class="editor-files nav-group" style="margin-bottom:12px;" open={$capabilities?.active_kernel !== 'mihomo'}>
+            <summary class="editor-files-head" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+              <span class="group-ttl">Xray</span>
+              <span style="display:flex;align-items:center;gap:6px;">
+                <span style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;">{xrayDir}</span>
+                <span class="nav-group-arrow">›</span>
+              </span>
+            </summary>
             <div class="file-list">
               {#each filteredXrayFiles as file}
                 <button
@@ -1781,20 +1778,17 @@
                 >
               {/each}
             </div>
-          </div>
+          </details>
 
           <!-- Mihomo Section -->
-          <div class="editor-files">
-            <div
-              class="editor-files-head"
-              style="display:flex;align-items:center;justify-content:space-between;"
-            >
-              <span>Mihomo</span>
-              <span
-                style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
-                >{mihomoDir}</span
-              >
-            </div>
+          <details class="editor-files nav-group" open={$capabilities?.active_kernel !== 'xray'}>
+            <summary class="editor-files-head" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+              <span class="group-ttl">Mihomo</span>
+              <span style="display:flex;align-items:center;gap:6px;">
+                <span style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;">{mihomoDir}</span>
+                <span class="nav-group-arrow">›</span>
+              </span>
+            </summary>
             <div class="file-list">
               {#each filteredMihomoFiles as file}
                 <button
@@ -1814,7 +1808,7 @@
                 >
               {/each}
             </div>
-          </div>
+          </details>
         </div>
       {/if}
 

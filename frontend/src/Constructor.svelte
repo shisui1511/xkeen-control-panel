@@ -1,5 +1,7 @@
 <script lang="ts">
   import { t } from './i18n';
+  import { capabilities } from './stores';
+  import { onMount } from 'svelte';
   import XrayRoutingConstructor from './XrayRoutingConstructor.svelte';
   import MihomoGenerator from './MihomoGenerator.svelte';
 
@@ -9,6 +11,17 @@
   export let embedded: boolean = false;
 
   let kernel: 'xray' | 'mihomo' = 'xray';
+  let kernelInitialized = false;
+
+  onMount(() => {
+    const unsubscribe = capabilities.subscribe((caps) => {
+      if (!kernelInitialized && caps?.active_kernel) {
+        kernel = caps.active_kernel as 'xray' | 'mihomo';
+        kernelInitialized = true;
+      }
+    });
+    return unsubscribe;
+  });
 </script>
 
 <div class="constructor-wrapper">
@@ -19,6 +32,7 @@
       aria-pressed={kernel === 'xray'}
       on:click={() => {
         kernel = 'xray';
+        kernelInitialized = true;
       }}
     >
       {$t('editor.kernel_xray')}
@@ -29,6 +43,7 @@
       aria-pressed={kernel === 'mihomo'}
       on:click={() => {
         kernel = 'mihomo';
+        kernelInitialized = true;
       }}
     >
       {$t('editor.kernel_mihomo')}
