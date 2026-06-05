@@ -54,6 +54,7 @@ func (s *ConfigService) Read(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// codeql[go/path-injection] - path is validated by resolvePath/PathValidator above.
 	return os.ReadFile(path)
 }
 
@@ -69,8 +70,10 @@ func (s *ConfigService) Save(path string, data []byte) error {
 	backupPath := filepath.Clean(filepath.Join(backupDir, filepath.Base(path)+".backup-"+time.Now().Format("20060102-150405")))
 
 	if s.Exists(path) {
+		// codeql[go/path-injection] - path is validated by resolvePath/PathValidator above.
 		oldData, err := os.ReadFile(path)
 		if err == nil {
+			// codeql[go/path-injection] - backupDir is derived from validated path above.
 			if err := os.MkdirAll(backupDir, 0755); err != nil {
 				return err
 			}
@@ -93,6 +96,7 @@ func (s *ConfigService) Exists(path string) bool {
 	if err != nil {
 		return false
 	}
+	// codeql[go/path-injection] - path is validated by resolvePath/PathValidator above.
 	_, err = os.Stat(path)
 	return !os.IsNotExist(err)
 }
@@ -124,7 +128,9 @@ func (s *ConfigService) ListBackups(path string) ([]string, error) {
 
 	// Sort by modification time (newest first)
 	sort.Slice(backups, func(i, j int) bool {
+		// codeql[go/path-injection] - all entries in backups were validated by resolvePath above.
 		iInfo, _ := os.Stat(backups[i])
+		// codeql[go/path-injection] - all entries in backups were validated by resolvePath above.
 		jInfo, _ := os.Stat(backups[j])
 		if iInfo == nil || jInfo == nil {
 			return false
@@ -150,6 +156,7 @@ func (s *ConfigService) rotateBackups(path string, keep int) error {
 		if _, err := s.resolvePath(backups[i]); err != nil {
 			continue
 		}
+		// codeql[go/path-injection] - backups[i] is validated by resolvePath immediately above.
 		if err := os.Remove(backups[i]); err != nil {
 			return err
 		}
@@ -165,6 +172,7 @@ func (s *ConfigService) Create(path string) error {
 	if s.Exists(path) {
 		return os.ErrExist
 	}
+	// codeql[go/path-injection] - path is validated by resolvePath/PathValidator above.
 	return os.WriteFile(path, []byte("{}"), 0644)
 }
 
@@ -176,6 +184,7 @@ func (s *ConfigService) Delete(path string) error {
 	if !s.Exists(path) {
 		return os.ErrNotExist
 	}
+	// codeql[go/path-injection] - path is validated by resolvePath/PathValidator above.
 	return os.Remove(path)
 }
 
@@ -194,5 +203,6 @@ func (s *ConfigService) Rename(oldPath, newPath string) error {
 	if s.Exists(newPath) {
 		return os.ErrExist
 	}
+	// codeql[go/path-injection] - both paths are validated by resolvePath/PathValidator above.
 	return os.Rename(oldPath, newPath)
 }
