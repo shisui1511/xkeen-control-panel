@@ -239,23 +239,38 @@
     }
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      await fetch(`/api/kernels/${name}/check`, {
+      const res = await fetch(`/api/kernels/${name}/check`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
       });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
       startPolling(name);
-    } catch (e) {}
+    } catch (e: any) {
+      showToast('error', `${$t('svc.action_error')}: ${e.message || e}`);
+      const idx = kernels.findIndex((k) => k.name === name);
+      if (idx >= 0) {
+        kernels[idx] = { ...kernels[idx], status: 'idle' };
+        kernels = [...kernels];
+      }
+    }
   }
 
   async function installKernel(name: string) {
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      await fetch(`/api/kernels/${name}/install`, {
+      const res = await fetch(`/api/kernels/${name}/install`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
       });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
       startPolling(name);
-    } catch (e) {}
+    } catch (e: any) {
+      showToast('error', `${$t('svc.action_error')}: ${e.message || e}`);
+    }
   }
 
   function downloadKernelBinary(name: string) {
@@ -295,10 +310,23 @@
           delete statusIntervals[name];
           fetchKernels();
         }
+      } else {
+        clearInterval(statusIntervals[name]);
+        delete statusIntervals[name];
+        const idx = kernels.findIndex((k) => k.name === name);
+        if (idx >= 0 && (kernels[idx].status === 'checking' || kernels[idx].status === 'downloading' || kernels[idx].status === 'installing')) {
+          kernels[idx] = { ...kernels[idx], status: 'failed' };
+          kernels = [...kernels];
+        }
       }
     } catch (e) {
       clearInterval(statusIntervals[name]);
       delete statusIntervals[name];
+      const idx = kernels.findIndex((k) => k.name === name);
+      if (idx >= 0 && (kernels[idx].status === 'checking' || kernels[idx].status === 'downloading' || kernels[idx].status === 'installing')) {
+        kernels[idx] = { ...kernels[idx], status: 'failed' };
+        kernels = [...kernels];
+      }
     }
   }
 
