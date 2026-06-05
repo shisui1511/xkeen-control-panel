@@ -22,7 +22,7 @@
   let availableSources = $state<string[]>([]);
 
   // Предопределённые вкладки источников
-  const KNOWN_SOURCES = ['xkeen', 'xray', 'mihomo'];
+  const KNOWN_SOURCES = ['xkeen', 'xray', 'mihomo', 'xcp'];
 
   const filteredLogs = $derived.by(() => {
     let result = logs;
@@ -56,6 +56,8 @@
         source = 'mihomo';
       } else if (tag.includes('xkeen-detached') || tag.includes('xkeen.log') || tag === 'xkeen') {
         source = 'xkeen';
+      } else if (tag.includes('xcp.log') || tag === 'xcp') {
+        source = 'xcp';
       } else {
         source = bracketMatch[1];
       }
