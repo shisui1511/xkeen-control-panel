@@ -948,8 +948,12 @@
   </div>
 
   <!-- Auto-start card -->
+  <!-- Note: toggles below persist to localStorage only — not yet connected to backend API -->
   <div class="card" style="margin-bottom:18px;">
     <h2 class="card-title">{$t('svc.section_autostart')}</h2>
+    <div class="alert alert-warning mb-2" style="font-size:12px;padding:6px 10px;">
+      {$t('svc.autostart_local_only')}
+    </div>
     <div class="field-row" style="border-bottom:1px solid var(--border-light);">
       <div>
         <div class="lbl">{$t('svc.autostart_keenetic_label')}</div>
