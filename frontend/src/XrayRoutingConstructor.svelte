@@ -95,7 +95,7 @@
   let importTag = $state('');
   let importStep = $state(1); // 1: Input link, 2: Preview & Confirm tag
   let importLoading = $state(false);
-  let parsedNode = $state<any>(null);
+  let importNodes = $state<{ link: string; outbound: any; tag: string }[]>([]);
   let importErrorMsg = $state('');
 
   // Form states
@@ -722,13 +722,25 @@
     return '';
   }
 
+  function generateUniqueTag(baseTag: string, existing: string[]): string {
+    let tag = baseTag.trim() || 'node';
+    if (!existing.includes(tag)) {
+      return tag;
+    }
+    let counter = 1;
+    while (existing.includes(`${tag}-${counter}`)) {
+      counter++;
+    }
+    return `${tag}-${counter}`;
+  }
+
   function openImportModal() {
     showImportModal = true;
     importLink = '';
     importTag = '';
     importStep = 1;
     importLoading = false;
-    parsedNode = null;
+    importNodes = [];
     importErrorMsg = '';
   }
 
@@ -747,10 +759,6 @@
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
-    if (lines.length > 1) {
-      importErrorMsg = $t('subscr.import_error_single_only');
-      return;
-    }
 
     importErrorMsg = '';
     importLoading = true;
@@ -763,7 +771,7 @@
           'Content-Type': 'application/json',
           'X-CSRF-Token': csrfToken || ''
         },
-        body: JSON.stringify({ links: [importLink.trim()] })
+        body: JSON.stringify({ links: lines })
       });
 
       const data = await res.json();
@@ -773,16 +781,32 @@
       }
 
       if (data.data && data.data.length > 0) {
-        const result = data.data[0];
-        if (result.error) {
-          importErrorMsg = result.error;
-        } else if (result.outbound) {
-          parsedNode = result.outbound;
-          importTag = parsedNode.tag || '';
-          importStep = 2;
-        } else {
-          importErrorMsg = $t('subscr.import_error_invalid');
+        for (const result of data.data) {
+          if (result.error) {
+            importErrorMsg = result.error;
+            return;
+          }
         }
+
+        const newImportNodes = [];
+        const existingTags = [...outboundTags];
+
+        for (let i = 0; i < data.data.length; i++) {
+          const result = data.data[i];
+          if (result.outbound) {
+            const baseTag = result.outbound.tag || 'node';
+            const uniqueTag = generateUniqueTag(baseTag, existingTags);
+            existingTags.push(uniqueTag);
+            newImportNodes.push({
+              link: lines[i],
+              outbound: result.outbound,
+              tag: uniqueTag
+            });
+          }
+        }
+
+        importNodes = newImportNodes;
+        importStep = 2;
       } else {
         importErrorMsg = $t('subscr.import_error_invalid');
       }
@@ -799,16 +823,18 @@
 
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/outbound/import', {
+      const items = importNodes.map((item) => ({
+        link: item.link,
+        tag: item.tag.trim()
+      }));
+
+      const res = await fetch('/api/outbound/import-bulk', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-CSRF-Token': csrfToken || ''
         },
-        body: JSON.stringify({
-          link: importLink.trim(),
-          tag: importTag.trim()
-        })
+        body: JSON.stringify({ items })
       });
 
       const data = await res.json();
@@ -817,7 +843,7 @@
         return;
       }
 
-      showToast('success', $t('subscr.import_success'));
+      showToast('success', $t('subscr.import_success', { count: importNodes.length }));
       showImportModal = false;
       outboundTags = await loadXrayOutboundTags();
     } catch (e: any) {
@@ -1691,50 +1717,29 @@
               style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
             ></textarea>
           </div>
-        {:else if importStep === 2 && parsedNode}
+        {:else if importStep === 2 && importNodes.length > 0}
           <div class="preview-section">
-            <h3 class="preview-title" style="margin: 0 0 8px 0; font-size: 14px;">
+            <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
               {$t('subscr.import_preview_title')}
             </h3>
-            <div class="preview-table" style="display: flex; flex-direction: column; gap: 6px;">
-              <div class="preview-row" style="display: flex; justify-content: space-between;">
-                <span class="preview-label" style="color: var(--fg-secondary);"
-                  >{$t('subscr.import_proto')}</span
-                >
-                <span class="preview-value code" style="font-family: monospace;"
-                  >{parsedNode.protocol}</span
-                >
-              </div>
-              <div class="preview-row" style="display: flex; justify-content: space-between;">
-                <span class="preview-label" style="color: var(--fg-secondary);"
-                  >{$t('subscr.import_server')}</span
-                >
-                <span class="preview-value code" style="font-family: monospace;"
-                  >{getNodeServer(parsedNode)}</span
-                >
-              </div>
-              <div class="preview-row" style="display: flex; justify-content: space-between;">
-                <span class="preview-label" style="color: var(--fg-secondary);"
-                  >{$t('subscr.import_port')}</span
-                >
-                <span class="preview-value code" style="font-family: monospace;"
-                  >{getNodePort(parsedNode)}</span
-                >
-              </div>
-            </div>
-
-            <div class="form-group" style="margin-top: 16px;">
-              <label for="import-tag" class="form-label" style="display: block; margin-bottom: 6px;"
-                >{$t('subscr.import_tag_custom')}</label
-              >
-              <input
-                id="import-tag"
-                type="text"
-                class="input"
-                bind:value={importTag}
-                placeholder={$t('subscr.import_tag_placeholder')}
-                style="width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
-              />
+            <div class="preview-list" style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;">
+              {#each importNodes as item, idx}
+                <div class="preview-item-card" style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+                  <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary);">
+                    <span><strong style="color: var(--fg);">{item.outbound.protocol}</strong> · {getNodeServer(item.outbound)}:{getNodePort(item.outbound)}</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <label class="form-label" style="margin: 0; font-size: 12px; flex-shrink: 0;" for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label>
+                    <input
+                      id="import-tag-{idx}"
+                      type="text"
+                      class="input"
+                      bind:value={item.tag}
+                      style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
+                    />
+                  </div>
+                </div>
+              {/each}
             </div>
           </div>
         {/if}
@@ -1759,7 +1764,7 @@
             {#if importLoading}
               <span class="spinner-xs" style="margin-right: 6px;"></span>
             {/if}
-            {$t('subscr.import_btn_confirm')}
+            {ru ? `Импортировать (${importNodes.length})` : `Import (${importNodes.length})`}
           </button>
         {/if}
       </div>
