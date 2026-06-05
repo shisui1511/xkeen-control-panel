@@ -411,6 +411,82 @@
     }
   }
 
+  function buildEditorState(doc: string, lang: ReturnType<typeof json>, schemaExts: ReturnType<typeof getSchemaExtensions>): EditorState {
+    return EditorState.create({
+      doc,
+      extensions: [
+        lineNumbers(),
+        highlightActiveLineGutter(),
+        highlightSpecialChars(),
+        history(),
+        foldGutter(),
+        drawSelection(),
+        dropCursor(),
+        EditorState.allowMultipleSelections.of(true),
+        indentOnInput(),
+        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        bracketMatching(),
+        closeBrackets(),
+        autocompletion(),
+        rectangularSelection(),
+        crosshairCursor(),
+        highlightActiveLine(),
+        highlightSelectionMatches(),
+        keymap.of([
+          {
+            key: 'Mod-s',
+            run: () => {
+              checkBeforeSave();
+              return true;
+            }
+          },
+          ...closeBracketsKeymap,
+          ...defaultKeymap,
+          ...searchKeymap,
+          ...historyKeymap,
+          ...foldKeymap,
+          ...completionKeymap,
+          ...lintKeymap
+        ]),
+        lang,
+        EditorView.lineWrapping,
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            const currentContent = update.state.doc.toString();
+            const activeT = tabs.find((t) => t.path === selectedFile);
+            if (activeT) {
+              activeT.currentContent = currentContent;
+              activeT.isDirty = currentContent !== activeT.originalContent;
+              isDirty = activeT.isDirty;
+
+              if (activeT.isPreview) {
+                activeT.isPreview = false;
+                tabs = [...tabs];
+              }
+
+              if (isDirty) {
+                localStorage.setItem(`editor.draft.${selectedFile}`, currentContent);
+              } else {
+                localStorage.removeItem(`editor.draft.${selectedFile}`);
+              }
+            }
+          }
+          if (update.selectionSet || update.docChanged) {
+            const pos = update.state.selection.main.head;
+            const line = update.state.doc.lineAt(pos);
+            cursorLine = line.number;
+            cursorCol = pos - line.from + 1;
+
+            // Обновить хлебные крошки
+            const isYaml = selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml');
+            breadcrumbs = buildPathAtCursor(update.state, pos, isYaml);
+          }
+        }),
+        schemaCompartment.of(schemaExts)
+      ]
+    });
+  }
+
   async function switchTab(path: string) {
     if (activeTabPath === path) return;
 
@@ -439,79 +515,7 @@
       const lang = path.endsWith('.yaml') || path.endsWith('.yml') ? yaml() : json();
       const schemaExts = getSchemaExtensions(path, expertMode);
 
-      const state = EditorState.create({
-        doc: targetTab.currentContent,
-        extensions: [
-          lineNumbers(),
-          highlightActiveLineGutter(),
-          highlightSpecialChars(),
-          history(),
-          foldGutter(),
-          drawSelection(),
-          dropCursor(),
-          EditorState.allowMultipleSelections.of(true),
-          indentOnInput(),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-          bracketMatching(),
-          closeBrackets(),
-          autocompletion(),
-          rectangularSelection(),
-          crosshairCursor(),
-          highlightActiveLine(),
-          highlightSelectionMatches(),
-          keymap.of([
-            {
-              key: 'Mod-s',
-              run: () => {
-                checkBeforeSave();
-                return true;
-              }
-            },
-            ...closeBracketsKeymap,
-            ...defaultKeymap,
-            ...searchKeymap,
-            ...historyKeymap,
-            ...foldKeymap,
-            ...completionKeymap,
-            ...lintKeymap
-          ]),
-          lang,
-          EditorView.lineWrapping,
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) {
-              const currentContent = update.state.doc.toString();
-              const activeT = tabs.find((t) => t.path === selectedFile);
-              if (activeT) {
-                activeT.currentContent = currentContent;
-                activeT.isDirty = currentContent !== activeT.originalContent;
-                isDirty = activeT.isDirty;
-
-                if (activeT.isPreview) {
-                  activeT.isPreview = false;
-                  tabs = [...tabs];
-                }
-
-                if (isDirty) {
-                  localStorage.setItem(`editor.draft.${selectedFile}`, currentContent);
-                } else {
-                  localStorage.removeItem(`editor.draft.${selectedFile}`);
-                }
-              }
-            }
-            if (update.selectionSet || update.docChanged) {
-              const pos = update.state.selection.main.head;
-              const line = update.state.doc.lineAt(pos);
-              cursorLine = line.number;
-              cursorCol = pos - line.from + 1;
-
-              // Обновить хлебные крошки
-              const isYaml = selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml');
-              breadcrumbs = buildPathAtCursor(update.state, pos, isYaml);
-            }
-          }),
-          schemaCompartment.of(schemaExts)
-        ]
-      });
+      const state = buildEditorState(targetTab.currentContent, lang, schemaExts);
 
       originalContent = targetTab.originalContent;
       isDirty = targetTab.isDirty;
@@ -601,7 +605,6 @@
   }
 
   async function loadFile(path: string, isPreviewClick = true) {
-    console.log('loadFile called with path:', path, 'isPreviewClick:', isPreviewClick);
     if (!path) return;
 
     const existingTab = tabs.find((t) => t.path === path);
@@ -704,79 +707,7 @@
       const lang = path.endsWith('.yaml') || path.endsWith('.yml') ? yaml() : json();
       const schemaExts = getSchemaExtensions(path, expertMode);
 
-      const state = EditorState.create({
-        doc: content,
-        extensions: [
-          lineNumbers(),
-          highlightActiveLineGutter(),
-          highlightSpecialChars(),
-          history(),
-          foldGutter(),
-          drawSelection(),
-          dropCursor(),
-          EditorState.allowMultipleSelections.of(true),
-          indentOnInput(),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-          bracketMatching(),
-          closeBrackets(),
-          autocompletion(),
-          rectangularSelection(),
-          crosshairCursor(),
-          highlightActiveLine(),
-          highlightSelectionMatches(),
-          keymap.of([
-            {
-              key: 'Mod-s',
-              run: () => {
-                checkBeforeSave();
-                return true;
-              }
-            },
-            ...closeBracketsKeymap,
-            ...defaultKeymap,
-            ...searchKeymap,
-            ...historyKeymap,
-            ...foldKeymap,
-            ...completionKeymap,
-            ...lintKeymap
-          ]),
-          lang,
-          EditorView.lineWrapping,
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) {
-              const currentContent = update.state.doc.toString();
-              const activeT = tabs.find((t) => t.path === selectedFile);
-              if (activeT) {
-                activeT.currentContent = currentContent;
-                activeT.isDirty = currentContent !== activeT.originalContent;
-                isDirty = activeT.isDirty;
-
-                if (activeT.isPreview) {
-                  activeT.isPreview = false;
-                  tabs = [...tabs];
-                }
-
-                if (isDirty) {
-                  localStorage.setItem(`editor.draft.${selectedFile}`, currentContent);
-                } else {
-                  localStorage.removeItem(`editor.draft.${selectedFile}`);
-                }
-              }
-            }
-            if (update.selectionSet || update.docChanged) {
-              const pos = update.state.selection.main.head;
-              const line = update.state.doc.lineAt(pos);
-              cursorLine = line.number;
-              cursorCol = pos - line.from + 1;
-
-              // Обновить хлебные крошки
-              const isYaml = selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml');
-              breadcrumbs = buildPathAtCursor(update.state, pos, isYaml);
-            }
-          }),
-          schemaCompartment.of(schemaExts)
-        ]
-      });
+      const state = buildEditorState(content, lang, schemaExts);
 
       originalContent = content;
       isDirty = false;
@@ -950,6 +881,7 @@
 
   function getDiffGroups(oldStr: string, newStr: string): DiffGroup[] {
     const changes = getDiff(oldStr, newStr);
+    if (changes.length === 0) return [];
     const groups: DiffGroup[] = [];
 
     let currentType = changes[0]?.type;
@@ -1082,12 +1014,6 @@
   }
 
   async function handleSaveAndApply() {
-    console.log(
-      'handleSaveAndApply called. selectedFile:',
-      selectedFile,
-      'editorView:',
-      !!editorView
-    );
     if (!selectedFile || !editorView) return;
     applyLoading = true;
     await tick();
@@ -1272,7 +1198,7 @@
       await loadFiles();
       await loadFile(path);
     } catch (e) {
-      showToast('error', $t('editor.create_error') + ': ' + e.message);
+      showToast('error', $t('editor.create_error') + ': ' + (e as any)?.message);
     }
   }
 
@@ -1295,7 +1221,7 @@
       backups = [];
       await loadFiles();
     } catch (e) {
-      showToast('error', $t('editor.delete_error') + ': ' + e.message);
+      showToast('error', $t('editor.delete_error') + ': ' + (e as any)?.message);
     }
   }
 
@@ -1322,7 +1248,7 @@
       await loadFiles();
       await loadFile(newPath);
     } catch (e) {
-      showToast('error', $t('editor.rename_error') + ': ' + e.message);
+      showToast('error', $t('editor.rename_error') + ': ' + (e as any)?.message);
     }
   }
 
@@ -1401,7 +1327,7 @@
         showToast('info', 'No quick fixes needed');
       }
     } catch (e) {
-      showToast('error', 'Quick fix error: ' + e.message);
+      showToast('error', 'Quick fix error: ' + (e as any)?.message);
     }
   }
 
@@ -1545,7 +1471,7 @@
             {
               address: genAddress,
               port: genPort,
-              method: '256-gcm',
+              method: 'aes-256-gcm',
               password: genUUID
             }
           ]
