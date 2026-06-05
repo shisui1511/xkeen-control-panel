@@ -56,7 +56,6 @@ jobs:
           version: v1.64
           working-directory: .
           args: --timeout=5m
-          install-mode: goinstall
 
       - name: Run govulncheck
         uses: golang/govulncheck-action@v1
