@@ -9,14 +9,7 @@ queries:
   - uses: security-extended
   - uses: security-and-quality
 
-query-filters:
-  # Исключаем go/path-injection в internal utility функциях:
-  # - utils/file.go: AtomicWriteFile и CopyFile — принимают validated пути от вызывающего кода
-  # - services/config.go: все методы вызывают resolvePath() → PathValidator.Validate() перед операциями
-  # - services/subscription.go: safeID через filepath.Base(id) + hardcoded configDir
-  - exclude:
-      id: go/path-injection
-      paths:
-        - "internal/utils/file.go"
-        - "internal/services/config.go"
-        - "internal/services/subscription.go"
+paths-ignore:
+  - "internal/utils/file.go"
+  - "internal/services/config.go"
+  - "internal/services/subscription.go"

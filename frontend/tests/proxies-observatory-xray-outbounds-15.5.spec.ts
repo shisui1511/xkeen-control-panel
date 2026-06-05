@@ -202,7 +202,6 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
   }) => {
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
-      const method = route.request().method();
       if (url.includes('/api/auth/me')) {
         await route.fulfill({
           status: 200,
