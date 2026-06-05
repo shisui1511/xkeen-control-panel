@@ -1,10 +1,17 @@
 .PHONY: build run clean test lint fmt deps keenetic-arm64 keenetic-mipsle keenetic-mips compress
 
 BINARY_NAME=xcp
-PKG_VERSION := $(shell grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4 || echo "dev")
-GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo "")
-GIT_DIRTY := $(shell git status --porcelain 2>/dev/null)
-VERSION ?= v$(PKG_VERSION)$(if $(GIT_SHA),-$(GIT_SHA))$(if $(GIT_DIRTY),-dirty)
+EXACT_TAG := $(shell git describe --tags --exact-match HEAD 2>/dev/null)
+IS_STABLE := $(shell echo "$(EXACT_TAG)" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$')
+
+ifneq ($(IS_STABLE),)
+  VERSION ?= $(EXACT_TAG)
+else
+  PKG_VERSION := $(shell grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4 || echo "dev")
+  GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo "")
+  GIT_DIRTY := $(shell git status --porcelain 2>/dev/null)
+  VERSION ?= v$(PKG_VERSION)$(if $(GIT_SHA),-$(GIT_SHA))$(if $(GIT_DIRTY),-dirty)
+endif
 
 deps:
 	go mod download
