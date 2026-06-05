@@ -117,10 +117,10 @@ test.describe('Templates modal integration test suite', () => {
   // Вспомогательная функция: открыть файл и затем модалку шаблонов через kebab-меню
   async function openTemplatesModal(page: any) {
     await page.goto('/#/editor');
-    // Ждём загрузки списка файлов
-    await page.waitForSelector('.file-row', { timeout: 8000 });
-    // Кликнуть на первый файл в списке чтобы появился toolbar с kebab
-    const fileRow = page.locator('.file-row').first();
+    // Ждём загрузки списка файлов — только из открытых секций (active_kernel определяет, какая details[open])
+    await page.waitForSelector('details[open] .file-row', { timeout: 8000 });
+    // Кликнуть на первый видимый файл в списке чтобы появился toolbar с kebab
+    const fileRow = page.locator('details[open] .file-row').first();
     await expect(fileRow).toBeVisible({ timeout: 5000 });
     await fileRow.click();
     // Ждём появления kebab-кнопки (отображается только когда файл выбран)
