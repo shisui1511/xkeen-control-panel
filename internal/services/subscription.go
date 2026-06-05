@@ -448,9 +448,12 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 
 						// Delete provider file; sanitize id to prevent path traversal (CWE-22).
 						safeID := filepath.Base(id)
-						providerFilePath := filepath.Join(configDir, "providers", fmt.Sprintf("%s.yaml", safeID))
-						// codeql[go/path-injection] - providerFilePath uses filepath.Base(id) which strips any traversal.
-						os.Remove(providerFilePath)
+						providersDir := filepath.Join(configDir, "providers")
+						providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", safeID))
+						// Explicit guard: path must be within providersDir (CWE-22).
+						if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
+							os.Remove(providerFilePath)
+						}
 
 						// Reset Mihomo specific fields in existing subscription
 						existing.ProxyNames = nil
