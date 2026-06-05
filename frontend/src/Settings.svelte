@@ -223,6 +223,9 @@
 
   async function createBackup() {
     if (!selectedFile) return;
+    // Backup is created as a side-effect of ConfigSave (internal/handlers/config.go):
+    // the handler always writes a timestamped .backup-* file before overwriting.
+    // There is no dedicated POST /api/config/backup endpoint.
     try {
       const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(selectedFile)}`);
       if (!readRes.ok) {
