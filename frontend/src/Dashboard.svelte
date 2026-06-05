@@ -99,6 +99,7 @@
   let subsLastUpdated = '';
   let totalProxiesCount = 0;
   let activeProxiesCount = 0;
+  let subscriptionProxiesCount = 0;
   let statsLastFetched = '';
 
   async function fetchSubscriptionSummary() {
@@ -109,7 +110,7 @@
         const subs = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
         activeSubscriptionsCount = subs.filter((s: any) => s.enabled).length;
         totalSubsCount = subs.length;
-        totalProxiesCount = subs.reduce((acc: number, s: any) => acc + (s.proxy_count || 0), 0);
+        subscriptionProxiesCount = subs.reduce((acc: number, s: any) => acc + (s.proxy_count || 0), 0);
         // Find most recent update
         const dates = subs.map((s: any) => s.last_updated || s.updated_at || '').filter(Boolean);
         if (dates.length > 0) {
@@ -852,7 +853,9 @@
                   ><b>{$t('nav.proxies')}</b><span class="s"
                     >{totalProxiesCount > 0
                       ? `${totalProxiesCount} узлов · ${activeProxiesCount} активных`
-                      : 'Mihomo узлы и группы'}</span
+                      : subscriptionProxiesCount > 0
+                        ? `${subscriptionProxiesCount} из подписок`
+                        : 'Mihomo узлы и группы'}</span
                   ></span
                 >
               </div>
