@@ -108,39 +108,23 @@ jobs:
               IS_STABLE="true"
             else
               SKIP="false"
-              LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
-              if [ -z "$LATEST_TAG" ]; then
-                BASE="0.0.0"
-                RANGE="HEAD"
+              
+              # Read version from frontend/package.json
+              PKG_VERSION=$(grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4 || echo "0.0.0")
+              if [[ "$PKG_VERSION" == v* ]]; then
+                VERSION="$PKG_VERSION"
               else
-                BASE=${LATEST_TAG#v}
-                RANGE="${LATEST_TAG}..HEAD"
+                VERSION="v$PKG_VERSION"
               fi
-              
-              MAJOR=$(echo "$BASE" | cut -d. -f1)
-              MINOR=$(echo "$BASE" | cut -d. -f2)
-              PATCH=$(echo "$BASE" | cut -d. -f3)
-
-              # Анализируем коммиты для определения типа инкремента (Conventional Commits)
-              COMMITS=$(git log "$RANGE" --pretty=format:"%s%b" 2>/dev/null || git log --pretty=format:"%s%b")
-              
-              if echo "$COMMITS" | grep -qE "BREAKING CHANGE|[a-zA-Z]+(\(.*\))?!:"; then
-                MAJOR=$((MAJOR + 1))
-                MINOR=0
-                PATCH=0
-                echo "Detected BREAKING CHANGE, bumping MAJOR"
-              elif echo "$COMMITS" | grep -qE "^feat(\(.*\))?:"; then
-                MINOR=$((MINOR + 1))
-                PATCH=0
-                echo "Detected feature, bumping MINOR"
-              else
-                PATCH=$((PATCH + 1))
-                echo "No major/minor changes, bumping PATCH"
-              fi
-              
-              VERSION="v${MAJOR}.${MINOR}.${PATCH}-dev"
               IS_STABLE="false"
               
+              # Calculate commit count since the last stable tag for build notes
+              LATEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -v -- '-' | sort -V | tail -1 2>/dev/null)
+              if [ -n "$LATEST_TAG" ]; then
+                RANGE="${LATEST_TAG}..HEAD"
+              else
+                RANGE="HEAD"
+              fi
               COMMIT_COUNT=$(git rev-list "$RANGE" --count 2>/dev/null || git rev-list HEAD --count)
               echo "commit_count=${COMMIT_COUNT}" >> $GITHUB_OUTPUT
             fi
@@ -307,12 +291,7 @@ jobs:
             artifacts/xcp_mips/xcp_${VERSION}_mips.sha256
 
           # Удаляем rolling pre-release этой же версии (cleanup)
-          _BASE="${VERSION#v}"
-          _MAJOR=$(echo "$_BASE" | cut -d. -f1)
-          _MINOR=$(echo "$_BASE" | cut -d. -f2)
-          _PATCH=$(echo "$_BASE" | cut -d. -f3)
-          _NEXT_PATCH=$((_PATCH + 1))
-          ROLLING_TAG="v${_MAJOR}.${_MINOR}.${_NEXT_PATCH}-dev"
+          ROLLING_TAG="${VERSION}-dev"
           echo "Cleaning up rolling pre-release ${ROLLING_TAG}..."
           gh release delete "${ROLLING_TAG}" --yes 2>/dev/null || true
           git push origin --delete "refs/tags/${ROLLING_TAG}" 2>/dev/null || true

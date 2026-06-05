@@ -1,15 +1,20 @@
 .PHONY: build run clean test lint fmt deps keenetic-arm64 keenetic-mipsle keenetic-mips compress
 
 BINARY_NAME=xcp
-VERSION?=$(shell git fetch --tags --prune --force 2>/dev/null || true; git describe --tags --always 2>/dev/null || grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4 || echo "dev")
+PKG_VERSION := $(shell grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4 || echo "dev")
+GIT_SHA := $(shell git rev-parse --short HEAD 2>/dev/null || echo "")
+GIT_DIRTY := $(shell git status --porcelain 2>/dev/null)
+VERSION ?= v$(PKG_VERSION)$(if $(GIT_SHA),-$(GIT_SHA))$(if $(GIT_DIRTY),-dirty)
 
 deps:
 	go mod download
 	go mod tidy
 
 update-version:
-	@echo "Syncing package.json version with Git tag ($(VERSION))..."
-	@cd frontend && npm version $(shell echo $(VERSION) | sed 's/^v//') --no-git-tag-version --allow-same-version 2>/dev/null || true
+	@echo "Building version $(VERSION)"
+
+version:
+	@echo $(VERSION)
 
 build: update-version
 	go build -buildvcs=false -ldflags "-s -w -X main.Version=$(VERSION)" -o build/$(BINARY_NAME) ./cmd/xcp
