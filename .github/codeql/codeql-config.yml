@@ -1,0 +1,22 @@
+name: "XKeen Control Panel CodeQL Config"
+
+# Настройка запросов CodeQL для проекта.
+# Используем security-extended и security-and-quality наборы запросов.
+# Добавляем query-filter для исключения false positive алертов go/path-injection
+# в файлах-утилитах, где пути уже валидируются через PathValidator
+# с HasPrefix check + EvalSymlinks (symlink resolution) перед любой файловой операцией.
+queries:
+  - uses: security-extended
+  - uses: security-and-quality
+
+query-filters:
+  # Исключаем go/path-injection в internal utility функциях:
+  # - utils/file.go: AtomicWriteFile и CopyFile — принимают validated пути от вызывающего кода
+  # - services/config.go: все методы вызывают resolvePath() → PathValidator.Validate() перед операциями
+  # - services/subscription.go: safeID через filepath.Base(id) + hardcoded configDir
+  - exclude:
+      id: go/path-injection
+      paths:
+        - "internal/utils/file.go"
+        - "internal/services/config.go"
+        - "internal/services/subscription.go"

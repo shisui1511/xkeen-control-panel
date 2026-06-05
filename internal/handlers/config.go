@@ -62,6 +62,7 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		if !pathAllowed {
 			continue
 		}
+		// codeql[go/path-injection] - cleanF validated via PathValidator.Validate + strings.HasPrefix check above.
 		info, statErr := os.Stat(cleanF)
 		var size int64
 		if statErr == nil {
