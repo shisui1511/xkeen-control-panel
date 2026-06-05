@@ -143,9 +143,7 @@
     : [];
   $: isMihomoAutoEdited =
     selectedFile.includes('/mihomo/') &&
-    (selectedFile.endsWith('config.yaml') ||
-      selectedFile.endsWith('config.yml') ||
-      selectedFile.endsWith('default.yaml'));
+    (selectedFile.endsWith('config.yaml') || selectedFile.endsWith('config.yml'));
   let showSidebar = true;
 
   // Status bar cursor position

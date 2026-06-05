@@ -68,9 +68,12 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		if statErr == nil {
 			size = info.Size()
 		}
+		// Use original glob path (f) for Name/Path so symlinks are shown by their
+		// link name (e.g. config.yaml), not the resolved target (e.g. profiles/default.yaml).
+		// cleanF is used only for the security check and os.Stat above.
 		res = append(res, ConfigFileInfo{
-			Name: filepath.Base(cleanF),
-			Path: cleanF,
+			Name: filepath.Base(f),
+			Path: f,
 			Size: size,
 		})
 	}
