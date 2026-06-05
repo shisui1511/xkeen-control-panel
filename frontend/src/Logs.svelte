@@ -10,6 +10,7 @@
     raw: string;
   }
 
+  let destroyed = false;
   let logs = $state<LogEntry[]>([]);
   let ws = $state<WebSocket | null>(null);
   let connected = $state(false);
@@ -93,9 +94,9 @@
       if (['info', 'inf', 'information'].includes(lowerTag)) {
         level = 'info';
       } else if (['warning', 'warn', 'wrn'].includes(lowerTag)) {
-        level = 'warn';
+        level = 'warning';
       } else if (['error', 'err'].includes(lowerTag)) {
-        level = 'err';
+        level = 'error';
       } else if (['debug', 'dbg'].includes(lowerTag)) {
         level = 'debug';
       } else if (!source) {
@@ -122,9 +123,9 @@
     if (!level) {
       const lowerText = text.toLowerCase();
       if (lowerText.includes('error') || lowerText.includes('err:')) {
-        level = 'err';
+        level = 'error';
       } else if (lowerText.includes('warning') || lowerText.includes('warn:')) {
-        level = 'warn';
+        level = 'warning';
       } else if (lowerText.includes('debug') || lowerText.includes('dbg:')) {
         level = 'debug';
       } else {
@@ -184,8 +185,8 @@
       const msg = $t('logs.disconnected');
       logs = [...logs, parseLogLine(`[xkeen] ${msg}`)];
 
-      // Auto-reconnect after 3 seconds if not paused
-      if (!paused) {
+      // Auto-reconnect after 3 seconds if not paused and component is still mounted
+      if (!paused && !destroyed) {
         setTimeout(connect, 3000);
       }
     };
@@ -239,6 +240,7 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
     disconnect();
     const mainContent = document.querySelector('.main-content') as HTMLElement;
     if (mainContent) {
@@ -545,14 +547,14 @@
     flex: 1;
   }
 
-  .logs-pane .lv-warn {
+  .logs-pane .lv-warning {
     color: var(--warning);
     word-break: break-all;
     white-space: pre-wrap;
     flex: 1;
   }
 
-  .logs-pane .lv-err {
+  .logs-pane .lv-error {
     color: var(--danger);
     word-break: break-all;
     white-space: pre-wrap;
