@@ -104,21 +104,6 @@
     }
   }
 
-  function getCommandSvg(command: string) {
-    if (command === '-start') {
-      return `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="margin-right:8px;flex-shrink:0;"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
-    }
-    if (command === '-stop') {
-      return `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="margin-right:8px;flex-shrink:0;"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>`;
-    }
-    if (command === '-restart') {
-      return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;flex-shrink:0;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>`;
-    }
-    if (command === '-status') {
-      return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;flex-shrink:0;"><path d="M3 12h18"/></svg>`;
-    }
-    return '';
-  }
 
   onMount(fetchCommands);
 </script>
@@ -155,8 +140,15 @@
                   title={cmd.description}
                 >
                   <div class="tile-name" class:dangerous-text={cmd.dangerous}>
-                    <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                    {@html getCommandSvg(cmd.command)}
+                    {#if cmd.command === '-start'}
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="margin-right:8px;flex-shrink:0;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    {:else if cmd.command === '-stop'}
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="margin-right:8px;flex-shrink:0;"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>
+                    {:else if cmd.command === '-restart'}
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;flex-shrink:0;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>
+                    {:else if cmd.command === '-status'}
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;flex-shrink:0;"><path d="M3 12h18"/></svg>
+                    {/if}
                     xkeen {cmd.command}
                   </div>
                   <div class="tile-desc">{cmd.description}</div>
