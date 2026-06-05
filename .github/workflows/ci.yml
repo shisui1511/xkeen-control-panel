@@ -51,12 +51,11 @@ jobs:
         run: go mod download
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.64
+          version: v1.64.2
           working-directory: .
           args: --timeout=5m
-          install-mode: goinstall
 
       - name: Run govulncheck
         uses: golang/govulncheck-action@v1
@@ -142,10 +141,11 @@ jobs:
           npm run build
 
       - name: Report bundle size
-        uses: preactjs/compressed-size-action@v2
+        uses: preactjs/compressed-size-action@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           cwd: frontend
+          build-script: ""
           pattern: "dist/assets/*.{js,css}"
           strip-hash: "-[a-zA-Z0-9_-]{8}"
 
