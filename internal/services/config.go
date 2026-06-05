@@ -47,10 +47,14 @@ func (s *ConfigService) List(dir string) ([]string, error) {
 	if dir == "" {
 		dir = s.ConfigDir
 	}
+	safeDir, err := s.resolvePath(dir)
+	if err != nil {
+		return nil, err
+	}
 	var allFiles []string
 	extensions := []string{"*.json", "*.yaml", "*.yml", "*.conf"}
 	for _, ext := range extensions {
-		pattern := filepath.Join(dir, ext)
+		pattern := filepath.Join(safeDir, ext)
 		files, err := filepath.Glob(pattern)
 		if err != nil {
 			continue
