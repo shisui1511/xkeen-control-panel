@@ -53,8 +53,9 @@ func (v *PathValidator) Validate(path string) (string, error) {
 			resolvedRoot = rr
 		}
 
-		if resolved == resolvedRoot || strings.HasPrefix(resolved, resolvedRoot+string(filepath.Separator)) {
-			return resolved, nil
+		rel, err := filepath.Rel(resolvedRoot, resolved)
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != ".." {
+			return filepath.Join(resolvedRoot, rel), nil
 		}
 	}
 	return "", errors.New("path traversal detected or path not allowed")

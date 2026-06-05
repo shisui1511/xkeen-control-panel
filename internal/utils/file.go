@@ -22,8 +22,9 @@ func validatePathAllowed(path string, allowedRoots []string) (string, error) {
 		if err != nil {
 			continue
 		}
-		if abs == absRoot || strings.HasPrefix(abs, absRoot+string(filepath.Separator)) {
-			return abs, nil
+		rel, err := filepath.Rel(absRoot, abs)
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != ".." {
+			return filepath.Join(absRoot, rel), nil
 		}
 	}
 	return "", errors.New("path not within allowed roots")
