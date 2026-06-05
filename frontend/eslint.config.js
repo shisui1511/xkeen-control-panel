@@ -30,7 +30,10 @@ export default ts.config(
       '@typescript-eslint/no-empty-object-type': 'off',
       'no-empty': 'off',
       'svelte/no-unused-svelte-ignore': 'off',
-      'svelte/valid-compile': 'warn'
+      'svelte/valid-compile': 'warn',
+      'svelte/require-each-key': 'off',
+      'svelte/prefer-svelte-reactivity': 'off',
+      'svelte/no-immutable-reactive-statements': 'off'
     }
   },
   {
