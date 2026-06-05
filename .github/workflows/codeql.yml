@@ -25,6 +25,7 @@ jobs:
   analyze:
     name: CodeQL Analyze
     runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
 
     strategy:
       fail-fast: false
