@@ -33,7 +33,8 @@ export default ts.config(
       'svelte/valid-compile': 'warn',
       'svelte/require-each-key': 'off',
       'svelte/prefer-svelte-reactivity': 'off',
-      'svelte/no-immutable-reactive-statements': 'off'
+      'svelte/no-immutable-reactive-statements': 'off',
+      'no-useless-assignment': 'off'
     }
   },
   {
