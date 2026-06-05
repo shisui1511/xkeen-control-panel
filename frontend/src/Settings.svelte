@@ -131,11 +131,11 @@
       let files: string[] = [];
       if (xrayRes.ok) {
         const data = await xrayRes.json();
-        files = [...files, ...data];
+        files = [...files, ...data.map((f: any) => f.path)];
       }
       if (mihomoRes.ok) {
         const data = await mihomoRes.json();
-        files = [...files, ...data];
+        files = [...files, ...data.map((f: any) => f.path)];
       }
 
       files.push('/opt/etc/xcp/config.json');
