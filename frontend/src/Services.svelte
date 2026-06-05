@@ -85,10 +85,21 @@
   // Auto-start toggles (localStorage-persisted until backend API exists)
   let autostartKeenetic = localStorage.getItem('autostart_keenetic') !== 'false';
   let watchdogEnabled = localStorage.getItem('watchdog_enabled') !== 'false';
-  let datUpdateDaily = localStorage.getItem('dat_update_daily') === 'true';
+  let refreshingStatus = false;
 
   function toggleAutostart(key: string, value: boolean) {
     localStorage.setItem(key, String(value));
+  }
+
+  async function handleRefreshStatus() {
+    if (refreshingStatus) return;
+    refreshingStatus = true;
+    try {
+      await fetchStatus();
+      await fetchKernels();
+    } finally {
+      refreshingStatus = false;
+    }
   }
 
   async function fetchStatus() {
@@ -413,10 +424,9 @@
     <div class="ph-actions">
       <button
         class="btn btn-secondary"
-        on:click={() => {
-          fetchStatus();
-          fetchKernels();
-        }}
+        on:click={handleRefreshStatus}
+        disabled={$isKernelChecking || refreshingStatus}
+        class:btn-loading={refreshingStatus}
         title={$t('svc.refresh_status')}
       >
         <svg
@@ -967,22 +977,6 @@
             type="checkbox"
             bind:checked={watchdogEnabled}
             on:change={() => toggleAutostart('watchdog_enabled', watchdogEnabled)}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </div>
-    <div class="field-row">
-      <div>
-        <div class="lbl">{$t('svc.dat_update_label')}</div>
-        <div class="desc">{$t('svc.dat_update_desc')}</div>
-      </div>
-      <div class="ctrl">
-        <label class="toggle-switch" title={$t('svc.dat_update_label')}>
-          <input
-            type="checkbox"
-            bind:checked={datUpdateDaily}
-            on:change={() => toggleAutostart('dat_update_daily', datUpdateDaily)}
           />
           <span class="toggle-slider"></span>
         </label>

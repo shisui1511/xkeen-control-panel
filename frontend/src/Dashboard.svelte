@@ -28,6 +28,7 @@
   import ApiOffline from './components/ApiOffline.svelte';
 
   let version = $t('app.loading');
+  let panelVersion = $t('app.loading');
   let loading = false;
   let currentTab = 'dashboard';
   const mihomoDependentTabs = [
@@ -289,8 +290,22 @@
       const res = await fetch('/api/version');
       const data = await res.json();
       version = data.version;
+      panelVersion = data.panel_version;
     } catch (e) {
       version = $t('app.error');
+      panelVersion = $t('app.error');
+    }
+  }
+
+  let isRefreshing = false;
+
+  async function handleRefresh() {
+    if (isRefreshing) return;
+    isRefreshing = true;
+    try {
+      await Promise.all([fetchLiveStatus(), fetchSystemStats(), fetchVersion()]);
+    } finally {
+      isRefreshing = false;
     }
   }
 
@@ -509,7 +524,7 @@
             <p class="sub">{$t('dash.welcome')}</p>
           </div>
           <div class="ph-actions">
-            <Button variant="secondary" onclick={fetchLiveStatus} title={$t('app.refresh')}>
+            <Button variant="secondary" onclick={handleRefresh} loading={isRefreshing} disabled={isRefreshing} title={$t('app.refresh')}>
               <Icon name="refresh" size={14} />
               {$t('app.refresh')}
             </Button>
@@ -600,7 +615,7 @@
             {:else if statusError}
               <div class="status-error-row">
                 <span><Icon name="warning" size={14} /> {$t('dash.status_error')}</span>
-                <Button variant="secondary" onclick={fetchLiveStatus} title={$t('app.refresh')}>
+                <Button variant="secondary" onclick={handleRefresh} loading={isRefreshing} disabled={isRefreshing} title={$t('app.refresh')}>
                   ↺ {$t('app.refresh')}
                 </Button>
               </div>
@@ -769,10 +784,11 @@
             <div class="info-rows">
               <div class="info-row">
                 <div class="lbl">{$t('dash.info_version')}</div>
-                <div class="val">
-                  {version}
-                  <span class="info-badge info-badge-teal">{$t('dash.info_latest')}</span>
-                </div>
+                <div class="val">{version}</div>
+              </div>
+              <div class="info-row">
+                <div class="lbl">{$t('dash.info_version_panel')}</div>
+                <div class="val">{panelVersion}</div>
               </div>
               <div class="info-row">
                 <div class="lbl">{$t('dash.info_platform')}</div>
