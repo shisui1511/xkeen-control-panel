@@ -25,7 +25,7 @@ func NewMihomoService(binary, xkeenPath, configDir string) *MihomoService {
 
 func (s *MihomoService) Status() (string, error) {
 	// Status checks if the binary is in the process list
-	cmd := exec.Command("sh", "-c", fmt.Sprintf("pidof %s", filepath.Base(s.BinaryPath)))
+	cmd := exec.Command("pidof", filepath.Base(s.BinaryPath))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "stopped", nil
