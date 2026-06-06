@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import { t, currentLang, setLang, pluralize } from './i18n';
-  import { isSidebarOpen, capabilities, fetchCapabilities, showToast } from './stores';
+  import { isSidebarOpen, capabilities, fetchCapabilities, showToast, mihomoApiAvailable } from './stores';
   import Sidebar from './components/Sidebar.svelte';
   import Toast from './components/Toast.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -96,6 +96,7 @@
   let loadHistory: number[] = [];
   let activeSubscriptionsCount = 0;
   let totalSubsCount = 0;
+  let hasSubscription = false;
   let subsLastUpdated = '';
   let totalProxiesCount = 0;
   let activeProxiesCount = 0;
@@ -110,6 +111,7 @@
         const subs = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
         activeSubscriptionsCount = subs.filter((s: any) => s.enabled).length;
         totalSubsCount = subs.length;
+        hasSubscription = subs.length > 0;
         subscriptionProxiesCount = subs.reduce((acc: number, s: any) => acc + (s.proxy_count || 0), 0);
         // Find most recent update
         const dates = subs.map((s: any) => s.last_updated || s.updated_at || '').filter(Boolean);
@@ -271,6 +273,15 @@
   }
 
   $: sparklineData = loadHistory.length >= 2 ? JSON.parse(buildSparklinePath(loadHistory)) : null;
+
+  // Quickstart checklist reactive state
+  $: quickstartDoneCount = [
+    true, // step 1 always done when card is visible (active_kernel === 'mihomo')
+    hasSubscription,
+    $mihomoApiAvailable,
+    serviceStatus.mihomo === 'running'
+  ].filter(Boolean).length;
+  $: allQuickstartComplete = quickstartDoneCount === 4;
 
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
