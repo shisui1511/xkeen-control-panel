@@ -92,6 +92,8 @@
   let activePreset: string = '';
   let activeRuleProvider: 'none' | 'zkeen' | 'metacubex' = 'none';
   let subscriptions: any[] = [];
+  let existingTproxyPort = $state<number | null>(null);
+  let existingRedirPort = $state<number | null>(null);
   let dns: DNSConfig = {
     enabled: false,
     nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],
@@ -1120,11 +1122,20 @@
   function generateYAML(): string {
     const lines: string[] = [];
 
+    // external-controller must be first field (required for Clash API on port 9090)
+    lines.push('external-controller: 0.0.0.0:9090');
+    lines.push('');
+
+    // System ports from XKeen (preserve existing values, fall back to defaults)
+    lines.push(`tproxy-port: ${existingTproxyPort ?? 1181}`);
+    lines.push(`redir-port: ${existingRedirPort ?? 1182}`);
+    lines.push('');
+
     // Proxy-providers (if we have subscriptions)
     if (subscriptions.length > 0) {
       lines.push('proxy-providers:');
-      for (const sub of subscriptions) {
-        const providerName = sub.name.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+      for (const [i, sub] of subscriptions.entries()) {
+        const providerName = (sub.name || sub.url?.split('/').pop() || `provider-${i}`).replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
         lines.push(`  ${providerName}:`);
         lines.push(`    type: http`);
         lines.push(`    path: ./providers/${providerName}.yaml`);
@@ -1191,7 +1202,7 @@
         lines.push(`    port: ${p.port}`);
 
         if (p.type === 'vless') {
-          lines.push(`    uuid: ${p.uuid}`);
+          lines.push(`    uuid: ${p.uuid ?? ''}`);
           if (p.flow) lines.push(`    flow: ${p.flow}`);
           lines.push(`    tls: true`);
           lines.push(`    reality-opts:`);
@@ -1203,7 +1214,7 @@
           lines.push(`    password: ${q(p.password || '')}`);
           if (p.sni) lines.push(`    sni: ${q(p.sni)}`);
         } else if (p.type === 'tuic') {
-          lines.push(`    uuid: ${p.uuid}`);
+          lines.push(`    uuid: ${p.uuid ?? ''}`);
           lines.push(`    password: ${q(p.password || '')}`);
           lines.push(`    congestion-controller: ${p.congestion || 'bbr'}`);
           if (p.sni) lines.push(`    sni: ${q(p.sni)}`);
@@ -1211,7 +1222,7 @@
           lines.push(`    cipher: ${p.cipher || 'aes-256-gcm'}`);
           lines.push(`    password: ${q(p.password || '')}`);
         } else if (p.type === 'vmess') {
-          lines.push(`    uuid: ${p.uuid}`);
+          lines.push(`    uuid: ${p.uuid ?? ''}`);
           lines.push(`    alterId: 0`);
           lines.push(`    cipher: auto`);
           lines.push(`    tls: ${p.tls}`);
@@ -1522,28 +1533,36 @@
 
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      const sections = {
-        'proxy-groups': extractSection(yaml, 'proxy-groups'),
-        'rule-providers': extractSection(yaml, 'rule-providers'),
-        rules: extractSection(yaml, 'rules')
-      };
-
       const path = selectedFile || '/opt/etc/mihomo/config.yaml';
-      const mergeRes = await fetch('/api/config/mihomo-merge', {
+
+      // Read existing config to extract system ports before generating YAML
+      try {
+        const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+        if (readRes.ok) {
+          const existingText = await readRes.text();
+          const tproxyMatch = existingText.match(/^tproxy-port:\s*(\d+)/m);
+          const redirMatch = existingText.match(/^redir-port:\s*(\d+)/m);
+          if (tproxyMatch) existingTproxyPort = parseInt(tproxyMatch[1]);
+          if (redirMatch) existingRedirPort = parseInt(redirMatch[1]);
+        }
+      } catch {
+        // Ports not found — generateYAML will use defaults 1181/1182
+      }
+
+      // Generate full YAML and write it directly via /api/config/save
+      const yamlContent = generateYAML();
+      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'text/plain',
           'X-CSRF-Token': csrfToken || ''
         },
-        body: JSON.stringify({
-          path: path,
-          sections: sections
-        })
+        body: yamlContent
       });
 
-      if (!mergeRes.ok) {
-        const errorText = await mergeRes.text();
-        throw new Error(errorText || 'Failed to merge config');
+      if (!saveRes.ok) {
+        const errorText = await saveRes.text();
+        throw new Error(errorText || 'Failed to save config');
       }
 
       const restartRes = await fetch('/api/service/control?action=restart', {
