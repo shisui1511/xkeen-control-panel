@@ -92,8 +92,8 @@
   let activePreset: string = '';
   let activeRuleProvider: 'none' | 'zkeen' | 'metacubex' = 'none';
   let subscriptions: any[] = [];
-  let existingTproxyPort = $state<number | null>(null);
-  let existingRedirPort = $state<number | null>(null);
+  let existingTproxyPort: number | null = null;
+  let existingRedirPort: number | null = null;
   let dns: DNSConfig = {
     enabled: false,
     nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],

@@ -437,7 +437,9 @@
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
     <EmptyState
       title={$t('ds.empty.mihomo_offline_title')}
-      description={$t('ds.empty.mihomo_offline_desc')}
+      description={$capabilities?.active_kernel === 'mihomo'
+        ? $t('ds.empty.mihomo_offline_desc_actionable')
+        : $t('ds.empty.mihomo_offline_desc')}
       icon={PlayIcon}
       ctaText={mihomoLaunching
         ? $t('ds.empty.mihomo_offline_loading')

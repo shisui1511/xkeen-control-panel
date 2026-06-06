@@ -1020,9 +1020,11 @@ const translations: Record<Lang, Record<string, string>> = {
       'API Mihomo не отвечает. Перейдите в раздел «Сервисы» для запуска Mihomo.',
 
     // Design System / Empty States
-    'ds.empty.mihomo_offline_title': 'Ядро Mihomo остановлено',
+    'ds.empty.mihomo_offline_title': 'Mihomo API недоступен',
     'ds.empty.mihomo_offline_desc':
       'Для просмотра этой страницы необходимо запустить сервис Mihomo.',
+    'ds.empty.mihomo_offline_desc_actionable':
+      'Откройте Конфигуратор → выберите сценарий → примените конфиг → перезапустите Mihomo.',
     'ds.empty.mihomo_offline_cta': 'Запустить Mihomo',
     'ds.empty.mihomo_offline_loading': 'Запуск службы...',
     'ds.empty.no_data_title': 'Данные отсутствуют',
@@ -2059,8 +2061,10 @@ const translations: Record<Lang, Record<string, string>> = {
       'Mihomo API is not responding. Go to Services to start Mihomo.',
 
     // Design System / Empty States
-    'ds.empty.mihomo_offline_title': 'Mihomo Core Offline',
+    'ds.empty.mihomo_offline_title': 'Mihomo API Unavailable',
     'ds.empty.mihomo_offline_desc': 'Mihomo service must be running to view this page.',
+    'ds.empty.mihomo_offline_desc_actionable':
+      'Open Constructor → choose scenario → apply config → restart Mihomo.',
     'ds.empty.mihomo_offline_cta': 'Start Mihomo',
     'ds.empty.mihomo_offline_loading': 'Starting service...',
     'ds.empty.no_data_title': 'No Data Available',
