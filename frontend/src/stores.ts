@@ -28,6 +28,11 @@ export interface CapabilitiesData {
 export const capabilities = writable<CapabilitiesData | null>(null);
 export const isKernelChecking = writable(false);
 
+// --- Mihomo API availability store ---
+// Updated by fetchCapabilities on every poll cycle (10 s interval).
+// Sidebar reads this store reactively to show/hide the badge on Proxy/Rules/Connections nav items.
+export const mihomoApiAvailable = writable<boolean>(false);
+
 let lastValidActiveKernel = '';
 
 export async function fetchCapabilities(): Promise<void> {
@@ -57,6 +62,10 @@ export async function fetchCapabilities(): Promise<void> {
       } else {
         capabilities.set(data);
       }
+
+      // Update Mihomo API availability store unconditionally on every successful fetch.
+      // Sidebar and Dashboard checklist both subscribe to this store reactively (D-12, D-13).
+      mihomoApiAvailable.set(data.mihomo?.api_reachable ?? false);
     }
   } catch (_) {
     // Silently ignore — capabilities will remain null
