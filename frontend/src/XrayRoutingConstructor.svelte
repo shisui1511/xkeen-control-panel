@@ -88,6 +88,7 @@
   let showApplyConfirm = $state(false);
   let loadErrors = $state<Record<string, string>>({});
   let xrayFiles = $state<Record<string, any>>({});
+  let showStubBanner = $state(false);
 
   // Import Node states (runes)
   let showImportModal = $state(false);
@@ -224,6 +225,12 @@
         r.outboundTag !== 'direct' && r.outboundTag !== 'block' && r.outboundTag !== 'dns-out'
     );
     proxyTag = proxyRule ? proxyRule.outboundTag : '';
+
+    // Stub detection heuristic (Bug C / D-05)
+    const isRoutingStub = !routingFile.routing?.rules || routingFile.routing.rules.length === 0;
+    const outboundsFile = xrayFiles['04_outbounds.json'] || {};
+    const isOutboundsStub = !outboundsFile.outbounds || outboundsFile.outbounds.length === 0;
+    showStubBanner = isRoutingStub || isOutboundsStub;
 
     // 06_policy.json
     const policyFile = xrayFiles['06_policy.json'] || {};
@@ -647,6 +654,98 @@
     showToast('success', $t('editor.preset_applied'));
   }
 
+  // Template data helpers (Bug C / D-06)
+  // Outbounds identical for all three templates: direct(freedom), block(blackhole)
+  function getOutboundsForTemplate(
+    _id: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing'
+  ): object {
+    return {
+      outbounds: [
+        { tag: 'direct', protocol: 'freedom' },
+        { tag: 'block', protocol: 'blackhole' }
+      ]
+    };
+  }
+
+  function getRoutingForTemplate(
+    id: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing'
+  ): object {
+    if (id === 'minimal-routing') {
+      return {
+        routing: {
+          domainStrategy: 'IPIfNonMatch',
+          rules: [
+            { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
+            { type: 'field', port: '0-65535', outboundTag: 'direct' }
+          ]
+        }
+      };
+    } else if (id === 'selective-routing') {
+      return {
+        routing: {
+          domainStrategy: 'IPIfNonMatch',
+          rules: [
+            { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
+            { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
+            { type: 'field', domain: ['geosite:geolocation-!cn'], outboundTag: 'PROXY_TAG' }
+          ]
+        }
+      };
+    } else {
+      // all-proxy-routing
+      return {
+        routing: {
+          domainStrategy: 'IPIfNonMatch',
+          rules: [
+            { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
+            { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
+            { type: 'field', port: '0-65535', outboundTag: 'PROXY_TAG' }
+          ]
+        }
+      };
+    }
+  }
+
+  // Apply template files: writes 04_outbounds.json + 05_routing.json (Bug C / D-06, D-07)
+  async function applyTemplateFiles(
+    templateId: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing'
+  ) {
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+
+      // Write 04_outbounds.json
+      const outboundsPath = `${XRAY_DIR}/04_outbounds.json`;
+      const saveOutboundsRes = await fetch(
+        `/api/config/save?path=${encodeURIComponent(outboundsPath)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+          body: JSON.stringify(getOutboundsForTemplate(templateId), null, 2)
+        }
+      );
+      if (!saveOutboundsRes.ok) throw new Error('Failed to save 04_outbounds.json');
+
+      // Write 05_routing.json
+      const routingPath = `${XRAY_DIR}/05_routing.json`;
+      const saveRoutingRes = await fetch(
+        `/api/config/save?path=${encodeURIComponent(routingPath)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+          body: JSON.stringify(getRoutingForTemplate(templateId), null, 2)
+        }
+      );
+      if (!saveRoutingRes.ok) throw new Error('Failed to save 05_routing.json');
+
+      // D-07: hide banner, notify, reload
+      showStubBanner = false;
+      showToast('success', $t('editor.preset_applied'));
+      await loadAllConfigs();
+    } catch (e: any) {
+      showToast('error', $t('editor.save_error') + ': ' + e.message);
+    }
+  }
+
   function openInEditor() {
     if (onInsertIntoEditor) {
       onInsertIntoEditor(previewJson);
@@ -897,6 +996,28 @@
           on:click={handleApplyChanges}
         >
           {ru ? 'Применить изменения' : 'Apply Changes'}
+        </button>
+      </div>
+    </div>
+  {/if}
+
+  {#if showStubBanner}
+    <div class="stub-banner">
+      <span class="stub-banner-icon">⚠</span>
+      <span class="stub-banner-text">
+        {ru
+          ? 'Файлы routing/outbounds содержат заглушки. Выберите шаблон для инициализации:'
+          : 'Routing/outbounds files are stubs. Choose a template to initialize:'}
+      </span>
+      <div class="stub-banner-actions">
+        <button class="btn btn-secondary" on:click={() => applyTemplateFiles('minimal-routing')}>
+          {ru ? 'Minimal (всё прямо)' : 'Minimal (all direct)'}
+        </button>
+        <button class="btn btn-secondary" on:click={() => applyTemplateFiles('selective-routing')}>
+          {ru ? 'Selective (блок. → proxy)' : 'Selective (blocked → proxy)'}
+        </button>
+        <button class="btn btn-secondary" on:click={() => applyTemplateFiles('all-proxy-routing')}>
+          {ru ? 'All-proxy (всё → proxy)' : 'All-proxy (all → proxy)'}
         </button>
       </div>
     </div>
@@ -1822,6 +1943,42 @@
     .gen-layout {
       grid-template-columns: 1fr;
     }
+  }
+
+  .stub-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, var(--bg-surface));
+    border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 40%, transparent);
+    border-radius: var(--radius-md, 8px);
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .stub-banner-icon {
+    font-size: 1.1rem;
+    line-height: 1.4;
+    flex-shrink: 0;
+    color: var(--color-warning, #f59e0b);
+  }
+
+  .stub-banner-text {
+    flex: 1;
+    font-size: 0.875rem;
+    color: var(--fg);
+    line-height: 1.5;
+    min-width: 200px;
+  }
+
+  .stub-banner-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    width: 100%;
   }
 
   .constructor-scenario-bar {
