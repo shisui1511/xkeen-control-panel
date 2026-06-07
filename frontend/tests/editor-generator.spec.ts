@@ -438,4 +438,67 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     expect(mergeCall).toBe(true);
     expect(restartCall).toBe(true);
   });
+
+  test('displays warning banner listing preserved non-managed keys and sends 6 sections on merge', async ({
+    page
+  }) => {
+    // We override config content to contain some custom keys
+    await page.route('**/api/config/read*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/plain',
+        body: 'mixed-port: 7890\ncustom-key: value\nproxies:\n  - name: test-p\n    type: ss\n    server: 1.1.1.1\n    port: 8388\n'
+      });
+    });
+
+    // Capture the payload sent to merge
+    let mergePayload: any = null;
+    await page.route('**/api/config/mihomo-merge', async (route) => {
+      mergePayload = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
+    });
+
+    await page.goto('/#/editor');
+
+    const fileRow = page.locator('.file-row:has-text("config.yaml")').first();
+    await expect(fileRow).toBeVisible();
+    await fileRow.click();
+
+    const constructorTab = page.locator('button.tab-btn:has-text("Конструктор")');
+    await constructorTab.click();
+
+    const mihomoKernelBtn = page.locator('.constructor-kernel-toggle button:has-text("Mihomo")');
+    await expect(mihomoKernelBtn).toBeVisible();
+    await mihomoKernelBtn.click();
+
+    // Check that warning banner is visible and lists the preserved keys
+    const warningBanner = page.locator('.alert-warning');
+    await expect(warningBanner).toBeVisible();
+    await expect(warningBanner).toContainText('mixed-port, custom-key');
+
+    // Click Apply
+    const applyBtn = page.locator('[data-testid="apply-changes-btn"]');
+    await expect(applyBtn).toBeVisible();
+    await applyBtn.click();
+
+    const confirmDialog = page.locator('[data-testid="apply-confirm-dialog"]');
+    await expect(confirmDialog).toBeVisible();
+
+    const confirmActionBtn = confirmDialog.locator('button.btn-primary');
+    await expect(confirmActionBtn).toBeVisible();
+    await confirmActionBtn.click();
+
+    // Wait for the merge call to happen
+    await page.waitForTimeout(500);
+
+    expect(mergePayload).not.toBeNull();
+    expect(mergePayload.sections).toBeDefined();
+    expect(mergePayload.sections['proxies']).toContain('test-p');
+    expect(mergePayload.sections['dns']).toBeDefined();
+    expect(mergePayload.sections['tun']).toBeDefined();
+  });
 });

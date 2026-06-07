@@ -510,7 +510,8 @@ func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
 	content := string(data)
 
 	for sectionName, newSecContent := range req.Sections {
-		if sectionName != "proxy-groups" && sectionName != "rule-providers" && sectionName != "rules" {
+		if sectionName != "proxy-groups" && sectionName != "rule-providers" && sectionName != "rules" &&
+			sectionName != "proxies" && sectionName != "dns" && sectionName != "tun" {
 			a.errorResponse(w, "invalid section name: "+sectionName, http.StatusBadRequest)
 			return
 		}

@@ -19,6 +19,7 @@
     | 'GEOSITE'
     | 'IP-CIDR'
     | 'PROCESS-NAME'
+    | 'RULE-SET'
     | 'MATCH';
 
   interface Proxy {
@@ -804,12 +805,38 @@
       const lines = text.split('\n');
       let inGroups = false;
       let inProxies = false;
+      let inDNS = false;
+      let inTUN = false;
+      let inRules = false;
+      let inRuleProviders = false;
+      let inNameservers = false;
+      let inFallback = false;
+      let inDnsHijack = false;
+
       let currentGroup: any = null;
       let currentProxy: any = null;
       let inProxiesList = false;
 
       const parsedGroups: ProxyGroup[] = [];
       const parsedProxies: Proxy[] = [];
+      const parsedRules: Rule[] = [];
+      selectedMetaRuleSets = new Map();
+      activeRuleProvider = 'none';
+      preservedKeys = [];
+      dns = {
+        enabled: false,
+        nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],
+        fallback: ['https://8.8.8.8/dns-query', '1.1.1.1'],
+        enhancedMode: 'fake-ip',
+        fakeIPRange: '198.18.0.1/16'
+      };
+      tun = {
+        enabled: false,
+        stack: 'mixed',
+        autoRoute: true,
+        autoDetectInterface: true,
+        dnsHijack: ['any:53']
+      };
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -817,15 +844,28 @@
 
         // Detect top-level sections
         if (/^[a-zA-Z0-9_-]+:/.test(line) && !line.startsWith(' ') && !line.startsWith('-')) {
-          if (trimmed.startsWith('proxy-groups:')) {
-            inGroups = true;
-            inProxies = false;
-          } else if (trimmed.startsWith('proxies:')) {
-            inProxies = true;
-            inGroups = false;
-          } else {
-            inGroups = false;
-            inProxies = false;
+          const match = line.match(/^([a-zA-Z0-9_-]+):/);
+          if (match) {
+            const sec = match[1];
+            inGroups = sec === 'proxy-groups';
+            inProxies = sec === 'proxies';
+            inDNS = sec === 'dns';
+            inTUN = sec === 'tun';
+            inRules = sec === 'rules';
+            inRuleProviders = sec === 'rule-providers';
+
+            if (
+              sec !== 'proxy-groups' &&
+              sec !== 'proxies' &&
+              sec !== 'dns' &&
+              sec !== 'tun' &&
+              sec !== 'rules' &&
+              sec !== 'rule-providers'
+            ) {
+              if (!preservedKeys.includes(sec)) {
+                preservedKeys = [...preservedKeys, sec];
+              }
+            }
           }
           continue;
         }
@@ -1012,6 +1052,144 @@
             continue;
           }
         }
+
+        if (inDNS) {
+          if (trimmed.startsWith('nameserver:')) {
+            inNameservers = true;
+            inFallback = false;
+            dns.nameservers = [];
+            continue;
+          }
+          if (trimmed.startsWith('fallback:')) {
+            inFallback = true;
+            inNameservers = false;
+            dns.fallback = [];
+            continue;
+          }
+
+          const enableMatch = trimmed.match(/^enable:\s*(.+)$/);
+          if (enableMatch) {
+            dns.enabled = unquote(enableMatch[1]) === 'true';
+            inNameservers = false;
+            inFallback = false;
+            continue;
+          }
+          const enhancedModeMatch = trimmed.match(/^enhanced-mode:\s*(.+)$/);
+          if (enhancedModeMatch) {
+            dns.enhancedMode = unquote(enhancedModeMatch[1]) as any;
+            inNameservers = false;
+            inFallback = false;
+            continue;
+          }
+          const fakeIpRangeMatch = trimmed.match(/^fake-ip-range:\s*(.+)$/);
+          if (fakeIpRangeMatch) {
+            dns.fakeIPRange = unquote(fakeIpRangeMatch[1]);
+            inNameservers = false;
+            inFallback = false;
+            continue;
+          }
+
+          if (inNameservers) {
+            const listMatch = trimmed.match(/^-\s*(.+)$/);
+            if (listMatch) {
+              dns.nameservers = [...dns.nameservers, unquote(listMatch[1])];
+            } else if (trimmed !== '' && !trimmed.startsWith('#') && !line.startsWith('    ')) {
+              inNameservers = false;
+            }
+          }
+          if (inFallback) {
+            const listMatch = trimmed.match(/^-\s*(.+)$/);
+            if (listMatch) {
+              dns.fallback = [...dns.fallback, unquote(listMatch[1])];
+            } else if (trimmed !== '' && !trimmed.startsWith('#') && !line.startsWith('    ')) {
+              inFallback = false;
+            }
+          }
+        }
+
+        if (inTUN) {
+          if (trimmed.startsWith('dns-hijack:')) {
+            inDnsHijack = true;
+            tun.dnsHijack = [];
+            continue;
+          }
+
+          const enableMatch = trimmed.match(/^enable:\s*(.+)$/);
+          if (enableMatch) {
+            tun.enabled = unquote(enableMatch[1]) === 'true';
+            inDnsHijack = false;
+            continue;
+          }
+          const stackMatch = trimmed.match(/^stack:\s*(.+)$/);
+          if (stackMatch) {
+            tun.stack = unquote(stackMatch[1]) as any;
+            inDnsHijack = false;
+            continue;
+          }
+          const autoRouteMatch = trimmed.match(/^auto-route:\s*(.+)$/);
+          if (autoRouteMatch) {
+            tun.autoRoute = unquote(autoRouteMatch[1]) === 'true';
+            inDnsHijack = false;
+            continue;
+          }
+          const autoDetectMatch = trimmed.match(/^auto-detect-interface:\s*(.+)$/);
+          if (autoDetectMatch) {
+            tun.autoDetectInterface = unquote(autoDetectMatch[1]) === 'true';
+            inDnsHijack = false;
+            continue;
+          }
+
+          if (inDnsHijack) {
+            const listMatch = trimmed.match(/^-\s*(.+)$/);
+            if (listMatch) {
+              tun.dnsHijack = [...tun.dnsHijack, unquote(listMatch[1])];
+            } else if (trimmed !== '' && !trimmed.startsWith('#') && !line.startsWith('    ')) {
+              inDnsHijack = false;
+            }
+          }
+        }
+
+        if (inRules) {
+          const ruleMatch = trimmed.match(/^-\s*([A-Z0-9-]+)\s*,\s*([^,]+)\s*,\s*([^,]+)$/);
+          const matchRuleMatch = trimmed.match(/^-\s*MATCH\s*,\s*(.+)$/);
+          const ruleSetMatch = trimmed.match(/^-\s*RULE-SET\s*,\s*([^,]+)\s*,\s*(.+)$/);
+
+          if (ruleMatch) {
+            const rType = ruleMatch[1] as RuleType;
+            const rValue = ruleMatch[2];
+            const rOutbound = ruleMatch[3];
+            parsedRules.push({
+              id: crypto.randomUUID(),
+              type: rType,
+              value: rValue,
+              outbound: rOutbound
+            });
+          } else if (matchRuleMatch) {
+            const matchOutbound = matchRuleMatch[1];
+            parsedRules.push({
+              id: crypto.randomUUID(),
+              type: 'MATCH',
+              value: '',
+              outbound: matchOutbound
+            });
+          } else if (ruleSetMatch) {
+            const rsName = ruleSetMatch[1];
+            const rsOutbound = ruleSetMatch[2];
+            if (rsName.startsWith('geosite-') || rsName.startsWith('geoip-')) {
+              const type = rsName.startsWith('geosite-') ? 'geosite' : 'geoip';
+              const id = rsName.replace(/^geosite-/, '').replace(/^geoip-/, '');
+              selectedMetaRuleSets.set(`${id}|${type}`, rsOutbound);
+              activeRuleProvider = 'metacubex';
+            } else {
+              parsedRules.push({
+                id: crypto.randomUUID(),
+                type: 'RULE-SET',
+                value: rsName,
+                outbound: rsOutbound
+              });
+            }
+          }
+        }
       }
 
       if (currentGroup) {
@@ -1044,6 +1222,9 @@
       if (parsedProxies.length > 0) {
         proxies = parsedProxies;
       }
+      if (parsedRules.length > 0) {
+        rules = parsedRules;
+      }
     } catch (err: any) {
       showToast(
         'warning',
@@ -1062,9 +1243,13 @@
     return str;
   }
 
-  onMount(async () => {
+  let configLoadedForPath = '';
+
+  async function loadConfig(path: string) {
+    if (!path) return;
+    if (configLoadedForPath === path) return;
+    configLoadedForPath = path;
     try {
-      const path = '/opt/etc/mihomo/config.yaml';
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
       if (res.ok) {
         const text = await res.text();
@@ -1074,7 +1259,17 @@
       showToast('error', `Ошибка загрузки конфига: ${e.message}`);
     }
     await loadSubscriptionProxies();
+  }
+
+  onMount(async () => {
+    await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml');
   });
+
+  $: {
+    if (selectedFile) {
+      loadConfig(selectedFile);
+    }
+  }
 
   function addProxy() {
     if (!np.name.trim() || !np.server.trim()) return;
@@ -1410,9 +1605,9 @@
     }
 
     // DNS
+    lines.push('dns:');
+    lines.push(`  enable: ${dns.enabled}`);
     if (dns.enabled) {
-      lines.push('dns:');
-      lines.push(`  enable: true`);
       lines.push(`  enhanced-mode: ${dns.enhancedMode}`);
       if (dns.enhancedMode === 'fake-ip') lines.push(`  fake-ip-range: ${dns.fakeIPRange}`);
       lines.push(`  nameserver:`);
@@ -1421,13 +1616,13 @@
         lines.push(`  fallback:`);
         for (const fb of dns.fallback) lines.push(`    - ${q(fb)}`);
       }
-      lines.push('');
     }
+    lines.push('');
 
     // TUN
+    lines.push('tun:');
+    lines.push(`  enable: ${tun.enabled}`);
     if (tun.enabled) {
-      lines.push('tun:');
-      lines.push(`  enable: true`);
       lines.push(`  stack: ${tun.stack}`);
       lines.push(`  auto-route: ${tun.autoRoute}`);
       lines.push(`  auto-detect-interface: ${tun.autoDetectInterface}`);
@@ -1435,8 +1630,8 @@
         lines.push(`  dns-hijack:`);
         for (const d of tun.dnsHijack) lines.push(`    - ${q(d)}`);
       }
-      lines.push('');
     }
+    lines.push('');
 
     return lines.join('\n').trimEnd();
   }
@@ -1483,6 +1678,7 @@
     'GEOSITE',
     'IP-CIDR',
     'PROCESS-NAME',
+    'RULE-SET',
     'MATCH'
   ];
   const CIPHERS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-poly1305', '2022-blake3-aes-256-gcm'];
@@ -1560,13 +1756,14 @@
 
       // Generate YAML and extract managed sections for merge via /api/config/mihomo-merge
       const yamlContent = generateYAML();
-      const sections: Record<string, string> = {};
-      const rpSection = extractSection(yamlContent, 'rule-providers');
-      if (rpSection) sections['rule-providers'] = rpSection;
-      const pgSection = extractSection(yamlContent, 'proxy-groups');
-      if (pgSection) sections['proxy-groups'] = pgSection;
-      const rulesSection = extractSection(yamlContent, 'rules');
-      if (rulesSection) sections['rules'] = rulesSection;
+      const sections: Record<string, string> = {
+        'rule-providers': extractSection(yamlContent, 'rule-providers'),
+        'proxy-groups': extractSection(yamlContent, 'proxy-groups'),
+        'rules': extractSection(yamlContent, 'rules'),
+        'proxies': extractSection(yamlContent, 'proxies'),
+        'dns': extractSection(yamlContent, 'dns'),
+        'tun': extractSection(yamlContent, 'tun')
+      };
 
       const mergeRes = await fetch('/api/config/mihomo-merge', {
         method: 'POST',
@@ -1658,6 +1855,18 @@
           >
           {ru ? 'Копировать YAML' : 'Copy YAML'}
         </button>
+      </div>
+    </div>
+  {/if}
+
+  {#if preservedKeys.length > 0}
+    <div class="alert alert-warning" style="margin: 0 0 16px 0;" role="status">
+      <span aria-hidden="true">⚠️</span>
+      <div>
+        <strong>{$t('editor.constructor_merge_warning_title')}</strong>
+        <div style="margin-top: 2px;">
+          {$t('editor.constructor_merge_warning_body', { keys: preservedKeys.join(', ') })}
+        </div>
       </div>
     </div>
   {/if}
