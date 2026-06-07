@@ -1535,34 +1535,28 @@
       const csrfToken = localStorage.getItem('csrf_token');
       const path = selectedFile || '/opt/etc/mihomo/config.yaml';
 
-      // Read existing config to extract system ports before generating YAML
-      try {
-        const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
-        if (readRes.ok) {
-          const existingText = await readRes.text();
-          const tproxyMatch = existingText.match(/^tproxy-port:\s*(\d+)/m);
-          const redirMatch = existingText.match(/^redir-port:\s*(\d+)/m);
-          if (tproxyMatch) existingTproxyPort = parseInt(tproxyMatch[1]);
-          if (redirMatch) existingRedirPort = parseInt(redirMatch[1]);
-        }
-      } catch {
-        // Ports not found — generateYAML will use defaults 1181/1182
-      }
-
-      // Generate full YAML and write it directly via /api/config/save
+      // Generate YAML and extract managed sections for merge via /api/config/mihomo-merge
       const yamlContent = generateYAML();
-      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
+      const sections: Record<string, string> = {};
+      const rpSection = extractSection(yamlContent, 'rule-providers');
+      if (rpSection) sections['rule-providers'] = rpSection;
+      const pgSection = extractSection(yamlContent, 'proxy-groups');
+      if (pgSection) sections['proxy-groups'] = pgSection;
+      const rulesSection = extractSection(yamlContent, 'rules');
+      if (rulesSection) sections['rules'] = rulesSection;
+
+      const mergeRes = await fetch('/api/config/mihomo-merge', {
         method: 'POST',
         headers: {
-          'Content-Type': 'text/plain',
+          'Content-Type': 'application/json',
           'X-CSRF-Token': csrfToken || ''
         },
-        body: yamlContent
+        body: JSON.stringify({ path, sections })
       });
 
-      if (!saveRes.ok) {
-        const errorText = await saveRes.text();
-        throw new Error(errorText || 'Failed to save config');
+      if (!mergeRes.ok) {
+        const errorText = await mergeRes.text();
+        throw new Error(errorText || 'Failed to merge config');
       }
 
       const restartRes = await fetch('/api/service/control?action=restart', {
