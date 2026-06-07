@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -27,6 +28,11 @@ const maxSubscriptionBytes = 10 * 1024 * 1024
 
 // invalidIDCharsRe — символы, недопустимые в ID подписки (path injection).
 var invalidIDCharsRe = regexp.MustCompile(`[^a-z0-9_-]`)
+
+var (
+	nonAlphanumericDashRe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
+	multiDashRe           = regexp.MustCompile(`-+`)
+)
 
 // subscriptionUserAgent возвращает User-Agent для подписки на основе реальных
 // версий установленных ядер:
@@ -390,32 +396,35 @@ func (s *SubscriptionService) populateMihomoIntegrated(subs []Subscription) {
 
 func (s *SubscriptionService) List() []Subscription {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	res := make([]Subscription, len(s.subscriptions))
 	for i := range s.subscriptions {
 		res[i] = s.subscriptions[i].Clone()
 		res[i].ProxyCount = s.getProxyCount(&res[i])
 	}
+	s.mu.RUnlock()
 	s.populateMihomoIntegrated(res)
 	return res
 }
 
 func (s *SubscriptionService) Get(id string) *Subscription {
+	var cloned *Subscription
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	for i := range s.subscriptions {
 		if s.subscriptions[i].ID == id {
-			cloned := s.subscriptions[i].Clone()
-			cloned.ProxyCount = s.getProxyCount(&cloned)
-
-			slice := []Subscription{cloned}
-			s.populateMihomoIntegrated(slice)
-			cloned = slice[0]
-
-			return &cloned
+			c := s.subscriptions[i].Clone()
+			c.ProxyCount = s.getProxyCount(&c)
+			cloned = &c
+			break
 		}
 	}
-	return nil
+	s.mu.RUnlock()
+
+	if cloned != nil {
+		slice := []Subscription{*cloned}
+		s.populateMihomoIntegrated(slice)
+		cloned = &slice[0]
+	}
+	return cloned
 }
 
 func (s *SubscriptionService) getProxyCount(sub *Subscription) int {
@@ -1603,17 +1612,14 @@ func getMihomoProviderName(name string, urlStr string, fallback string) string {
 	providerName := name
 	if providerName == "" {
 		if parsed, err := url.Parse(urlStr); err == nil && parsed.Path != "" {
-			providerName = filepath.Base(parsed.Path)
+			providerName = path.Base(parsed.Path)
 		}
 	}
 	if providerName == "" || providerName == "." || providerName == "/" {
 		providerName = fallback
 	}
 
-	nonAlphanumericDashRe := regexp.MustCompile(`[^a-zA-Z0-9-]`)
 	providerName = nonAlphanumericDashRe.ReplaceAllString(providerName, "-")
-
-	multiDashRe := regexp.MustCompile(`-+`)
 	providerName = multiDashRe.ReplaceAllString(providerName, "-")
 	providerName = strings.Trim(providerName, "-")
 	providerName = strings.ToLower(providerName)
