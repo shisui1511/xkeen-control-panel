@@ -146,7 +146,13 @@ func (s *MihomoService) ValidateMihomoConfig() (PreflightResult, error) {
 	var warnings []PreflightIssue
 
 	// ERROR: external-controller is required for the panel API to communicate with Mihomo.
-	if _, ok := cfg["external-controller"]; !ok {
+	val, ok := cfg["external-controller"]
+	if !ok {
+		errors = append(errors, PreflightIssue{
+			Code:    "no_external_controller",
+			Message: "external-controller is not configured; Clash API will be unavailable",
+		})
+	} else if strVal, ok := val.(string); ok && strings.TrimSpace(strVal) == "" {
 		errors = append(errors, PreflightIssue{
 			Code:    "no_external_controller",
 			Message: "external-controller is not configured; Clash API will be unavailable",

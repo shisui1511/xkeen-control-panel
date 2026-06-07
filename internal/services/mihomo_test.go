@@ -215,6 +215,22 @@ proxies:
 			wantErrCodes: []string{"no_external_controller"},
 		},
 		{
+			name: "empty external-controller",
+			yaml: `
+external-controller: ""
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies: []
+rules:
+  - MATCH,DIRECT
+proxies:
+  - name: test
+`,
+			wantValid:    false,
+			wantErrCodes: []string{"no_external_controller"},
+		},
+		{
 			name: "with external-controller but no proxy-groups",
 			yaml: `
 external-controller: 127.0.0.1:9090
