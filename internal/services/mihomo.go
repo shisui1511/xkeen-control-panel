@@ -7,7 +7,22 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
+
+// PreflightIssue represents a single validation issue (error or warning) from a preflight check.
+type PreflightIssue struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// PreflightResult holds the outcome of a preflight validation.
+type PreflightResult struct {
+	Valid    bool
+	Errors   []PreflightIssue
+	Warnings []PreflightIssue
+}
 
 type MihomoService struct {
 	BinaryPath string
@@ -106,4 +121,67 @@ func cleanYamlValue(val string) string {
 		}
 	}
 	return val
+}
+
+// ValidateMihomoConfig inspects the Mihomo config.yaml and returns a PreflightResult
+// with blocking errors and non-blocking warnings. On read or parse failure, returns
+// a non-nil error (the handler converts this to a safe valid:true response).
+func (s *MihomoService) ValidateMihomoConfig() (PreflightResult, error) {
+	configPath := filepath.Join(s.ConfigDir, "config.yaml")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		configPath = filepath.Join(s.ConfigDir, "config.yml")
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return PreflightResult{}, fmt.Errorf("failed to read mihomo config: %w", err)
+	}
+
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return PreflightResult{}, fmt.Errorf("failed to parse mihomo config: %w", err)
+	}
+
+	var errors []PreflightIssue
+	var warnings []PreflightIssue
+
+	// ERROR: external-controller is required for the panel API to communicate with Mihomo.
+	if _, ok := cfg["external-controller"]; !ok {
+		errors = append(errors, PreflightIssue{
+			Code:    "no_external_controller",
+			Message: "external-controller is not configured; Clash API will be unavailable",
+		})
+	}
+
+	// WARNING: proxy-groups absence means no routing groups defined.
+	if _, ok := cfg["proxy-groups"]; !ok {
+		warnings = append(warnings, PreflightIssue{
+			Code:    "no_proxy_groups",
+			Message: "no proxy-groups defined in config",
+		})
+	}
+
+	// WARNING: rules absence means no routing rules.
+	if _, ok := cfg["rules"]; !ok {
+		warnings = append(warnings, PreflightIssue{
+			Code:    "no_rules",
+			Message: "no rules defined in config",
+		})
+	}
+
+	// WARNING: no proxies AND no proxy-providers.
+	_, hasProxies := cfg["proxies"]
+	_, hasProxyProviders := cfg["proxy-providers"]
+	if !hasProxies && !hasProxyProviders {
+		warnings = append(warnings, PreflightIssue{
+			Code:    "no_proxies_or_providers",
+			Message: "neither proxies nor proxy-providers are defined in config",
+		})
+	}
+
+	return PreflightResult{
+		Valid:    len(errors) == 0,
+		Errors:   errors,
+		Warnings: warnings,
+	}, nil
 }
