@@ -109,6 +109,7 @@
     autoDetectInterface: true,
     dnsHijack: ['any:53']
   };
+  let preservedKeys: string[] = [];
 
   // Import Node states
   let showImportModal = false;
@@ -1150,14 +1151,14 @@
         }
 
         if (inRules) {
-          const ruleMatch = trimmed.match(/^-\s*([A-Z0-9-]+)\s*,\s*([^,]+)\s*,\s*([^,]+)$/);
+          const ruleMatch = trimmed.match(/^-\s*([A-Z0-9-]+)\s*,\s*([^,]+)\s*,\s*([^,]+?)(?:\s*,\s*([^,]+))?$/);
           const matchRuleMatch = trimmed.match(/^-\s*MATCH\s*,\s*(.+)$/);
           const ruleSetMatch = trimmed.match(/^-\s*RULE-SET\s*,\s*([^,]+)\s*,\s*(.+)$/);
 
           if (ruleMatch) {
             const rType = ruleMatch[1] as RuleType;
             const rValue = ruleMatch[2];
-            const rOutbound = ruleMatch[3];
+            const rOutbound = ruleMatch[4] ? `${ruleMatch[3]},${ruleMatch[4]}` : ruleMatch[3];
             parsedRules.push({
               id: crypto.randomUUID(),
               type: rType,
@@ -1237,8 +1238,18 @@
 
   function unquote(str: string): string {
     str = str.trim();
-    if ((str.startsWith('"') && str.endsWith('"')) || (str.startsWith("'") && str.endsWith("'"))) {
-      return str.slice(1, -1);
+    if (str.startsWith('"')) {
+      const closingIdx = str.indexOf('"', 1);
+      if (closingIdx !== -1) {
+        return str.slice(1, closingIdx);
+      }
+    } else if (str.startsWith("'")) {
+      const closingIdx = str.indexOf("'", 1);
+      if (closingIdx !== -1) {
+        return str.slice(1, closingIdx);
+      }
+    } else {
+      str = str.split('#')[0].trim();
     }
     return str;
   }
@@ -1251,10 +1262,12 @@
     configLoadedForPath = path;
     try {
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
-      if (res.ok) {
-        const text = await res.text();
-        populateMihomoFromYAML(text);
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `HTTP ${res.status}`);
       }
+      const text = await res.text();
+      populateMihomoFromYAML(text);
     } catch (e: any) {
       showToast('error', `Ошибка загрузки конфига: ${e.message}`);
     }
@@ -1458,7 +1471,8 @@
     // Helper to check if a target outbound group is enabled
     const isOutboundEnabled = (outbound: string) => {
       if (activeRuleProvider === 'zkeen') {
-        const g = groups.find((x) => x.name === outbound);
+        const primaryOutbound = outbound.split(',')[0].trim();
+        const g = groups.find((x) => x.name === primaryOutbound);
         if (g && g.enabled === false) return false;
       }
       return true;
