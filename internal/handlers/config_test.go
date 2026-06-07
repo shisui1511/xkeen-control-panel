@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -143,6 +144,125 @@ func TestAuthMiddleware_Unauthenticated(t *testing.T) {
 	if rr.Code == http.StatusInternalServerError {
 		t.Errorf("handler returned 500, indicating a misconfiguration: %s", rr.Body.String())
 	}
+}
+
+func TestConfigPreflight(t *testing.T) {
+	t.Run("kernel=mihomo with no external-controller returns 200 valid=false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		// Write a config.yaml without external-controller
+		configContent := "proxy-groups:\n  - name: Proxy\nrules:\n  - MATCH,DIRECT\nproxies:\n  - name: test\n"
+		if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), []byte(configContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		api := newTestAPI(t, tmpDir)
+		api.mihomoSvc = services.NewMihomoService("", "", tmpDir)
+		api.xkeenSvc = services.NewXKeenService("", tmpDir)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/config/preflight?kernel=mihomo", nil)
+		rr := httptest.NewRecorder()
+		api.ConfigPreflight(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+
+		var resp struct {
+			Valid    bool `json:"valid"`
+			Errors   []struct {
+				Code string `json:"code"`
+			} `json:"errors"`
+			Warnings []interface{} `json:"warnings"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.Valid {
+			t.Error("expected valid=false when external-controller missing")
+		}
+		found := false
+		for _, e := range resp.Errors {
+			if e.Code == "no_external_controller" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected error code no_external_controller, got %+v", resp.Errors)
+		}
+	})
+
+	t.Run("kernel=xray returns 200", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		api := newTestAPI(t, tmpDir)
+		api.mihomoSvc = services.NewMihomoService("", "", tmpDir)
+		api.xkeenSvc = services.NewXKeenService("", tmpDir)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/config/preflight?kernel=xray", nil)
+		rr := httptest.NewRecorder()
+		api.ConfigPreflight(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("kernel=foo returns 400", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		api := newTestAPI(t, tmpDir)
+		api.mihomoSvc = services.NewMihomoService("", "", tmpDir)
+		api.xkeenSvc = services.NewXKeenService("", tmpDir)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/config/preflight?kernel=foo", nil)
+		rr := httptest.NewRecorder()
+		api.ConfigPreflight(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("POST returns 405", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		api := newTestAPI(t, tmpDir)
+		api.mihomoSvc = services.NewMihomoService("", "", tmpDir)
+		api.xkeenSvc = services.NewXKeenService("", tmpDir)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/config/preflight?kernel=mihomo", nil)
+		rr := httptest.NewRecorder()
+		api.ConfigPreflight(rr, req)
+
+		if rr.Code != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("service read failure returns 200 valid=true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		api := newTestAPI(t, tmpDir)
+		// mihomoSvc points to a dir with no config.yaml — service will return error
+		api.mihomoSvc = services.NewMihomoService("", "", tmpDir)
+		api.xkeenSvc = services.NewXKeenService("", tmpDir)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/config/preflight?kernel=mihomo", nil)
+		rr := httptest.NewRecorder()
+		api.ConfigPreflight(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Errorf("expected 200 on service error, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Valid    bool          `json:"valid"`
+			Errors   []interface{} `json:"errors"`
+			Warnings []interface{} `json:"warnings"`
+		}
+		if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if !resp.Valid {
+			t.Error("expected valid=true on service error (silent safe fallback)")
+		}
+	})
 }
 
 func TestConfigValidation(t *testing.T) {
