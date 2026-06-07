@@ -359,6 +359,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.check_updates': 'Проверить обновления',
     'svc.channel_prefix': 'канал',
     'svc.actual_badge': 'актуально',
+    'svc.mihomo_api_unavailable': '⚠ API недоступен — Исправить',
+    'svc.mihomo_api_unavailable_title': 'external-controller не задан в конфиге Mihomo',
+    'svc.preflight_error_title': 'Ошибка конфигурации',
+    'svc.preflight_error_body': 'Конфиг содержит проблемы:',
+    'svc.preflight_fix': 'Исправить → Конфигуратор',
+    'svc.preflight_start_anyway': 'Запустить всё равно',
 
     // Kernel process status
     'kernel.status.running': 'Запущено',
@@ -1428,6 +1434,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.check_updates': 'Check updates',
     'svc.channel_prefix': 'channel',
     'svc.actual_badge': 'up to date',
+    'svc.mihomo_api_unavailable': '⚠ API unavailable — Fix',
+    'svc.mihomo_api_unavailable_title': 'external-controller is missing in Mihomo config',
+    'svc.preflight_error_title': 'Configuration error',
+    'svc.preflight_error_body': 'Config has issues:',
+    'svc.preflight_fix': 'Fix → Configurator',
+    'svc.preflight_start_anyway': 'Start anyway',
 
     // Kernel process status
     'kernel.status.running': 'Running',
