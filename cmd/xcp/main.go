@@ -118,6 +118,7 @@ func main() {
 	srv.HandleProtected("/api/config/delete", api.ConfigDelete)
 	srv.HandleProtected("/api/config/rename", api.ConfigRename)
 	srv.HandleProtected("/api/config/validate", api.ConfigValidate)
+	srv.HandleProtected("/api/config/preflight", api.ConfigPreflight)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
 	srv.HandleProtected("/api/settings/dev-mode", api.SettingsDevMode)

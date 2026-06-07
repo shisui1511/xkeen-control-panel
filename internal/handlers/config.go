@@ -269,6 +269,85 @@ type ConfigValidateResponse struct {
 	Error string `json:"error"`
 }
 
+// PreflightIssue is the JSON representation of a single preflight issue.
+// The canonical type is services.PreflightIssue; this mirrors its JSON shape.
+type PreflightIssueJSON struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// ConfigPreflightResponse is the JSON body for GET /api/config/preflight.
+type ConfigPreflightResponse struct {
+	Valid    bool                 `json:"valid"`
+	Errors   []PreflightIssueJSON `json:"errors"`
+	Warnings []PreflightIssueJSON `json:"warnings"`
+}
+
+// ConfigPreflight handles GET /api/config/preflight?kernel=mihomo|xray.
+// It runs a pre-flight validation of the kernel config and returns blocking errors
+// and non-blocking warnings. On service read/parse failure it returns valid:true
+// with empty arrays (silent safe fallback — must never block the user).
+func (a *API) ConfigPreflight(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	kernel := r.URL.Query().Get("kernel")
+	if kernel != "mihomo" && kernel != "xray" {
+		a.errorResponse(w, "kernel must be 'mihomo' or 'xray'", http.StatusBadRequest)
+		return
+	}
+
+	safeResp := ConfigPreflightResponse{
+		Valid:    true,
+		Errors:   []PreflightIssueJSON{},
+		Warnings: []PreflightIssueJSON{},
+	}
+
+	switch kernel {
+	case "mihomo":
+		result, err := a.mihomoSvc.ValidateMihomoConfig()
+		if err != nil {
+			// T-22-05: swallow fs/parse errors — never leak raw error text to client.
+			a.jsonResponse(w, safeResp)
+			return
+		}
+		resp := ConfigPreflightResponse{
+			Valid:    result.Valid,
+			Errors:   mapIssues(result.Errors),
+			Warnings: mapIssues(result.Warnings),
+		}
+		a.jsonResponse(w, resp)
+
+	case "xray":
+		result, err := a.xkeenSvc.ValidateXrayConfig(a.cfg.XRayConfigDir)
+		if err != nil {
+			a.jsonResponse(w, safeResp)
+			return
+		}
+		resp := ConfigPreflightResponse{
+			Valid:    result.Valid,
+			Errors:   mapIssues(result.Errors),
+			Warnings: mapIssues(result.Warnings),
+		}
+		a.jsonResponse(w, resp)
+	}
+}
+
+// mapIssues converts services.PreflightIssue slice to handler JSON types.
+// Always returns a non-nil slice so JSON serializes as [] not null.
+func mapIssues(issues []services.PreflightIssue) []PreflightIssueJSON {
+	result := make([]PreflightIssueJSON, 0, len(issues))
+	for _, iss := range issues {
+		result = append(result, PreflightIssueJSON{
+			Code:    iss.Code,
+			Message: iss.Message,
+		})
+	}
+	return result
+}
+
 func (a *API) getBinaryPath(name string) string {
 	if a.kernelSvc != nil {
 		if k := a.kernelSvc.Get(name); k != nil && k.BinaryPath != "" {
