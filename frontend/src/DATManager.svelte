@@ -63,14 +63,26 @@
     }
   }
 
-  async function updateAll(_filename?: string) {
-    globalUpdating = true;
+  async function updateAll(filename?: string) {
+    if (filename) {
+      updatingFile = filename;
+    } else {
+      globalUpdating = true;
+    }
     error = '';
     try {
       const csrfToken = localStorage.getItem('csrf_token');
+      const body = filename ? JSON.stringify({ file: filename }) : undefined;
+      const headers: Record<string, string> = {
+        'X-CSRF-Token': csrfToken || ''
+      };
+      if (body) {
+        headers['Content-Type'] = 'application/json';
+      }
       const res = await fetch('/api/dat/update', {
         method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+        headers,
+        body
       });
       if (!res.ok) {
         const text = await res.text();
@@ -98,14 +110,11 @@
         const text = await res.text();
         throw new Error(text);
       }
-      showToast(
-        'success',
-        $currentLang === 'ru' ? 'Файлы успешно откачены' : 'Files rolled back successfully'
-      );
+      showToast('success', $t('dat.rollback_success'));
       await fetchFiles();
     } catch (e: any) {
       error = e.message;
-      showToast('error', e.message);
+      showToast('error', `${$t('dat.rollback_error')}: ${e.message}`);
     } finally {
       rollbacking = false;
     }

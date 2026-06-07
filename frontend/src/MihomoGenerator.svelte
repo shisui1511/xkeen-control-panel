@@ -115,7 +115,7 @@
   let importTag = '';
   let importStep = 1; // 1: Input link, 2: Preview & Confirm tag
   let importLoading = false;
-  let importNodes: { link: string; outbound: any; tag: string }[] = [];
+  let importNodes: { link: string; outbound: any; tag: string; rowError?: string | null }[] = [];
   let importErrorMsg = '';
 
   // Form visibility
@@ -657,13 +657,6 @@
       }
 
       if (data.data && data.data.length > 0) {
-        for (const result of data.data) {
-          if (result.error) {
-            importErrorMsg = result.error;
-            return;
-          }
-        }
-
         const newImportNodes = [];
         const existingNames = proxies.map((p) => p.name);
 
@@ -676,7 +669,15 @@
             newImportNodes.push({
               link: lines[i],
               outbound: result.outbound,
-              tag: uniqueName
+              tag: uniqueName,
+              rowError: result.error || null
+            });
+          } else {
+            newImportNodes.push({
+              link: lines[i],
+              outbound: null,
+              tag: '',
+              rowError: result.error || $t('subscr.import_error_invalid')
             });
           }
         }
@@ -770,11 +771,28 @@
 
   function confirmImportNode() {
     try {
-      const mappedList = importNodes.map((item) => {
-        return mapParsedOutboundToMihomoProxy(item.outbound, item.tag.trim());
-      });
+      const validNodes = importNodes.filter((n) => !n.rowError);
+      const mappedList: Proxy[] = [];
+      let skippedCount = importNodes.length - validNodes.length;
+
+      for (const item of validNodes) {
+        const p = mapParsedOutboundToMihomoProxy(item.outbound, item.tag.trim());
+        if (p && p.server) {
+          mappedList.push(p);
+        } else {
+          skippedCount++;
+        }
+      }
+
       proxies = [...proxies, ...mappedList];
-      showToast('success', $t('subscr.import_success', { count: importNodes.length }));
+
+      if (skippedCount > 0) {
+        showToast('warning', $t('subscr.partial_map_warning'));
+      }
+      if (mappedList.length > 0) {
+        showToast('success', $t('subscr.import_success', { count: mappedList.length }));
+      }
+
       showImportModal = false;
     } catch (e: any) {
       importErrorMsg = e.message || $t('subscr.import_error');
@@ -1026,8 +1044,13 @@
       if (parsedProxies.length > 0) {
         proxies = parsedProxies;
       }
-    } catch (err) {
-      console.error('Failed to parse Mihomo config.yaml', err);
+    } catch (err: any) {
+      showToast(
+        'warning',
+        $currentLang === 'ru'
+          ? 'Не удалось прочитать существующий config.yaml. Начинаем с чистого листа.'
+          : 'Could not parse existing config.yaml. Starting fresh.'
+      );
     }
   }
 
@@ -2520,21 +2543,44 @@
             </h3>
             <div class="preview-list" style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;">
               {#each importNodes as item, idx}
-                <div class="preview-item-card" style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px;">
-                  <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary);">
-                    <span><strong style="color: var(--fg);">{item.outbound.protocol}</strong> · {getNodeServer(item.outbound)}:{getNodePort(item.outbound)}</span>
+                {#if item.rowError}
+                  <div class="preview-item-card" style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;">
+                    <button
+                      type="button"
+                      on:click={() => importNodes = importNodes.filter((_, i) => i !== idx)}
+                      style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
+                      aria-label="Remove"
+                    >✕</button>
+                    <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
+                      <strong>{$t('app.error')}:</strong> {item.rowError}
+                    </div>
+                    <div style="font-size: 11px; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;" title={item.link}>
+                      {item.link}
+                    </div>
                   </div>
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <label class="form-label" style="margin: 0; font-size: 12px; flex-shrink: 0;" for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label>
-                    <input
-                      id="import-tag-{idx}"
-                      type="text"
-                      class="input"
-                      bind:value={item.tag}
-                      style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
-                    />
+                {:else}
+                  <div class="preview-item-card" style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;">
+                    <button
+                      type="button"
+                      on:click={() => importNodes = importNodes.filter((_, i) => i !== idx)}
+                      style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
+                      aria-label="Remove"
+                    >✕</button>
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;">
+                      <span><strong style="color: var(--fg);">{item.outbound?.protocol}</strong> · {getNodeServer(item.outbound)}:{getNodePort(item.outbound)}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <label class="form-label" style="margin: 0; font-size: 12px; flex-shrink: 0;" for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label>
+                      <input
+                        id="import-tag-{idx}"
+                        type="text"
+                        class="input"
+                        bind:value={item.tag}
+                        style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
+                      />
+                    </div>
                   </div>
-                </div>
+                {/if}
               {/each}
             </div>
           </div>
@@ -2556,7 +2602,7 @@
             {$t('subscr.import_btn_parse')}
           </button>
         {:else}
-          <button class="btn btn-primary" on:click={confirmImportNode} disabled={importLoading}>
+          <button class="btn btn-primary" on:click={confirmImportNode} disabled={importLoading || importNodes.length === 0 || importNodes.some(n => n.rowError)}>
             {#if importLoading}
               <span class="spinner-xs" style="margin-right: 6px;"></span>
             {/if}

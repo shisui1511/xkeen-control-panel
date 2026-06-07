@@ -702,6 +702,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.url_required': 'Укажите URL для обновления',
     'dat.no_files': 'Файлы DAT не найдены в /opt/etc/xray/dat/ или /opt/etc/mihomo/',
     'dat.url_placeholder': 'URL для загрузки обновления (https://...)',
+    'dat.rollback_success': 'Откат успешно выполнен',
+    'dat.rollback_error': 'Ошибка отката',
 
     // Console Commands
     'console.title': 'Консоль XKeen',
@@ -905,6 +907,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.import_error_too_long': 'Ссылка превышает лимит 8 КБ',
     'subscr.import_error_single_only': 'Пожалуйста, введите только одну ссылку за раз',
     'subscr.import_error': 'Ошибка импорта',
+    'subscr.partial_map_warning': 'Некоторые узлы были пропущены (несовместимый протокол или отсутствуют настройки сервера)',
     'settings.update_confirm_title': 'Подтверждение обновления',
     'settings.update_confirm_text':
       'Вы уверены, что хотите обновить панель управления? Список изменений:',
@@ -1759,6 +1762,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.url_required': 'Specify update URL',
     'dat.no_files': 'DAT files not found in /opt/etc/xray/dat/ or /opt/etc/mihomo/',
     'dat.url_placeholder': 'Update download URL (https://...)',
+    'dat.rollback_success': 'Rollback completed successfully.',
+    'dat.rollback_error': 'Rollback failed.',
 
     // Console Commands
     'console.title': 'XKeen Console',
@@ -1962,6 +1967,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.import_error_too_long': 'Link exceeds the 8 KB limit',
     'subscr.import_error_single_only': 'Please enter only one link at a time',
     'subscr.import_error': 'Import error',
+    'subscr.partial_map_warning': 'Some nodes were skipped (incompatible protocol or missing server settings)',
     'settings.update_confirm_title': 'Confirm Update',
     'settings.update_confirm_text': 'Are you sure you want to update the control panel? Changelog:',
     'settings.update_install_btn': 'Update Panel',

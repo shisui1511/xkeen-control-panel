@@ -96,7 +96,7 @@
   let importTag = $state('');
   let importStep = $state(1); // 1: Input link, 2: Preview & Confirm tag
   let importLoading = $state(false);
-  let importNodes = $state<{ link: string; outbound: any; tag: string }[]>([]);
+  let importNodes = $state<{ link: string; outbound: any; tag: string; rowError?: string | null }[]>([]);
   let importErrorMsg = $state('');
 
   // Form states
@@ -398,17 +398,25 @@
     try {
       const csrfToken = localStorage.getItem('csrf_token');
 
+      const changed = filesToModify.filter((f) => f.changesCount > 0);
+      if (changed.length === 0) {
+        showToast('info', $t('editor.no_changes'));
+        return;
+      }
+
       // 1. Сохранить изменённые файлы
-      for (const [name, managed] of getChangedFiles()) {
-        const existing = xrayFiles[name] ?? {};
-        const merged = mergeXrayFile(name, existing, managed);
-        const path = `${XRAY_DIR}/${name}`;
-        const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
+      for (const file of changed) {
+        const managedPair = getChangedFiles().find(([n]) => n === file.name);
+        if (!managedPair) continue;
+        const [, managed] = managedPair;
+        const existing = xrayFiles[file.name] ?? {};
+        const merged = mergeXrayFile(file.name, existing, managed);
+        const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(file.path)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
           body: JSON.stringify(merged, null, 2)
         });
-        if (!saveRes.ok) throw new Error(`Failed to save ${name}`);
+        if (!saveRes.ok) throw new Error(`Failed to save ${file.name}`);
       }
 
       // 2. Рестарт XKeen
@@ -880,13 +888,6 @@
       }
 
       if (data.data && data.data.length > 0) {
-        for (const result of data.data) {
-          if (result.error) {
-            importErrorMsg = result.error;
-            return;
-          }
-        }
-
         const newImportNodes = [];
         const existingTags = [...outboundTags];
 
@@ -899,7 +900,15 @@
             newImportNodes.push({
               link: lines[i],
               outbound: result.outbound,
-              tag: uniqueTag
+              tag: uniqueTag,
+              rowError: result.error || null
+            });
+          } else {
+            newImportNodes.push({
+              link: lines[i],
+              outbound: null,
+              tag: '',
+              rowError: result.error || $t('subscr.import_error_invalid')
             });
           }
         }
@@ -1845,21 +1854,44 @@
             </h3>
             <div class="preview-list" style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;">
               {#each importNodes as item, idx}
-                <div class="preview-item-card" style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px;">
-                  <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary);">
-                    <span><strong style="color: var(--fg);">{item.outbound.protocol}</strong> · {getNodeServer(item.outbound)}:{getNodePort(item.outbound)}</span>
+                {#if item.rowError}
+                  <div class="preview-item-card" style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;">
+                    <button
+                      type="button"
+                      on:click={() => importNodes = importNodes.filter((_, i) => i !== idx)}
+                      style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
+                      aria-label="Remove"
+                    >✕</button>
+                    <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
+                      <strong>{$t('app.error')}:</strong> {item.rowError}
+                    </div>
+                    <div style="font-size: 11px; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;" title={item.link}>
+                      {item.link}
+                    </div>
                   </div>
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <label class="form-label" style="margin: 0; font-size: 12px; flex-shrink: 0;" for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label>
-                    <input
-                      id="import-tag-{idx}"
-                      type="text"
-                      class="input"
-                      bind:value={item.tag}
-                      style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
-                    />
+                {:else}
+                  <div class="preview-item-card" style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;">
+                    <button
+                      type="button"
+                      on:click={() => importNodes = importNodes.filter((_, i) => i !== idx)}
+                      style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
+                      aria-label="Remove"
+                    >✕</button>
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;">
+                      <span><strong style="color: var(--fg);">{item.outbound?.protocol}</strong> · {getNodeServer(item.outbound)}:{getNodePort(item.outbound)}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <label class="form-label" style="margin: 0; font-size: 12px; flex-shrink: 0;" for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label>
+                      <input
+                        id="import-tag-{idx}"
+                        type="text"
+                        class="input"
+                        bind:value={item.tag}
+                        style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
+                      />
+                    </div>
                   </div>
-                </div>
+                {/if}
               {/each}
             </div>
           </div>
@@ -1881,7 +1913,7 @@
             {$t('subscr.import_btn_parse')}
           </button>
         {:else}
-          <button class="btn btn-primary" on:click={confirmImportNode} disabled={importLoading}>
+          <button class="btn btn-primary" on:click={confirmImportNode} disabled={importLoading || importNodes.length === 0 || importNodes.some(n => n.rowError)}>
             {#if importLoading}
               <span class="spinner-xs" style="margin-right: 6px;"></span>
             {/if}
