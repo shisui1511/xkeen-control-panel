@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -26,8 +27,14 @@ func (a *API) OutboundParse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
 	var req OutboundParseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1 MB)")
+			return
+		}
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -75,7 +82,8 @@ func (a *API) OutboundImport(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
 	var req OutboundImportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err.Error() == "http: request body too large" {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
 			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1 MB)")
 			return
 		}
@@ -192,7 +200,8 @@ func (a *API) OutboundImportBulk(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
 	var req OutboundImportBulkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err.Error() == "http: request body too large" {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
 			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1 MB)")
 			return
 		}
@@ -244,6 +253,15 @@ func (a *API) OutboundImportBulk(w http.ResponseWriter, r *http.Request) {
 			ob.Tag = item.Tag
 		}
 		newOutbounds = append(newOutbounds, ob)
+	}
+
+	seenTags := make(map[string]struct{}, len(newOutbounds))
+	for idx, ob := range newOutbounds {
+		if _, dup := seenTags[ob.Tag]; dup {
+			JSONError(w, http.StatusBadRequest, fmt.Sprintf("item %d: duplicate tag %q in batch", idx+1, ob.Tag))
+			return
+		}
+		seenTags[ob.Tag] = struct{}{}
 	}
 
 	manualPath := filepath.Join(a.cfg.XRayConfigDir, "04_outbounds.manual.json")

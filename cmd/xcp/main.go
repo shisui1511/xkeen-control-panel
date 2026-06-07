@@ -83,7 +83,10 @@ func main() {
 		},
 	}
 
-	webFS, _ := xkeencontrolpanel.GetWebFS()
+	webFS, err := xkeencontrolpanel.GetWebFS()
+	if err != nil {
+		log.Fatalf("failed to load embedded web assets: %v", err)
+	}
 	srv, err := server.New(srvCfg, Version, webFS)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
@@ -219,7 +222,10 @@ func main() {
 	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)
 
 	// Templates
-	templatesFS, _ := xkeencontrolpanel.GetTemplatesFS()
+	templatesFS, err := xkeencontrolpanel.GetTemplatesFS()
+	if err != nil {
+		log.Fatalf("failed to load embedded templates: %v", err)
+	}
 	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir)
 	api.SetTemplateService(templateSvc)
 	srv.HandleProtected("/api/templates/list", api.TemplateList)

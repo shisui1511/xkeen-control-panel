@@ -165,6 +165,23 @@ func TestOutboundParse_TextInput(t *testing.T) {
 	}
 }
 
+// TestOutboundParse_OversizedBody verifies that an oversized request body on OutboundParse returns 413.
+func TestOutboundParse_OversizedBody(t *testing.T) {
+	tmp := t.TempDir()
+	svc := services.NewSubscriptionService(tmp, tmp, tmp)
+	api := &API{subscriptionSvc: svc}
+
+	// Body larger than 1MB (maxConfigBytes is 1MB, i.e., 1024*1024) and formatted as valid JSON
+	body := `{"links":["` + strings.Repeat("a", 1024*1024) + `"]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/outbound/parse", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+	api.OutboundParse(rr, req)
+
+	if rr.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected 413, got %d", rr.Code)
+	}
+}
+
 // --- Snapshot handler ---
 
 // TestSnapshotRouter_InvalidID verifies that snapshot routes with invalid IDs return 400.
