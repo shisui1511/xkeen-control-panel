@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
-  import { showToast, fetchCapabilities, showConfirm, isKernelChecking } from './stores';
+  import { showToast, fetchCapabilities, showConfirm, isKernelChecking, capabilities } from './stores';
   import Skeleton from './components/Skeleton.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
@@ -203,6 +203,42 @@
     const key = `xkeen-${action}`;
     actionLoading[key] = true;
     try {
+      if (action === 'start') {
+        // Pre-flight check: determine kernel to validate
+        const kernel = activeKernel === 'xray' || activeKernel === 'mihomo'
+          ? activeKernel
+          : xray?.process_status === 'running'
+            ? 'xray'
+            : mihomo?.process_status === 'running'
+              ? 'mihomo'
+              : 'xray';
+        try {
+          const pfRes = await fetch(`/api/config/preflight?kernel=${kernel}`, {
+            signal: AbortSignal.timeout(3000)
+          });
+          if (pfRes.ok) {
+            const pfBody = await pfRes.json();
+            const data = pfBody.data ?? pfBody;
+            if (Array.isArray(data.errors) && data.errors.length > 0) {
+              const errList = data.errors.map((e: { message?: string; code?: string }) => e.message || e.code || '').join('\n• ');
+              const message = `${$t('svc.preflight_error_body')}\n• ${errList}`;
+              const proceed = await showConfirm(
+                $t('svc.preflight_error_title'),
+                message,
+                $t('svc.preflight_start_anyway'),
+                $t('svc.preflight_fix')
+              );
+              if (!proceed) {
+                window.location.hash = '/editor';
+                actionLoading[key] = false;
+                return;
+              }
+            }
+          }
+        } catch (_) {
+          // Network/timeout error — fall through to silent start
+        }
+      }
       const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch(`/api/service/control?action=${action}`, {
         method: 'POST',
@@ -837,6 +873,15 @@
               {:else if mihomo.current_version && mihomo.current_version !== 'not installed'}
                 <span class="badge">v{mihomo.current_version} · {$t('svc.actual_badge')}</span>
               {/if}
+            {/if}
+            {#if mihomo.process_status === 'running' && $capabilities?.mihomo?.api_reachable === false}
+              <a
+                href="#/editor"
+                class="badge badge-warning"
+                title={$t('svc.mihomo_api_unavailable_title')}
+                aria-label={$t('svc.mihomo_api_unavailable_title')}
+                style="text-decoration:none;"
+              >{$t('svc.mihomo_api_unavailable')}</a>
             {/if}
           {:else}
             <span class="status-badge stopped"
