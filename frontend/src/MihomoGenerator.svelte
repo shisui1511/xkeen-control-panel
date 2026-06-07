@@ -1380,7 +1380,16 @@
     if (subscriptions.length > 0) {
       lines.push('proxy-providers:');
       for (const [i, sub] of subscriptions.entries()) {
-        let providerName = (sub.name || sub.url?.split('/').pop() || `provider-${i}`)
+        let path = '';
+        try {
+          if (sub.url) {
+            const parsed = new URL(sub.url);
+            path = parsed.pathname || '';
+          }
+        } catch (e) {}
+        path = path.replace(/\/+$/, '');
+        let urlBase = path ? path.split('/').pop() : '';
+        let providerName = (sub.name || urlBase || `provider-${i}`)
           .replace(/[^a-zA-Z0-9-]/g, '-')
           .replace(/-+/g, '-')
           .replace(/^-|-$/g, '')
