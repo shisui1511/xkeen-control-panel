@@ -149,7 +149,7 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
     const observatoryHeader = page.locator('h2.card-title').filter({ hasText: 'OBSERVATORY' });
     await expect(observatoryHeader).not.toBeVisible();
 
-    const offlineText = page.locator('text=Ядро Mihomo остановлено');
+    const offlineText = page.locator('text=Mihomo API недоступен');
     await expect(offlineText).toBeVisible();
   });
 
