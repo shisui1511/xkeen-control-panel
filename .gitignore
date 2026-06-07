@@ -43,6 +43,7 @@ frontend/test-results/
 # ── GSD baseline (auto-generated) ──
 .gsd
 .gsd-id
+.gsd-backups
 .bg-shell/
 .DS_Store
 Thumbs.db
