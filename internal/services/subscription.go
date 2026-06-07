@@ -76,18 +76,30 @@ func (s *SubscriptionService) fetchWithUserAgent(subURL string, sub *Subscriptio
 
 // SubscriptionNode представляет метаданные отдельного узла подписки.
 type SubscriptionNode struct {
-	Tag       string `json:"tag"`                 // Уникальный тег XRay (sub-N-K)
-	Name      string `json:"name"`                // Чистое имя без флагов и мусора
-	Country   string `json:"country,omitempty"`   // ISO-код страны (например, RU, DE)
-	Flag      string `json:"flag,omitempty"`      // Эмодзи флаг (например, 🇷🇺)
-	UseCase   string `json:"use_case,omitempty"`  // Область применения (например, "Youtube, Instagram")
-	Speed     string `json:"speed,omitempty"`     // Скорость (например, "1Gb/s")
-	IsNew     bool   `json:"is_new,omitempty"`    // Флаг новизны
-	Protocol  string `json:"protocol"`            // Протокол (vless, vmess, trojan, shadowsocks)
-	Transport string `json:"transport,omitempty"` // Транспорт (ws, grpc, httpupgrade, xhttp, tcp)
-	Security  string `json:"security,omitempty"`  // Безопасность (tls, reality, none)
-	Server    string `json:"server,omitempty"`    // Адрес сервера (хост:порт)
-	Active    bool   `json:"active,omitempty"`    // Выбран ли узел активным
+	Tag         string `json:"tag"`                 // Уникальный тег XRay (sub-N-K)
+	Name        string `json:"name"`                // Чистое имя без флагов и мусора
+	Country     string `json:"country,omitempty"`   // ISO-код страны (например, RU, DE)
+	Flag        string `json:"flag,omitempty"`      // Эмодзи флаг (например, 🇷🇺)
+	UseCase     string `json:"use_case,omitempty"`  // Область применения (например, "Youtube, Instagram")
+	Speed       string `json:"speed,omitempty"`     // Скорость (например, "1Gb/s")
+	IsNew       bool   `json:"is_new,omitempty"`    // Флаг новизны
+	Protocol    string `json:"protocol"`            // Протокол (vless, vmess, trojan, shadowsocks)
+	Transport   string `json:"transport,omitempty"` // Транспорт (ws, grpc, httpupgrade, xhttp, tcp)
+	Security    string `json:"security,omitempty"`  // Безопасность (tls, reality, none)
+	Server      string `json:"server,omitempty"`    // Адрес сервера (хост:порт)
+	Active      bool   `json:"active,omitempty"`    // Выбран ли узел активным
+	UUID        string `json:"uuid,omitempty"`
+	Password    string `json:"password,omitempty"`
+	Flow        string `json:"flow,omitempty"`
+	PublicKey   string `json:"public_key,omitempty"`
+	ShortID     string `json:"short_id,omitempty"`
+	ServerName  string `json:"servername,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	WSPath      string `json:"ws_path,omitempty"`
+	Cipher      string `json:"cipher,omitempty"`
+	SNI         string `json:"sni,omitempty"`
+	Congestion  string `json:"congestion,omitempty"`
+	AlterID     int    `json:"alter_id,omitempty"`
 }
 
 // Subscription represents a proxy subscription
@@ -162,6 +174,9 @@ type Subscription struct {
 	// HwidLocked — провайдер вернул X-Hwid-Not-Supported: true при последнем refresh.
 	// Означает что без HwidToken будут приходить заглушки вместо реальных нод.
 	HwidLocked bool `json:"hwid_locked,omitempty"`
+
+	// MihomoIntegrated — интегрирована ли подписка в config.yaml Mihomo
+	MihomoIntegrated bool `json:"mihomo_integrated"`
 }
 
 // Clone возвращает глубокую копию Subscription.
@@ -338,6 +353,41 @@ func (s *SubscriptionService) save() error {
 	return utils.AtomicWriteFile(path, data, 0600)
 }
 
+func (s *SubscriptionService) populateMihomoIntegrated(subs []Subscription) {
+	configDir := s.mihomoConfigDir
+	if configDir == "" {
+		configDir = "/opt/etc/mihomo"
+	}
+	configPath := filepath.Join(configDir, "config.yaml")
+
+	rawConfig, err := os.ReadFile(configPath)
+	if err != nil {
+		return
+	}
+
+	lines := strings.Split(string(rawConfig), "\n")
+	start, end, indent := findTopLevelSection(lines, "proxy-providers")
+	if start == -1 {
+		return
+	}
+
+	// Extract provider names
+	providers := extractProviderBlocks(lines, start, end, indent)
+	activeProviders := make(map[string]bool)
+	for _, p := range providers {
+		activeProviders[p.ID] = true
+	}
+
+	for i := range subs {
+		providerName := getMihomoProviderName(subs[i].Name, subs[i].URL, subs[i].ID)
+		if activeProviders[providerName] {
+			subs[i].MihomoIntegrated = true
+		} else {
+			subs[i].MihomoIntegrated = false
+		}
+	}
+}
+
 func (s *SubscriptionService) List() []Subscription {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -346,6 +396,7 @@ func (s *SubscriptionService) List() []Subscription {
 		res[i] = s.subscriptions[i].Clone()
 		res[i].ProxyCount = s.getProxyCount(&res[i])
 	}
+	s.populateMihomoIntegrated(res)
 	return res
 }
 
@@ -356,6 +407,11 @@ func (s *SubscriptionService) Get(id string) *Subscription {
 		if s.subscriptions[i].ID == id {
 			cloned := s.subscriptions[i].Clone()
 			cloned.ProxyCount = s.getProxyCount(&cloned)
+
+			slice := []Subscription{cloned}
+			s.populateMihomoIntegrated(slice)
+			cloned = slice[0]
+
 			return &cloned
 		}
 	}
@@ -434,12 +490,14 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 						}
 						configPath := filepath.Join(configDir, "config.yaml")
 
+						providerName := getMihomoProviderName(existing.Name, existing.URL, existing.ID)
+
 						s.mihomoMu.Lock()
 						rawConfig, err := os.ReadFile(configPath)
 						if err == nil {
-							newConfig := ReplaceMihomoProxyProvider(string(rawConfig), safeID, "")
+							newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, "")
 							for _, group := range existing.MihomoGroups {
-								newConfig = UpdateMihomoGroupProviders(newConfig, group, safeID, true)
+								newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, true)
 							}
 							newConfig = ReplaceMihomoProxies(newConfig, existing.ProxyNames, nil)
 							for _, group := range existing.MihomoGroups {
@@ -451,7 +509,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 
 						// Delete provider file; sanitize id to prevent path traversal (CWE-22).
 						providersDir := filepath.Join(configDir, "providers")
-						providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", safeID))
+						providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", providerName))
 						// Explicit guard: path must be within providersDir (CWE-22).
 						if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
 							os.Remove(providerFilePath)
@@ -524,12 +582,14 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 		configPath := filepath.Join(configDir, "config.yaml")
 
+		providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
+
 		s.mihomoMu.Lock()
 		rawConfig, err := os.ReadFile(configPath)
 		if err == nil {
-			newConfig := ReplaceMihomoProxyProvider(string(rawConfig), safeID, "")
+			newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, "")
 			for _, group := range sub.MihomoGroups {
-				newConfig = UpdateMihomoGroupProviders(newConfig, group, safeID, true)
+				newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, true)
 			}
 			// Также почистим старые прокси на всякий случай
 			newConfig = ReplaceMihomoProxies(newConfig, sub.ProxyNames, nil)
@@ -542,7 +602,7 @@ func (s *SubscriptionService) Delete(id string) error {
 
 		// Удалить файл провайдера; санитизируем путь к файлу провайдера (CWE-22)
 		providersDir := filepath.Join(configDir, "providers")
-		providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", safeID))
+		providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", providerName))
 		if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
 			os.Remove(providerFilePath)
 		}
@@ -759,11 +819,13 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription) error {
 		intervalSec = 3600
 	}
 
+	providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
+
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("  %s:\n", sub.ID))
+	sb.WriteString(fmt.Sprintf("  %s:\n", providerName))
 	sb.WriteString("    type: http\n")
 	sb.WriteString(fmt.Sprintf("    url: %s\n", yamlSafeScalar(sub.URL)))
-	sb.WriteString(fmt.Sprintf("    path: ./providers/%s.yaml\n", sub.ID))
+	sb.WriteString(fmt.Sprintf("    path: ./providers/%s.yaml\n", providerName))
 	sb.WriteString(fmt.Sprintf("    interval: %d\n", intervalSec))
 	sb.WriteString("    headers:\n")
 	sb.WriteString(fmt.Sprintf("      User-Agent: %s\n", yamlSafeScalar(ua)))
@@ -786,17 +848,17 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription) error {
 	}
 
 	// 3. Добавление/обновление proxy-provider в config.yaml
-	newConfig = ReplaceMihomoProxyProvider(newConfig, sub.ID, providerBlock)
+	newConfig = ReplaceMihomoProxyProvider(newConfig, providerName, providerBlock)
 
 	// 4. Привязка proxy-provider к группам через use:
 	for _, group := range sub.MihomoGroups {
-		newConfig = UpdateMihomoGroupProviders(newConfig, group, sub.ID, false)
+		newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, false)
 	}
 
 	// Записать скачанный контент в файл провайдера
 	providersDir := filepath.Join(configDir, "providers")
 	_ = os.MkdirAll(providersDir, 0755)
-	providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", sub.ID))
+	providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", providerName))
 	if err := utils.AtomicWriteFile(providerFilePath, body, 0600); err != nil {
 		return fmt.Errorf("write provider file: %w", err)
 	}
@@ -1444,6 +1506,124 @@ func (s *SubscriptionService) writeRoutingFragment(path string, sub *Subscriptio
 	return utils.AtomicWriteFile(path, data, 0600)
 }
 
+func getVNextUserField(ob *Outbound, field string) string {
+	if ob.Settings == nil {
+		return ""
+	}
+	vnextRaw, ok := ob.Settings["vnext"]
+	if !ok {
+		return ""
+	}
+	vnextSlice, ok := vnextRaw.([]interface{})
+	if !ok || len(vnextSlice) == 0 {
+		return ""
+	}
+	firstVN, ok := vnextSlice[0].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	usersRaw, ok := firstVN["users"]
+	if !ok {
+		return ""
+	}
+	usersSlice, ok := usersRaw.([]interface{})
+	if !ok || len(usersSlice) == 0 {
+		return ""
+	}
+	firstUser, ok := usersSlice[0].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	val, _ := firstUser[field].(string)
+	return val
+}
+
+func getVNextUserInt(ob *Outbound, field string) int {
+	if ob.Settings == nil {
+		return 0
+	}
+	vnextRaw, ok := ob.Settings["vnext"]
+	if !ok {
+		return 0
+	}
+	vnextSlice, ok := vnextRaw.([]interface{})
+	if !ok || len(vnextSlice) == 0 {
+		return 0
+	}
+	firstVN, ok := vnextSlice[0].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	usersRaw, ok := firstVN["users"]
+	if !ok {
+		return 0
+	}
+	usersSlice, ok := usersRaw.([]interface{})
+	if !ok || len(usersSlice) == 0 {
+		return 0
+	}
+	firstUser, ok := usersSlice[0].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	switch v := firstUser[field].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case string:
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return 0
+}
+
+func getServerField(ob *Outbound, field string) string {
+	if ob.Settings == nil {
+		return ""
+	}
+	serversRaw, ok := ob.Settings["servers"]
+	if !ok {
+		return ""
+	}
+	serversSlice, ok := serversRaw.([]interface{})
+	if !ok || len(serversSlice) == 0 {
+		return ""
+	}
+	firstSrv, ok := serversSlice[0].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	val, _ := firstSrv[field].(string)
+	return val
+}
+
+func getMihomoProviderName(name string, urlStr string, fallback string) string {
+	providerName := name
+	if providerName == "" {
+		if parsed, err := url.Parse(urlStr); err == nil && parsed.Path != "" {
+			providerName = filepath.Base(parsed.Path)
+		}
+	}
+	if providerName == "" || providerName == "." || providerName == "/" {
+		providerName = fallback
+	}
+
+	nonAlphanumericDashRe := regexp.MustCompile(`[^a-zA-Z0-9-]`)
+	providerName = nonAlphanumericDashRe.ReplaceAllString(providerName, "-")
+
+	multiDashRe := regexp.MustCompile(`-+`)
+	providerName = multiDashRe.ReplaceAllString(providerName, "-")
+	providerName = strings.Trim(providerName, "-")
+	providerName = strings.ToLower(providerName)
+
+	if providerName == "" {
+		providerName = fallback
+	}
+	return providerName
+}
+
 func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, sub *Subscription) ([]SubscriptionNode, error) {
 	// Ensure directory exists
 	dir := filepath.Dir(path)
@@ -1477,12 +1657,94 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 		// Извлекаем transport и security
 		node.Transport = "tcp"
 		node.Security = "none"
+
+		// Извлекаем детальные настройки протокола
+		switch node.Protocol {
+		case "vless":
+			node.UUID = getVNextUserField(&outbounds[i], "id")
+			node.Flow = getVNextUserField(&outbounds[i], "flow")
+		case "vmess":
+			node.UUID = getVNextUserField(&outbounds[i], "id")
+			node.AlterID = getVNextUserInt(&outbounds[i], "alterId")
+		case "trojan":
+			node.Password = getServerField(&outbounds[i], "password")
+		case "tuic":
+			node.UUID = getServerField(&outbounds[i], "uuid")
+			node.Password = getServerField(&outbounds[i], "password")
+			node.Congestion = getServerField(&outbounds[i], "congestionControl")
+		case "shadowsocks":
+			node.Cipher = getServerField(&outbounds[i], "method")
+			node.Password = getServerField(&outbounds[i], "password")
+		case "hysteria2":
+			node.Password = getServerField(&outbounds[i], "password")
+		}
+
 		if outbounds[i].StreamSettings != nil {
 			if net, ok := outbounds[i].StreamSettings["network"].(string); ok && net != "" {
 				node.Transport = net
 			}
 			if sec, ok := outbounds[i].StreamSettings["security"].(string); ok && sec != "" {
 				node.Security = sec
+			}
+
+			// tlsSettings / realitySettings
+			if node.Security == "reality" {
+				if rsRaw, ok := outbounds[i].StreamSettings["realitySettings"]; ok {
+					if rsMap, ok := rsRaw.(map[string]interface{}); ok {
+						if pbk, _ := rsMap["publicKey"].(string); pbk != "" {
+							node.PublicKey = pbk
+						}
+						if sid, _ := rsMap["shortId"].(string); sid != "" {
+							node.ShortID = sid
+						}
+						if sn, _ := rsMap["serverName"].(string); sn != "" {
+							node.ServerName = sn
+							node.SNI = sn
+						}
+						if fp, _ := rsMap["fingerprint"].(string); fp != "" {
+							node.Fingerprint = fp
+						}
+					}
+				}
+			} else if node.Security == "tls" {
+				if tsRaw, ok := outbounds[i].StreamSettings["tlsSettings"]; ok {
+					if tsMap, ok := tsRaw.(map[string]interface{}); ok {
+						if sn, _ := tsMap["serverName"].(string); sn != "" {
+							node.ServerName = sn
+							node.SNI = sn
+						}
+						if fp, _ := tsMap["fingerprint"].(string); fp != "" {
+							node.Fingerprint = fp
+						}
+					}
+				}
+			}
+
+			// wsSettings / httpupgradeSettings / xhttpSettings
+			if node.Transport == "ws" {
+				if wsRaw, ok := outbounds[i].StreamSettings["wsSettings"]; ok {
+					if wsMap, ok := wsRaw.(map[string]interface{}); ok {
+						if path, _ := wsMap["path"].(string); path != "" {
+							node.WSPath = path
+						}
+					}
+				}
+			} else if node.Transport == "httpupgrade" {
+				if huRaw, ok := outbounds[i].StreamSettings["httpupgradeSettings"]; ok {
+					if huMap, ok := huRaw.(map[string]interface{}); ok {
+						if path, _ := huMap["path"].(string); path != "" {
+							node.WSPath = path
+						}
+					}
+				}
+			} else if node.Transport == "xhttp" {
+				if xhttpRaw, ok := outbounds[i].StreamSettings["xhttpSettings"]; ok {
+					if xhttpMap, ok := xhttpRaw.(map[string]interface{}); ok {
+						if path, _ := xhttpMap["path"].(string); path != "" {
+							node.WSPath = path
+						}
+					}
+				}
 			}
 		}
 

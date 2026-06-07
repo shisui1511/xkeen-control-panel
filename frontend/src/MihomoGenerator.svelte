@@ -47,6 +47,7 @@
     wsPath?: string;
     tls?: boolean;
     fingerprint?: string;
+    alterID?: number;
   }
 
   interface ProxyGroup {
@@ -562,7 +563,20 @@
             name: n.name || n.tag || `proxy-${imported}`,
             type: (n.protocol || 'vless') as ProxyType,
             server,
-            port
+            port,
+            uuid: n.uuid || '',
+            password: n.password || '',
+            flow: n.flow || '',
+            publicKey: n.public_key || '',
+            shortId: n.short_id || '',
+            servername: n.servername || '',
+            fingerprint: n.fingerprint || '',
+            wsPath: n.ws_path || '',
+            cipher: n.cipher || '',
+            sni: n.sni || '',
+            congestion: n.congestion || '',
+            alterID: n.alter_id || 0,
+            tls: n.security === 'tls' || n.security === 'reality'
           };
         });
         proxies = [...proxies, ...mapped];
@@ -1366,7 +1380,14 @@
     if (subscriptions.length > 0) {
       lines.push('proxy-providers:');
       for (const [i, sub] of subscriptions.entries()) {
-        const providerName = (sub.name || sub.url?.split('/').pop() || `provider-${i}`).replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+        let providerName = (sub.name || sub.url?.split('/').pop() || `provider-${i}`)
+          .replace(/[^a-zA-Z0-9-]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '')
+          .toLowerCase();
+        if (!providerName) {
+          providerName = sub.id || `provider-${i}`;
+        }
         lines.push(`  ${providerName}:`);
         lines.push(`    type: http`);
         lines.push(`    path: ./providers/${providerName}.yaml`);
@@ -1776,7 +1797,8 @@
         'rules': extractSection(yamlContent, 'rules'),
         'proxies': extractSection(yamlContent, 'proxies'),
         'dns': extractSection(yamlContent, 'dns'),
-        'tun': extractSection(yamlContent, 'tun')
+        'tun': extractSection(yamlContent, 'tun'),
+        'proxy-providers': extractSection(yamlContent, 'proxy-providers')
       };
 
       const mergeRes = await fetch('/api/config/mihomo-merge', {

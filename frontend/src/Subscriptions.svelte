@@ -42,6 +42,7 @@
     hwid_locked?: boolean;
     use_provider_interval?: boolean;
     announcement?: string;
+    mihomo_integrated?: boolean;
   }
 
   interface SubscriptionNode {
@@ -946,6 +947,13 @@
 
               <span class="sub-type-label">{sub.type === 'mihomo' ? 'Mihomo' : 'XRay'}</span>
 
+              <span class="meta-divider">|</span>
+              {#if sub.mihomo_integrated}
+                <span class="mihomo-integrated-badge active" title="Интегрировано в Mihomo config.yaml">Mihomo ✓</span>
+              {:else}
+                <span class="mihomo-integrated-badge" title="Не интегрировано в Mihomo config.yaml">Mihomo —</span>
+              {/if}
+
               {#if sub.hwid_locked}
                 <span class="meta-divider">|</span>
                 <span class="hwid-locked-badge">⚠ HWID Locked</span>
@@ -1721,6 +1729,18 @@
     letter-spacing: 0.08em;
     font-weight: 700;
     color: var(--fg-dim);
+  }
+
+  .mihomo-integrated-badge {
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    color: var(--fg-faint);
+  }
+
+  .mihomo-integrated-badge.active {
+    color: var(--success);
   }
 
   .sub-meta-right {

@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -476,6 +477,42 @@ func ParseClashProxyNode(blockStr string) SubscriptionNode {
 	}
 	if p.get("reality-opts.public-key") != "" {
 		node.Security = "reality"
+	}
+
+	node.UUID = p.get("uuid")
+	node.Password = p.get("password")
+	node.Flow = p.get("flow")
+	node.Cipher = p.get("cipher")
+	node.SNI = p.get("sni")
+	node.Congestion = p.get("congestion")
+
+	node.PublicKey = p.get("reality-opts.public-key")
+	node.ShortID = p.get("reality-opts.short-id")
+	node.Fingerprint = p.get("client-fingerprint")
+
+	sn := p.get("servername")
+	if sn == "" {
+		sn = p.get("sni")
+	}
+	node.ServerName = sn
+
+	wspath := p.get("ws-opts.path")
+	if wspath == "" {
+		wspath = p.get("httpupgrade-opts.path")
+	}
+	if wspath == "" {
+		wspath = p.get("xhttp-opts.path")
+	}
+	node.WSPath = wspath
+
+	aidStr := p.get("alter-id")
+	if aidStr == "" {
+		aidStr = p.get("alterId")
+	}
+	if aidStr != "" {
+		if aid, err := strconv.Atoi(aidStr); err == nil {
+			node.AlterID = aid
+		}
 	}
 
 	return node

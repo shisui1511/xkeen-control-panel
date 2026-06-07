@@ -114,8 +114,9 @@ func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 
 	// Create dummy config.yaml and provider file for mihomo
 	configPath := filepath.Join(mihomoDir, "config.yaml")
-	_ = os.WriteFile(configPath, []byte("proxy-providers:\n  "+id+":\n    type: http\n"), 0600)
-	providerPath := filepath.Join(mihomoDir, "providers", fmt.Sprintf("%s.yaml", id))
+	providerName := getMihomoProviderName(sub.Name, sub.URL, id)
+	_ = os.WriteFile(configPath, []byte("proxy-providers:\n  "+providerName+":\n    type: http\n"), 0600)
+	providerPath := filepath.Join(mihomoDir, "providers", fmt.Sprintf("%s.yaml", providerName))
 	_ = os.MkdirAll(filepath.Join(mihomoDir, "providers"), 0755)
 	_ = os.WriteFile(providerPath, []byte(""), 0600)
 
@@ -983,7 +984,8 @@ func TestMihomoSubscriptionType(t *testing.T) {
 
 	got := svc.List()[0]
 
-	// config.yaml должен содержать proxy-providers и ID подписки.
+	providerName := getMihomoProviderName(sub.Name, sub.URL, id)
+	// config.yaml должен содержать proxy-providers и имя провайдера подписки.
 	configPath := filepath.Join(tmp, "config.yaml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -992,12 +994,12 @@ func TestMihomoSubscriptionType(t *testing.T) {
 	if !strings.Contains(string(data), "proxy-providers:") {
 		t.Error("expected 'proxy-providers:' in config.yaml after refresh")
 	}
-	if !strings.Contains(string(data), id) {
-		t.Errorf("expected subscription ID %q in config.yaml after refresh", id)
+	if !strings.Contains(string(data), providerName) {
+		t.Errorf("expected provider name %q in config.yaml after refresh", providerName)
 	}
 
 	// Файл провайдера должен содержать TestProxy
-	providerPath := filepath.Join(tmp, "providers", id+".yaml")
+	providerPath := filepath.Join(tmp, "providers", providerName+".yaml")
 	providerData, err := os.ReadFile(providerPath)
 	if err != nil {
 		t.Fatalf("expected provider file at %s: %v", providerPath, err)
@@ -1502,15 +1504,16 @@ proxy-groups:
 	if !strings.Contains(configStr, "proxy-providers:") {
 		t.Error("config.yaml should contain proxy-providers:")
 	}
-	if !strings.Contains(configStr, "mihomo-sub:") {
-		t.Error("config.yaml should contain provider ID 'mihomo-sub'")
+	providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
+	if !strings.Contains(configStr, providerName+":") {
+		t.Errorf("config.yaml should contain provider name %q", providerName)
 	}
-	if !strings.Contains(configStr, "use:\n      - mihomo-sub") {
+	if !strings.Contains(configStr, "use:\n      - "+providerName) {
 		t.Errorf("config.yaml group should use provider, got:\n%s", configStr)
 	}
 
 	// Проверить что файл провайдера записан
-	providerFilePath := filepath.Join(mihomoDir, "providers", "mihomo-sub.yaml")
+	providerFilePath := filepath.Join(mihomoDir, "providers", providerName+".yaml")
 	if _, err := os.Stat(providerFilePath); err != nil {
 		t.Errorf("provider file should be written at %s: %v", providerFilePath, err)
 	}
