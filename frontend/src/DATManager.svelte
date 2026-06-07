@@ -63,12 +63,8 @@
     }
   }
 
-  async function updateAll(filename?: string) {
-    if (filename) {
-      updatingFile = filename;
-    } else {
-      globalUpdating = true;
-    }
+  async function updateAll(_filename?: string) {
+    globalUpdating = true;
     error = '';
     try {
       const csrfToken = localStorage.getItem('csrf_token');
