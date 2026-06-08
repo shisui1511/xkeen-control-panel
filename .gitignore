@@ -44,6 +44,7 @@ frontend/test-results/
 .gsd
 .gsd-id
 .gsd-backups
+commands.md
 .bg-shell/
 .DS_Store
 Thumbs.db
