@@ -496,9 +496,6 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 	// Fork new process
 	configPath := filepath.Join(dataDir, "config.json")
 	cmd := exec.Command(binPath, "-config", configPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
 	}
