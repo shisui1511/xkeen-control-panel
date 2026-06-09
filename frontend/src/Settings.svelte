@@ -52,8 +52,14 @@
   async function fetchSnapshots() {
     try {
       const res = await fetch('/api/snapshots/list');
-      if (res.ok) snapshots = (await res.json()) ?? [];
-    } catch (_) {}
+      if (res.ok) {
+        snapshots = (await res.json()) ?? [];
+      } else {
+        showToast('error', await res.text());
+      }
+    } catch (e) {
+      showToast('error', e instanceof Error ? e.message : String(e));
+    }
   }
 
   async function createSnapshot() {
