@@ -416,6 +416,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.backup_restore_confirm':
       'Вы уверены, что хотите восстановить этот бэкап? Текущий файл будет перезаписан.',
     'settings.backup_restore_success': 'Конфигурация успешно восстановлена',
+    'settings.backup_read_error': 'Ошибка чтения бэкапа',
+    'settings.backup_restore_error': 'Ошибка восстановления',
+    'settings.backup_delete_error': 'Ошибка удаления',
     'settings.backup_delete_confirm': 'Вы уверены, что хотите удалить этот бэкап?',
     'settings.backup_delete_success': 'Бэкап удален',
     'settings.backup_created': 'Резервная копия создана',
@@ -1497,6 +1500,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.backup_restore_confirm':
       'Are you sure you want to restore this backup? The current file will be overwritten.',
     'settings.backup_restore_success': 'Configuration restored successfully',
+    'settings.backup_read_error': 'Error reading backup',
+    'settings.backup_restore_error': 'Error restoring backup',
+    'settings.backup_delete_error': 'Error deleting backup',
     'settings.backup_delete_confirm': 'Are you sure you want to delete this backup?',
     'settings.backup_delete_success': 'Backup deleted',
     'settings.backup_created': 'Backup created',

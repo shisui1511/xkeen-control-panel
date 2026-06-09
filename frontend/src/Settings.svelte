@@ -169,17 +169,19 @@
 
   async function restoreBackup(backupPath: string) {
     if (!confirm($t('settings.backup_restore_confirm'))) return;
+    const targetFile = selectedFile; // capture before any await to prevent TOCTOU race
+    if (!targetFile) return;
     try {
       const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
       if (!readRes.ok) {
         const txt = await readRes.text();
-        showToast('error', `Ошибка чтения бэкапа: ${txt}`);
+        showToast('error', `${$t('settings.backup_read_error')}: ${txt}`);
         return;
       }
       const data = await readRes.text();
 
       const csrfToken = localStorage.getItem('csrf_token');
-      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
+      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(targetFile)}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -192,7 +194,7 @@
         fetchBackups();
       } else {
         const txt = await saveRes.text();
-        showToast('error', `Ошибка восстановления: ${txt}`);
+        showToast('error', `${$t('settings.backup_restore_error')}: ${txt}`);
       }
     } catch (e: any) {
       showToast('error', e.message);
