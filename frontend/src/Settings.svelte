@@ -317,6 +317,10 @@
   async function changePassword() {
     passwordError = '';
     passwordSuccess = false;
+    if (newPassword.length < 8) {
+      passwordError = $t('settings.password_too_short');
+      return;
+    }
     if (newPassword !== confirmPassword) {
       passwordError = $t('settings.password_mismatch');
       return;
