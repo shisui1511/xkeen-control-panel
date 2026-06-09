@@ -546,6 +546,7 @@
       }
     } catch (e) {
       updateInstalling = false;
+      showToast('error', e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -565,6 +566,7 @@
       }
     } catch (e) {
       updateInstalling = false;
+      showToast('error', e instanceof Error ? e.message : String(e));
     }
   }
 
