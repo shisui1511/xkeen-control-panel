@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
@@ -190,8 +191,22 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	setUpdateState(st)
 
-	// Replace with backup
-	if err := os.Rename(latestBackup, binPath); err != nil {
+	// Replace with backup via temporary file to preserve backup on disk and set executable permissions
+	tempBinPath := binPath + ".rollback"
+	if err := copyFile(latestBackup, tempBinPath); err != nil {
+		st = getUpdateState()
+		st.Status = "failed"
+		st.Message = "Rollback failed: " + err.Error()
+		setUpdateState(st)
+		JSONError(w, http.StatusInternalServerError, st.Message)
+		return
+	}
+	if err := os.Chmod(tempBinPath, 0755); err != nil {
+		log.Printf("Rollback: failed to chmod binary: %v", err)
+	}
+
+	if err := os.Rename(tempBinPath, binPath); err != nil {
+		_ = os.Remove(tempBinPath)
 		st = getUpdateState()
 		st.Status = "failed"
 		st.Message = "Rollback failed: " + err.Error()
@@ -206,7 +221,7 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 	st.Progress = 90
 	setUpdateState(st)
 
-	go a.restartProcess(binPath, "", a.cfg.DataDir, "")
+	go a.restartProcess(binPath, latestBackup, a.cfg.DataDir, "")
 
 	JSONSuccess(w, getUpdateState())
 }
@@ -471,6 +486,13 @@ func (a *API) performUpdate(channel string) {
 }
 
 func (a *API) restartProcess(binPath string, backupPath string, dataDir string, expectedVersion string) {
+	// Shutdown the server listener so the new process can bind to the port
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Update: shutdown error: %v", err)
+	}
+
 	// Fork new process
 	configPath := filepath.Join(dataDir, "config.json")
 	cmd := exec.Command(binPath, "-config", configPath)
@@ -482,12 +504,24 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 	}
 
 	if err := cmd.Start(); err != nil {
+		// If starting the new binary fails, rollback immediately
+		msg := "Restart failed: " + err.Error()
+		if backupPath != "" {
+			if err := copyFile(backupPath, binPath); err == nil {
+				// Start the backup binary to restore the server
+				rollbackCmd := exec.Command(binPath, "-config", configPath)
+				rollbackCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+				_ = rollbackCmd.Start()
+				msg = "Проверка не удалась, выполнен авто-откат на резервную копию."
+			}
+		}
 		setUpdateState(UpdateStatus{
 			Status:    "failed",
-			Message:   "Restart failed: " + err.Error(),
+			Message:   msg,
 			Timestamp: time.Now().Unix(),
 		})
-		return
+		time.Sleep(1 * time.Second)
+		os.Exit(1)
 	}
 
 	// Health check
@@ -548,7 +582,14 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 		if err := copyFile(backupPath, binPath); err != nil {
 			msg = "Проверка не удалась. Откат завершился ошибкой: " + err.Error()
 		} else {
-			msg = "Проверка не удалась, выполнен авто-откат на резервную копию."
+			// Start the backup binary to restore the server
+			rollbackCmd := exec.Command(binPath, "-config", configPath)
+			rollbackCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			if err := rollbackCmd.Start(); err == nil {
+				msg = "Проверка не удалась, выполнен авто-откат на резервную копию."
+			} else {
+				msg = "Проверка не удалась, авто-откат не смог запуститься: " + err.Error()
+			}
 		}
 	}
 
@@ -557,6 +598,8 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 		Message:   msg,
 		Timestamp: time.Now().Unix(),
 	})
+	time.Sleep(1 * time.Second)
+	os.Exit(1)
 }
 
 // compareSemver сравнивает две версии без префикса "v".
