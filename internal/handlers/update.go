@@ -3,6 +3,7 @@ package handlers
 import (
 	"bufio"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -130,13 +131,13 @@ func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
 		channel = "stable"
 	}
 
-	// Run update in background
-	go a.performUpdate(channel)
-
+	// Lock state BEFORE spawning goroutine to prevent race condition
 	st.Status = "checking"
 	st.Progress = 5
 	st.Timestamp = time.Now().Unix()
 	setUpdateState(st)
+
+	go a.performUpdate(channel)
 
 	JSONSuccess(w, getUpdateState())
 }
@@ -156,14 +157,29 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Find latest backup
+	// Find latest backup by modification time (not by filename)
 	backups, err := os.ReadDir(backupDir)
 	if err != nil || len(backups) == 0 {
 		JSONError(w, http.StatusNotFound, "No backup found")
 		return
 	}
 
-	latestBackup := filepath.Join(backupDir, backups[len(backups)-1].Name())
+	var latestBackup string
+	var latestModTime time.Time
+	for _, entry := range backups {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(latestModTime) {
+			latestModTime = info.ModTime()
+			latestBackup = filepath.Join(backupDir, entry.Name())
+		}
+	}
+	if latestBackup == "" {
+		JSONError(w, http.StatusNotFound, "No backup found")
+		return
+	}
 
 	// Stop current binary
 	st := UpdateStatus{
@@ -477,9 +493,20 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 	time.Sleep(2 * time.Second)
 
 	port := a.cfg.Port
-	healthURL := fmt.Sprintf("http://localhost:%d/api/version", port)
-
-	client := &http.Client{Timeout: 5 * time.Second}
+	var healthURL string
+	var client *http.Client
+	if a.cfg.HTTPS.Enabled {
+		healthURL = fmt.Sprintf("https://localhost:%d/api/version", port)
+		client = &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // localhost-only health check
+			},
+		}
+	} else {
+		healthURL = fmt.Sprintf("http://localhost:%d/api/version", port)
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
 	for i := 0; i < 10; i++ {
 		resp, err := client.Get(healthURL)
 		if err == nil && resp.StatusCode == http.StatusOK {
@@ -604,7 +631,7 @@ func fetchLatestRelease(channel string) (*UpdateInfo, error) {
 				Changelog:     rel.Body,
 			}, nil
 		}
-		if channel == "beta" {
+		if channel == "beta" && rel.Prerelease {
 			return &UpdateInfo{
 				LatestVersion: tag,
 				Changelog:     rel.Body,
@@ -633,7 +660,7 @@ func fetchChangelog(version string) (string, error) {
 	return release.Body, nil
 }
 
-func downloadFile(url, filepath string) error {
+func downloadFile(url, destPath string) error {
 	client := utils.SafeHTTPClient(300 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
@@ -645,14 +672,24 @@ func downloadFile(url, filepath string) error {
 		return fmt.Errorf("download failed: %s", resp.Status)
 	}
 
-	out, err := os.Create(filepath)
+	out, err := os.Create(destPath)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, resp.Body)
-	return err
+	_, copyErr := io.Copy(out, resp.Body)
+	// Always close before possible removal
+	closeErr := out.Close()
+
+	if copyErr != nil {
+		_ = os.Remove(destPath) // cleanup on copy error
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(destPath) // cleanup on close error
+		return closeErr
+	}
+	return nil
 }
 
 func copyFile(src, dst string) error {
@@ -668,8 +705,11 @@ func copyFile(src, dst string) error {
 	}
 	defer out.Close()
 
-	_, err = io.Copy(out, in)
-	return err
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	// Sync before Close — ensure data is flushed to disk (power-loss safety on router)
+	return out.Sync()
 }
 
 // verifyFileChecksum downloads checksums.txt from the release and verifies the SHA-256
