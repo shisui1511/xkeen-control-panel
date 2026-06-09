@@ -298,10 +298,8 @@ func main() {
 		}
 		// If the server was closed (e.g. during update restart), wait for either a signal
 		// or for the update process to call os.Exit().
-		select {
-		case sig := <-sigCh:
-			log.Printf("Received signal %s during restart, exiting...", sig)
-		}
+		sig := <-sigCh
+		log.Printf("Received signal %s during restart, exiting...", sig)
 	}
 	log.Println("Server stopped.")
 }
