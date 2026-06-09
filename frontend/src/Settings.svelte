@@ -224,7 +224,7 @@
         fetchBackups();
       } else {
         const txt = await res.text();
-        showToast('error', `Ошибка удаления: ${txt}`);
+        showToast('error', `${$t('settings.backup_delete_error')}: ${txt}`);
       }
     } catch (e: any) {
       showToast('error', e.message);
