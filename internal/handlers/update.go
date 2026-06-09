@@ -545,11 +545,11 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 			ok := true
 			if expectedVersion != "" {
 				var versionResp struct {
-					Version string `json:"version"`
+					PanelVersion string `json:"panel_version"`
 				}
 				_ = json.NewDecoder(resp.Body).Decode(&versionResp)
 				newVer := strings.TrimPrefix(expectedVersion, "v")
-				actualVer := strings.TrimPrefix(versionResp.Version, "v")
+				actualVer := strings.TrimPrefix(versionResp.PanelVersion, "v")
 				ok = actualVer == newVer
 			}
 			resp.Body.Close()
