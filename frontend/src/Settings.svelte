@@ -154,6 +154,8 @@
         fetchBackups();
       }
     } catch (e) {
+      configFiles = [];
+      showToast('error', `${$t('settings.backup_list_error')}: ${e instanceof Error ? e.message : String(e)}`);
       console.error(e);
     }
   }
@@ -167,9 +169,14 @@
         backups = (await res.json()) ?? [];
       } else {
         backups = [];
+        const txt = await res.text();
+        showToast('error', `${$t('settings.backups_fetch_error')}: ${txt}`);
+        console.error(new Error(`Failed to fetch backups: ${txt}`));
       }
     } catch (e) {
       backups = [];
+      showToast('error', `${$t('settings.backups_fetch_error')}: ${e instanceof Error ? e.message : String(e)}`);
+      console.error(e);
     } finally {
       loadingBackups = false;
     }
@@ -1416,31 +1423,31 @@
   }
 
   .status-ok {
-    color: #10b981;
+    color: var(--success);
   }
 
   .status-err {
-    color: #ef4444;
+    color: var(--danger);
   }
 
   .field-error {
     margin-top: 8px;
     font-size: 13px;
-    color: #ef4444;
+    color: var(--danger);
     padding: 6px 10px;
-    background: rgba(239, 68, 68, 0.08);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
     border-radius: 6px;
-    border: 1px solid rgba(239, 68, 68, 0.25);
+    border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   }
 
   .field-success {
     margin-top: 8px;
     font-size: 13px;
-    color: #10b981;
+    color: var(--success);
     padding: 6px 10px;
-    background: rgba(16, 185, 129, 0.08);
+    background: color-mix(in srgb, var(--success) 8%, transparent);
     border-radius: 6px;
-    border: 1px solid rgba(16, 185, 129, 0.25);
+    border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
   }
 
   .channel-switcher {
