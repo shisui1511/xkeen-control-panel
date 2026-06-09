@@ -422,6 +422,58 @@
   let sseSource: EventSource | null = null;
   let showConfirmUpdateModal = false;
 
+  // Reconnect/polling state after update restart
+  let reconnecting = false;
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const RECONNECT_INTERVAL_MS = 1500;
+  const RECONNECT_MAX_ATTEMPTS = 40; // 40 × 1.5s = 60s max
+
+  function stopReconnectPolling() {
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    reconnecting = false;
+    reconnectAttempt = 0;
+  }
+
+  function startReconnectPolling() {
+    if (reconnecting) return;
+    reconnecting = true;
+    reconnectAttempt = 0;
+    pollVersion();
+  }
+
+  function pollVersion() {
+    reconnectTimer = setTimeout(async () => {
+      reconnectAttempt++;
+      try {
+        const res = await fetch('/api/version', { cache: 'no-store' });
+        if (res.ok) {
+          // New server is up — reload the page
+          stopReconnectPolling();
+          window.location.reload();
+          return;
+        }
+      } catch (_) {
+        // Server not yet up — continue polling
+      }
+      if (reconnectAttempt < RECONNECT_MAX_ATTEMPTS) {
+        pollVersion();
+      } else {
+        // Give up — let user know
+        stopReconnectPolling();
+        updateInstalling = false;
+        updateStatus = {
+          status: 'failed',
+          message: $t('settings.update_reconnect_timeout'),
+          progress: 0
+        };
+      }
+    }, RECONNECT_INTERVAL_MS);
+  }
+
   function startStatusSSE() {
     if (sseSource) {
       sseSource.close();
@@ -432,7 +484,18 @@
       try {
         const state = JSON.parse(event.data);
         updateStatus = state;
-        if (state.status === 'done' || state.status === 'failed') {
+        if (state.status === 'restarting') {
+          // Server is about to shut down — switch to polling mode
+          sseSource?.close();
+          sseSource = null;
+          startReconnectPolling();
+        } else if (state.status === 'done') {
+          updateInstalling = false;
+          sseSource?.close();
+          sseSource = null;
+          // Reload so the page reflects the new version
+          window.location.reload();
+        } else if (state.status === 'failed') {
           updateInstalling = false;
           sseSource?.close();
           sseSource = null;
@@ -442,9 +505,14 @@
       }
     };
     sseSource.onerror = () => {
-      updateInstalling = false;
       sseSource?.close();
       sseSource = null;
+      // If we were in the middle of an install (not done/failed), start polling
+      if (updateInstalling && !reconnecting) {
+        startReconnectPolling();
+      } else {
+        updateInstalling = false;
+      }
     };
   }
 
@@ -517,6 +585,7 @@
       sseSource.close();
       sseSource = null;
     }
+    stopReconnectPolling();
   });
 </script>
 
@@ -756,9 +825,24 @@
       {#if updateStatus && updateStatus.status !== 'idle'}
         <div class="update-progress">
           <div class="progress-bar">
-            <div class="progress-fill" style="width: {updateStatus.progress}%"></div>
+            <div
+              class="progress-fill"
+              class:progress-pulse={reconnecting}
+              style="width: {reconnecting ? 100 : updateStatus.progress}%"
+            ></div>
           </div>
           <span class="progress-text">{updateStatus.message}</span>
+        </div>
+      {/if}
+
+      {#if reconnecting}
+        <div class="reconnect-overlay">
+          <div class="reconnect-spinner"></div>
+          <div class="reconnect-text">
+            <span>{$t('settings.update_reconnecting')}</span>
+            <span class="reconnect-dots"></span>
+          </div>
+          <div class="reconnect-sub">{$t('settings.update_reconnecting_sub')}</div>
         </div>
       {/if}
 
@@ -1391,6 +1475,77 @@
     background: var(--accent);
     border-radius: 4px;
     transition: width 0.3s ease;
+  }
+
+  .progress-fill.progress-pulse {
+    animation: progress-shimmer 1.5s ease-in-out infinite;
+    background: linear-gradient(
+      90deg,
+      var(--accent) 0%,
+      color-mix(in srgb, var(--accent) 60%, white) 50%,
+      var(--accent) 100%
+    );
+    background-size: 200% 100%;
+  }
+
+  @keyframes progress-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  /* Reconnect overlay */
+  .reconnect-overlay {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 18px 16px;
+    margin: 6px 0 10px;
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius: var(--radius-md, 8px);
+  }
+
+  .reconnect-spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .reconnect-text {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .reconnect-dots::after {
+    content: '';
+    animation: dots 1.5s steps(4, end) infinite;
+  }
+
+  @keyframes dots {
+    0%   { content: ''; }
+    25%  { content: '.'; }
+    50%  { content: '..'; }
+    75%  { content: '...'; }
+    100% { content: ''; }
+  }
+
+  .reconnect-sub {
+    font-size: 12px;
+    color: var(--fg-secondary);
+    text-align: center;
   }
 
   .progress-text {
