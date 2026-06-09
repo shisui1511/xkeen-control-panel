@@ -9,6 +9,7 @@
   export let selectedFile: string = '';
   export let onInsertIntoEditor: (content: string) => void = () => {};
   export let embedded: boolean = false;
+  export let invalidateCache: boolean = false;
 
   let kernel: 'xray' | 'mihomo' = 'xray';
   let kernelInitialized = false;
@@ -54,7 +55,7 @@
     {#if kernel === 'xray'}
       <XrayRoutingConstructor {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} />
     {:else}
-      <MihomoGenerator {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} />
+      <MihomoGenerator {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} {invalidateCache} />
     {/if}
   </div>
 </div>

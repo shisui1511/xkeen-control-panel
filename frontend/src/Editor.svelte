@@ -570,19 +570,19 @@
     }
   }
 
-  function closeTab(path: string) {
+  function closeTab(path: string, force = false) {
     const tabIndex = tabs.findIndex((t) => t.path === path);
     if (tabIndex === -1) return;
 
     const tabToClose = tabs[tabIndex];
 
-    if (tabToClose.isDirty) {
+    if (tabToClose.isDirty && !force) {
       if (activeTabPath !== path) {
         switchTab(path);
       }
       if (!confirmUnsaved()) return;
-      localStorage.removeItem('editor.draft.' + path);
     }
+    localStorage.removeItem('editor.draft.' + path);
 
     tabs.splice(tabIndex, 1);
 
@@ -1219,8 +1219,8 @@
       if (!res.ok) throw new Error(await res.text());
 
       showToast('success', $t('app.delete'));
-      selectedFile = '';
-      backups = [];
+      const fileToDelete = selectedFile;
+      closeTab(fileToDelete, true);
       await loadFiles();
     } catch (e) {
       showToast('error', $t('editor.delete_error') + ': ' + (e as any)?.message);
@@ -2178,6 +2178,7 @@
         onInsertIntoEditor={handleInsertIntoEditor}
         {selectedFile}
         embedded={true}
+        invalidateCache={activeTab === 'constructor'}
       />
     </div>
   {/if}

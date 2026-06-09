@@ -88,7 +88,6 @@
   let showApplyConfirm = $state(false);
   let loadErrors = $state<Record<string, string>>({});
   let xrayFiles = $state<Record<string, any>>({});
-  let showStubBanner = $state(false);
 
   // Import Node states (runes)
   let showImportModal = $state(false);
@@ -182,6 +181,17 @@
       }
     }
     isDirty = false;
+
+    // Auto-initialize if stub config (CONSTR-06 / D-08)
+    const routingFile = xrayFiles['05_routing.json'] || {};
+    const isRoutingStub = !routingFile.routing?.rules || routingFile.routing.rules.length === 0;
+    const outboundsFile = xrayFiles['04_outbounds.json'] || {};
+    const isOutboundsStub = !outboundsFile.outbounds || outboundsFile.outbounds.length === 0;
+    if (isRoutingStub || isOutboundsStub) {
+      if (!applyLoading) {
+        applyTemplateFiles('selective-routing', true);
+      }
+    }
   }
 
   function populateFromFiles() {
@@ -228,11 +238,7 @@
     );
     proxyTag = proxyRule ? proxyRule.outboundTag : '';
 
-    // Stub detection heuristic (Bug C / D-05)
-    const isRoutingStub = !routingFile.routing?.rules || routingFile.routing.rules.length === 0;
-    const outboundsFile = xrayFiles['04_outbounds.json'] || {};
-    const isOutboundsStub = !outboundsFile.outbounds || outboundsFile.outbounds.length === 0;
-    showStubBanner = isRoutingStub || isOutboundsStub;
+    // Stub detection removed (CONSTR-06)
 
     // 06_policy.json
     const policyFile = xrayFiles['06_policy.json'] || {};
@@ -403,6 +409,7 @@
       const changed = filesToModify.filter((f) => f.changesCount > 0);
       if (changed.length === 0) {
         showToast('info', $t('editor.no_changes'));
+        applyLoading = false;
         return;
       }
 
@@ -678,48 +685,48 @@
   }
 
   function getRoutingForTemplate(
-    id: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing'
+    id: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing',
+    tag: string
   ): object {
+    let rules: any[] = [];
     if (id === 'minimal-routing') {
-      return {
-        routing: {
-          domainStrategy: 'IPIfNonMatch',
-          rules: [
-            { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
-            { type: 'field', port: '0-65535', outboundTag: 'direct' }
-          ]
-        }
-      };
+      rules = [
+        { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
+        { type: 'field', port: '0-65535', outboundTag: 'direct' }
+      ];
     } else if (id === 'selective-routing') {
-      return {
-        routing: {
-          domainStrategy: 'IPIfNonMatch',
-          rules: [
-            { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
-            { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
-            { type: 'field', domain: ['geosite:geolocation-!cn'], outboundTag: 'PROXY_TAG' }
-          ]
-        }
-      };
+      rules = [
+        { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
+        { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
+        { type: 'field', domain: ['geosite:geolocation-!cn'], outboundTag: 'PROXY_TAG' }
+      ];
     } else {
       // all-proxy-routing
-      return {
-        routing: {
-          domainStrategy: 'IPIfNonMatch',
-          rules: [
-            { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
-            { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
-            { type: 'field', port: '0-65535', outboundTag: 'PROXY_TAG' }
-          ]
-        }
-      };
+      rules = [
+        { type: 'field', ip: ['geoip:private'], outboundTag: 'direct' },
+        { type: 'field', domain: ['geosite:category-ads-all'], outboundTag: 'block' },
+        { type: 'field', port: '0-65535', outboundTag: 'PROXY_TAG' }
+      ];
     }
+    return {
+      routing: {
+        domainStrategy: 'IPIfNonMatch',
+        rules: substituteProxyTag(rules, tag)
+      }
+    };
   }
 
   // Apply template files: writes 04_outbounds.json + 05_routing.json (Bug C / D-06, D-07)
   async function applyTemplateFiles(
-    templateId: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing'
+    templateId: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing',
+    silent = false
   ) {
+    if (!proxyTag || !outboundTags.includes(proxyTag)) {
+      showToast('warning', $t('editor.proxy_tag_warning'));
+      return;
+    }
+
+    applyLoading = true;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
 
@@ -742,17 +749,19 @@
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
-          body: JSON.stringify(getRoutingForTemplate(templateId), null, 2)
+          body: JSON.stringify(getRoutingForTemplate(templateId, proxyTag), null, 2)
         }
       );
       if (!saveRoutingRes.ok) throw new Error('Failed to save 05_routing.json');
 
-      // D-07: hide banner, notify, reload
-      showStubBanner = false;
-      showToast('success', $t('editor.preset_applied'));
+      if (!silent) {
+        showToast('success', $t('editor.preset_applied'));
+      }
       await loadAllConfigs();
     } catch (e: any) {
       showToast('error', $t('editor.save_error') + ': ' + e.message);
+    } finally {
+      applyLoading = false;
     }
   }
 
@@ -972,9 +981,9 @@
       <div>
         <div class="crumbs">
           {ru ? 'Сервисы' : 'Services'} <span class="crumb-sep">/</span>
-          {ru ? 'Конструктор Xray' : 'Xray Constructor'}
+          {ru ? 'Сценарии Xray' : 'Xray Presets'}
         </div>
-        <h1>{ru ? 'Визуальный конструктор Xray' : 'Xray Visual Constructor'}</h1>
+        <h1>{ru ? 'Визуальные сценарии Xray' : 'Xray Visual Presets'}</h1>
         <p class="sub">
           {ru
             ? 'Настройка логирования, DNS, inbounds, outbounds, routing и policy для Xray.'
@@ -1012,27 +1021,7 @@
     </div>
   {/if}
 
-  {#if showStubBanner}
-    <div class="stub-banner">
-      <span class="stub-banner-icon">⚠</span>
-      <span class="stub-banner-text">
-        {ru
-          ? 'Файлы routing/outbounds содержат заглушки. Выберите шаблон для инициализации:'
-          : 'Routing/outbounds files are stubs. Choose a template to initialize:'}
-      </span>
-      <div class="stub-banner-actions">
-        <button class="btn btn-secondary" on:click={() => applyTemplateFiles('minimal-routing')}>
-          {ru ? 'Minimal (всё прямо)' : 'Minimal (all direct)'}
-        </button>
-        <button class="btn btn-secondary" on:click={() => applyTemplateFiles('selective-routing')}>
-          {ru ? 'Selective (блок. → proxy)' : 'Selective (blocked → proxy)'}
-        </button>
-        <button class="btn btn-secondary" on:click={() => applyTemplateFiles('all-proxy-routing')}>
-          {ru ? 'All-proxy (всё → proxy)' : 'All-proxy (all → proxy)'}
-        </button>
-      </div>
-    </div>
-  {/if}
+
 
   <div class="gen-layout">
     <!-- Left Panel -->
@@ -2008,41 +1997,7 @@
     }
   }
 
-  .stub-banner {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 12px 16px;
-    margin-bottom: 16px;
-    background: color-mix(in srgb, var(--color-warning, #f59e0b) 12%, var(--bg-surface));
-    border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 40%, transparent);
-    border-radius: var(--radius-md, 8px);
-    flex-wrap: wrap;
-    row-gap: 10px;
-  }
 
-  .stub-banner-icon {
-    font-size: 1.1rem;
-    line-height: 1.4;
-    flex-shrink: 0;
-    color: var(--color-warning, #f59e0b);
-  }
-
-  .stub-banner-text {
-    flex: 1;
-    font-size: 0.875rem;
-    color: var(--fg);
-    line-height: 1.5;
-    min-width: 200px;
-  }
-
-  .stub-banner-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    align-items: center;
-    width: 100%;
-  }
 
   .constructor-scenario-bar {
     display: flex;
