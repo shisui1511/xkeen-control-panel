@@ -55,7 +55,13 @@
     {#if kernel === 'xray'}
       <XrayRoutingConstructor {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} />
     {:else}
-      <MihomoGenerator {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} {invalidateCache} />
+      <MihomoGenerator
+        {onSwitchTab}
+        {selectedFile}
+        {onInsertIntoEditor}
+        {embedded}
+        {invalidateCache}
+      />
     {/if}
   </div>
 </div>

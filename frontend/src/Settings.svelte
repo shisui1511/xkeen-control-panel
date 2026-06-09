@@ -155,7 +155,10 @@
       }
     } catch (e) {
       configFiles = [];
-      showToast('error', `${$t('settings.backup_list_error')}: ${e instanceof Error ? e.message : String(e)}`);
+      showToast(
+        'error',
+        `${$t('settings.backup_list_error')}: ${e instanceof Error ? e.message : String(e)}`
+      );
       console.error(e);
     }
   }
@@ -175,7 +178,10 @@
       }
     } catch (e) {
       backups = [];
-      showToast('error', `${$t('settings.backups_fetch_error')}: ${e instanceof Error ? e.message : String(e)}`);
+      showToast(
+        'error',
+        `${$t('settings.backups_fetch_error')}: ${e instanceof Error ? e.message : String(e)}`
+      );
       console.error(e);
     } finally {
       loadingBackups = false;
@@ -410,7 +416,10 @@
   async function fetchVersion() {
     try {
       const res = await fetch('/api/version');
-      if (!res.ok) { version = $t('app.unavailable'); return; }
+      if (!res.ok) {
+        version = $t('app.unavailable');
+        return;
+      }
       const data = await res.json();
       version = data.panel_version || data.version || $t('app.unavailable');
     } catch (e) {
@@ -1137,7 +1146,10 @@
             <span class="field-row-name">{$t('settings.mihomo_secret_discovered')}</span>
             <span class="field-row-val mono" style="display:flex;align-items:center;gap:6px;">
               {secretVisible ? $capabilities.mihomo.discovered_secret : '••••••••'}
-              <button class="btn btn-secondary btn-sm" on:click={() => (secretVisible = !secretVisible)}>
+              <button
+                class="btn btn-secondary btn-sm"
+                on:click={() => (secretVisible = !secretVisible)}
+              >
                 {secretVisible ? $t('app.hide') : $t('app.show')}
               </button>
             </span>
@@ -1534,8 +1546,12 @@
   }
 
   @keyframes progress-shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
   }
 
   /* Reconnect overlay */
@@ -1562,7 +1578,9 @@
   }
 
   @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .reconnect-text {
@@ -1580,11 +1598,21 @@
   }
 
   @keyframes dots {
-    0%   { content: ''; }
-    25%  { content: '.'; }
-    50%  { content: '..'; }
-    75%  { content: '...'; }
-    100% { content: ''; }
+    0% {
+      content: '';
+    }
+    25% {
+      content: '.';
+    }
+    50% {
+      content: '..';
+    }
+    75% {
+      content: '...';
+    }
+    100% {
+      content: '';
+    }
   }
 
   .reconnect-sub {

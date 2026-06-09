@@ -1021,8 +1021,6 @@
     </div>
   {/if}
 
-
-
   <div class="gen-layout">
     <!-- Left Panel -->
     <div class="gen-left">
@@ -1996,8 +1994,6 @@
       grid-template-columns: 1fr;
     }
   }
-
-
 
   .constructor-scenario-bar {
     display: flex;

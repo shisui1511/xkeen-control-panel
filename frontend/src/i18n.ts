@@ -486,8 +486,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.installing': 'Установка...',
     'settings.rollback': 'Откатить',
     'settings.update_reconnecting': 'Ожидаем запуска новой версии',
-    'settings.update_reconnecting_sub': 'Страница автоматически обновится, как только сервер будет готов',
-    'settings.update_reconnect_timeout': 'Новый сервер не ответил за 60 секунд. Пожалуйста, обновите страницу вручную (Ctrl+F5).',
+    'settings.update_reconnecting_sub':
+      'Страница автоматически обновится, как только сервер будет готов',
+    'settings.update_reconnect_timeout':
+      'Новый сервер не ответил за 60 секунд. Пожалуйста, обновите страницу вручную (Ctrl+F5).',
     'settings.update_channel': 'Канал обновлений',
     'settings.channel_stable': 'Stable',
     'settings.channel_beta': 'Beta',
@@ -1574,8 +1576,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.installing': 'Installing...',
     'settings.rollback': 'Rollback',
     'settings.update_reconnecting': 'Waiting for new version to start',
-    'settings.update_reconnecting_sub': 'The page will automatically reload once the server is ready',
-    'settings.update_reconnect_timeout': 'New server did not respond within 60 seconds. Please reload the page manually (Ctrl+F5).',
+    'settings.update_reconnecting_sub':
+      'The page will automatically reload once the server is ready',
+    'settings.update_reconnect_timeout':
+      'New server did not respond within 60 seconds. Please reload the page manually (Ctrl+F5).',
     'settings.update_channel': 'Update channel',
     'settings.channel_stable': 'Stable',
     'settings.channel_beta': 'Beta',
