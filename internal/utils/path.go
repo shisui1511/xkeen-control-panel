@@ -3,6 +3,7 @@ package utils
 import (
 	"errors"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -19,6 +20,14 @@ func NewPathValidator(roots []string) *PathValidator {
 // Validate resolves symlinks and cleans the input path, checking if it resides within the allowed roots.
 func (v *PathValidator) Validate(path string) (string, error) {
 	if path == "" {
+		return "", errors.New("path traversal detected or path not allowed")
+	}
+
+	// Strict validation against path traversal and characters to satisfy static analyzers (CWE-22)
+	if strings.Contains(path, "..") {
+		return "", errors.New("path traversal detected or path not allowed")
+	}
+	if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_\-\.\/]+$`, path); !matched {
 		return "", errors.New("path traversal detected or path not allowed")
 	}
 

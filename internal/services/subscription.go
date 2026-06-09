@@ -312,6 +312,9 @@ func (s *SubscriptionService) subPath(filename string) string {
 	// Sanitize filename to prevent path traversal (CWE-22)
 	filename = filepath.Base(filename)
 	clean := filepath.Clean(filename)
+	if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_\-\.]+$`, clean); !matched {
+		return filepath.Join(dir, "invalid_id")
+	}
 	if strings.Contains(clean, "..") || strings.Contains(clean, "/") || strings.Contains(clean, "\\") {
 		return filepath.Join(dir, "invalid_id")
 	}
@@ -1429,12 +1432,18 @@ func (s *SubscriptionService) applyFilters(outbounds []Outbound, sub *Subscripti
 func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {
 	safeID := filepath.Base(sub.ID)
 	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+	if matched, _ := regexp.MatchString(`^[a-z0-9_-]+$`, safeID); !matched {
+		safeID = "safe_id"
+	}
 	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", safeID))
 }
 
 func (s *SubscriptionService) getRoutingFragmentPath(sub *Subscription) string {
 	safeID := filepath.Base(sub.ID)
 	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+	if matched, _ := regexp.MatchString(`^[a-z0-9_-]+$`, safeID); !matched {
+		safeID = "safe_id"
+	}
 	return filepath.Join(s.configDir, fmt.Sprintf("05_routing.%s.json", safeID))
 }
 
@@ -1626,6 +1635,11 @@ func getMihomoProviderName(name string, urlStr string, fallback string) string {
 
 	if providerName == "" {
 		providerName = fallback
+	}
+	if matched, _ := regexp.MatchString(`^[a-z0-9\-]+$`, providerName); !matched {
+		providerName = "safe-provider-" + fallback
+		providerName = nonAlphanumericDashRe.ReplaceAllString(providerName, "-")
+		providerName = strings.ToLower(providerName)
 	}
 	return providerName
 }

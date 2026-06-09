@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -15,6 +16,14 @@ func (s *ConfigService) resolvePath(path string) (string, error) {
 	if s.validator == nil {
 		return "", errors.New("path validator not configured")
 	}
+	// Strict validation against path traversal and characters to satisfy static analyzers (CWE-22)
+	if strings.Contains(path, "..") {
+		return "", errors.New("path traversal detected")
+	}
+	if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_\-\.\/]+$`, path); !matched {
+		return "", errors.New("invalid characters in path")
+	}
+
 	// Explicit clean + validate: strips traversal and checks against allowed roots.
 	clean := filepath.Clean(path)
 	validated, err := s.validator.Validate(clean)

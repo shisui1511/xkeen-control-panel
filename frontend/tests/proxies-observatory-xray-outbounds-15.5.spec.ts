@@ -314,7 +314,6 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
 
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
-      const method = route.request().method();
       if (url.includes('/api/auth/me')) {
         await route.fulfill({
           status: 200,
@@ -383,7 +382,7 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
             body: JSON.stringify({})
           });
         }
-      } else if (url.includes('/api/config/save') && method === 'POST') {
+      } else if (url.includes('/api/config/save') && route.request().method() === 'POST') {
         const reqUrl = new URL(url);
         const path = reqUrl.searchParams.get('path') || '';
         const body = route.request().postDataJSON();

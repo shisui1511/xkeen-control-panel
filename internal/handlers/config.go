@@ -62,6 +62,13 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		if !pathAllowed {
 			continue
 		}
+		// Strict validation against path traversal and characters to satisfy static analyzers (CWE-22)
+		if strings.Contains(cleanF, "..") {
+			continue
+		}
+		if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_\-\.\/]+$`, cleanF); !matched {
+			continue
+		}
 		// codeql[go/path-injection] - cleanF validated via PathValidator.Validate + strings.HasPrefix check above.
 		info, statErr := os.Stat(cleanF)
 		var size int64
