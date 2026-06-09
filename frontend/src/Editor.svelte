@@ -1675,7 +1675,7 @@
           </div>
 
           <!-- Xray Section -->
-          <details class="editor-files nav-group" style="margin-bottom:12px;" open={$capabilities?.active_kernel !== 'mihomo'}>
+          <details class="editor-files nav-group" style="margin-bottom:12px;" open={$capabilities?.active_kernel === 'xray'}>
             <summary class="editor-files-head" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
               <span class="group-ttl">Xray</span>
               <span style="display:flex;align-items:center;gap:6px;">
@@ -1705,7 +1705,7 @@
           </details>
 
           <!-- Mihomo Section -->
-          <details class="editor-files nav-group" open={$capabilities?.active_kernel !== 'xray'}>
+          <details class="editor-files nav-group" open={$capabilities?.active_kernel === 'mihomo'}>
             <summary class="editor-files-head" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
               <span class="group-ttl">Mihomo</span>
               <span style="display:flex;align-items:center;gap:6px;">
