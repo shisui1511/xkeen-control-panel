@@ -14,6 +14,7 @@
   export let onSwitchTab: (tab: string) => void = () => {};
 
   let checkingConnection = false;
+  let secretVisible = false;
 
   async function recheckConnection() {
     checkingConnection = true;
@@ -1111,7 +1112,12 @@
         {#if $capabilities?.mihomo.discovered_secret}
           <div class="field-row">
             <span class="field-row-name">{$t('settings.mihomo_secret_discovered')}</span>
-            <span class="field-row-val mono">{$capabilities.mihomo.discovered_secret}</span>
+            <span class="field-row-val mono" style="display:flex;align-items:center;gap:6px;">
+              {secretVisible ? $capabilities.mihomo.discovered_secret : '••••••••'}
+              <button class="btn btn-secondary btn-sm" on:click={() => (secretVisible = !secretVisible)}>
+                {secretVisible ? $t('app.hide') : $t('app.show')}
+              </button>
+            </span>
           </div>
         {/if}
       </div>
