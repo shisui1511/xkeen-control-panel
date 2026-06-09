@@ -35,6 +35,7 @@
   let selectedFile = '';
   let backups: string[] = [];
   let loadingBackups = false;
+  let backupsLoaded = false;
 
   // Snapshots state
   interface SnapshotMeta {
@@ -256,9 +257,13 @@
     }
   }
 
-  $: if (activeTab === 'backups') {
+  $: if (activeTab === 'backups' && !backupsLoaded) {
+    backupsLoaded = true;
     loadConfigFiles();
     fetchSnapshots();
+  }
+  $: if (activeTab !== 'backups') {
+    backupsLoaded = false;
   }
 
   // Appearance & Behavior settings (persisted in localStorage)
