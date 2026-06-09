@@ -1,6 +1,6 @@
 {
   "name": "xkeen-control-panel-frontend",
-  "version": "0.18.0-dev",
+  "version": "0.18.1-dev",
   "type": "module",
   "scripts": {
     "dev": "vite",
