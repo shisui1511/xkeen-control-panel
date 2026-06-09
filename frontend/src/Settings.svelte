@@ -388,8 +388,9 @@
   async function fetchVersion() {
     try {
       const res = await fetch('/api/version');
+      if (!res.ok) { version = $t('app.unavailable'); return; }
       const data = await res.json();
-      version = data.panel_version || data.version;
+      version = data.panel_version || data.version || $t('app.unavailable');
     } catch (e) {
       version = $t('app.unavailable');
     }
