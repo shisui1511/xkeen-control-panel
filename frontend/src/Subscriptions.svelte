@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t, currentLang } from './i18n';
+  import { t, currentLang, pluralize } from './i18n';
   import {
     showConfirm,
     capabilities,
@@ -42,6 +42,7 @@
     hwid_locked?: boolean;
     use_provider_interval?: boolean;
     announcement?: string;
+    mihomo_integrated?: boolean;
   }
 
   interface SubscriptionNode {
@@ -107,6 +108,7 @@
   let refreshLoading = $state<Record<string, boolean>>({});
   let showAddModal = $state(false);
   let editingSub = $state<Subscription | null>(null);
+
   let activeDropdownId = $state<string | null>(null);
 
   // Состояние для inline раскрытия узлов
@@ -161,6 +163,28 @@
   function closeDiagnosticModal() {
     showDiagnosticModal = false;
     diagnosticSub = null;
+  }
+
+  function getNodeServer(node: any): string {
+    if (!node || !node.settings) return '';
+    if (node.settings.vnext && node.settings.vnext[0]) {
+      return node.settings.vnext[0].address || '';
+    }
+    if (node.settings.servers && node.settings.servers[0]) {
+      return node.settings.servers[0].address || '';
+    }
+    return '';
+  }
+
+  function getNodePort(node: any): string {
+    if (!node || !node.settings) return '';
+    if (node.settings.vnext && node.settings.vnext[0]) {
+      return String(node.settings.vnext[0].port || '');
+    }
+    if (node.settings.servers && node.settings.servers[0]) {
+      return String(node.settings.servers[0].port || '');
+    }
+    return '';
   }
 
   // Form fields
@@ -581,7 +605,7 @@
         ctx.fillText('🇺🇸', 0, 0);
         const widthFlag = ctx.measureText('🇺🇸').width;
         const widthLetters = ctx.measureText('US').width;
-        flagsSupported = widthFlag < widthLetters;
+        flagsSupported = widthFlag > widthLetters;
       }
     } catch (e) {
       flagsSupported = false;
@@ -672,6 +696,7 @@
         >
         {$t('subscr.refresh_all')}
       </button>
+
       <button class="btn btn-primary" on:click={openAddModal}>
         <svg
           width="14"
@@ -727,8 +752,12 @@
   {:else}
     <div class="stats-chips-row mb-3">
       <span class="chip chip-default">
-        <b>{stats.total}</b>
-        {$currentLang === 'ru' ? 'подписки' : 'subscriptions'}
+        {pluralize(
+          stats.total,
+          $t('subscr.total_one', { count: String(stats.total) }),
+          $t('subscr.total_few', { count: String(stats.total) }),
+          $t('subscr.total_many', { count: String(stats.total) })
+        )}
       </span>
       <span class="chip chip-default">
         <b>{stats.nodes}</b>
@@ -917,6 +946,18 @@
               {/if}
 
               <span class="sub-type-label">{sub.type === 'mihomo' ? 'Mihomo' : 'XRay'}</span>
+
+              <span class="meta-divider">|</span>
+              {#if sub.mihomo_integrated}
+                <span
+                  class="mihomo-integrated-badge active"
+                  title="Интегрировано в Mihomo config.yaml">Mihomo ✓</span
+                >
+              {:else}
+                <span class="mihomo-integrated-badge" title="Не интегрировано в Mihomo config.yaml"
+                  >Mihomo —</span
+                >
+              {/if}
 
               {#if sub.hwid_locked}
                 <span class="meta-divider">|</span>
@@ -1693,6 +1734,18 @@
     letter-spacing: 0.08em;
     font-weight: 700;
     color: var(--fg-dim);
+  }
+
+  .mihomo-integrated-badge {
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    color: var(--fg-faint);
+  }
+
+  .mihomo-integrated-badge.active {
+    color: var(--success);
   }
 
   .sub-meta-right {
@@ -2583,5 +2636,45 @@
     border-radius: var(--radius-md);
     margin-top: 4px;
     margin-bottom: 12px;
+  }
+
+  .textarea-link {
+    min-height: 90px;
+  }
+  .preview-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .preview-title {
+    margin: 0 0 4px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-secondary);
+  }
+  .preview-table {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+  }
+  .preview-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+  }
+  .preview-label {
+    color: var(--fg-secondary);
+  }
+  .preview-value {
+    color: var(--fg-primary);
+  }
+  .preview-value.code {
+    font-family: var(--font-family-mono, monospace);
+    font-size: 12px;
   }
 </style>

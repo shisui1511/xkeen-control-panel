@@ -39,3 +39,42 @@ frontend/test-results/
 
 # Redesign folder from external designer
 /frontend-redesign/
+
+# ── GSD baseline (auto-generated) ──
+.gsd
+.gsd-id
+.gsd-backups
+commands.md
+.bg-shell/
+.DS_Store
+Thumbs.db
+nul
+nul.*
+con
+con.*
+prn
+prn.*
+aux
+aux.*
+com[1-9]
+com[1-9].*
+lpt[1-9]
+lpt[1-9].*
+*.swp
+*.swo
+*~
+*.code-workspace
+.env.*
+!.env.example
+.next/
+dist/
+__pycache__/
+*.pyc
+.venv/
+venv/
+target/
+vendor/
+*.log
+coverage/
+.cache/
+tmp/

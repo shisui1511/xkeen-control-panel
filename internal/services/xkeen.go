@@ -179,6 +179,74 @@ func (s *XKeenService) SwitchKernel(name string) (string, error) {
 	return out, err
 }
 
+// ValidateXrayConfig inspects the Xray config directory for outbound configuration quality.
+// It scans 04_outbounds*.json files and warns if no real proxy protocols are found.
+// Always returns Valid=true and nil error (Xray has only warnings per design).
+func (s *XKeenService) ValidateXrayConfig(configDir string) (PreflightResult, error) {
+	realProtocols := map[string]bool{
+		"vless":       true,
+		"vmess":       true,
+		"trojan":      true,
+		"shadowsocks": true,
+		"socks":       true,
+	}
+
+	pattern := filepath.Join(configDir, "04_outbounds*.json")
+	files, err := filepath.Glob(pattern)
+	if err != nil || len(files) == 0 {
+		// No files found or glob error — treat as no real outbounds.
+		return PreflightResult{
+			Valid: true,
+			Warnings: []PreflightIssue{
+				{Code: "no_real_outbounds", Message: "no real proxy outbounds found in Xray config"},
+			},
+		}, nil
+	}
+
+	hasReal := false
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue // skip unreadable files silently
+		}
+		var obj map[string]interface{}
+		if err := json.Unmarshal(data, &obj); err != nil {
+			continue // skip unparseable files silently
+		}
+		outbounds, ok := obj["outbounds"].([]interface{})
+		if !ok {
+			continue
+		}
+		for _, item := range outbounds {
+			entry, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			protocol, _ := entry["protocol"].(string)
+			if realProtocols[protocol] {
+				hasReal = true
+				break
+			}
+		}
+		if hasReal {
+			break
+		}
+	}
+
+	var warnings []PreflightIssue
+	if !hasReal {
+		warnings = append(warnings, PreflightIssue{
+			Code:    "no_real_outbounds",
+			Message: "no real proxy outbounds found in Xray config",
+		})
+	}
+
+	return PreflightResult{
+		Valid:    true,
+		Warnings: warnings,
+	}, nil
+}
+
 func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (string, error) {
 	// INVARIANT: no shell interpreter — exec.Command receives the binary path directly,
 	// never via "sh -c", so action cannot trigger shell injection.

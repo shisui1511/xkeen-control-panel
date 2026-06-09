@@ -23,6 +23,8 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
+var procDir = "/proc"
+
 // allowedKernelRoots are the only directories where kernel binaries and backups may live.
 var allowedKernelRoots = []string{
 	"/opt/sbin/",
@@ -121,6 +123,138 @@ type versionCache struct {
 	expires time.Time
 }
 
+var semverRegexp = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+(.+))?$`)
+
+func isValidSemver(v string) bool {
+	v = strings.TrimPrefix(strings.TrimPrefix(v, "v"), "V")
+	return semverRegexp.MatchString(v)
+}
+
+func comparePrerelease(pre1, pre2 string) int {
+	parts1 := strings.Split(pre1, ".")
+	parts2 := strings.Split(pre2, ".")
+
+	isNumeric := func(s string) bool {
+		if s == "" {
+			return false
+		}
+		for _, r := range s {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+		return true
+	}
+
+	minLen := len(parts1)
+	if len(parts2) < minLen {
+		minLen = len(parts2)
+	}
+
+	for i := 0; i < minLen; i++ {
+		p1 := parts1[i]
+		p2 := parts2[i]
+
+		if p1 == p2 {
+			continue
+		}
+
+		num1 := isNumeric(p1)
+		num2 := isNumeric(p2)
+
+		if num1 && num2 {
+			val1, _ := strconv.Atoi(p1)
+			val2, _ := strconv.Atoi(p2)
+			if val1 != val2 {
+				if val1 > val2 {
+					return 1
+				}
+				return -1
+			}
+		} else if num1 {
+			return -1
+		} else if num2 {
+			return 1
+		} else {
+			res := strings.Compare(p1, p2)
+			if res != 0 {
+				return res
+			}
+		}
+	}
+
+	if len(parts1) > len(parts2) {
+		return 1
+	} else if len(parts1) < len(parts2) {
+		return -1
+	}
+	return 0
+}
+
+func compareSemver(v1, v2 string) int {
+	v1 = strings.TrimPrefix(strings.TrimPrefix(v1, "v"), "V")
+	v2 = strings.TrimPrefix(strings.TrimPrefix(v2, "v"), "V")
+
+	m1 := semverRegexp.FindStringSubmatch(v1)
+	m2 := semverRegexp.FindStringSubmatch(v2)
+
+	if m1 == nil && m2 == nil {
+		return 0
+	}
+	if m1 == nil {
+		return -1
+	}
+	if m2 == nil {
+		return 1
+	}
+
+	// Compare major
+	major1, _ := strconv.Atoi(m1[1])
+	major2, _ := strconv.Atoi(m2[1])
+	if major1 != major2 {
+		if major1 > major2 {
+			return 1
+		}
+		return -1
+	}
+
+	// Compare minor
+	minor1, _ := strconv.Atoi(m1[2])
+	minor2, _ := strconv.Atoi(m2[2])
+	if minor1 != minor2 {
+		if minor1 > minor2 {
+			return 1
+		}
+		return -1
+	}
+
+	// Compare patch
+	patch1, _ := strconv.Atoi(m1[3])
+	patch2, _ := strconv.Atoi(m2[3])
+	if patch1 != patch2 {
+		if patch1 > patch2 {
+			return 1
+		}
+		return -1
+	}
+
+	// Compare prerelease
+	pre1 := m1[4]
+	pre2 := m2[4]
+
+	if pre1 != "" && pre2 == "" {
+		return -1
+	}
+	if pre1 == "" && pre2 != "" {
+		return 1
+	}
+	if pre1 != "" && pre2 != "" {
+		return comparePrerelease(pre1, pre2)
+	}
+
+	return 0
+}
+
 // KernelInfo holds info about an installed kernel
 type KernelInfo struct {
 	Name           string `json:"name"`
@@ -148,9 +282,34 @@ type KernelInfo struct {
 	verCache *versionCache
 }
 
+func isShortLivedOrHelperProcess(pidStr string) bool {
+	cmdlinePath := filepath.Join(procDir, pidStr, "cmdline")
+	data, err := os.ReadFile(cmdlinePath)
+	if err != nil {
+		return true
+	}
+	args := strings.Split(string(data), "\x00")
+	blacklist := map[string]bool{
+		"version":   true,
+		"-v":        true,
+		"-t":        true,
+		"-test":     true,
+		"--version": true,
+		"-version":  true,
+		"-h":        true,
+		"--help":    true,
+	}
+	for _, arg := range args {
+		if blacklist[strings.TrimSpace(arg)] {
+			return true
+		}
+	}
+	return false
+}
+
 // kernelProcessStatus detects whether the kernel process is running.
-// Method 1: scan /proc/*/exe readlinks for the binary basename.
-// Method 2 (fallback): run pidof <basename> if /proc appears empty.
+// Method 1: scan procDir/*/exe readlinks for the binary basename.
+// Method 2 (fallback): run pidof <basename> if procDir appears empty.
 // Returns "not_installed", "not_accessible", "running", "stopped", or "unknown".
 func kernelProcessStatus(binaryPath string) string {
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
@@ -169,25 +328,38 @@ func kernelProcessStatus(binaryPath string) string {
 
 	base := filepath.Base(binaryPath)
 
-	// Method 1: /proc/*/exe readlink (no external tools required)
-	matches, _ := filepath.Glob("/proc/*/exe")
+	// Method 1: procDir/*/exe readlink (no external tools required)
+	matches, _ := filepath.Glob(filepath.Join(procDir, "*/exe"))
 	for _, link := range matches {
 		target, err := os.Readlink(link)
 		if err == nil && filepath.Base(target) == base {
+			pidStr := filepath.Base(filepath.Dir(link))
+			if isShortLivedOrHelperProcess(pidStr) {
+				continue
+			}
 			return "running"
 		}
 	}
 
-	// Method 2: pidof fallback when /proc gives no entries
+	// Method 2: pidof fallback when procDir gives no entries
 	if len(matches) == 0 {
 		out, err := exec.Command("pidof", base).Output()
-		if err == nil && len(strings.TrimSpace(string(out))) > 0 {
-			return "running"
+		if err == nil {
+			pids := strings.Fields(strings.TrimSpace(string(out)))
+			hasRunning := false
+			for _, pidStr := range pids {
+				if !isShortLivedOrHelperProcess(pidStr) {
+					hasRunning = true
+					break
+				}
+			}
+			if hasRunning {
+				return "running"
+			}
+			return "stopped"
 		}
-		if err != nil {
-			// pidof itself unavailable — cannot determine state
-			return "unknown"
-		}
+		// pidof itself unavailable — cannot determine state
+		return "unknown"
 	}
 
 	return "stopped"
@@ -207,31 +379,35 @@ func kernelProcessStatusDetailed(binaryPath string) (status string, pid int, upt
 
 	base := filepath.Base(binaryPath)
 
-	// Method 1: /proc/*/exe readlink (no external tools required)
-	matches, _ := filepath.Glob("/proc/*/exe")
+	// Method 1: procDir/*/exe readlink (no external tools required)
+	matches, _ := filepath.Glob(filepath.Join(procDir, "*/exe"))
 	for _, link := range matches {
 		target, err := os.Readlink(link)
 		if err == nil && filepath.Base(target) == base {
-			parts := strings.Split(link, "/")
-			if len(parts) >= 3 {
-				if p, err := strconv.Atoi(parts[2]); err == nil {
-					uptimeStr := getProcUptime(parts[2])
-					return "running", p, uptimeStr
-				}
+			pidStr := filepath.Base(filepath.Dir(link))
+			if isShortLivedOrHelperProcess(pidStr) {
+				continue
+			}
+			if p, err := strconv.Atoi(pidStr); err == nil {
+				uptimeStr := getProcUptime(pidStr)
+				return "running", p, uptimeStr
 			}
 			return "running", 0, ""
 		}
 	}
 
-	// Method 2: pidof fallback when /proc gives no entries
+	// Method 2: pidof fallback when procDir gives no entries
 	if len(matches) == 0 {
 		out, err := exec.Command("pidof", base).Output()
 		if err == nil {
-			pidStr := strings.TrimSpace(string(out))
-			firstPid := strings.Split(pidStr, " ")[0]
-			if p, err := strconv.Atoi(firstPid); err == nil {
-				uptimeStr := getProcUptime(firstPid)
-				return "running", p, uptimeStr
+			pids := strings.Fields(strings.TrimSpace(string(out)))
+			for _, pidStr := range pids {
+				if !isShortLivedOrHelperProcess(pidStr) {
+					if p, err := strconv.Atoi(pidStr); err == nil {
+						uptimeStr := getProcUptime(pidStr)
+						return "running", p, uptimeStr
+					}
+				}
 			}
 		}
 	}
@@ -240,7 +416,7 @@ func kernelProcessStatusDetailed(binaryPath string) (status string, pid int, upt
 }
 
 func getProcUptime(pidStr string) string {
-	procPath := filepath.Join("/proc", pidStr)
+	procPath := filepath.Join(procDir, pidStr)
 	st, err := os.Stat(procPath)
 	if err != nil {
 		return ""
@@ -272,6 +448,9 @@ type KernelService struct {
 	// statFunc is used to check if a file exists; defaults to os.Stat.
 	// Overridable in tests to verify TTL caching without touching the filesystem.
 	statFunc func(string) (os.FileInfo, error)
+
+	testClient    *http.Client
+	githubAPIBase string
 }
 
 func NewKernelService() *KernelService {
@@ -369,9 +548,12 @@ func (s *KernelService) List() []KernelInfo {
 	for _, k := range s.kernels {
 		s.resolveBinaryPath(k)
 	}
-	snapshots := make([]KernelInfo, 0, len(s.kernels))
-	for _, k := range s.kernels {
-		snapshots = append(snapshots, *k)
+	order := []string{"xray", "mihomo"}
+	snapshots := make([]KernelInfo, 0, len(order))
+	for _, name := range order {
+		if k, ok := s.kernels[name]; ok {
+			snapshots = append(snapshots, *k)
+		}
 	}
 	s.mu.Unlock()
 
@@ -512,12 +694,22 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	currentVersion := k.CurrentVersion
 	s.mu.Unlock()
 
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
-	if channel != "stable" {
-		apiURL = fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=5", repo)
+	githubBase := "https://api.github.com"
+	if s.githubAPIBase != "" {
+		githubBase = s.githubAPIBase
 	}
 
-	client := utils.SafeHTTPClient(15 * time.Second)
+	apiURL := fmt.Sprintf("%s/repos/%s/releases/latest", githubBase, repo)
+	if channel != "stable" {
+		apiURL = fmt.Sprintf("%s/repos/%s/releases?per_page=5", githubBase, repo)
+	}
+
+	var client *http.Client
+	if s.testClient != nil {
+		client = s.testClient
+	} else {
+		client = utils.SafeHTTPClient(15 * time.Second)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		s.mu.Lock()
@@ -580,7 +772,11 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 	s.mu.Lock()
 	if kk := s.kernels[name]; kk != nil {
 		kk.LatestVersion = latestVersion
-		kk.HasUpdate = latestVersion != "" && latestVersion != currentVersion
+		if isValidSemver(currentVersion) {
+			kk.HasUpdate = latestVersion != "" && compareSemver(latestVersion, currentVersion) > 0
+		} else {
+			kk.HasUpdate = latestVersion != ""
+		}
 		kk.Status = "idle"
 		kk.Message = ""
 	}
@@ -760,7 +956,11 @@ func (s *KernelService) Install(name string) error {
 		// Re-resolve path immediately so we report the correct location
 		s.resolveBinaryPath(kk)
 		kk.CurrentVersion = s.detectVersion(kk)
-		kk.HasUpdate = kk.CurrentVersion != latestVersion
+		if isValidSemver(kk.CurrentVersion) {
+			kk.HasUpdate = latestVersion != "" && compareSemver(latestVersion, kk.CurrentVersion) > 0
+		} else {
+			kk.HasUpdate = latestVersion != ""
+		}
 		kk.Status = "done"
 		kk.Message = "Updated to " + kk.CurrentVersion
 	}

@@ -131,11 +131,11 @@
       let files: string[] = [];
       if (xrayRes.ok) {
         const data = await xrayRes.json();
-        files = [...files, ...data];
+        files = [...files, ...data.map((f: any) => f.path)];
       }
       if (mihomoRes.ok) {
         const data = await mihomoRes.json();
-        files = [...files, ...data];
+        files = [...files, ...data.map((f: any) => f.path)];
       }
 
       files.push('/opt/etc/xcp/config.json');
@@ -215,6 +215,38 @@
       } else {
         const txt = await res.text();
         showToast('error', `Ошибка удаления: ${txt}`);
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+    }
+  }
+
+  async function createBackup() {
+    if (!selectedFile) return;
+    // Backup is created as a side-effect of ConfigSave (internal/handlers/config.go):
+    // the handler always writes a timestamped .backup-* file before overwriting.
+    // There is no dedicated POST /api/config/backup endpoint.
+    try {
+      const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(selectedFile)}`);
+      if (!readRes.ok) {
+        showToast('error', await readRes.text());
+        return;
+      }
+      const data = await readRes.text();
+      const csrfToken = localStorage.getItem('csrf_token');
+      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: data
+      });
+      if (saveRes.ok) {
+        showToast('success', $t('settings.backup_created'));
+        await fetchBackups();
+      } else {
+        showToast('error', await saveRes.text());
       }
     } catch (e: any) {
       showToast('error', e.message);
@@ -801,7 +833,7 @@
   {#if activeTab === 'backups'}
     <div class="card settings-card" style="margin-bottom:18px;padding:0;">
       <div class="field-group">
-        <div class="field-group-head">{$t('settings.tab_backups')}</div>
+        <div class="field-group-head">{$t('settings.section_file_backups')}</div>
         <div class="field-row">
           <div>
             <div class="lbl">{$t('settings.backup_file')}</div>
@@ -818,22 +850,27 @@
               {#each configFiles as file}
                 <option value={file}>{file}</option>
               {:else}
-                <option value="">Нет доступных файлов</option>
+                <option value="">{$t('settings.no_files')}</option>
               {/each}
             </select>
+            <button class="btn btn-primary btn-sm" on:click={createBackup} disabled={!selectedFile}>
+              {$t('settings.backup_create_btn')}
+            </button>
           </div>
         </div>
       </div>
-    </div>
 
-    <div class="card" style="padding:0;">
-      <h2 class="card-title" style="margin:0;padding:14px 20px;">{$t('settings.tab_backups')}</h2>
+      <!-- Backups table -->
       <div class="field-group" style="border:0;">
-        {#if loadingBackups}
+        {#if !selectedFile}
+          <div style="padding:20px;text-align:center;color:var(--fg-dim);font-style:italic;">
+            {$t('settings.backup_select_file_hint')}
+          </div>
+        {:else if loadingBackups}
           <div style="padding:20px;text-align:center;color:var(--fg-dim);">{$t('app.loading')}</div>
         {:else if backups.length === 0}
-          <div style="padding:20px;text-align:center;color:var(--fg-dim);">
-            Резервные копии отсутствуют
+          <div style="padding:20px;text-align:center;color:var(--fg-dim);font-style:italic;">
+            {$t('settings.backups_empty')}
           </div>
         {:else}
           {#each backups as backup}
@@ -844,18 +881,18 @@
               </div>
               <div class="ctrl">
                 <button
-                  class="btn btn-secondary"
+                  class="btn btn-secondary btn-sm"
                   on:click={() => restoreBackup(backup)}
-                  title="Восстановить"
+                  title={$t('settings.backup_restore_btn')}
                 >
-                  Восстановить
+                  {$t('settings.backup_restore_btn')}
                 </button>
                 <button
-                  class="btn btn-danger"
+                  class="btn btn-danger btn-sm"
                   on:click={() => deleteBackup(backup)}
-                  title="Удалить"
+                  title={$t('app.delete')}
                 >
-                  Удалить
+                  {$t('app.delete')}
                 </button>
               </div>
             </div>
@@ -863,16 +900,17 @@
         {/if}
       </div>
     </div>
-  {/if}
 
-  <!-- Config Snapshots section (inside backups tab) -->
-  {#if activeTab === 'backups'}
-    <div class="card" style="margin-top:16px;">
+    <!-- Divider -->
+    <div style="border-top: 1px solid var(--border); margin: 24px 0;"></div>
+
+    <!-- Section 2: Snapshots -->
+    <div class="card" style="margin-top:0;">
       <div
         class="card-title-row"
         style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;"
       >
-        <h2 class="card-title" style="margin:0;">{$t('settings.snapshots_title')}</h2>
+        <h2 class="card-title" style="margin:0;">{$t('settings.section_snapshots')}</h2>
       </div>
       <div
         class="field-row"
@@ -1535,5 +1573,10 @@
     display: flex;
     justify-content: flex-end;
     gap: 12px;
+  }
+
+  .btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
   }
 </style>

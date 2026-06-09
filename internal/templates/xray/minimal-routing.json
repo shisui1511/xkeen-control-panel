@@ -1,0 +1,54 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "socks",
+      "port": 10808,
+      "listen": "127.0.0.1",
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": true
+      }
+    },
+    {
+      "tag": "http",
+      "port": 10809,
+      "listen": "127.0.0.1",
+      "protocol": "http"
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "PROXY_TAG",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "ip": [
+          "geoip:private"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "port": "0-65535",
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}

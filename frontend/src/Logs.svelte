@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { t } from './i18n';
+  import { t, pluralize } from './i18n';
 
   interface LogEntry {
     timestamp: string;
@@ -10,6 +10,7 @@
     raw: string;
   }
 
+  let destroyed = false;
   let logs = $state<LogEntry[]>([]);
   let ws = $state<WebSocket | null>(null);
   let connected = $state(false);
@@ -22,7 +23,7 @@
   let availableSources = $state<string[]>([]);
 
   // Предопределённые вкладки источников
-  const KNOWN_SOURCES = ['xkeen', 'xray', 'mihomo'];
+  const KNOWN_SOURCES = ['xkeen', 'xray', 'mihomo', 'xcp'];
 
   const filteredLogs = $derived.by(() => {
     let result = logs;
@@ -56,6 +57,8 @@
         source = 'mihomo';
       } else if (tag.includes('xkeen-detached') || tag.includes('xkeen.log') || tag === 'xkeen') {
         source = 'xkeen';
+      } else if (tag.includes('xcp.log') || tag === 'xcp') {
+        source = 'xcp';
       } else {
         source = bracketMatch[1];
       }
@@ -182,8 +185,8 @@
       const msg = $t('logs.disconnected');
       logs = [...logs, parseLogLine(`[xkeen] ${msg}`)];
 
-      // Auto-reconnect after 3 seconds if not paused
-      if (!paused) {
+      // Auto-reconnect after 3 seconds if not paused and component is still mounted
+      if (!paused && !destroyed) {
         setTimeout(connect, 3000);
       }
     };
@@ -237,6 +240,7 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
     disconnect();
     const mainContent = document.querySelector('.main-content') as HTMLElement;
     if (mainContent) {
@@ -458,17 +462,15 @@
     </div>
 
     <div class="stats">
-      <span class="stat"
-        ><b>{logs.length}</b>
-        {$t('logs.buffer_count', { count: logs.length })
-          .replace(String(logs.length), '')
-          .trim()}</span
-      >
+      <span class="stat">{$t('logs.buffer_count', { count: String(logs.length) })}</span>
       <span class="stat"
         ><b>{availableSources.length}</b>
-        {$t('logs.source_count', { count: availableSources.length })
-          .replace(String(availableSources.length), '')
-          .trim()}</span
+        {pluralize(
+          availableSources.length,
+          $t('logs.source_count_one', { count: '' }).trim(),
+          $t('logs.source_count_few', { count: '' }).trim(),
+          $t('logs.source_count_many', { count: '' }).trim()
+        )}</span
       >
       <span class="stat">{$t('logs.realtime_label')}</span>
     </div>
@@ -545,14 +547,14 @@
     flex: 1;
   }
 
-  .logs-pane .lv-warn {
+  .logs-pane .lv-warning {
     color: var(--warning);
     word-break: break-all;
     white-space: pre-wrap;
     flex: 1;
   }
 
-  .logs-pane .lv-err {
+  .logs-pane .lv-error {
     color: var(--danger);
     word-break: break-all;
     white-space: pre-wrap;

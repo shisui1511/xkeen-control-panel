@@ -1,7 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t } from './i18n';
-  import { showToast, fetchCapabilities, showConfirm } from './stores';
+  import { t, currentLang, pluralize } from './i18n';
+  import {
+    showToast,
+    fetchCapabilities,
+    showConfirm,
+    isKernelChecking,
+    capabilities
+  } from './stores';
   import Skeleton from './components/Skeleton.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
@@ -85,10 +91,21 @@
   // Auto-start toggles (localStorage-persisted until backend API exists)
   let autostartKeenetic = localStorage.getItem('autostart_keenetic') !== 'false';
   let watchdogEnabled = localStorage.getItem('watchdog_enabled') !== 'false';
-  let datUpdateDaily = localStorage.getItem('dat_update_daily') === 'true';
+  let refreshingStatus = false;
 
   function toggleAutostart(key: string, value: boolean) {
     localStorage.setItem(key, String(value));
+  }
+
+  async function handleRefreshStatus() {
+    if (refreshingStatus) return;
+    refreshingStatus = true;
+    try {
+      await fetchStatus();
+      await fetchKernels();
+    } finally {
+      refreshingStatus = false;
+    }
   }
 
   async function fetchStatus() {
@@ -188,9 +205,49 @@
   }
 
   async function controlService(action: string) {
+    isKernelChecking.set(false);
     const key = `xkeen-${action}`;
     actionLoading[key] = true;
     try {
+      if (action === 'start') {
+        // Pre-flight check: determine kernel to validate
+        const kernel =
+          activeKernel === 'xray' || activeKernel === 'mihomo'
+            ? activeKernel
+            : xray?.process_status === 'running'
+              ? 'xray'
+              : mihomo?.process_status === 'running'
+                ? 'mihomo'
+                : 'xray';
+        try {
+          const pfRes = await fetch(`/api/config/preflight?kernel=${kernel}`, {
+            signal: AbortSignal.timeout(3000)
+          });
+          if (pfRes.ok) {
+            const pfBody = await pfRes.json();
+            const data = pfBody.data ?? pfBody;
+            if (Array.isArray(data.errors) && data.errors.length > 0) {
+              const errList = data.errors
+                .map((e: { message?: string; code?: string }) => e.message || e.code || '')
+                .join('\n• ');
+              const message = `${$t('svc.preflight_error_body')}\n• ${errList}`;
+              const proceed = await showConfirm(
+                $t('svc.preflight_error_title'),
+                message,
+                $t('svc.preflight_start_anyway'),
+                $t('svc.preflight_fix')
+              );
+              if (!proceed) {
+                window.location.hash = '/editor';
+                actionLoading[key] = false;
+                return;
+              }
+            }
+          }
+        } catch (_) {
+          // Network/timeout error — fall through to silent start
+        }
+      }
       const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch(`/api/service/control?action=${action}`, {
         method: 'POST',
@@ -210,6 +267,7 @@
   }
 
   async function switchKernel(kernel: string) {
+    isKernelChecking.set(false);
     switchingKernelTo = kernel;
     actionLoading[`switch-${kernel}`] = true;
     try {
@@ -232,25 +290,46 @@
   }
 
   async function checkKernelUpdate(name: string) {
+    isKernelChecking.set(true);
+    const idx = kernels.findIndex((k) => k.name === name);
+    if (idx >= 0) {
+      kernels[idx] = { ...kernels[idx], status: 'checking' };
+      kernels = [...kernels];
+    }
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      await fetch(`/api/kernels/${name}/check`, {
+      const res = await fetch(`/api/kernels/${name}/check`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
       });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
       startPolling(name);
-    } catch (e) {}
+    } catch (e: any) {
+      showToast('error', `${$t('svc.action_error')}: ${e.message || e}`);
+      const idx = kernels.findIndex((k) => k.name === name);
+      if (idx >= 0) {
+        kernels[idx] = { ...kernels[idx], status: 'idle' };
+        kernels = [...kernels];
+      }
+    }
   }
 
   async function installKernel(name: string) {
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      await fetch(`/api/kernels/${name}/install`, {
+      const res = await fetch(`/api/kernels/${name}/install`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
       });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
       startPolling(name);
-    } catch (e) {}
+    } catch (e: any) {
+      showToast('error', `${$t('svc.action_error')}: ${e.message || e}`);
+    }
   }
 
   function downloadKernelBinary(name: string) {
@@ -274,6 +353,14 @@
     } catch (e) {}
   }
 
+  function checkIfFinishedChecking() {
+    const isAnyChecking =
+      Object.keys(statusIntervals).length > 0 || kernels.some((k) => k.status === 'checking');
+    if (!isAnyChecking) {
+      isKernelChecking.set(false);
+    }
+  }
+
   async function fetchKernelStatus(name: string) {
     try {
       const res = await fetch(`/api/kernels/${name}/status`);
@@ -289,11 +376,37 @@
           clearInterval(statusIntervals[name]);
           delete statusIntervals[name];
           fetchKernels();
+          checkIfFinishedChecking();
         }
+      } else {
+        clearInterval(statusIntervals[name]);
+        delete statusIntervals[name];
+        const idx = kernels.findIndex((k) => k.name === name);
+        if (
+          idx >= 0 &&
+          (kernels[idx].status === 'checking' ||
+            kernels[idx].status === 'downloading' ||
+            kernels[idx].status === 'installing')
+        ) {
+          kernels[idx] = { ...kernels[idx], status: 'failed' };
+          kernels = [...kernels];
+        }
+        checkIfFinishedChecking();
       }
     } catch (e) {
       clearInterval(statusIntervals[name]);
       delete statusIntervals[name];
+      const idx = kernels.findIndex((k) => k.name === name);
+      if (
+        idx >= 0 &&
+        (kernels[idx].status === 'checking' ||
+          kernels[idx].status === 'downloading' ||
+          kernels[idx].status === 'installing')
+      ) {
+        kernels[idx] = { ...kernels[idx], status: 'failed' };
+        kernels = [...kernels];
+      }
+      checkIfFinishedChecking();
     }
   }
 
@@ -309,6 +422,7 @@
 
   $: xray = kernels.find((k) => k.name === 'xray');
   $: mihomo = kernels.find((k) => k.name === 'mihomo');
+  $: isAnyKernelChecking = kernels.some((k) => k.status === 'checking');
   $: activeKernel = (() => {
     if (xray?.process_status === 'running') return 'xray';
     if (mihomo?.process_status === 'running') return 'mihomo';
@@ -355,10 +469,9 @@
     <div class="ph-actions">
       <button
         class="btn btn-secondary"
-        on:click={() => {
-          fetchStatus();
-          fetchKernels();
-        }}
+        on:click={handleRefreshStatus}
+        disabled={$isKernelChecking || refreshingStatus}
+        class:btn-loading={refreshingStatus}
         title={$t('svc.refresh_status')}
       >
         <svg
@@ -377,6 +490,8 @@
           checkKernelUpdate('xray');
           checkKernelUpdate('mihomo');
         }}
+        disabled={$isKernelChecking}
+        class:btn-loading={$isKernelChecking}
         title={$t('svc.check_updates')}
       >
         <svg
@@ -421,8 +536,7 @@
         <div class="k-meta">
           {#if isRunning}
             {#if xkeenInfo.pid}
-              PID {xkeenInfo.pid} · uptime {xkeenInfo.uptime || '—'} · {xkeenInfo.binaryPath ||
-                '/opt/sbin/xkeen'}
+              PID {xkeenInfo.pid} · uptime {xkeenInfo.uptime || '—'}
             {:else if xkeenStatus}
               {xkeenStatus}
             {:else}
@@ -430,8 +544,7 @@
                 · {$t('svc.active_kernel')}: {activeKernel}{/if}
             {/if}
           {:else}
-            {$t('svc.xkeen_module')}{#if xkeenInfo.binaryPath}
-              · {xkeenInfo.binaryPath}{/if}
+            {$t('svc.xkeen_module')}
           {/if}
         </div>
       </div>
@@ -606,11 +719,16 @@
                 )}</span
               >
             {/if}
-            {#if xray.has_update}
-              <span class="badge badge-warning">{$t('svc.update_badge')} {xray.latest_version}</span
-              >
-            {:else if xray.current_version && xray.current_version !== 'not installed'}
-              <span class="badge">v{xray.current_version} · {$t('svc.actual_badge')}</span>
+            {#if xray.status === 'checking'}
+              <span class="badge badge-info">{$t('kernels.checking')}</span>
+            {:else}
+              {#if xray.has_update}
+                <span class="badge badge-warning"
+                  >{$t('svc.update_badge')} {xray.latest_version}</span
+                >
+              {:else if xray.current_version && xray.current_version !== 'not installed'}
+                <span class="badge">v{xray.current_version} · {$t('svc.actual_badge')}</span>
+              {/if}
             {/if}
           {:else}
             <span class="status-badge stopped"
@@ -625,15 +743,11 @@
             <Skeleton type="text-line" width="120px" />
           {:else if xray}
             {#if xray.process_status === 'running'}
-              v{xray.current_version} · PID {xray.pid || '—'} · uptime {xray.uptime || '—'} · {xray.binary_path}
-            {:else if xray.has_update}
-              v{xray.current_version} &rarr; {xray.latest_version} · {xray.binary_path}
-              {#if xray.message}
-                · {xray.message}{/if}
+              PID {xray.pid || '—'} · uptime {xray.uptime || '—'}
             {:else}
-              v{xray.current_version} · {xray.binary_path}
               {#if xray.message}
-                · {xray.message}{/if}
+                {xray.message}
+              {/if}
             {/if}
           {:else}
             {$t('kernel.status.not_installed')}
@@ -758,12 +872,25 @@
                 )}</span
               >
             {/if}
-            {#if mihomo.has_update}
-              <span class="badge badge-warning"
-                >{$t('svc.update_badge')} {mihomo.latest_version}</span
+            {#if mihomo.status === 'checking'}
+              <span class="badge badge-info">{$t('kernels.checking')}</span>
+            {:else}
+              {#if mihomo.has_update}
+                <span class="badge badge-warning"
+                  >{$t('svc.update_badge')} {mihomo.latest_version}</span
+                >
+              {:else if mihomo.current_version && mihomo.current_version !== 'not installed'}
+                <span class="badge">v{mihomo.current_version} · {$t('svc.actual_badge')}</span>
+              {/if}
+            {/if}
+            {#if mihomo.process_status === 'running' && $capabilities?.mihomo?.api_reachable === false}
+              <a
+                href="#/editor"
+                class="badge badge-warning"
+                title={$t('svc.mihomo_api_unavailable_title')}
+                aria-label={$t('svc.mihomo_api_unavailable_title')}
+                style="text-decoration:none;">{$t('svc.mihomo_api_unavailable')}</a
               >
-            {:else if mihomo.current_version && mihomo.current_version !== 'not installed'}
-              <span class="badge">v{mihomo.current_version} · {$t('svc.actual_badge')}</span>
             {/if}
           {:else}
             <span class="status-badge stopped"
@@ -778,12 +905,11 @@
             <Skeleton type="text-line" width="120px" />
           {:else if mihomo}
             {#if mihomo.process_status === 'running'}
-              API {mihomo.api_addr || '127.0.0.1:9090'} · clash-meta (v{mihomo.current_version}) ·
-              uptime {mihomo.uptime || '—'} · {mihomo.binary_path}
+              API {mihomo.api_addr || '127.0.0.1:9090'} · uptime {mihomo.uptime || '—'}
             {:else}
-              {mihomo.binary_path}
               {#if mihomo.message}
-                · {mihomo.message}{/if}
+                {mihomo.message}
+              {/if}
             {/if}
           {:else}
             {$t('kernel.status.not_installed')}
@@ -876,8 +1002,12 @@
   </div>
 
   <!-- Auto-start card -->
+  <!-- Note: toggles below persist to localStorage only — not yet connected to backend API -->
   <div class="card" style="margin-bottom:18px;">
     <h2 class="card-title">{$t('svc.section_autostart')}</h2>
+    <div class="alert alert-warning mb-2" style="font-size:12px;padding:6px 10px;">
+      {$t('svc.autostart_local_only')}
+    </div>
     <div class="field-row" style="border-bottom:1px solid var(--border-light);">
       <div>
         <div class="lbl">{$t('svc.autostart_keenetic_label')}</div>
@@ -910,36 +1040,19 @@
         </label>
       </div>
     </div>
-    <div class="field-row">
-      <div>
-        <div class="lbl">{$t('svc.dat_update_label')}</div>
-        <div class="desc">{$t('svc.dat_update_desc')}</div>
-      </div>
-      <div class="ctrl">
-        <label class="toggle-switch" title={$t('svc.dat_update_label')}>
-          <input
-            type="checkbox"
-            bind:checked={datUpdateDaily}
-            on:change={() => toggleAutostart('dat_update_daily', datUpdateDaily)}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </div>
   </div>
 
   <!-- Restart log card -->
   {#if restartLog.length > 0}
     <div class="card">
-      <div class="card-title-row">
-        <h2 class="card-title">{$t('svc.restart_log_title')}</h2>
-        <button
-          class="btn btn-ghost btn-sm"
-          on:click={() => (restartLogExpanded = !restartLogExpanded)}
-        >
-          {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
-        </button>
-      </div>
+      <h2 class="card-title">
+        {$t('svc.restart_log_title')}
+        <span class="ct-actions">
+          <button on:click={() => (restartLogExpanded = !restartLogExpanded)}>
+            {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
+          </button>
+        </span>
+      </h2>
       <div class="restart-log">
         {#each restartLogExpanded ? restartLog : restartLog.slice(0, 5) as entry}
           <div class="log-entry" class:log-success={entry.success} class:log-fail={!entry.success}>
@@ -961,7 +1074,13 @@
         {/each}
         {#if !restartLogExpanded && restartLog.length > 5}
           <div class="log-more" on:click={() => (restartLogExpanded = true)}>
-            {$t('svc.log_show_more', { count: restartLog.length - 5 })}
+            {pluralize(
+              restartLog.length - 5,
+              $t('svc.log_show_more_one', { count: String(restartLog.length - 5) }),
+              $t('svc.log_show_more_few', { count: String(restartLog.length - 5) }),
+              $t('svc.log_show_more_many', { count: String(restartLog.length - 5) }),
+              $currentLang
+            )}
           </div>
         {/if}
       </div>
@@ -1228,5 +1347,26 @@
   }
   .log-more:hover {
     text-decoration: underline;
+  }
+
+  @media (max-width: 768px) {
+    .kernel-card {
+      grid-template-columns: 60px 1fr;
+      grid-template-rows: auto auto;
+    }
+
+    .kernel-card .k-actions {
+      grid-column: 1 / span 2;
+      border-top: 1px solid var(--border);
+      background: var(--bg-secondary);
+      padding: 12px 18px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .kernel-card .k-name {
+      flex-wrap: wrap;
+    }
   }
 </style>

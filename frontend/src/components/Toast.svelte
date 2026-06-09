@@ -9,6 +9,7 @@
   function getIconName(type: ToastItem['type']): string {
     if (type === 'success') return 'check';
     if (type === 'error') return 'cross';
+    if (type === 'warning') return 'warning';
     return 'info';
   }
 </script>
@@ -69,6 +70,12 @@
       0 20px 36px -16px rgba(0, 0, 0, 0.6),
       0 0 24px -4px rgba(239, 91, 107, 0.25);
   }
+  .toast--warning {
+    border-left-color: var(--warning);
+    box-shadow:
+      0 20px 36px -16px rgba(0, 0, 0, 0.6),
+      0 0 24px -4px rgba(240, 180, 80, 0.25);
+  }
   .toast--info {
     border-left-color: var(--accent);
     box-shadow:
@@ -87,6 +94,9 @@
   }
   .toast--error .toast__icon {
     color: var(--danger);
+  }
+  .toast--warning .toast__icon {
+    color: var(--warning);
   }
   .toast--info .toast__icon {
     color: var(--accent);

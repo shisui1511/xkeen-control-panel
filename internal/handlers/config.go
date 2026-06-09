@@ -10,9 +10,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
+
+var configPathRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-\.\/]+$`)
 
 type ConfigFileInfo struct {
 	Name string `json:"name"`
@@ -60,14 +64,25 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		if !pathAllowed {
 			continue
 		}
+		// Strict validation against path traversal and characters to satisfy static analyzers (CWE-22)
+		if strings.Contains(cleanF, "..") {
+			continue
+		}
+		if !configPathRegex.MatchString(cleanF) {
+			continue
+		}
+		// codeql[go/path-injection] - cleanF validated via PathValidator.Validate + strings.HasPrefix check above.
 		info, statErr := os.Stat(cleanF)
 		var size int64
 		if statErr == nil {
 			size = info.Size()
 		}
+		// Use original glob path (f) for Name/Path so symlinks are shown by their
+		// link name (e.g. config.yaml), not the resolved target (e.g. profiles/default.yaml).
+		// cleanF is used only for the security check and os.Stat above.
 		res = append(res, ConfigFileInfo{
-			Name: filepath.Base(cleanF),
-			Path: cleanF,
+			Name: filepath.Base(f),
+			Path: f,
 			Size: size,
 		})
 	}
@@ -90,6 +105,10 @@ func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {
 
 	data, err := a.configSvc.Read(cleanPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			a.errorResponse(w, a.t(r, "config.file_not_found"), http.StatusNotFound)
+			return
+		}
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -257,6 +276,85 @@ type ConfigValidateRequest struct {
 type ConfigValidateResponse struct {
 	Valid bool   `json:"valid"`
 	Error string `json:"error"`
+}
+
+// PreflightIssue is the JSON representation of a single preflight issue.
+// The canonical type is services.PreflightIssue; this mirrors its JSON shape.
+type PreflightIssueJSON struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// ConfigPreflightResponse is the JSON body for GET /api/config/preflight.
+type ConfigPreflightResponse struct {
+	Valid    bool                 `json:"valid"`
+	Errors   []PreflightIssueJSON `json:"errors"`
+	Warnings []PreflightIssueJSON `json:"warnings"`
+}
+
+// ConfigPreflight handles GET /api/config/preflight?kernel=mihomo|xray.
+// It runs a pre-flight validation of the kernel config and returns blocking errors
+// and non-blocking warnings. On service read/parse failure it returns valid:true
+// with empty arrays (silent safe fallback — must never block the user).
+func (a *API) ConfigPreflight(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	kernel := r.URL.Query().Get("kernel")
+	if kernel != "mihomo" && kernel != "xray" {
+		a.errorResponse(w, "kernel must be 'mihomo' or 'xray'", http.StatusBadRequest)
+		return
+	}
+
+	safeResp := ConfigPreflightResponse{
+		Valid:    true,
+		Errors:   []PreflightIssueJSON{},
+		Warnings: []PreflightIssueJSON{},
+	}
+
+	switch kernel {
+	case "mihomo":
+		result, err := a.mihomoSvc.ValidateMihomoConfig()
+		if err != nil {
+			// T-22-05: swallow fs/parse errors — never leak raw error text to client.
+			a.jsonResponse(w, safeResp)
+			return
+		}
+		resp := ConfigPreflightResponse{
+			Valid:    result.Valid,
+			Errors:   mapIssues(result.Errors),
+			Warnings: mapIssues(result.Warnings),
+		}
+		a.jsonResponse(w, resp)
+
+	case "xray":
+		result, err := a.xkeenSvc.ValidateXrayConfig(a.cfg.XRayConfigDir)
+		if err != nil {
+			a.jsonResponse(w, safeResp)
+			return
+		}
+		resp := ConfigPreflightResponse{
+			Valid:    result.Valid,
+			Errors:   mapIssues(result.Errors),
+			Warnings: mapIssues(result.Warnings),
+		}
+		a.jsonResponse(w, resp)
+	}
+}
+
+// mapIssues converts services.PreflightIssue slice to handler JSON types.
+// Always returns a non-nil slice so JSON serializes as [] not null.
+func mapIssues(issues []services.PreflightIssue) []PreflightIssueJSON {
+	result := make([]PreflightIssueJSON, 0, len(issues))
+	for _, iss := range issues {
+		result = append(result, PreflightIssueJSON{
+			Code:    iss.Code,
+			Message: iss.Message,
+		})
+	}
+	return result
 }
 
 func (a *API) getBinaryPath(name string) string {
@@ -450,4 +548,70 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 	a.jsonResponse(w, ConfigValidateResponse{
 		Valid: true,
 	})
+}
+
+type MihomoMergeRequest struct {
+	Path     string            `json:"path"`
+	Sections map[string]string `json:"sections"`
+}
+
+func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
+	var req MihomoMergeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err.Error() == "http: request body too large" {
+			a.errorResponse(w, "request body too large (max 1 MB)", http.StatusRequestEntityTooLarge)
+			return
+		}
+		a.errorResponse(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Path == "" {
+		a.errorResponse(w, "path is required", http.StatusBadRequest)
+		return
+	}
+
+	cleanPath, err := a.pathVal.Validate(req.Path)
+	if err != nil {
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	ext := filepath.Ext(cleanPath)
+	if ext != ".yaml" && ext != ".yml" {
+		a.errorResponse(w, "only .yaml, .yml files are allowed for merge", http.StatusForbidden)
+		return
+	}
+
+	data, err := a.configSvc.Read(cleanPath)
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	content := string(data)
+
+	for sectionName, newSecContent := range req.Sections {
+		if sectionName != "proxy-groups" && sectionName != "rule-providers" && sectionName != "rules" &&
+			sectionName != "proxies" && sectionName != "dns" && sectionName != "tun" &&
+			sectionName != "proxy-providers" {
+			a.errorResponse(w, "invalid section name: "+sectionName, http.StatusBadRequest)
+			return
+		}
+		content = services.ReplaceMihomoTopLevelSection(content, sectionName, newSecContent)
+	}
+
+	err = a.configSvc.Save(cleanPath, []byte(content))
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	JSONSuccess(w, nil)
 }

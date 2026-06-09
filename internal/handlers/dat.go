@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 )
 
@@ -51,7 +52,24 @@ func (a *API) DATUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := a.datSvc.Update()
+	var req struct {
+		File string `json:"file"`
+	}
+
+	if r.Header.Get("Content-Type") == "application/json" && r.ContentLength > 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
+	var err error
+	if req.File != "" {
+		err = a.datSvc.UpdateFile(req.File)
+	} else {
+		err = a.datSvc.Update()
+	}
+
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return

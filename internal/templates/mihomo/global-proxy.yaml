@@ -1,0 +1,31 @@
+# global-proxy.yaml — весь трафик через прокси
+# Пользователь добавляет proxy-providers через страницу Subscriptions
+# Требует Mihomo Meta >= 1.15 (поддержка include-all: true)
+mixed-port: 7890
+allow-lan: false
+mode: global
+log-level: warning
+ipv6: false
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  nameserver:
+    - 1.1.1.1
+    - 8.8.8.8
+
+# proxy-providers: добавьте через страницу Subscriptions
+proxy-providers: {}
+
+proxy-groups:
+  # Требует Mihomo Meta >= 1.15 (include-all: true автоматически включает все proxy-providers)
+  - name: "Proxy"
+    type: select
+    include-all: true
+    proxies:
+      - DIRECT
+
+rules:
+  - GEOIP,private,DIRECT,no-resolve
+  - MATCH,Proxy

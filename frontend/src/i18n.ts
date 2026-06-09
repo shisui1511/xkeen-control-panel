@@ -12,6 +12,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'app.version': 'Версия',
     'app.status': 'Статус',
     'app.running': 'Работает',
+    'app.active': 'Активна',
+    'app.disabled': 'Выключена',
+    'app.success': 'Успешно',
     'app.error': 'Ошибка',
     'app.unavailable': 'Недоступно',
     'app.save': 'Сохранить',
@@ -102,6 +105,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.mihomo_sub': 'proxy core (clash-meta)',
     'dash.status_error': 'Не удалось получить статус сервисов',
     'dash.info_version': 'Версия XKeen',
+    'dash.info_version_panel': 'Версия панели',
     'dash.info_platform': 'Платформа',
     'dash.info_kernel': 'Ядро',
     'dash.info_host': 'Хост',
@@ -114,7 +118,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.info_gateway': 'Шлюз по умолчанию',
     'dash.info_dns': 'DNS серверы',
     'dash.info_latest': 'latest',
-    'dash.info_lines': '{count} строк',
+    'dash.info_lines_one': '{count} строка',
+    'dash.info_lines_few': '{count} строки',
+    'dash.info_lines_many': '{count} строк',
     'dash.uptime_since': 'с {time}',
     'dash.uptime_stable': 'стабильно',
     'dash.uptime_restarts': '0 рестартов',
@@ -142,11 +148,28 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.problems.mihomo_api_title': 'API Mihomo недоступен',
     'dash.problems.mihomo_api_desc':
       'Панель управления не может подключиться к Mihomo API. Прокси-сервисы могут работать некорректно.',
-    'dash.problems.mihomo_api_cta': 'Настроить API',
+    'dash.problems.mihomo_api_cta': 'Открыть конструктор',
     'dash.problems.kernel_missing_title': 'Прокси ядра не установлены',
     'dash.problems.kernel_missing_desc':
       'Ни одно ядро (Xray или Mihomo) не установлено. Пожалуйста, установите ядро в разделе управления сервисами.',
     'dash.problems.kernel_missing_cta': 'Установить ядро',
+    // Quickstart checklist (Phase 19)
+    'dash.quickstart.title': 'Быстрый старт',
+    'dash.quickstart.progress': '{done} из {total}',
+    'dash.quickstart.step1_label': 'Ядро Mihomo выбрано',
+    'dash.quickstart.step2_label': 'Добавьте подписку',
+    'dash.quickstart.step2_done': 'Подписка добавлена',
+    'dash.quickstart.step2_cta': 'Добавить →',
+    'dash.quickstart.step3_label': 'Настройте конфигурацию',
+    'dash.quickstart.step3_done': 'Конфиг применён',
+    'dash.quickstart.step3_cta': 'Конструктор →',
+    'dash.quickstart.step4_label': 'Запустите Mihomo',
+    'dash.quickstart.step4_done': 'Mihomo запущен',
+    'dash.quickstart.step4_cta': 'Сервисы →',
+    'dash.quickstart.sidebar_badge_aria': 'Mihomo API недоступен',
+    'dash.updated_today': 'обновлено сегодня',
+    'dash.subs_empty': 'Подписки на прокси',
+    'dash.editor_subtitle': 'правка config.yaml',
 
     // Editor
     'editor.title': 'Управление сервисами',
@@ -206,6 +229,58 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.generator_subtitle':
       'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.',
     'editor.crumbs_generator': 'Генератор Mihomo',
+    'editor.tab_constructor': 'Конструктор',
+    'editor.constructor_merge_warning_title': 'Безопасное слияние конфигурации',
+    'editor.constructor_merge_warning_body':
+      'Следующие ручные настройки будут автоматически сохранены: {keys}',
+    'editor.constructor_title': 'Конструктор конфигов',
+    'editor.constructor_subtitle': 'Визуальный генератор для Xray и Mihomo',
+    'editor.kernel_xray': 'Xray',
+    'editor.kernel_mihomo': 'Mihomo',
+    'editor.constructor_scenario': 'Сценарий',
+    'editor.scenario_rule_based': 'Selective Routing',
+    'editor.scenario_global_proxy': 'Global Proxy',
+    'editor.scenario_zkeen_selective': 'ZKeen (СНГ выборочный)',
+    'editor.scenario_mihomo_only': 'Только Mihomo',
+    'editor.open_in_editor': 'Открыть в редакторе',
+    'editor.constructor_invalid': 'Конфигурация содержит ошибки',
+    'editor.constructor_preview': 'Превью',
+    'editor.constructor_import_proxies': 'Импорт прокси из подписок',
+    'editor.constructor_rule_providers': 'Наборы правил',
+    'editor.rp_zkeen': 'ZKeen (СНГ)',
+    'editor.rp_acl4ssr': 'ACL4SSR',
+    'editor.rp_loyalsoldier': 'Loyalsoldier',
+    'editor.rp_none': 'Без наборов',
+    'editor.xray_routing_rules': 'Правила маршрутизации',
+    'editor.xray_routing_add_rule': 'Добавить правило',
+    'editor.xray_outbound_tag': 'Outbound тег',
+    'editor.xray_domain_list': 'Домены',
+    'editor.xray_ip_list': 'IP-адреса',
+    'editor.xray_port_range': 'Порты',
+    'editor.xray_network': 'Сеть',
+    'editor.xray_inbounds': 'Inbounds',
+    'editor.xray_dns': 'DNS',
+    'editor.xray_domain_strategy': 'Стратегия доменов',
+    'editor.xray_load_outbounds': 'Загрузить теги из файлов',
+    'editor.xray_section_log': 'Логирование',
+    'editor.xray_section_dns': 'DNS',
+    'editor.xray_section_inbounds': 'Входящие (Inbounds)',
+    'editor.xray_section_outbounds': 'Исходящие (Outbounds)',
+    'editor.xray_section_routing': 'Маршрутизация (Routing)',
+    'editor.xray_section_policy': 'Политики (Policy)',
+    'editor.apply_confirm_title': 'Подтверждение применения изменений',
+    'editor.apply_and_restart': 'Применить и перезапустить',
+    'editor.apply_confirm_body':
+      'Вы действительно хотите применить изменения в конфигурационных файлах и перезапустить ядро?',
+    'editor.rulesets_picker': 'Наборы правил MetaCubeX',
+    'editor.rulesets_category': 'Категория',
+    'editor.rp_metacubex': 'MetaCubeX',
+    'editor.preset_applied': 'Пресет применён',
+    'editor.import_proxies_done': 'Прокси импортированы',
+    'editor.import_proxies_error': 'Ошибка импорта прокси',
+    'editor.import_proxies_empty': 'Подписки не найдены',
+    'editor.xray_mode_outbound': 'Только outbound',
+    'editor.xray_mode_full': 'Полный конфиг',
     'editor.template_applied': 'Шаблон успешно применен',
     'editor.template_error': 'Ошибка при применении шаблона',
     'editor.save_and_apply': 'Сохранить и применить',
@@ -214,6 +289,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.checking_status': 'Проверка статуса...',
     'editor.apply_success': 'Конфигурация успешно применилась, служба запущена!',
     'editor.apply_timeout': 'Служба не запустилась вовремя. Проверьте логи.',
+    'editor.proxy_tag_warning':
+      'Выбранный прокси-выход не найден в списке исходящих подключений. Конфигурация сохранена, но маршрутизация может работать некорректно.',
+    'editor.loading_tags': 'Загрузка тегов...',
+    'editor.no_outbounds_configured': 'Исходящие подключения не найдены',
 
     // Services
     'svc.title': 'Управление сервисами',
@@ -258,7 +337,11 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.log_fail': 'Ошибка',
     'svc.log_expand': 'Показать все',
     'svc.log_collapse': 'Свернуть',
-    'svc.log_show_more': 'Показать ещё {count} записей',
+    'svc.log_show_more_one': 'Показать ещё {count} запись',
+    'svc.log_show_more_few': 'Показать ещё {count} записи',
+    'svc.log_show_more_many': 'Показать ещё {count} записей',
+    'svc.autostart_local_only':
+      'Настройки сохраняются локально в браузере и не отправляются на роутер — функция в разработке',
     'svc.section_autostart': 'Авто‑запуск и расписание',
     'svc.xkeen_module': 'главный модуль',
     'svc.xray_core': 'core · v2ray-compatible',
@@ -278,6 +361,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.check_updates': 'Проверить обновления',
     'svc.channel_prefix': 'канал',
     'svc.actual_badge': 'актуально',
+    'svc.mihomo_api_unavailable': '⚠ API недоступен — Исправить',
+    'svc.mihomo_api_unavailable_title': 'external-controller не задан в конфиге Mihomo',
+    'svc.preflight_error_title': 'Ошибка конфигурации',
+    'svc.preflight_error_body': 'Конфиг содержит проблемы:',
+    'svc.preflight_fix': 'Исправить → Конфигуратор',
+    'svc.preflight_start_anyway': 'Запустить всё равно',
 
     // Kernel process status
     'kernel.status.running': 'Запущено',
@@ -289,6 +378,15 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // Editor extras
     'editor.no_templates': 'Шаблоны не найдены',
+    'editor.no_templates_hint': 'Нажмите «Обновить шаблоны» для загрузки шаблонов из репозитория',
+    'editor.templates_update': 'Обновить шаблоны',
+    'editor.templates_updated': 'Шаблоны обновлены из репозитория',
+    'editor.templates_update_error': 'Не удалось обновить шаблоны. Проверьте соединение.',
+    'editor.apply_template': 'Применить шаблон',
+    'editor.confirm_apply_action': 'Применить шаблон',
+    'editor.no_file_for_template': 'Откройте файл для применения шаблона',
+    'editor.templates_tab_xray': 'Xray',
+    'editor.templates_tab_mihomo': 'Mihomo',
 
     // Settings
     'settings.title': 'Настройки',
@@ -320,6 +418,15 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.backup_restore_success': 'Конфигурация успешно восстановлена',
     'settings.backup_delete_confirm': 'Вы уверены, что хотите удалить этот бэкап?',
     'settings.backup_delete_success': 'Бэкап удален',
+    'settings.backup_created': 'Резервная копия создана',
+    'settings.backup_create_btn': 'Создать копию',
+    'settings.backup_restore_btn': 'Восстановить',
+    'settings.no_files': 'Нет доступных файлов',
+    'settings.backups_empty': 'Резервные копии отсутствуют',
+    'settings.backup_restored': 'Бэкап восстановлен',
+    'settings.section_snapshots': 'Снапшоты системы',
+    'settings.section_file_backups': 'Файловые бэкапы',
+    'settings.backup_select_file_hint': 'Выберите файл для просмотра бэкапов',
     'settings.section_locale': 'ЛОКАЛИЗАЦИЯ',
     'settings.timezone': 'Часовой пояс',
     'settings.timezone_desc': 'Используется в логах и расписаниях',
@@ -588,6 +695,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.title': 'DAT Manager',
     'dat.h1': 'DAT файлы',
     'dat.h1_sub': 'Базы данных GeoIP и GeoSite для фильтрации трафика.',
+    'dat.record_count_one': '{count} запись',
+    'dat.record_count_few': '{count} записи',
+    'dat.record_count_many': '{count} записей',
     'dat.section_xray': 'XRAY',
     'dat.section_mihomo': 'MIHOMO',
     'dat.total_files': 'Файлов',
@@ -602,6 +712,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.url_required': 'Укажите URL для обновления',
     'dat.no_files': 'Файлы DAT не найдены в /opt/etc/xray/dat/ или /opt/etc/mihomo/',
     'dat.url_placeholder': 'URL для загрузки обновления (https://...)',
+    'dat.rollback_success': 'Откат успешно выполнен',
+    'dat.rollback_error': 'Ошибка отката',
 
     // Console Commands
     'console.title': 'Консоль XKeen',
@@ -629,10 +741,8 @@ const translations: Record<Lang, Record<string, string>> = {
     // Editor Extras
     'editor.back_to_dashboard': 'Вернуться на Dashboard',
     'editor.templates': 'Шаблоны',
-    'editor.templates_desc':
-      'Выберите готовый шаблон для быстрой настройки. Внимание: текущий контент будет заменен!',
-    'editor.confirm_template':
-      'Вы уверены, что хотите применить этот шаблон? Текущее содержимое файла будет заменено.',
+    'editor.templates_desc': 'Выберите готовый шаблон. Текущее содержимое файла будет заменено.',
+    'editor.confirm_template': 'Текущее содержимое файла будет заменено. Продолжить?',
     'editor.generator': 'Генератор',
     'editor.protocol': 'Протокол',
     'editor.address': 'Адрес',
@@ -709,6 +819,9 @@ const translations: Record<Lang, Record<string, string>> = {
     // Subscriptions
     'subscr.title': 'Подписки',
     'subscr.subtitle': 'Управление ссылками на подписки прокси',
+    'subscr.total_one': '{count} подписка',
+    'subscr.total_few': '{count} подписки',
+    'subscr.total_many': '{count} подписок',
     'subscr.refresh_all': 'Обновить все',
     'subscr.add': 'Добавить',
     'subscr.empty': 'Нет подписок.',
@@ -785,6 +898,26 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.detail.auto_routing_conflict': 'Нельзя вручную задать ноду в режиме автобалансировки',
     'subscr.detail.activate_error': 'Ошибка активации ноды',
     'subscr.detail.open': 'Узлы',
+    'subscr.import_node': 'Импорт узла',
+    'subscr.import_modal_title': 'Импорт прокси-узла',
+    'subscr.import_link_label': 'Ссылки share-link (по одной на строку)',
+    'subscr.import_link_placeholder': 'Вставьте одну или несколько ссылок (по одной на строку)',
+    'subscr.import_btn_parse': 'Распознать',
+    'subscr.import_btn_confirm': 'Импортировать',
+    'subscr.import_preview_title': 'Параметры узла',
+    'subscr.import_proto': 'Протокол',
+    'subscr.import_server': 'Сервер',
+    'subscr.import_port': 'Порт',
+    'subscr.import_tag_custom': 'Имя (тег) узла',
+    'subscr.import_tag_placeholder': 'Введите имя или оставьте пустым',
+    'subscr.import_success': 'Успешно импортировано {count} узлов',
+    'subscr.import_error_empty': 'Ссылка не может быть пустой',
+    'subscr.import_error_invalid': 'Не удалось распознать ссылку',
+    'subscr.import_error_too_long': 'Ссылка превышает лимит 8 КБ',
+    'subscr.import_error_single_only': 'Пожалуйста, введите только одну ссылку за раз',
+    'subscr.import_error': 'Ошибка импорта',
+    'subscr.partial_map_warning':
+      'Некоторые узлы были пропущены (несовместимый протокол или отсутствуют настройки сервера)',
     'settings.update_confirm_title': 'Подтверждение обновления',
     'settings.update_confirm_text':
       'Вы уверены, что хотите обновить панель управления? Список изменений:',
@@ -807,7 +940,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.disconnected': 'Отключено от сервера логов',
     'logs.status_connected': 'Подключено',
     'logs.status_disconnected': 'Отключено',
-    'logs.source_count': '{count} источников',
+    'logs.source_count_one': '{count} источник',
+    'logs.source_count_few': '{count} источника',
+    'logs.source_count_many': '{count} источников',
     'logs.all_sources': 'Все источники',
     'logs.all_levels': 'Все уровни',
     'logs.autoscroll': 'Автопрокрутка',
@@ -821,7 +956,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.disconnected_title': 'Соединение разорвано',
     'logs.disconnected_desc': 'Потеряно подключение к WebSocket серверу логов.',
     'logs.buffer_count': '{count} строк в буфере',
-    'logs.active_sources_count': '{count} активных источника',
+    'logs.active_sources_count_one': '{count} активный источник',
+    'logs.active_sources_count_few': '{count} активных источника',
+    'logs.active_sources_count_many': '{count} активных источников',
     'logs.realtime_label': 'обновление в реальном времени',
 
     // Proxies
@@ -910,9 +1047,11 @@ const translations: Record<Lang, Record<string, string>> = {
       'API Mihomo не отвечает. Перейдите в раздел «Сервисы» для запуска Mihomo.',
 
     // Design System / Empty States
-    'ds.empty.mihomo_offline_title': 'Ядро Mihomo остановлено',
+    'ds.empty.mihomo_offline_title': 'Mihomo API недоступен',
     'ds.empty.mihomo_offline_desc':
       'Для просмотра этой страницы необходимо запустить сервис Mihomo.',
+    'ds.empty.mihomo_offline_desc_actionable':
+      'Откройте Конфигуратор → выберите сценарий → примените конфиг → перезапустите Mihomo.',
     'ds.empty.mihomo_offline_cta': 'Запустить Mihomo',
     'ds.empty.mihomo_offline_loading': 'Запуск службы...',
     'ds.empty.no_data_title': 'Данные отсутствуют',
@@ -947,6 +1086,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'app.version': 'Version',
     'app.status': 'Status',
     'app.running': 'Running',
+    'app.active': 'Active',
+    'app.disabled': 'Disabled',
+    'app.success': 'Success',
     'app.error': 'Error',
     'app.unavailable': 'Unavailable',
     'app.save': 'Save',
@@ -1040,6 +1182,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.mihomo_sub': 'proxy core (clash-meta)',
     'dash.status_error': 'Failed to load service status',
     'dash.info_version': 'XKeen Version',
+    'dash.info_version_panel': 'Panel Version',
     'dash.info_platform': 'Platform',
     'dash.info_kernel': 'Kernel',
     'dash.info_host': 'Host',
@@ -1052,7 +1195,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.info_gateway': 'Default Gateway',
     'dash.info_dns': 'DNS Servers',
     'dash.info_latest': 'latest',
-    'dash.info_lines': '{count} lines',
+    'dash.info_lines_one': '{count} line',
+    'dash.info_lines_few': '{count} lines',
+    'dash.info_lines_many': '{count} lines',
     'dash.uptime_since': 'since {time}',
     'dash.uptime_stable': 'stable',
     'dash.uptime_restarts': '0 restarts',
@@ -1080,11 +1225,28 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.problems.mihomo_api_title': 'Mihomo API Unavailable',
     'dash.problems.mihomo_api_desc':
       'The control panel cannot connect to Mihomo API. Proxy services might not work correctly.',
-    'dash.problems.mihomo_api_cta': 'Configure API',
+    'dash.problems.mihomo_api_cta': 'Open constructor',
     'dash.problems.kernel_missing_title': 'Proxy Kernels Not Installed',
     'dash.problems.kernel_missing_desc':
       'No kernels (Xray or Mihomo) are currently installed. Please install a kernel in the services management section.',
     'dash.problems.kernel_missing_cta': 'Install Kernel',
+    // Quickstart checklist (Phase 19)
+    'dash.quickstart.title': 'Quick Start',
+    'dash.quickstart.progress': '{done} of {total}',
+    'dash.quickstart.step1_label': 'Mihomo kernel selected',
+    'dash.quickstart.step2_label': 'Add a subscription',
+    'dash.quickstart.step2_done': 'Subscription added',
+    'dash.quickstart.step2_cta': 'Add →',
+    'dash.quickstart.step3_label': 'Configure proxy',
+    'dash.quickstart.step3_done': 'Config applied',
+    'dash.quickstart.step3_cta': 'Constructor →',
+    'dash.quickstart.step4_label': 'Start Mihomo',
+    'dash.quickstart.step4_done': 'Mihomo running',
+    'dash.quickstart.step4_cta': 'Services →',
+    'dash.quickstart.sidebar_badge_aria': 'Mihomo API unavailable',
+    'dash.updated_today': 'updated today',
+    'dash.subs_empty': 'Proxy subscriptions',
+    'dash.editor_subtitle': 'edit config.yaml',
 
     // Editor
     'editor.title': 'Service Management',
@@ -1144,6 +1306,58 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.generator_subtitle':
       'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.',
     'editor.crumbs_generator': 'Mihomo Generator',
+    'editor.tab_constructor': 'Constructor',
+    'editor.constructor_merge_warning_title': 'Safe configuration merge',
+    'editor.constructor_merge_warning_body':
+      'The following manual settings will be automatically preserved: {keys}',
+    'editor.constructor_title': 'Config Constructor',
+    'editor.constructor_subtitle': 'Visual generator for Xray and Mihomo',
+    'editor.kernel_xray': 'Xray',
+    'editor.kernel_mihomo': 'Mihomo',
+    'editor.constructor_scenario': 'Scenario',
+    'editor.scenario_rule_based': 'Selective Routing',
+    'editor.scenario_global_proxy': 'Global Proxy',
+    'editor.scenario_zkeen_selective': 'ZKeen CIS Selective',
+    'editor.scenario_mihomo_only': 'Mihomo Only',
+    'editor.open_in_editor': 'Open in editor',
+    'editor.constructor_invalid': 'Configuration contains errors',
+    'editor.constructor_preview': 'Preview',
+    'editor.constructor_import_proxies': 'Import proxies from subscriptions',
+    'editor.constructor_rule_providers': 'Rule providers',
+    'editor.rp_zkeen': 'ZKeen (CIS)',
+    'editor.rp_acl4ssr': 'ACL4SSR',
+    'editor.rp_loyalsoldier': 'Loyalsoldier',
+    'editor.rp_none': 'None',
+    'editor.xray_routing_rules': 'Routing rules',
+    'editor.xray_routing_add_rule': 'Add rule',
+    'editor.xray_outbound_tag': 'Outbound tag',
+    'editor.xray_domain_list': 'Domains',
+    'editor.xray_ip_list': 'IP addresses',
+    'editor.xray_port_range': 'Ports',
+    'editor.xray_network': 'Network',
+    'editor.xray_inbounds': 'Inbounds',
+    'editor.xray_dns': 'DNS',
+    'editor.xray_domain_strategy': 'Domain strategy',
+    'editor.xray_load_outbounds': 'Load tags from files',
+    'editor.xray_section_log': 'Logging',
+    'editor.xray_section_dns': 'DNS',
+    'editor.xray_section_inbounds': 'Inbounds',
+    'editor.xray_section_outbounds': 'Outbounds',
+    'editor.xray_section_routing': 'Routing',
+    'editor.xray_section_policy': 'Policy',
+    'editor.apply_confirm_title': 'Confirm Changes Application',
+    'editor.apply_and_restart': 'Apply and Restart',
+    'editor.apply_confirm_body':
+      'Are you sure you want to apply the configuration changes and restart the core?',
+    'editor.rulesets_picker': 'MetaCubeX Rule Sets',
+    'editor.rulesets_category': 'Category',
+    'editor.rp_metacubex': 'MetaCubeX',
+    'editor.preset_applied': 'Preset applied',
+    'editor.import_proxies_done': 'Proxies imported',
+    'editor.import_proxies_error': 'Failed to import proxies',
+    'editor.import_proxies_empty': 'No subscriptions found',
+    'editor.xray_mode_outbound': 'Outbound only',
+    'editor.xray_mode_full': 'Full config',
     'editor.template_applied': 'Template applied successfully',
     'editor.template_error': 'Failed to apply template',
     'editor.save_and_apply': 'Save & Apply',
@@ -1152,6 +1366,10 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.checking_status': 'Checking status...',
     'editor.apply_success': 'Configuration applied successfully, service started!',
     'editor.apply_timeout': 'Service did not start in time. Check logs.',
+    'editor.proxy_tag_warning':
+      'Selected proxy outbound not found in available outbounds. Config saved, but routing may not work correctly.',
+    'editor.loading_tags': 'Loading tags...',
+    'editor.no_outbounds_configured': 'No outbounds configured',
 
     // Services
     'svc.title': 'Service Management',
@@ -1196,7 +1414,11 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.log_fail': 'Error',
     'svc.log_expand': 'Show all',
     'svc.log_collapse': 'Collapse',
-    'svc.log_show_more': 'Show {count} more',
+    'svc.log_show_more_one': 'Show {count} more entry',
+    'svc.log_show_more_few': 'Show {count} more entries',
+    'svc.log_show_more_many': 'Show {count} more entries',
+    'svc.autostart_local_only':
+      'Settings are saved locally in the browser only and are not sent to the router — feature under development',
     'svc.section_autostart': 'Auto-start & schedule',
     'svc.xkeen_module': 'main module',
     'svc.xray_core': 'core · v2ray-compatible',
@@ -1216,6 +1438,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.check_updates': 'Check updates',
     'svc.channel_prefix': 'channel',
     'svc.actual_badge': 'up to date',
+    'svc.mihomo_api_unavailable': '⚠ API unavailable — Fix',
+    'svc.mihomo_api_unavailable_title': 'external-controller is missing in Mihomo config',
+    'svc.preflight_error_title': 'Configuration error',
+    'svc.preflight_error_body': 'Config has issues:',
+    'svc.preflight_fix': 'Fix → Configurator',
+    'svc.preflight_start_anyway': 'Start anyway',
 
     // Kernel process status
     'kernel.status.running': 'Running',
@@ -1227,6 +1455,15 @@ const translations: Record<Lang, Record<string, string>> = {
 
     // Editor extras
     'editor.no_templates': 'No templates found',
+    'editor.no_templates_hint': 'Click "Update templates" to load templates from the repository',
+    'editor.templates_update': 'Update templates',
+    'editor.templates_updated': 'Templates updated from repository',
+    'editor.templates_update_error': 'Failed to update templates. Check your connection.',
+    'editor.apply_template': 'Apply template',
+    'editor.confirm_apply_action': 'Apply template',
+    'editor.no_file_for_template': 'Open a file to apply a template',
+    'editor.templates_tab_xray': 'Xray',
+    'editor.templates_tab_mihomo': 'Mihomo',
 
     // Settings
     'settings.title': 'Settings',
@@ -1259,6 +1496,15 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.backup_restore_success': 'Configuration restored successfully',
     'settings.backup_delete_confirm': 'Are you sure you want to delete this backup?',
     'settings.backup_delete_success': 'Backup deleted',
+    'settings.backup_created': 'Backup created',
+    'settings.backup_create_btn': 'Create backup',
+    'settings.backup_restore_btn': 'Restore',
+    'settings.no_files': 'No files available',
+    'settings.backups_empty': 'No backups found',
+    'settings.backup_restored': 'Backup restored',
+    'settings.section_snapshots': 'System Snapshots',
+    'settings.section_file_backups': 'File Backups',
+    'settings.backup_select_file_hint': 'Select a file to view backups',
     'settings.section_locale': 'LOCALIZATION',
     'settings.timezone': 'Timezone',
     'settings.timezone_desc': 'Used in logs and schedules',
@@ -1519,6 +1765,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.title': 'DAT Manager',
     'dat.h1': 'DAT Files',
     'dat.h1_sub': 'GeoIP and GeoSite databases for traffic filtering.',
+    'dat.record_count_one': '{count} record',
+    'dat.record_count_few': '{count} records',
+    'dat.record_count_many': '{count} records',
     'dat.section_xray': 'XRAY',
     'dat.section_mihomo': 'MIHOMO',
     'dat.total_files': 'Files',
@@ -1533,6 +1782,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.url_required': 'Specify update URL',
     'dat.no_files': 'DAT files not found in /opt/etc/xray/dat/ or /opt/etc/mihomo/',
     'dat.url_placeholder': 'Update download URL (https://...)',
+    'dat.rollback_success': 'Rollback completed successfully.',
+    'dat.rollback_error': 'Rollback failed.',
 
     // Console Commands
     'console.title': 'XKeen Console',
@@ -1559,10 +1810,8 @@ const translations: Record<Lang, Record<string, string>> = {
     // Editor Extras
     'editor.back_to_dashboard': 'Back to Dashboard',
     'editor.templates': 'Templates',
-    'editor.templates_desc':
-      'Select a pre-made template for quick setup. Warning: current content will be replaced!',
-    'editor.confirm_template':
-      'Are you sure you want to apply this template? Current file content will be replaced.',
+    'editor.templates_desc': 'Select a pre-made template. Current file content will be replaced.',
+    'editor.confirm_template': 'Current file content will be replaced. Continue?',
     'editor.generator': 'Generator',
     'editor.protocol': 'Protocol',
     'editor.address': 'Address',
@@ -1639,6 +1888,9 @@ const translations: Record<Lang, Record<string, string>> = {
     // Subscriptions
     'subscr.title': 'Subscriptions',
     'subscr.subtitle': 'Manage proxy subscription links',
+    'subscr.total_one': '{count} subscription',
+    'subscr.total_few': '{count} subscriptions',
+    'subscr.total_many': '{count} subscriptions',
     'subscr.refresh_all': 'Refresh All',
     'subscr.add': 'Add',
     'subscr.empty': 'No subscriptions.',
@@ -1716,6 +1968,26 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.detail.auto_routing_conflict': 'Cannot set node manually in auto-balancing mode',
     'subscr.detail.activate_error': 'Node activation error',
     'subscr.detail.open': 'Nodes',
+    'subscr.import_node': 'Import Node',
+    'subscr.import_modal_title': 'Import Proxy Node',
+    'subscr.import_link_label': 'Share Links (one per line)',
+    'subscr.import_link_placeholder': 'Paste one or more links (one per line)',
+    'subscr.import_btn_parse': 'Parse Link',
+    'subscr.import_btn_confirm': 'Import Node',
+    'subscr.import_preview_title': 'Node Parameters',
+    'subscr.import_proto': 'Protocol',
+    'subscr.import_server': 'Server',
+    'subscr.import_port': 'Port',
+    'subscr.import_tag_custom': 'Node Name (Tag)',
+    'subscr.import_tag_placeholder': 'Enter tag or leave empty',
+    'subscr.import_success': 'Successfully imported {count} nodes',
+    'subscr.import_error_empty': 'Link cannot be empty',
+    'subscr.import_error_invalid': 'Failed to parse link',
+    'subscr.import_error_too_long': 'Link exceeds the 8 KB limit',
+    'subscr.import_error_single_only': 'Please enter only one link at a time',
+    'subscr.import_error': 'Import error',
+    'subscr.partial_map_warning':
+      'Some nodes were skipped (incompatible protocol or missing server settings)',
     'settings.update_confirm_title': 'Confirm Update',
     'settings.update_confirm_text': 'Are you sure you want to update the control panel? Changelog:',
     'settings.update_install_btn': 'Update Panel',
@@ -1736,7 +2008,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.disconnected': 'Disconnected from logs server',
     'logs.status_connected': 'Connected',
     'logs.status_disconnected': 'Disconnected',
-    'logs.source_count': '{count} sources',
+    'logs.source_count_one': '{count} source',
+    'logs.source_count_few': '{count} sources',
+    'logs.source_count_many': '{count} sources',
     'logs.all_sources': 'All sources',
     'logs.all_levels': 'All levels',
     'logs.autoscroll': 'Auto-scroll',
@@ -1750,7 +2024,9 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.disconnected_title': 'Connection lost',
     'logs.disconnected_desc': 'Lost connection to the WebSocket log server.',
     'logs.buffer_count': '{count} lines in buffer',
-    'logs.active_sources_count': '{count} active sources',
+    'logs.active_sources_count_one': '{count} active source',
+    'logs.active_sources_count_few': '{count} active sources',
+    'logs.active_sources_count_many': '{count} active sources',
     'logs.realtime_label': 'live update',
 
     // Proxies
@@ -1839,8 +2115,10 @@ const translations: Record<Lang, Record<string, string>> = {
       'Mihomo API is not responding. Go to Services to start Mihomo.',
 
     // Design System / Empty States
-    'ds.empty.mihomo_offline_title': 'Mihomo Core Offline',
+    'ds.empty.mihomo_offline_title': 'Mihomo API Unavailable',
     'ds.empty.mihomo_offline_desc': 'Mihomo service must be running to view this page.',
+    'ds.empty.mihomo_offline_desc_actionable':
+      'Open Constructor → choose scenario → apply config → restart Mihomo.',
     'ds.empty.mihomo_offline_cta': 'Start Mihomo',
     'ds.empty.mihomo_offline_loading': 'Starting service...',
     'ds.empty.no_data_title': 'No Data Available',
@@ -1902,6 +2180,34 @@ export const t = derived(currentLang, ($lang: Lang) => {
     return text;
   };
 });
+
+/**
+ * Хелпер для выбора правильной формы числительного.
+ * По умолчанию применяет правила русского языка (CLDR Russian rules).
+ * Для lang === 'en' применяет двухформенное правило английского (singular / plural).
+ *
+ * @param n - число для проверки
+ * @param one - форма для единственного числа (рус: 1, 21, 101…; англ: 1)
+ * @param few - форма для малого числа (рус: 2–4, 22–24…; для англ: не используется)
+ * @param many - форма для множественного числа (рус: 0, 5–20…; англ: 0, 2, 3…)
+ * @param lang - язык для применения правил ('ru' по умолчанию, поддерживает 'en')
+ */
+export function pluralize(
+  n: number,
+  one: string,
+  few: string,
+  many: string,
+  lang: Lang = 'ru'
+): string {
+  if (lang === 'en') {
+    return n === 1 ? one : many;
+  }
+  // Русские правила CLDR
+  const abs = Math.abs(Math.floor(n));
+  if (abs % 10 === 1 && abs % 100 !== 11) return one;
+  if (abs % 10 >= 2 && abs % 10 <= 4 && (abs % 100 < 10 || abs % 100 >= 20)) return few;
+  return many;
+}
 
 // Switch language
 export function setLang(lang: Lang) {

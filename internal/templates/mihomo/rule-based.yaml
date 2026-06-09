@@ -1,0 +1,56 @@
+# rule-based.yaml — selective routing с MetaCubeX rule-sets
+# Пользователь добавляет proxy-providers через страницу Subscriptions
+# Требует Mihomo Meta >= 1.15 (поддержка include-all: true)
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: warning
+ipv6: false
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  nameserver:
+    - 77.88.8.8
+    - 1.1.1.1
+  fallback:
+    - 8.8.8.8
+
+# proxy-providers: добавьте через страницу Subscriptions
+proxy-providers: {}
+
+proxy-groups:
+  # Требует Mihomo Meta >= 1.15 (include-all: true автоматически включает все proxy-providers)
+  - name: "Selective"
+    type: select
+    include-all: true
+    proxies:
+      - DIRECT
+
+rule-providers:
+  category-ads-all:
+    type: http
+    format: mrs
+    behavior: domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ads-all.mrs"
+    interval: 86400
+  telegram-ip:
+    type: http
+    format: mrs
+    behavior: ipcidr
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs"
+    interval: 86400
+  private-ip:
+    type: http
+    format: mrs
+    behavior: ipcidr
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/private.mrs"
+    interval: 86400
+
+rules:
+  - RULE-SET,category-ads-all,REJECT
+  - RULE-SET,telegram-ip,Selective
+  - RULE-SET,private-ip,DIRECT
+  - MATCH,DIRECT

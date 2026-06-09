@@ -79,6 +79,77 @@ func TestXKeenService_Restart(t *testing.T) {
 	}
 }
 
+func TestXKeenService_ValidateXrayConfig(t *testing.T) {
+	t.Run("only freedom and blackhole - warns no_real_outbounds", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		content := `{"outbounds":[{"protocol":"freedom","tag":"direct"},{"protocol":"blackhole","tag":"blocked"}]}`
+		if err := os.WriteFile(filepath.Join(tmpDir, "04_outbounds.json"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		svc := NewXKeenService("", tmpDir)
+		result, err := svc.ValidateXrayConfig(tmpDir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.Valid {
+			t.Errorf("expected Valid=true, got false")
+		}
+		found := false
+		for _, w := range result.Warnings {
+			if w.Code == "no_real_outbounds" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected warning no_real_outbounds, got %+v", result.Warnings)
+		}
+	})
+
+	t.Run("vless outbound - no warning", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		content := `{"outbounds":[{"protocol":"vless","tag":"proxy"},{"protocol":"freedom","tag":"direct"}]}`
+		if err := os.WriteFile(filepath.Join(tmpDir, "04_outbounds.json"), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		svc := NewXKeenService("", tmpDir)
+		result, err := svc.ValidateXrayConfig(tmpDir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.Valid {
+			t.Errorf("expected Valid=true, got false")
+		}
+		for _, w := range result.Warnings {
+			if w.Code == "no_real_outbounds" {
+				t.Errorf("unexpected warning no_real_outbounds when vless outbound present")
+			}
+		}
+	})
+
+	t.Run("no 04_outbounds files - warns no_real_outbounds", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		svc := NewXKeenService("", tmpDir)
+		result, err := svc.ValidateXrayConfig(tmpDir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !result.Valid {
+			t.Errorf("expected Valid=true, got false")
+		}
+		found := false
+		for _, w := range result.Warnings {
+			if w.Code == "no_real_outbounds" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected warning no_real_outbounds for empty config dir, got %+v", result.Warnings)
+		}
+	})
+}
+
 // TestXkeenNoShellInjection verifies that runWithTimeout uses exec.Command with
 // separate args (never "sh -c"), so shell metacharacters in action cannot be exploited.
 func TestXkeenNoShellInjection(t *testing.T) {

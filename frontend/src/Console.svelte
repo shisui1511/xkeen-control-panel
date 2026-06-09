@@ -104,22 +104,6 @@
     }
   }
 
-  function getCommandSvg(command: string) {
-    if (command === '-start') {
-      return `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="margin-right:8px;flex-shrink:0;"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
-    }
-    if (command === '-stop') {
-      return `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="margin-right:8px;flex-shrink:0;"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>`;
-    }
-    if (command === '-restart') {
-      return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;flex-shrink:0;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>`;
-    }
-    if (command === '-status') {
-      return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;flex-shrink:0;"><path d="M3 12h18"/></svg>`;
-    }
-    return '';
-  }
-
   onMount(fetchCommands);
 </script>
 
@@ -144,23 +128,72 @@
         {#each categories as category}
           <div class="cmd-list mb-3">
             <div class="cmd-cat-head">
-              {$t('console.cat_' + category.name) || category.name}
+              {$t(`console.cat_${category.name}`) || category.name}
             </div>
-            {#each category.commands as cmd}
-              <button
-                class="cmd-row"
-                on:click={() => handleCommandClick(cmd)}
-                disabled={executing !== ''}
-                title={cmd.description}
-              >
-                <div class="cmd-name" class:dangerous-text={cmd.dangerous}>
-                  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                  {@html getCommandSvg(cmd.command)}
-                  xkeen {cmd.command}
-                </div>
-                <div class="cmd-desc">{cmd.description}</div>
-              </button>
-            {/each}
+            <div class="cmd-tile-grid">
+              {#each category.commands as cmd}
+                <button
+                  class="cmd-tile"
+                  on:click={() => handleCommandClick(cmd)}
+                  disabled={executing !== ''}
+                  title={cmd.description}
+                >
+                  <div class="tile-name" class:dangerous-text={cmd.dangerous}>
+                    {#if cmd.command === '-start'}
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        style="margin-right:8px;flex-shrink:0;"
+                        ><polygon points="5 3 19 12 5 21 5 3" /></svg
+                      >
+                    {:else if cmd.command === '-stop'}
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        style="margin-right:8px;flex-shrink:0;"
+                        ><rect x="6" y="5" width="4" height="14" /><rect
+                          x="14"
+                          y="5"
+                          width="4"
+                          height="14"
+                        /></svg
+                      >
+                    {:else if cmd.command === '-restart'}
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        style="margin-right:8px;flex-shrink:0;"
+                        ><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+                      >
+                    {:else if cmd.command === '-status'}
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        style="margin-right:8px;flex-shrink:0;"><path d="M3 12h18" /></svg
+                      >
+                    {/if}
+                    xkeen {cmd.command}
+                  </div>
+                  <div class="tile-desc">{cmd.description}</div>
+                </button>
+              {/each}
+            </div>
           </div>
         {/each}
       {/if}
@@ -265,16 +298,13 @@
 <style>
   .console-grid {
     display: grid;
-    grid-template-columns: 300px 1fr;
+    grid-template-columns: 2fr 3fr;
     gap: 14px;
     align-items: start;
   }
 
   .cmd-list {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
+    margin-bottom: 18px;
   }
 
   .cmd-cat-head {
@@ -286,6 +316,60 @@
     color: var(--fg-dim);
     font-weight: 700;
     border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+
+  .cmd-tile-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-2, 8px);
+  }
+
+  .cmd-tile {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-1, 4px);
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition:
+      background var(--transition-fast),
+      border-color var(--transition-fast);
+    text-align: left;
+    font-family: inherit;
+    min-height: 44px;
+    width: 100%;
+  }
+
+  .cmd-tile:hover:not(:disabled) {
+    background: var(--hover);
+    border-color: var(--accent-line);
+  }
+
+  .cmd-tile:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .cmd-tile .tile-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-primary);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-1, 4px);
+  }
+
+  .cmd-tile .tile-name.dangerous-text {
+    color: var(--danger);
+  }
+
+  .cmd-tile .tile-desc {
+    font-size: var(--font-size-xs, 11px);
+    color: var(--fg-dim);
+    line-height: 1.3;
   }
 
   .cmd-row {
@@ -485,6 +569,9 @@
 
   @media (max-width: 768px) {
     .console-grid {
+      grid-template-columns: 1fr;
+    }
+    .cmd-tile-grid {
       grid-template-columns: 1fr;
     }
   }

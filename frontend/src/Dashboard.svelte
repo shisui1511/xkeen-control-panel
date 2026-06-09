@@ -1,8 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { t, setLang } from './i18n';
-  import { isSidebarOpen, capabilities, fetchCapabilities, showToast } from './stores';
+  import { t, currentLang, setLang, pluralize } from './i18n';
+  import {
+    isSidebarOpen,
+    capabilities,
+    fetchCapabilities,
+    showToast,
+    mihomoApiAvailable
+  } from './stores';
   import Sidebar from './components/Sidebar.svelte';
   import Toast from './components/Toast.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -28,6 +34,7 @@
   import ApiOffline from './components/ApiOffline.svelte';
 
   let version = $t('app.loading');
+  let panelVersion = $t('app.loading');
   let loading = false;
   let currentTab = 'dashboard';
   const mihomoDependentTabs = [
@@ -95,9 +102,11 @@
   let loadHistory: number[] = [];
   let activeSubscriptionsCount = 0;
   let totalSubsCount = 0;
+  let hasSubscription = false;
   let subsLastUpdated = '';
   let totalProxiesCount = 0;
   let activeProxiesCount = 0;
+  let subscriptionProxiesCount = 0;
   let statsLastFetched = '';
 
   async function fetchSubscriptionSummary() {
@@ -108,7 +117,11 @@
         const subs = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
         activeSubscriptionsCount = subs.filter((s: any) => s.enabled).length;
         totalSubsCount = subs.length;
-        totalProxiesCount = subs.reduce((acc: number, s: any) => acc + (s.proxy_count || 0), 0);
+        hasSubscription = subs.length > 0;
+        subscriptionProxiesCount = subs.reduce(
+          (acc: number, s: any) => acc + (s.proxy_count || 0),
+          0
+        );
         // Find most recent update
         const dates = subs.map((s: any) => s.last_updated || s.updated_at || '').filter(Boolean);
         if (dates.length > 0) {
@@ -116,9 +129,12 @@
           const d = new Date(latest);
           const today = new Date();
           if (d.toDateString() === today.toDateString()) {
-            subsLastUpdated = 'обновлено сегодня';
+            subsLastUpdated = $t('dash.updated_today');
           } else {
-            subsLastUpdated = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+            subsLastUpdated = d.toLocaleDateString($currentLang === 'ru' ? 'ru-RU' : 'en-US', {
+              day: '2-digit',
+              month: '2-digit'
+            });
           }
         }
       }
@@ -267,6 +283,15 @@
 
   $: sparklineData = loadHistory.length >= 2 ? JSON.parse(buildSparklinePath(loadHistory)) : null;
 
+  // Quickstart checklist reactive state
+  $: quickstartDoneCount = [
+    true, // step 1 always done when card is visible (active_kernel === 'mihomo')
+    hasSubscription,
+    $mihomoApiAvailable,
+    serviceStatus.mihomo === 'running'
+  ].filter(Boolean).length;
+  $: allQuickstartComplete = quickstartDoneCount === 4;
+
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -286,8 +311,22 @@
       const res = await fetch('/api/version');
       const data = await res.json();
       version = data.version;
+      panelVersion = data.panel_version;
     } catch (e) {
       version = $t('app.error');
+      panelVersion = $t('app.error');
+    }
+  }
+
+  let isRefreshing = false;
+
+  async function handleRefresh() {
+    if (isRefreshing) return;
+    isRefreshing = true;
+    try {
+      await Promise.all([fetchLiveStatus(), fetchSystemStats(), fetchVersion()]);
+    } finally {
+      isRefreshing = false;
     }
   }
 
@@ -320,7 +359,7 @@
         window.location.hash = '#/subscriptions';
         return 'subscriptions';
       }
-      if (path === 'mihomo-gen') {
+      if (path === 'mihomo-gen' || path === 'constructor') {
         return 'editor';
       }
       return path;
@@ -506,7 +545,13 @@
             <p class="sub">{$t('dash.welcome')}</p>
           </div>
           <div class="ph-actions">
-            <Button variant="secondary" onclick={fetchLiveStatus} title={$t('app.refresh')}>
+            <Button
+              variant="secondary"
+              onclick={handleRefresh}
+              loading={isRefreshing}
+              disabled={isRefreshing}
+              title={$t('app.refresh')}
+            >
               <Icon name="refresh" size={14} />
               {$t('app.refresh')}
             </Button>
@@ -518,6 +563,137 @@
             </Button>
           </div>
         </div>
+
+        <!-- Quickstart Checklist (Mihomo only, auto-hides when all steps complete) -->
+        {#if $capabilities?.active_kernel === 'mihomo' && !allQuickstartComplete}
+          <div style="margin-bottom: 18px;">
+            <Card title={$t('dash.quickstart.title')}>
+              {#snippet actions()}
+                <span
+                  style="font-size: 12px; font-weight: 400; color: var(--fg-dim); font-family: var(--font-family-mono);"
+                >
+                  {$t('dash.quickstart.progress', {
+                    done: String(quickstartDoneCount),
+                    total: '4'
+                  })}
+                </span>
+              {/snippet}
+              <ul class="quickstart-list" role="list">
+                <!-- Step 1: kernel selected (always done when card is visible) -->
+                <li class="qs-step qs-step--done">
+                  <span class="qs-icon" aria-label="Выполнено">
+                    <Icon name="check" size={16} color="var(--success)" />
+                  </span>
+                  <span class="qs-text">{$t('dash.quickstart.step1_label')}</span>
+                </li>
+                <!-- Step 2: subscription added -->
+                <li class="qs-step" class:qs-step--done={hasSubscription}>
+                  <span class="qs-icon" aria-label={hasSubscription ? 'Выполнено' : 'Не выполнено'}>
+                    {#if hasSubscription}
+                      <Icon name="check" size={16} color="var(--success)" />
+                    {:else}
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <circle cx="8" cy="8" r="6.5" stroke="var(--fg-dim)" stroke-width="1.5" />
+                      </svg>
+                    {/if}
+                  </span>
+                  <span class="qs-text">
+                    {hasSubscription
+                      ? $t('dash.quickstart.step2_done')
+                      : $t('dash.quickstart.step2_label')}
+                  </span>
+                  {#if !hasSubscription}
+                    <a
+                      class="btn btn-secondary qs-cta"
+                      href="#/subscriptions"
+                      onclick={() => switchTab('subscriptions')}
+                    >
+                      {$t('dash.quickstart.step2_cta')}
+                    </a>
+                  {/if}
+                </li>
+                <!-- Step 3: config applied (Mihomo API reachable) -->
+                <li class="qs-step" class:qs-step--done={$mihomoApiAvailable}>
+                  <span
+                    class="qs-icon"
+                    aria-label={$mihomoApiAvailable ? 'Выполнено' : 'Не выполнено'}
+                  >
+                    {#if $mihomoApiAvailable}
+                      <Icon name="check" size={16} color="var(--success)" />
+                    {:else}
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <circle cx="8" cy="8" r="6.5" stroke="var(--fg-dim)" stroke-width="1.5" />
+                      </svg>
+                    {/if}
+                  </span>
+                  <span class="qs-text">
+                    {$mihomoApiAvailable
+                      ? $t('dash.quickstart.step3_done')
+                      : $t('dash.quickstart.step3_label')}
+                  </span>
+                  {#if !$mihomoApiAvailable}
+                    <a
+                      class="btn btn-secondary qs-cta"
+                      href="#/constructor"
+                      onclick={() => {
+                        window.location.hash = '#/constructor';
+                      }}
+                    >
+                      {$t('dash.quickstart.step3_cta')}
+                    </a>
+                  {/if}
+                </li>
+                <!-- Step 4: Mihomo running -->
+                <li class="qs-step" class:qs-step--done={serviceStatus.mihomo === 'running'}>
+                  <span
+                    class="qs-icon"
+                    aria-label={serviceStatus.mihomo === 'running' ? 'Выполнено' : 'Не выполнено'}
+                  >
+                    {#if serviceStatus.mihomo === 'running'}
+                      <Icon name="check" size={16} color="var(--success)" />
+                    {:else}
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <circle cx="8" cy="8" r="6.5" stroke="var(--fg-dim)" stroke-width="1.5" />
+                      </svg>
+                    {/if}
+                  </span>
+                  <span class="qs-text">
+                    {serviceStatus.mihomo === 'running'
+                      ? $t('dash.quickstart.step4_done')
+                      : $t('dash.quickstart.step4_label')}
+                  </span>
+                  {#if serviceStatus.mihomo !== 'running'}
+                    <a
+                      class="btn btn-secondary qs-cta"
+                      href="#/services"
+                      onclick={() => switchTab('services')}
+                    >
+                      {$t('dash.quickstart.step4_cta')}
+                    </a>
+                  {/if}
+                </li>
+              </ul>
+            </Card>
+          </div>
+        {/if}
 
         <!-- Problems Panel (conditional) -->
         {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running) || ($capabilities !== null && !$capabilities.kernels.xray.installed && !$capabilities.kernels.mihomo.installed)}
@@ -550,7 +726,12 @@
                         <div class="problem-desc">{$t('dash.problems.mihomo_api_desc')}</div>
                       </div>
                     </div>
-                    <Button variant="secondary" onclick={() => switchTab('settings')}>
+                    <Button
+                      variant="secondary"
+                      onclick={() => {
+                        window.location.hash = '#/constructor';
+                      }}
+                    >
                       {$t('dash.problems.mihomo_api_cta')}
                     </Button>
                   </div>
@@ -597,7 +778,13 @@
             {:else if statusError}
               <div class="status-error-row">
                 <span><Icon name="warning" size={14} /> {$t('dash.status_error')}</span>
-                <Button variant="secondary" onclick={fetchLiveStatus} title={$t('app.refresh')}>
+                <Button
+                  variant="secondary"
+                  onclick={handleRefresh}
+                  loading={isRefreshing}
+                  disabled={isRefreshing}
+                  title={$t('app.refresh')}
+                >
                   ↺ {$t('app.refresh')}
                 </Button>
               </div>
@@ -611,7 +798,9 @@
                   </span>
                   <span class="status-badge-value">
                     <span class="status-{statusColor(serviceStatus.xkeen)}">
-                      {serviceStatus.xkeen === 'running' ? $t('app.running') : $t('app.stop')}
+                      {serviceStatus.xkeen === 'running'
+                        ? $t('app.running')
+                        : $t('kernel.status.stopped')}
                     </span>
                   </span>
                 </div>
@@ -764,10 +953,11 @@
             <div class="info-rows">
               <div class="info-row">
                 <div class="lbl">{$t('dash.info_version')}</div>
-                <div class="val">
-                  {version}
-                  <span class="info-badge info-badge-teal">{$t('dash.info_latest')}</span>
-                </div>
+                <div class="val">{version}</div>
+              </div>
+              <div class="info-row">
+                <div class="lbl">{$t('dash.info_version_panel')}</div>
+                <div class="val">{panelVersion}</div>
               </div>
               <div class="info-row">
                 <div class="lbl">{$t('dash.info_platform')}</div>
@@ -795,7 +985,12 @@
                   {systemStats?.config_path || '/opt/etc/xkeen/'}
                   {#if systemStats?.config_lines}
                     <span class="info-badge info-badge-orange"
-                      >{systemStats.config_lines} строк</span
+                      >{pluralize(
+                        systemStats.config_lines,
+                        $t('dash.info_lines_one', { count: String(systemStats.config_lines) }),
+                        $t('dash.info_lines_few', { count: String(systemStats.config_lines) }),
+                        $t('dash.info_lines_many', { count: String(systemStats.config_lines) })
+                      )}</span
                     >
                   {/if}
                 </div>
@@ -826,7 +1021,9 @@
                   ><b>{$t('nav.proxies')}</b><span class="s"
                     >{totalProxiesCount > 0
                       ? `${totalProxiesCount} узлов · ${activeProxiesCount} активных`
-                      : 'Mihomo узлы и группы'}</span
+                      : subscriptionProxiesCount > 0
+                        ? `${subscriptionProxiesCount} из подписок`
+                        : 'Mihomo узлы и группы'}</span
                   ></span
                 >
               </div>
@@ -844,7 +1041,7 @@
                   ><b>{$t('nav.subscriptions')}</b><span class="s"
                     >{totalSubsCount > 0
                       ? `${totalSubsCount} источника${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
-                      : 'Подписки на прокси'}</span
+                      : $t('dash.subs_empty')}</span
                   ></span
                 >
               </div>
@@ -858,7 +1055,10 @@
                 onkeydown={(e) => e.key === 'Enter' && switchTab('editor')}
               >
                 <span class="qa-mini-ico"><Icon name="editor" size={18} /></span>
-                <span><b>{$t('nav.editor')}</b><span class="s">правка config.yaml</span></span>
+                <span
+                  ><b>{$t('nav.editor')}</b><span class="s">{$t('dash.editor_subtitle')}</span
+                  ></span
+                >
               </div>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -1217,5 +1417,45 @@
     background: rgba(255, 138, 0, 0.1);
     color: var(--warning, #f59e0b);
     border: 1px solid rgba(255, 138, 0, 0.2);
+  }
+
+  /* Quickstart checklist card */
+  .quickstart-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2, 8px);
+  }
+
+  .qs-step {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-2, 8px);
+    padding: var(--spacing-1, 4px) 0;
+  }
+
+  .qs-icon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .qs-text {
+    font-size: 13px;
+    color: var(--fg-primary);
+    flex: 1;
+  }
+
+  .qs-step--done .qs-text {
+    color: var(--fg-secondary);
+  }
+
+  .qs-cta {
+    font-size: 12px;
+    padding: 4px 8px;
+    margin-left: auto;
+    flex-shrink: 0;
   }
 </style>

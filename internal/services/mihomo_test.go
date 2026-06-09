@@ -47,13 +47,28 @@ func TestMihomoService_Status_Stopped(t *testing.T) {
 func TestMihomoService_Status_Running(t *testing.T) {
 	svc := NewMihomoService("/opt/bin/mihomo", "", "/opt/etc/mihomo")
 
-	// Create dummy pidof that returns a pid
+	// Redirect procDir to a temp dir so isShortLivedOrHelperProcess won't fail to read cmdline
 	tmpDir := t.TempDir()
-	pidofPath := filepath.Join(tmpDir, "pidof")
+	origProcDir := procDir
+	procDir = tmpDir
+	defer func() { procDir = origProcDir }()
+
+	// Create a dummy cmdline for PID 12345
+	pidDir := filepath.Join(tmpDir, "12345")
+	if err := os.MkdirAll(pidDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "cmdline"), []byte("/opt/bin/mihomo\x00-c\x00/opt/etc/mihomo/config.yaml\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create dummy pidof that returns a pid
+	binDir := t.TempDir()
+	pidofPath := filepath.Join(binDir, "pidof")
 	os.WriteFile(pidofPath, []byte("#!/bin/sh\necho \"12345\"\n"), 0755)
 
 	oldPath := os.Getenv("PATH")
-	os.Setenv("PATH", tmpDir+":"+oldPath)
+	os.Setenv("PATH", binDir+":"+oldPath)
 	defer os.Setenv("PATH", oldPath)
 
 	status, err := svc.Status()
@@ -153,6 +168,159 @@ port: 7890
 		_, _, err := svc.ParseConfig()
 		if err == nil {
 			t.Error("expected error for nonexistent file, got nil")
+		}
+	})
+}
+
+func TestMihomoService_ValidateMihomoConfig(t *testing.T) {
+	tests := []struct {
+		name          string
+		yaml          string
+		wantValid     bool
+		wantErrCodes  []string
+		wantWarnCodes []string
+		wantErr       bool
+	}{
+		{
+			name: "full valid config",
+			yaml: `
+external-controller: 127.0.0.1:9090
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies: []
+rules:
+  - MATCH,DIRECT
+proxies:
+  - name: test
+    type: socks5
+`,
+			wantValid:     true,
+			wantErrCodes:  []string{},
+			wantWarnCodes: []string{},
+		},
+		{
+			name: "missing external-controller",
+			yaml: `
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies: []
+rules:
+  - MATCH,DIRECT
+proxies:
+  - name: test
+`,
+			wantValid:    false,
+			wantErrCodes: []string{"no_external_controller"},
+		},
+		{
+			name: "empty external-controller",
+			yaml: `
+external-controller: ""
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies: []
+rules:
+  - MATCH,DIRECT
+proxies:
+  - name: test
+`,
+			wantValid:    false,
+			wantErrCodes: []string{"no_external_controller"},
+		},
+		{
+			name: "with external-controller but no proxy-groups",
+			yaml: `
+external-controller: 127.0.0.1:9090
+rules:
+  - MATCH,DIRECT
+proxies:
+  - name: test
+`,
+			wantValid:     true,
+			wantErrCodes:  []string{},
+			wantWarnCodes: []string{"no_proxy_groups"},
+		},
+		{
+			name: "no proxies and no proxy-providers",
+			yaml: `
+external-controller: 127.0.0.1:9090
+proxy-groups:
+  - name: Proxy
+rules:
+  - MATCH,DIRECT
+`,
+			wantValid:     true,
+			wantWarnCodes: []string{"no_proxies_or_providers"},
+		},
+		{
+			name: "no rules",
+			yaml: `
+external-controller: 127.0.0.1:9090
+proxy-groups:
+  - name: Proxy
+proxies:
+  - name: test
+`,
+			wantValid:     true,
+			wantWarnCodes: []string{"no_rules"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+			if err := os.WriteFile(configPath, []byte(tt.yaml), 0644); err != nil {
+				t.Fatalf("failed to write config.yaml: %v", err)
+			}
+
+			svc := NewMihomoService("", "", tmpDir)
+			result, err := svc.ValidateMihomoConfig()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateMihomoConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err != nil {
+				return
+			}
+			if result.Valid != tt.wantValid {
+				t.Errorf("ValidateMihomoConfig() Valid = %v, want %v", result.Valid, tt.wantValid)
+			}
+			for _, code := range tt.wantErrCodes {
+				found := false
+				for _, issue := range result.Errors {
+					if issue.Code == code {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected error code %q not found in errors: %+v", code, result.Errors)
+				}
+			}
+			for _, code := range tt.wantWarnCodes {
+				found := false
+				for _, issue := range result.Warnings {
+					if issue.Code == code {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected warning code %q not found in warnings: %+v", code, result.Warnings)
+				}
+			}
+		})
+	}
+
+	t.Run("missing config file returns error", func(t *testing.T) {
+		svc := NewMihomoService("", "", "/nonexistent/dir")
+		_, err := svc.ValidateMihomoConfig()
+		if err == nil {
+			t.Error("expected error for nonexistent config, got nil")
 		}
 	})
 }

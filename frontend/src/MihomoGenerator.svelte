@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { currentLang } from './i18n';
+  import { onMount } from 'svelte';
+  import { currentLang, t } from './i18n';
   import { showToast } from './stores';
 
   export let onSwitchTab: (tab: string) => void = () => {};
   export let selectedFile: string = '';
   export let onInsertIntoEditor: (content: string) => void = () => {};
   export let embedded: boolean = false;
+  export let initialPreset: string = '';
 
   type ProxyType = 'vless' | 'hysteria2' | 'tuic' | 'ss' | 'vmess';
   type GroupType = 'select' | 'url-test' | 'fallback' | 'load-balance';
@@ -17,6 +19,7 @@
     | 'GEOSITE'
     | 'IP-CIDR'
     | 'PROCESS-NAME'
+    | 'RULE-SET'
     | 'MATCH';
 
   interface Proxy {
@@ -44,6 +47,7 @@
     wsPath?: string;
     tls?: boolean;
     fingerprint?: string;
+    alterID?: number;
   }
 
   interface ProxyGroup {
@@ -51,8 +55,12 @@
     name: string;
     type: GroupType;
     proxies: string[];
+    includeAll?: boolean;
     url?: string;
     interval?: number;
+    excludeFilter?: string;
+    icon?: string;
+    enabled?: boolean;
   }
 
   interface Rule {
@@ -79,10 +87,15 @@
   }
 
   // State
-  let activeSection: 'proxies' | 'groups' | 'rules' | 'dns' | 'tun' = 'proxies';
+  let activeSection: 'proxies' | 'groups' | 'rules' | 'dns' | 'tun' | 'rulesets' = 'proxies';
   let proxies: Proxy[] = [];
   let groups: ProxyGroup[] = [];
   let rules: Rule[] = [];
+  let activePreset: string = '';
+  let activeRuleProvider: 'none' | 'zkeen' | 'metacubex' = 'none';
+  let subscriptions: any[] = [];
+  let existingTproxyPort: number | null = null;
+  let existingRedirPort: number | null = null;
   let dns: DNSConfig = {
     enabled: false,
     nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],
@@ -97,6 +110,16 @@
     autoDetectInterface: true,
     dnsHijack: ['any:53']
   };
+  let preservedKeys: string[] = [];
+
+  // Import Node states
+  let showImportModal = false;
+  let importLink = '';
+  let importTag = '';
+  let importStep = 1; // 1: Input link, 2: Preview & Confirm tag
+  let importLoading = false;
+  let importNodes: { link: string; outbound: any; tag: string; rowError?: string | null }[] = [];
+  let importErrorMsg = '';
 
   // Form visibility
   let showProxyForm = false;
@@ -134,6 +157,7 @@
     name: '',
     type: 'select',
     proxies: [],
+    includeAll: false,
     url: 'https://www.gstatic.com/generate_204',
     interval: 300
   };
@@ -141,6 +165,1140 @@
 
   // New rule form
   let nr: Omit<Rule, 'id'> = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
+
+  // ── Rule-provider URL constants ─────────────────────────────────────────
+  const META_BASE_URL = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
+  const METACUBEX_BASE = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo';
+
+  interface RuleProvider {
+    name: string;
+    url: string;
+    behavior: string;
+    outbound: string;
+    format: string;
+    payload?: string[];
+  }
+
+  const ZKEEN_RULE_PROVIDERS: RuleProvider[] = [
+    {
+      name: 'adlist@domain',
+      url: 'https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs',
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'REJECT'
+    },
+    {
+      name: 'category-ai@domain',
+      url: `${METACUBEX_BASE}/geosite/category-ai.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'AI'
+    },
+    {
+      name: 'steam@domain',
+      url: `${METACUBEX_BASE}/geosite/steam.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Steam'
+    },
+    {
+      name: 'spotify@domain',
+      url: `${METACUBEX_BASE}/geosite/spotify.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Spotify'
+    },
+    {
+      name: 'speedtest@domain',
+      url: `${METACUBEX_BASE}/geosite/speedtest.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Speedtest'
+    },
+    {
+      name: 'reddit@domain',
+      url: `${METACUBEX_BASE}/geosite/reddit.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Reddit'
+    },
+    {
+      name: 'twitch@domain',
+      url: `${METACUBEX_BASE}/geosite/twitch.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Twitch'
+    },
+    {
+      name: 'twitter@domain',
+      url: `${METACUBEX_BASE}/geosite/twitter.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Twitter'
+    },
+    {
+      name: 'meta@domain',
+      url: `${METACUBEX_BASE}/geosite/meta.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Meta'
+    },
+    {
+      name: 'discord@classical',
+      url: `${METACUBEX_BASE}/classical/discord.txt`,
+      behavior: 'classical',
+      format: 'text',
+      outbound: 'Discord'
+    },
+    {
+      name: 'refilter@domain',
+      url: 'https://raw.githubusercontent.com/1andrevich/Re-filter-lists/release/refilter_domains.mrs',
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'Заблок. сервисы'
+    },
+    {
+      name: 'telegram@ipcidr',
+      url: `${METACUBEX_BASE}/geoip/telegram.mrs`,
+      behavior: 'ipcidr',
+      format: 'mrs',
+      outbound: 'Telegram'
+    },
+    {
+      name: 'github@domain',
+      url: `${METACUBEX_BASE}/geosite/github.mrs`,
+      behavior: 'domain',
+      format: 'mrs',
+      outbound: 'GitHub'
+    },
+    {
+      name: 'private@ip',
+      url: `${METACUBEX_BASE}/geoip/private.mrs`,
+      behavior: 'ipcidr',
+      format: 'mrs',
+      outbound: 'DIRECT'
+    },
+    {
+      name: 'quic@inline',
+      url: '',
+      behavior: 'classical',
+      format: 'inline',
+      outbound: 'QUIC',
+      payload: ['AND,((DST-PORT,443),(NETWORK,UDP))']
+    }
+  ];
+
+  const RULE_PROVIDERS: Record<
+    string,
+    Array<{
+      name: string;
+      url: string;
+      behavior: string;
+      outbound: string;
+      format?: string;
+      payload?: string[];
+    }>
+  > = {
+    zkeen: ZKEEN_RULE_PROVIDERS
+  };
+
+  const ZKEEN_16_GROUPS: Omit<ProxyGroup, 'id'>[] = [
+    {
+      name: 'Заблок. сервисы',
+      type: 'select',
+      includeAll: true,
+      proxies: [] as string[],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Reject.png'
+    },
+    {
+      name: 'YouTube',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png'
+    },
+    {
+      name: 'Discord',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png'
+    },
+    {
+      name: 'Twitch',
+      type: 'select',
+      includeAll: true,
+      proxies: ['DIRECT', 'Заблок. сервисы'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png'
+    },
+    {
+      name: 'Reddit',
+      type: 'select',
+      includeAll: true,
+      proxies: ['DIRECT', 'Заблок. сервисы'],
+      icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png'
+    },
+    {
+      name: 'Meta',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png'
+    },
+    {
+      name: 'Spotify',
+      type: 'select',
+      includeAll: true,
+      excludeFilter: '🇷🇺',
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png'
+    },
+    {
+      name: 'Speedtest',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png'
+    },
+    {
+      name: 'Telegram',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png'
+    },
+    {
+      name: 'Steam',
+      type: 'select',
+      includeAll: true,
+      proxies: ['DIRECT', 'Забlock. сервисы'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png'
+    },
+    {
+      name: 'CDN',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'PASS'],
+      icon: 'https://www.svgrepo.com/show/396567/globe-with-meridians.svg'
+    },
+    {
+      name: 'Google',
+      type: 'select',
+      includeAll: true,
+      proxies: ['PASS', 'Заблок. сервисы'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png'
+    },
+    {
+      name: 'GitHub',
+      type: 'select',
+      includeAll: true,
+      proxies: ['PASS', 'Заблок. сервисы'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png'
+    },
+    {
+      name: 'AI',
+      type: 'select',
+      includeAll: true,
+      excludeFilter: '🇷🇺',
+      proxies: ['Заблок. сервисы'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png'
+    },
+    {
+      name: 'Twitter',
+      type: 'select',
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png'
+    },
+    {
+      name: 'QUIC',
+      type: 'select',
+      includeAll: false,
+      proxies: ['REJECT', 'PASS'],
+      icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/quic.png'
+    }
+  ];
+
+  const META_RULE_SETS_BY_CATEGORY: Record<
+    string,
+    Array<{ id: string; label: string; type: 'geosite' | 'geoip'; defaultOutbound: string }>
+  > = {
+    'Социальные сети': [
+      { id: 'youtube', label: 'YouTube', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'telegram', label: 'Telegram', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'discord', label: 'Discord', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'twitter', label: 'Twitter/X', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'instagram', label: 'Instagram', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'reddit', label: 'Reddit', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'vk', label: 'VK', type: 'geosite', defaultOutbound: 'DIRECT' },
+      { id: 'tiktok', label: 'TikTok', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'twitch', label: 'Twitch', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'facebook', label: 'Facebook', type: 'geosite', defaultOutbound: 'Proxy' }
+    ],
+    Сервисы: [
+      { id: 'spotify', label: 'Spotify', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'steam', label: 'Steam', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'github', label: 'GitHub', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'openai', label: 'OpenAI', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'netflix', label: 'Netflix', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'google', label: 'Google', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'amazon', label: 'Amazon', type: 'geosite', defaultOutbound: 'Proxy' },
+      { id: 'speedtest', label: 'Speedtest', type: 'geosite', defaultOutbound: 'Proxy' }
+    ],
+    'Сети/CDN': [
+      { id: 'cloudflare', label: 'Cloudflare', type: 'geosite', defaultOutbound: 'DIRECT' },
+      { id: 'akamai', label: 'Akamai', type: 'geosite', defaultOutbound: 'DIRECT' },
+      { id: 'fastly', label: 'Fastly', type: 'geosite', defaultOutbound: 'DIRECT' },
+      { id: 'digitalocean', label: 'DigitalOcean', type: 'geosite', defaultOutbound: 'DIRECT' },
+      { id: 'private', label: 'Private Network', type: 'geoip', defaultOutbound: 'DIRECT' },
+      { id: 'telegram', label: 'Telegram IP', type: 'geoip', defaultOutbound: 'Proxy' }
+    ],
+    Блокировки: [
+      {
+        id: 'category-ads-all',
+        label: 'Ads & Trackers',
+        type: 'geosite',
+        defaultOutbound: 'REJECT'
+      },
+      {
+        id: 'category-ai-!cn',
+        label: 'AI Services (non-CN)',
+        type: 'geosite',
+        defaultOutbound: 'Proxy'
+      },
+      {
+        id: 'category-anticensorship',
+        label: 'Anti-Censorship',
+        type: 'geosite',
+        defaultOutbound: 'Proxy'
+      }
+    ]
+  };
+
+  let selectedMetaRuleSets: Map<string, string> = new Map();
+
+  function buildMetaRuleSetUrl(id: string, type: 'geosite' | 'geoip'): string {
+    return `${META_BASE_URL}/${type}/${id}.mrs`;
+  }
+
+  // ── Presets ──────────────────────────────────────────────────────────────
+  function applyPreset(id: 'rule-based' | 'global-proxy' | 'zkeen-selective') {
+    activePreset = id;
+    if (id === 'rule-based') {
+      groups = [
+        {
+          id: crypto.randomUUID(),
+          name: 'Selective',
+          type: 'select',
+          proxies: ['DIRECT', ...proxies.map((p) => p.name)],
+          includeAll: true,
+          url: 'https://www.gstatic.com/generate_204',
+          interval: 300
+        }
+      ];
+      rules = [];
+      activeRuleProvider = 'metacubex';
+      selectedMetaRuleSets = new Map([
+        ['category-ads-all|geosite', 'REJECT'],
+        ['telegram|geoip', 'Selective'],
+        ['private|geoip', 'DIRECT']
+      ]);
+    } else if (id === 'global-proxy') {
+      groups = [
+        {
+          id: crypto.randomUUID(),
+          name: 'Proxy',
+          type: 'select',
+          proxies: ['DIRECT', ...proxies.map((p) => p.name)],
+          includeAll: true,
+          url: 'https://www.gstatic.com/generate_204',
+          interval: 300
+        }
+      ];
+      rules = [
+        { id: crypto.randomUUID(), type: 'GEOIP', value: 'private', outbound: 'DIRECT' },
+        { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'Proxy' }
+      ];
+      activeRuleProvider = 'none';
+      selectedMetaRuleSets = new Map();
+    } else if (id === 'zkeen-selective') {
+      groups = ZKEEN_16_GROUPS.map((g) => ({
+        ...g,
+        id: crypto.randomUUID(),
+        enabled: true
+      }));
+      rules = [];
+      activeRuleProvider = 'zkeen';
+      selectedMetaRuleSets = new Map();
+    }
+    showToast('success', $t('editor.preset_applied'));
+  }
+
+  // ── Import proxies from subscriptions ───────────────────────────────────
+  async function loadSubscriptionProxies() {
+    try {
+      const res = await fetch('/api/subscriptions');
+      if (!res.ok) return;
+      const subs: any[] = await res.json();
+      subscriptions = subs.filter((s) => s.enabled);
+      if (!subs || subs.length === 0) {
+        showToast('info', $t('editor.import_proxies_empty'));
+        return;
+      }
+      let imported = 0;
+      for (const sub of subs) {
+        if (!sub.enabled) continue;
+        const nr = await fetch(`/api/subscriptions/nodes?id=${sub.id}`);
+        if (!nr.ok) continue;
+        const nodes: any[] = await nr.json();
+        if (!nodes || nodes.length === 0) continue;
+        const mapped = nodes.map((n: any) => {
+          const serverRaw: string = n.server || '';
+          const lastColon = serverRaw.lastIndexOf(':');
+          const server = lastColon > 0 ? serverRaw.substring(0, lastColon) : serverRaw;
+          const portStr = lastColon > 0 ? serverRaw.substring(lastColon + 1) : '443';
+          const port = parseInt(portStr) || 443;
+          return {
+            id: crypto.randomUUID(),
+            name: n.name || n.tag || `proxy-${imported}`,
+            type: (n.protocol || 'vless') as ProxyType,
+            server,
+            port,
+            uuid: n.uuid || '',
+            password: n.password || '',
+            flow: n.flow || '',
+            publicKey: n.public_key || '',
+            shortId: n.short_id || '',
+            servername: n.servername || '',
+            fingerprint: n.fingerprint || '',
+            wsPath: n.ws_path || '',
+            cipher: n.cipher || '',
+            sni: n.sni || '',
+            congestion: n.congestion || '',
+            alterID: n.alter_id || 0,
+            tls: n.security === 'tls' || n.security === 'reality'
+          };
+        });
+        proxies = [...proxies, ...mapped];
+        imported += mapped.length;
+      }
+      if (imported > 0) {
+        showToast('success', $t('editor.import_proxies_done'));
+      } else {
+        showToast('info', $t('editor.import_proxies_empty'));
+      }
+    } catch (e: any) {
+      showToast('error', $t('editor.import_proxies_error'));
+    }
+  }
+
+  function generateUniqueProxyName(baseName: string, existing: string[]): string {
+    let name = baseName.trim() || 'proxy';
+    if (!existing.includes(name)) {
+      return name;
+    }
+    let counter = 1;
+    while (existing.includes(`${name}-${counter}`)) {
+      counter++;
+    }
+    return `${name}-${counter}`;
+  }
+
+  function openImportModal() {
+    showImportModal = true;
+    importLink = '';
+    importTag = '';
+    importStep = 1;
+    importLoading = false;
+    importNodes = [];
+    importErrorMsg = '';
+  }
+
+  function closeImportModal() {
+    showImportModal = false;
+  }
+
+  function getNodeServer(node: any): string {
+    if (!node || !node.settings) return '';
+    if (node.settings.vnext && node.settings.vnext[0]) {
+      return node.settings.vnext[0].address || '';
+    }
+    if (node.settings.servers && node.settings.servers[0]) {
+      return node.settings.servers[0].address || '';
+    }
+    return '';
+  }
+
+  function getNodePort(node: any): string {
+    if (!node || !node.settings) return '';
+    if (node.settings.vnext && node.settings.vnext[0]) {
+      return String(node.settings.vnext[0].port || '');
+    }
+    if (node.settings.servers && node.settings.servers[0]) {
+      return String(node.settings.servers[0].port || '');
+    }
+    return '';
+  }
+
+  async function parseImportLink() {
+    const trimmed = importLink.trim();
+    if (!trimmed) {
+      importErrorMsg = $t('subscr.import_error_empty');
+      return;
+    }
+
+    const lines = trimmed
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+
+    importErrorMsg = '';
+    importLoading = true;
+
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/outbound/parse', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({ links: lines })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        importErrorMsg = data.error || $t('subscr.import_error_invalid');
+        return;
+      }
+
+      if (data.data && data.data.length > 0) {
+        const newImportNodes = [];
+        const existingNames = proxies.map((p) => p.name);
+
+        for (let i = 0; i < data.data.length; i++) {
+          const result = data.data[i];
+          if (result.outbound) {
+            const baseName = result.outbound.tag || 'proxy';
+            const uniqueName = generateUniqueProxyName(baseName, existingNames);
+            existingNames.push(uniqueName);
+            newImportNodes.push({
+              link: lines[i],
+              outbound: result.outbound,
+              tag: uniqueName,
+              rowError: result.error || null
+            });
+          } else {
+            newImportNodes.push({
+              link: lines[i],
+              outbound: null,
+              tag: '',
+              rowError: result.error || $t('subscr.import_error_invalid')
+            });
+          }
+        }
+
+        importNodes = newImportNodes;
+        importStep = 2;
+      } else {
+        importErrorMsg = $t('subscr.import_error_invalid');
+      }
+    } catch (e: any) {
+      importErrorMsg = e.message || $t('subscr.import_error_invalid');
+    } finally {
+      importLoading = false;
+    }
+  }
+
+  function mapParsedOutboundToMihomoProxy(parsed: any, customTag?: string): Proxy {
+    const proto = parsed.protocol || 'vless';
+    const tag = customTag || parsed.tag || 'imported-node';
+    const p: Proxy = {
+      id: crypto.randomUUID(),
+      name: tag,
+      type: 'vless',
+      server: '',
+      port: 443
+    };
+
+    if (proto === 'vless' || proto === 'vmess') {
+      p.type = proto;
+      const vnext = parsed.settings?.vnext?.[0];
+      if (vnext) {
+        p.server = vnext.address || '';
+        p.port = vnext.port || 443;
+        p.uuid = vnext.users?.[0]?.id || '';
+        p.flow = vnext.users?.[0]?.flow || '';
+      }
+      const ss = parsed.streamSettings;
+      if (ss) {
+        p.tls = ss.security === 'tls' || ss.security === 'reality';
+        p.network = ss.network || 'tcp';
+        if (ss.wsSettings?.path) {
+          p.wsPath = ss.wsSettings.path;
+        }
+        if (ss.security === 'reality') {
+          const rOpts = ss.realitySettings;
+          if (rOpts) {
+            p.publicKey = rOpts.publicKey || '';
+            p.shortId = rOpts.shortId || '';
+            p.servername = rOpts.serverName || '';
+            p.fingerprint = rOpts.fingerprint || 'chrome';
+          }
+        } else if (ss.security === 'tls') {
+          const tOpts = ss.tlsSettings;
+          if (tOpts) {
+            p.servername = tOpts.serverName || '';
+          }
+        }
+      }
+    } else if (proto === 'shadowsocks' || proto === 'ss') {
+      p.type = 'ss';
+      const server = parsed.settings?.servers?.[0];
+      if (server) {
+        p.server = server.address || '';
+        p.port = server.port || 443;
+        p.cipher = server.method || 'aes-256-gcm';
+        p.password = server.password || '';
+      }
+    } else if (proto === 'hysteria2' || proto === 'hy2') {
+      p.type = 'hysteria2';
+      const server = parsed.settings?.servers?.[0];
+      if (server) {
+        p.server = server.address || '';
+        p.port = server.port || 443;
+        p.password = server.password || '';
+        p.sni = parsed.streamSettings?.tlsSettings?.serverName || '';
+      }
+    } else if (proto === 'tuic') {
+      p.type = 'tuic';
+      const server = parsed.settings?.servers?.[0];
+      if (server) {
+        p.server = server.address || '';
+        p.port = server.port || 443;
+        p.uuid = server.uuid || '';
+        p.password = server.password || '';
+        p.congestion = 'bbr';
+        p.sni = parsed.streamSettings?.tlsSettings?.serverName || '';
+      }
+    }
+    return p;
+  }
+
+  function confirmImportNode() {
+    try {
+      const validNodes = importNodes.filter((n) => !n.rowError);
+      const mappedList: Proxy[] = [];
+      let skippedCount = importNodes.length - validNodes.length;
+
+      for (const item of validNodes) {
+        const p = mapParsedOutboundToMihomoProxy(item.outbound, item.tag.trim());
+        if (p && p.server) {
+          mappedList.push(p);
+        } else {
+          skippedCount++;
+        }
+      }
+
+      proxies = [...proxies, ...mappedList];
+
+      if (skippedCount > 0) {
+        showToast('warning', $t('subscr.partial_map_warning'));
+      }
+      if (mappedList.length > 0) {
+        showToast('success', $t('subscr.import_success', { count: mappedList.length }));
+      }
+
+      showImportModal = false;
+    } catch (e: any) {
+      importErrorMsg = e.message || $t('subscr.import_error');
+    }
+  }
+
+  function populateMihomoFromYAML(text: string) {
+    try {
+      const lines = text.split('\n');
+      let inGroups = false;
+      let inProxies = false;
+      let inDNS = false;
+      let inTUN = false;
+      let inRules = false;
+      let inRuleProviders = false;
+      let inNameservers = false;
+      let inFallback = false;
+      let inDnsHijack = false;
+
+      let currentGroup: any = null;
+      let currentProxy: any = null;
+      let inProxiesList = false;
+
+      const parsedGroups: ProxyGroup[] = [];
+      const parsedProxies: Proxy[] = [];
+      const parsedRules: Rule[] = [];
+      selectedMetaRuleSets = new Map();
+      activeRuleProvider = 'none';
+      preservedKeys = [];
+      dns = {
+        enabled: false,
+        nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],
+        fallback: ['https://8.8.8.8/dns-query', '1.1.1.1'],
+        enhancedMode: 'fake-ip',
+        fakeIPRange: '198.18.0.1/16'
+      };
+      tun = {
+        enabled: false,
+        stack: 'mixed',
+        autoRoute: true,
+        autoDetectInterface: true,
+        dnsHijack: ['any:53']
+      };
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        // Detect top-level sections
+        if (/^[a-zA-Z0-9_-]+:/.test(line) && !line.startsWith(' ') && !line.startsWith('-')) {
+          const match = line.match(/^([a-zA-Z0-9_-]+):/);
+          if (match) {
+            const sec = match[1];
+            inGroups = sec === 'proxy-groups';
+            inProxies = sec === 'proxies';
+            inDNS = sec === 'dns';
+            inTUN = sec === 'tun';
+            inRules = sec === 'rules';
+            inRuleProviders = sec === 'rule-providers';
+
+            if (
+              sec !== 'proxy-groups' &&
+              sec !== 'proxies' &&
+              sec !== 'dns' &&
+              sec !== 'tun' &&
+              sec !== 'rules' &&
+              sec !== 'rule-providers'
+            ) {
+              if (!preservedKeys.includes(sec)) {
+                preservedKeys = [...preservedKeys, sec];
+              }
+            }
+          }
+          continue;
+        }
+
+        if (inGroups) {
+          if (line.startsWith('  -') || line.startsWith(' -') || trimmed.startsWith('-')) {
+            if (currentGroup) {
+              parsedGroups.push(currentGroup);
+            }
+            currentGroup = {
+              id: crypto.randomUUID(),
+              name: '',
+              type: 'select',
+              proxies: [],
+              includeAll: false
+            };
+            inProxiesList = false;
+
+            const nameMatch = trimmed.match(/^-\s+name:\s*(.+)$/);
+            if (nameMatch) {
+              currentGroup.name = unquote(nameMatch[1]);
+            }
+            continue;
+          }
+
+          if (!currentGroup) continue;
+
+          const nameMatch = trimmed.match(/^name:\s*(.+)$/);
+          if (nameMatch) {
+            currentGroup.name = unquote(nameMatch[1]);
+            continue;
+          }
+          const typeMatch = trimmed.match(/^type:\s*(.+)$/);
+          if (typeMatch) {
+            currentGroup.type = unquote(typeMatch[1]);
+            continue;
+          }
+          const includeAllMatch = trimmed.match(/^include-all:\s*(.+)$/);
+          if (includeAllMatch) {
+            currentGroup.includeAll = unquote(includeAllMatch[1]) === 'true';
+            continue;
+          }
+          const urlMatch = trimmed.match(/^url:\s*(.+)$/);
+          if (urlMatch) {
+            currentGroup.url = unquote(urlMatch[1]);
+            continue;
+          }
+          const intervalMatch = trimmed.match(/^interval:\s*(.+)$/);
+          if (intervalMatch) {
+            currentGroup.interval = parseInt(unquote(intervalMatch[1])) || 300;
+            continue;
+          }
+
+          const proxiesInlineMatch = trimmed.match(/^proxies:\s*\[(.*)\]$/);
+          if (proxiesInlineMatch) {
+            currentGroup.proxies = proxiesInlineMatch[1]
+              .split(',')
+              .map((p) => unquote(p.trim()))
+              .filter((p) => p.length > 0);
+            inProxiesList = false;
+            continue;
+          }
+
+          if (trimmed.startsWith('proxies:')) {
+            inProxiesList = true;
+            continue;
+          }
+
+          if (inProxiesList) {
+            const proxyItemMatch = trimmed.match(/^-\s*(.+)$/);
+            if (proxyItemMatch) {
+              currentGroup.proxies.push(unquote(proxyItemMatch[1]));
+            } else if (trimmed !== '' && !trimmed.startsWith('#') && !line.startsWith('    ')) {
+              inProxiesList = false;
+            }
+          }
+        }
+
+        if (inProxies) {
+          if (line.startsWith('  -') || line.startsWith(' -') || trimmed.startsWith('-')) {
+            if (currentProxy) {
+              parsedProxies.push(currentProxy);
+            }
+            currentProxy = {
+              id: crypto.randomUUID(),
+              name: '',
+              type: 'vless',
+              server: '',
+              port: 443
+            };
+
+            const nameMatch = trimmed.match(/^-\s+name:\s*(.+)$/);
+            if (nameMatch) {
+              currentProxy.name = unquote(nameMatch[1]);
+            }
+            continue;
+          }
+
+          if (!currentProxy) continue;
+
+          const nameMatch = trimmed.match(/^name:\s*(.+)$/);
+          if (nameMatch) {
+            currentProxy.name = unquote(nameMatch[1]);
+            continue;
+          }
+          const typeMatch = trimmed.match(/^type:\s*(.+)$/);
+          if (typeMatch) {
+            currentProxy.type = unquote(typeMatch[1]);
+            continue;
+          }
+          const serverMatch = trimmed.match(/^server:\s*(.+)$/);
+          if (serverMatch) {
+            currentProxy.server = unquote(serverMatch[1]);
+            continue;
+          }
+          const portMatch = trimmed.match(/^port:\s*(.+)$/);
+          if (portMatch) {
+            currentProxy.port = parseInt(unquote(portMatch[1])) || 443;
+            continue;
+          }
+          const uuidMatch = trimmed.match(/^uuid:\s*(.+)$/);
+          if (uuidMatch) {
+            currentProxy.uuid = unquote(uuidMatch[1]);
+            continue;
+          }
+          const passwordMatch = trimmed.match(/^password:\s*(.+)$/);
+          if (passwordMatch) {
+            currentProxy.password = unquote(passwordMatch[1]);
+            continue;
+          }
+          const flowMatch = trimmed.match(/^flow:\s*(.+)$/);
+          if (flowMatch) {
+            currentProxy.flow = unquote(flowMatch[1]);
+            continue;
+          }
+          const publicKeyMatch = trimmed.match(/^public-key:\s*(.+)$/);
+          if (publicKeyMatch) {
+            currentProxy.publicKey = unquote(publicKeyMatch[1]);
+            continue;
+          }
+          const shortIdMatch = trimmed.match(/^short-id:\s*(.+)$/);
+          if (shortIdMatch) {
+            currentProxy.shortId = unquote(shortIdMatch[1]);
+            continue;
+          }
+          const servernameMatch = trimmed.match(/^servername:\s*(.+)$/);
+          if (servernameMatch) {
+            currentProxy.servername = unquote(servernameMatch[1]);
+            continue;
+          }
+          const sniMatch = trimmed.match(/^sni:\s*(.+)$/);
+          if (sniMatch) {
+            currentProxy.sni = unquote(sniMatch[1]);
+            continue;
+          }
+          const congestionMatch = trimmed.match(/^congestion-controller:\s*(.+)$/);
+          if (congestionMatch) {
+            currentProxy.congestion = unquote(congestionMatch[1]);
+            continue;
+          }
+          const cipherMatch = trimmed.match(/^cipher:\s*(.+)$/);
+          if (cipherMatch) {
+            currentProxy.cipher = unquote(cipherMatch[1]);
+            continue;
+          }
+          const networkMatch = trimmed.match(/^network:\s*(.+)$/);
+          if (networkMatch) {
+            currentProxy.network = unquote(networkMatch[1]);
+            continue;
+          }
+          const wsPathMatch = trimmed.match(/^path:\s*(.+)$/);
+          if (wsPathMatch) {
+            currentProxy.wsPath = unquote(wsPathMatch[1]);
+            continue;
+          }
+          const tlsMatch = trimmed.match(/^tls:\s*(.+)$/);
+          if (tlsMatch) {
+            currentProxy.tls = unquote(tlsMatch[1]) === 'true';
+            continue;
+          }
+          const fingerprintMatch = trimmed.match(/^client-fingerprint:\s*(.+)$/);
+          if (fingerprintMatch) {
+            currentProxy.fingerprint = unquote(fingerprintMatch[1]);
+            continue;
+          }
+        }
+
+        if (inDNS) {
+          if (trimmed.startsWith('nameserver:')) {
+            inNameservers = true;
+            inFallback = false;
+            dns.nameservers = [];
+            continue;
+          }
+          if (trimmed.startsWith('fallback:')) {
+            inFallback = true;
+            inNameservers = false;
+            dns.fallback = [];
+            continue;
+          }
+
+          const enableMatch = trimmed.match(/^enable:\s*(.+)$/);
+          if (enableMatch) {
+            dns.enabled = unquote(enableMatch[1]) === 'true';
+            inNameservers = false;
+            inFallback = false;
+            continue;
+          }
+          const enhancedModeMatch = trimmed.match(/^enhanced-mode:\s*(.+)$/);
+          if (enhancedModeMatch) {
+            dns.enhancedMode = unquote(enhancedModeMatch[1]) as any;
+            inNameservers = false;
+            inFallback = false;
+            continue;
+          }
+          const fakeIpRangeMatch = trimmed.match(/^fake-ip-range:\s*(.+)$/);
+          if (fakeIpRangeMatch) {
+            dns.fakeIPRange = unquote(fakeIpRangeMatch[1]);
+            inNameservers = false;
+            inFallback = false;
+            continue;
+          }
+
+          if (inNameservers) {
+            const listMatch = trimmed.match(/^-\s*(.+)$/);
+            if (listMatch) {
+              dns.nameservers = [...dns.nameservers, unquote(listMatch[1])];
+            } else if (trimmed !== '' && !trimmed.startsWith('#') && !line.startsWith('    ')) {
+              inNameservers = false;
+            }
+          }
+          if (inFallback) {
+            const listMatch = trimmed.match(/^-\s*(.+)$/);
+            if (listMatch) {
+              dns.fallback = [...dns.fallback, unquote(listMatch[1])];
+            } else if (trimmed !== '' && !trimmed.startsWith('#') && !line.startsWith('    ')) {
+              inFallback = false;
+            }
+          }
+        }
+
+        if (inTUN) {
+          if (trimmed.startsWith('dns-hijack:')) {
+            inDnsHijack = true;
+            tun.dnsHijack = [];
+            continue;
+          }
+
+          const enableMatch = trimmed.match(/^enable:\s*(.+)$/);
+          if (enableMatch) {
+            tun.enabled = unquote(enableMatch[1]) === 'true';
+            inDnsHijack = false;
+            continue;
+          }
+          const stackMatch = trimmed.match(/^stack:\s*(.+)$/);
+          if (stackMatch) {
+            tun.stack = unquote(stackMatch[1]) as any;
+            inDnsHijack = false;
+            continue;
+          }
+          const autoRouteMatch = trimmed.match(/^auto-route:\s*(.+)$/);
+          if (autoRouteMatch) {
+            tun.autoRoute = unquote(autoRouteMatch[1]) === 'true';
+            inDnsHijack = false;
+            continue;
+          }
+          const autoDetectMatch = trimmed.match(/^auto-detect-interface:\s*(.+)$/);
+          if (autoDetectMatch) {
+            tun.autoDetectInterface = unquote(autoDetectMatch[1]) === 'true';
+            inDnsHijack = false;
+            continue;
+          }
+
+          if (inDnsHijack) {
+            const listMatch = trimmed.match(/^-\s*(.+)$/);
+            if (listMatch) {
+              tun.dnsHijack = [...tun.dnsHijack, unquote(listMatch[1])];
+            } else if (trimmed !== '' && !trimmed.startsWith('#') && !line.startsWith('    ')) {
+              inDnsHijack = false;
+            }
+          }
+        }
+
+        if (inRules) {
+          const ruleMatch = trimmed.match(
+            /^-\s*([A-Z0-9-]+)\s*,\s*([^,]+)\s*,\s*([^,]+?)(?:\s*,\s*([^,]+))?$/
+          );
+          const matchRuleMatch = trimmed.match(/^-\s*MATCH\s*,\s*(.+)$/);
+          const ruleSetMatch = trimmed.match(/^-\s*RULE-SET\s*,\s*([^,]+)\s*,\s*(.+)$/);
+
+          if (ruleMatch) {
+            const rType = ruleMatch[1] as RuleType;
+            const rValue = ruleMatch[2];
+            const rOutbound = ruleMatch[4] ? `${ruleMatch[3]},${ruleMatch[4]}` : ruleMatch[3];
+            parsedRules.push({
+              id: crypto.randomUUID(),
+              type: rType,
+              value: rValue,
+              outbound: rOutbound
+            });
+          } else if (matchRuleMatch) {
+            const matchOutbound = matchRuleMatch[1];
+            parsedRules.push({
+              id: crypto.randomUUID(),
+              type: 'MATCH',
+              value: '',
+              outbound: matchOutbound
+            });
+          } else if (ruleSetMatch) {
+            const rsName = ruleSetMatch[1];
+            const rsOutbound = ruleSetMatch[2];
+            if (rsName.startsWith('geosite-') || rsName.startsWith('geoip-')) {
+              const type = rsName.startsWith('geosite-') ? 'geosite' : 'geoip';
+              const id = rsName.replace(/^geosite-/, '').replace(/^geoip-/, '');
+              selectedMetaRuleSets.set(`${id}|${type}`, rsOutbound);
+              activeRuleProvider = 'metacubex';
+            } else {
+              parsedRules.push({
+                id: crypto.randomUUID(),
+                type: 'RULE-SET',
+                value: rsName,
+                outbound: rsOutbound
+              });
+            }
+          }
+        }
+      }
+
+      if (currentGroup) {
+        parsedGroups.push(currentGroup);
+      }
+      if (currentProxy) {
+        parsedProxies.push(currentProxy);
+      }
+
+      if (parsedGroups.length > 0) {
+        groups = parsedGroups;
+        const hasZkeenGroup = parsedGroups.some((g) => g.name === 'Заблок. сервисы');
+        if (hasZkeenGroup) {
+          activePreset = 'zkeen-selective';
+          activeRuleProvider = 'zkeen';
+          groups = groups.map((g) => {
+            const zG = ZKEEN_16_GROUPS.find((zg) => zg.name === g.name);
+            if (zG) {
+              return {
+                ...g,
+                icon: zG.icon,
+                excludeFilter: zG.excludeFilter,
+                enabled: g.enabled !== false
+              };
+            }
+            return g;
+          });
+        }
+      }
+      if (parsedProxies.length > 0) {
+        proxies = parsedProxies;
+      }
+      if (parsedRules.length > 0) {
+        rules = parsedRules;
+      }
+    } catch (err: any) {
+      showToast(
+        'warning',
+        $currentLang === 'ru'
+          ? 'Не удалось прочитать существующий config.yaml. Начинаем с чистого листа.'
+          : 'Could not parse existing config.yaml. Starting fresh.'
+      );
+    }
+  }
+
+  function unquote(str: string): string {
+    str = str.trim();
+    if (str.startsWith('"')) {
+      const closingIdx = str.indexOf('"', 1);
+      if (closingIdx !== -1) {
+        return str.slice(1, closingIdx);
+      }
+    } else if (str.startsWith("'")) {
+      const closingIdx = str.indexOf("'", 1);
+      if (closingIdx !== -1) {
+        return str.slice(1, closingIdx);
+      }
+    } else {
+      str = str.split('#')[0].trim();
+    }
+    return str;
+  }
+
+  let configLoadedForPath = '';
+
+  async function loadConfig(path: string) {
+    if (!path) return;
+    if (configLoadedForPath === path) return;
+    configLoadedForPath = path;
+    try {
+      const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `HTTP ${res.status}`);
+      }
+      const text = await res.text();
+      populateMihomoFromYAML(text);
+    } catch (e: any) {
+      showToast('error', `Ошибка загрузки конфига: ${e.message}`);
+    }
+    await loadSubscriptionProxies();
+  }
+
+  onMount(async () => {
+    await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml');
+  });
+
+  $: {
+    if (selectedFile) {
+      loadConfig(selectedFile);
+    }
+  }
 
   function addProxy() {
     if (!np.name.trim() || !np.server.trim()) return;
@@ -203,13 +1361,99 @@
   // ── YAML generation ─────────────────────────────────────────────────────
 
   function q(v: string | number | boolean) {
-    return typeof v === 'string' && (v.includes(':') || v.includes('#') || v === '')
-      ? `"${v}"`
-      : String(v);
+    if (typeof v !== 'string') return String(v);
+    const escaped = v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return v.includes(':') || v.includes('#') || v === '' ? `"${escaped}"` : escaped;
   }
 
   function generateYAML(): string {
     const lines: string[] = [];
+
+    // external-controller must be first field (required for Clash API on port 9090)
+    lines.push('external-controller: 0.0.0.0:9090');
+    lines.push('');
+
+    // System ports from XKeen (preserve existing values, fall back to defaults)
+    lines.push(`tproxy-port: ${existingTproxyPort ?? 1181}`);
+    lines.push(`redir-port: ${existingRedirPort ?? 1182}`);
+    lines.push('');
+
+    // Proxy-providers (if we have subscriptions)
+    if (subscriptions.length > 0) {
+      lines.push('proxy-providers:');
+      for (const [i, sub] of subscriptions.entries()) {
+        let path = '';
+        try {
+          if (sub.url) {
+            const parsed = new URL(sub.url);
+            path = parsed.pathname || '';
+          }
+        } catch (e) {}
+        path = path.replace(/\/+$/, '');
+        let urlBase = path ? path.split('/').pop() : '';
+        let providerName = (sub.name || urlBase || `provider-${i}`)
+          .replace(/[^a-zA-Z0-9-]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '')
+          .toLowerCase();
+        if (!providerName) {
+          providerName = sub.id || `provider-${i}`;
+        }
+        lines.push(`  ${providerName}:`);
+        lines.push(`    type: http`);
+        lines.push(`    path: ./providers/${providerName}.yaml`);
+        lines.push(`    url: ${q(sub.url)}`);
+        lines.push(`    interval: ${sub.interval * 3600 || 86400}`);
+        lines.push(`    health-check:`);
+        lines.push(`      enable: true`);
+        lines.push(`      url: http://www.gstatic.com/generate_204`);
+        lines.push(`      interval: 300`);
+      }
+      lines.push('');
+    }
+
+    // Rule-providers (if selected)
+    if (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0) {
+      lines.push('rule-providers:');
+      for (const [key, outbound] of selectedMetaRuleSets) {
+        const [id, type] = key.split('|') as [string, 'geosite' | 'geoip'];
+        const behavior = type === 'geoip' ? 'ipcidr' : 'domain';
+        lines.push(`  ${type}-${id.replace(/[^a-z0-9-]/g, '-')}:`);
+        lines.push(`    type: http`);
+        lines.push(`    format: mrs`);
+        lines.push(`    behavior: ${behavior}`);
+        lines.push(`    url: "${buildMetaRuleSetUrl(id, type)}"`);
+        lines.push(`    interval: 86400`);
+      }
+      lines.push('');
+    } else if (activeRuleProvider !== 'none' && activeRuleProvider !== 'metacubex') {
+      const providers = RULE_PROVIDERS[activeRuleProvider];
+      if (providers && providers.length > 0) {
+        lines.push('rule-providers:');
+        for (const rp of providers) {
+          lines.push(`  ${rp.name}:`);
+          if (rp.format === 'inline') {
+            lines.push(`    type: inline`);
+            lines.push(`    behavior: ${rp.behavior}`);
+            lines.push(`    payload:`);
+            if (rp.payload) {
+              for (const item of rp.payload) {
+                lines.push(`      - ${q(item)}`);
+              }
+            }
+          } else {
+            lines.push(`    type: http`);
+            if (rp.format) {
+              lines.push(`    format: ${rp.format}`);
+            }
+            lines.push(`    behavior: ${rp.behavior}`);
+            lines.push(`    url: "${rp.url}"`);
+            lines.push(`    interval: 86400`);
+          }
+        }
+        lines.push('');
+      }
+    }
 
     // Proxies
     if (proxies.length > 0) {
@@ -221,7 +1465,7 @@
         lines.push(`    port: ${p.port}`);
 
         if (p.type === 'vless') {
-          lines.push(`    uuid: ${p.uuid}`);
+          lines.push(`    uuid: ${p.uuid ?? ''}`);
           if (p.flow) lines.push(`    flow: ${p.flow}`);
           lines.push(`    tls: true`);
           lines.push(`    reality-opts:`);
@@ -233,7 +1477,7 @@
           lines.push(`    password: ${q(p.password || '')}`);
           if (p.sni) lines.push(`    sni: ${q(p.sni)}`);
         } else if (p.type === 'tuic') {
-          lines.push(`    uuid: ${p.uuid}`);
+          lines.push(`    uuid: ${p.uuid ?? ''}`);
           lines.push(`    password: ${q(p.password || '')}`);
           lines.push(`    congestion-controller: ${p.congestion || 'bbr'}`);
           if (p.sni) lines.push(`    sni: ${q(p.sni)}`);
@@ -241,7 +1485,7 @@
           lines.push(`    cipher: ${p.cipher || 'aes-256-gcm'}`);
           lines.push(`    password: ${q(p.password || '')}`);
         } else if (p.type === 'vmess') {
-          lines.push(`    uuid: ${p.uuid}`);
+          lines.push(`    uuid: ${p.uuid ?? ''}`);
           lines.push(`    alterId: 0`);
           lines.push(`    cipher: auto`);
           lines.push(`    tls: ${p.tls}`);
@@ -256,12 +1500,34 @@
       lines.push('');
     }
 
+    // Helper to check if a target outbound group is enabled
+    const isOutboundEnabled = (outbound: string) => {
+      if (activeRuleProvider === 'zkeen') {
+        const primaryOutbound = outbound.split(',')[0].trim();
+        const g = groups.find((x) => x.name === primaryOutbound);
+        if (g && g.enabled === false) return false;
+      }
+      return true;
+    };
+
     // Proxy groups
     if (groups.length > 0) {
       lines.push('proxy-groups:');
       for (const g of groups) {
+        if (activeRuleProvider === 'zkeen' && g.enabled === false) {
+          continue;
+        }
         lines.push(`  - name: ${q(g.name)}`);
         lines.push(`    type: ${g.type}`);
+        if (g.icon) {
+          lines.push(`    icon: ${q(g.icon)}`);
+        }
+        if (g.excludeFilter) {
+          lines.push(`    exclude-filter: ${q(g.excludeFilter)}`);
+        }
+        if (g.includeAll === true || (g.includeAll !== false && subscriptions.length > 0)) {
+          lines.push(`    include-all: true`);
+        }
         if (g.proxies.length > 0) {
           lines.push(`    proxies:`);
           for (const p of g.proxies) lines.push(`      - ${q(p)}`);
@@ -275,22 +1541,119 @@
     }
 
     // Rules
-    if (rules.length > 0) {
+    const hasRules =
+      rules.length > 0 ||
+      activeRuleProvider === 'zkeen' ||
+      (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0);
+    if (hasRules) {
       lines.push('rules:');
-      for (const r of rules) {
-        if (r.type === 'MATCH') {
-          lines.push(`  - MATCH,${r.outbound}`);
-        } else {
-          lines.push(`  - ${r.type},${r.value},${r.outbound}`);
+      if (activeRuleProvider === 'zkeen') {
+        const zkeenRules = [
+          { type: 'RULE-SET', val: 'adlist@domain', outbound: 'REJECT' },
+          { type: 'RULE-SET', val: 'quic@inline', outbound: 'QUIC' },
+          {
+            type: 'OR',
+            val: '((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),Заблок. сервисы',
+            outbound: 'Заблок. сервисы'
+          },
+          { type: 'RULE-SET', val: 'category-ai@domain', outbound: 'AI' },
+          { type: 'RULE-SET', val: 'steam@domain', outbound: 'Steam' },
+          { type: 'RULE-SET', val: 'spotify@domain', outbound: 'Spotify' },
+          { type: 'RULE-SET', val: 'reddit@domain', outbound: 'Reddit' },
+          { type: 'RULE-SET', val: 'twitch@domain', outbound: 'Twitch' },
+          { type: 'RULE-SET', val: 'twitter@domain', outbound: 'Twitter' },
+          { type: 'RULE-SET', val: 'discord@classical', outbound: 'Discord' },
+          { type: 'RULE-SET', val: 'speedtest@domain', outbound: 'Speedtest' },
+          { type: 'GEOSITE', val: 'YOUTUBE', outbound: 'YouTube' },
+          { type: 'GEOIP', val: 'YOUTUBE', outbound: 'YouTube' },
+          { type: 'RULE-SET', val: 'meta@domain', outbound: 'Meta' },
+          { type: 'GEOIP', val: 'META', outbound: 'Meta' },
+          { type: 'GEOIP', val: 'AKAMAI', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'AMAZON', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'CDN77', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'CLOUDFLARE', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'COLOCROSSING', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'CONTABO', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'DIGITALOCEAN', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'FASTLY', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'GCORE', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'GOOGLE', outbound: 'Google' },
+          { type: 'GEOIP', val: 'HETZNER', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'LINODE', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'MEGA', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'ORACLE', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'OVH', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'SCALEWAY', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'TELEGRAM', outbound: 'Telegram' },
+          { type: 'GEOIP', val: 'VODAFONE', outbound: 'CDN' },
+          { type: 'GEOIP', val: 'VULTR', outbound: 'CDN' },
+          { type: 'RULE-SET', val: 'refilter@domain', outbound: 'Заблок. сервисы' },
+          { type: 'GEOSITE', val: 'DOMAINS', outbound: 'Заблок. сервисы' },
+          { type: 'GEOSITE', val: 'OTHER', outbound: 'Заблок. сервисы' },
+          { type: 'GEOSITE', val: 'POLITIC', outbound: 'Заблок. сервисы' },
+          { type: 'RULE-SET', val: 'github@domain', outbound: 'GitHub' }
+        ];
+
+        for (const r of zkeenRules) {
+          if (isOutboundEnabled(r.outbound)) {
+            if (r.type === 'OR') {
+              lines.push(`  - OR,${r.val}`);
+            } else {
+              lines.push(`  - ${r.type},${r.val},${r.outbound}`);
+            }
+          }
+        }
+
+        // Custom user rules (except MATCH which goes last)
+        for (const r of rules) {
+          if (isOutboundEnabled(r.outbound)) {
+            if (r.type === 'MATCH') continue;
+            lines.push(`  - ${r.type},${r.value},${r.outbound}`);
+          }
+        }
+
+        if (isOutboundEnabled('DIRECT')) {
+          lines.push('  - RULE-SET,private@ip,DIRECT');
+        }
+        lines.push('  - MATCH,DIRECT');
+      } else {
+        // Rule-set entries from rule-providers (before user rules, before MATCH)
+        if (activeRuleProvider === 'metacubex') {
+          for (const [key, outbound] of selectedMetaRuleSets) {
+            const [id, type] = key.split('|') as [string, 'geosite' | 'geoip'];
+            lines.push(`  - RULE-SET,${type}-${id.replace(/[^a-z0-9-]/g, '-')},${outbound}`);
+          }
+        } else if (activeRuleProvider !== 'none') {
+          const providers = RULE_PROVIDERS[activeRuleProvider];
+          if (providers) {
+            for (const rp of providers) {
+              lines.push(`  - RULE-SET,${rp.name},${rp.outbound}`);
+            }
+          }
+        }
+        for (const r of rules) {
+          if (r.type === 'MATCH') {
+            lines.push(`  - MATCH,${r.outbound}`);
+          } else {
+            lines.push(`  - ${r.type},${r.value},${r.outbound}`);
+          }
+        }
+        // If only rule-providers active but no manual rules, add a default MATCH
+        if (
+          rules.length === 0 &&
+          activeRuleProvider === 'metacubex' &&
+          selectedMetaRuleSets.size > 0
+        ) {
+          lines.push(`  - MATCH,DIRECT`);
         }
       }
       lines.push('');
     }
 
     // DNS
+    lines.push('dns:');
+    lines.push(`  enable: ${dns.enabled}`);
     if (dns.enabled) {
-      lines.push('dns:');
-      lines.push(`  enable: true`);
       lines.push(`  enhanced-mode: ${dns.enhancedMode}`);
       if (dns.enhancedMode === 'fake-ip') lines.push(`  fake-ip-range: ${dns.fakeIPRange}`);
       lines.push(`  nameserver:`);
@@ -299,13 +1662,13 @@
         lines.push(`  fallback:`);
         for (const fb of dns.fallback) lines.push(`    - ${q(fb)}`);
       }
-      lines.push('');
     }
+    lines.push('');
 
     // TUN
+    lines.push('tun:');
+    lines.push(`  enable: ${tun.enabled}`);
     if (tun.enabled) {
-      lines.push('tun:');
-      lines.push(`  enable: true`);
       lines.push(`  stack: ${tun.stack}`);
       lines.push(`  auto-route: ${tun.autoRoute}`);
       lines.push(`  auto-detect-interface: ${tun.autoDetectInterface}`);
@@ -313,13 +1676,28 @@
         lines.push(`  dns-hijack:`);
         for (const d of tun.dnsHijack) lines.push(`    - ${q(d)}`);
       }
-      lines.push('');
     }
+    lines.push('');
 
     return lines.join('\n').trimEnd();
   }
 
-  $: yaml = generateYAML();
+  let yaml = '';
+  $: {
+    // Explicit deps so Svelte 5 legacy mode tracks them across the function call
+    void proxies;
+    void groups;
+    void rules;
+    void activeRuleProvider;
+    void selectedMetaRuleSets;
+    void subscriptions;
+    void dns.enabled;
+    void dns.nameservers;
+    void dns.fallback;
+    void tun.enabled;
+    void tun.stack;
+    yaml = generateYAML();
+  }
 
   async function copyYAML() {
     await navigator.clipboard.writeText(yaml);
@@ -346,16 +1724,132 @@
     'GEOSITE',
     'IP-CIDR',
     'PROCESS-NAME',
+    'RULE-SET',
     'MATCH'
   ];
   const CIPHERS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-poly1305', '2022-blake3-aes-256-gcm'];
 
+  let allProxyNames: string[] = [];
   $: allProxyNames = [
     'DIRECT',
     'REJECT',
     ...proxies.map((p) => p.name),
     ...groups.map((g) => g.name)
   ];
+
+  // Dynamic tabs calculation and auto-switch
+  $: tabs = [
+    ['proxies', ru ? 'Прокси' : 'Proxies'],
+    ['groups', ru ? 'Группы' : 'Groups'],
+    ...(activeRuleProvider === 'metacubex' ? [['rulesets', ru ? 'Наборы' : 'Rule Sets']] : []),
+    ['rules', ru ? 'Правила' : 'Rules'],
+    ['dns', 'DNS'],
+    ['tun', 'TUN']
+  ];
+
+  $: if (
+    activeRuleProvider === 'metacubex' &&
+    activeSection !== 'rulesets' &&
+    activeSection !== 'proxies' &&
+    activeSection !== 'groups' &&
+    activeSection !== 'rules' &&
+    activeSection !== 'dns' &&
+    activeSection !== 'tun'
+  ) {
+    activeSection = 'rulesets';
+  }
+
+  let showApplyConfirm = false;
+  let applyLoading = false;
+
+  function extractSection(yamlText: string, sectionName: string): string {
+    const lines = yamlText.split('\n');
+    let start = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith(sectionName + ':')) {
+        start = i;
+        break;
+      }
+    }
+    if (start === -1) return '';
+    const resultLines: string[] = [];
+    for (let i = start + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (
+        line.trim() !== '' &&
+        !line.startsWith(' ') &&
+        !line.startsWith('\t') &&
+        !line.startsWith('#')
+      ) {
+        break;
+      }
+      resultLines.push(line);
+    }
+    return resultLines.join('\n').trimEnd();
+  }
+
+  async function handleApplyMihomo() {
+    if (!showApplyConfirm) {
+      showApplyConfirm = true;
+      return;
+    }
+    showApplyConfirm = false;
+    applyLoading = true;
+
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const path = selectedFile || '/opt/etc/mihomo/config.yaml';
+
+      // Generate YAML and extract managed sections for merge via /api/config/mihomo-merge
+      const yamlContent = generateYAML();
+      const sections: Record<string, string> = {
+        'rule-providers': extractSection(yamlContent, 'rule-providers'),
+        'proxy-groups': extractSection(yamlContent, 'proxy-groups'),
+        rules: extractSection(yamlContent, 'rules'),
+        proxies: extractSection(yamlContent, 'proxies'),
+        dns: extractSection(yamlContent, 'dns'),
+        tun: extractSection(yamlContent, 'tun'),
+        'proxy-providers': extractSection(yamlContent, 'proxy-providers')
+      };
+
+      const mergeRes = await fetch('/api/config/mihomo-merge', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({ path, sections })
+      });
+
+      if (!mergeRes.ok) {
+        const errorText = await mergeRes.text();
+        throw new Error(errorText || 'Failed to merge config');
+      }
+
+      const restartRes = await fetch('/api/service/control?action=restart', {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken || ''
+        }
+      });
+
+      if (!restartRes.ok) {
+        throw new Error('Failed to restart service');
+      }
+
+      showToast(
+        'success',
+        ru
+          ? 'Конфигурация Mihomo обновлена и перезапущена'
+          : 'Mihomo configuration updated and restarted'
+      );
+    } catch (err: any) {
+      console.error(err);
+      showToast('error', err.message || (ru ? 'Ошибка сохранения' : 'Save error'));
+    } finally {
+      applyLoading = false;
+    }
+  }
 </script>
 
 <div class="container">
@@ -412,12 +1906,72 @@
     </div>
   {/if}
 
+  {#if preservedKeys.length > 0}
+    <div class="alert alert-warning" style="margin: 0 0 16px 0;" role="status">
+      <span aria-hidden="true">⚠️</span>
+      <div>
+        <strong>{$t('editor.constructor_merge_warning_title')}</strong>
+        <div style="margin-top: 2px;">
+          {$t('editor.constructor_merge_warning_body', { keys: preservedKeys.join(', ') })}
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <div class="gen-layout">
     <!-- Left: sections -->
     <div class="gen-left">
+      <!-- Scenario selection -->
+      <div
+        class="constructor-scenario-bar"
+        style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;"
+      >
+        <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
+        <select
+          id="preset-select"
+          class="form-select preset-select"
+          style="max-width: 250px;"
+          data-testid="preset-select"
+          value={activePreset}
+          on:change={(e) => {
+            const val = e.currentTarget.value;
+            applyPreset(val as any);
+            if (val === 'rule-based') {
+              activeSection = 'rulesets';
+            } else if (val === 'zkeen-selective') {
+              activeSection = 'groups';
+            }
+          }}
+        >
+          <option value="">-- {$t('editor.constructor_scenario')} --</option>
+          <option value="rule-based">{$t('editor.scenario_rule_based')}</option>
+          <option value="global-proxy">{$t('editor.scenario_global_proxy')}</option>
+          <option value="zkeen-selective">{$t('editor.scenario_zkeen_selective')}</option>
+        </select>
+      </div>
+
+      <!-- Rule providers -->
+      <div class="rule-providers-row">
+        <label class="form-label" for="rp-select">{$t('editor.constructor_rule_providers')}:</label>
+        <select
+          id="rp-select"
+          class="form-select rp-select"
+          bind:value={activeRuleProvider}
+          on:change={(e) => {
+            if (e.currentTarget.value === 'metacubex') {
+              activeSection = 'rulesets';
+            }
+          }}
+        >
+          <option value="none">{$t('editor.rp_none')}</option>
+          <option value="zkeen">{$t('editor.rp_zkeen')}</option>
+          <option value="metacubex">{$t('editor.rp_metacubex')}</option>
+        </select>
+      </div>
+
       <!-- Section tabs -->
       <div class="sec-tabs">
-        {#each [['proxies', ru ? 'Прокси' : 'Proxies'], ['groups', ru ? 'Группы' : 'Groups'], ['rules', ru ? 'Правила' : 'Rules'], ['dns', 'DNS'], ['tun', 'TUN']] as [id, label]}
+        {#each tabs as [id, label]}
           <button
             class="sec-tab"
             class:active={activeSection === id}
@@ -433,6 +1987,9 @@
                 >{proxies.length}</span
               >{/if}
             {#if id === 'groups' && groups.length > 0}<span class="sec-count">{groups.length}</span
+              >{/if}
+            {#if id === 'rulesets' && selectedMetaRuleSets.size > 0}<span class="sec-count"
+                >{selectedMetaRuleSets.size}</span
               >{/if}
             {#if id === 'rules' && rules.length > 0}<span class="sec-count">{rules.length}</span
               >{/if}
@@ -607,9 +2164,34 @@
               </div>
             </div>
           {:else}
-            <button class="add-btn" on:click={() => (showProxyForm = true)}>
-              + {ru ? 'Добавить прокси' : 'Add proxy'}
-            </button>
+            <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
+              <button class="add-btn" style="flex: 1;" on:click={() => (showProxyForm = true)}>
+                + {ru ? 'Добавить прокси' : 'Add proxy'}
+              </button>
+              <button
+                class="add-btn import-btn"
+                style="flex: 1;"
+                on:click={loadSubscriptionProxies}
+              >
+                ↓ {$t('editor.constructor_import_proxies')}
+              </button>
+              <button class="add-btn import-btn" style="flex: 1;" on:click={openImportModal}>
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  style="margin-right: 4px; display: inline-block; vertical-align: middle;"
+                >
+                  <path
+                    d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"
+                  />
+                </svg>
+                {$t('subscr.import_node')}
+              </button>
+            </div>
           {/if}
         </div>
       {/if}
@@ -617,76 +2199,281 @@
       <!-- GROUPS -->
       {#if activeSection === 'groups'}
         <div class="sec-body">
-          {#each groups as g (g.id)}
-            <div class="item-row">
-              <span class="item-badge type-group">{g.type}</span>
-              <span class="item-name">{g.name}</span>
-              <span class="item-meta">{g.proxies.length} {ru ? 'прокси' : 'proxies'}</span>
-              <button class="item-del" on:click={() => removeGroup(g.id)}>✕</button>
-            </div>
-          {/each}
+          {#if activeRuleProvider === 'zkeen'}
+            <!-- Premium zkeen 16 groups UI -->
+            <div class="zkeen-groups-grid">
+              {#each groups as g (g.id)}
+                <div class="zkeen-group-card" class:disabled={g.enabled === false}>
+                  <div class="zkeen-group-header">
+                    <div class="zkeen-group-icon-wrap">
+                      <img
+                        src={g.icon}
+                        alt={g.name}
+                        class="zkeen-group-icon"
+                        on:error={() => {
+                          const fallback =
+                            'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png';
+                          if (g.icon !== fallback) {
+                            g.icon = fallback;
+                          } else {
+                            g.icon =
+                              'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                          }
+                          groups = [...groups];
+                        }}
+                      />
+                    </div>
+                    <div class="zkeen-group-title">
+                      <span class="zkeen-group-name">{g.name}</span>
+                      <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                        {#if g.excludeFilter}
+                          <span class="zkeen-exclude-badge">exclude: {g.excludeFilter}</span>
+                        {/if}
+                        {#if g.includeAll}
+                          <span class="zkeen-include-badge">include-all</span>
+                        {/if}
+                      </div>
+                    </div>
+                    <label class="switch">
+                      <input
+                        type="checkbox"
+                        checked={g.enabled !== false}
+                        on:change={(e) => {
+                          g.enabled = e.currentTarget.checked;
+                          groups = [...groups];
+                        }}
+                      />
+                      <span class="slider round"></span>
+                    </label>
+                  </div>
 
-          {#if showGroupForm}
-            <div class="form-card">
-              <div class="form-row">
-                <label class="form-label">{ru ? 'Тип' : 'Type'}</label>
-                <select class="form-select" bind:value={ng.type}>
-                  {#each GROUP_TYPES as t}<option value={t}>{t}</option>{/each}
-                </select>
-              </div>
-              <div class="form-row">
-                <label class="form-label">{ru ? 'Имя группы' : 'Group name'}</label>
-                <input class="form-input" bind:value={ng.name} placeholder="Выбор прокси" />
-              </div>
-              <div class="form-row">
-                <label class="form-label">{ru ? 'Прокси' : 'Proxies'}</label>
-                <div class="tag-input-wrap">
-                  {#each ng.proxies as p}
-                    <span class="tag-pill">
-                      {p}
-                      <button
-                        class="tag-rm"
-                        on:click={() =>
-                          (ng = { ...ng, proxies: ng.proxies.filter((x) => x !== p) })}>✕</button
+                  {#if g.enabled !== false}
+                    <div class="zkeen-group-body">
+                      <label class="form-label" style="font-size: 11px; margin-bottom: 2px;"
+                        >{ru ? 'Исходящий канал по умолчанию' : 'Default outbound'}</label
                       >
-                    </span>
-                  {/each}
-                  <select
-                    class="form-select-inline"
-                    bind:value={ngProxyInput}
-                    on:change={addGroupProxy}
-                  >
-                    <option value="">+ {ru ? 'добавить' : 'add'}...</option>
-                    {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
-                  </select>
+                      <select
+                        class="form-select"
+                        value={g.proxies[0] || 'DIRECT'}
+                        on:change={(e) => {
+                          const val = e.currentTarget.value;
+                          g.proxies = [val, ...g.proxies.slice(1).filter((p) => p !== val)];
+                          groups = [...groups];
+                        }}
+                      >
+                        <option value="DIRECT">DIRECT</option>
+                        <option value="REJECT">REJECT</option>
+                        <option value="PASS">PASS</option>
+                        {#each allProxyNames.filter((n) => n !== 'DIRECT' && n !== 'REJECT' && n !== 'PASS' && n !== g.name) as n}
+                          <option value={n}>{n}</option>
+                        {/each}
+                      </select>
+                    </div>
+                  {/if}
                 </div>
-              </div>
-              {#if ng.type !== 'select'}
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label">URL</label>
-                    <input class="form-input" bind:value={ng.url} />
-                  </div>
-                  <div class="form-col form-col-sm">
-                    <label class="form-label">{ru ? 'Интервал (с)' : 'Interval (s)'}</label>
-                    <input class="form-input" type="number" bind:value={ng.interval} />
-                  </div>
-                </div>
-              {/if}
-              <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => (showGroupForm = false)}
-                  >{ru ? 'Отмена' : 'Cancel'}</button
-                >
-                <button class="btn btn-primary" on:click={addGroup}
-                  >{ru ? 'Добавить' : 'Add'}</button
-                >
-              </div>
+              {/each}
             </div>
           {:else}
-            <button class="add-btn" on:click={() => (showGroupForm = true)}>
-              + {ru ? 'Добавить группу' : 'Add group'}
-            </button>
+            {#each groups as g (g.id)}
+              <div class="item-row">
+                <span class="item-badge type-group">{g.type}</span>
+                <span class="item-name">{g.name}</span>
+                {#if g.includeAll}
+                  <span
+                    class="item-badge"
+                    style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; font-size: 10px; text-transform: none;"
+                    >include-all</span
+                  >
+                {/if}
+                <span class="item-meta">{g.proxies.length} {ru ? 'прокси' : 'proxies'}</span>
+                <button class="item-del" on:click={() => removeGroup(g.id)}>✕</button>
+              </div>
+            {/each}
+
+            {#if showGroupForm}
+              <div class="form-card">
+                <div class="form-row">
+                  <label class="form-label">{ru ? 'Тип' : 'Type'}</label>
+                  <select class="form-select" bind:value={ng.type}>
+                    {#each GROUP_TYPES as t}<option value={t}>{t}</option>{/each}
+                  </select>
+                </div>
+                <div class="form-row">
+                  <label class="form-label">{ru ? 'Имя группы' : 'Group name'}</label>
+                  <input class="form-input" bind:value={ng.name} placeholder="Выбор прокси" />
+                </div>
+                <div class="form-row">
+                  <label
+                    class="toggle-label"
+                    style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;"
+                  >
+                    <input type="checkbox" bind:checked={ng.includeAll} />
+                    <span
+                      >{ru
+                        ? 'Включить все провайдеры (include-all)'
+                        : 'Include all providers'}</span
+                    >
+                  </label>
+                </div>
+                <div class="form-row">
+                  <label class="form-label">{ru ? 'Прокси' : 'Proxies'}</label>
+                  <div class="tag-input-wrap">
+                    {#each ng.proxies as p}
+                      <span class="tag-pill">
+                        {p}
+                        <button
+                          class="tag-rm"
+                          on:click={() =>
+                            (ng = { ...ng, proxies: ng.proxies.filter((x) => x !== p) })}>✕</button
+                        >
+                      </span>
+                    {/each}
+                    <select
+                      class="form-select-inline"
+                      bind:value={ngProxyInput}
+                      on:change={addGroupProxy}
+                    >
+                      <option value="">+ {ru ? 'добавить' : 'add'}...</option>
+                      {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
+                    </select>
+                  </div>
+                </div>
+                {#if ng.type !== 'select'}
+                  <div class="form-row2">
+                    <div class="form-col">
+                      <label class="form-label">URL</label>
+                      <input class="form-input" bind:value={ng.url} />
+                    </div>
+                    <div class="form-col form-col-sm">
+                      <label class="form-label">{ru ? 'Интервал (с)' : 'Interval (s)'}</label>
+                      <input class="form-input" type="number" bind:value={ng.interval} />
+                    </div>
+                  </div>
+                {/if}
+                <div class="form-actions">
+                  <button class="btn btn-secondary" on:click={() => (showGroupForm = false)}
+                    >{ru ? 'Отмена' : 'Cancel'}</button
+                  >
+                  <button class="btn btn-primary" on:click={addGroup}
+                    >{ru ? 'Добавить' : 'Add'}</button
+                  >
+                </div>
+              </div>
+            {:else}
+              <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
+                <button class="add-btn" style="flex: 1;" on:click={() => (showGroupForm = true)}>
+                  + {ru ? 'Добавить группу' : 'Add group'}
+                </button>
+              </div>
+            {/if}
           {/if}
+        </div>
+      {/if}
+
+      <!-- RULESETS -->
+      {#if activeSection === 'rulesets'}
+        <div class="sec-body" data-testid="rulesets-picker">
+          <div class="card rulesets-card" style="padding:16px;">
+            <div class="rulesets-header">
+              <h3 style="margin-top:0; margin-bottom:4px; font-size:16px;">
+                {$t('editor.rulesets_picker')}
+              </h3>
+              <p
+                class="sub"
+                style="margin-top:0; margin-bottom:16px; font-size:12px; color:var(--fg-dim);"
+              >
+                {ru
+                  ? 'Выберите наборы правил и укажите группу для каждого.'
+                  : 'Select rule sets and assign a group for each.'}
+              </p>
+            </div>
+
+            {#each Object.entries(META_RULE_SETS_BY_CATEGORY) as [category, items]}
+              <div class="rulesets-category-group" style="margin-top:16px;">
+                <h4
+                  class="category-title"
+                  style="font-size:13px; font-weight:600; color:var(--fg-secondary); margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.05);"
+                >
+                  {category}
+                </h4>
+                <div
+                  class="rulesets-grid"
+                  style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:8px;"
+                >
+                  {#each items as item}
+                    {@const key = `${item.id}|${item.type}`}
+                    {@const isChecked = selectedMetaRuleSets.has(key)}
+                    <div
+                      class="ruleset-item-row"
+                      class:selected={isChecked}
+                      style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:var(--radius); transition:background var(--transition-fast), border-color var(--transition-fast);"
+                    >
+                      <label
+                        class="ruleset-label"
+                        for="ruleset-{item.type}-{item.id}"
+                        style="display:flex; align-items:center; gap:8px; cursor:pointer; flex:1; user-select:none;"
+                      >
+                        <input
+                          type="checkbox"
+                          id="ruleset-{item.type}-{item.id}"
+                          value={key}
+                          checked={isChecked}
+                          on:change={(e) => {
+                            if (e.currentTarget.checked) {
+                              let outbound = item.defaultOutbound;
+                              if (
+                                outbound === 'Proxy' &&
+                                groups.some((g) => g.name === 'Selective')
+                              ) {
+                                outbound = 'Selective';
+                              } else if (
+                                outbound === 'Proxy' &&
+                                groups.some((g) => g.name === 'Proxy')
+                              ) {
+                                outbound = 'Proxy';
+                              } else if (!allProxyNames.includes(outbound)) {
+                                outbound = allProxyNames[0] || 'DIRECT';
+                              }
+                              selectedMetaRuleSets.set(key, outbound);
+                            } else {
+                              selectedMetaRuleSets.delete(key);
+                            }
+                            selectedMetaRuleSets = new Map(selectedMetaRuleSets);
+                          }}
+                        />
+                        <span
+                          class="ruleset-name"
+                          style="font-size:13px; font-weight:500; color:var(--fg-primary);"
+                          >{item.label}</span
+                        >
+                        <span
+                          class="ruleset-type-badge"
+                          style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--fg-dim); background:rgba(255,255,255,0.05); padding:1px 4px; border-radius:4px;"
+                          >{item.type}</span
+                        >
+                      </label>
+
+                      {#if isChecked}
+                        <select
+                          class="ruleset-outbound-select"
+                          style="font-size:12px; background:var(--bg-surface); border:1px solid var(--border); color:var(--fg-primary); border-radius:var(--radius-sm); padding:2px 6px; max-width:120px; outline:none;"
+                          value={selectedMetaRuleSets.get(key)}
+                          on:change={(e) => {
+                            selectedMetaRuleSets.set(key, e.currentTarget.value);
+                            selectedMetaRuleSets = selectedMetaRuleSets;
+                          }}
+                        >
+                          {#each allProxyNames as n}
+                            <option value={n}>{n}</option>
+                          {/each}
+                        </select>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          </div>
         </div>
       {/if}
 
@@ -789,23 +2576,21 @@
               <label class="form-label">Nameservers</label>
               <textarea
                 class="form-textarea"
-                bind:value={dns.nameservers}
+                value={dns.nameservers.join('\n')}
                 rows="3"
                 on:change={(e) =>
                   (dns.nameservers = e.currentTarget.value.split('\n').filter(Boolean))}
-                >{dns.nameservers.join('\n')}</textarea
-              >
+              ></textarea>
             </div>
             <div class="form-row">
               <label class="form-label">Fallback</label>
               <textarea
                 class="form-textarea"
-                bind:value={dns.fallback}
+                value={dns.fallback.join('\n')}
                 rows="2"
                 on:change={(e) =>
                   (dns.fallback = e.currentTarget.value.split('\n').filter(Boolean))}
-                >{dns.fallback.join('\n')}</textarea
-              >
+              ></textarea>
             </div>
           {/if}
         </div>
@@ -904,26 +2689,215 @@
               {ru ? 'Открыть в редакторе' : 'Open in Editor'}
             {/if}
           </button>
-          <button class="btn btn-primary" on:click={copyYAML} disabled={!yaml} style="flex: 1;">
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              style="margin-right:5px"
-              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-              /></svg
-            >
-            {ru ? 'Копировать' : 'Copy'}
+          <button
+            class="btn btn-primary"
+            data-testid="apply-changes-btn"
+            on:click={handleApplyMihomo}
+            disabled={applyLoading || !yaml}
+            style="flex: 1;"
+          >
+            {applyLoading
+              ? ru
+                ? 'Сохранение...'
+                : 'Saving...'
+              : ru
+                ? 'Применить изменения'
+                : 'Apply Changes'}
           </button>
         </div>
       {/if}
     </div>
   </div>
 </div>
+
+{#if showApplyConfirm}
+  <div
+    class="modal-overlay"
+    role="button"
+    tabindex="0"
+    data-testid="apply-confirm-dialog"
+    on:click={() => (showApplyConfirm = false)}
+    on:keydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}
+  >
+    <div class="modal-card" role="presentation" on:click|stopPropagation>
+      <div class="modal-card-header">
+        <h2>{$t('editor.apply_confirm_title')}</h2>
+        <button class="modal-close-btn" on:click={() => (showApplyConfirm = false)}>&times;</button>
+      </div>
+      <div class="modal-card-body">
+        <p>{$t('editor.apply_confirm_body')}</p>
+        <div class="changed-files-list" style="margin-top: 12px;">
+          <strong
+            >{ru ? 'Будут обновлены секции в файле:' : 'Sections to be updated in file:'}</strong
+          >
+          <div style="margin: 8px 0; font-family: monospace; font-size: 13px;">
+            <code>{selectedFile || '/opt/etc/mihomo/config.yaml'}</code>
+          </div>
+          <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+            <li><code>proxy-groups</code></li>
+            <li><code>rule-providers</code></li>
+            <li><code>rules</code></li>
+          </ul>
+          <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
+            {ru
+              ? '* Автоматически будет создана резервная копия (хранится до 5 последних бэкапов)'
+              : '* A backup will be created automatically (up to 5 copies stored)'}
+          </p>
+        </div>
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn btn-secondary" on:click={() => (showApplyConfirm = false)}>
+          {$t('app.cancel')}
+        </button>
+        <button class="btn btn-primary" on:click={handleApplyMihomo} disabled={applyLoading}>
+          {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showImportModal}
+  <div
+    class="modal-overlay"
+    role="button"
+    tabindex="0"
+    on:click={closeImportModal}
+    on:keydown={(e) => e.key === 'Escape' && closeImportModal()}
+  >
+    <div class="modal-card" role="presentation" on:click|stopPropagation>
+      <div class="modal-card-header">
+        <h2>{$t('subscr.import_modal_title')}</h2>
+        <button class="modal-close-btn" on:click={closeImportModal}>&times;</button>
+      </div>
+      <div class="modal-card-body">
+        {#if importErrorMsg}
+          <div
+            class="error-msg"
+            style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
+          >
+            {importErrorMsg}
+          </div>
+        {/if}
+
+        {#if importStep === 1}
+          <div class="form-group">
+            <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
+            <textarea
+              id="import-link"
+              class="input textarea-link"
+              bind:value={importLink}
+              placeholder={$t('subscr.import_link_placeholder')}
+              rows="4"
+              style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
+            ></textarea>
+          </div>
+        {:else if importStep === 2 && importNodes.length > 0}
+          <div class="preview-section">
+            <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
+              {$t('subscr.import_preview_title')}
+            </h3>
+            <div
+              class="preview-list"
+              style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;"
+            >
+              {#each importNodes as item, idx}
+                {#if item.rowError}
+                  <div
+                    class="preview-item-card"
+                    style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                  >
+                    <button
+                      type="button"
+                      on:click={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                      style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
+                      aria-label="Remove">✕</button
+                    >
+                    <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
+                      <strong>{$t('app.error')}:</strong>
+                      {item.rowError}
+                    </div>
+                    <div
+                      style="font-size: 11px; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
+                      title={item.link}
+                    >
+                      {item.link}
+                    </div>
+                  </div>
+                {:else}
+                  <div
+                    class="preview-item-card"
+                    style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                  >
+                    <button
+                      type="button"
+                      on:click={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                      style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
+                      aria-label="Remove">✕</button
+                    >
+                    <div
+                      style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
+                    >
+                      <span
+                        ><strong style="color: var(--fg);">{item.outbound?.protocol}</strong> · {getNodeServer(
+                          item.outbound
+                        )}:{getNodePort(item.outbound)}</span
+                      >
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <label
+                        class="form-label"
+                        style="margin: 0; font-size: 12px; flex-shrink: 0;"
+                        for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label
+                      >
+                      <input
+                        id="import-tag-{idx}"
+                        type="text"
+                        class="input"
+                        bind:value={item.tag}
+                        style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
+                      />
+                    </div>
+                  </div>
+                {/if}
+              {/each}
+            </div>
+          </div>
+        {/if}
+      </div>
+      <div class="modal-card-footer">
+        <button class="btn btn-secondary" on:click={closeImportModal} disabled={importLoading}>
+          {$t('app.cancel')}
+        </button>
+        {#if importStep === 1}
+          <button
+            class="btn btn-primary"
+            on:click={parseImportLink}
+            disabled={!importLink.trim() || importLoading}
+          >
+            {#if importLoading}
+              <span class="spinner-xs" style="margin-right: 6px;"></span>
+            {/if}
+            {$t('subscr.import_btn_parse')}
+          </button>
+        {:else}
+          <button
+            class="btn btn-primary"
+            on:click={confirmImportNode}
+            disabled={importLoading ||
+              importNodes.length === 0 ||
+              importNodes.some((n) => n.rowError)}
+          >
+            {#if importLoading}
+              <span class="spinner-xs" style="margin-right: 6px;"></span>
+            {/if}
+            {ru ? `Импортировать (${importNodes.length})` : `Import (${importNodes.length})`}
+          </button>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .crumb-sep {
@@ -1356,5 +3330,293 @@
       position: static;
       max-height: 300px;
     }
+  }
+
+  /* Scenario bar */
+  .constructor-scenario-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+
+  .scenario-label {
+    font-size: 11px;
+    color: var(--fg-dim);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+
+  .scenario-chip {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--fg-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 12px;
+    cursor: pointer;
+    transition:
+      background var(--transition-fast),
+      border-color var(--transition-fast),
+      color var(--transition-fast);
+    line-height: 1.4;
+  }
+
+  .scenario-chip:hover {
+    background: rgba(41, 194, 240, 0.08);
+    border-color: rgba(41, 194, 240, 0.35);
+    color: var(--primary);
+  }
+
+  .scenario-chip.active {
+    background: rgba(41, 194, 240, 0.15);
+    border-color: rgba(41, 194, 240, 0.5);
+    color: var(--primary);
+  }
+
+  /* Rule providers row */
+  .rule-providers-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .rule-providers-row .form-label {
+    flex-shrink: 0;
+  }
+
+  .rp-select {
+    width: auto;
+    min-width: 160px;
+    font-size: 12px;
+    padding: 5px 8px;
+  }
+
+  /* Proxy list action group */
+  .constructor-proxy-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .import-btn {
+    border-style: dashed;
+    color: var(--fg-dim);
+  }
+
+  .import-btn:hover {
+    background: rgba(70, 209, 138, 0.05);
+    border-color: rgba(70, 209, 138, 0.3);
+    color: var(--success);
+  }
+
+  /* Premium zkeen 16 groups grid */
+  .zkeen-groups-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .zkeen-group-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition:
+      opacity var(--transition-fast),
+      border-color var(--transition-fast);
+  }
+
+  .zkeen-group-card.disabled {
+    opacity: 0.6;
+    border-color: var(--border);
+  }
+
+  .zkeen-group-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .zkeen-group-icon-wrap {
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .zkeen-group-icon {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  .zkeen-group-title {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .zkeen-group-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .zkeen-exclude-badge {
+    background: rgba(240, 180, 80, 0.1);
+    color: var(--warning);
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    width: fit-content;
+  }
+
+  .zkeen-include-badge {
+    background: rgba(139, 92, 246, 0.1);
+    color: #a78bfa;
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    width: fit-content;
+  }
+
+  .zkeen-group-body {
+    margin-top: 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.03);
+    padding-top: 8px;
+  }
+
+  /* Toggle Switch */
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 32px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+
+  .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 255, 255, 0.1);
+    transition: 0.4s;
+    border: 1px solid var(--border);
+  }
+
+  .slider:before {
+    position: absolute;
+    content: '';
+    height: 12px;
+    width: 12px;
+    left: 2px;
+    bottom: 2px;
+    background-color: var(--fg-secondary);
+    transition: 0.4s;
+  }
+
+  input:checked + .slider {
+    background-color: var(--success);
+    border-color: var(--success);
+  }
+
+  input:checked + .slider:before {
+    transform: translateX(14px);
+    background-color: #0c2237;
+  }
+
+  .slider.round {
+    border-radius: 18px;
+  }
+
+  .slider.round:before {
+    border-radius: 50%;
+  }
+
+  /* Modal styles */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg, 8px);
+    width: 500px;
+    max-width: 90%;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  }
+
+  .modal-card-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .modal-card-header h2 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--fg);
+  }
+
+  .modal-close-btn {
+    background: transparent;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--fg-secondary);
+    cursor: pointer;
+  }
+
+  .modal-card-body {
+    padding: 16px;
+    font-size: var(--font-size-sm, 0.8125rem);
+    color: var(--fg);
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .modal-card-footer {
+    padding: 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
   }
 </style>

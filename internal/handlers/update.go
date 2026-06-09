@@ -329,7 +329,8 @@ func (a *API) performUpdate(channel string) {
 	}
 
 	currentVersion := strings.TrimPrefix(a.srv.GetVersion(), "v")
-	if compareSemver(info.LatestVersion, currentVersion) <= 0 {
+	isDevOrBeta := strings.Contains(currentVersion, "dev") || strings.Contains(currentVersion, "beta")
+	if !isDevOrBeta && compareSemver(info.LatestVersion, currentVersion) <= 0 {
 		setUpdateState(UpdateStatus{
 			Status:    "done",
 			Progress:  100,

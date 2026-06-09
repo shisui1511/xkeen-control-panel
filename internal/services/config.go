@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -12,34 +13,57 @@ import (
 )
 
 func (s *ConfigService) resolvePath(path string) (string, error) {
-	if path == "" {
-		return "", errors.New("empty path")
+	if s.validator == nil {
+		return "", errors.New("path validator not configured")
 	}
-	clean := filepath.Clean(path)
-	if strings.Contains(clean, "..") {
+	// Strict validation against path traversal and characters to satisfy static analyzers (CWE-22)
+	if strings.Contains(path, "..") {
 		return "", errors.New("path traversal detected")
 	}
-	// Note: We don't check against s.ConfigDir here anymore because the API handler
-	// uses PathValidator which checks against multiple AllowedRoots.
-	return clean, nil
+	if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_\-\.\/]+$`, path); !matched {
+		return "", errors.New("invalid characters in path")
+	}
+
+	// Explicit clean + validate: strips traversal and checks against allowed roots.
+	clean := filepath.Clean(path)
+	validated, err := s.validator.Validate(clean)
+	if err != nil {
+		return "", err
+	}
+	// Extra guard: path must be within one of the known allowed roots (CWE-22).
+	for _, root := range s.validator.AllowedRoots {
+		cleanRoot := filepath.Clean(root)
+		if validated == cleanRoot || strings.HasPrefix(validated, cleanRoot+string(filepath.Separator)) {
+			return validated, nil
+		}
+	}
+	return "", errors.New("path not within allowed configuration roots")
 }
 
 type ConfigService struct {
 	ConfigDir string
+	validator *utils.PathValidator
 }
 
-func NewConfigService(dir string) *ConfigService {
-	return &ConfigService{ConfigDir: dir}
+func NewConfigService(dir string, roots []string) *ConfigService {
+	return &ConfigService{
+		ConfigDir: dir,
+		validator: utils.NewPathValidator(roots),
+	}
 }
 
 func (s *ConfigService) List(dir string) ([]string, error) {
 	if dir == "" {
 		dir = s.ConfigDir
 	}
+	safeDir, err := s.resolvePath(dir)
+	if err != nil {
+		return nil, err
+	}
 	var allFiles []string
 	extensions := []string{"*.json", "*.yaml", "*.yml", "*.conf"}
 	for _, ext := range extensions {
-		pattern := filepath.Join(dir, ext)
+		pattern := filepath.Join(safeDir, ext)
 		files, err := filepath.Glob(pattern)
 		if err != nil {
 			continue
@@ -51,25 +75,26 @@ func (s *ConfigService) List(dir string) ([]string, error) {
 }
 
 func (s *ConfigService) Read(path string) ([]byte, error) {
-	path, err := s.resolvePath(path)
+	safePath, err := s.resolvePath(path)
 	if err != nil {
 		return nil, err
 	}
-	return os.ReadFile(path)
+	return os.ReadFile(safePath)
 }
 
 func (s *ConfigService) Save(path string, data []byte) error {
-	path, err := s.resolvePath(path)
+	safePath, err := s.resolvePath(path)
 	if err != nil {
 		return err
 	}
 
-	// Create backup in 'backups' subdirectory
-	backupDir := filepath.Join(filepath.Dir(path), "backups")
-	backupPath := filepath.Join(backupDir, filepath.Base(path)+".backup-"+time.Now().Format("20060102-150405"))
+	// Build backup paths entirely from the validated safePath.
+	backupDir := filepath.Join(filepath.Dir(safePath), "backups")
+	backupName := filepath.Base(safePath) + ".backup-" + time.Now().Format("20060102-150405")
+	backupPath := filepath.Join(backupDir, backupName)
 
-	if s.Exists(path) {
-		oldData, err := os.ReadFile(path)
+	if s.Exists(safePath) {
+		oldData, err := os.ReadFile(safePath)
 		if err == nil {
 			if err := os.MkdirAll(backupDir, 0755); err != nil {
 				return err
@@ -81,30 +106,30 @@ func (s *ConfigService) Save(path string, data []byte) error {
 	}
 
 	// Rotate backups - keep only last 5
-	if err := s.rotateBackups(path, 5); err != nil {
+	if err := s.rotateBackups(safePath, 5); err != nil {
 		return err
 	}
 
-	return utils.AtomicWriteFile(path, data, 0644)
+	return utils.AtomicWriteFile(safePath, data, 0644)
 }
 
 func (s *ConfigService) Exists(path string) bool {
-	path, err := s.resolvePath(path)
+	safePath, err := s.resolvePath(path)
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(path)
+	_, err = os.Stat(safePath)
 	return !os.IsNotExist(err)
 }
 
 func (s *ConfigService) ListBackups(path string) ([]string, error) {
-	path, err := s.resolvePath(path)
+	safePath, err := s.resolvePath(path)
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Dir(path)
+	dir := filepath.Dir(safePath)
 	backupDir := filepath.Join(dir, "backups")
-	base := filepath.Base(path)
+	base := filepath.Base(safePath)
 	pattern := filepath.Join(backupDir, base+".backup-*")
 
 	backups, err := filepath.Glob(pattern)
@@ -112,7 +137,7 @@ func (s *ConfigService) ListBackups(path string) ([]string, error) {
 		return nil, err
 	}
 
-	// Validate and filter backups to ensure they are within config dir
+	// Validate and filter backups to ensure they are within config dir.
 	var valid []string
 	for _, b := range backups {
 		if _, err := s.resolvePath(b); err != nil {
@@ -136,21 +161,22 @@ func (s *ConfigService) ListBackups(path string) ([]string, error) {
 }
 
 func (s *ConfigService) rotateBackups(path string, keep int) error {
-	path, err := s.resolvePath(path)
+	safePath, err := s.resolvePath(path)
 	if err != nil {
 		return err
 	}
-	backups, err := s.ListBackups(path)
+	backups, err := s.ListBackups(safePath)
 	if err != nil || len(backups) <= keep {
 		return err
 	}
 
-	// Delete old backups
+	// Delete old backups — each entry was validated by ListBackups/resolvePath.
 	for i := keep; i < len(backups); i++ {
-		if _, err := s.resolvePath(backups[i]); err != nil {
+		safeBackup, err := s.resolvePath(backups[i])
+		if err != nil {
 			continue
 		}
-		if err := os.Remove(backups[i]); err != nil {
+		if err := os.Remove(safeBackup); err != nil {
 			return err
 		}
 	}
@@ -158,41 +184,41 @@ func (s *ConfigService) rotateBackups(path string, keep int) error {
 }
 
 func (s *ConfigService) Create(path string) error {
-	path, err := s.resolvePath(path)
+	safePath, err := s.resolvePath(path)
 	if err != nil {
 		return err
 	}
-	if s.Exists(path) {
+	if s.Exists(safePath) {
 		return os.ErrExist
 	}
-	return os.WriteFile(path, []byte("{}"), 0644)
+	return os.WriteFile(safePath, []byte("{}"), 0644)
 }
 
 func (s *ConfigService) Delete(path string) error {
-	path, err := s.resolvePath(path)
+	safePath, err := s.resolvePath(path)
 	if err != nil {
 		return err
 	}
-	if !s.Exists(path) {
+	if !s.Exists(safePath) {
 		return os.ErrNotExist
 	}
-	return os.Remove(path)
+	return os.Remove(safePath)
 }
 
 func (s *ConfigService) Rename(oldPath, newPath string) error {
-	oldPath, err := s.resolvePath(oldPath)
+	safeOld, err := s.resolvePath(oldPath)
 	if err != nil {
 		return err
 	}
-	newPath, err = s.resolvePath(newPath)
+	safeNew, err := s.resolvePath(newPath)
 	if err != nil {
 		return err
 	}
-	if !s.Exists(oldPath) {
+	if !s.Exists(safeOld) {
 		return os.ErrNotExist
 	}
-	if s.Exists(newPath) {
+	if s.Exists(safeNew) {
 		return os.ErrExist
 	}
-	return os.Rename(oldPath, newPath)
+	return os.Rename(safeOld, safeNew)
 }

@@ -1,0 +1,42 @@
+{
+  "version": "2.0.0",
+  "updated_at": "2026-06-03",
+  "templates": [
+    {
+      "name": "Xray: Routing — Selective (GeoSite/GeoIP)",
+      "description": "Selective routing: GeoSite/GeoIP → PROXY_TAG, private → direct, ads → block",
+      "type": "xray",
+      "filename": "selective-routing.json"
+    },
+    {
+      "name": "Xray: Routing — All Proxy",
+      "description": "Весь трафик через PROXY_TAG, кроме private и рекламы",
+      "type": "xray",
+      "filename": "all-proxy-routing.json"
+    },
+    {
+      "name": "Xray: Routing — Block QUIC + Selective",
+      "description": "Selective routing + блокировка QUIC (UDP 443) для стабильности",
+      "type": "xray",
+      "filename": "selective-no-quic.json"
+    },
+    {
+      "name": "Xray: Routing — Minimal (Direct)",
+      "description": "Минимальная конфигурация: inbounds SOCKS+HTTP, весь трафик direct",
+      "type": "xray",
+      "filename": "minimal-routing.json"
+    },
+    {
+      "name": "Mihomo: Rule-Based Routing",
+      "description": "Selective routing: MetaCubeX rule-sets, fake-ip DNS, proxy-providers",
+      "type": "mihomo",
+      "filename": "rule-based.yaml"
+    },
+    {
+      "name": "Mihomo: Global Proxy",
+      "description": "Весь трафик через прокси (mode: global), private → direct",
+      "type": "mihomo",
+      "filename": "global-proxy.yaml"
+    }
+  ]
+}

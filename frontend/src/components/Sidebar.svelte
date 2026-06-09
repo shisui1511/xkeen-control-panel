@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '../i18n';
-  import { isSidebarOpen, capabilities } from '../stores';
+  import { isSidebarOpen, capabilities, mihomoApiAvailable } from '../stores';
   import Icon from '../lib/components/Icon.svelte';
 
   export let currentTab: string = 'dashboard';
@@ -165,6 +165,13 @@
       >
         <Icon name="connections" size={16} />
         {$t('nav.connections')}
+        {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
+          <span
+            class="nav-badge-warn"
+            role="img"
+            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+          >
+        {/if}
       </a>
     {/if}
     <a
@@ -219,6 +226,13 @@
       >
         <Icon name="proxies" size={16} />
         {$t('nav.proxies')}
+        {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
+          <span
+            class="nav-badge-warn"
+            role="img"
+            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+          >
+        {/if}
       </a>
       <a
         href="#/rules"
@@ -229,6 +243,13 @@
       >
         <Icon name="rules" size={16} />
         {$t('nav.rules')}
+        {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
+          <span
+            class="nav-badge-warn"
+            role="img"
+            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+          >
+        {/if}
       </a>
     {/if}
     <a
@@ -365,3 +386,22 @@
     {loading ? $t('auth.logging_out') : $t('auth.logout')}
   </button>
 </div>
+
+<style>
+  .nav-badge-warn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--warning);
+    color: #03182a;
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 1;
+    margin-left: auto;
+    flex-shrink: 0;
+    box-shadow: 0 0 6px rgba(240, 180, 80, 0.5);
+  }
+</style>

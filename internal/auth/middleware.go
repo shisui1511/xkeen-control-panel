@@ -18,10 +18,10 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; "+
 				"script-src 'self' 'unsafe-inline'; "+
-				"style-src 'self' 'unsafe-inline'; "+
-				"img-src 'self' data:; "+
+				"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
+				"img-src 'self' data: https://cdn.jsdelivr.net https://raw.githubusercontent.com https://github.com https://www.redditstatic.com https://www.svgrepo.com; "+
 				"connect-src 'self'; "+
-				"font-src 'self'; "+
+				"font-src 'self' https://fonts.gstatic.com; "+
 				"frame-ancestors 'none'")
 
 		// Referrer policy

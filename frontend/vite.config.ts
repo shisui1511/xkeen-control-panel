@@ -21,5 +21,11 @@ export default defineConfig({
         changeOrigin: true
       }
     }
+  },
+  test: {
+    include: [
+      'src/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}',
+      'tests/**/*.test.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'
+    ]
   }
 });

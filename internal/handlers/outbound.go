@@ -2,8 +2,14 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 // OutboundParseRequest accepts a list of share links or a single multi-line string.
@@ -21,8 +27,14 @@ func (a *API) OutboundParse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
 	var req OutboundParseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1 MB)")
+			return
+		}
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -50,4 +62,265 @@ func (a *API) OutboundParse(w http.ResponseWriter, r *http.Request) {
 
 	results := a.subscriptionSvc.ParseLinks(links)
 	JSONSuccess(w, results)
+}
+
+// OutboundImportRequest represents the payload for importing a single outbound node.
+type OutboundImportRequest struct {
+	Link string `json:"link"`
+	Tag  string `json:"tag,omitempty"`
+}
+
+// OutboundImport handles POST /api/outbound/import.
+// Parses a single share link, updates or adds it to 04_outbounds.manual.json,
+// and restarts Xray service if it is running.
+func (a *API) OutboundImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
+	var req OutboundImportRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1 MB)")
+			return
+		}
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	link := strings.TrimSpace(req.Link)
+	if link == "" {
+		a.errorResponse(w, a.t(r, "subscr.import_error_empty"), http.StatusBadRequest)
+		return
+	}
+
+	if len(link) > 16384 {
+		a.errorResponse(w, a.t(r, "subscr.import_error_too_long"), http.StatusBadRequest)
+		return
+	}
+
+	if strings.HasPrefix(strings.ToLower(link), "vmess://") && len(link) > 8192 {
+		a.errorResponse(w, a.t(r, "subscr.import_error_too_long"), http.StatusBadRequest)
+		return
+	}
+
+	results := a.subscriptionSvc.ParseLinks([]string{link})
+	if len(results) == 0 || results[0].Error != "" || results[0].Outbound == nil {
+		a.errorResponse(w, a.t(r, "subscr.import_error_invalid"), http.StatusBadRequest)
+		return
+	}
+
+	ob := results[0].Outbound
+	if req.Tag != "" {
+		ob.Tag = req.Tag
+	}
+
+	manualPath := filepath.Join(a.cfg.XRayConfigDir, "04_outbounds.manual.json")
+
+	var wrapper struct {
+		Outbounds []services.Outbound `json:"outbounds"`
+	}
+
+	if a.configSvc.Exists(manualPath) {
+		data, err := a.configSvc.Read(manualPath)
+		if err != nil {
+			a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := json.Unmarshal(data, &wrapper); err != nil {
+			if len(strings.TrimSpace(string(data))) > 0 {
+				a.errorResponse(w, "Failed to parse manual outbounds file: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			wrapper.Outbounds = []services.Outbound{}
+		}
+	} else {
+		wrapper.Outbounds = []services.Outbound{}
+	}
+
+	// Update existing by tag or append
+	found := false
+	for i, existing := range wrapper.Outbounds {
+		if existing.Tag == ob.Tag {
+			wrapper.Outbounds[i] = *ob
+			found = true
+			break
+		}
+	}
+	if !found {
+		wrapper.Outbounds = append(wrapper.Outbounds, *ob)
+	}
+
+	jsonData, err := json.MarshalIndent(wrapper, "", "  ")
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := a.configSvc.Save(manualPath, jsonData); err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// D-03: Restart xray if running
+	if a.kernelSvc != nil && a.consoleSvc != nil {
+		if k := a.kernelSvc.Get("xray"); k != nil && k.ProcessStatus == "running" {
+			if _, err := a.consoleSvc.Execute("-restart"); err != nil {
+				log.Printf("OutboundImport: xkeen -restart after outbound import: %v", err)
+			}
+		}
+	}
+
+	JSONSuccess(w, nil)
+}
+
+// OutboundImportBulkItem represents an item to import.
+type OutboundImportBulkItem struct {
+	Link string `json:"link"`
+	Tag  string `json:"tag,omitempty"`
+}
+
+// OutboundImportBulkRequest represents the payload for importing multiple outbound nodes.
+type OutboundImportBulkRequest struct {
+	Items []OutboundImportBulkItem `json:"items"`
+}
+
+// OutboundImportBulk handles POST /api/outbound/import-bulk.
+// Parses multiple share links, updates or adds them to 04_outbounds.manual.json,
+// and restarts Xray service if it is running.
+func (a *API) OutboundImportBulk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
+	var req OutboundImportBulkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1 MB)")
+			return
+		}
+		JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if len(req.Items) == 0 {
+		JSONError(w, http.StatusBadRequest, "items is required")
+		return
+	}
+
+	if len(req.Items) > 200 {
+		JSONError(w, http.StatusBadRequest, "too many items (max 200 per request)")
+		return
+	}
+
+	var newOutbounds []*services.Outbound
+
+	for idx, item := range req.Items {
+		link := strings.TrimSpace(item.Link)
+		if link == "" {
+			JSONError(w, http.StatusBadRequest, fmt.Sprintf("item %d: link is empty", idx+1))
+			return
+		}
+
+		if len(link) > 16384 {
+			JSONError(w, http.StatusBadRequest, fmt.Sprintf("item %d: link too long (max 16384 characters)", idx+1))
+			return
+		}
+
+		if strings.HasPrefix(strings.ToLower(link), "vmess://") && len(link) > 8192 {
+			JSONError(w, http.StatusBadRequest, fmt.Sprintf("item %d: vmess link too long (max 8192 characters)", idx+1))
+			return
+		}
+
+		results := a.subscriptionSvc.ParseLinks([]string{link})
+		if len(results) == 0 || results[0].Error != "" || results[0].Outbound == nil {
+			errMsg := "invalid share link format"
+			if len(results) > 0 && results[0].Error != "" {
+				errMsg = results[0].Error
+			}
+			JSONError(w, http.StatusBadRequest, fmt.Sprintf("item %d: %s", idx+1, errMsg))
+			return
+		}
+
+		ob := results[0].Outbound
+		if item.Tag != "" {
+			ob.Tag = item.Tag
+		}
+		newOutbounds = append(newOutbounds, ob)
+	}
+
+	seenTags := make(map[string]struct{}, len(newOutbounds))
+	for idx, ob := range newOutbounds {
+		if _, dup := seenTags[ob.Tag]; dup {
+			JSONError(w, http.StatusBadRequest, fmt.Sprintf("item %d: duplicate tag %q in batch", idx+1, ob.Tag))
+			return
+		}
+		seenTags[ob.Tag] = struct{}{}
+	}
+
+	manualPath := filepath.Join(a.cfg.XRayConfigDir, "04_outbounds.manual.json")
+
+	var wrapper struct {
+		Outbounds []services.Outbound `json:"outbounds"`
+	}
+
+	if a.configSvc.Exists(manualPath) {
+		data, err := a.configSvc.Read(manualPath)
+		if err != nil {
+			a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := json.Unmarshal(data, &wrapper); err != nil {
+			if len(strings.TrimSpace(string(data))) > 0 {
+				a.errorResponse(w, "Failed to parse manual outbounds file: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			wrapper.Outbounds = []services.Outbound{}
+		}
+	} else {
+		wrapper.Outbounds = []services.Outbound{}
+	}
+
+	// Update existing by tag or append
+	for _, ob := range newOutbounds {
+		found := false
+		for i, existing := range wrapper.Outbounds {
+			if existing.Tag == ob.Tag {
+				wrapper.Outbounds[i] = *ob
+				found = true
+				break
+			}
+		}
+		if !found {
+			wrapper.Outbounds = append(wrapper.Outbounds, *ob)
+		}
+	}
+
+	jsonData, err := json.MarshalIndent(wrapper, "", "  ")
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := a.configSvc.Save(manualPath, jsonData); err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Restart xray if running
+	if a.kernelSvc != nil && a.consoleSvc != nil {
+		if k := a.kernelSvc.Get("xray"); k != nil && k.ProcessStatus == "running" {
+			if _, err := a.consoleSvc.Execute("-restart"); err != nil {
+				log.Printf("OutboundImportBulk: xkeen -restart after outbound import: %v", err)
+			}
+		}
+	}
+
+	JSONSuccess(w, nil)
 }

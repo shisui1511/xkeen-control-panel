@@ -3,7 +3,7 @@
   import { fade, slide } from 'svelte/transition';
   import { t, currentLang } from './i18n';
   $: ru = $currentLang === 'ru';
-  import { showToast } from './stores';
+  import { showToast, capabilities } from './stores';
   import Icon from './lib/components/Icon.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import EditorIcon from './lib/components/icons/Editor.svelte';
@@ -56,7 +56,7 @@
   import { mihomoSchema } from './schemas/mihomo';
 
   import { xraySnippetSource, mihomoSnippetSource } from './lib/snippets';
-  import MihomoGenerator from './MihomoGenerator.svelte';
+  import Constructor from './Constructor.svelte';
   import { buildPathAtCursor, type PathSegment } from './lib/editor-utils';
 
   export let onSwitchTab: (tab: string) => void = () => {};
@@ -135,17 +135,15 @@
   let xrayFiles: ConfigFileInfo[] = [];
   let mihomoFiles: ConfigFileInfo[] = [];
   let fileSearchQuery = '';
-  $: filteredXrayFiles = xrayFiles.filter((file) =>
-    file.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
-  );
-  $: filteredMihomoFiles = mihomoFiles.filter((file) =>
-    file.name.toLowerCase().includes(fileSearchQuery.toLowerCase())
-  );
+  $: filteredXrayFiles = Array.isArray(xrayFiles)
+    ? xrayFiles.filter((file) => file.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
+    : [];
+  $: filteredMihomoFiles = Array.isArray(mihomoFiles)
+    ? mihomoFiles.filter((file) => file.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
+    : [];
   $: isMihomoAutoEdited =
     selectedFile.includes('/mihomo/') &&
-    (selectedFile.endsWith('config.yaml') ||
-      selectedFile.endsWith('config.yml') ||
-      selectedFile.endsWith('default.yaml'));
+    (selectedFile.endsWith('config.yaml') || selectedFile.endsWith('config.yml'));
   let showSidebar = true;
 
   // Status bar cursor position
@@ -163,6 +161,13 @@
   let newFileName = '';
   let renameTarget = '';
   let templates: Template[] = [];
+  let templateTab: 'xray' | 'mihomo' = 'xray';
+  let selectedTemplate: Template | null = null;
+  let templatePreview = '';
+  let updatingTemplates = false;
+  let loadingPreview = false;
+
+  $: filteredTemplates = templates.filter((t) => t.type === templateTab);
 
   // Generator state
   let showGeneratorModal = false;
@@ -181,29 +186,33 @@
   let originalContent = '';
   let isDirty = false;
 
-  // Local active tab: 'files' or 'generator'
-  let activeTab: 'files' | 'generator' = 'files';
+  // Local active tab: 'files' | 'constructor'
+  let activeTab: 'files' | 'constructor' = 'files';
 
   function checkHashTab() {
-    if (window.location.hash === '#/mihomo-gen') {
-      activeTab = 'generator';
+    if (window.location.hash === '#/constructor') {
+      activeTab = 'constructor';
+    } else if (window.location.hash === '#/mihomo-gen') {
+      // backward-compat: старый deep-link редиректит на Constructor
+      activeTab = 'constructor';
+      window.location.hash = '#/constructor';
     } else {
       activeTab = 'files';
     }
   }
 
-  function setTab(tab: 'files' | 'generator') {
+  function setTab(tab: 'files' | 'constructor') {
     activeTab = tab;
-    if (tab === 'generator') {
-      window.location.hash = '#/mihomo-gen';
+    if (tab === 'constructor') {
+      window.location.hash = '#/constructor';
     } else {
       window.location.hash = '#/editor';
     }
   }
 
-  function handleInsertIntoEditor(yamlContent: string) {
+  async function handleInsertIntoEditor(yamlContent: string) {
     if (selectedFile) {
-      if (editorView) {
+      if (editorView && editorView.dom.isConnected) {
         editorView.dispatch({
           changes: {
             from: 0,
@@ -212,11 +221,28 @@
           }
         });
         isDirty = true;
-        // Save draft to local storage
-        localStorage.setItem(`editor.draft.${selectedFile}`, yamlContent);
+        activeTab = 'files';
+        window.location.hash = '#/editor';
+      } else {
+        // Editor DOM detached (on constructor tab).
+        // Switch to files tab, await tick so Svelte re-binds editorContainer,
+        // then re-mount the editor in-place (preserving state/extensions) and insert.
+        activeTab = 'files';
+        window.location.hash = '#/editor';
+        await tick();
+        if (editorView && !editorView.dom.isConnected && editorContainer) {
+          // Re-attach to the freshly-mounted container while keeping all extensions
+          const state = editorView.state;
+          editorView.destroy();
+          editorView = new EditorView({ state, parent: editorContainer });
+        }
+        if (editorView) {
+          editorView.dispatch({
+            changes: { from: 0, to: editorView.state.doc.length, insert: yamlContent }
+          });
+          isDirty = true;
+        }
       }
-      activeTab = 'files';
-      window.location.hash = '#/editor';
       showToast(
         'success',
         $t('editor.yaml_inserted') || 'Конфигурация вставлена в редактор. Не забудьте сохранить её!'
@@ -383,6 +409,86 @@
     }
   }
 
+  function buildEditorState(
+    doc: string,
+    lang: ReturnType<typeof json>,
+    schemaExts: ReturnType<typeof getSchemaExtensions>
+  ): EditorState {
+    return EditorState.create({
+      doc,
+      extensions: [
+        lineNumbers(),
+        highlightActiveLineGutter(),
+        highlightSpecialChars(),
+        history(),
+        foldGutter(),
+        drawSelection(),
+        dropCursor(),
+        EditorState.allowMultipleSelections.of(true),
+        indentOnInput(),
+        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        bracketMatching(),
+        closeBrackets(),
+        autocompletion(),
+        rectangularSelection(),
+        crosshairCursor(),
+        highlightActiveLine(),
+        highlightSelectionMatches(),
+        keymap.of([
+          {
+            key: 'Mod-s',
+            run: () => {
+              checkBeforeSave();
+              return true;
+            }
+          },
+          ...closeBracketsKeymap,
+          ...defaultKeymap,
+          ...searchKeymap,
+          ...historyKeymap,
+          ...foldKeymap,
+          ...completionKeymap,
+          ...lintKeymap
+        ]),
+        lang,
+        EditorView.lineWrapping,
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            const currentContent = update.state.doc.toString();
+            const activeT = tabs.find((t) => t.path === selectedFile);
+            if (activeT) {
+              activeT.currentContent = currentContent;
+              activeT.isDirty = currentContent !== activeT.originalContent;
+              isDirty = activeT.isDirty;
+
+              if (activeT.isPreview) {
+                activeT.isPreview = false;
+                tabs = [...tabs];
+              }
+
+              if (isDirty) {
+                localStorage.setItem(`editor.draft.${selectedFile}`, currentContent);
+              } else {
+                localStorage.removeItem(`editor.draft.${selectedFile}`);
+              }
+            }
+          }
+          if (update.selectionSet || update.docChanged) {
+            const pos = update.state.selection.main.head;
+            const line = update.state.doc.lineAt(pos);
+            cursorLine = line.number;
+            cursorCol = pos - line.from + 1;
+
+            // Обновить хлебные крошки
+            const isYaml = selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml');
+            breadcrumbs = buildPathAtCursor(update.state, pos, isYaml);
+          }
+        }),
+        schemaCompartment.of(schemaExts)
+      ]
+    });
+  }
+
   async function switchTab(path: string) {
     if (activeTabPath === path) return;
 
@@ -411,79 +517,7 @@
       const lang = path.endsWith('.yaml') || path.endsWith('.yml') ? yaml() : json();
       const schemaExts = getSchemaExtensions(path, expertMode);
 
-      const state = EditorState.create({
-        doc: targetTab.currentContent,
-        extensions: [
-          lineNumbers(),
-          highlightActiveLineGutter(),
-          highlightSpecialChars(),
-          history(),
-          foldGutter(),
-          drawSelection(),
-          dropCursor(),
-          EditorState.allowMultipleSelections.of(true),
-          indentOnInput(),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-          bracketMatching(),
-          closeBrackets(),
-          autocompletion(),
-          rectangularSelection(),
-          crosshairCursor(),
-          highlightActiveLine(),
-          highlightSelectionMatches(),
-          keymap.of([
-            {
-              key: 'Mod-s',
-              run: () => {
-                checkBeforeSave();
-                return true;
-              }
-            },
-            ...closeBracketsKeymap,
-            ...defaultKeymap,
-            ...searchKeymap,
-            ...historyKeymap,
-            ...foldKeymap,
-            ...completionKeymap,
-            ...lintKeymap
-          ]),
-          lang,
-          EditorView.lineWrapping,
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) {
-              const currentContent = update.state.doc.toString();
-              const activeT = tabs.find((t) => t.path === selectedFile);
-              if (activeT) {
-                activeT.currentContent = currentContent;
-                activeT.isDirty = currentContent !== activeT.originalContent;
-                isDirty = activeT.isDirty;
-
-                if (activeT.isPreview) {
-                  activeT.isPreview = false;
-                  tabs = [...tabs];
-                }
-
-                if (isDirty) {
-                  localStorage.setItem(`editor.draft.${selectedFile}`, currentContent);
-                } else {
-                  localStorage.removeItem(`editor.draft.${selectedFile}`);
-                }
-              }
-            }
-            if (update.selectionSet || update.docChanged) {
-              const pos = update.state.selection.main.head;
-              const line = update.state.doc.lineAt(pos);
-              cursorLine = line.number;
-              cursorCol = pos - line.from + 1;
-
-              // Обновить хлебные крошки
-              const isYaml = selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml');
-              breadcrumbs = buildPathAtCursor(update.state, pos, isYaml);
-            }
-          }),
-          schemaCompartment.of(schemaExts)
-        ]
-      });
+      const state = buildEditorState(targetTab.currentContent, lang, schemaExts);
 
       originalContent = targetTab.originalContent;
       isDirty = targetTab.isDirty;
@@ -573,7 +607,6 @@
   }
 
   async function loadFile(path: string, isPreviewClick = true) {
-    console.log('loadFile called with path:', path, 'isPreviewClick:', isPreviewClick);
     if (!path) return;
 
     const existingTab = tabs.find((t) => t.path === path);
@@ -676,79 +709,7 @@
       const lang = path.endsWith('.yaml') || path.endsWith('.yml') ? yaml() : json();
       const schemaExts = getSchemaExtensions(path, expertMode);
 
-      const state = EditorState.create({
-        doc: content,
-        extensions: [
-          lineNumbers(),
-          highlightActiveLineGutter(),
-          highlightSpecialChars(),
-          history(),
-          foldGutter(),
-          drawSelection(),
-          dropCursor(),
-          EditorState.allowMultipleSelections.of(true),
-          indentOnInput(),
-          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-          bracketMatching(),
-          closeBrackets(),
-          autocompletion(),
-          rectangularSelection(),
-          crosshairCursor(),
-          highlightActiveLine(),
-          highlightSelectionMatches(),
-          keymap.of([
-            {
-              key: 'Mod-s',
-              run: () => {
-                checkBeforeSave();
-                return true;
-              }
-            },
-            ...closeBracketsKeymap,
-            ...defaultKeymap,
-            ...searchKeymap,
-            ...historyKeymap,
-            ...foldKeymap,
-            ...completionKeymap,
-            ...lintKeymap
-          ]),
-          lang,
-          EditorView.lineWrapping,
-          EditorView.updateListener.of((update) => {
-            if (update.docChanged) {
-              const currentContent = update.state.doc.toString();
-              const activeT = tabs.find((t) => t.path === selectedFile);
-              if (activeT) {
-                activeT.currentContent = currentContent;
-                activeT.isDirty = currentContent !== activeT.originalContent;
-                isDirty = activeT.isDirty;
-
-                if (activeT.isPreview) {
-                  activeT.isPreview = false;
-                  tabs = [...tabs];
-                }
-
-                if (isDirty) {
-                  localStorage.setItem(`editor.draft.${selectedFile}`, currentContent);
-                } else {
-                  localStorage.removeItem(`editor.draft.${selectedFile}`);
-                }
-              }
-            }
-            if (update.selectionSet || update.docChanged) {
-              const pos = update.state.selection.main.head;
-              const line = update.state.doc.lineAt(pos);
-              cursorLine = line.number;
-              cursorCol = pos - line.from + 1;
-
-              // Обновить хлебные крошки
-              const isYaml = selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml');
-              breadcrumbs = buildPathAtCursor(update.state, pos, isYaml);
-            }
-          }),
-          schemaCompartment.of(schemaExts)
-        ]
-      });
+      const state = buildEditorState(content, lang, schemaExts);
 
       originalContent = content;
       isDirty = false;
@@ -922,6 +883,7 @@
 
   function getDiffGroups(oldStr: string, newStr: string): DiffGroup[] {
     const changes = getDiff(oldStr, newStr);
+    if (changes.length === 0) return [];
     const groups: DiffGroup[] = [];
 
     let currentType = changes[0]?.type;
@@ -1054,12 +1016,6 @@
   }
 
   async function handleSaveAndApply() {
-    console.log(
-      'handleSaveAndApply called. selectedFile:',
-      selectedFile,
-      'editorView:',
-      !!editorView
-    );
     if (!selectedFile || !editorView) return;
     applyLoading = true;
     await tick();
@@ -1244,7 +1200,7 @@
       await loadFiles();
       await loadFile(path);
     } catch (e) {
-      showToast('error', $t('editor.create_error') + ': ' + e.message);
+      showToast('error', $t('editor.create_error') + ': ' + (e as any)?.message);
     }
   }
 
@@ -1267,7 +1223,7 @@
       backups = [];
       await loadFiles();
     } catch (e) {
-      showToast('error', $t('editor.delete_error') + ': ' + e.message);
+      showToast('error', $t('editor.delete_error') + ': ' + (e as any)?.message);
     }
   }
 
@@ -1294,7 +1250,7 @@
       await loadFiles();
       await loadFile(newPath);
     } catch (e) {
-      showToast('error', $t('editor.rename_error') + ': ' + e.message);
+      showToast('error', $t('editor.rename_error') + ': ' + (e as any)?.message);
     }
   }
 
@@ -1373,7 +1329,7 @@
         showToast('info', 'No quick fixes needed');
       }
     } catch (e) {
-      showToast('error', 'Quick fix error: ' + e.message);
+      showToast('error', 'Quick fix error: ' + (e as any)?.message);
     }
   }
 
@@ -1389,6 +1345,51 @@
     } catch (e) {
       templates = [];
     }
+  }
+
+  async function loadTemplatePreview(template: Template) {
+    selectedTemplate = template;
+    templatePreview = '';
+    loadingPreview = true;
+    try {
+      const res = await fetch(`/api/templates/fetch?name=${encodeURIComponent(template.name)}`);
+      if (res.ok) {
+        const data = await res.json();
+        templatePreview = (data.content || '').split('\n').slice(0, 50).join('\n');
+      }
+    } catch (e) {
+      templatePreview = '';
+    } finally {
+      loadingPreview = false;
+    }
+  }
+
+  async function updateTemplates() {
+    updatingTemplates = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/templates/update', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (!res.ok) throw new Error((await res.text()) || 'Failed');
+      await loadTemplates();
+      // После обновления авто-выбрать первый шаблон текущего таба
+      const first = templates.find((t) => t.type === templateTab);
+      if (first) await loadTemplatePreview(first);
+      showToast('success', $t('editor.templates_updated'));
+    } catch (e: any) {
+      showToast('error', $t('editor.templates_update_error'));
+    } finally {
+      updatingTemplates = false;
+    }
+  }
+
+  function openTemplatesModal() {
+    templateTab = 'xray';
+    selectedTemplate = null;
+    templatePreview = '';
+    showTemplatesModal = true;
   }
 
   async function applyTemplate(template: Template) {
@@ -1472,7 +1473,7 @@
             {
               address: genAddress,
               port: genPort,
-              method: '256-gcm',
+              method: 'aes-256-gcm',
               password: genUUID
             }
           ]
@@ -1528,14 +1529,14 @@
       <div class="crumbs">
         {$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
         {$t('nav.editor')}
-        {#if activeTab === 'generator'}
+        {#if activeTab === 'constructor'}
           <span style="color:var(--fg-faint);margin:0 6px;">/</span>
-          {$t('editor.crumbs_generator')}
+          {$t('editor.tab_constructor')}
         {/if}
       </div>
-      <h1>{activeTab === 'generator' ? $t('editor.generator_title') : $t('editor.h1')}</h1>
+      <h1>{activeTab === 'constructor' ? $t('editor.constructor_title') : $t('editor.h1')}</h1>
       <p class="sub">
-        {activeTab === 'generator' ? $t('editor.generator_subtitle') : $t('editor.h1_sub')}
+        {activeTab === 'constructor' ? $t('editor.constructor_subtitle') : $t('editor.h1_sub')}
       </p>
     </div>
     {#if activeTab === 'files'}
@@ -1645,11 +1646,11 @@
     </button>
     <button
       class="tab-btn"
-      class:active={activeTab === 'generator'}
-      on:click={() => setTab('generator')}
+      class:active={activeTab === 'constructor'}
+      on:click={() => setTab('constructor')}
     >
       <Icon name="settings" size={14} />
-      {$t('editor.tab_generator')}
+      {$t('editor.tab_constructor')}
     </button>
   </div>
 
@@ -1678,17 +1679,24 @@
           </div>
 
           <!-- Xray Section -->
-          <div class="editor-files" style="margin-bottom:12px;">
-            <div
+          <details
+            class="editor-files nav-group"
+            style="margin-bottom:12px;"
+            open={$capabilities?.active_kernel === 'xray'}
+          >
+            <summary
               class="editor-files-head"
-              style="display:flex;align-items:center;justify-content:space-between;"
+              style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
             >
-              <span>Xray</span>
-              <span
-                style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
-                >{xrayDir}</span
-              >
-            </div>
+              <span class="group-ttl">Xray</span>
+              <span style="display:flex;align-items:center;gap:6px;">
+                <span
+                  style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
+                  >{xrayDir}</span
+                >
+                <span class="nav-group-arrow">›</span>
+              </span>
+            </summary>
             <div class="file-list">
               {#each filteredXrayFiles as file}
                 <button
@@ -1708,20 +1716,23 @@
                 >
               {/each}
             </div>
-          </div>
+          </details>
 
           <!-- Mihomo Section -->
-          <div class="editor-files">
-            <div
+          <details class="editor-files nav-group" open={$capabilities?.active_kernel === 'mihomo'}>
+            <summary
               class="editor-files-head"
-              style="display:flex;align-items:center;justify-content:space-between;"
+              style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
             >
-              <span>Mihomo</span>
-              <span
-                style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
-                >{mihomoDir}</span
-              >
-            </div>
+              <span class="group-ttl">Mihomo</span>
+              <span style="display:flex;align-items:center;gap:6px;">
+                <span
+                  style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
+                  >{mihomoDir}</span
+                >
+                <span class="nav-group-arrow">›</span>
+              </span>
+            </summary>
             <div class="file-list">
               {#each filteredMihomoFiles as file}
                 <button
@@ -1741,7 +1752,7 @@
                 >
               {/each}
             </div>
-          </div>
+          </details>
         </div>
       {/if}
 
@@ -1943,7 +1954,7 @@
                         class="kebab-item"
                         on:click={() => {
                           showKebabMenu = false;
-                          showTemplatesModal = true;
+                          openTemplatesModal();
                           loadTemplates();
                         }}
                       >
@@ -2160,9 +2171,9 @@
         </div>
       {/if}
     </div>
-  {:else if activeTab === 'generator'}
+  {:else if activeTab === 'constructor'}
     <div transition:fade={{ duration: 150 }} style="margin-top: 16px;">
-      <MihomoGenerator
+      <Constructor
         {onSwitchTab}
         onInsertIntoEditor={handleInsertIntoEditor}
         {selectedFile}
@@ -2260,40 +2271,128 @@
     on:keydown={(e) => e.key === 'Escape' && (showTemplatesModal = false)}
   >
     <div
-      class="confirm-modal"
-      style="max-width: 600px;"
+      class="confirm-modal templates-wide-modal"
       role="presentation"
+      aria-modal="true"
       on:click|stopPropagation
       on:keydown|stopPropagation
     >
+      <!-- Header -->
       <div class="modal-header">
-        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
-          {$t('editor.templates')}
-        </h3>
-        <button class="btn-close" on:click={() => (showTemplatesModal = false)}>
-          <Icon name="cross" size={14} />
-        </button>
-      </div>
-      <p style="margin: 8px 0 16px; color: var(--fg-dim); font-size: 13px;">
-        {$t('editor.templates_desc')}
-      </p>
-
-      <div class="template-list">
-        {#each templates as template}
+        <div class="templates-modal-title-block">
+          <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
+            {$t('editor.templates')}
+          </h3>
+          <p class="templates-modal-subtitle">{$t('editor.templates_desc')}</p>
+        </div>
+        <div class="templates-modal-header-actions">
           <button
-            class="template-item"
-            on:click={() => applyTemplate(template)}
-            disabled={templateLoading}
+            class="btn btn-secondary templates-update-btn"
+            on:click={updateTemplates}
+            disabled={updatingTemplates}
+            title={$t('editor.templates_update')}
           >
-            <div class="template-info">
-              <span class="template-name">{template.name}</span>
-              <span class="template-desc">{template.description}</span>
-            </div>
-            <span class="template-type">{template.type}</span>
+            <span class="templates-update-icon" class:spinning={updatingTemplates}>
+              <Icon name="refresh" size={14} />
+            </span>
+            {$t('editor.templates_update')}
           </button>
-        {:else}
-          <p class="text-center p-3" style="color: var(--fg-dim);">{$t('editor.no_templates')}</p>
-        {/each}
+          <button
+            class="btn-close"
+            aria-label="Закрыть"
+            on:click={() => (showTemplatesModal = false)}
+          >
+            <Icon name="cross" size={14} />
+          </button>
+        </div>
+      </div>
+
+      <!-- 2-column body -->
+      <div class="templates-body-grid">
+        <!-- Left column: tabs + list -->
+        <div class="templates-col-list">
+          <div class="templates-kernel-tabs">
+            <button
+              class="tab-btn"
+              class:active={templateTab === 'xray'}
+              aria-pressed={templateTab === 'xray'}
+              on:click={async () => {
+                templateTab = 'xray';
+                selectedTemplate = null;
+                templatePreview = '';
+                const first = filteredTemplates[0];
+                if (first) await loadTemplatePreview(first);
+              }}
+            >
+              {$t('editor.templates_tab_xray')}
+            </button>
+            <button
+              class="tab-btn"
+              class:active={templateTab === 'mihomo'}
+              aria-pressed={templateTab === 'mihomo'}
+              on:click={async () => {
+                templateTab = 'mihomo';
+                selectedTemplate = null;
+                templatePreview = '';
+                const first = filteredTemplates[0];
+                if (first) await loadTemplatePreview(first);
+              }}
+            >
+              {$t('editor.templates_tab_mihomo')}
+            </button>
+          </div>
+
+          <div class="template-list">
+            {#each filteredTemplates as template (template.name)}
+              <button
+                class="template-item"
+                class:selected={selectedTemplate?.name === template.name}
+                on:click={() => loadTemplatePreview(template)}
+                disabled={templateLoading}
+              >
+                <div class="template-info">
+                  <span class="template-name">{template.name}</span>
+                  <span class="template-desc">{template.description}</span>
+                </div>
+                <span class="template-type">{template.type}</span>
+              </button>
+            {:else}
+              <div class="templates-empty-state">
+                <p class="templates-empty-title">{$t('editor.no_templates')}</p>
+                <p class="templates-empty-hint">{$t('editor.no_templates_hint')}</p>
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <!-- Right column: preview -->
+        <div class="templates-col-preview">
+          {#if loadingPreview}
+            <div class="templates-preview-loading">
+              <span class="spinning"><Icon name="refresh" size={16} /></span>
+            </div>
+          {:else if templatePreview}
+            <pre class="template-preview-code">{templatePreview}</pre>
+          {:else}
+            <div class="templates-preview-placeholder">
+              <p style="color: var(--fg-dim); font-size: 13px; text-align: center;">
+                {selectedTemplate ? '' : 'Выберите шаблон для предпросмотра'}
+              </p>
+            </div>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="templates-modal-footer">
+        <button
+          class="btn btn-primary"
+          disabled={!selectedTemplate || !editorView || templateLoading}
+          title={!editorView ? $t('editor.no_file_for_template') : undefined}
+          on:click={() => selectedTemplate && applyTemplate(selectedTemplate)}
+        >
+          {$t('editor.apply_template')}
+        </button>
       </div>
     </div>
   </div>
@@ -2668,8 +2767,19 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 360px;
     overflow-y: auto;
+    flex: 1;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  .template-list::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .template-list::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 2px;
   }
 
   .template-item {
@@ -2718,6 +2828,179 @@
     border: 1px solid var(--border);
     color: var(--fg-dim);
     font-family: var(--font-family-mono);
+  }
+
+  .template-item.selected {
+    border-color: var(--accent);
+    background: var(--hover);
+  }
+
+  /* Templates wide modal — 2-column layout */
+  .templates-wide-modal {
+    max-width: 900px !important;
+    width: 90vw !important;
+    padding: 0 !important;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .templates-wide-modal .modal-header {
+    padding: 20px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-shrink: 0;
+  }
+
+  .templates-modal-title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .templates-modal-subtitle {
+    margin: 0;
+    color: var(--fg-dim);
+    font-size: 11.5px;
+  }
+
+  .templates-modal-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .templates-update-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 6px 10px;
+    height: 32px;
+  }
+
+  .templates-update-icon {
+    display: flex;
+    align-items: center;
+  }
+
+  .spinning {
+    display: inline-flex;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .templates-body-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    max-height: 460px;
+  }
+
+  .templates-col-list {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .templates-kernel-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 12px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .templates-kernel-tabs .tab-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .templates-col-list .template-list {
+    padding: 12px;
+  }
+
+  .templates-col-preview {
+    background: var(--bg-deep);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .template-preview-code {
+    margin: 0;
+    padding: 16px;
+    font-family: var(--font-family-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--fg-secondary);
+    overflow-y: auto;
+    overflow-x: auto;
+    white-space: pre;
+    height: 100%;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  .template-preview-code::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .template-preview-code::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 2px;
+  }
+
+  .templates-preview-loading,
+  .templates-preview-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 200px;
+    color: var(--fg-dim);
+  }
+
+  .templates-empty-state {
+    padding: 24px 16px;
+    text-align: center;
+  }
+
+  .templates-empty-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-secondary);
+    margin: 0 0 6px;
+  }
+
+  .templates-empty-hint {
+    font-size: 11.5px;
+    color: var(--fg-dim);
+    margin: 0;
+  }
+
+  .templates-modal-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    flex-shrink: 0;
   }
 
   .modal-header {

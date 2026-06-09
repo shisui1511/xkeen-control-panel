@@ -83,7 +83,10 @@ func main() {
 		},
 	}
 
-	webFS, _ := xkeencontrolpanel.GetWebFS()
+	webFS, err := xkeencontrolpanel.GetWebFS()
+	if err != nil {
+		log.Fatalf("failed to load embedded web assets: %v", err)
+	}
 	srv, err := server.New(srvCfg, Version, webFS)
 	if err != nil {
 		log.Fatalf("Failed to create server: %v", err)
@@ -93,7 +96,7 @@ func main() {
 	authSvc := srv.GetAuthService()
 	defer authSvc.Stop()
 	srv.Handle("/api/auth/login", authSvc.HandleLogin)
-	srv.Handle("/api/auth/logout", authSvc.HandleLogout)
+	srv.HandleProtected("/api/auth/logout", authSvc.HandleLogout)
 	srv.Handle("/api/auth/me", authSvc.HandleMe)
 	srv.Handle("/api/auth/setup", authSvc.HandleSetup)
 
@@ -109,11 +112,13 @@ func main() {
 	srv.HandleProtected("/api/config/list", api.ConfigList)
 	srv.HandleProtected("/api/config/read", api.ConfigRead)
 	srv.HandleProtected("/api/config/save", api.ConfigSave)
+	srv.HandleProtected("/api/config/mihomo-merge", api.MihomoMergeSave)
 	srv.HandleProtected("/api/config/backups", api.ConfigBackups)
 	srv.HandleProtected("/api/config/create", api.ConfigCreate)
 	srv.HandleProtected("/api/config/delete", api.ConfigDelete)
 	srv.HandleProtected("/api/config/rename", api.ConfigRename)
 	srv.HandleProtected("/api/config/validate", api.ConfigValidate)
+	srv.HandleProtected("/api/config/preflight", api.ConfigPreflight)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
 	srv.HandleProtected("/api/settings/dev-mode", api.SettingsDevMode)
@@ -137,6 +142,8 @@ func main() {
 
 	// Subscription endpoints
 	srv.HandleProtected("/api/outbound/parse", api.OutboundParse)
+	srv.HandleProtected("/api/outbound/import", api.OutboundImport)
+	srv.HandleProtected("/api/outbound/import-bulk", api.OutboundImportBulk)
 	srv.HandleProtected("/api/subscriptions", api.SubscriptionList)
 	srv.HandleProtected("/api/subscriptions/add", api.SubscriptionAdd)
 	srv.HandleProtected("/api/subscriptions/update", api.SubscriptionUpdate)
@@ -216,10 +223,15 @@ func main() {
 	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)
 
 	// Templates
-	templateSvc := services.NewTemplateService()
+	templatesFS, err := xkeencontrolpanel.GetTemplatesFS()
+	if err != nil {
+		log.Fatalf("failed to load embedded templates: %v", err)
+	}
+	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir)
 	api.SetTemplateService(templateSvc)
 	srv.HandleProtected("/api/templates/list", api.TemplateList)
 	srv.HandleProtected("/api/templates/fetch", api.TemplateFetch)
+	srv.HandleProtected("/api/templates/update", api.TemplateUpdate)
 
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)

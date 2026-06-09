@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, get } from 'svelte/store';
 
 // --- Capabilities store ---
 
@@ -26,6 +26,14 @@ export interface CapabilitiesData {
 }
 
 export const capabilities = writable<CapabilitiesData | null>(null);
+export const isKernelChecking = writable(false);
+
+// --- Mihomo API availability store ---
+// Updated by fetchCapabilities on every poll cycle (10 s interval).
+// Sidebar reads this store reactively to show/hide the badge on Proxy/Rules/Connections nav items.
+export const mihomoApiAvailable = writable<boolean>(false);
+
+let lastValidActiveKernel = '';
 
 export async function fetchCapabilities(): Promise<void> {
   try {
@@ -34,7 +42,30 @@ export async function fetchCapabilities(): Promise<void> {
       const envelope = await res.json();
       // Capabilities uses JSONSuccess envelope: {success, data: {...}}
       const data: CapabilitiesData = envelope.data ?? envelope;
-      capabilities.set(data);
+
+      if (data.active_kernel) {
+        lastValidActiveKernel = data.active_kernel;
+      } else if (lastValidActiveKernel) {
+        data.active_kernel = lastValidActiveKernel;
+      }
+
+      if (get(isKernelChecking)) {
+        capabilities.update((current) => {
+          if (current) {
+            return {
+              ...data,
+              active_kernel: current.active_kernel
+            };
+          }
+          return data;
+        });
+      } else {
+        capabilities.set(data);
+      }
+
+      // Update Mihomo API availability store unconditionally on every successful fetch.
+      // Sidebar and Dashboard checklist both subscribe to this store reactively (D-12, D-13).
+      mihomoApiAvailable.set(data.mihomo?.api_reachable ?? false);
     }
   } catch (_) {
     // Silently ignore — capabilities will remain null
@@ -48,7 +79,7 @@ export const isSidebarOpen = writable(false);
 
 export interface ToastItem {
   id: number;
-  type: 'success' | 'error' | 'info';
+  type: 'success' | 'error' | 'info' | 'warning';
   message: string;
   duration?: number;
 }

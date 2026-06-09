@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t, currentLang } from './i18n';
+  import { t, currentLang, pluralize } from './i18n';
   import Icon from './lib/components/Icon.svelte';
   import { showToast, capabilities } from './stores';
 
@@ -31,6 +31,7 @@
   let error = '';
   let globalUpdating = false;
   let rollbacking = false;
+  let updatingFile: string | null = null;
 
   // Tag browser state
   let tagDrawer: {
@@ -62,14 +63,26 @@
     }
   }
 
-  async function updateAll() {
-    globalUpdating = true;
+  async function updateAll(filename?: string) {
+    if (filename) {
+      updatingFile = filename;
+    } else {
+      globalUpdating = true;
+    }
     error = '';
     try {
       const csrfToken = localStorage.getItem('csrf_token');
+      const body = filename ? JSON.stringify({ file: filename }) : undefined;
+      const headers: Record<string, string> = {
+        'X-CSRF-Token': csrfToken || ''
+      };
+      if (body) {
+        headers['Content-Type'] = 'application/json';
+      }
       const res = await fetch('/api/dat/update', {
         method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+        headers,
+        body
       });
       if (!res.ok) {
         const text = await res.text();
@@ -80,6 +93,7 @@
       error = e.message;
     } finally {
       globalUpdating = false;
+      updatingFile = null;
     }
   }
 
@@ -96,14 +110,11 @@
         const text = await res.text();
         throw new Error(text);
       }
-      showToast(
-        'success',
-        $currentLang === 'ru' ? 'Файлы успешно откачены' : 'Files rolled back successfully'
-      );
+      showToast('success', $t('dat.rollback_success'));
       await fetchFiles();
     } catch (e: any) {
       error = e.message;
-      showToast('error', e.message);
+      showToast('error', `${$t('dat.rollback_error')}: ${e.message}`);
     } finally {
       rollbacking = false;
     }
@@ -189,7 +200,7 @@
     if (s === 'outdated')
       return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕЛО' : 'OUTDATED' };
     if (s === 'warning')
-      return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕЛО' : 'OUTDATED' };
+      return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕВАЕТ' : 'AGING' };
     return { cls: 'badge badge-success', label: 'OK' };
   }
 
@@ -235,9 +246,18 @@
   $: xrayFiles = files.filter((f) => f.type === 'xray');
   $: mihomoFiles = files.filter((f) => f.type === 'mihomo');
   $: otherFiles = files.filter((f) => f.type !== 'xray' && f.type !== 'mihomo');
-  $: totalSize = files.reduce((sum, f) => sum + f.size, 0);
-  $: lastUpdated = files.reduce((max, f) => Math.max(max, f.last_update || 0), 0);
-  $: missingCount = files.filter((f) => !f.exists).length;
+
+  $: activeKernel = $capabilities?.active_kernel || null;
+  $: displayedFiles = files.filter((f) => {
+    if (f.type === 'xray') return activeKernel === null || activeKernel === 'xray';
+    if (f.type === 'mihomo') return activeKernel === null || activeKernel === 'mihomo';
+    return true; // Прочие файлы всегда показываются
+  });
+
+  $: actualCount = displayedFiles.filter((f) => getFileStatus(f) === 'ok').length;
+  $: missingCount = displayedFiles.filter((f) => !f.exists).length;
+  $: totalSize = displayedFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+  $: lastUpdated = displayedFiles.reduce((max, f) => Math.max(max, f.last_update || 0), 0);
 
   onMount(fetchFiles);
 </script>
@@ -256,7 +276,7 @@
       <button
         class="btn btn-secondary"
         on:click={rollbackAll}
-        disabled={rollbacking || loading || globalUpdating}
+        disabled={rollbacking || loading || globalUpdating || updatingFile !== null}
         title={$currentLang === 'ru'
           ? 'Откатить DAT-файлы из бэкапа'
           : 'Rollback DAT files from backup'}
@@ -285,8 +305,8 @@
       </button>
       <button
         class="btn btn-primary"
-        on:click={updateAll}
-        disabled={globalUpdating || loading}
+        on:click={() => updateAll()}
+        disabled={globalUpdating || loading || updatingFile !== null}
         title={$t('dat.update_all')}
       >
         {#if globalUpdating}
@@ -316,11 +336,11 @@
   {/if}
 
   <!-- Stats -->
-  {#if !loading && files.length > 0}
+  {#if !loading && displayedFiles.length > 0}
     <div class="stats mb-3">
-      <span class="stat"><b>{files.length}</b> {$t('dat.total_files')}</span>
+      <span class="stat"><b>{displayedFiles.length}</b> {$t('dat.total_files')}</span>
       <span class="stat"
-        ><b>{files.length - missingCount}</b>
+        ><b>{actualCount}</b>
         {$currentLang === 'ru' ? 'актуальных' : 'active'}</span
       >
       {#if missingCount > 0}
@@ -390,8 +410,13 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {file.record_count.toLocaleString()}
-                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                    {pluralize(
+                      file.record_count,
+                      $t('dat.record_count_one', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_few', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_many', { count: file.record_count.toLocaleString() }),
+                      $currentLang
+                    )} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·
@@ -432,20 +457,30 @@
                 {#if getFileStatus(file) === 'outdated' || getFileStatus(file) === 'warning'}
                   <button
                     class="btn btn-primary"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
                   >
-                    {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {#if updatingFile === file.name}
+                      {$currentLang === 'ru' ? 'Обновление...' : 'Updating...'}
+                    {:else}
+                      {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {/if}
                   </button>
                 {:else}
                   <button
                     class="btn btn-secondary btn-icon-only"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_all')}
                   >
-                    ↓
+                    {#if updatingFile === file.name}
+                      …
+                    {:else}
+                      ↓
+                    {/if}
                   </button>
                 {/if}
               </div>
@@ -505,8 +540,13 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {file.record_count.toLocaleString()}
-                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                    {pluralize(
+                      file.record_count,
+                      $t('dat.record_count_one', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_few', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_many', { count: file.record_count.toLocaleString() }),
+                      $currentLang
+                    )} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·
@@ -547,20 +587,30 @@
                 {#if getFileStatus(file) === 'outdated' || getFileStatus(file) === 'warning'}
                   <button
                     class="btn btn-primary"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
                   >
-                    {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {#if updatingFile === file.name}
+                      {$currentLang === 'ru' ? 'Обновление...' : 'Updating...'}
+                    {:else}
+                      {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {/if}
                   </button>
                 {:else}
                   <button
                     class="btn btn-secondary btn-icon-only"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_all')}
                   >
-                    ↓
+                    {#if updatingFile === file.name}
+                      …
+                    {:else}
+                      ↓
+                    {/if}
                   </button>
                 {/if}
               </div>
@@ -606,8 +656,13 @@
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
                     {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
-                    {file.record_count.toLocaleString()}
-                    {$currentLang === 'ru' ? 'записи' : 'records'} ·
+                    {pluralize(
+                      file.record_count,
+                      $t('dat.record_count_one', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_few', { count: file.record_count.toLocaleString() }),
+                      $t('dat.record_count_many', { count: file.record_count.toLocaleString() }),
+                      $currentLang
+                    )} ·
                   {/if}
                   {#if file.info}
                     {file.info} ·
@@ -629,20 +684,30 @@
                 {#if getFileStatus(file) === 'outdated' || getFileStatus(file) === 'warning'}
                   <button
                     class="btn btn-primary"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
                   >
-                    {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {#if updatingFile === file.name}
+                      {$currentLang === 'ru' ? 'Обновление...' : 'Updating...'}
+                    {:else}
+                      {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                    {/if}
                   </button>
                 {:else}
                   <button
                     class="btn btn-secondary btn-icon-only"
-                    on:click={updateAll}
-                    disabled={globalUpdating}
+                    class:btn-loading={updatingFile === file.name}
+                    on:click={() => updateAll(file.name)}
+                    disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_all')}
                   >
-                    ↓
+                    {#if updatingFile === file.name}
+                      …
+                    {:else}
+                      ↓
+                    {/if}
                   </button>
                 {/if}
               </div>

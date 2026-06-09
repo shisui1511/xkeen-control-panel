@@ -3,6 +3,9 @@ package services
 import (
 	"archive/zip"
 	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -401,5 +404,170 @@ func TestDecompressionLimit(t *testing.T) {
 	}
 	if info.Size() > maxKernelExtractBytes {
 		t.Errorf("extracted file size %d exceeds limit %d", info.Size(), maxKernelExtractBytes)
+	}
+}
+
+func TestCompareSemver(t *testing.T) {
+	cases := []struct {
+		v1       string
+		v2       string
+		wantSign int
+	}{
+		{"1.18.1", "1.18.0", 1},
+		{"1.18.0", "1.18.1", -1},
+		{"1.18.0", "1.18.0", 0},
+		{"2.0.0", "1.99.99", 1},
+		{"1.18.0-rc2", "1.18.0-rc1", 1},
+		{"1.18.0-rc1", "1.18.0", -1},
+		{"1.18.0", "1.18.0-rc1", 1},
+		{"not installed", "1.18.0", -1},
+		{"error", "1.18.0", -1},
+		{"1.18.0", "not installed", 1},
+		{"garbage", "garbage", 0},
+		{"1.18.0+entware", "1.18.0", 0},
+		{"1.18.0", "1.18.0+entware", 0},
+		{"1.18.0-rc.10", "1.18.0-rc.2", 1},
+		{"1.18.0-rc.2", "1.18.0-rc.10", -1},
+		{"1.18.0-rc.2", "1.18.0-rc.2", 0},
+		{"1.18.0-rc.2+build1", "1.18.0-rc.2+build2", 0},
+	}
+
+	sign := func(n int) int {
+		if n > 0 {
+			return 1
+		}
+		if n < 0 {
+			return -1
+		}
+		return 0
+	}
+
+	for _, tc := range cases {
+		got := compareSemver(tc.v1, tc.v2)
+		if sign(got) != tc.wantSign {
+			t.Errorf("compareSemver(%q, %q) = %d (sign %d); want sign %d", tc.v1, tc.v2, got, sign(got), tc.wantSign)
+		}
+	}
+}
+
+func TestCheckLatest_SemverHasUpdate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tag_name":"v1.18.0"}`))
+	}))
+	defer server.Close()
+
+	ctx := context.Background()
+
+	// Scenario 1: CurrentVersion = "1.18.1", latestVersion = "1.18.0" -> HasUpdate == false
+	svc := NewKernelService()
+	svc.testClient = server.Client()
+	svc.githubAPIBase = server.URL
+	svc.kernels["xray"].CurrentVersion = "1.18.1"
+	svc.kernels["xray"].Channel = "stable"
+	svc.kernels["xray"].Repo = "some/repo"
+
+	err := svc.CheckLatest(ctx, "xray")
+	if err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+	if svc.kernels["xray"].HasUpdate {
+		t.Errorf("expected HasUpdate = false for current 1.18.1 and latest 1.18.0")
+	}
+
+	// Scenario 2: CurrentVersion = "1.17.0", latestVersion = "1.18.0" -> HasUpdate == true
+	svc = NewKernelService()
+	svc.testClient = server.Client()
+	svc.githubAPIBase = server.URL
+	svc.kernels["xray"].CurrentVersion = "1.17.0"
+	svc.kernels["xray"].Channel = "stable"
+	svc.kernels["xray"].Repo = "some/repo"
+
+	err = svc.CheckLatest(ctx, "xray")
+	if err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+	if !svc.kernels["xray"].HasUpdate {
+		t.Errorf("expected HasUpdate = true for current 1.17.0 and latest 1.18.0")
+	}
+
+	// Scenario 3: CurrentVersion = "not installed", latestVersion = "1.18.0" -> HasUpdate == true
+	svc = NewKernelService()
+	svc.testClient = server.Client()
+	svc.githubAPIBase = server.URL
+	svc.kernels["xray"].CurrentVersion = "not installed"
+	svc.kernels["xray"].Channel = "stable"
+	svc.kernels["xray"].Repo = "some/repo"
+
+	err = svc.CheckLatest(ctx, "xray")
+	if err != nil {
+		t.Fatalf("CheckLatest error: %v", err)
+	}
+	if !svc.kernels["xray"].HasUpdate {
+		t.Errorf("expected HasUpdate = true for current 'not installed' and latest 1.18.0")
+	}
+}
+
+func TestIsShortLivedOrHelperProcess(t *testing.T) {
+	tmpDir := t.TempDir()
+	origProcDir := procDir
+	procDir = tmpDir
+	defer func() { procDir = origProcDir }()
+
+	// Case 1: Helper process with "version" flag
+	pid1 := "123"
+	if err := os.MkdirAll(filepath.Join(tmpDir, pid1), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, pid1, "cmdline"), []byte("/opt/sbin/xray\x00version\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Case 2: Helper process with "-v" flag
+	pid2 := "456"
+	if err := os.MkdirAll(filepath.Join(tmpDir, pid2), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, pid2, "cmdline"), []byte("/opt/sbin/mihomo\x00-v\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Case 3: Regular daemon process
+	pid3 := "789"
+	if err := os.MkdirAll(filepath.Join(tmpDir, pid3), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, pid3, "cmdline"), []byte("/opt/sbin/xray\x00-config\x00/opt/etc/xray.json\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Case 4: Non-existent PID
+	pid4 := "999"
+
+	if !isShortLivedOrHelperProcess(pid1) {
+		t.Errorf("expected PID %s to be classified as short lived/helper", pid1)
+	}
+	if !isShortLivedOrHelperProcess(pid2) {
+		t.Errorf("expected PID %s to be classified as short lived/helper", pid2)
+	}
+	if isShortLivedOrHelperProcess(pid3) {
+		t.Errorf("expected PID %s to be classified as daemon process", pid3)
+	}
+	if !isShortLivedOrHelperProcess(pid4) {
+		t.Errorf("expected PID %s (non-existent) to return true", pid4)
+	}
+}
+
+func TestKernelService_List_Order(t *testing.T) {
+	svc := NewKernelService()
+	list := svc.List()
+	if len(list) < 2 {
+		t.Fatalf("expected at least 2 kernels, got %d", len(list))
+	}
+	if list[0].Name != "xray" {
+		t.Errorf("expected first kernel to be xray, got %s", list[0].Name)
+	}
+	if list[1].Name != "mihomo" {
+		t.Errorf("expected second kernel to be mihomo, got %s", list[1].Name)
 	}
 }

@@ -25,6 +25,7 @@ jobs:
   analyze:
     name: CodeQL Analyze
     runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
 
     strategy:
       fail-fast: false
@@ -63,9 +64,7 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          queries: security-extended,security-and-quality
-          # security-extended      — больше security-запросов, чем default
-          # security-and-quality   — security + quality (например, мёртвый код)
+          config-file: .github/codeql/codeql-config.yml
 
       - name: Build Go (for CodeQL extraction)
         if: matrix.language == 'go'

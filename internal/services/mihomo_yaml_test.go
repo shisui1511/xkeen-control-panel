@@ -185,6 +185,23 @@ func TestUpdateMihomoGroupProxies_GroupNotFound(t *testing.T) {
 	}
 }
 
+func TestUpdateMihomoGroupProxies_EmptyProxies(t *testing.T) {
+	yaml := `proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - P1
+      - P2
+`
+	result := UpdateMihomoGroupProxies(yaml, "PROXY", nil, []string{"P1", "P2"})
+	if strings.Contains(result, "proxies:") {
+		t.Error("proxies: section should be completely removed if empty")
+	}
+	if !strings.Contains(result, "name: PROXY") {
+		t.Error("group name should be preserved")
+	}
+}
+
 func TestYamlSafeScalar(t *testing.T) {
 	tests := []struct {
 		in, want string
@@ -204,5 +221,193 @@ func TestYamlSafeScalar(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("yamlSafeScalar(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestReplaceMihomoProxyProvider_AddUpdateDelete(t *testing.T) {
+	yaml := `port: 7890
+proxy-providers:
+  sub_1:
+    type: http
+    url: http://example.com/1
+  sub_2:
+    type: http
+    url: http://example.com/2
+rules: []
+`
+	// Test update existing provider
+	newBlock := `  sub_2:
+    type: http
+    url: http://example.com/2_new`
+	result := ReplaceMihomoProxyProvider(yaml, "sub_2", newBlock)
+	if !strings.Contains(result, "http://example.com/2_new") {
+		t.Error("sub_2 should be updated")
+	}
+	if strings.Contains(result, "http://example.com/2\n") {
+		t.Error("old sub_2 url should be replaced")
+	}
+	if !strings.Contains(result, "sub_1:") {
+		t.Error("sub_1 should be preserved")
+	}
+
+	// Test add new provider
+	newBlock3 := `  sub_3:
+    type: http
+    url: http://example.com/3`
+	result = ReplaceMihomoProxyProvider(yaml, "sub_3", newBlock3)
+	if !strings.Contains(result, "sub_3:") || !strings.Contains(result, "http://example.com/3") {
+		t.Error("sub_3 should be added")
+	}
+
+	// Test delete provider
+	result = ReplaceMihomoProxyProvider(yaml, "sub_2", "")
+	if strings.Contains(result, "sub_2:") {
+		t.Error("sub_2 should be deleted")
+	}
+	if !strings.Contains(result, "sub_1:") {
+		t.Error("sub_1 should be preserved")
+	}
+}
+
+func TestReplaceMihomoProxyProvider_NoSection(t *testing.T) {
+	yaml := `port: 7890
+rules: []
+`
+	newBlock := `  sub_1:
+    type: http
+    url: http://example.com/1`
+	result := ReplaceMihomoProxyProvider(yaml, "sub_1", newBlock)
+	if !strings.Contains(result, "proxy-providers:") {
+		t.Error("proxy-providers section should be created")
+	}
+	if !strings.Contains(result, "sub_1:") {
+		t.Error("sub_1 should be added")
+	}
+}
+
+func TestReplaceMihomoProxyProvider_DeleteLast(t *testing.T) {
+	yaml := `port: 7890
+proxy-providers:
+  sub_1:
+    type: http
+    url: http://example.com/1
+rules: []
+`
+	result := ReplaceMihomoProxyProvider(yaml, "sub_1", "")
+	if strings.Contains(result, "proxy-providers:") {
+		t.Error("proxy-providers section should be completely removed if empty")
+	}
+	if !strings.Contains(result, "port: 7890") {
+		t.Error("other options should be preserved")
+	}
+}
+
+func TestUpdateMihomoGroupProviders(t *testing.T) {
+	yaml := `proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - DIRECT
+    use:
+      - sub_1
+      - sub_2
+rules: []
+`
+	// Test delete provider from use
+	result := UpdateMihomoGroupProviders(yaml, "PROXY", "sub_2", true)
+	if strings.Contains(result, "      - sub_2") {
+		t.Error("sub_2 should be removed from group use list")
+	}
+	if !strings.Contains(result, "      - sub_1") {
+		t.Error("sub_1 should be preserved in use list")
+	}
+
+	// Test add provider to use
+	result = UpdateMihomoGroupProviders(yaml, "PROXY", "sub_3", false)
+	if !strings.Contains(result, "      - sub_3") {
+		t.Error("sub_3 should be added to use list")
+	}
+
+	// Test add duplicate provider
+	result = UpdateMihomoGroupProviders(yaml, "PROXY", "sub_1", false)
+	count := strings.Count(result, "      - sub_1")
+	if count != 1 {
+		t.Errorf("sub_1 should appear exactly once, got %d", count)
+	}
+
+	// Test delete last provider from use (section use: should be deleted)
+	yamlOne := `proxy-groups:
+  - name: PROXY
+    type: select
+    use:
+      - sub_1
+`
+	result = UpdateMihomoGroupProviders(yamlOne, "PROXY", "sub_1", true)
+	if strings.Contains(result, "use:") {
+		t.Error("use: section should be completely removed if empty")
+	}
+}
+
+func TestReplaceMihomoTopLevelSection(t *testing.T) {
+	yaml := `port: 7890
+geox-url:
+  geoip: http://example.com/geoip
+proxies:
+  - name: P1
+    type: ss
+proxy-providers:
+  sub_1:
+    type: http
+rule-providers:
+  rp_1:
+    type: http
+rules:
+  - RULE-SET,rp_1,DIRECT
+`
+
+	// Test 1: замена существующей секции rule-providers сохраняет секцию proxies без изменений (D-04)
+	newRp := `  rp_2:
+    type: http
+    url: http://new.com`
+	res1 := ReplaceMihomoTopLevelSection(yaml, "rule-providers", newRp)
+	if !strings.Contains(res1, "rp_2:") || !strings.Contains(res1, "http://new.com") {
+		t.Error("rule-providers section should be updated with new Content")
+	}
+	if strings.Contains(res1, "rp_1:") {
+		t.Error("old rule-providers should be removed")
+	}
+	if !strings.Contains(res1, "proxies:\n  - name: P1") {
+		t.Error("proxies section should be preserved")
+	}
+
+	// Test 2: замена секции rules сохраняет proxy-providers и geox-url (D-04)
+	newRules := `  - GEOSITE,youtube,PROXY
+  - MATCH,DIRECT`
+	res2 := ReplaceMihomoTopLevelSection(yaml, "rules", newRules)
+	if !strings.Contains(res2, "GEOSITE,youtube") {
+		t.Error("rules section should be updated")
+	}
+	if !strings.Contains(res2, "proxy-providers:") || !strings.Contains(res2, "geox-url:") {
+		t.Error("proxy-providers and geox-url sections should be preserved")
+	}
+
+	// Test 3: при отсутствии секции — она добавляется в конец, остальной контент не тронут
+	yamlNoRules := `port: 7890
+proxies:
+  - name: P1
+`
+	res3 := ReplaceMihomoTopLevelSection(yamlNoRules, "rules", "  - MATCH,DIRECT")
+	if !strings.Contains(res3, "rules:\n  - MATCH,DIRECT") {
+		t.Error("rules section should be added to the end of file")
+	}
+	if !strings.Contains(res3, "proxies:\n  - name: P1") {
+		t.Error("proxies should be preserved")
+	}
+
+	// Test 4: вызов с тем же newContent дважды даёт идентичный результат (идемпотентность)
+	res4First := ReplaceMihomoTopLevelSection(yaml, "rule-providers", newRp)
+	res4Second := ReplaceMihomoTopLevelSection(res4First, "rule-providers", newRp)
+	if res4First != res4Second {
+		t.Error("ReplaceMihomoTopLevelSection should be idempotent")
 	}
 }

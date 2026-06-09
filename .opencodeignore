@@ -1,7 +1,0 @@
-frontend/node_modules/
-frontend/dist/
-build/
-frontend/playwright-report/
-frontend/test-results/
-*.log
-.git/

@@ -535,3 +535,58 @@ func rollbackFile(path string) error {
 	}
 	return os.Rename(bakPath, path)
 }
+
+var standardURLs = map[string]string{
+	"geosite_refilter.dat": "https://github.com/1andrevich/Re-filter-lists/releases/latest/download/geosite.dat",
+	"geoip_refilter.dat":   "https://github.com/1andrevich/Re-filter-lists/releases/latest/download/geoip.dat",
+	"geosite_v2fly.dat":    "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat",
+	"geoip_v2fly.dat":      "https://github.com/loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
+	"geosite_zkeen.dat":    "https://github.com/jameszeroX/zkeen-domains/releases/latest/download/zkeen.dat",
+	"zkeen.dat":            "https://github.com/jameszeroX/zkeen-domains/releases/latest/download/zkeen.dat",
+	"geoip_zkeenip.dat":    "https://github.com/jameszeroX/zkeen-ip/releases/latest/download/zkeenip.dat",
+	"zkeenip.dat":          "https://github.com/jameszeroX/zkeen-ip/releases/latest/download/zkeenip.dat",
+	"geoip.dat":            "https://github.com/loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
+	"geosite.dat":          "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat",
+}
+
+func (s *DATManagerService) UpdateFile(filename string) error {
+	safeName := filepath.Base(filepath.Clean(filename))
+	if !safePathComponentRe.MatchString(safeName) {
+		return fmt.Errorf("invalid file name")
+	}
+
+	urlVal, ok := standardURLs[strings.ToLower(safeName)]
+	if !ok {
+		return fmt.Errorf("no update URL configured for %s", safeName)
+	}
+
+	var path string
+	for _, dir := range []string{s.xrayDir, s.mihomoDir} {
+		candidate := filepath.Join(dir, safeName)
+		if _, err := os.Stat(candidate); err == nil {
+			path = candidate
+			break
+		}
+	}
+
+	if path == "" {
+		if strings.HasSuffix(strings.ToLower(safeName), ".mmdb") {
+			path = filepath.Join(s.mihomoDir, safeName)
+		} else {
+			path = filepath.Join(s.xrayDir, safeName)
+		}
+	}
+
+	info, err := os.Lstat(path)
+	if err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if target, err := os.Readlink(path); err == nil {
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(path), target)
+			}
+			path = target
+		}
+	}
+
+	_, err = s.UpdateCustom(path, urlVal)
+	return err
+}

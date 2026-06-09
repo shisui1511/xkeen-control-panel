@@ -437,7 +437,9 @@
   {#if $capabilities !== null && !$capabilities.mihomo.reachable}
     <EmptyState
       title={$t('ds.empty.mihomo_offline_title')}
-      description={$t('ds.empty.mihomo_offline_desc')}
+      description={$capabilities?.active_kernel === 'mihomo'
+        ? $t('ds.empty.mihomo_offline_desc_actionable')
+        : $t('ds.empty.mihomo_offline_desc')}
       icon={PlayIcon}
       ctaText={mihomoLaunching
         ? $t('ds.empty.mihomo_offline_loading')
@@ -455,32 +457,34 @@
     />
   {:else}
     <!-- Observatory statistics -->
-    {@const stats = computeStats()}
-    <div class="card" style="margin-bottom:18px;">
-      <h2 class="card-title" style="margin-top: 0;">{$t('proxies.observatory_title')}</h2>
-      <div class="stats-grid">
-        <div class="stat-box">
-          <div class="stat-label">{$t('proxies.obs_total')}</div>
-          <div class="stat-value">{stats.totalProxies}</div>
-          <div class="res-sub">{$t('proxies.obs_total_sub', { groupsCount: groups.length })}</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">{$t('proxies.obs_healthy')}</div>
-          <div class="stat-value" style="color:var(--success);">{stats.healthyProxies}</div>
-          <div class="res-sub">{$t('proxies.obs_healthy_sub')}</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">{$t('proxies.obs_degraded')}</div>
-          <div class="stat-value" style="color:var(--warning);">{stats.degradedProxies}</div>
-          <div class="res-sub">{$t('proxies.obs_degraded_sub')}</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-label">{$t('proxies.obs_unreachable')}</div>
-          <div class="stat-value" style="color:var(--danger);">{stats.downProxies}</div>
-          <div class="res-sub">{$t('proxies.obs_unreachable_sub')}</div>
+    {#if groups.length > 0 && $capabilities?.mihomo?.reachable}
+      {@const stats = computeStats()}
+      <div class="card" style="margin-bottom:18px;">
+        <h2 class="card-title" style="margin-top: 0;">{$t('proxies.observatory_title')}</h2>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-label">{$t('proxies.obs_total')}</div>
+            <div class="stat-value">{stats.totalProxies}</div>
+            <div class="res-sub">{$t('proxies.obs_total_sub', { groupsCount: groups.length })}</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">{$t('proxies.obs_healthy')}</div>
+            <div class="stat-value" style="color:var(--success);">{stats.healthyProxies}</div>
+            <div class="res-sub">{$t('proxies.obs_healthy_sub')}</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">{$t('proxies.obs_degraded')}</div>
+            <div class="stat-value" style="color:var(--warning);">{stats.degradedProxies}</div>
+            <div class="res-sub">{$t('proxies.obs_degraded_sub')}</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">{$t('proxies.obs_unreachable')}</div>
+            <div class="stat-value" style="color:var(--danger);">{stats.downProxies}</div>
+            <div class="res-sub">{$t('proxies.obs_unreachable_sub')}</div>
+          </div>
         </div>
       </div>
-    </div>
+    {/if}
 
     <!-- Groups Grid -->
     {#if loading && groups.length === 0}

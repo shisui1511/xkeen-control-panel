@@ -8,7 +8,7 @@ import (
 
 func TestNewConfigService(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewConfigService(tmp)
+	svc := NewConfigService(tmp, []string{tmp})
 	if svc == nil {
 		t.Fatal("expected non-nil service")
 	}
@@ -21,7 +21,7 @@ func TestConfigService_List(t *testing.T) {
 		os.WriteFile(filepath.Join(tmp, f), []byte("{}"), 0644)
 	}
 
-	svc := NewConfigService(tmp)
+	svc := NewConfigService(tmp, []string{tmp})
 	got, err := svc.List("")
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
@@ -33,7 +33,7 @@ func TestConfigService_List(t *testing.T) {
 
 func TestConfigService_ReadWrite(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewConfigService(tmp)
+	svc := NewConfigService(tmp, []string{tmp})
 	testFile := filepath.Join(tmp, "test.json")
 	data := []byte(`{"log": {"level": "debug"}}`)
 
@@ -53,7 +53,7 @@ func TestConfigService_ReadWrite(t *testing.T) {
 
 func TestConfigService_PathTraversal(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewConfigService(tmp)
+	svc := NewConfigService(tmp, []string{tmp})
 
 	_, err := svc.Read("../etc/passwd")
 	if err == nil {
@@ -63,7 +63,7 @@ func TestConfigService_PathTraversal(t *testing.T) {
 
 func TestConfigService_Backup(t *testing.T) {
 	tmp := t.TempDir()
-	svc := NewConfigService(tmp)
+	svc := NewConfigService(tmp, []string{tmp})
 	testFile := filepath.Join(tmp, "config.json")
 
 	os.WriteFile(testFile, []byte(`{"v1":true}`), 0644)
