@@ -949,9 +949,14 @@
 
               <span class="meta-divider">|</span>
               {#if sub.mihomo_integrated}
-                <span class="mihomo-integrated-badge active" title="Интегрировано в Mihomo config.yaml">Mihomo ✓</span>
+                <span
+                  class="mihomo-integrated-badge active"
+                  title="Интегрировано в Mihomo config.yaml">Mihomo ✓</span
+                >
               {:else}
-                <span class="mihomo-integrated-badge" title="Не интегрировано в Mihomo config.yaml">Mihomo —</span>
+                <span class="mihomo-integrated-badge" title="Не интегрировано в Mihomo config.yaml"
+                  >Mihomo —</span
+                >
               {/if}
 
               {#if sub.hwid_locked}

@@ -174,12 +174,12 @@ port: 7890
 
 func TestMihomoService_ValidateMihomoConfig(t *testing.T) {
 	tests := []struct {
-		name         string
-		yaml         string
-		wantValid    bool
-		wantErrCodes []string
+		name          string
+		yaml          string
+		wantValid     bool
+		wantErrCodes  []string
 		wantWarnCodes []string
-		wantErr      bool
+		wantErr       bool
 	}{
 		{
 			name: "full valid config",
@@ -195,8 +195,8 @@ proxies:
   - name: test
     type: socks5
 `,
-			wantValid:    true,
-			wantErrCodes: []string{},
+			wantValid:     true,
+			wantErrCodes:  []string{},
 			wantWarnCodes: []string{},
 		},
 		{

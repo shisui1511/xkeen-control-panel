@@ -1165,7 +1165,9 @@
         }
 
         if (inRules) {
-          const ruleMatch = trimmed.match(/^-\s*([A-Z0-9-]+)\s*,\s*([^,]+)\s*,\s*([^,]+?)(?:\s*,\s*([^,]+))?$/);
+          const ruleMatch = trimmed.match(
+            /^-\s*([A-Z0-9-]+)\s*,\s*([^,]+)\s*,\s*([^,]+?)(?:\s*,\s*([^,]+))?$/
+          );
           const matchRuleMatch = trimmed.match(/^-\s*MATCH\s*,\s*(.+)$/);
           const ruleSetMatch = trimmed.match(/^-\s*RULE-SET\s*,\s*([^,]+)\s*,\s*(.+)$/);
 
@@ -1803,10 +1805,10 @@
       const sections: Record<string, string> = {
         'rule-providers': extractSection(yamlContent, 'rule-providers'),
         'proxy-groups': extractSection(yamlContent, 'proxy-groups'),
-        'rules': extractSection(yamlContent, 'rules'),
-        'proxies': extractSection(yamlContent, 'proxies'),
-        'dns': extractSection(yamlContent, 'dns'),
-        'tun': extractSection(yamlContent, 'tun'),
+        rules: extractSection(yamlContent, 'rules'),
+        proxies: extractSection(yamlContent, 'proxies'),
+        dns: extractSection(yamlContent, 'dns'),
+        tun: extractSection(yamlContent, 'tun'),
         'proxy-providers': extractSection(yamlContent, 'proxy-providers')
       };
 
@@ -2795,36 +2797,59 @@
             <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
               {$t('subscr.import_preview_title')}
             </h3>
-            <div class="preview-list" style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;">
+            <div
+              class="preview-list"
+              style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;"
+            >
               {#each importNodes as item, idx}
                 {#if item.rowError}
-                  <div class="preview-item-card" style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;">
+                  <div
+                    class="preview-item-card"
+                    style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                  >
                     <button
                       type="button"
-                      on:click={() => importNodes = importNodes.filter((_, i) => i !== idx)}
+                      on:click={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
                       style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                      aria-label="Remove"
-                    >✕</button>
+                      aria-label="Remove">✕</button
+                    >
                     <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
-                      <strong>{$t('app.error')}:</strong> {item.rowError}
+                      <strong>{$t('app.error')}:</strong>
+                      {item.rowError}
                     </div>
-                    <div style="font-size: 11px; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;" title={item.link}>
+                    <div
+                      style="font-size: 11px; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
+                      title={item.link}
+                    >
                       {item.link}
                     </div>
                   </div>
                 {:else}
-                  <div class="preview-item-card" style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;">
+                  <div
+                    class="preview-item-card"
+                    style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+                  >
                     <button
                       type="button"
-                      on:click={() => importNodes = importNodes.filter((_, i) => i !== idx)}
+                      on:click={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
                       style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                      aria-label="Remove"
-                    >✕</button>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;">
-                      <span><strong style="color: var(--fg);">{item.outbound?.protocol}</strong> · {getNodeServer(item.outbound)}:{getNodePort(item.outbound)}</span>
+                      aria-label="Remove">✕</button
+                    >
+                    <div
+                      style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
+                    >
+                      <span
+                        ><strong style="color: var(--fg);">{item.outbound?.protocol}</strong> · {getNodeServer(
+                          item.outbound
+                        )}:{getNodePort(item.outbound)}</span
+                      >
                     </div>
                     <div style="display: flex; align-items: center; gap: 8px;">
-                      <label class="form-label" style="margin: 0; font-size: 12px; flex-shrink: 0;" for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label>
+                      <label
+                        class="form-label"
+                        style="margin: 0; font-size: 12px; flex-shrink: 0;"
+                        for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label
+                      >
                       <input
                         id="import-tag-{idx}"
                         type="text"
@@ -2856,7 +2881,13 @@
             {$t('subscr.import_btn_parse')}
           </button>
         {:else}
-          <button class="btn btn-primary" on:click={confirmImportNode} disabled={importLoading || importNodes.length === 0 || importNodes.some(n => n.rowError)}>
+          <button
+            class="btn btn-primary"
+            on:click={confirmImportNode}
+            disabled={importLoading ||
+              importNodes.length === 0 ||
+              importNodes.some((n) => n.rowError)}
+          >
             {#if importLoading}
               <span class="spinner-xs" style="margin-right: 6px;"></span>
             {/if}

@@ -275,7 +275,9 @@ test.describe('Import Node из конструкторов (D-15, D-16, D-17)', 
     await expect(page.locator('button:has-text("Импорт узла")')).not.toBeVisible();
   });
 
-  test('импорт в Xray-конструкторе вызывает POST /api/outbound/import-bulk (D-17)', async ({ page }) => {
+  test('импорт в Xray-конструкторе вызывает POST /api/outbound/import-bulk (D-17)', async ({
+    page
+  }) => {
     let importCalled = false;
     await page.route('**/api/outbound/import-bulk', async (route) => {
       importCalled = true;

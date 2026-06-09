@@ -2,7 +2,13 @@
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import { t, currentLang, setLang, pluralize } from './i18n';
-  import { isSidebarOpen, capabilities, fetchCapabilities, showToast, mihomoApiAvailable } from './stores';
+  import {
+    isSidebarOpen,
+    capabilities,
+    fetchCapabilities,
+    showToast,
+    mihomoApiAvailable
+  } from './stores';
   import Sidebar from './components/Sidebar.svelte';
   import Toast from './components/Toast.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -112,7 +118,10 @@
         activeSubscriptionsCount = subs.filter((s: any) => s.enabled).length;
         totalSubsCount = subs.length;
         hasSubscription = subs.length > 0;
-        subscriptionProxiesCount = subs.reduce((acc: number, s: any) => acc + (s.proxy_count || 0), 0);
+        subscriptionProxiesCount = subs.reduce(
+          (acc: number, s: any) => acc + (s.proxy_count || 0),
+          0
+        );
         // Find most recent update
         const dates = subs.map((s: any) => s.last_updated || s.updated_at || '').filter(Boolean);
         if (dates.length > 0) {
@@ -536,7 +545,13 @@
             <p class="sub">{$t('dash.welcome')}</p>
           </div>
           <div class="ph-actions">
-            <Button variant="secondary" onclick={handleRefresh} loading={isRefreshing} disabled={isRefreshing} title={$t('app.refresh')}>
+            <Button
+              variant="secondary"
+              onclick={handleRefresh}
+              loading={isRefreshing}
+              disabled={isRefreshing}
+              title={$t('app.refresh')}
+            >
               <Icon name="refresh" size={14} />
               {$t('app.refresh')}
             </Button>
@@ -557,7 +572,10 @@
                 <span
                   style="font-size: 12px; font-weight: 400; color: var(--fg-dim); font-family: var(--font-family-mono);"
                 >
-                  {$t('dash.quickstart.progress', { done: String(quickstartDoneCount), total: '4' })}
+                  {$t('dash.quickstart.progress', {
+                    done: String(quickstartDoneCount),
+                    total: '4'
+                  })}
                 </span>
               {/snippet}
               <ul class="quickstart-list" role="list">
@@ -574,13 +592,21 @@
                     {#if hasSubscription}
                       <Icon name="check" size={16} color="var(--success)" />
                     {:else}
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
                         <circle cx="8" cy="8" r="6.5" stroke="var(--fg-dim)" stroke-width="1.5" />
                       </svg>
                     {/if}
                   </span>
                   <span class="qs-text">
-                    {hasSubscription ? $t('dash.quickstart.step2_done') : $t('dash.quickstart.step2_label')}
+                    {hasSubscription
+                      ? $t('dash.quickstart.step2_done')
+                      : $t('dash.quickstart.step2_label')}
                   </span>
                   {#if !hasSubscription}
                     <a
@@ -594,11 +620,20 @@
                 </li>
                 <!-- Step 3: config applied (Mihomo API reachable) -->
                 <li class="qs-step" class:qs-step--done={$mihomoApiAvailable}>
-                  <span class="qs-icon" aria-label={$mihomoApiAvailable ? 'Выполнено' : 'Не выполнено'}>
+                  <span
+                    class="qs-icon"
+                    aria-label={$mihomoApiAvailable ? 'Выполнено' : 'Не выполнено'}
+                  >
                     {#if $mihomoApiAvailable}
                       <Icon name="check" size={16} color="var(--success)" />
                     {:else}
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
                         <circle cx="8" cy="8" r="6.5" stroke="var(--fg-dim)" stroke-width="1.5" />
                       </svg>
                     {/if}
@@ -612,7 +647,9 @@
                     <a
                       class="btn btn-secondary qs-cta"
                       href="#/constructor"
-                      onclick={() => { window.location.hash = '#/constructor'; }}
+                      onclick={() => {
+                        window.location.hash = '#/constructor';
+                      }}
                     >
                       {$t('dash.quickstart.step3_cta')}
                     </a>
@@ -627,7 +664,13 @@
                     {#if serviceStatus.mihomo === 'running'}
                       <Icon name="check" size={16} color="var(--success)" />
                     {:else}
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 16 16"
+                        fill="none"
+                        aria-hidden="true"
+                      >
                         <circle cx="8" cy="8" r="6.5" stroke="var(--fg-dim)" stroke-width="1.5" />
                       </svg>
                     {/if}
@@ -683,7 +726,12 @@
                         <div class="problem-desc">{$t('dash.problems.mihomo_api_desc')}</div>
                       </div>
                     </div>
-                    <Button variant="secondary" onclick={() => { window.location.hash = '#/constructor'; }}>
+                    <Button
+                      variant="secondary"
+                      onclick={() => {
+                        window.location.hash = '#/constructor';
+                      }}
+                    >
                       {$t('dash.problems.mihomo_api_cta')}
                     </Button>
                   </div>
@@ -730,7 +778,13 @@
             {:else if statusError}
               <div class="status-error-row">
                 <span><Icon name="warning" size={14} /> {$t('dash.status_error')}</span>
-                <Button variant="secondary" onclick={handleRefresh} loading={isRefreshing} disabled={isRefreshing} title={$t('app.refresh')}>
+                <Button
+                  variant="secondary"
+                  onclick={handleRefresh}
+                  loading={isRefreshing}
+                  disabled={isRefreshing}
+                  title={$t('app.refresh')}
+                >
                   ↺ {$t('app.refresh')}
                 </Button>
               </div>

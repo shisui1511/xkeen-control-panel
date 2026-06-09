@@ -168,8 +168,8 @@ func TestConfigPreflight(t *testing.T) {
 		}
 
 		var resp struct {
-			Valid    bool `json:"valid"`
-			Errors   []struct {
+			Valid  bool `json:"valid"`
+			Errors []struct {
 				Code string `json:"code"`
 			} `json:"errors"`
 			Warnings []interface{} `json:"warnings"`

@@ -104,7 +104,6 @@
     }
   }
 
-
   onMount(fetchCommands);
 </script>
 
@@ -141,13 +140,53 @@
                 >
                   <div class="tile-name" class:dangerous-text={cmd.dangerous}>
                     {#if cmd.command === '-start'}
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="margin-right:8px;flex-shrink:0;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        style="margin-right:8px;flex-shrink:0;"
+                        ><polygon points="5 3 19 12 5 21 5 3" /></svg
+                      >
                     {:else if cmd.command === '-stop'}
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="margin-right:8px;flex-shrink:0;"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></svg>
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        style="margin-right:8px;flex-shrink:0;"
+                        ><rect x="6" y="5" width="4" height="14" /><rect
+                          x="14"
+                          y="5"
+                          width="4"
+                          height="14"
+                        /></svg
+                      >
                     {:else if cmd.command === '-restart'}
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;flex-shrink:0;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        style="margin-right:8px;flex-shrink:0;"
+                        ><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+                      >
                     {:else if cmd.command === '-status'}
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:8px;flex-shrink:0;"><path d="M3 12h18"/></svg>
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        style="margin-right:8px;flex-shrink:0;"><path d="M3 12h18" /></svg
+                      >
                     {/if}
                     xkeen {cmd.command}
                   </div>
@@ -295,7 +334,9 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     cursor: pointer;
-    transition: background var(--transition-fast), border-color var(--transition-fast);
+    transition:
+      background var(--transition-fast),
+      border-color var(--transition-fast);
     text-align: left;
     font-family: inherit;
     min-height: 44px;

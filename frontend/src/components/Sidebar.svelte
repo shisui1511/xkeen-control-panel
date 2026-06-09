@@ -166,7 +166,11 @@
         <Icon name="connections" size={16} />
         {$t('nav.connections')}
         {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
-          <span class="nav-badge-warn" role="img" aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span>
+          <span
+            class="nav-badge-warn"
+            role="img"
+            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+          >
         {/if}
       </a>
     {/if}
@@ -223,7 +227,11 @@
         <Icon name="proxies" size={16} />
         {$t('nav.proxies')}
         {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
-          <span class="nav-badge-warn" role="img" aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span>
+          <span
+            class="nav-badge-warn"
+            role="img"
+            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+          >
         {/if}
       </a>
       <a
@@ -236,7 +244,11 @@
         <Icon name="rules" size={16} />
         {$t('nav.rules')}
         {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
-          <span class="nav-badge-warn" role="img" aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span>
+          <span
+            class="nav-badge-warn"
+            role="img"
+            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+          >
         {/if}
       </a>
     {/if}

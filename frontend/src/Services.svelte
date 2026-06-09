@@ -1,7 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
-  import { showToast, fetchCapabilities, showConfirm, isKernelChecking, capabilities } from './stores';
+  import {
+    showToast,
+    fetchCapabilities,
+    showConfirm,
+    isKernelChecking,
+    capabilities
+  } from './stores';
   import Skeleton from './components/Skeleton.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
@@ -205,13 +211,14 @@
     try {
       if (action === 'start') {
         // Pre-flight check: determine kernel to validate
-        const kernel = activeKernel === 'xray' || activeKernel === 'mihomo'
-          ? activeKernel
-          : xray?.process_status === 'running'
-            ? 'xray'
-            : mihomo?.process_status === 'running'
-              ? 'mihomo'
-              : 'xray';
+        const kernel =
+          activeKernel === 'xray' || activeKernel === 'mihomo'
+            ? activeKernel
+            : xray?.process_status === 'running'
+              ? 'xray'
+              : mihomo?.process_status === 'running'
+                ? 'mihomo'
+                : 'xray';
         try {
           const pfRes = await fetch(`/api/config/preflight?kernel=${kernel}`, {
             signal: AbortSignal.timeout(3000)
@@ -220,7 +227,9 @@
             const pfBody = await pfRes.json();
             const data = pfBody.data ?? pfBody;
             if (Array.isArray(data.errors) && data.errors.length > 0) {
-              const errList = data.errors.map((e: { message?: string; code?: string }) => e.message || e.code || '').join('\n• ');
+              const errList = data.errors
+                .map((e: { message?: string; code?: string }) => e.message || e.code || '')
+                .join('\n• ');
               const message = `${$t('svc.preflight_error_body')}\n• ${errList}`;
               const proceed = await showConfirm(
                 $t('svc.preflight_error_title'),
@@ -880,8 +889,8 @@
                 class="badge badge-warning"
                 title={$t('svc.mihomo_api_unavailable_title')}
                 aria-label={$t('svc.mihomo_api_unavailable_title')}
-                style="text-decoration:none;"
-              >{$t('svc.mihomo_api_unavailable')}</a>
+                style="text-decoration:none;">{$t('svc.mihomo_api_unavailable')}</a
+              >
             {/if}
           {:else}
             <span class="status-badge stopped"

@@ -16,6 +16,8 @@ import (
 
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
 
+var configPathRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-\.\/]+$`)
+
 type ConfigFileInfo struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
@@ -66,7 +68,7 @@ func (a *API) ConfigList(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(cleanF, "..") {
 			continue
 		}
-		if matched, _ := regexp.MatchString(`^[a-zA-Z0-9_\-\.\/]+$`, cleanF); !matched {
+		if !configPathRegex.MatchString(cleanF) {
 			continue
 		}
 		// codeql[go/path-injection] - cleanF validated via PathValidator.Validate + strings.HasPrefix check above.

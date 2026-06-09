@@ -409,7 +409,11 @@
     }
   }
 
-  function buildEditorState(doc: string, lang: ReturnType<typeof json>, schemaExts: ReturnType<typeof getSchemaExtensions>): EditorState {
+  function buildEditorState(
+    doc: string,
+    lang: ReturnType<typeof json>,
+    schemaExts: ReturnType<typeof getSchemaExtensions>
+  ): EditorState {
     return EditorState.create({
       doc,
       extensions: [
@@ -1675,11 +1679,21 @@
           </div>
 
           <!-- Xray Section -->
-          <details class="editor-files nav-group" style="margin-bottom:12px;" open={$capabilities?.active_kernel === 'xray'}>
-            <summary class="editor-files-head" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+          <details
+            class="editor-files nav-group"
+            style="margin-bottom:12px;"
+            open={$capabilities?.active_kernel === 'xray'}
+          >
+            <summary
+              class="editor-files-head"
+              style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
+            >
               <span class="group-ttl">Xray</span>
               <span style="display:flex;align-items:center;gap:6px;">
-                <span style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;">{xrayDir}</span>
+                <span
+                  style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
+                  >{xrayDir}</span
+                >
                 <span class="nav-group-arrow">›</span>
               </span>
             </summary>
@@ -1706,10 +1720,16 @@
 
           <!-- Mihomo Section -->
           <details class="editor-files nav-group" open={$capabilities?.active_kernel === 'mihomo'}>
-            <summary class="editor-files-head" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <summary
+              class="editor-files-head"
+              style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
+            >
               <span class="group-ttl">Mihomo</span>
               <span style="display:flex;align-items:center;gap:6px;">
-                <span style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;">{mihomoDir}</span>
+                <span
+                  style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
+                  >{mihomoDir}</span
+                >
                 <span class="nav-group-arrow">›</span>
               </span>
             </summary>

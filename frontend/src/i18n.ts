@@ -231,7 +231,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.crumbs_generator': 'Генератор Mihomo',
     'editor.tab_constructor': 'Конструктор',
     'editor.constructor_merge_warning_title': 'Безопасное слияние конфигурации',
-    'editor.constructor_merge_warning_body': 'Следующие ручные настройки будут автоматически сохранены: {keys}',
+    'editor.constructor_merge_warning_body':
+      'Следующие ручные настройки будут автоматически сохранены: {keys}',
     'editor.constructor_title': 'Конструктор конфигов',
     'editor.constructor_subtitle': 'Визуальный генератор для Xray и Mihomo',
     'editor.kernel_xray': 'Xray',
@@ -339,7 +340,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.log_show_more_one': 'Показать ещё {count} запись',
     'svc.log_show_more_few': 'Показать ещё {count} записи',
     'svc.log_show_more_many': 'Показать ещё {count} записей',
-    'svc.autostart_local_only': 'Настройки сохраняются локально в браузере и не отправляются на роутер — функция в разработке',
+    'svc.autostart_local_only':
+      'Настройки сохраняются локально в браузере и не отправляются на роутер — функция в разработке',
     'svc.section_autostart': 'Авто‑запуск и расписание',
     'svc.xkeen_module': 'главный модуль',
     'svc.xray_core': 'core · v2ray-compatible',
@@ -899,8 +901,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.import_node': 'Импорт узла',
     'subscr.import_modal_title': 'Импорт прокси-узла',
     'subscr.import_link_label': 'Ссылки share-link (по одной на строку)',
-    'subscr.import_link_placeholder':
-      'Вставьте одну или несколько ссылок (по одной на строку)',
+    'subscr.import_link_placeholder': 'Вставьте одну или несколько ссылок (по одной на строку)',
     'subscr.import_btn_parse': 'Распознать',
     'subscr.import_btn_confirm': 'Импортировать',
     'subscr.import_preview_title': 'Параметры узла',
@@ -915,7 +916,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.import_error_too_long': 'Ссылка превышает лимит 8 КБ',
     'subscr.import_error_single_only': 'Пожалуйста, введите только одну ссылку за раз',
     'subscr.import_error': 'Ошибка импорта',
-    'subscr.partial_map_warning': 'Некоторые узлы были пропущены (несовместимый протокол или отсутствуют настройки сервера)',
+    'subscr.partial_map_warning':
+      'Некоторые узлы были пропущены (несовместимый протокол или отсутствуют настройки сервера)',
     'settings.update_confirm_title': 'Подтверждение обновления',
     'settings.update_confirm_text':
       'Вы уверены, что хотите обновить панель управления? Список изменений:',
@@ -1306,7 +1308,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.crumbs_generator': 'Mihomo Generator',
     'editor.tab_constructor': 'Constructor',
     'editor.constructor_merge_warning_title': 'Safe configuration merge',
-    'editor.constructor_merge_warning_body': 'The following manual settings will be automatically preserved: {keys}',
+    'editor.constructor_merge_warning_body':
+      'The following manual settings will be automatically preserved: {keys}',
     'editor.constructor_title': 'Config Constructor',
     'editor.constructor_subtitle': 'Visual generator for Xray and Mihomo',
     'editor.kernel_xray': 'Xray',
@@ -1414,7 +1417,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'svc.log_show_more_one': 'Show {count} more entry',
     'svc.log_show_more_few': 'Show {count} more entries',
     'svc.log_show_more_many': 'Show {count} more entries',
-    'svc.autostart_local_only': 'Settings are saved locally in the browser only and are not sent to the router — feature under development',
+    'svc.autostart_local_only':
+      'Settings are saved locally in the browser only and are not sent to the router — feature under development',
     'svc.section_autostart': 'Auto-start & schedule',
     'svc.xkeen_module': 'main module',
     'svc.xray_core': 'core · v2ray-compatible',
@@ -1967,8 +1971,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.import_node': 'Import Node',
     'subscr.import_modal_title': 'Import Proxy Node',
     'subscr.import_link_label': 'Share Links (one per line)',
-    'subscr.import_link_placeholder':
-      'Paste one or more links (one per line)',
+    'subscr.import_link_placeholder': 'Paste one or more links (one per line)',
     'subscr.import_btn_parse': 'Parse Link',
     'subscr.import_btn_confirm': 'Import Node',
     'subscr.import_preview_title': 'Node Parameters',
@@ -1983,7 +1986,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.import_error_too_long': 'Link exceeds the 8 KB limit',
     'subscr.import_error_single_only': 'Please enter only one link at a time',
     'subscr.import_error': 'Import error',
-    'subscr.partial_map_warning': 'Some nodes were skipped (incompatible protocol or missing server settings)',
+    'subscr.partial_map_warning':
+      'Some nodes were skipped (incompatible protocol or missing server settings)',
     'settings.update_confirm_title': 'Confirm Update',
     'settings.update_confirm_text': 'Are you sure you want to update the control panel? Changelog:',
     'settings.update_install_btn': 'Update Panel',
