@@ -83,7 +83,8 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 	info.CurrentVersion = currentVersion
 	info.Channel = channel
 
-	info.HasUpdate = info.LatestVersion != "" && compareSemver(info.LatestVersion, currentVersion) > 0
+	isDevBuild := strings.Contains(currentVersion, "-dev")
+	info.HasUpdate = info.LatestVersion != "" && (isDevBuild || compareSemver(info.LatestVersion, currentVersion) > 0)
 
 	if info.HasUpdate {
 		arch := runtime.GOARCH
