@@ -351,7 +351,6 @@
   let updateStatus: { status: string; message: string; progress: number } | null = null;
   let updateChecking = false;
   let updateInstalling = false;
-  let statusInterval: ReturnType<typeof setInterval>;
   let updateChannel: 'stable' | 'beta' = 'stable';
 
   async function fetchUpdateChannel() {
