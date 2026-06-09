@@ -362,16 +362,25 @@
   }
 
   async function saveUpdateChannel(ch: 'stable' | 'beta') {
-    updateChannel = ch;
+    const prev = updateChannel;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      await fetch('/api/update/channel', {
+      const res = await fetch('/api/update/channel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ channel: ch })
       });
-      showToast('success', $t('settings.channel_saved'));
-    } catch (_) {}
+      if (res.ok) {
+        updateChannel = ch;
+        showToast('success', $t('settings.channel_saved'));
+      } else {
+        updateChannel = prev;
+        showToast('error', await res.text());
+      }
+    } catch (e) {
+      updateChannel = prev;
+      showToast('error', e instanceof Error ? e.message : String(e));
+    }
   }
 
   async function fetchVersion() {
@@ -400,9 +409,11 @@
         if (updateInfo?.has_update && updateInfo?.latest_version) {
           await fetchChangelog(updateInfo.latest_version);
         }
+      } else {
+        showToast('error', await res.text());
       }
     } catch (e) {
-      // ignore
+      showToast('error', e instanceof Error ? e.message : String(e));
     } finally {
       updateChecking = false;
     }
@@ -528,6 +539,7 @@
         startStatusSSE();
       } else {
         updateInstalling = false;
+        showToast('error', await res.text());
       }
     } catch (e) {
       updateInstalling = false;
@@ -546,6 +558,7 @@
         startStatusSSE();
       } else {
         updateInstalling = false;
+        showToast('error', await res.text());
       }
     } catch (e) {
       updateInstalling = false;
