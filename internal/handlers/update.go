@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -82,7 +84,8 @@ func (a *API) UpdateCheck(w http.ResponseWriter, r *http.Request) {
 	info.CurrentVersion = currentVersion
 	info.Channel = channel
 
-	info.HasUpdate = info.LatestVersion != "" && compareSemver(info.LatestVersion, currentVersion) > 0
+	isDevBuild := strings.Contains(currentVersion, "-dev")
+	info.HasUpdate = info.LatestVersion != "" && (isDevBuild || compareSemver(info.LatestVersion, currentVersion) > 0)
 
 	if info.HasUpdate {
 		arch := runtime.GOARCH
@@ -130,13 +133,13 @@ func (a *API) UpdateInstall(w http.ResponseWriter, r *http.Request) {
 		channel = "stable"
 	}
 
-	// Run update in background
-	go a.performUpdate(channel)
-
+	// Lock state BEFORE spawning goroutine to prevent race condition
 	st.Status = "checking"
 	st.Progress = 5
 	st.Timestamp = time.Now().Unix()
 	setUpdateState(st)
+
+	go a.performUpdate(channel)
 
 	JSONSuccess(w, getUpdateState())
 }
@@ -156,14 +159,29 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Find latest backup
+	// Find latest backup by modification time (not by filename)
 	backups, err := os.ReadDir(backupDir)
 	if err != nil || len(backups) == 0 {
 		JSONError(w, http.StatusNotFound, "No backup found")
 		return
 	}
 
-	latestBackup := filepath.Join(backupDir, backups[len(backups)-1].Name())
+	var latestBackup string
+	var latestModTime time.Time
+	for _, entry := range backups {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(latestModTime) {
+			latestModTime = info.ModTime()
+			latestBackup = filepath.Join(backupDir, entry.Name())
+		}
+	}
+	if latestBackup == "" {
+		JSONError(w, http.StatusNotFound, "No backup found")
+		return
+	}
 
 	// Stop current binary
 	st := UpdateStatus{
@@ -173,8 +191,22 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	setUpdateState(st)
 
-	// Replace with backup
-	if err := os.Rename(latestBackup, binPath); err != nil {
+	// Replace with backup via temporary file to preserve backup on disk and set executable permissions
+	tempBinPath := binPath + ".rollback"
+	if err := copyFile(latestBackup, tempBinPath); err != nil {
+		st = getUpdateState()
+		st.Status = "failed"
+		st.Message = "Rollback failed: " + err.Error()
+		setUpdateState(st)
+		JSONError(w, http.StatusInternalServerError, st.Message)
+		return
+	}
+	if err := os.Chmod(tempBinPath, 0755); err != nil {
+		log.Printf("Rollback: failed to chmod binary: %v", err)
+	}
+
+	if err := os.Rename(tempBinPath, binPath); err != nil {
+		_ = os.Remove(tempBinPath)
 		st = getUpdateState()
 		st.Status = "failed"
 		st.Message = "Rollback failed: " + err.Error()
@@ -189,7 +221,7 @@ func (a *API) UpdateRollback(w http.ResponseWriter, r *http.Request) {
 	st.Progress = 90
 	setUpdateState(st)
 
-	go a.restartProcess(binPath, "", a.cfg.DataDir, "")
+	go a.restartProcess(binPath, latestBackup, a.cfg.DataDir, "")
 
 	JSONSuccess(w, getUpdateState())
 }
@@ -454,43 +486,70 @@ func (a *API) performUpdate(channel string) {
 }
 
 func (a *API) restartProcess(binPath string, backupPath string, dataDir string, expectedVersion string) {
+	// Shutdown the server listener so the new process can bind to the port
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := a.srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Update: shutdown error: %v", err)
+	}
+
 	// Fork new process
 	configPath := filepath.Join(dataDir, "config.json")
 	cmd := exec.Command(binPath, "-config", configPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
 	}
 
 	if err := cmd.Start(); err != nil {
+		// If starting the new binary fails, rollback immediately
+		msg := "Restart failed: " + err.Error()
+		if backupPath != "" {
+			if err := copyFile(backupPath, binPath); err == nil {
+				// Start the backup binary to restore the server
+				rollbackCmd := exec.Command(binPath, "-config", configPath)
+				rollbackCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+				_ = rollbackCmd.Start()
+				msg = "Проверка не удалась, выполнен авто-откат на резервную копию."
+			}
+		}
 		setUpdateState(UpdateStatus{
 			Status:    "failed",
-			Message:   "Restart failed: " + err.Error(),
+			Message:   msg,
 			Timestamp: time.Now().Unix(),
 		})
-		return
+		time.Sleep(1 * time.Second)
+		os.Exit(1)
 	}
 
 	// Health check
 	time.Sleep(2 * time.Second)
 
 	port := a.cfg.Port
-	healthURL := fmt.Sprintf("http://localhost:%d/api/version", port)
-
-	client := &http.Client{Timeout: 5 * time.Second}
+	var healthURL string
+	var client *http.Client
+	if a.cfg.HTTPS.Enabled {
+		healthURL = fmt.Sprintf("https://localhost:%d/api/version", port)
+		client = &http.Client{
+			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // localhost-only health check
+			},
+		}
+	} else {
+		healthURL = fmt.Sprintf("http://localhost:%d/api/version", port)
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
 	for i := 0; i < 10; i++ {
 		resp, err := client.Get(healthURL)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			ok := true
 			if expectedVersion != "" {
 				var versionResp struct {
-					Version string `json:"version"`
+					PanelVersion string `json:"panel_version"`
 				}
 				_ = json.NewDecoder(resp.Body).Decode(&versionResp)
 				newVer := strings.TrimPrefix(expectedVersion, "v")
-				actualVer := strings.TrimPrefix(versionResp.Version, "v")
+				actualVer := strings.TrimPrefix(versionResp.PanelVersion, "v")
 				ok = actualVer == newVer
 			}
 			resp.Body.Close()
@@ -520,7 +579,14 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 		if err := copyFile(backupPath, binPath); err != nil {
 			msg = "Проверка не удалась. Откат завершился ошибкой: " + err.Error()
 		} else {
-			msg = "Проверка не удалась, выполнен авто-откат на резервную копию."
+			// Start the backup binary to restore the server
+			rollbackCmd := exec.Command(binPath, "-config", configPath)
+			rollbackCmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			if err := rollbackCmd.Start(); err == nil {
+				msg = "Проверка не удалась, выполнен авто-откат на резервную копию."
+			} else {
+				msg = "Проверка не удалась, авто-откат не смог запуститься: " + err.Error()
+			}
 		}
 	}
 
@@ -529,6 +595,8 @@ func (a *API) restartProcess(binPath string, backupPath string, dataDir string, 
 		Message:   msg,
 		Timestamp: time.Now().Unix(),
 	})
+	time.Sleep(1 * time.Second)
+	os.Exit(1)
 }
 
 // compareSemver сравнивает две версии без префикса "v".
@@ -604,7 +672,7 @@ func fetchLatestRelease(channel string) (*UpdateInfo, error) {
 				Changelog:     rel.Body,
 			}, nil
 		}
-		if channel == "beta" {
+		if channel == "beta" && rel.Prerelease {
 			return &UpdateInfo{
 				LatestVersion: tag,
 				Changelog:     rel.Body,
@@ -633,7 +701,7 @@ func fetchChangelog(version string) (string, error) {
 	return release.Body, nil
 }
 
-func downloadFile(url, filepath string) error {
+func downloadFile(url, destPath string) error {
 	client := utils.SafeHTTPClient(300 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
@@ -645,14 +713,24 @@ func downloadFile(url, filepath string) error {
 		return fmt.Errorf("download failed: %s", resp.Status)
 	}
 
-	out, err := os.Create(filepath)
+	out, err := os.Create(destPath)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, resp.Body)
-	return err
+	_, copyErr := io.Copy(out, resp.Body)
+	// Always close before possible removal
+	closeErr := out.Close()
+
+	if copyErr != nil {
+		_ = os.Remove(destPath) // cleanup on copy error
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(destPath) // cleanup on close error
+		return closeErr
+	}
+	return nil
 }
 
 func copyFile(src, dst string) error {
@@ -668,8 +746,11 @@ func copyFile(src, dst string) error {
 	}
 	defer out.Close()
 
-	_, err = io.Copy(out, in)
-	return err
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	// Sync before Close — ensure data is flushed to disk (power-loss safety on router)
+	return out.Sync()
 }
 
 // verifyFileChecksum downloads checksums.txt from the release and verifies the SHA-256

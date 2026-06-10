@@ -8,6 +8,7 @@
   export let onInsertIntoEditor: (content: string) => void = () => {};
   export let embedded: boolean = false;
   export let initialPreset: string = '';
+  export let invalidateCache: boolean = false;
 
   type ProxyType = 'vless' | 'hysteria2' | 'tuic' | 'ss' | 'vmess';
   type GroupType = 'select' | 'url-test' | 'fallback' | 'load-balance';
@@ -371,7 +372,7 @@
       name: 'Steam',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Забlock. сервисы'],
+      proxies: ['DIRECT', 'Заблок. сервисы'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png'
     },
     {
@@ -482,7 +483,7 @@
   }
 
   // ── Presets ──────────────────────────────────────────────────────────────
-  function applyPreset(id: 'rule-based' | 'global-proxy' | 'zkeen-selective') {
+  function applyPreset(id: 'rule-based' | 'global-proxy' | 'zkeen-selective', silent = false) {
     activePreset = id;
     if (id === 'rule-based') {
       groups = [
@@ -531,7 +532,9 @@
       activeRuleProvider = 'zkeen';
       selectedMetaRuleSets = new Map();
     }
-    showToast('success', $t('editor.preset_applied'));
+    if (!silent) {
+      showToast('success', $t('editor.preset_applied'));
+    }
   }
 
   // ── Import proxies from subscriptions ───────────────────────────────────
@@ -816,6 +819,10 @@
   }
 
   function populateMihomoFromYAML(text: string) {
+    if (!text || text.trim() === '') {
+      applyPreset('zkeen-selective', true);
+      return;
+    }
     try {
       const lines = text.split('\n');
       let inGroups = false;
@@ -1242,6 +1249,9 @@
       if (parsedRules.length > 0) {
         rules = parsedRules;
       }
+      if (parsedGroups.length === 0 && parsedProxies.length === 0) {
+        applyPreset('zkeen-selective', true);
+      }
     } catch (err: any) {
       showToast(
         'warning',
@@ -1249,6 +1259,7 @@
           ? 'Не удалось прочитать существующий config.yaml. Начинаем с чистого листа.'
           : 'Could not parse existing config.yaml. Starting fresh.'
       );
+      applyPreset('zkeen-selective', true);
     }
   }
 
@@ -1272,9 +1283,9 @@
 
   let configLoadedForPath = '';
 
-  async function loadConfig(path: string) {
+  async function loadConfig(path: string, force = false) {
     if (!path) return;
-    if (configLoadedForPath === path) return;
+    if (configLoadedForPath === path && !force) return;
     configLoadedForPath = path;
     try {
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
@@ -1291,13 +1302,22 @@
   }
 
   onMount(async () => {
-    await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml');
+    await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
   });
 
   $: {
     if (selectedFile) {
       loadConfig(selectedFile);
     }
+  }
+
+  let prevInvalidateCache = false;
+  $: if (invalidateCache && !prevInvalidateCache) {
+    prevInvalidateCache = true;
+    configLoadedForPath = '';
+    loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
+  } else if (!invalidateCache) {
+    prevInvalidateCache = false;
   }
 
   function addProxy() {

@@ -137,13 +137,21 @@ export async function fetchDevMode(): Promise<void> {
 }
 
 export async function setDevMode(enabled: boolean): Promise<void> {
-  const csrfToken = localStorage.getItem('csrf_token');
-  const res = await fetch('/api/settings/dev-mode', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
-    body: JSON.stringify({ enabled })
-  });
-  if (res.ok) {
-    devMode.set(enabled);
+  try {
+    const csrfToken = localStorage.getItem('csrf_token');
+    const res = await fetch('/api/settings/dev-mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+      body: JSON.stringify({ enabled })
+    });
+    if (res.ok) {
+      devMode.set(enabled);
+    } else {
+      devMode.set(!enabled);
+      showToast('error', await res.text());
+    }
+  } catch (e) {
+    devMode.set(!enabled);
+    showToast('error', e instanceof Error ? e.message : String(e));
   }
 }

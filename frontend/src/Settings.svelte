@@ -14,6 +14,7 @@
   export let onSwitchTab: (tab: string) => void = () => {};
 
   let checkingConnection = false;
+  let secretVisible = false;
 
   async function recheckConnection() {
     checkingConnection = true;
@@ -34,6 +35,7 @@
   let selectedFile = '';
   let backups: string[] = [];
   let loadingBackups = false;
+  let backupsLoaded = false;
 
   // Snapshots state
   interface SnapshotMeta {
@@ -50,8 +52,14 @@
   async function fetchSnapshots() {
     try {
       const res = await fetch('/api/snapshots/list');
-      if (res.ok) snapshots = (await res.json()) ?? [];
-    } catch (_) {}
+      if (res.ok) {
+        snapshots = (await res.json()) ?? [];
+      } else {
+        showToast('error', await res.text());
+      }
+    } catch (e) {
+      showToast('error', e instanceof Error ? e.message : String(e));
+    }
   }
 
   async function createSnapshot() {
@@ -146,6 +154,11 @@
         fetchBackups();
       }
     } catch (e) {
+      configFiles = [];
+      showToast(
+        'error',
+        `${$t('settings.backup_list_error')}: ${e instanceof Error ? e.message : String(e)}`
+      );
       console.error(e);
     }
   }
@@ -159,9 +172,17 @@
         backups = (await res.json()) ?? [];
       } else {
         backups = [];
+        const txt = await res.text();
+        showToast('error', `${$t('settings.backups_fetch_error')}: ${txt}`);
+        console.error(new Error(`Failed to fetch backups: ${txt}`));
       }
     } catch (e) {
       backups = [];
+      showToast(
+        'error',
+        `${$t('settings.backups_fetch_error')}: ${e instanceof Error ? e.message : String(e)}`
+      );
+      console.error(e);
     } finally {
       loadingBackups = false;
     }
@@ -169,17 +190,19 @@
 
   async function restoreBackup(backupPath: string) {
     if (!confirm($t('settings.backup_restore_confirm'))) return;
+    const targetFile = selectedFile; // capture before any await to prevent TOCTOU race
+    if (!targetFile) return;
     try {
       const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
       if (!readRes.ok) {
         const txt = await readRes.text();
-        showToast('error', `Ошибка чтения бэкапа: ${txt}`);
+        showToast('error', `${$t('settings.backup_read_error')}: ${txt}`);
         return;
       }
       const data = await readRes.text();
 
       const csrfToken = localStorage.getItem('csrf_token');
-      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
+      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(targetFile)}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -192,7 +215,7 @@
         fetchBackups();
       } else {
         const txt = await saveRes.text();
-        showToast('error', `Ошибка восстановления: ${txt}`);
+        showToast('error', `${$t('settings.backup_restore_error')}: ${txt}`);
       }
     } catch (e: any) {
       showToast('error', e.message);
@@ -214,7 +237,7 @@
         fetchBackups();
       } else {
         const txt = await res.text();
-        showToast('error', `Ошибка удаления: ${txt}`);
+        showToast('error', `${$t('settings.backup_delete_error')}: ${txt}`);
       }
     } catch (e: any) {
       showToast('error', e.message);
@@ -253,9 +276,13 @@
     }
   }
 
-  $: if (activeTab === 'backups') {
+  $: if (activeTab === 'backups' && !backupsLoaded) {
+    backupsLoaded = true;
     loadConfigFiles();
     fetchSnapshots();
+  }
+  $: if (activeTab !== 'backups') {
+    backupsLoaded = false;
   }
 
   // Appearance & Behavior settings (persisted in localStorage)
@@ -309,6 +336,10 @@
   async function changePassword() {
     passwordError = '';
     passwordSuccess = false;
+    if (newPassword.length < 8) {
+      passwordError = $t('settings.password_too_short');
+      return;
+    }
     if (newPassword !== confirmPassword) {
       passwordError = $t('settings.password_mismatch');
       return;
@@ -348,7 +379,6 @@
   let updateStatus: { status: string; message: string; progress: number } | null = null;
   let updateChecking = false;
   let updateInstalling = false;
-  let statusInterval: ReturnType<typeof setInterval>;
   let updateChannel: 'stable' | 'beta' = 'stable';
 
   async function fetchUpdateChannel() {
@@ -362,23 +392,36 @@
   }
 
   async function saveUpdateChannel(ch: 'stable' | 'beta') {
-    updateChannel = ch;
+    const prev = updateChannel;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      await fetch('/api/update/channel', {
+      const res = await fetch('/api/update/channel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
         body: JSON.stringify({ channel: ch })
       });
-      showToast('success', $t('settings.channel_saved'));
-    } catch (_) {}
+      if (res.ok) {
+        updateChannel = ch;
+        showToast('success', $t('settings.channel_saved'));
+      } else {
+        updateChannel = prev;
+        showToast('error', await res.text());
+      }
+    } catch (e) {
+      updateChannel = prev;
+      showToast('error', e instanceof Error ? e.message : String(e));
+    }
   }
 
   async function fetchVersion() {
     try {
       const res = await fetch('/api/version');
+      if (!res.ok) {
+        version = $t('app.unavailable');
+        return;
+      }
       const data = await res.json();
-      version = data.panel_version || data.version;
+      version = data.panel_version || data.version || $t('app.unavailable');
     } catch (e) {
       version = $t('app.unavailable');
     }
@@ -400,9 +443,11 @@
         if (updateInfo?.has_update && updateInfo?.latest_version) {
           await fetchChangelog(updateInfo.latest_version);
         }
+      } else {
+        showToast('error', await res.text());
       }
     } catch (e) {
-      // ignore
+      showToast('error', e instanceof Error ? e.message : String(e));
     } finally {
       updateChecking = false;
     }
@@ -422,6 +467,58 @@
   let sseSource: EventSource | null = null;
   let showConfirmUpdateModal = false;
 
+  // Reconnect/polling state after update restart
+  let reconnecting = false;
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const RECONNECT_INTERVAL_MS = 1500;
+  const RECONNECT_MAX_ATTEMPTS = 40; // 40 × 1.5s = 60s max
+
+  function stopReconnectPolling() {
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    reconnecting = false;
+    reconnectAttempt = 0;
+  }
+
+  function startReconnectPolling() {
+    if (reconnecting) return;
+    reconnecting = true;
+    reconnectAttempt = 0;
+    pollVersion();
+  }
+
+  function pollVersion() {
+    reconnectTimer = setTimeout(async () => {
+      reconnectAttempt++;
+      try {
+        const res = await fetch('/api/version', { cache: 'no-store' });
+        if (res.ok) {
+          // New server is up — reload the page
+          stopReconnectPolling();
+          window.location.reload();
+          return;
+        }
+      } catch (_) {
+        // Server not yet up — continue polling
+      }
+      if (reconnectAttempt < RECONNECT_MAX_ATTEMPTS) {
+        pollVersion();
+      } else {
+        // Give up — let user know
+        stopReconnectPolling();
+        updateInstalling = false;
+        updateStatus = {
+          status: 'failed',
+          message: $t('settings.update_reconnect_timeout'),
+          progress: 0
+        };
+      }
+    }, RECONNECT_INTERVAL_MS);
+  }
+
   function startStatusSSE() {
     if (sseSource) {
       sseSource.close();
@@ -432,7 +529,18 @@
       try {
         const state = JSON.parse(event.data);
         updateStatus = state;
-        if (state.status === 'done' || state.status === 'failed') {
+        if (state.status === 'restarting') {
+          // Server is about to shut down — switch to polling mode
+          sseSource?.close();
+          sseSource = null;
+          startReconnectPolling();
+        } else if (state.status === 'done') {
+          updateInstalling = false;
+          sseSource?.close();
+          sseSource = null;
+          // Reload so the page reflects the new version
+          window.location.reload();
+        } else if (state.status === 'failed') {
           updateInstalling = false;
           sseSource?.close();
           sseSource = null;
@@ -442,9 +550,14 @@
       }
     };
     sseSource.onerror = () => {
-      updateInstalling = false;
       sseSource?.close();
       sseSource = null;
+      // If we were in the middle of an install (not done/failed), start polling
+      if (updateInstalling && !reconnecting) {
+        startReconnectPolling();
+      } else {
+        updateInstalling = false;
+      }
     };
   }
 
@@ -460,9 +573,11 @@
         startStatusSSE();
       } else {
         updateInstalling = false;
+        showToast('error', await res.text());
       }
     } catch (e) {
       updateInstalling = false;
+      showToast('error', e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -478,9 +593,11 @@
         startStatusSSE();
       } else {
         updateInstalling = false;
+        showToast('error', await res.text());
       }
     } catch (e) {
       updateInstalling = false;
+      showToast('error', e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -517,6 +634,7 @@
       sseSource.close();
       sseSource = null;
     }
+    stopReconnectPolling();
   });
 </script>
 
@@ -756,9 +874,24 @@
       {#if updateStatus && updateStatus.status !== 'idle'}
         <div class="update-progress">
           <div class="progress-bar">
-            <div class="progress-fill" style="width: {updateStatus.progress}%"></div>
+            <div
+              class="progress-fill"
+              class:progress-pulse={reconnecting}
+              style="width: {reconnecting ? 100 : updateStatus.progress}%"
+            ></div>
           </div>
           <span class="progress-text">{updateStatus.message}</span>
+        </div>
+      {/if}
+
+      {#if reconnecting}
+        <div class="reconnect-overlay">
+          <div class="reconnect-spinner"></div>
+          <div class="reconnect-text">
+            <span>{$t('settings.update_reconnecting')}</span>
+            <span class="reconnect-dots"></span>
+          </div>
+          <div class="reconnect-sub">{$t('settings.update_reconnecting_sub')}</div>
         </div>
       {/if}
 
@@ -1011,7 +1144,15 @@
         {#if $capabilities?.mihomo.discovered_secret}
           <div class="field-row">
             <span class="field-row-name">{$t('settings.mihomo_secret_discovered')}</span>
-            <span class="field-row-val mono">{$capabilities.mihomo.discovered_secret}</span>
+            <span class="field-row-val mono" style="display:flex;align-items:center;gap:6px;">
+              {secretVisible ? $capabilities.mihomo.discovered_secret : '••••••••'}
+              <button
+                class="btn btn-secondary btn-sm"
+                on:click={() => (secretVisible = !secretVisible)}
+              >
+                {secretVisible ? $t('app.hide') : $t('app.show')}
+              </button>
+            </span>
           </div>
         {/if}
       </div>
@@ -1294,31 +1435,31 @@
   }
 
   .status-ok {
-    color: #10b981;
+    color: var(--success);
   }
 
   .status-err {
-    color: #ef4444;
+    color: var(--danger);
   }
 
   .field-error {
     margin-top: 8px;
     font-size: 13px;
-    color: #ef4444;
+    color: var(--danger);
     padding: 6px 10px;
-    background: rgba(239, 68, 68, 0.08);
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
     border-radius: 6px;
-    border: 1px solid rgba(239, 68, 68, 0.25);
+    border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   }
 
   .field-success {
     margin-top: 8px;
     font-size: 13px;
-    color: #10b981;
+    color: var(--success);
     padding: 6px 10px;
-    background: rgba(16, 185, 129, 0.08);
+    background: color-mix(in srgb, var(--success) 8%, transparent);
     border-radius: 6px;
-    border: 1px solid rgba(16, 185, 129, 0.25);
+    border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
   }
 
   .channel-switcher {
@@ -1391,6 +1532,93 @@
     background: var(--accent);
     border-radius: 4px;
     transition: width 0.3s ease;
+  }
+
+  .progress-fill.progress-pulse {
+    animation: progress-shimmer 1.5s ease-in-out infinite;
+    background: linear-gradient(
+      90deg,
+      var(--accent) 0%,
+      color-mix(in srgb, var(--accent) 60%, white) 50%,
+      var(--accent) 100%
+    );
+    background-size: 200% 100%;
+  }
+
+  @keyframes progress-shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  /* Reconnect overlay */
+  .reconnect-overlay {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 18px 16px;
+    margin: 6px 0 10px;
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-card));
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-radius: var(--radius-md, 8px);
+  }
+
+  .reconnect-spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .reconnect-text {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .reconnect-dots::after {
+    content: '';
+    animation: dots 1.5s steps(4, end) infinite;
+  }
+
+  @keyframes dots {
+    0% {
+      content: '';
+    }
+    25% {
+      content: '.';
+    }
+    50% {
+      content: '..';
+    }
+    75% {
+      content: '...';
+    }
+    100% {
+      content: '';
+    }
+  }
+
+  .reconnect-sub {
+    font-size: 12px;
+    color: var(--fg-secondary);
+    text-align: center;
   }
 
   .progress-text {

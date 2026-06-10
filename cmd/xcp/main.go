@@ -275,8 +275,16 @@ func main() {
 	// Graceful shutdown on SIGINT/SIGTERM
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	srvErrCh := make(chan error, 1)
 	go func() {
-		sig := <-sigCh
+		if err := srv.Start(); err != nil {
+			srvErrCh <- err
+		}
+	}()
+
+	select {
+	case sig := <-sigCh:
 		log.Printf("Received signal %s, shutting down...", sig)
 		cancelScheduler()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -284,10 +292,14 @@ func main() {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			log.Printf("Shutdown error: %v", err)
 		}
-	}()
-
-	if err := srv.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("Server error: %v", err)
+	case err := <-srvErrCh:
+		if !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("Server error: %v", err)
+		}
+		// If the server was closed (e.g. during update restart), wait for either a signal
+		// or for the update process to call os.Exit().
+		sig := <-sigCh
+		log.Printf("Received signal %s during restart, exiting...", sig)
 	}
 	log.Println("Server stopped.")
 }
