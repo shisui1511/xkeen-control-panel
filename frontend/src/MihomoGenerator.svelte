@@ -483,8 +483,47 @@
   }
 
   // ── Presets ──────────────────────────────────────────────────────────────
-  function applyPreset(id: 'rule-based' | 'global-proxy' | 'zkeen-selective', silent = false) {
+  function applyPreset(id: string, silent = false) {
     activePreset = id;
+    validationError = '';
+
+    if (schema && schema.mihomo && schema.mihomo.presets) {
+      const p = schema.mihomo.presets.find((x: any) => x.id === id);
+      if (p) {
+        activeRuleProvider = p.active_rule_provider || 'none';
+        groups = (p.groups || []).map((g: any) => ({
+          id: crypto.randomUUID(),
+          name: g.name,
+          type: g.type || 'select',
+          proxies: g.name === 'Selective' || g.name === 'Proxy'
+            ? ['DIRECT', ...proxies.map((pr) => pr.name)]
+            : [...(g.proxies || [])],
+          includeAll: g.include_all ?? false,
+          excludeFilter: g.exclude_filter || '',
+          url: g.url || 'https://www.gstatic.com/generate_204',
+          interval: g.interval || 300,
+          icon: g.icon || '',
+          enabled: true
+        }));
+        rules = (p.rules || []).map((r: any) => ({
+          id: crypto.randomUUID(),
+          type: r.type,
+          value: r.value,
+          outbound: r.outbound
+        }));
+        selectedMetaRuleSets = new Map();
+        if (p.selected_meta_rule_sets) {
+          for (const [k, v] of Object.entries(p.selected_meta_rule_sets)) {
+            selectedMetaRuleSets.set(k, v as string);
+          }
+        }
+        if (!silent) {
+          showToast('success', $t('editor.preset_applied'));
+        }
+        return;
+      }
+    }
+
     if (id === 'rule-based') {
       groups = [
         {
@@ -1302,6 +1341,7 @@
   }
 
   onMount(async () => {
+    await loadSchema();
     await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
   });
 
@@ -1447,7 +1487,7 @@
       }
       lines.push('');
     } else if (activeRuleProvider !== 'none' && activeRuleProvider !== 'metacubex') {
-      const providers = RULE_PROVIDERS[activeRuleProvider];
+      const providers = activeRuleProvider === 'zkeen' ? ruleProviders : RULE_PROVIDERS[activeRuleProvider];
       if (providers && providers.length > 0) {
         lines.push('rule-providers:');
         for (const rp of providers) {
@@ -1488,9 +1528,11 @@
           lines.push(`    uuid: ${p.uuid ?? ''}`);
           if (p.flow) lines.push(`    flow: ${p.flow}`);
           lines.push(`    tls: true`);
-          lines.push(`    reality-opts:`);
-          lines.push(`      public-key: ${q(p.publicKey || '')}`);
-          lines.push(`      short-id: ${q(p.shortId || '')}`);
+          if (p.publicKey) {
+            lines.push(`    reality-opts:`);
+            lines.push(`      public-key: ${q(p.publicKey)}`);
+            lines.push(`      short-id: ${q(p.shortId || '')}`);
+          }
           lines.push(`    client-fingerprint: ${p.fingerprint || 'chrome'}`);
           if (p.servername) lines.push(`    servername: ${q(p.servername)}`);
         } else if (p.type === 'hysteria2') {
@@ -1545,7 +1587,7 @@
         if (g.excludeFilter) {
           lines.push(`    exclude-filter: ${q(g.excludeFilter)}`);
         }
-        if (g.includeAll === true || (g.includeAll !== false && subscriptions.length > 0)) {
+        if (g.includeAll === true) {
           lines.push(`    include-all: true`);
         }
         if (g.proxies.length > 0) {
@@ -1644,7 +1686,7 @@
             lines.push(`  - RULE-SET,${type}-${id.replace(/[^a-z0-9-]/g, '-')},${outbound}`);
           }
         } else if (activeRuleProvider !== 'none') {
-          const providers = RULE_PROVIDERS[activeRuleProvider];
+          const providers = activeRuleProvider === 'zkeen' ? ruleProviders : RULE_PROVIDERS[activeRuleProvider];
           if (providers) {
             for (const rp of providers) {
               lines.push(`  - RULE-SET,${rp.name},${rp.outbound}`);
@@ -1808,6 +1850,88 @@
     return resultLines.join('\n').trimEnd();
   }
 
+  let schema: any = null;
+  let schemaLoading = true;
+  let schemaError = '';
+  let validationError = '';
+
+  async function loadSchema() {
+    schemaLoading = true;
+    schemaError = '';
+    try {
+      const res = await fetch('/api/assets/definition');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      schema = await res.json();
+    } catch (e: any) {
+      schemaError = e.message || 'Unknown error';
+    } finally {
+      schemaLoading = false;
+    }
+  }
+
+  $: ruleProviders = (schema && schema.mihomo && schema.mihomo.rule_providers)
+    ? schema.mihomo.rule_providers
+    : ZKEEN_RULE_PROVIDERS;
+
+  function findTopLevelSection(lines: string[], sectionName: string) {
+    const header = sectionName + ':';
+    let start = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trimEnd();
+      if (trimmed === header || trimmed.startsWith(header + ' ') || trimmed.startsWith(header + '\t')) {
+        if (line.length === line.trimStart().length) {
+          start = i;
+          break;
+        }
+      }
+    }
+    if (start === -1) {
+      return { start: -1, end: -1 };
+    }
+
+    let end = lines.length;
+    for (let i = start + 1; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      if (trimmed === '' || trimmed.startsWith('#')) {
+        continue;
+      }
+      const raw = line.trimStart();
+      if (line.length === raw.length && !raw.startsWith('- ')) {
+        end = i;
+        break;
+      }
+    }
+    return { start, end };
+  }
+
+  function replaceMihomoTopLevelSection(content: string, sectionName: string, newContent: string): string {
+    const lines = content.split('\n');
+    const { start, end } = findTopLevelSection(lines, sectionName);
+    const newLines = newContent.trim() !== '' ? newContent.trimEnd().split('\n') : [];
+
+    if (start === -1) {
+      if (newLines.length === 0) return content;
+      let appended = `\n${sectionName}:\n` + newLines.join('\n') + '\n';
+      if (content.endsWith('\n')) {
+        return content + appended.substring(1);
+      }
+      return content + appended;
+    }
+
+    const out: string[] = [];
+    out.push(...lines.slice(0, start));
+    if (newLines.length > 0 || newContent.trim() !== '') {
+      out.push(sectionName + ':');
+      out.push(...newLines);
+    }
+    if (end < lines.length) {
+      out.push(...lines.slice(end));
+    }
+    return out.join('\n');
+  }
+
   async function handleApplyMihomo() {
     if (!showApplyConfirm) {
       showApplyConfirm = true;
@@ -1820,7 +1944,6 @@
       const csrfToken = localStorage.getItem('csrf_token');
       const path = selectedFile || '/opt/etc/mihomo/config.yaml';
 
-      // Generate YAML and extract managed sections for merge via /api/config/mihomo-merge
       const yamlContent = generateYAML();
       const sections: Record<string, string> = {
         'rule-providers': extractSection(yamlContent, 'rule-providers'),
@@ -1831,6 +1954,39 @@
         tun: extractSection(yamlContent, 'tun'),
         'proxy-providers': extractSection(yamlContent, 'proxy-providers')
       };
+
+      const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+      if (!readRes.ok) {
+        throw new Error(`Failed to read current config: HTTP ${readRes.status}`);
+      }
+      let currentYAML = await readRes.text();
+
+      for (const [sectionName, newSecContent] of Object.entries(sections)) {
+        currentYAML = replaceMihomoTopLevelSection(currentYAML, sectionName, newSecContent);
+      }
+
+      const validateRes = await fetch('/api/config/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({ path, content: currentYAML })
+      });
+
+      if (!validateRes.ok) {
+        throw new Error(`Failed to validate config: HTTP ${validateRes.status}`);
+      }
+
+      const validateResult = await validateRes.json();
+      if (!validateResult.valid) {
+        validationError = validateResult.error || 'Unknown validation error';
+        applyLoading = false;
+        showToast('error', $t('editor.validation_failed'));
+        return;
+      }
+
+      validationError = '';
 
       const mergeRes = await fetch('/api/config/mihomo-merge', {
         method: 'POST',
@@ -1873,7 +2029,19 @@
 </script>
 
 <div class="container">
-  {#if !embedded}
+  {#if schemaLoading}
+    <div class="loading-state-block" style="padding: 48px; text-align: center; color: var(--fg-secondary);">
+      <div class="spinner" style="width: 24px; height: 24px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 12px;"></div>
+      <p>{$t('editor.loading_definition')}</p>
+    </div>
+  {:else if schemaError}
+    <div class="error-state-block" style="padding: 48px; text-align: center;">
+      <div class="error-icon" style="color: var(--danger); font-size: 24px; margin-bottom: 12px;">⚠</div>
+      <p style="color: var(--danger); margin-bottom: 16px;">{$t('editor.definition_load_error', { error: schemaError })}</p>
+      <button class="btn btn-secondary" on:click={loadSchema}>{ru ? 'Повторить попытку' : 'Retry'}</button>
+    </div>
+  {:else}
+    {#if !embedded}
     <div class="page-head">
       <div>
         <div class="crumbs">
@@ -1955,7 +2123,7 @@
           value={activePreset}
           on:change={(e) => {
             const val = e.currentTarget.value;
-            applyPreset(val as any);
+            applyPreset(val);
             if (val === 'rule-based') {
               activeSection = 'rulesets';
             } else if (val === 'zkeen-selective') {
@@ -1964,9 +2132,15 @@
           }}
         >
           <option value="">-- {$t('editor.constructor_scenario')} --</option>
-          <option value="rule-based">{$t('editor.scenario_rule_based')}</option>
-          <option value="global-proxy">{$t('editor.scenario_global_proxy')}</option>
-          <option value="zkeen-selective">{$t('editor.scenario_zkeen_selective')}</option>
+          {#if schema && schema.mihomo && schema.mihomo.presets}
+            {#each schema.mihomo.presets as p}
+              <option value={p.id}>{$t(p.name)}</option>
+            {/each}
+          {:else}
+            <option value="rule-based">{$t('editor.scenario_rule_based')}</option>
+            <option value="global-proxy">{$t('editor.scenario_global_proxy')}</option>
+            <option value="zkeen-selective">{$t('editor.scenario_zkeen_selective')}</option>
+          {/if}
         </select>
       </div>
 
@@ -2688,9 +2862,16 @@
             ? '# Добавьте элементы слева\n# чтобы сгенерировать YAML'
             : '# Add elements on the left\n# to generate YAML')}</pre>
 
+      {#if validationError}
+        <div class="validation-error-block" style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-family: var(--font-family-mono); font-size: 13px; white-space: pre-wrap;">
+          <strong>{$t('editor.validation_failed')}</strong>
+          <pre style="margin: 8px 0 0 0; white-space: pre-wrap; font-family: inherit; font-size: inherit;">{validationError}</pre>
+        </div>
+      {/if}
+
       {#if embedded}
         <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
-          <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
+           <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
             <svg
               width="13"
               height="13"
@@ -2728,6 +2909,7 @@
       {/if}
     </div>
   </div>
+    {/if}
 </div>
 
 {#if showApplyConfirm}
