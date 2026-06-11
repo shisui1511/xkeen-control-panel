@@ -1827,8 +1827,14 @@
   function extractSection(yamlText: string, sectionName: string): string {
     const lines = yamlText.split('\n');
     let start = -1;
+    const header = sectionName + ':';
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith(sectionName + ':')) {
+      const line = lines[i];
+      const trimmed = line.trimEnd();
+      if (
+        (trimmed === header || trimmed.startsWith(header + ' ') || trimmed.startsWith(header + '\t')) &&
+        line.length === line.trimStart().length
+      ) {
         start = i;
         break;
       }
