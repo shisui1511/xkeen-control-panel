@@ -18,6 +18,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/handlers"
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/assets"
 )
 
 var (
@@ -221,6 +222,11 @@ func main() {
 	api.SetConsoleService(consoleSvc)
 	srv.HandleProtected("/api/console/commands", api.ConsoleListCommands)
 	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)
+
+	// Assets Service
+	assetsSvc := assets.NewService()
+	api.SetAssetsService(assetsSvc)
+	srv.HandleProtected("/api/assets/definition", api.AssetsDefinition)
 
 	// Templates
 	templatesFS, err := xkeencontrolpanel.GetTemplatesFS()

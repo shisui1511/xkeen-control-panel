@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"gopkg.in/yaml.v3"
 )
 
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
@@ -604,7 +605,20 @@ func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
 			a.errorResponse(w, "invalid section name: "+sectionName, http.StatusBadRequest)
 			return
 		}
+		if strings.TrimSpace(newSecContent) != "" {
+			var temp interface{}
+			if err := yaml.Unmarshal([]byte(newSecContent), &temp); err != nil {
+				a.errorResponse(w, "invalid YAML syntax in section "+sectionName+": "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
 		content = services.ReplaceMihomoTopLevelSection(content, sectionName, newSecContent)
+	}
+
+	var resultTemp interface{}
+	if err := yaml.Unmarshal([]byte(content), &resultTemp); err != nil {
+		a.errorResponse(w, "invalid resulting YAML config: "+err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	err = a.configSvc.Save(cleanPath, []byte(content))

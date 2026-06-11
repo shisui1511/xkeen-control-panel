@@ -1,0 +1,390 @@
+{
+  "schema_version": "1.0.0",
+  "xray": {
+    "presets": [
+      {
+        "id": "selective-routing",
+        "name": "preset.selective-routing",
+        "description": "preset.selective-routing.desc",
+        "default": true,
+        "dns_servers": [
+          "1.1.1.1",
+          {
+            "address": "8.8.8.8",
+            "port": 53,
+            "tag": "dns-in-ytb",
+            "domains": ["geosite:youtube", "geosite:google"],
+            "skipFallback": true
+          },
+          {
+            "address": "77.88.8.8",
+            "port": 53,
+            "tag": "dns-in-direct",
+            "domains": ["geosite:ru"],
+            "skipFallback": false
+          }
+        ],
+        "routing_rules": [
+          {
+            "outboundTag": "direct",
+            "ip": ["geoip:private"]
+          },
+          {
+            "outboundTag": "block",
+            "domain": ["geosite:category-ads-all"]
+          },
+          {
+            "outboundTag": "PROXY_TAG",
+            "network": "tcp,udp"
+          }
+        ]
+      },
+      {
+        "id": "all-proxy-routing",
+        "name": "preset.all-proxy-routing",
+        "description": "preset.all-proxy-routing.desc",
+        "dns_servers": ["1.1.1.1", "8.8.8.8"],
+        "routing_rules": [
+          {
+            "outboundTag": "direct",
+            "ip": ["geoip:private"]
+          },
+          {
+            "outboundTag": "PROXY_TAG",
+            "network": "tcp,udp"
+          }
+        ]
+      },
+      {
+        "id": "selective-no-quic",
+        "name": "preset.selective-no-quic",
+        "description": "preset.selective-no-quic.desc",
+        "dns_servers": [
+          "1.1.1.1",
+          {
+            "address": "8.8.8.8",
+            "port": 53,
+            "tag": "dns-in-ytb",
+            "domains": ["geosite:youtube", "geosite:google"],
+            "skipFallback": true
+          }
+        ],
+        "routing_rules": [
+          {
+            "outboundTag": "block",
+            "network": "udp",
+            "port": "443"
+          },
+          {
+            "outboundTag": "direct",
+            "ip": ["geoip:private"]
+          },
+          {
+            "outboundTag": "block",
+            "domain": ["geosite:category-ads-all"]
+          },
+          {
+            "outboundTag": "PROXY_TAG",
+            "network": "tcp,udp"
+          }
+        ]
+      },
+      {
+        "id": "minimal-routing",
+        "name": "preset.minimal-routing",
+        "description": "preset.minimal-routing.desc",
+        "dns_servers": ["1.1.1.1", "8.8.8.8"],
+        "routing_rules": [
+          {
+            "outboundTag": "direct",
+            "ip": ["geoip:private"]
+          },
+          {
+            "outboundTag": "direct",
+            "port": "0-65535"
+          }
+        ]
+      }
+    ]
+  },
+  "mihomo": {
+    "presets": [
+      {
+        "id": "rule-based",
+        "name": "preset.rule-based",
+        "description": "preset.rule-based.desc",
+        "active_rule_provider": "metacubex",
+        "groups": [
+          {
+            "name": "Selective",
+            "type": "select",
+            "proxies": ["DIRECT"],
+            "include_all": true,
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 300
+          }
+        ],
+        "rules": [],
+        "selected_meta_rule_sets": {
+          "category-ads-all|geosite": "REJECT",
+          "telegram|geoip": "Selective",
+          "private|geoip": "DIRECT"
+        }
+      },
+      {
+        "id": "global-proxy",
+        "name": "preset.global-proxy",
+        "description": "preset.global-proxy.desc",
+        "active_rule_provider": "none",
+        "groups": [
+          {
+            "name": "Proxy",
+            "type": "select",
+            "proxies": ["DIRECT"],
+            "include_all": true,
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 300
+          }
+        ],
+        "rules": [
+          { "type": "GEOIP", "value": "private", "outbound": "DIRECT" },
+          { "type": "MATCH", "value": "", "outbound": "Proxy" }
+        ],
+        "selected_meta_rule_sets": {}
+      },
+      {
+        "id": "zkeen-selective",
+        "name": "preset.zkeen-selective",
+        "description": "preset.zkeen-selective.desc",
+        "default": true,
+        "active_rule_provider": "zkeen",
+        "groups": [
+          {
+            "name": "Заблок. сервисы",
+            "type": "select",
+            "include_all": true,
+            "proxies": [],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Reject.png"
+          },
+          {
+            "name": "YouTube",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png"
+          },
+          {
+            "name": "Discord",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png"
+          },
+          {
+            "name": "Twitch",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT", "Заблок. сервисы"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png"
+          },
+          {
+            "name": "Reddit",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT", "Заблок. сервисы"],
+            "icon": "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png"
+          },
+          {
+            "name": "Meta",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "icon": "https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png"
+          },
+          {
+            "name": "Spotify",
+            "type": "select",
+            "include_all": true,
+            "exclude_filter": "🇷🇺",
+            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png"
+          },
+          {
+            "name": "Speedtest",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png"
+          },
+          {
+            "name": "Telegram",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png"
+          },
+          {
+            "name": "Steam",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT", "Заблок. сервисы"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png"
+          },
+          {
+            "name": "CDN",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "icon": "https://www.svgrepo.com/show/396567/globe-with-meridians.svg"
+          },
+          {
+            "name": "Google",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT", "Заблок. сервисы"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png"
+          },
+          {
+            "name": "GitHub",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT", "Заблок. сервисы"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png"
+          },
+          {
+            "name": "AI",
+            "type": "select",
+            "include_all": true,
+            "exclude_filter": "🇷🇺",
+            "proxies": ["Заблок. сервисы"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png"
+          },
+          {
+            "name": "Twitter",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png"
+          },
+          {
+            "name": "QUIC",
+            "type": "select",
+            "include_all": false,
+            "proxies": ["REJECT", "DIRECT"],
+            "icon": "https://github.com/zxc-rv/assets/raw/main/group-icons/quic.png"
+          }
+        ],
+        "rules": [],
+        "selected_meta_rule_sets": {}
+      }
+    ],
+    "rule_providers": [
+      {
+        "name": "adlist@domain",
+        "url": "https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "REJECT"
+      },
+      {
+        "name": "category-ai@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/category-ai.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "AI"
+      },
+      {
+        "name": "steam@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/steam.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Steam"
+      },
+      {
+        "name": "spotify@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/spotify.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Spotify"
+      },
+      {
+        "name": "speedtest@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/speedtest.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Speedtest"
+      },
+      {
+        "name": "reddit@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/reddit.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Reddit"
+      },
+      {
+        "name": "twitch@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/twitch.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Twitch"
+      },
+      {
+        "name": "twitter@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/twitter.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Twitter"
+      },
+      {
+        "name": "meta@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/meta.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Meta"
+      },
+      {
+        "name": "discord@classical",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/classical/discord.txt",
+        "behavior": "classical",
+        "format": "text",
+        "outbound": "Discord"
+      },
+      {
+        "name": "refilter@domain",
+        "url": "https://raw.githubusercontent.com/1andrevich/Re-filter-lists/release/refilter_domains.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Заблок. сервисы"
+      },
+      {
+        "name": "telegram@ipcidr",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geoip/telegram.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "Telegram"
+      },
+      {
+        "name": "github@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/github.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "GitHub"
+      },
+      {
+        "name": "private@ip",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geoip/private.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "DIRECT"
+      },
+      {
+        "name": "quic@inline",
+        "url": "",
+        "behavior": "classical",
+        "format": "inline",
+        "outbound": "QUIC",
+        "payload": ["AND,((DST-PORT,443),(NETWORK,UDP))"]
+      }
+    ]
+  }
+}
