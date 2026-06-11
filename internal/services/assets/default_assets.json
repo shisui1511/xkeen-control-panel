@@ -270,7 +270,7 @@
             "name": "QUIC",
             "type": "select",
             "include_all": false,
-            "proxies": ["REJECT", "DIRECT"],
+            "proxies": ["REJECT", "PASS"],
             "icon": "https://github.com/zxc-rv/assets/raw/main/group-icons/quic.png"
           }
         ],

@@ -310,6 +310,13 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
   });
 
   test('Warning toast is displayed when invalid proxyTag is saved', async ({ page }) => {
+    page.on('console', (msg) => console.log(`[BROWSER CONSOLE] ${msg.type()}: ${msg.text()}`));
+    page.on('request', (req) => {
+      if (req.method() === 'POST' || req.url().includes('save') || req.url().includes('validate')) {
+        console.log(`[BROWSER REQUEST] ${req.method()} ${req.url()}`);
+      }
+    });
+
     const savedFiles: Record<string, any> = {};
 
     await page.route('**/api/**', async (route) => {
@@ -392,6 +399,18 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
           contentType: 'application/json',
           body: JSON.stringify({ success: true })
         });
+      } else if (url.includes('/api/assets/definition')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({})
+        });
+      } else if (url.includes('/api/config/validate')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ valid: true })
+        });
       } else {
         await route.fulfill({
           status: 200,
@@ -422,6 +441,10 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
     await expect(toast).toBeVisible({ timeout: 5000 });
     const toastText = await toast.innerText();
     expect(toastText).toContain('не найден в списке исходящих подключений');
+
+    // Wait for the save flow to finish
+    const successToast = page.locator('.toast.toast--success');
+    await expect(successToast).toBeVisible({ timeout: 5000 });
 
     // But the configuration should still be saved
     expect(Object.keys(savedFiles).length).toBeGreaterThan(0);

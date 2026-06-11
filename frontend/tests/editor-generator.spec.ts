@@ -89,6 +89,18 @@ test.describe('Editor & Constructor integration test suite', () => {
           contentType: 'application/json',
           body: JSON.stringify([])
         });
+      } else if (url.includes('/api/assets/definition')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({})
+        });
+      } else if (url.includes('/api/config/validate')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ valid: true })
+        });
       } else {
         await route.fulfill({
           status: 200,
@@ -328,6 +340,18 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
           contentType: 'application/json',
           body: JSON.stringify([])
         });
+      } else if (url.includes('/api/assets/definition')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({})
+        });
+      } else if (url.includes('/api/config/validate')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ valid: true })
+        });
       } else {
         await route.fulfill({
           status: 200,
@@ -430,6 +454,9 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
 
     await expect(confirmDialog).not.toBeVisible();
 
+    // Wait for the save flow to finish
+    await expect(page.locator('[data-testid="apply-changes-btn"]')).toBeEnabled({ timeout: 5000 });
+
     const mergeCall = postRequests.some((url) => url.includes('/api/config/mihomo-merge'));
     const restartCall = postRequests.some(
       (url) => url.includes('/api/service/control') && url.includes('action=restart')
@@ -492,8 +519,8 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await expect(confirmActionBtn).toBeVisible();
     await confirmActionBtn.click();
 
-    // Wait for the merge call to happen
-    await page.waitForTimeout(500);
+    // Wait for the save flow to finish
+    await expect(page.locator('[data-testid="apply-changes-btn"]')).toBeEnabled({ timeout: 5000 });
 
     expect(mergePayload).not.toBeNull();
     expect(mergePayload.sections).toBeDefined();
