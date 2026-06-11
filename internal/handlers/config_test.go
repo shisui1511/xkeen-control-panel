@@ -392,6 +392,20 @@ rules:
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for forbidden path, got %d", rr.Code)
 	}
+
+	// Invalid YAML in section
+	invalidYAMLBody := `{
+		"path": "` + strings.ReplaceAll(targetPath, "\\", "\\\\") + `",
+		"sections": {
+			"rules": "  - [MATCH,DIRECT"
+		}
+	}`
+	req = httptest.NewRequest(http.MethodPost, "/api/config/mihomo-merge", strings.NewReader(invalidYAMLBody))
+	rr = httptest.NewRecorder()
+	api.MihomoMergeSave(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid YAML, got %d: %s", rr.Code, rr.Body.String())
+	}
 }
 
 // TestConfigRead_FileNotFound verifies that ConfigRead returns 404 when file does not exist.

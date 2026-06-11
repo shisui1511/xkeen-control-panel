@@ -10,6 +10,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/i18n"
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/assets"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -29,6 +30,7 @@ type API struct {
 	snapshotSvc           *services.SnapshotService
 	consoleSvc            *services.ConsoleService
 	templateSvc           *services.TemplateService
+	assetsSvc             *assets.AssetsService
 	pathVal               *utils.PathValidator
 	configValCache        bool
 	configValCacheTime    time.Time
@@ -71,6 +73,10 @@ func (a *API) SetConsoleService(svc *services.ConsoleService) {
 
 func (a *API) SetTemplateService(svc *services.TemplateService) {
 	a.templateSvc = svc
+}
+
+func (a *API) SetAssetsService(svc *assets.AssetsService) {
+	a.assetsSvc = svc
 }
 
 func (a *API) SetKernelService(svc *services.KernelService) {
