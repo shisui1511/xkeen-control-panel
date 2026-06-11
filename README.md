@@ -173,7 +173,7 @@ rm -rf /opt/etc/xcp   # удалить конфиги (опционально)
 | **MIPSLE (mipsel)** | Giga/Hero (KN-1010/KN-1011), Ultra (KN-1810), Viva/Skipper (KN-1910/KN-1912/KN-1913), Giant (KN-2610), Hero 4G (KN-2310/KN-2311), Hopper (KN-3810), Skipper 4G (KN-2910), Launcher DSL (KN-2012), Speedster DSL (KN-2113), Hopper DSL (KN-3611), 4G (KN-1212), Extra/Carrier (KN-1711/KN-1713) |
 | **MIPS (mips)** | Ultra SE/Peak DSL (KN-2510), Giga SE/Hero DSL (KN-2410), DSL/Omni DSL (KN-2010), Skipper DSL (KN-2112), Duo/Extra DSL (KN-2110), Hopper DSL (KN-3610) |
 
-Панель работает совместно с другими инструментами (XKeen-UI, zashboard) на разных портах без конфликтов.
+Панель работает совместно с другими инструментами (Legacy-UI, zashboard) на разных портах без конфликтов.
 
 ---
 
