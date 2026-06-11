@@ -67,6 +67,7 @@ export function mergeXrayFile(
         ...existing,
         routing: {
           ...(existing.routing ?? {}),
+          domainStrategy: managed.domainStrategy ?? existing.routing?.domainStrategy,
           rules
         }
       };
@@ -134,9 +135,10 @@ export function syncDnsPipeline(
  * @param tag   - реальный тег исходящего соединения
  */
 export function substituteProxyTag(rules: any[], tag: string): any[] {
+  const realTag = tag || 'direct';
   return rules.map((r) => {
     if (r.outboundTag === 'PROXY_TAG') {
-      return { ...r, outboundTag: tag };
+      return { ...r, outboundTag: realTag };
     }
     return r;
   });

@@ -83,6 +83,25 @@
     system: {}
   });
 
+  let schema = $state<any>(null);
+  let schemaLoading = $state(true);
+  let schemaError = $state('');
+  let validationError = $state('');
+
+  async function loadSchema() {
+    schemaLoading = true;
+    schemaError = '';
+    try {
+      const res = await fetch('/api/assets/definition');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      schema = await res.json();
+    } catch (e: any) {
+      schemaError = e.message || 'Unknown error';
+    } finally {
+      schemaLoading = false;
+    }
+  }
+
   let isDirty = $state(false);
   let applyLoading = $state(false);
   let showApplyConfirm = $state(false);
@@ -149,6 +168,7 @@
   ];
 
   onMount(async () => {
+    await loadSchema();
     await loadAllConfigs();
   });
 
@@ -413,6 +433,39 @@
         return;
       }
 
+      // Pre-validate all changed files first
+      for (const file of changed) {
+        const managedPair = getChangedFiles().find(([n]) => n === file.name);
+        if (!managedPair) continue;
+        const [, managed] = managedPair;
+        const existing = xrayFiles[file.name] ?? {};
+        const merged = mergeXrayFile(file.name, existing, managed);
+        const content = JSON.stringify(merged, null, 2);
+
+        const validateRes = await fetch('/api/config/validate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken || ''
+          },
+          body: JSON.stringify({ path: file.path, content })
+        });
+
+        if (!validateRes.ok) {
+          throw new Error(`Failed to validate config: HTTP ${validateRes.status}`);
+        }
+
+        const validateResult = await validateRes.json();
+        if (!validateResult.valid) {
+          validationError = validateResult.error || 'Unknown validation error';
+          applyLoading = false;
+          showToast('error', $t('editor.validation_failed'));
+          return;
+        }
+      }
+
+      validationError = '';
+
       // 1. Сохранить изменённые файлы
       for (const file of changed) {
         const managedPair = getChangedFiles().find(([n]) => n === file.name);
@@ -573,7 +626,38 @@
   }
 
   // Пресеты
-  function applyPreset(presetId: 'selective-routing' | 'all-proxy-routing' | 'selective-no-quic') {
+  function applyPreset(presetId: string) {
+    validationError = '';
+    if (schema && schema.xray && schema.xray.presets) {
+      const p = schema.xray.presets.find((x: any) => x.id === presetId);
+      if (p) {
+        dnsConfig.servers = (p.dns_servers || []).map((s: any) => {
+          if (typeof s === 'string') return s;
+          return {
+            address: s.address,
+            port: s.port,
+            tag: s.tag,
+            domains: s.domains ? [...s.domains] : undefined,
+            skipFallback: s.skipFallback
+          };
+        });
+        routingRules = (p.routing_rules || []).map((r: any) => ({
+          id: crypto.randomUUID(),
+          type: r.type || 'field',
+          outboundTag: r.outboundTag,
+          domain: r.domain ? [...r.domain] : undefined,
+          ip: r.ip ? [...r.ip] : undefined,
+          port: r.port,
+          network: r.network,
+          protocol: r.protocol ? [...r.protocol] : undefined,
+          inboundTag: r.inboundTag ? [...r.inboundTag] : undefined
+        }));
+        isDirty = true;
+        showToast('success', $t('editor.preset_applied'));
+        return;
+      }
+    }
+
     if (presetId === 'selective-routing') {
       dnsConfig.servers = [
         '1.1.1.1',
@@ -721,10 +805,7 @@
     templateId: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing',
     silent = false
   ) {
-    if (!proxyTag || !outboundTags.includes(proxyTag)) {
-      showToast('warning', $t('editor.proxy_tag_warning'));
-      return;
-    }
+    const tag = proxyTag && outboundTags.includes(proxyTag) ? proxyTag : 'direct';
 
     applyLoading = true;
     try {
@@ -749,7 +830,7 @@
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
-          body: JSON.stringify(getRoutingForTemplate(templateId, proxyTag), null, 2)
+          body: JSON.stringify(getRoutingForTemplate(templateId, tag), null, 2)
         }
       );
       if (!saveRoutingRes.ok) throw new Error('Failed to save 05_routing.json');
@@ -759,7 +840,9 @@
       }
       await loadAllConfigs();
     } catch (e: any) {
-      showToast('error', $t('editor.save_error') + ': ' + e.message);
+      if (!silent) {
+        showToast('error', $t('editor.save_error') + ': ' + e.message);
+      }
     } finally {
       applyLoading = false;
     }
@@ -976,61 +1059,79 @@
 </script>
 
 <div class="container">
-  {#if !embedded}
-    <div class="page-head">
-      <div>
-        <div class="crumbs">
-          {ru ? 'Сервисы' : 'Services'} <span class="crumb-sep">/</span>
-          {ru ? 'Сценарии Xray' : 'Xray Presets'}
-        </div>
-        <h1>{ru ? 'Визуальные сценарии Xray' : 'Xray Visual Presets'}</h1>
-        <p class="sub">
-          {ru
-            ? 'Настройка логирования, DNS, inbounds, outbounds, routing и policy для Xray.'
-            : 'Configure logging, DNS, inbounds, outbounds, routing and policy for Xray.'}
-        </p>
-      </div>
-      <div class="ph-actions">
-        <button class="btn btn-secondary" on:click={openInEditor}>
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right:5px"
-            ><path d="M12 20h9" /><path
-              d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
-            /></svg
-          >
-          {#if selectedFile}
-            {ru ? 'Вставить в редактор' : 'Insert into Editor'}
-          {:else}
-            {ru ? 'Открыть в редакторе' : 'Open in Editor'}
-          {/if}
-        </button>
-        <button
-          class="btn btn-primary"
-          data-testid="apply-changes-btn"
-          on:click={handleApplyChanges}
-        >
-          {ru ? 'Применить изменения' : 'Apply Changes'}
-        </button>
-      </div>
+  {#if schemaLoading}
+    <div class="loading-state-block" style="padding: 48px; text-align: center; color: var(--fg-secondary);">
+      <div class="spinner" style="width: 24px; height: 24px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 12px;"></div>
+      <p>{$t('editor.loading_definition')}</p>
     </div>
-  {/if}
-
-  <div class="gen-layout">
-    <!-- Left Panel -->
-    <div class="gen-left">
-      <!-- Scenario chips -->
-      <div class="constructor-scenario-bar">
-        <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
-        {#each [['selective-routing', $t('editor.scenario_rule_based')], ['all-proxy-routing', $t('editor.scenario_global_proxy')], ['selective-no-quic', ru ? 'Блокировка QUIC' : 'Block QUIC']] as [id, label]}
-          <button class="scenario-chip" on:click={() => applyPreset(id as any)}>{label}</button>
-        {/each}
+  {:else if schemaError}
+    <div class="error-state-block" style="padding: 48px; text-align: center;">
+      <div class="error-icon" style="color: var(--danger); font-size: 24px; margin-bottom: 12px;">⚠</div>
+      <p style="color: var(--danger); margin-bottom: 16px;">{$t('editor.definition_load_error', { error: schemaError })}</p>
+      <button class="btn btn-secondary" on:click={loadSchema}>{ru ? 'Повторить попытку' : 'Retry'}</button>
+    </div>
+  {:else}
+    {#if !embedded}
+      <div class="page-head">
+        <div>
+          <div class="crumbs">
+            {ru ? 'Сервисы' : 'Services'} <span class="crumb-sep">/</span>
+            {ru ? 'Сценарии Xray' : 'Xray Presets'}
+          </div>
+          <h1>{ru ? 'Визуальные сценарии Xray' : 'Xray Visual Presets'}</h1>
+          <p class="sub">
+            {ru
+              ? 'Настройка логирования, DNS, inbounds, outbounds, routing и policy для Xray.'
+              : 'Configure logging, DNS, inbounds, outbounds, routing and policy for Xray.'}
+          </p>
+        </div>
+        <div class="ph-actions">
+          <button class="btn btn-secondary" on:click={openInEditor}>
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right:5px"
+              ><path d="M12 20h9" /><path
+                d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
+              /></svg
+            >
+            {#if selectedFile}
+              {ru ? 'Вставить в редактор' : 'Insert into Editor'}
+            {:else}
+              {ru ? 'Открыть в редакторе' : 'Open in Editor'}
+            {/if}
+          </button>
+          <button
+            class="btn btn-primary"
+            data-testid="apply-changes-btn"
+            on:click={handleApplyChanges}
+          >
+            {ru ? 'Применить изменения' : 'Apply Changes'}
+          </button>
+        </div>
       </div>
+    {/if}
+
+    <div class="gen-layout">
+      <!-- Left Panel -->
+      <div class="gen-left">
+        <!-- Scenario chips -->
+        <div class="constructor-scenario-bar">
+          <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
+          {#if schema && schema.xray && schema.xray.presets}
+            {#each schema.xray.presets as p}
+              <button class="scenario-chip" on:click={() => applyPreset(p.id)}>{$t(p.name)}</button>
+            {/each}
+          {:else}
+            {#each [['selective-routing', $t('editor.scenario_rule_based')], ['all-proxy-routing', $t('editor.scenario_global_proxy')], ['selective-no-quic', ru ? 'Блокировка QUIC' : 'Block QUIC']] as [id, label]}
+              <button class="scenario-chip" on:click={() => applyPreset(id as any)}>{label}</button>
+            {/each}
+          {/if}
+        </div>
 
       <!-- Outbound Tag selection -->
       <div class="rule-providers-row">
@@ -1710,6 +1811,13 @@
       </div>
       <pre class="constructor-preview-pane" data-testid="xray-json-preview">{previewJson}</pre>
 
+      {#if validationError}
+        <div class="validation-error-block" style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-family: var(--font-family-mono); font-size: 13px; white-space: pre-wrap;">
+          <strong>{$t('editor.validation_failed')}</strong>
+          <pre style="margin: 8px 0 0 0; white-space: pre-wrap; font-family: inherit; font-size: inherit;">{validationError}</pre>
+        </div>
+      {/if}
+
       {#if embedded}
         <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
           <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
@@ -1743,6 +1851,7 @@
       {/if}
     </div>
   </div>
+  {/if}
 </div>
 
 {#if showApplyConfirm}
