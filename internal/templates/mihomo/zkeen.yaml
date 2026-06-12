@@ -22,7 +22,7 @@ dns:
     - 77.88.8.8
     - 1.1.1.1
   nameserver-policy:
-    "geosite:ru": [77.88.8.8, 8.8.8.8]
+    "+.ru,+.su,+.am,+.by,+.kz,+.ua": [77.88.8.8, 8.8.8.8]
   fallback:
     - 8.8.8.8
 

@@ -155,7 +155,7 @@ func TestXrayTemplatesStructure(t *testing.T) {
 		ips, _ := rule["ip"].([]interface{})
 		hasTelegram := false
 		for _, ipVal := range ips {
-			if ipStr, ok := ipVal.(string); ok && ipStr == "geoip:telegram" {
+			if ipStr, ok := ipVal.(string); ok && ipStr == "ext:zkeenip.dat:telegram" {
 				hasTelegram = true
 				break
 			}
@@ -169,7 +169,7 @@ func TestXrayTemplatesStructure(t *testing.T) {
 		}
 	}
 	if !foundTelegram {
-		t.Error("zkeen-routing.json: routing rule for geoip:telegram not found")
+		t.Error("zkeen-routing.json: routing rule for ext:zkeenip.dat:telegram not found")
 	}
 
 	// 2. observatory.json

@@ -91,7 +91,7 @@
       {
         "type": "field",
         "ip": [
-          "geoip:telegram"
+          "ext:zkeenip.dat:telegram"
         ],
         "port": "80,443,596-599,1400,5222",
         "outboundTag": "PROXY_TAG"
@@ -99,7 +99,7 @@
       {
         "type": "field",
         "domain": [
-          "ext:zkeen.dat:blocked"
+          "ext:zkeen.dat:politic"
         ],
         "outboundTag": "PROXY_TAG"
       },
