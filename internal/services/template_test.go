@@ -1,13 +1,19 @@
 package services
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services/assets"
 )
 
 // testCatalogJSON содержит минимальный catalog.json для in-memory тестов.
-const testCatalogJSON = `{"templates":[{"name":"Test","description":"d","type":"xray","filename":"test.json"}]}`
+const testCatalogJSON = `{"version":"1.0.0","templates":[{"name":"Test","description":"d","type":"xray","filename":"test.json"}]}`
 
 // testMapFS возвращает fstest.MapFS с catalog.json и xray/test.json.
 func testMapFS() fstest.MapFS {
@@ -23,7 +29,9 @@ func testMapFS() fstest.MapFS {
 
 func TestTemplateService_List(t *testing.T) {
 	fsys := testMapFS()
-	svc := NewTemplateService(fsys, t.TempDir())
+	tempDir := t.TempDir()
+	assetsSvc := assets.NewService(tempDir)
+	svc := NewTemplateService(fsys, tempDir, "", assetsSvc)
 
 	list := svc.List()
 	if len(list) == 0 {
@@ -36,7 +44,9 @@ func TestTemplateService_List(t *testing.T) {
 
 func TestTemplateService_FetchByName(t *testing.T) {
 	fsys := testMapFS()
-	svc := NewTemplateService(fsys, t.TempDir())
+	tempDir := t.TempDir()
+	assetsSvc := assets.NewService(tempDir)
+	svc := NewTemplateService(fsys, tempDir, "", assetsSvc)
 
 	// Несуществующее имя должно возвращать ошибку
 	_, err := svc.FetchByName("Non-existent Template Name")
@@ -56,7 +66,9 @@ func TestTemplateService_FetchByName(t *testing.T) {
 
 func TestTemplateService_NoURLTemplates(t *testing.T) {
 	fsys := testMapFS()
-	svc := NewTemplateService(fsys, t.TempDir())
+	tempDir := t.TempDir()
+	assetsSvc := assets.NewService(tempDir)
+	svc := NewTemplateService(fsys, tempDir, "", assetsSvc)
 
 	list := svc.List()
 	for _, tmpl := range list {
@@ -80,11 +92,94 @@ func TestTemplateService_PathTraversal(t *testing.T) {
 			Data: []byte("SECRET_CONTENT"),
 		},
 	}
-	svc := NewTemplateService(maliciousFS, t.TempDir())
+	tempDir := t.TempDir()
+	assetsSvc := assets.NewService(tempDir)
+	svc := NewTemplateService(maliciousFS, tempDir, "", assetsSvc)
 
 	content, err := svc.FetchByName("Evil")
 	// filepath.Base("../secret") == "secret"; xray/secret не существует в FS → обязана быть ошибка.
 	if err == nil {
 		t.Errorf("expected error for path traversal filename, got content: %q", content)
+	}
+}
+
+func TestTemplateService_FetchByNameFallback(t *testing.T) {
+	fsys := testMapFS()
+	tempDir := t.TempDir()
+	assetsSvc := assets.NewService(tempDir)
+	svc := NewTemplateService(fsys, tempDir, "", assetsSvc)
+
+	// Level 3: embedded FS (Test template content)
+	content, err := svc.FetchByName("Test")
+	if err != nil {
+		t.Fatalf("expected to fetch embedded template: %v", err)
+	}
+	if content != `{"test": true}` {
+		t.Errorf("expected embedded content `{\"test\": true}`, got: %q", content)
+	}
+
+	// Level 2: disk cache templates.json
+	cachedData := cachedTemplates{
+		FetchedAt: time.Now(),
+		Version:   "2.0.0",
+		Templates: []Template{
+			{
+				Name:        "Test",
+				Description: "Disk Cache",
+				Type:        "xray",
+				Filename:    "test.json",
+				Content:     `{"test": "disk"}`,
+			},
+		},
+	}
+	data, err := json.Marshal(cachedData)
+	if err != nil {
+		t.Fatalf("failed to marshal cachedTemplates: %v", err)
+	}
+	err = os.WriteFile(filepath.Join(tempDir, "templates.json"), data, 0600)
+	if err != nil {
+		t.Fatalf("failed to write disk cache templates.json: %v", err)
+	}
+
+	// Clear memory s.templates to force loading from disk/memory fallback
+	svc.mu.Lock()
+	svc.templates = []Template{
+		{
+			Name:        "Test",
+			Description: "d",
+			Type:        "xray",
+			Filename:    "test.json",
+			Content:     "", // Empty content forces search to next level (disk cache)
+		},
+	}
+	svc.mu.Unlock()
+
+	content, err = svc.FetchByName("Test")
+	if err != nil {
+		t.Fatalf("expected to fetch from disk cache: %v", err)
+	}
+	if content != `{"test": "disk"}` {
+		t.Errorf("expected disk content `{\"test\": \"disk\"}`, got: %q", content)
+	}
+
+	// Level 1: Memory cache
+	svc.mu.Lock()
+	svc.templates = []Template{
+		{
+			Name:        "Test",
+			Description: "d",
+			Type:        "xray",
+			Filename:    "test.json",
+			Content:     `{"test": "memory"}`,
+		},
+	}
+	svc.mu.Unlock()
+
+	content, err = svc.FetchByName("Test")
+	if err != nil {
+		t.Fatalf("expected to fetch from memory: %v", err)
+	}
+	if content != `{"test": "memory"}` {
+		t.Errorf("expected memory content `{\"test\": \"memory\"}`, got: %q", content)
 	}
 }

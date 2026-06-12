@@ -224,7 +224,7 @@ func main() {
 	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)
 
 	// Assets Service
-	assetsSvc := assets.NewService()
+	assetsSvc := assets.NewService(cfg.DataDir)
 	api.SetAssetsService(assetsSvc)
 	srv.HandleProtected("/api/assets/definition", api.AssetsDefinition)
 
@@ -233,11 +233,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load embedded templates: %v", err)
 	}
-	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir)
+	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir, cfg.TemplatesRepoURL, assetsSvc)
 	api.SetTemplateService(templateSvc)
 	srv.HandleProtected("/api/templates/list", api.TemplateList)
 	srv.HandleProtected("/api/templates/fetch", api.TemplateFetch)
 	srv.HandleProtected("/api/templates/update", api.TemplateUpdate)
+	srv.HandleProtected("/api/templates/status", api.TemplateStatus)
+	srv.HandleProtected("/api/templates/check", api.TemplateCheck)
 
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)

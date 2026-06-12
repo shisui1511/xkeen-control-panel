@@ -2,6 +2,8 @@ package assets
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -96,5 +98,74 @@ func TestDefaultAssetsStructure(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestAssetsService_UpdateDefinition(t *testing.T) {
+	tempDir := t.TempDir()
+	svc := NewService(tempDir)
+
+	// Verify baseline fallback (since no file exists, GetDefinition should return defaultAssets)
+	def, err := svc.GetDefinition()
+	if err != nil {
+		t.Fatalf("expected no error getting definition, got: %v", err)
+	}
+	if len(def) == 0 {
+		t.Fatal("expected non-empty default assets")
+	}
+
+	// Update with invalid JSON
+	invalidJSON := []byte(`{ "schema_version": `) // invalid syntax
+	err = svc.UpdateDefinition(invalidJSON)
+	if err == nil {
+		t.Error("expected error when updating with invalid JSON, got nil")
+	}
+
+	// Update with missing schema_version
+	noVersionJSON := []byte(`{ "something_else": "1.0.0" }`)
+	err = svc.UpdateDefinition(noVersionJSON)
+	if err == nil {
+		t.Error("expected error when updating with missing schema_version, got nil")
+	}
+
+	// Update with valid JSON
+	validJSON := []byte(`{ "schema_version": "2.0.0", "custom": true }`)
+	err = svc.UpdateDefinition(validJSON)
+	if err != nil {
+		t.Fatalf("expected no error updating with valid JSON, got: %v", err)
+	}
+
+	// Get again and check content
+	def, err = svc.GetDefinition()
+	if err != nil {
+		t.Fatalf("expected no error getting updated definition, got: %v", err)
+	}
+	var schema map[string]interface{}
+	if err := json.Unmarshal(def, &schema); err != nil {
+		t.Fatalf("failed to unmarshal updated definition: %v", err)
+	}
+	if schema["schema_version"] != "2.0.0" {
+		t.Errorf("expected schema_version '2.0.0', got '%v'", schema["schema_version"])
+	}
+
+	// Now write another valid one to trigger backup test
+	newValidJSON := []byte(`{ "schema_version": "3.0.0", "custom": true }`)
+	err = svc.UpdateDefinition(newValidJSON)
+	if err != nil {
+		t.Fatalf("expected no error updating with new valid JSON, got: %v", err)
+	}
+
+	// Check if backup exists and has the correct previous version (2.0.0)
+	bakPath := filepath.Join(tempDir, "assets-definition.json.bak")
+	bakData, err := os.ReadFile(bakPath)
+	if err != nil {
+		t.Fatalf("expected backup file to exist, got error: %v", err)
+	}
+	var bakSchema map[string]interface{}
+	if err := json.Unmarshal(bakData, &bakSchema); err != nil {
+		t.Fatalf("failed to unmarshal backup: %v", err)
+	}
+	if bakSchema["schema_version"] != "2.0.0" {
+		t.Errorf("expected backup schema_version '2.0.0', got '%v'", bakSchema["schema_version"])
 	}
 }

@@ -26,9 +26,10 @@ type Config struct {
 	Auth            AuthConfig  `json:"auth"`
 	HTTPS           HTTPSConfig `json:"https"`
 	MihomoSecret    string      `json:"mihomo_secret"`
-	UpdateChannel   string      `json:"update_channel"` // stable, beta, dev
-	DevMode         bool        `json:"dev_mode"`
-	ConfigPath      string      `json:"-"`
+	UpdateChannel    string      `json:"update_channel"` // stable, beta, dev
+	TemplatesRepoURL string      `json:"templates_repo_url"`
+	DevMode          bool        `json:"dev_mode"`
+	ConfigPath       string      `json:"-"`
 }
 
 // AuthConfig represents the configuration settings for authentication and session management.
@@ -52,6 +53,7 @@ func findXKeen() string {
 		"/opt/sbin/xkeen",
 		"/opt/bin/xkeen",
 		"/usr/local/bin/xkeen",
+		"/usr/bin/xkeen",
 		"/usr/bin/xkeen",
 	}
 	for _, p := range paths {
@@ -101,7 +103,8 @@ func Default() *Config {
 			CertPath: "",
 			KeyPath:  "",
 		},
-		UpdateChannel: "stable",
+		UpdateChannel:    "stable",
+		TemplatesRepoURL: "https://raw.githubusercontent.com/shisui1511/xkeen-control-panel-templates/main",
 	}
 }
 

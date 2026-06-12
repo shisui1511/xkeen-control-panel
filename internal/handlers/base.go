@@ -41,12 +41,14 @@ type API struct {
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
+	assetsSvc := assets.NewService(cfg.DataDir)
 	return &API{
 		cfg:       cfg,
 		srv:       srv,
 		xkeenSvc:  services.NewXKeenService(cfg.XKeenBinary, cfg.DataDir),
 		mihomoSvc: services.NewMihomoService(cfg.MihomoBinary, cfg.XKeenBinary, cfg.MihomoConfigDir),
 		configSvc: services.NewConfigService(cfg.XRayConfigDir, cfg.AllowedRoots),
+		assetsSvc: assetsSvc,
 		pathVal:   utils.NewPathValidator(cfg.AllowedRoots),
 	}
 }
