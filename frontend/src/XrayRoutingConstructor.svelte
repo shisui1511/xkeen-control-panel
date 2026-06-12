@@ -1076,9 +1076,9 @@
         <div>
           <div class="crumbs">
             {ru ? 'Сервисы' : 'Services'} <span class="crumb-sep">/</span>
-            {ru ? 'Сценарии Xray' : 'Xray Presets'}
+            {ru ? 'Пресеты Xray' : 'Xray Presets'}
           </div>
-          <h1>{ru ? 'Визуальные сценарии Xray' : 'Xray Visual Presets'}</h1>
+          <h1>{ru ? 'Визуальные пресеты Xray' : 'Xray Visual Presets'}</h1>
           <p class="sub">
             {ru
               ? 'Настройка логирования, DNS, inbounds, outbounds, routing и policy для Xray.'
