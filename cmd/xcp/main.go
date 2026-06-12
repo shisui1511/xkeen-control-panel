@@ -300,6 +300,7 @@ func main() {
 	case sig := <-sigCh:
 		log.Printf("Received signal %s, shutting down...", sig)
 		cancelScheduler()
+		cancelTemplatesChecker()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
