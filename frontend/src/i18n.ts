@@ -239,7 +239,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.constructor_subtitle': 'Визуальный генератор для Xray и Mihomo',
     'editor.kernel_xray': 'Xray',
     'editor.kernel_mihomo': 'Mihomo',
-    'editor.constructor_scenario': 'Сценарий',
+    'editor.constructor_scenario': 'Пресет',
     'editor.scenario_rule_based': 'Selective Routing',
     'editor.scenario_global_proxy': 'Global Proxy',
     'editor.scenario_zkeen_selective': 'ZKeen (СНГ выборочный)',
@@ -1081,7 +1081,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'ds.empty.mihomo_offline_desc':
       'Для просмотра этой страницы необходимо запустить сервис Mihomo.',
     'ds.empty.mihomo_offline_desc_actionable':
-      'Откройте Конфигуратор → выберите сценарий → примените конфиг → перезапустите Mihomo.',
+      'Откройте Конфигуратор → выберите пресет → примените конфиг → перезапустите Mihomo.',
     'ds.empty.mihomo_offline_cta': 'Запустить Mihomo',
     'ds.empty.mihomo_offline_loading': 'Запуск службы...',
     'ds.empty.no_data_title': 'Данные отсутствуют',
@@ -1346,7 +1346,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.constructor_subtitle': 'Visual generator for Xray and Mihomo',
     'editor.kernel_xray': 'Xray',
     'editor.kernel_mihomo': 'Mihomo',
-    'editor.constructor_scenario': 'Scenario',
+    'editor.constructor_scenario': 'Preset',
     'editor.scenario_rule_based': 'Selective Routing',
     'editor.scenario_global_proxy': 'Global Proxy',
     'editor.scenario_zkeen_selective': 'ZKeen CIS Selective',
@@ -2178,7 +2178,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'ds.empty.mihomo_offline_title': 'Mihomo API Unavailable',
     'ds.empty.mihomo_offline_desc': 'Mihomo service must be running to view this page.',
     'ds.empty.mihomo_offline_desc_actionable':
-      'Open Constructor → choose scenario → apply config → restart Mihomo.',
+      'Open Constructor → choose preset → apply config → restart Mihomo.',
     'ds.empty.mihomo_offline_cta': 'Start Mihomo',
     'ds.empty.mihomo_offline_loading': 'Starting service...',
     'ds.empty.no_data_title': 'No Data Available',
