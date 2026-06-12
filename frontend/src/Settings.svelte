@@ -616,12 +616,87 @@
     }
   }
 
+  let templatesVersion = '';
+  let templatesRepoUrl = '';
+  let templatesLastCheck = '';
+  let templatesHasUpdate = false;
+  let checkingTemplates = false;
+  let updatingTemplates = false;
+
+  async function fetchTemplatesStatus() {
+    try {
+      const res = await fetch('/api/templates/status');
+      if (res.ok) {
+        const data = await res.json();
+        templatesVersion = data.current_version || '';
+        templatesRepoUrl = data.templates_repo_url || '';
+        templatesHasUpdate = data.has_update || false;
+        if (data.last_check && data.last_check !== '0001-01-01T00:00:00Z') {
+          const date = new Date(data.last_check);
+          templatesLastCheck = date.toLocaleString();
+        } else {
+          templatesLastCheck = '';
+        }
+      }
+    } catch (_) {}
+  }
+
+  async function checkTemplatesUpdates() {
+    checkingTemplates = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/templates/check', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        templatesHasUpdate = data.has_update || false;
+        await fetchTemplatesStatus();
+        if (templatesHasUpdate) {
+          showToast('info', $t('editor.update_available') || 'Update available');
+        } else {
+          showToast('success', $t('editor.up_to_date') || 'Up to date');
+        }
+      } else {
+        showToast('error', await res.text());
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+    } finally {
+      checkingTemplates = false;
+    }
+  }
+
+  async function installTemplatesUpdates() {
+    updatingTemplates = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/templates/update', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast('success', $t('editor.templates_updated') || 'Templates updated');
+        await fetchTemplatesStatus();
+      } else {
+        showToast('error', await res.text());
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+    } finally {
+      updatingTemplates = false;
+    }
+  }
+
   onMount(async () => {
     fetchVersion();
     fetchCapabilities();
     fetchDevMode();
     loadAppearanceSettings();
     fetchUpdateChannel();
+    fetchTemplatesStatus();
 
     await fetchStatus();
     if (updateStatus && !['idle', 'done', 'failed'].includes(updateStatus.status)) {
@@ -917,6 +992,54 @@
         {#if updateStatus?.status === 'failed'}
           <button class="btn btn-danger" on:click={rollbackUpdate} title={$t('settings.rollback')}>
             {$t('settings.rollback')}
+          </button>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Templates updates card -->
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.templates_title')}</div>
+      <div class="field-group">
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.templates_repo_url')}</span>
+          <span class="field-row-val mono" style="font-size: 11px; word-break: break-all; text-align: right; max-width: 70%;">{templatesRepoUrl || '...'}</span>
+        </div>
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.current_version')}</span>
+          <span class="field-row-val mono">{templatesVersion || '...'}</span>
+        </div>
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.templates_last_check')}</span>
+          <span class="field-row-val mono">
+            {templatesLastCheck ? templatesLastCheck : $t('settings.templates_never_checked')}
+          </span>
+        </div>
+        {#if templatesHasUpdate}
+          <div class="field-row">
+            <span class="field-row-name" style="color: var(--warning)">{$t('editor.update_available')}</span>
+            <span class="field-row-val" style="color: var(--warning)">Yes</span>
+          </div>
+        {/if}
+      </div>
+
+      <div class="card-actions">
+        <button
+          class="btn btn-secondary"
+          on:click={checkTemplatesUpdates}
+          disabled={checkingTemplates || updatingTemplates}
+          title={$t('settings.check_updates')}
+        >
+          {checkingTemplates ? $t('settings.checking') : $t('settings.check_updates')}
+        </button>
+        {#if templatesHasUpdate}
+          <button
+            class="btn btn-primary"
+            on:click={installTemplatesUpdates}
+            disabled={updatingTemplates}
+            title={$t('settings.install_updates')}
+          >
+            {updatingTemplates ? $t('settings.installing') : $t('settings.install_updates')}
           </button>
         {/if}
       </div>
