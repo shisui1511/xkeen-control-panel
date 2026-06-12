@@ -50,6 +50,72 @@ func TestZkeenYamlStructure(t *testing.T) {
 			t.Error("Expected sniffer.enable: true")
 		}
 	}
+
+	// Assert rule-providers
+	ruleProviders, ok := parsed["rule-providers"].(map[string]interface{})
+	if !ok {
+		t.Error("Missing rule-providers block or not a map")
+	} else {
+		if _, ok := ruleProviders["quic@inline"]; !ok {
+			t.Error("Missing quic@inline in rule-providers")
+		}
+		if _, ok := ruleProviders["netbios@inline"]; !ok {
+			t.Error("Missing netbios@inline in rule-providers")
+		}
+	}
+
+	// Assert rules
+	rules, ok := parsed["rules"].([]interface{})
+	if !ok {
+		t.Error("Missing rules list or not a slice")
+	} else {
+		foundQuic := false
+		foundNetbios := false
+		for _, ruleVal := range rules {
+			ruleStr, ok := ruleVal.(string)
+			if !ok {
+				continue
+			}
+			if strings.HasPrefix(ruleStr, "RULE-SET,quic@inline,REJECT") {
+				foundQuic = true
+			}
+			if strings.HasPrefix(ruleStr, "RULE-SET,netbios@inline,REJECT") {
+				foundNetbios = true
+			}
+		}
+		if !foundQuic {
+			t.Error("Missing RULE-SET,quic@inline,REJECT in rules")
+		}
+		if !foundNetbios {
+			t.Error("Missing RULE-SET,netbios@inline,REJECT in rules")
+		}
+	}
+}
+
+func verifyBlockingRules(t *testing.T, rules []interface{}, filename string) {
+	foundQuic := false
+	foundNetbios := false
+	for _, ruleVal := range rules {
+		rule, ok := ruleVal.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		port, _ := rule["port"].(string)
+		network, _ := rule["network"].(string)
+		outboundTag, _ := rule["outboundTag"].(string)
+		if port == "443" && network == "udp" && outboundTag == "block" {
+			foundQuic = true
+		}
+		if port == "135,137,138,139" && network == "udp" && outboundTag == "block" {
+			foundNetbios = true
+		}
+	}
+	if !foundQuic {
+		t.Errorf("%s: missing UDP 443 block rule", filename)
+	}
+	if !foundNetbios {
+		t.Errorf("%s: missing UDP 135,137,138,139 block rule", filename)
+	}
 }
 
 func TestXrayTemplatesStructure(t *testing.T) {
@@ -77,6 +143,8 @@ func TestXrayTemplatesStructure(t *testing.T) {
 	if !ok {
 		t.Fatal("zkeen-routing.json: missing routing.rules array")
 	}
+
+	verifyBlockingRules(t, rules, "zkeen-routing.json")
 
 	foundTelegram := false
 	for _, ruleVal := range rules {
@@ -151,6 +219,8 @@ func TestXrayTemplatesStructure(t *testing.T) {
 	if !ok {
 		t.Fatal("observatory.json: missing routing.rules array")
 	}
+
+	verifyBlockingRules(t, obsRules, "observatory.json")
 
 	foundCatchAll := false
 	for _, ruleVal := range obsRules {
