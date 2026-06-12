@@ -1,0 +1,116 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "inbounds": [
+    {
+      "tag": "redirect",
+      "port": 5000,
+      "listen": "0.0.0.0",
+      "protocol": "dokodemo-door",
+      "settings": {
+        "network": "tcp,udp",
+        "followRedirect": true
+      },
+      "sniffing": {
+        "enabled": true
+      }
+    },
+    {
+      "tag": "tproxy",
+      "port": 5001,
+      "listen": "0.0.0.0",
+      "protocol": "dokodemo-door",
+      "settings": {
+        "network": "tcp,udp",
+        "followRedirect": true
+      },
+      "streamSettings": {
+        "sockopt": {
+          "tproxy": "tproxy"
+        }
+      },
+      "sniffing": {
+        "enabled": true
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "PROXY_TAG",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "port": "443",
+        "network": "udp",
+        "outboundTag": "block"
+      },
+      {
+        "type": "field",
+        "network": "udp",
+        "port": "135,137,138,139",
+        "outboundTag": "block"
+      },
+      {
+        "type": "field",
+        "ip": [
+          "127.0.0.0/8",
+          "10.0.0.0/8",
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "169.254.0.0/16"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "geosite:category-ads-all",
+          "google-analytics.com",
+          "analytics.yandex.ru",
+          "appcenter.ms",
+          "app-measurement.com",
+          "firebase.io",
+          "crashlytics.com"
+        ],
+        "outboundTag": "block"
+      },
+      {
+        "type": "field",
+        "ip": [
+          "geoip:telegram"
+        ],
+        "port": "80,443,596-599,1400,5222",
+        "outboundTag": "PROXY_TAG"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "ext:zkeen.dat:blocked"
+        ],
+        "outboundTag": "PROXY_TAG"
+      },
+      {
+        "type": "field",
+        "inboundTag": [
+          "redirect",
+          "tproxy"
+        ],
+        "outboundTag": "PROXY_TAG"
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 {
-  "version": "2.0.0",
-  "updated_at": "2026-06-03",
+  "version": "3.0.0",
+  "updated_at": "2026-06-11",
   "templates": [
     {
       "name": "Xray: Routing — Selective (GeoSite/GeoIP)",
@@ -37,6 +37,24 @@
       "description": "Весь трафик через прокси (mode: global), private → direct",
       "type": "mihomo",
       "filename": "global-proxy.yaml"
+    },
+    {
+      "name": "Mihomo: zkeen — Transparent Proxy (tproxy/redir)",
+      "description": "Полный шаблон: redir-port 5000, tproxy-port 5001, routing-mark 255, sniffer, 18 proxy-groups, rule-providers. Применять только через Редактор. Требует XKeen с Mihomo-ядром.",
+      "type": "mihomo",
+      "filename": "zkeen.yaml"
+    },
+    {
+      "name": "Xray: Routing — zkeen (Telegram + zkeen.dat + блокировки)",
+      "description": "Selective routing с Telegram geoip+портами, zkeen.dat, LAN RFC1918, блокировками QUIC/UDP/рекламы. Требует zkeen.dat в confdir XKeen.",
+      "type": "xray",
+      "filename": "zkeen-routing.json"
+    },
+    {
+      "name": "Xray: Observatory — leastPing Balancer",
+      "description": "Observatory + routing.balancers со strategy leastPing. Outbound-теги должны начинаться с 'proxy'. Совместим с inbound-тегами redirect/tproxy XKeen.",
+      "type": "xray",
+      "filename": "observatory.json"
     }
   ]
 }
