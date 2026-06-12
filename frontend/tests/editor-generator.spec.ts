@@ -397,11 +397,11 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     const ruleProviderMatches = yamlText.match(/\n {2}[a-z][^:\n]+@[a-z]+:/g);
     const ruleProviderCount = ruleProviderMatches ? ruleProviderMatches.length : 0;
 
-    // D-13: 16 групп
-    expect(proxyGroupCount).toBe(16);
+    // D-13: 18 групп
+    expect(proxyGroupCount).toBe(18);
 
-    // D-13: 15 rule-providers
-    expect(ruleProviderCount).toBe(15);
+    // D-13: 16 rule-providers
+    expect(ruleProviderCount).toBe(16);
 
     // Ключевые правила должны присутствовать
     expect(yamlText).toContain('RULE-SET');
