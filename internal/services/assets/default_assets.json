@@ -163,42 +163,64 @@
             "name": "Заблок. сервисы",
             "type": "select",
             "include_all": true,
-            "proxies": [],
+            "proxies": ["Fallback", "Fastest"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Reject.png"
+          },
+          {
+            "name": "Fallback",
+            "type": "fallback",
+            "include_all": true,
+            "proxies": [],
+            "hidden": true,
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 300,
+            "max_failed_times": 3,
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Auto.png"
+          },
+          {
+            "name": "Fastest",
+            "type": "url-test",
+            "include_all": true,
+            "proxies": [],
+            "hidden": true,
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 300,
+            "max_failed_times": 3,
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available.png"
           },
           {
             "name": "YouTube",
             "type": "select",
             "include_all": true,
-            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png"
           },
           {
             "name": "Discord",
             "type": "select",
             "include_all": true,
-            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png"
           },
           {
             "name": "Twitch",
             "type": "select",
             "include_all": true,
-            "proxies": ["DIRECT", "Заблок. сервисы"],
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png"
           },
           {
             "name": "Reddit",
             "type": "select",
             "include_all": true,
-            "proxies": ["DIRECT", "Заблок. сервисы"],
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
             "icon": "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png"
           },
           {
             "name": "Meta",
             "type": "select",
             "include_all": true,
-            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
             "icon": "https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png"
           },
           {
@@ -206,49 +228,49 @@
             "type": "select",
             "include_all": true,
             "exclude_filter": "🇷🇺",
-            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png"
           },
           {
             "name": "Speedtest",
             "type": "select",
             "include_all": true,
-            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png"
           },
           {
             "name": "Telegram",
             "type": "select",
             "include_all": true,
-            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png"
           },
           {
             "name": "Steam",
             "type": "select",
             "include_all": true,
-            "proxies": ["DIRECT", "Заблок. сервисы"],
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png"
           },
           {
             "name": "CDN",
             "type": "select",
             "include_all": true,
-            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
             "icon": "https://www.svgrepo.com/show/396567/globe-with-meridians.svg"
           },
           {
             "name": "Google",
             "type": "select",
             "include_all": true,
-            "proxies": ["DIRECT", "Заблок. сервисы"],
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png"
           },
           {
             "name": "GitHub",
             "type": "select",
             "include_all": true,
-            "proxies": ["DIRECT", "Заблок. сервисы"],
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png"
           },
           {
@@ -256,14 +278,14 @@
             "type": "select",
             "include_all": true,
             "exclude_filter": "🇷🇺",
-            "proxies": ["Заблок. сервисы"],
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png"
           },
           {
             "name": "Twitter",
             "type": "select",
             "include_all": true,
-            "proxies": ["Заблок. сервисы", "DIRECT"],
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png"
           },
           {
@@ -384,6 +406,19 @@
         "format": "inline",
         "outbound": "QUIC",
         "payload": ["AND,((DST-PORT,443),(NETWORK,UDP))"]
+      },
+      {
+        "name": "netbios@inline",
+        "url": "",
+        "behavior": "classical",
+        "format": "inline",
+        "outbound": "REJECT",
+        "payload": [
+          "AND,((DST-PORT,135),(NETWORK,UDP))",
+          "AND,((DST-PORT,137),(NETWORK,UDP))",
+          "AND,((DST-PORT,138),(NETWORK,UDP))",
+          "AND,((DST-PORT,139),(NETWORK,UDP))"
+        ]
       }
     ]
   }

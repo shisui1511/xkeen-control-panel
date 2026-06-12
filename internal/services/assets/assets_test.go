@@ -40,6 +40,61 @@ func TestDefaultAssetsStructure(t *testing.T) {
 		presets, ok := mihomoSection["presets"].([]interface{})
 		if !ok || len(presets) == 0 {
 			t.Error("Missing presets in mihomo section or it is empty")
+		} else {
+			// Find zkeen-selective preset
+			var zkeenSelective map[string]interface{}
+			for _, p := range presets {
+				presetObj, ok := p.(map[string]interface{})
+				if ok && presetObj["id"] == "zkeen-selective" {
+					zkeenSelective = presetObj
+					break
+				}
+			}
+			if zkeenSelective == nil {
+				t.Error("zkeen-selective preset not found")
+			} else {
+				groups, ok := zkeenSelective["groups"].([]interface{})
+				if !ok || len(groups) == 0 {
+					t.Error("zkeen-selective missing groups or empty")
+				} else {
+					hasFallback := false
+					hasFastest := false
+					for _, g := range groups {
+						groupObj, ok := g.(map[string]interface{})
+						if !ok {
+							continue
+						}
+						name := groupObj["name"]
+						hidden := groupObj["hidden"]
+						groupType := groupObj["type"]
+
+						if name == "Fallback" {
+							hasFallback = true
+							if hidden != true {
+								t.Error("Fallback group must be hidden: true")
+							}
+							if groupType != "fallback" {
+								t.Errorf("Expected Fallback type: fallback, got %v", groupType)
+							}
+						}
+						if name == "Fastest" {
+							hasFastest = true
+							if hidden != true {
+								t.Error("Fastest group must be hidden: true")
+							}
+							if groupType != "url-test" {
+								t.Errorf("Expected Fastest type: url-test, got %v", groupType)
+							}
+						}
+					}
+					if !hasFallback {
+						t.Error("zkeen-selective missing Fallback group")
+					}
+					if !hasFastest {
+						t.Error("zkeen-selective missing Fastest group")
+					}
+				}
+			}
 		}
 	}
 }
