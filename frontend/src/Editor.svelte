@@ -1417,7 +1417,6 @@
     )
       return;
 
-    const backupContent = editorView.state.doc.toString();
     templateLoading = true;
     try {
       const res = await fetch(`/api/templates/fetch?name=${encodeURIComponent(template.name)}`);
@@ -1437,11 +1436,6 @@
         'error',
         ($t('editor.template_error') || 'Failed to apply template') + ': ' + e.message
       );
-      if (editorView) {
-        editorView.dispatch({
-          changes: { from: 0, to: editorView.state.doc.length, insert: backupContent }
-        });
-      }
     } finally {
       templateLoading = false;
     }
