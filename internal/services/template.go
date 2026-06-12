@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -395,4 +396,32 @@ func (s *TemplateService) fetchURL(rawURL string) ([]byte, error) {
 
 	// Лимит размера 1MB (T-15-04)
 	return io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+}
+
+// StartBackgroundChecker запускает фоновую проверку обновлений шаблонов.
+// Первая проверка запускается с задержкой в 2 минуты, последующие — каждые 24 часа.
+func (s *TemplateService) StartBackgroundChecker(ctx context.Context) {
+	initialDelay := time.NewTimer(2 * time.Minute)
+	defer initialDelay.Stop()
+
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Template background update checker stopped.")
+			return
+		case <-initialDelay.C:
+			log.Println("Running initial templates update check...")
+			if _, err := s.CheckForUpdates(); err != nil {
+				log.Printf("Background templates update check failed: %v", err)
+			}
+		case <-ticker.C:
+			log.Println("Running periodic templates update check...")
+			if _, err := s.CheckForUpdates(); err != nil {
+				log.Printf("Background templates update check failed: %v", err)
+			}
+		}
+	}
 }
