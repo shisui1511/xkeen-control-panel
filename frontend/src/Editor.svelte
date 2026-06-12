@@ -166,6 +166,7 @@
   let templatePreview = '';
   let updatingTemplates = false;
   let loadingPreview = false;
+  let templateStatus: any = null;
 
   $: filteredTemplates = templates.filter((t) => t.type === templateTab);
 
@@ -1364,6 +1365,17 @@
     }
   }
 
+  async function loadTemplateStatus() {
+    try {
+      const res = await fetch('/api/templates/status');
+      if (res.ok) {
+        templateStatus = await res.json();
+      }
+    } catch (e) {
+      templateStatus = null;
+    }
+  }
+
   async function updateTemplates() {
     updatingTemplates = true;
     try {
@@ -1378,6 +1390,7 @@
       const first = templates.find((t) => t.type === templateTab);
       if (first) await loadTemplatePreview(first);
       showToast('success', $t('editor.templates_updated'));
+      await loadTemplateStatus();
     } catch (e: any) {
       showToast('error', $t('editor.templates_update_error'));
     } finally {
@@ -1390,6 +1403,7 @@
     selectedTemplate = null;
     templatePreview = '';
     showTemplatesModal = true;
+    loadTemplateStatus();
   }
 
   async function applyTemplate(template: Template) {
@@ -2281,8 +2295,21 @@
       <!-- Header -->
       <div class="modal-header">
         <div class="templates-modal-title-block">
-          <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
+          <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px;">
             {$t('editor.templates')}
+            {#if templateStatus}
+              {#if templateStatus.has_update}
+                <span class="templates-badge update-available">
+                  <span class="pulse-dot"></span>
+                  {$t('editor.update_available')} (v{templateStatus.current_version})
+                </span>
+              {:else if templateStatus.current_version}
+                <span class="templates-badge up-to-date">
+                  <span class="dot"></span>
+                  {$t('editor.up_to_date')} (v{templateStatus.current_version})
+                </span>
+              {/if}
+            {/if}
           </h3>
           <p class="templates-modal-subtitle">{$t('editor.templates_desc')}</p>
         </div>
@@ -2865,6 +2892,58 @@
     margin: 0;
     color: var(--fg-dim);
     font-size: 11.5px;
+  }
+
+  .templates-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 8px;
+    border-radius: 12px;
+  }
+  .templates-badge.update-available {
+    background-color: rgba(240, 180, 80, 0.15);
+    color: var(--warning);
+  }
+  .templates-badge.up-to-date {
+    background-color: rgba(70, 209, 138, 0.15);
+    color: var(--success);
+  }
+  .templates-badge .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--success);
+  }
+  .templates-badge .pulse-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--warning);
+    position: relative;
+  }
+  .templates-badge .pulse-dot::after {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    background-color: inherit;
+    border-radius: 50%;
+    animation: badge-pulse 1.5s infinite ease-out;
+  }
+  @keyframes badge-pulse {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(2.5);
+      opacity: 0;
+    }
   }
 
   .templates-modal-header-actions {
