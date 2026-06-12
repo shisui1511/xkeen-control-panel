@@ -62,6 +62,9 @@
     excludeFilter?: string;
     icon?: string;
     enabled?: boolean;
+    hidden?: boolean;         // NEW (D-02): hides group from Mihomo selector UI
+    tolerance?: number;       // NEW (D-02): latency tolerance ms for url-test
+    maxFailedTimes?: number;  // NEW (D-02): maps to YAML key max-failed-times
   }
 
   interface Rule {
@@ -286,6 +289,19 @@
       format: 'inline',
       outbound: 'QUIC',
       payload: ['AND,((DST-PORT,443),(NETWORK,UDP))']
+    },
+    {
+      name: 'netbios@inline',
+      url: '',
+      behavior: 'classical',
+      format: 'inline',
+      outbound: 'REJECT',
+      payload: [
+        'AND,((DST-PORT,135),(NETWORK,UDP))',
+        'AND,((DST-PORT,137),(NETWORK,UDP))',
+        'AND,((DST-PORT,138),(NETWORK,UDP))',
+        'AND,((DST-PORT,139),(NETWORK,UDP))'
+      ]
     }
   ];
 
@@ -308,42 +324,64 @@
       name: 'Заблок. сервисы',
       type: 'select',
       includeAll: true,
-      proxies: [] as string[],
+      proxies: ['Fallback', 'Fastest'] as string[],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Reject.png'
+    },
+    {
+      name: 'Fallback',
+      type: 'fallback',
+      includeAll: true,
+      proxies: [] as string[],
+      hidden: true,
+      url: 'https://www.gstatic.com/generate_204',
+      interval: 300,
+      maxFailedTimes: 3,
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Auto.png'
+    },
+    {
+      name: 'Fastest',
+      type: 'url-test',
+      includeAll: true,
+      proxies: [] as string[],
+      hidden: true,
+      url: 'https://www.gstatic.com/generate_204',
+      interval: 300,
+      maxFailedTimes: 3,
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available.png'
     },
     {
       name: 'YouTube',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png'
     },
     {
       name: 'Discord',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png'
     },
     {
       name: 'Twitch',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Заблок. сервисы'],
+      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png'
     },
     {
       name: 'Reddit',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Заблок. сервисы'],
+      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
       icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png'
     },
     {
       name: 'Meta',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png'
     },
     {
@@ -351,49 +389,49 @@
       type: 'select',
       includeAll: true,
       excludeFilter: '🇷🇺',
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png'
     },
     {
       name: 'Speedtest',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png'
     },
     {
       name: 'Telegram',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png'
     },
     {
       name: 'Steam',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Заблок. сервисы'],
+      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png'
     },
     {
       name: 'CDN',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'PASS'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://www.svgrepo.com/show/396567/globe-with-meridians.svg'
     },
     {
       name: 'Google',
       type: 'select',
       includeAll: true,
-      proxies: ['PASS', 'Заблок. сервисы'],
+      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png'
     },
     {
       name: 'GitHub',
       type: 'select',
       includeAll: true,
-      proxies: ['PASS', 'Заблок. сервисы'],
+      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png'
     },
     {
@@ -401,14 +439,14 @@
       type: 'select',
       includeAll: true,
       excludeFilter: '🇷🇺',
-      proxies: ['Заблок. сервисы'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png'
     },
     {
       name: 'Twitter',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png'
     },
     {
@@ -503,7 +541,10 @@
           url: g.url || 'https://www.gstatic.com/generate_204',
           interval: g.interval || 300,
           icon: g.icon || '',
-          enabled: true
+          enabled: true,
+          hidden: g.hidden ?? false,
+          tolerance: g.tolerance ?? undefined,
+          maxFailedTimes: g.max_failed_times ?? undefined
         }));
         rules = (p.rules || []).map((r: any) => ({
           id: crypto.randomUUID(),
@@ -1597,6 +1638,15 @@
         if (g.type !== 'select') {
           lines.push(`    url: ${g.url || 'https://www.gstatic.com/generate_204'}`);
           lines.push(`    interval: ${g.interval || 300}`);
+          if (g.hidden === true) {
+            lines.push(`    hidden: true`);
+          }
+          if (g.tolerance !== undefined && g.tolerance > 0) {
+            lines.push(`    tolerance: ${g.tolerance}`);
+          }
+          if (g.maxFailedTimes !== undefined) {
+            lines.push(`    max-failed-times: ${g.maxFailedTimes}`);
+          }
         }
       }
       lines.push('');
@@ -1613,6 +1663,7 @@
         const zkeenRules = [
           { type: 'RULE-SET', val: 'adlist@domain', outbound: 'REJECT' },
           { type: 'RULE-SET', val: 'quic@inline', outbound: 'QUIC' },
+          { type: 'RULE-SET', val: 'netbios@inline', outbound: 'REJECT' },
           {
             type: 'OR',
             val: '((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),Заблок. сервисы',
