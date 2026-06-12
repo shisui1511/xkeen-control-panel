@@ -241,6 +241,11 @@ func main() {
 	srv.HandleProtected("/api/templates/status", api.TemplateStatus)
 	srv.HandleProtected("/api/templates/check", api.TemplateCheck)
 
+	// Фоновый чекер обновлений шаблонов
+	templatesCtx, cancelTemplatesChecker := context.WithCancel(context.Background())
+	defer cancelTemplatesChecker()
+	go templateSvc.StartBackgroundChecker(templatesCtx)
+
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
 	subscriptionSvc.SetConsoleService(consoleSvc)

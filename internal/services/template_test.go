@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -181,5 +182,28 @@ func TestTemplateService_FetchByNameFallback(t *testing.T) {
 	}
 	if content != `{"test": "memory"}` {
 		t.Errorf("expected memory content `{\"test\": \"memory\"}`, got: %q", content)
+	}
+}
+
+func TestTemplateService_BackgroundChecker(t *testing.T) {
+	fsys := testMapFS()
+	tempDir := t.TempDir()
+	assetsSvc := assets.NewService(tempDir)
+	svc := NewTemplateService(fsys, tempDir, "", assetsSvc)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	done := make(chan struct{})
+	go func() {
+		svc.StartBackgroundChecker(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success, exited cleanly
+	case <-time.After(1 * time.Second):
+		t.Fatal("StartBackgroundChecker did not exit cleanly when context was cancelled")
 	}
 }
