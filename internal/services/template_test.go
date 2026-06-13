@@ -3,6 +3,9 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -205,5 +208,110 @@ func TestTemplateService_BackgroundChecker(t *testing.T) {
 		// Success, exited cleanly
 	case <-time.After(1 * time.Second):
 		t.Fatal("StartBackgroundChecker did not exit cleanly when context was cancelled")
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestTemplateService_FetchOnlineUpdates_NetworkFallback(t *testing.T) {
+	fsys := testMapFS()
+	tempDir := t.TempDir()
+	assetsSvc := assets.NewService(tempDir)
+
+	// 1. Start an HTTP test server that returns a 500 error / network failure
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	svc := NewTemplateService(fsys, tempDir, "http://example.com", assetsSvc)
+	svc.httpClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			targetURL, _ := url.Parse(server.URL)
+			req.URL.Scheme = targetURL.Scheme
+			req.URL.Host = targetURL.Host
+			return http.DefaultTransport.RoundTrip(req)
+		}),
+	}
+
+	// FetchOnlineUpdates should fail with a network error
+	_, err := svc.FetchOnlineUpdates()
+	if err == nil {
+		t.Fatal("expected error from FetchOnlineUpdates when network fails, got nil")
+	}
+
+	// Verify that the local template still works via FetchByName
+	content, err := svc.FetchByName("Test")
+	if err != nil {
+		t.Fatalf("FetchByName should still work using fallback, got error: %v", err)
+	}
+	if content != `{"test": true}` {
+		t.Errorf("expected embedded content `{\"test\": true}`, got: %q", content)
+	}
+}
+
+func TestTemplateService_UpdateIncompatibility(t *testing.T) {
+	fsys := testMapFS()
+	tempDir := t.TempDir()
+	assetsSvc := assets.NewService(tempDir)
+
+	// 1. Start an HTTP test server that serves:
+	// - catalog.json (valid)
+	// - assets-definition.json (incompatible schema version e.g. 2.0.0)
+	// - xray/test.json (valid)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "catalog.json") {
+			w.Write([]byte(`{"version":"2.0.0","templates":[{"name":"Test","description":"d","type":"xray","filename":"test.json"}]}`))
+		} else if strings.HasSuffix(r.URL.Path, "assets-definition.json") {
+			w.Write([]byte(`{"schema_version":"2.0.0"}`))
+		} else if strings.HasSuffix(r.URL.Path, "test.json") {
+			w.Write([]byte(`{"test": "online"}`))
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	svc := NewTemplateService(fsys, tempDir, "http://example.com", assetsSvc)
+	svc.httpClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			targetURL, _ := url.Parse(server.URL)
+			req.URL.Scheme = targetURL.Scheme
+			req.URL.Host = targetURL.Host
+			return http.DefaultTransport.RoundTrip(req)
+		}),
+	}
+
+	// CheckForUpdates should set Incompatible: true since remote schema is 2.0.0 (local default is 1.0.0)
+	_, err := svc.CheckForUpdates()
+	if err != nil {
+		t.Fatalf("CheckForUpdates failed: %v", err)
+	}
+
+	status := svc.GetStatus()
+	if !status.Incompatible {
+		t.Error("expected status.Incompatible to be true")
+	}
+	if !strings.Contains(status.WarningMessage, "incompatible schema version") {
+		t.Errorf("expected warning message to contain 'incompatible schema version', got %q", status.WarningMessage)
+	}
+
+	// FetchOnlineUpdates should fail with incompatibility error
+	_, err = svc.FetchOnlineUpdates()
+	if err == nil {
+		t.Fatal("expected FetchOnlineUpdates to fail, got nil")
+	}
+	if !strings.Contains(err.Error(), "incompatible schema version") {
+		t.Errorf("expected error to mention 'incompatible schema version', got: %v", err)
+	}
+
+	// Double-check GetStatus still returns Incompatible
+	status = svc.GetStatus()
+	if !status.Incompatible {
+		t.Error("expected status.Incompatible to remain true after failed FetchOnlineUpdates")
 	}
 }
