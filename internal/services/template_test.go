@@ -315,3 +315,59 @@ func TestTemplateService_UpdateIncompatibility(t *testing.T) {
 		t.Error("expected status.Incompatible to remain true after failed FetchOnlineUpdates")
 	}
 }
+
+func TestTemplateService_CheckForUpdates_NetworkFailurePreservesIncompatible(t *testing.T) {
+	fsys := testMapFS()
+	tempDir := t.TempDir()
+	assetsSvc := assets.NewService(tempDir)
+
+	var shouldFail bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if shouldFail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "catalog.json") {
+			w.Write([]byte(`{"version":"2.0.0","templates":[{"name":"Test","description":"d","type":"xray","filename":"test.json"}]}`))
+		} else if strings.HasSuffix(r.URL.Path, "assets-definition.json") {
+			w.Write([]byte(`{"schema_version":"2.0.0"}`))
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	svc := NewTemplateService(fsys, tempDir, "http://example.com", assetsSvc)
+	svc.httpClient = &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			targetURL, _ := url.Parse(server.URL)
+			req.URL.Scheme = targetURL.Scheme
+			req.URL.Host = targetURL.Host
+			return http.DefaultTransport.RoundTrip(req)
+		}),
+	}
+
+	// 1. Initial check returns incompatible
+	_, err := svc.CheckForUpdates()
+	if err != nil {
+		t.Fatalf("CheckForUpdates failed: %v", err)
+	}
+
+	status := svc.GetStatus()
+	if !status.Incompatible {
+		t.Fatal("expected incompatible to be true")
+	}
+
+	// 2. Next check fails due to network error (500 Internal Server Error)
+	shouldFail = true
+	_, err = svc.CheckForUpdates()
+	if err == nil {
+		t.Fatal("expected CheckForUpdates to return an error, got nil")
+	}
+
+	// 3. Verify that incompatible state is still true (not reset to false)
+	status = svc.GetStatus()
+	if !status.Incompatible {
+		t.Error("expected status.Incompatible to remain true after a failed network request")
+	}
+}
