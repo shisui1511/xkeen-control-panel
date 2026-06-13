@@ -622,6 +622,8 @@
   let templatesHasUpdate = false;
   let checkingTemplates = false;
   let updatingTemplates = false;
+  let templatesIncompatible = false;
+  let templatesWarningMessage = '';
 
   async function fetchTemplatesStatus() {
     try {
@@ -631,6 +633,8 @@
         templatesVersion = data.current_version || '';
         templatesRepoUrl = data.templates_repo_url || '';
         templatesHasUpdate = data.has_update || false;
+        templatesIncompatible = data.incompatible || false;
+        templatesWarningMessage = data.warning_message || '';
         if (data.last_check && data.last_check !== '0001-01-01T00:00:00Z') {
           const date = new Date(data.last_check);
           templatesLastCheck = date.toLocaleString();
@@ -660,9 +664,11 @@
         }
       } else {
         showToast('error', await res.text());
+        await fetchTemplatesStatus();
       }
     } catch (e: any) {
       showToast('error', e.message);
+      await fetchTemplatesStatus();
     } finally {
       checkingTemplates = false;
     }
@@ -682,9 +688,11 @@
         await fetchTemplatesStatus();
       } else {
         showToast('error', await res.text());
+        await fetchTemplatesStatus();
       }
     } catch (e: any) {
       showToast('error', e.message);
+      await fetchTemplatesStatus();
     } finally {
       updatingTemplates = false;
     }
@@ -1000,6 +1008,11 @@
     <!-- Templates updates card -->
     <div class="card mb-2">
       <div class="card-label">{$t('settings.templates_title')}</div>
+      {#if templatesIncompatible}
+        <div class="alert alert-warning" style="margin-top: 0; margin-bottom: 12px;">
+          <strong>{$t('settings.templates_incompatible_warning')}</strong> {templatesWarningMessage}
+        </div>
+      {/if}
       <div class="field-group">
         <div class="field-row">
           <span class="field-row-name">{$t('settings.templates_repo_url')}</span>
