@@ -45,6 +45,8 @@ type TemplateStatus struct {
 	LastUpdated      time.Time `json:"last_updated"`
 	LastCheck        time.Time `json:"last_check"`
 	HasUpdate        bool      `json:"has_update"`
+	Incompatible     bool      `json:"incompatible"`
+	WarningMessage   string    `json:"warning_message"`
 }
 
 // TemplateService предоставляет доступ к конфигурационным шаблонам
@@ -58,6 +60,8 @@ type TemplateService struct {
 	lastUpdated      time.Time
 	lastCheck        time.Time
 	hasUpdate        bool
+	incompatible     bool
+	warningMessage   string
 	assetsSvc        *assets.AssetsService
 	mu               sync.RWMutex
 	httpClient       *http.Client
@@ -213,8 +217,16 @@ func (s *TemplateService) FetchOnlineUpdates() (int, error) {
 	if assetsData, err := s.fetchURL(assetsURL); err == nil {
 		if s.assetsSvc != nil {
 			if updateErr := s.assetsSvc.UpdateDefinition(assetsData); updateErr != nil {
-				log.Printf("WARNING: failed to update assets definition: %v", updateErr)
+				s.mu.Lock()
+				s.incompatible = true
+				s.warningMessage = updateErr.Error()
+				s.mu.Unlock()
+				return 0, fmt.Errorf("failed to update assets definition: %w", updateErr)
 			}
+			s.mu.Lock()
+			s.incompatible = false
+			s.warningMessage = ""
+			s.mu.Unlock()
 		}
 	} else {
 		log.Printf("WARNING: failed to fetch assets definition from %s: %v", assetsURL, err)
@@ -301,12 +313,16 @@ func (s *TemplateService) CheckForUpdates() (bool, error) {
 	// 2. Проверяем версию ассетов (assets-definition.json)
 	assetsURL := repoURL + "/assets-definition.json"
 	var remoteAssetsVersion string
+	var compatibilityErr error
 	if assetsData, err := s.fetchURL(assetsURL); err == nil {
 		var remoteAssets struct {
 			SchemaVersion string `json:"schema_version"`
 		}
 		if json.Unmarshal(assetsData, &remoteAssets) == nil {
 			remoteAssetsVersion = remoteAssets.SchemaVersion
+		}
+		if s.assetsSvc != nil {
+			compatibilityErr = s.assetsSvc.CheckCompatibility(assetsData)
 		}
 	}
 
@@ -335,6 +351,13 @@ func (s *TemplateService) CheckForUpdates() (bool, error) {
 	}
 
 	s.mu.Lock()
+	if compatibilityErr != nil {
+		s.incompatible = true
+		s.warningMessage = compatibilityErr.Error()
+	} else {
+		s.incompatible = false
+		s.warningMessage = ""
+	}
 	s.hasUpdate = hasUpdate
 	s.lastCheck = time.Now()
 	s.mu.Unlock()
@@ -358,6 +381,8 @@ func (s *TemplateService) GetStatus() TemplateStatus {
 		LastUpdated:      s.lastUpdated,
 		LastCheck:        s.lastCheck,
 		HasUpdate:        s.hasUpdate,
+		Incompatible:     s.incompatible,
+		WarningMessage:   s.warningMessage,
 	}
 }
 

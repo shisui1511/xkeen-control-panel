@@ -3,6 +3,7 @@ package templates_test
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -249,4 +250,248 @@ func TestXrayTemplatesStructure(t *testing.T) {
 	if !foundCatchAll {
 		t.Error("observatory.json: catch-all rule with inboundTag redirect/tproxy not found")
 	}
+}
+
+type CatalogTemplate struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Type        string `json:"type"`
+	Filename    string `json:"filename"`
+}
+
+type Catalog struct {
+	Version   string            `json:"version"`
+	Templates []CatalogTemplate `json:"templates"`
+}
+
+func TestPresetsConsistency(t *testing.T) {
+	// 1. Read catalog.json
+	catalogData, err := os.ReadFile("catalog.json")
+	if err != nil {
+		t.Fatalf("Failed to read catalog.json: %v", err)
+	}
+
+	var cat Catalog
+	if err := json.Unmarshal(catalogData, &cat); err != nil {
+		t.Fatalf("Failed to parse catalog.json: %v", err)
+	}
+
+	// 2. Read default_assets.json
+	assetsData, err := os.ReadFile("../services/assets/default_assets.json")
+	if err != nil {
+		t.Fatalf("Failed to read default_assets.json: %v", err)
+	}
+
+	var assetsMap map[string]interface{}
+	if err := json.Unmarshal(assetsData, &assetsMap); err != nil {
+		t.Fatalf("Failed to parse default_assets.json: %v", err)
+	}
+
+	// Helper to find a preset by ID/name in default assets
+	findPreset := func(templateType, presetID string) map[string]interface{} {
+		typeMap, ok := assetsMap[templateType].(map[string]interface{})
+		if !ok {
+			return nil
+		}
+		presets, ok := typeMap["presets"].([]interface{})
+		if !ok {
+			return nil
+		}
+		for _, p := range presets {
+			pMap, ok := p.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if pMap["id"] == presetID {
+				return pMap
+			}
+		}
+		return nil
+	}
+
+	// Loop over all templates in the catalog
+	for _, tmpl := range cat.Templates {
+		t.Run(tmpl.Name, func(t *testing.T) {
+			// Read template file content
+			tmplPath := tmpl.Type + "/" + tmpl.Filename
+			tmplData, err := os.ReadFile(tmplPath)
+			if err != nil {
+				t.Fatalf("Failed to read template file %s: %v", tmplPath, err)
+			}
+			tmplContent := string(tmplData)
+
+			// Try to find the corresponding preset in assets
+			// We map filename without extension to preset id (with zkeen.yaml mapping to zkeen-selective)
+			presetID := strings.TrimSuffix(tmpl.Filename, filepath.Ext(tmpl.Filename))
+			if tmpl.Filename == "zkeen.yaml" {
+				presetID = "zkeen-selective"
+			}
+			preset := findPreset(tmpl.Type, presetID)
+			if preset == nil {
+				t.Logf("No matching preset found in default_assets.json for template %s (preset ID: %s)", tmpl.Filename, presetID)
+			}
+
+			// We will test replacing PROXY_TAG with standard tags
+			testTags := []string{"proxy", "direct", "block", "vless-reality", "shadowsocks"}
+
+			for _, tag := range testTags {
+				// Apply replacement
+				replacedContent := strings.ReplaceAll(tmplContent, "PROXY_TAG", tag)
+
+				if tmpl.Type == "xray" {
+					var config map[string]interface{}
+					if err := json.Unmarshal([]byte(replacedContent), &config); err != nil {
+						t.Fatalf("Failed to parse applied Xray template as JSON (tag: %s): %v", tag, err)
+					}
+
+					// Referential integrity check
+					// Extract outbounds
+					outboundsMap := make(map[string]bool)
+					if outbounds, ok := config["outbounds"].([]interface{}); ok {
+						for _, obVal := range outbounds {
+							if ob, ok := obVal.(map[string]interface{}); ok {
+								if tagStr, ok := ob["tag"].(string); ok {
+									outboundsMap[tagStr] = true
+								}
+							}
+						}
+					}
+					// Add reserved outbounds
+					outboundsMap["direct"] = true
+					outboundsMap["block"] = true
+					outboundsMap["proxy"] = true
+					outboundsMap["vless-reality"] = true
+					outboundsMap["shadowsocks"] = true
+
+					// Extract balancers
+					balancersMap := make(map[string]bool)
+					if routing, ok := config["routing"].(map[string]interface{}); ok {
+						if balancers, ok := routing["balancers"].([]interface{}); ok {
+							for _, bVal := range balancers {
+								if b, ok := bVal.(map[string]interface{}); ok {
+									if tagStr, ok := b["tag"].(string); ok {
+										balancersMap[tagStr] = true
+									}
+								}
+							}
+						}
+
+						// Verify routing rules
+						if rules, ok := routing["rules"].([]interface{}); ok {
+							for _, rVal := range rules {
+								if r, ok := rVal.(map[string]interface{}); ok {
+									if obTag, ok := r["outboundTag"].(string); ok && obTag != "" {
+										if !outboundsMap[obTag] {
+											t.Errorf("Rule targets undeclared outboundTag: %s (template: %s)", obTag, tmpl.Filename)
+										}
+									}
+									if balTag, ok := r["balancerTag"].(string); ok && balTag != "" {
+										if !balancersMap[balTag] {
+											t.Errorf("Rule targets undeclared balancerTag: %s (template: %s)", balTag, tmpl.Filename)
+										}
+									}
+								}
+							}
+						}
+					}
+				} else if tmpl.Type == "mihomo" {
+					var config map[string]interface{}
+					if err := yaml.Unmarshal([]byte(replacedContent), &config); err != nil {
+						t.Fatalf("Failed to parse applied Mihomo template as YAML (tag: %s): %v", tag, err)
+					}
+
+					// Referential integrity check
+					// Extract proxy-groups
+					groupsMap := make(map[string]bool)
+					if groups, ok := config["proxy-groups"].([]interface{}); ok {
+						for _, gVal := range groups {
+							if g, ok := gVal.(map[string]interface{}); ok {
+								if nameStr, ok := g["name"].(string); ok {
+									groupsMap[nameStr] = true
+								}
+							}
+						}
+					}
+
+					// Extract proxies
+					proxiesMap := make(map[string]bool)
+					if proxies, ok := config["proxies"].([]interface{}); ok {
+						for _, pVal := range proxies {
+							if p, ok := pVal.(map[string]interface{}); ok {
+								if nameStr, ok := p["name"].(string); ok {
+									proxiesMap[nameStr] = true
+								}
+							}
+						}
+					}
+
+					// Declared outbounds includes groups, proxies, builtins and standard tags
+					declared := make(map[string]bool)
+					for k := range groupsMap {
+						declared[k] = true
+					}
+					for k := range proxiesMap {
+						declared[k] = true
+					}
+					declared["DIRECT"] = true
+					declared["REJECT"] = true
+					declared["PASS"] = true
+					for _, tVal := range testTags {
+						declared[tVal] = true
+					}
+
+					// Verify groups dependencies
+					if groups, ok := config["proxy-groups"].([]interface{}); ok {
+						for _, gVal := range groups {
+							if g, ok := gVal.(map[string]interface{}); ok {
+								if proxiesList, ok := g["proxies"].([]interface{}); ok {
+									for _, pNameVal := range proxiesList {
+										if pName, ok := pNameVal.(string); ok {
+											if !declared[pName] {
+												t.Errorf("Group %v targets undeclared proxy/group: %s (template: %s)", g["name"], pName, tmpl.Filename)
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+
+					// Verify rules
+					if rules, ok := config["rules"].([]interface{}); ok {
+						for _, ruleVal := range rules {
+							if ruleStr, ok := ruleVal.(string); ok {
+								outbound := extractMihomoRuleOutbound(ruleStr)
+								if outbound != "" && !declared[outbound] {
+									t.Errorf("Rule %q targets undeclared outbound: %s (template: %s)", ruleStr, outbound, tmpl.Filename)
+								}
+							}
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func extractMihomoRuleOutbound(ruleStr string) string {
+	// If rule contains `),` split it and inspect the rest
+	if strings.Contains(ruleStr, "),") {
+		parts := strings.Split(ruleStr, "),")
+		rest := parts[len(parts)-1]
+		outboundParts := strings.Split(rest, ",")
+		return strings.TrimSpace(outboundParts[0])
+	}
+	parts := strings.Split(ruleStr, ",")
+	if len(parts) < 2 {
+		return ""
+	}
+	lastPart := strings.TrimSpace(parts[len(parts)-1])
+	if lastPart == "no-resolve" {
+		if len(parts) >= 3 {
+			return strings.TrimSpace(parts[len(parts)-2])
+		}
+		return ""
+	}
+	return lastPart
 }

@@ -128,8 +128,8 @@ func TestAssetsService_UpdateDefinition(t *testing.T) {
 		t.Error("expected error when updating with missing schema_version, got nil")
 	}
 
-	// Update with valid JSON
-	validJSON := []byte(`{ "schema_version": "2.0.0", "custom": true }`)
+	// Update with valid JSON (compatible version)
+	validJSON := []byte(`{ "schema_version": "1.0.1", "custom": true }`)
 	err = svc.UpdateDefinition(validJSON)
 	if err != nil {
 		t.Fatalf("expected no error updating with valid JSON, got: %v", err)
@@ -144,18 +144,18 @@ func TestAssetsService_UpdateDefinition(t *testing.T) {
 	if err := json.Unmarshal(def, &schema); err != nil {
 		t.Fatalf("failed to unmarshal updated definition: %v", err)
 	}
-	if schema["schema_version"] != "2.0.0" {
-		t.Errorf("expected schema_version '2.0.0', got '%v'", schema["schema_version"])
+	if schema["schema_version"] != "1.0.1" {
+		t.Errorf("expected schema_version '1.0.1', got '%v'", schema["schema_version"])
 	}
 
-	// Now write another valid one to trigger backup test
-	newValidJSON := []byte(`{ "schema_version": "3.0.0", "custom": true }`)
+	// Now write another valid one to trigger backup test (compatible version)
+	newValidJSON := []byte(`{ "schema_version": "1.1.0", "custom": true }`)
 	err = svc.UpdateDefinition(newValidJSON)
 	if err != nil {
 		t.Fatalf("expected no error updating with new valid JSON, got: %v", err)
 	}
 
-	// Check if backup exists and has the correct previous version (2.0.0)
+	// Check if backup exists and has the correct previous version (1.0.1)
 	bakPath := filepath.Join(tempDir, "assets-definition.json.bak")
 	bakData, err := os.ReadFile(bakPath)
 	if err != nil {
@@ -165,7 +165,97 @@ func TestAssetsService_UpdateDefinition(t *testing.T) {
 	if err := json.Unmarshal(bakData, &bakSchema); err != nil {
 		t.Fatalf("failed to unmarshal backup: %v", err)
 	}
-	if bakSchema["schema_version"] != "2.0.0" {
-		t.Errorf("expected backup schema_version '2.0.0', got '%v'", bakSchema["schema_version"])
+	if bakSchema["schema_version"] != "1.0.1" {
+		t.Errorf("expected backup schema_version '1.0.1', got '%v'", bakSchema["schema_version"])
+	}
+}
+
+func TestAssetsService_CheckCompatibility(t *testing.T) {
+	svc := NewService(t.TempDir())
+
+	tests := []struct {
+		name    string
+		json    string
+		wantErr bool
+	}{
+		{
+			name:    "Equal major version",
+			json:    `{"schema_version": "1.0.0"}`,
+			wantErr: false,
+		},
+		{
+			name:    "Higher minor version",
+			json:    `{"schema_version": "1.2.3"}`,
+			wantErr: false,
+		},
+		{
+			name:    "Higher major version",
+			json:    `{"schema_version": "2.0.0"}`,
+			wantErr: true,
+		},
+		{
+			name:    "Missing version",
+			json:    `{"something": "else"}`,
+			wantErr: true,
+		},
+		{
+			name:    "Invalid JSON",
+			json:    `{invalid`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := svc.CheckCompatibility([]byte(tt.json))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CheckCompatibility() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestAssetsService_UpdateDefinition_BackupRollback(t *testing.T) {
+	tempDir := t.TempDir()
+	svc := NewService(tempDir)
+
+	// Write initial valid version
+	initialJSON := []byte(`{"schema_version": "1.0.0", "val": "A"}`)
+	err := svc.UpdateDefinition(initialJSON)
+	if err != nil {
+		t.Fatalf("failed to write initial: %v", err)
+	}
+
+	// Update with invalid JSON
+	err = svc.UpdateDefinition([]byte(`{invalid`))
+	if err == nil {
+		t.Error("expected error for invalid JSON, got nil")
+	}
+
+	// Verify original content A is preserved
+	def, err := svc.GetDefinition()
+	if err != nil {
+		t.Fatalf("failed to get definition: %v", err)
+	}
+	var s map[string]interface{}
+	json.Unmarshal(def, &s)
+	if s["val"] != "A" {
+		t.Errorf("expected val to be 'A', got '%v'", s["val"])
+	}
+
+	// Update with incompatible version
+	err = svc.UpdateDefinition([]byte(`{"schema_version": "2.0.0", "val": "B"}`))
+	if err == nil {
+		t.Error("expected error for incompatible version, got nil")
+	}
+
+	// Verify original content A is preserved
+	def, err = svc.GetDefinition()
+	if err != nil {
+		t.Fatalf("failed to get definition: %v", err)
+	}
+	json.Unmarshal(def, &s)
+	if s["val"] != "A" {
+		t.Errorf("expected val to be 'A', got '%v'", s["val"])
 	}
 }
