@@ -314,7 +314,9 @@ func (s *TemplateService) CheckForUpdates() (bool, error) {
 	assetsURL := repoURL + "/assets-definition.json"
 	var remoteAssetsVersion string
 	var compatibilityErr error
+	var fetchedAssets bool
 	if assetsData, err := s.fetchURL(assetsURL); err == nil {
+		fetchedAssets = true
 		var remoteAssets struct {
 			SchemaVersion string `json:"schema_version"`
 		}
@@ -351,12 +353,14 @@ func (s *TemplateService) CheckForUpdates() (bool, error) {
 	}
 
 	s.mu.Lock()
-	if compatibilityErr != nil {
-		s.incompatible = true
-		s.warningMessage = compatibilityErr.Error()
-	} else {
-		s.incompatible = false
-		s.warningMessage = ""
+	if fetchedAssets {
+		if compatibilityErr != nil {
+			s.incompatible = true
+			s.warningMessage = compatibilityErr.Error()
+		} else {
+			s.incompatible = false
+			s.warningMessage = ""
+		}
 	}
 	s.hasUpdate = hasUpdate
 	s.lastCheck = time.Now()
