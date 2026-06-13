@@ -133,6 +133,8 @@ func (s *AssetsService) CheckCompatibility(newData []byte) error {
 }
 
 func parseMajorVersion(v string) (int, error) {
+	v = strings.TrimPrefix(v, "v")
+	v = strings.TrimPrefix(v, "V")
 	dotIdx := strings.Index(v, ".")
 	if dotIdx != -1 {
 		v = v[:dotIdx]

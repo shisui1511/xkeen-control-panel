@@ -194,6 +194,21 @@ func TestAssetsService_CheckCompatibility(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "Lower major version with 'v' prefix",
+			json:    `{"schema_version": "v1.0.0"}`,
+			wantErr: false,
+		},
+		{
+			name:    "Higher major version with 'v' prefix",
+			json:    `{"schema_version": "v2.0.0"}`,
+			wantErr: true,
+		},
+		{
+			name:    "Lower major version with 'V' prefix",
+			json:    `{"schema_version": "V1.0.0"}`,
+			wantErr: false,
+		},
+		{
 			name:    "Missing version",
 			json:    `{"something": "else"}`,
 			wantErr: true,
