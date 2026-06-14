@@ -131,6 +131,7 @@ func main() {
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
+	srv.HandleProtected("/api/system/diagnostics", api.DiagnosticsDownload)
 
 	// Update endpoints
 	srv.HandleProtected("/api/update/check", api.UpdateCheck)
