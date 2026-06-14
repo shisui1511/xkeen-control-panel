@@ -26,10 +26,12 @@ var sensitiveYAMLKeys = map[string]bool{
 }
 
 var sensitiveJSONKeys = map[string]bool{
-	"id":        true,
-	"secret":    true,
-	"password":  true,
-	"publicKey": true,
+	"id":            true,
+	"secret":        true,
+	"password":      true,
+	"publicKey":     true,
+	"password_hash": true,
+	"passwordHash":  true,
 }
 
 // sanitizeYAML parses YAML data, recursively replaces sensitive values with *REDACTED*,
