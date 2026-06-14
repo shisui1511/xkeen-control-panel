@@ -456,3 +456,51 @@ func TestConfigRead_Success(t *testing.T) {
 		t.Errorf("expected content %q, got %q", string(content), rr.Body.String())
 	}
 }
+
+func TestConfigSave_ValidationFailureAndRollback(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	// Create mock validation script that fails
+	mockBin := filepath.Join(tmpDir, "mock-mihomo")
+	mockScript := `#!/bin/sh
+echo "mihomo mock validation failed"
+exit 1
+`
+	if err := os.WriteFile(mockBin, []byte(mockScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+	api.cfg.MihomoBinary = mockBin
+
+	// Create initial valid config file
+	targetPath := filepath.Join(tmpDir, "config.yaml")
+	initialContent := []byte("proxies: []")
+	if err := os.WriteFile(targetPath, initialContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Try saving invalid configuration (which will fail validation)
+	invalidContent := []byte("proxies: invalid_structure")
+	req := httptest.NewRequest(http.MethodPost, "/api/config/save?path="+targetPath, bytes.NewReader(invalidContent))
+	rr := httptest.NewRecorder()
+
+	api.ConfigSave(rr, req)
+
+	// Verify it returns 422 StatusUnprocessableEntity
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "mihomo mock validation failed") {
+		t.Errorf("expected validation error message, got: %s", rr.Body.String())
+	}
+
+	// Verify that the file content was rolled back to initialContent
+	gotContent, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotContent) != string(initialContent) {
+		t.Errorf("expected content to be rolled back to %q, got %q", string(initialContent), string(gotContent))
+	}
+}
+
