@@ -433,6 +433,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.snapshot_delete_btn': 'Удалить',
     'settings.snapshot_delete_confirm': 'Удалить снимок?',
     'settings.snapshot_deleted': 'Снимок удалён',
+    'settings.diagnostics_download': 'Скачать диагностический архив',
+    'settings.diagnostics_downloading': 'Загрузка архива...',
     'settings.backups_desc': 'Управление резервными копиями файлов конфигурации',
     'settings.backup_file': 'Файл конфигурации',
     'settings.backup_restore_confirm':
@@ -1551,6 +1553,8 @@ const translations: Record<Lang, Record<string, string>> = {
     'settings.snapshot_delete_btn': 'Delete',
     'settings.snapshot_delete_confirm': 'Delete this snapshot?',
     'settings.snapshot_deleted': 'Snapshot deleted',
+    'settings.diagnostics_download': 'Download Diagnostics Archive',
+    'settings.diagnostics_downloading': 'Downloading...',
     'settings.backups_desc': 'Manage configuration file backups',
     'settings.backup_file': 'Configuration file',
     'settings.backup_restore_confirm':

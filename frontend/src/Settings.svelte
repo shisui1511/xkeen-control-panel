@@ -49,6 +49,30 @@
   let creatingSnapshot = false;
   let restoringSnapshot = '';
 
+  let downloadingDiagnostics = false;
+
+  async function downloadDiagnostics() {
+    downloadingDiagnostics = true;
+    try {
+      const res = await fetch('/api/system/diagnostics');
+      if (!res.ok) {
+        showToast('error', await res.text());
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `xcp-diagnostics-${new Date().toISOString().slice(0, 10)}.tar.gz`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      showToast('error', e instanceof Error ? e.message : String(e));
+    } finally {
+      downloadingDiagnostics = false;
+    }
+  }
+
   async function fetchSnapshots() {
     try {
       const res = await fetch('/api/snapshots/list');
@@ -1395,6 +1419,16 @@
           <span class="field-row-name">{$t('settings.backend')}</span>
           <span class="field-row-val mono">Go + net/http</span>
         </div>
+      </div>
+      <div class="card-actions">
+        <button
+          class="btn btn-secondary"
+          on:click={downloadDiagnostics}
+          disabled={downloadingDiagnostics}
+          title={$t('settings.diagnostics_download')}
+        >
+          {downloadingDiagnostics ? $t('settings.diagnostics_downloading') : $t('settings.diagnostics_download')}
+        </button>
       </div>
     </div>
   {/if}
