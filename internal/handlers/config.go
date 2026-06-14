@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,8 +11,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 	"gopkg.in/yaml.v3"
 )
 
@@ -149,9 +152,23 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var backupData []byte
+	var backupExists bool
+	if _, statErr := os.Stat(cleanPath); statErr == nil {
+		if d, readErr := os.ReadFile(cleanPath); readErr == nil {
+			backupData = d
+			backupExists = true
+		}
+	}
+
 	err = a.configSvc.Save(cleanPath, data)
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if errStr := a.validateConfigAndRollback(r, cleanPath, data, backupExists, backupData); errStr != "" {
+		a.errorResponse(w, errStr, http.StatusUnprocessableEntity)
 		return
 	}
 
@@ -621,11 +638,77 @@ func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var backupData []byte
+	var backupExists bool
+	if _, statErr := os.Stat(cleanPath); statErr == nil {
+		if d, readErr := os.ReadFile(cleanPath); readErr == nil {
+			backupData = d
+			backupExists = true
+		}
+	}
+
 	err = a.configSvc.Save(cleanPath, []byte(content))
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	if errStr := a.validateConfigAndRollback(r, cleanPath, []byte(content), backupExists, backupData); errStr != "" {
+		a.errorResponse(w, errStr, http.StatusUnprocessableEntity)
+		return
+	}
+
 	JSONSuccess(w, nil)
+}
+
+func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data []byte, backupExists bool, backupData []byte) string {
+	ext := filepath.Ext(cleanPath)
+	var kernelType string
+	if strings.Contains(cleanPath, "xray") || ext == ".json" {
+		kernelType = "xray"
+	} else if strings.Contains(cleanPath, "mihomo") || ext == ".yaml" || ext == ".yml" {
+		kernelType = "mihomo"
+	} else {
+		kernelType = "xray"
+	}
+
+	binaryPath := a.getBinaryPath(kernelType)
+	if binaryPath == "" {
+		return ""
+	}
+
+	tempDir, err := os.MkdirTemp("", "xcp-save-val-*")
+	if err != nil {
+		return ""
+	}
+	defer os.RemoveAll(tempDir)
+
+	origDir := filepath.Dir(cleanPath)
+	filename := filepath.Base(cleanPath)
+	if err := copyDirConfigs(origDir, tempDir, filename, string(data), a.cfg.AllowedRoots); err != nil {
+		return ""
+	}
+
+	var cmd *exec.Cmd
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if kernelType == "xray" {
+		cmd = exec.CommandContext(ctx, binaryPath, "-test", "-confdir", tempDir)
+	} else {
+		cmd = exec.CommandContext(ctx, binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, filename))
+	}
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// Rollback!
+		if backupExists {
+			_ = utils.AtomicWriteFile(cleanPath, backupData, 0644)
+		} else {
+			_ = os.Remove(cleanPath)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	return ""
 }
