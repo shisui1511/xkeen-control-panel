@@ -672,7 +672,7 @@
           address: '77.88.8.8',
           port: 53,
           tag: 'dns-in-direct',
-          domains: ['geosite:ru'],
+          domains: ['geosite:tld-ru'],
           skipFallback: false
         }
       ];
