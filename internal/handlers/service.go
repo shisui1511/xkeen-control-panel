@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -126,4 +127,33 @@ func (a *API) ServiceRestartLog(w http.ResponseWriter, r *http.Request) {
 		entries[i], entries[j] = entries[j], entries[i]
 	}
 	a.jsonResponse(w, entries)
+}
+
+func (a *API) ServiceDNSRedirect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.errorResponse(w, a.t(r, "error.invalid_json"), http.StatusBadRequest)
+		return
+	}
+	if req.Enabled == nil {
+		a.errorResponse(w, a.t(r, "error.bad_request"), http.StatusBadRequest)
+		return
+	}
+
+	out, err := a.xkeenSvc.SetDNSProxying(*req.Enabled)
+	if err != nil {
+		a.errorResponse(w, out, http.StatusInternalServerError)
+		return
+	}
+
+	a.ClearCapabilitiesCache()
+
+	w.Write([]byte(out))
 }

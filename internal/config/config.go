@@ -76,7 +76,7 @@ func Default() *Config {
 		XKeenBinary:     findXKeen(),
 		MihomoConfigDir: "/opt/etc/mihomo",
 		MihomoBinary:    "/opt/sbin/mihomo",
-		MihomoAPIURL:    "http://localhost:9090",
+		MihomoAPIURL:    "http://127.0.0.1:9090",
 		DataDir:         "/opt/etc/xcp",
 		LogLevel:        "info",
 		LogPath:         "/opt/var/log/xkeen.log",

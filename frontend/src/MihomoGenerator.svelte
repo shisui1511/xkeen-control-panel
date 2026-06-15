@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { currentLang, t } from './i18n';
-  import { showToast } from './stores';
+  import { capabilities, showToast, fetchCapabilities } from './stores';
 
   export let onSwitchTab: (tab: string) => void = () => {};
   export let selectedFile: string = '';
@@ -172,7 +172,7 @@
 
   // ── Rule-provider URL constants ─────────────────────────────────────────
   const META_BASE_URL = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
-  const METACUBEX_BASE = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo';
+  const METACUBEX_BASE = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
 
   interface RuleProvider {
     name: string;
@@ -193,7 +193,7 @@
     },
     {
       name: 'category-ai@domain',
-      url: `${METACUBEX_BASE}/geosite/category-ai.mrs`,
+      url: `${METACUBEX_BASE}/geosite/category-ai-!cn.mrs`,
       behavior: 'domain',
       format: 'mrs',
       outbound: 'AI'
@@ -1851,6 +1851,34 @@
 
   const ru = $currentLang === 'ru';
 
+  let dnsRedirectLoading = false;
+
+  async function enableDNSRedirect() {
+    dnsRedirectLoading = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/service/dns-redirect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({ enabled: true })
+      });
+      if (res.ok) {
+        showToast('success', ru ? 'Перехват DNS успешно включен' : 'DNS Interception enabled successfully');
+        await fetchCapabilities();
+      } else {
+        const text = await res.text();
+        showToast('error', text || (ru ? 'Не удалось включить перехват DNS' : 'Failed to enable DNS Interception'));
+      }
+    } catch (err: any) {
+      showToast('error', err.message || String(err));
+    } finally {
+      dnsRedirectLoading = false;
+    }
+  }
+
   const PROXY_TYPES: ProxyType[] = ['vless', 'hysteria2', 'tuic', 'ss', 'vmess'];
   const GROUP_TYPES: GroupType[] = ['select', 'url-test', 'fallback', 'load-balance'];
   const RULE_TYPES: RuleType[] = [
@@ -2834,6 +2862,20 @@
             </label>
           </div>
           {#if dns.enabled}
+            {#if $capabilities?.xkeen_dns === false}
+              <div class="alert alert-warning" style="margin: 0 0 16px 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;" role="status">
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <span aria-hidden="true">⚠️</span>
+                  <span>{$t('editor.dns_intercept_warning')}</span>
+                </div>
+                <button class="btn btn-secondary btn-sm" style="font-size: 12px; padding: 4px 8px; display: flex; align-items: center; gap: 4px;" on:click={enableDNSRedirect} disabled={dnsRedirectLoading}>
+                  {#if dnsRedirectLoading}
+                    <span class="spinner" style="display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span>
+                  {/if}
+                  {$t('editor.dns_intercept_enable')}
+                </button>
+              </div>
+            {/if}
             <div class="form-row">
               <label class="form-label">{ru ? 'Режим' : 'Enhanced mode'}</label>
               <select class="form-select" bind:value={dns.enhancedMode}>
@@ -3901,5 +3943,10 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>
