@@ -323,6 +323,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.loading_tags': 'Загрузка тегов...',
     'editor.no_outbounds_configured': 'Исходящие подключения не найдены',
     'editor.proxy_name_sanitized': 'Имя прокси очищено от спецсимволов',
+    'editor.undo': 'Отменить последнее изменение',
+    'editor.undo_success': 'Изменения успешно отменены',
+    'editor.empty_proxies_warning': 'Вы не настроили ни одного прокси-сервера. Конфигурация может быть нерабочей!',
+    'editor.group_disable_warning': 'Отключение группы {group} удалит правила маршрутизации для этой группы!',
+    'editor.sniffer_enable': 'Включить sniffer (для tproxy)',
+    'editor.outbounds_title': 'Управление исходящими (Outbounds)',
 
     // Services
     'svc.title': 'Управление сервисами',
@@ -1453,6 +1459,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.loading_tags': 'Loading tags...',
     'editor.no_outbounds_configured': 'No outbounds configured',
     'editor.proxy_name_sanitized': 'Proxy name sanitized of special characters',
+    'editor.undo': 'Undo last change',
+    'editor.undo_success': 'Last change reverted successfully',
+    'editor.empty_proxies_warning': 'No proxy servers configured. The configuration might be broken!',
+    'editor.group_disable_warning': 'Disabling group {group} will remove routing rules for it!',
+    'editor.sniffer_enable': 'Enable sniffer (for tproxy)',
+    'editor.outbounds_title': 'Outbound Management',
 
     // Services
     'svc.title': 'Service Management',
