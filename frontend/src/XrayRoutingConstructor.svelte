@@ -883,12 +883,21 @@
 
       // Write 04_outbounds.json
       const outboundsPath = `${XRAY_DIR}/04_outbounds.json`;
+      const existingOutbounds = (xrayFiles['04_outbounds.json']?.outbounds || []) as any[];
+      const customOutbounds = existingOutbounds.filter(
+        (o: any) => o && o.tag !== 'direct' && o.tag !== 'block'
+      );
+      const templateOutbounds = (getOutboundsForTemplate(templateId) as any).outbounds || [];
+      const mergedOutbounds = {
+        outbounds: [...templateOutbounds, ...customOutbounds]
+      };
+
       const saveOutboundsRes = await fetch(
         `/api/config/save?path=${encodeURIComponent(outboundsPath)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
-          body: JSON.stringify(getOutboundsForTemplate(templateId), null, 2)
+          body: JSON.stringify(mergedOutbounds, null, 2)
         }
       );
       if (!saveOutboundsRes.ok) throw new Error('Failed to save 04_outbounds.json');
