@@ -2091,8 +2091,8 @@
 
     const out: string[] = [];
     out.push(...lines.slice(0, start));
-    if (newLines.length > 0 || newContent.trim() !== '') {
-      out.push(sectionName + ':');
+    out.push(sectionName + ':');
+    if (newLines.length > 0) {
       out.push(...newLines);
     }
     if (end < lines.length) {
