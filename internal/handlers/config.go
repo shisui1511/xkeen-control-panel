@@ -490,12 +490,25 @@ func copyDirConfigs(srcDir, dstDir string, targetFilename string, newContent str
 				return err
 			}
 		} else {
-			data, err := os.ReadFile(srcFile)
-			if err != nil {
-				return err
-			}
-			if err := os.WriteFile(dstFile, data, 0644); err != nil {
-				return err
+			if ext == ".dat" || ext == ".metadb" {
+				if err := os.Symlink(srcFile, dstFile); err != nil {
+					// Fallback to copy if symlink fails
+					data, err := os.ReadFile(srcFile)
+					if err != nil {
+						return err
+					}
+					if err := os.WriteFile(dstFile, data, 0644); err != nil {
+						return err
+					}
+				}
+			} else {
+				data, err := os.ReadFile(srcFile)
+				if err != nil {
+					return err
+				}
+				if err := os.WriteFile(dstFile, data, 0644); err != nil {
+					return err
+				}
 			}
 		}
 	}

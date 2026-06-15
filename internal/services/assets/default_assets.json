@@ -108,6 +108,36 @@
             "port": "0-65535"
           }
         ]
+      },
+      {
+        "id": "only-blocked-routing",
+        "name": "preset.only-blocked-routing",
+        "description": "preset.only-blocked-routing.desc",
+        "dns_over_vless": true,
+        "dns_servers": [
+          "1.1.1.1",
+          {
+            "address": "8.8.8.8",
+            "port": 53,
+            "tag": "dns-in-ytb",
+            "domains": ["geosite:category-anticensorship", "geosite:refilter"],
+            "skipFallback": true
+          }
+        ],
+        "routing_rules": [
+          {
+            "outboundTag": "direct",
+            "ip": ["geoip:private"]
+          },
+          {
+            "outboundTag": "PROXY_TAG",
+            "domain": ["geosite:category-anticensorship", "geosite:refilter"]
+          },
+          {
+            "outboundTag": "direct",
+            "port": "0-65535"
+          }
+        ]
       }
     ]
   },
@@ -301,6 +331,27 @@
           }
         ],
         "rules": [],
+        "selected_meta_rule_sets": {}
+      },
+      {
+        "id": "only-blocked",
+        "name": "preset.only-blocked",
+        "description": "preset.only-blocked.desc",
+        "active_rule_provider": "zkeen",
+        "groups": [
+          {
+            "name": "Selective",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Proxy.png"
+          }
+        ],
+        "rules": [
+          { "type": "RULE-SET", "value": "refilter@domain", "outbound": "Selective" },
+          { "type": "RULE-SET", "value": "private@ip", "outbound": "DIRECT" },
+          { "type": "MATCH", "value": "", "outbound": "DIRECT" }
+        ],
         "selected_meta_rule_sets": {}
       }
     ],

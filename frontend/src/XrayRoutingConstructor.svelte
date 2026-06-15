@@ -3,6 +3,7 @@
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities } from './stores';
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
+  import { parseValidationError } from './lib/errorParser';
 
   let {
     onSwitchTab = () => {},
@@ -488,37 +489,6 @@
         return;
       }
 
-      // Pre-validate all changed files first
-      for (const file of changed) {
-        const managedPair = getChangedFiles().find(([n]) => n === file.name);
-        if (!managedPair) continue;
-        const [, managed] = managedPair;
-        const existing = xrayFiles[file.name] ?? {};
-        const merged = mergeXrayFile(file.name, existing, managed);
-        const content = JSON.stringify(merged, null, 2);
-
-        const validateRes = await fetch('/api/config/validate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken || ''
-          },
-          body: JSON.stringify({ path: file.path, content })
-        });
-
-        if (!validateRes.ok) {
-          throw new Error(`Failed to validate config: HTTP ${validateRes.status}`);
-        }
-
-        const validateResult = await validateRes.json();
-        if (!validateResult.valid) {
-          validationError = validateResult.error || 'Unknown validation error';
-          applyLoading = false;
-          showToast('error', $t('editor.validation_failed'));
-          return;
-        }
-      }
-
       validationError = '';
 
       // 1. Сохранить изменённые файлы
@@ -533,7 +503,16 @@
           headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
           body: JSON.stringify(merged, null, 2)
         });
-        if (!saveRes.ok) throw new Error(`Failed to save ${file.name}`);
+        if (!saveRes.ok) {
+          if (saveRes.status === 422) {
+            const data = await saveRes.json();
+            validationError = data.error || 'Unknown validation error';
+            showToast('error', $t('editor.validation_failed'));
+            applyLoading = false;
+            return;
+          }
+          throw new Error(`Failed to save ${file.name}`);
+        }
       }
 
       // 2. Рестарт XKeen
@@ -806,6 +785,38 @@
           type: 'field',
           outboundTag: 'PROXY_TAG',
           network: 'tcp,udp'
+        }
+      ];
+      dnsOverVless = true;
+    } else if (presetId === 'only-blocked-routing') {
+      dnsConfig.servers = [
+        '1.1.1.1',
+        {
+          address: '8.8.8.8',
+          port: 53,
+          tag: 'dns-in-ytb',
+          domains: ['geosite:category-anticensorship', 'geosite:refilter'],
+          skipFallback: true
+        }
+      ];
+      routingRules = [
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'direct',
+          ip: ['geoip:private']
+        },
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'PROXY_TAG',
+          domain: ['geosite:category-anticensorship', 'geosite:refilter']
+        },
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'direct',
+          port: '0-65535'
         }
       ];
       dnsOverVless = true;
@@ -1186,7 +1197,7 @@
               <button class="scenario-chip" on:click={() => applyPreset(p.id)}>{$t(p.name)}</button>
             {/each}
           {:else}
-            {#each [['selective-routing', $t('editor.scenario_rule_based')], ['all-proxy-routing', $t('editor.scenario_global_proxy')], ['selective-no-quic', ru ? 'Блокировка QUIC' : 'Block QUIC']] as [id, label]}
+            {#each [['selective-routing', $t('editor.scenario_rule_based')], ['all-proxy-routing', $t('editor.scenario_global_proxy')], ['selective-no-quic', ru ? 'Блокировка QUIC' : 'Block QUIC'], ['only-blocked-routing', $t('preset.only-blocked-routing')]] as [id, label]}
               <button class="scenario-chip" on:click={() => applyPreset(id as any)}>{label}</button>
             {/each}
           {/if}
@@ -1901,9 +1912,15 @@
       <pre class="constructor-preview-pane" data-testid="xray-json-preview">{previewJson}</pre>
 
       {#if validationError}
-        <div class="validation-error-block" style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-family: var(--font-family-mono); font-size: 13px; white-space: pre-wrap;">
-          <strong>{$t('editor.validation_failed')}</strong>
-          <pre style="margin: 8px 0 0 0; white-space: pre-wrap; font-family: inherit; font-size: inherit;">{validationError}</pre>
+        <div class="validation-error-block" style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;">
+          <div style="font-weight: bold; margin-bottom: 6px;">{$t('editor.validation_failed')}</div>
+          <div style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;">
+            {parseValidationError(validationError, ru ? 'ru' : 'en')}
+          </div>
+          <details>
+            <summary style="cursor: pointer; font-size: 12px; opacity: 0.8; user-select: none;">{$t('editor.validation_details')}</summary>
+            <pre style="margin: 6px 0 0 0; white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 12px; opacity: 0.9; max-height: 200px; overflow-y: auto;">{validationError}</pre>
+          </details>
         </div>
       {/if}
 

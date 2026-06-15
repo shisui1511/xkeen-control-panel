@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities } from './stores';
+  import { parseValidationError } from './lib/errorParser';
 
   export let onSwitchTab: (tab: string) => void = () => {};
   export let selectedFile: string = '';
@@ -610,6 +611,26 @@
         enabled: true
       }));
       rules = [];
+      activeRuleProvider = 'zkeen';
+      selectedMetaRuleSets = new Map();
+    } else if (id === 'only-blocked') {
+      groups = [
+        {
+          id: crypto.randomUUID(),
+          name: 'Selective',
+          type: 'select',
+          proxies: ['DIRECT', ...proxies.map((p) => p.name)],
+          includeAll: true,
+          url: 'https://www.gstatic.com/generate_204',
+          interval: 300,
+          icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Proxy.png'
+        }
+      ];
+      rules = [
+        { id: crypto.randomUUID(), type: 'RULE-SET', value: 'refilter@domain', outbound: 'Selective' },
+        { id: crypto.randomUUID(), type: 'RULE-SET', value: 'private@ip', outbound: 'DIRECT' },
+        { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'DIRECT' }
+      ];
       activeRuleProvider = 'zkeen';
       selectedMetaRuleSets = new Map();
     }
@@ -2113,27 +2134,6 @@
         currentYAML = replaceMihomoTopLevelSection(currentYAML, sectionName, newSecContent);
       }
 
-      const validateRes = await fetch('/api/config/validate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
-        },
-        body: JSON.stringify({ path, content: currentYAML })
-      });
-
-      if (!validateRes.ok) {
-        throw new Error(`Failed to validate config: HTTP ${validateRes.status}`);
-      }
-
-      const validateResult = await validateRes.json();
-      if (!validateResult.valid) {
-        validationError = validateResult.error || 'Unknown validation error';
-        applyLoading = false;
-        showToast('error', $t('editor.validation_failed'));
-        return;
-      }
-
       validationError = '';
 
       const mergeRes = await fetch('/api/config/mihomo-merge', {
@@ -2146,6 +2146,13 @@
       });
 
       if (!mergeRes.ok) {
+        if (mergeRes.status === 422) {
+          const resData = await mergeRes.json();
+          validationError = resData.error || 'Unknown validation error';
+          showToast('error', $t('editor.validation_failed'));
+          applyLoading = false;
+          return;
+        }
         const errorText = await mergeRes.text();
         throw new Error(errorText || 'Failed to merge config');
       }
@@ -2288,9 +2295,17 @@
             <option value="rule-based">{$t('editor.scenario_rule_based')}</option>
             <option value="global-proxy">{$t('editor.scenario_global_proxy')}</option>
             <option value="zkeen-selective">{$t('editor.scenario_zkeen_selective')}</option>
+            <option value="only-blocked">{$t('preset.only-blocked')}</option>
           {/if}
         </select>
       </div>
+
+      {#if activePreset === 'zkeen-selective' && !hasZkeenGeodata}
+        <div class="alert alert-warning" style="margin-bottom: 16px; padding: 8px 12px; font-size: 13px; display: flex; align-items: center; gap: 8px; border-radius: var(--radius-sm);">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span>{$t('editor.requires_zkeen_geodata')}</span>
+        </div>
+      {/if}
 
       <!-- Rule providers -->
       <div class="rule-providers-row">
@@ -3025,9 +3040,15 @@
             : '# Add elements on the left\n# to generate YAML')}</pre>
 
       {#if validationError}
-        <div class="validation-error-block" style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-family: var(--font-family-mono); font-size: 13px; white-space: pre-wrap;">
-          <strong>{$t('editor.validation_failed')}</strong>
-          <pre style="margin: 8px 0 0 0; white-space: pre-wrap; font-family: inherit; font-size: inherit;">{validationError}</pre>
+        <div class="validation-error-block" style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;">
+          <div style="font-weight: bold; margin-bottom: 6px;">{$t('editor.validation_failed')}</div>
+          <div style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;">
+            {parseValidationError(validationError, $currentLang)}
+          </div>
+          <details>
+            <summary style="cursor: pointer; font-size: 12px; opacity: 0.8; user-select: none;">{$t('editor.validation_details')}</summary>
+            <pre style="margin: 6px 0 0 0; white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 12px; opacity: 0.9; max-height: 200px; overflow-y: auto;">{validationError}</pre>
+          </details>
         </div>
       {/if}
 
