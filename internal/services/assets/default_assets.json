@@ -290,7 +290,7 @@
             "name": "CDN",
             "type": "select",
             "include_all": true,
-            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
             "icon": "https://www.svgrepo.com/show/396567/globe-with-meridians.svg"
           },
           {
@@ -321,13 +321,6 @@
             "include_all": true,
             "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png"
-          },
-          {
-            "name": "QUIC",
-            "type": "select",
-            "include_all": false,
-            "proxies": ["REJECT", "PASS"],
-            "icon": "https://github.com/zxc-rv/assets/raw/main/group-icons/quic.png"
           }
         ],
         "rules": [],
@@ -459,7 +452,7 @@
         "url": "",
         "behavior": "classical",
         "format": "inline",
-        "outbound": "QUIC",
+        "outbound": "REJECT",
         "payload": ["AND,((DST-PORT,443),(NETWORK,UDP))"]
       },
       {
