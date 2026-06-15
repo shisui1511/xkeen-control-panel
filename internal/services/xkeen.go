@@ -247,10 +247,57 @@ func (s *XKeenService) ValidateXrayConfig(configDir string) (PreflightResult, er
 	}, nil
 }
 
+func (s *XKeenService) IsDNSProxyingEnabled() bool {
+	data, err := os.ReadFile("/opt/etc/init.d/S05xkeen")
+	if err != nil {
+		return false
+	}
+	content := string(data)
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(line, "proxy_dns") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				val := strings.TrimSpace(parts[1])
+				val = strings.Trim(val, `"'`)
+				if key == "proxy_dns" && val == "on" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (s *XKeenService) SetDNSProxying(enabled bool) (string, error) {
+	arg := "off"
+	if enabled {
+		arg = "on"
+	}
+	out, err := s.runWithTimeoutArgs(30*time.Second, "-dns", arg)
+	if err != nil {
+		s.RecordAction("dns_redirect:"+arg, out, err)
+		return out, err
+	}
+	restartOut, restartErr := s.Restart()
+	combinedOut := out + "\n" + restartOut
+	s.RecordAction("dns_redirect:"+arg, combinedOut, restartErr)
+	return combinedOut, restartErr
+}
+
 func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (string, error) {
+	return s.runWithTimeoutArgs(timeout, action)
+}
+
+func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string) (string, error) {
 	// INVARIANT: no shell interpreter — exec.Command receives the binary path directly,
 	// never via "sh -c", so action cannot trigger shell injection.
-	cmd := exec.Command(s.BinaryPath, action)
+	cmd := exec.Command(s.BinaryPath, args...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -271,8 +318,14 @@ func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (str
 			cmd.Process.Kill()
 		}
 		output := utils.StripANSI(out.String())
-		// If it was a start/restart, check if it actually started despite the timeout
-		if strings.Contains(action, "start") || strings.Contains(action, "restart") {
+		isStart := false
+		for _, arg := range args {
+			if strings.Contains(arg, "start") || strings.Contains(arg, "restart") {
+				isStart = true
+				break
+			}
+		}
+		if isStart {
 			status, _ := s.Status()
 			if strings.Contains(status, "running") || strings.Contains(status, "активен") {
 				return output, nil
@@ -281,8 +334,14 @@ func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (str
 		return output, fmt.Errorf("timeout exceeded")
 	case err := <-done:
 		output := utils.StripANSI(out.String())
-		if err != nil && (strings.Contains(action, "start") || strings.Contains(action, "restart")) {
-			// Check if it's running despite the error code
+		isStart := false
+		for _, arg := range args {
+			if strings.Contains(arg, "start") || strings.Contains(arg, "restart") {
+				isStart = true
+				break
+			}
+		}
+		if err != nil && isStart {
 			status, _ := s.Status()
 			if strings.Contains(status, "running") || strings.Contains(status, "активен") {
 				return output, nil
@@ -291,3 +350,4 @@ func (s *XKeenService) runWithTimeout(action string, timeout time.Duration) (str
 		return output, err
 	}
 }
+

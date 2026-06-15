@@ -13,6 +13,7 @@ type CapabilitiesResponse struct {
 	Mihomo       MihomoCapability            `json:"mihomo"`
 	XRay         XRayCapability              `json:"xray"`
 	ActiveKernel string                      `json:"active_kernel"`
+	XKeenDNS     bool                        `json:"xkeen_dns"`
 }
 
 // XRayCapability describes XRay confdir setup status.
@@ -128,6 +129,10 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	resp.XRay.ConfDir = a.cfg.XRayConfigDir
 	if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
 		resp.XRay.ConfDirExists = true
+	}
+
+	if a.xkeenSvc != nil {
+		resp.XKeenDNS = a.xkeenSvc.IsDNSProxyingEnabled()
 	}
 
 	a.capsCacheMutex.Lock()

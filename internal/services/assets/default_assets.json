@@ -7,6 +7,7 @@
         "name": "preset.selective-routing",
         "description": "preset.selective-routing.desc",
         "default": true,
+        "dns_over_vless": true,
         "dns_servers": [
           "1.1.1.1",
           {
@@ -43,6 +44,7 @@
         "id": "all-proxy-routing",
         "name": "preset.all-proxy-routing",
         "description": "preset.all-proxy-routing.desc",
+        "dns_over_vless": true,
         "dns_servers": ["1.1.1.1", "8.8.8.8"],
         "routing_rules": [
           {
@@ -59,6 +61,7 @@
         "id": "selective-no-quic",
         "name": "preset.selective-no-quic",
         "description": "preset.selective-no-quic.desc",
+        "dns_over_vless": true,
         "dns_servers": [
           "1.1.1.1",
           {
@@ -93,6 +96,7 @@
         "id": "minimal-routing",
         "name": "preset.minimal-routing",
         "description": "preset.minimal-routing.desc",
+        "dns_over_vless": true,
         "dns_servers": ["1.1.1.1", "8.8.8.8"],
         "routing_rules": [
           {
@@ -310,63 +314,63 @@
       },
       {
         "name": "category-ai@domain",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/category-ai.mrs",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs",
         "behavior": "domain",
         "format": "mrs",
         "outbound": "AI"
       },
       {
         "name": "steam@domain",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/steam.mrs",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.mrs",
         "behavior": "domain",
         "format": "mrs",
         "outbound": "Steam"
       },
       {
         "name": "spotify@domain",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/spotify.mrs",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/spotify.mrs",
         "behavior": "domain",
         "format": "mrs",
         "outbound": "Spotify"
       },
       {
         "name": "speedtest@domain",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/speedtest.mrs",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/speedtest.mrs",
         "behavior": "domain",
         "format": "mrs",
         "outbound": "Speedtest"
       },
       {
         "name": "reddit@domain",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/reddit.mrs",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/reddit.mrs",
         "behavior": "domain",
         "format": "mrs",
         "outbound": "Reddit"
       },
       {
         "name": "twitch@domain",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/twitch.mrs",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitch.mrs",
         "behavior": "domain",
         "format": "mrs",
         "outbound": "Twitch"
       },
       {
         "name": "twitter@domain",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/twitter.mrs",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitter.mrs",
         "behavior": "domain",
         "format": "mrs",
         "outbound": "Twitter"
       },
       {
         "name": "meta@domain",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/meta.mrs",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/meta.mrs",
         "behavior": "domain",
         "format": "mrs",
         "outbound": "Meta"
       },
       {
         "name": "discord@classical",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/classical/discord.txt",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/classical/discord.txt",
         "behavior": "classical",
         "format": "text",
         "outbound": "Discord"
@@ -380,21 +384,21 @@
       },
       {
         "name": "telegram@ipcidr",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geoip/telegram.mrs",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs",
         "behavior": "ipcidr",
         "format": "mrs",
         "outbound": "Telegram"
       },
       {
         "name": "github@domain",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geosite/github.mrs",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/github.mrs",
         "behavior": "domain",
         "format": "mrs",
         "outbound": "GitHub"
       },
       {
         "name": "private@ip",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo/geoip/private.mrs",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/private.mrs",
         "behavior": "ipcidr",
         "format": "mrs",
         "outbound": "DIRECT"

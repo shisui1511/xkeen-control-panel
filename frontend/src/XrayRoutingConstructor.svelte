@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { currentLang, t } from './i18n';
-  import { showToast } from './stores';
+  import { capabilities, showToast, fetchCapabilities } from './stores';
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
 
   let {
@@ -87,6 +87,35 @@
   let schemaLoading = $state(true);
   let schemaError = $state('');
   let validationError = $state('');
+
+  let dnsOverVless = $state(false);
+  let dnsRedirectLoading = $state(false);
+
+  async function enableDNSRedirect() {
+    dnsRedirectLoading = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/service/dns-redirect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({ enabled: true })
+      });
+      if (res.ok) {
+        showToast('success', ru ? 'Перехват DNS успешно включен' : 'DNS Interception enabled successfully');
+        await fetchCapabilities();
+      } else {
+        const text = await res.text();
+        showToast('error', text || (ru ? 'Не удалось включить перехват DNS' : 'Failed to enable DNS Interception'));
+      }
+    } catch (err: any) {
+      showToast('error', err.message || String(err));
+    } finally {
+      dnsRedirectLoading = false;
+    }
+  }
 
   async function loadSchema() {
     schemaLoading = true;
@@ -240,7 +269,18 @@
     routingConfig = {
       domainStrategy: routingFile.routing?.domainStrategy || 'IPIfNonMatch'
     };
-    routingRules = (routingFile.routing?.rules || []).map((r: any) => ({
+    const rawRules = routingFile.routing?.rules || [];
+    const hasDnsInRule = rawRules.some((r: any) => r.inboundTag && r.inboundTag.includes('dns-in'));
+    const hasPort53Rule = rawRules.some((r: any) => (r.port === 53 || r.port === '53') && r.outboundTag === 'dns-out');
+    dnsOverVless = hasDnsInRule && hasPort53Rule;
+
+    const filteredRules = rawRules.filter((r: any) => {
+      const isDnsInRule = r.inboundTag && r.inboundTag.includes('dns-in');
+      const isPort53Rule = (r.port === 53 || r.port === '53') && r.outboundTag === 'dns-out';
+      return !isDnsInRule && !isPort53Rule;
+    });
+
+    routingRules = filteredRules.map((r: any) => ({
       id: r.id || crypto.randomUUID(),
       type: r.type || 'field',
       outboundTag: r.outboundTag || 'direct',
@@ -369,7 +409,7 @@
     // 02_dns.json
     list.push([
       '02_dns.json',
-      { servers: dnsConfig.servers, queryStrategy: dnsConfig.queryStrategy, hosts: dnsConfig.hosts }
+      { servers: dnsConfig.servers, queryStrategy: dnsConfig.queryStrategy, hosts: dnsConfig.hosts, tag: 'dns-in' }
     ]);
 
     // Синхронизируем DNS c inbounds и routing
@@ -391,6 +431,21 @@
           ...r
         });
       }
+    }
+    if (dnsOverVless) {
+      const activeProxy = proxyTag || outboundTags.find((t) => !['direct', 'block', 'dns-out'].includes(t)) || 'direct';
+      rules.unshift({
+        id: crypto.randomUUID(),
+        type: 'field',
+        port: 53,
+        outboundTag: 'dns-out'
+      });
+      rules.unshift({
+        id: crypto.randomUUID(),
+        type: 'field',
+        inboundTag: ['dns-in'],
+        outboundTag: activeProxy
+      });
     }
     list.push([
       '05_routing.json',
@@ -652,6 +707,7 @@
           protocol: r.protocol ? [...r.protocol] : undefined,
           inboundTag: r.inboundTag ? [...r.inboundTag] : undefined
         }));
+        dnsOverVless = p.dns_over_vless ?? false;
         isDirty = true;
         showToast('success', $t('editor.preset_applied'));
         return;
@@ -696,6 +752,7 @@
           network: 'tcp,udp'
         }
       ];
+      dnsOverVless = true;
     } else if (presetId === 'all-proxy-routing') {
       dnsConfig.servers = ['1.1.1.1', '8.8.8.8'];
       routingRules = [
@@ -712,6 +769,7 @@
           network: 'tcp,udp'
         }
       ];
+      dnsOverVless = true;
     } else if (presetId === 'selective-no-quic') {
       dnsConfig.servers = [
         '1.1.1.1',
@@ -750,6 +808,7 @@
           network: 'tcp,udp'
         }
       ];
+      dnsOverVless = true;
     }
     isDirty = true;
     showToast('success', $t('editor.preset_applied'));
@@ -1468,6 +1527,21 @@
       <!-- DNS SECTION -->
       {#if activeSection === 'dns'}
         <div class="sec-body">
+          {#if $capabilities?.xkeen_dns === false && dnsConfig.servers.length > 0}
+            <div class="alert alert-warning" style="margin: 0 0 16px 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;" role="status">
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <span aria-hidden="true">⚠️</span>
+                <span>{$t('editor.dns_intercept_warning')}</span>
+              </div>
+              <button class="btn btn-secondary btn-sm" style="font-size: 12px; padding: 4px 8px; display: flex; align-items: center; gap: 4px;" on:click={enableDNSRedirect} disabled={dnsRedirectLoading}>
+                {#if dnsRedirectLoading}
+                  <span class="spinner" style="display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span>
+                {/if}
+                {$t('editor.dns_intercept_enable')}
+              </button>
+            </div>
+          {/if}
+
           <div class="form-row">
             <label class="form-label" for="dns-query-strategy"
               >{ru ? 'Стратегия запросов DNS' : 'DNS Query Strategy'}</label
@@ -1482,6 +1556,21 @@
               <option value="UseIPv4">UseIPv4</option>
               <option value="UseIPv6">UseIPv6</option>
             </select>
+          </div>
+
+          <div class="card" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; display: flex; flex-direction: column; gap: 4px;">
+            <label class="checkbox-container" style="margin: 0;">
+              <input
+                type="checkbox"
+                bind:checked={dnsOverVless}
+                on:change={() => (isDirty = true)}
+              />
+              <span class="checkmark" style="top: 1px;"></span>
+              <span style="font-weight: 600; color: var(--fg);">{$t('editor.dns_over_vless')}</span>
+            </label>
+            <div style="font-size: 0.75rem; color: var(--fg-secondary); padding-left: 28px; line-height: 1.4;">
+              {$t('editor.dns_over_vless_desc')}
+            </div>
           </div>
 
           <div class="section-title">{$t('editor.xray_dns')}</div>

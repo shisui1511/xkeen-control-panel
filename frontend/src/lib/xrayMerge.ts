@@ -47,7 +47,8 @@ export function mergeXrayFile(
           ...(existing.dns ?? {}),
           servers: managed.servers,
           queryStrategy: managed.queryStrategy,
-          hosts: managed.hosts
+          hosts: managed.hosts,
+          tag: managed.tag ?? existing.dns?.tag
         }
       };
     case '03_inbounds.json': {
@@ -142,4 +143,24 @@ export function substituteProxyTag(rules: any[], tag: string): any[] {
     }
     return r;
   });
+}
+
+/**
+ * generateDnsOverVlessRules — генерирует правила маршрутизации для DNS-over-VLESS.
+ *
+ * @param proxyTag - тег первого прокси-выхода
+ */
+export function generateDnsOverVlessRules(proxyTag: string): any[] {
+  return [
+    {
+      type: 'field',
+      inboundTag: ['dns-in'],
+      outboundTag: proxyTag || 'direct'
+    },
+    {
+      type: 'field',
+      port: 53,
+      outboundTag: 'dns-out'
+    }
+  ];
 }

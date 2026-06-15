@@ -11,6 +11,7 @@ export interface KernelCapability {
 export interface CapabilitiesData {
   kernels: Record<string, KernelCapability>;
   active_kernel: string;
+  xkeen_dns?: boolean;
   mihomo: {
     reachable: boolean;
     process_running: boolean;
