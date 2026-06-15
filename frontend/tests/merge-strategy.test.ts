@@ -291,4 +291,31 @@ describe('mergeXrayFile (DNS-over-VLESS) — DNS-over-VLESS & tag preservation',
       outboundTag: 'dns-out'
     });
   });
+
+  test('merge 04_outbounds.json сохраняет системные и перезаписывает кастомные outbounds', () => {
+    const existing = {
+      outbounds: [
+        { tag: 'direct', protocol: 'freedom' },
+        { tag: 'block', protocol: 'blackhole' },
+        { tag: 'dns-out', protocol: 'dns' },
+        { tag: 'old-custom', protocol: 'vless', settings: { vnext: [{ address: '1.1.1.1' }] } }
+      ]
+    };
+    const managed = {
+      outbounds: [
+        { tag: 'new-custom', protocol: 'vless', settings: { vnext: [{ address: '2.2.2.2' }] } }
+      ]
+    };
+
+    const result = mergeXrayFile('04_outbounds.json', existing, managed);
+    const outbounds = result.outbounds as any[];
+
+    expect(outbounds).toHaveLength(4);
+    expect(outbounds.find(o => o.tag === 'direct')).toBeDefined();
+    expect(outbounds.find(o => o.tag === 'block')).toBeDefined();
+    expect(outbounds.find(o => o.tag === 'dns-out')).toBeDefined();
+    expect(outbounds.find(o => o.tag === 'old-custom')).toBeUndefined();
+    expect(outbounds.find(o => o.tag === 'new-custom')).toBeDefined();
+  });
 });
+

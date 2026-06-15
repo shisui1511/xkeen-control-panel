@@ -51,6 +51,16 @@ export function mergeXrayFile(
           tag: managed.tag ?? existing.dns?.tag
         }
       };
+    case '04_outbounds.json': {
+      const existingOutbounds = (existing.outbounds ?? []) as Record<string, any>[];
+      const nonCustom = existingOutbounds.filter(
+        (o) => o && (o.tag === 'direct' || o.tag === 'block' || o.tag === 'dns-out')
+      );
+      return {
+        ...existing,
+        outbounds: [...nonCustom, ...(managed.outbounds ?? [])]
+      };
+    }
     case '03_inbounds.json': {
       const existingInbounds = (existing.inbounds ?? []) as Record<string, any>[];
       const nonDns = existingInbounds.filter((ib) => !String(ib.tag || '').startsWith('dns-in-'));
