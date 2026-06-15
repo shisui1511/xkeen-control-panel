@@ -1749,7 +1749,7 @@
       if (activeRuleProvider === 'zkeen') {
         const zkeenRules = [
           { type: 'RULE-SET', val: 'adlist@domain', outbound: 'REJECT' },
-          { type: 'RULE-SET', val: 'quic@inline', outbound: 'QUIC' },
+          { type: 'RULE-SET', val: 'quic@inline', outbound: 'REJECT' },
           { type: 'RULE-SET', val: 'netbios@inline', outbound: 'REJECT' },
           {
             type: 'OR',
