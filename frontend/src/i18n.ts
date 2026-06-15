@@ -316,6 +316,7 @@ const translations: Record<Lang, Record<string, string>> = {
       'Выбранный прокси-выход не найден в списке исходящих подключений. Конфигурация сохранена, но маршрутизация может работать некорректно.',
     'editor.loading_tags': 'Загрузка тегов...',
     'editor.no_outbounds_configured': 'Исходящие подключения не найдены',
+    'editor.proxy_name_sanitized': 'Имя прокси очищено от спецсимволов',
 
     // Services
     'svc.title': 'Управление сервисами',
@@ -1439,6 +1440,7 @@ const translations: Record<Lang, Record<string, string>> = {
       'Selected proxy outbound not found in available outbounds. Config saved, but routing may not work correctly.',
     'editor.loading_tags': 'Loading tags...',
     'editor.no_outbounds_configured': 'No outbounds configured',
+    'editor.proxy_name_sanitized': 'Proxy name sanitized of special characters',
 
     // Services
     'svc.title': 'Service Management',

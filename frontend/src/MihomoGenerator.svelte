@@ -98,6 +98,7 @@
   let activePreset: string = '';
   let activeRuleProvider: 'none' | 'zkeen' | 'metacubex' = 'none';
   let subscriptions: any[] = [];
+  let hasZkeenGeodata = false;
   let existingTproxyPort: number | null = null;
   let existingRedirPort: number | null = null;
   let dns: DNSConfig = {
@@ -1383,9 +1384,28 @@
     await loadSubscriptionProxies();
   }
 
+  async function checkZkeenGeodata() {
+    try {
+      const res = await fetch('/api/dat/tags?name=geosite.dat');
+      if (res.ok) {
+        const json = await res.json();
+        const tags = json.tags || [];
+        const tagNames = tags.map((t: any) => t.tag.toLowerCase());
+        hasZkeenGeodata =
+          tagNames.includes('domains') &&
+          tagNames.includes('other') &&
+          tagNames.includes('politic');
+      }
+    } catch (e) {
+      console.error('Failed to load geosite.dat tags:', e);
+      hasZkeenGeodata = false;
+    }
+  }
+
   onMount(async () => {
     await loadSchema();
     await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
+    await checkZkeenGeodata();
   });
 
   $: {
@@ -1403,9 +1423,19 @@
     prevInvalidateCache = false;
   }
 
+  function sanitizeProxyName(name: string): { name: string; sanitized: boolean } {
+    const original = name;
+    const cleaned = name.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
+    return { name: cleaned, sanitized: cleaned !== original };
+  }
+
   function addProxy() {
     if (!np.name.trim() || !np.server.trim()) return;
-    proxies = [...proxies, { ...np, id: crypto.randomUUID() }];
+    const { name: cleanName, sanitized } = sanitizeProxyName(np.name);
+    if (sanitized) {
+      showToast('info', $t('editor.proxy_name_sanitized') || 'Имя прокси очищено от спецсимволов');
+    }
+    proxies = [...proxies, { ...np, name: cleanName, id: crypto.randomUUID() }];
     showProxyForm = false;
     np = newProxyDefaults('vless');
   }
@@ -1463,10 +1493,14 @@
 
   // ── YAML generation ─────────────────────────────────────────────────────
 
-  function q(v: string | number | boolean) {
+  function yamlSafeString(v: string | number | boolean): string {
     if (typeof v !== 'string') return String(v);
-    const escaped = v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    return v.includes(':') || v.includes('#') || v === '' ? `"${escaped}"` : escaped;
+    const escaped = v
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\t/g, '\\t');
+    return `"${escaped}"`;
   }
 
   function generateYAML(): string {
@@ -1505,7 +1539,7 @@
         lines.push(`  ${providerName}:`);
         lines.push(`    type: http`);
         lines.push(`    path: ./providers/${providerName}.yaml`);
-        lines.push(`    url: ${q(sub.url)}`);
+        lines.push(`    url: ${yamlSafeString(sub.url)}`);
         lines.push(`    interval: ${sub.interval * 3600 || 86400}`);
         lines.push(`    health-check:`);
         lines.push(`      enable: true`);
@@ -1557,7 +1591,7 @@
             lines.push(`    payload:`);
             if (rp.payload) {
               for (const item of rp.payload) {
-                lines.push(`      - ${q(item)}`);
+                lines.push(`      - ${yamlSafeString(item)}`);
               }
             }
           } else {
@@ -1578,44 +1612,44 @@
     if (proxies.length > 0) {
       lines.push('proxies:');
       for (const p of proxies) {
-        lines.push(`  - name: ${q(p.name)}`);
+        lines.push(`  - name: ${yamlSafeString(p.name)}`);
         lines.push(`    type: ${p.type}`);
-        lines.push(`    server: ${q(p.server)}`);
+        lines.push(`    server: ${yamlSafeString(p.server)}`);
         lines.push(`    port: ${p.port}`);
 
         if (p.type === 'vless') {
           lines.push(`    uuid: ${p.uuid ?? ''}`);
           if (p.flow) lines.push(`    flow: ${p.flow}`);
-          lines.push(`    tls: true`);
+          lines.push(`    tls: ${p.tls ?? true}`);
           if (p.publicKey) {
             lines.push(`    reality-opts:`);
-            lines.push(`      public-key: ${q(p.publicKey)}`);
-            lines.push(`      short-id: ${q(p.shortId || '')}`);
+            lines.push(`      public-key: ${yamlSafeString(p.publicKey)}`);
+            lines.push(`      short-id: ${yamlSafeString(p.shortId || '')}`);
           }
           lines.push(`    client-fingerprint: ${p.fingerprint || 'chrome'}`);
-          if (p.servername) lines.push(`    servername: ${q(p.servername)}`);
+          if (p.servername) lines.push(`    servername: ${yamlSafeString(p.servername)}`);
         } else if (p.type === 'hysteria2') {
-          lines.push(`    password: ${q(p.password || '')}`);
-          if (p.sni) lines.push(`    sni: ${q(p.sni)}`);
+          lines.push(`    password: ${yamlSafeString(p.password || '')}`);
+          if (p.sni) lines.push(`    sni: ${yamlSafeString(p.sni)}`);
         } else if (p.type === 'tuic') {
           lines.push(`    uuid: ${p.uuid ?? ''}`);
-          lines.push(`    password: ${q(p.password || '')}`);
+          lines.push(`    password: ${yamlSafeString(p.password || '')}`);
           lines.push(`    congestion-controller: ${p.congestion || 'bbr'}`);
-          if (p.sni) lines.push(`    sni: ${q(p.sni)}`);
+          if (p.sni) lines.push(`    sni: ${yamlSafeString(p.sni)}`);
         } else if (p.type === 'ss') {
           lines.push(`    cipher: ${p.cipher || 'aes-256-gcm'}`);
-          lines.push(`    password: ${q(p.password || '')}`);
+          lines.push(`    password: ${yamlSafeString(p.password || '')}`);
         } else if (p.type === 'vmess') {
           lines.push(`    uuid: ${p.uuid ?? ''}`);
-          lines.push(`    alterId: 0`);
-          lines.push(`    cipher: auto`);
+          lines.push(`    alterId: ${p.alterID ?? 0}`);
+          lines.push(`    cipher: ${p.cipher || 'auto'}`);
           lines.push(`    tls: ${p.tls}`);
           lines.push(`    network: ${p.network || 'ws'}`);
           if (p.network === 'ws') {
             lines.push(`    ws-opts:`);
-            lines.push(`      path: ${q(p.wsPath || '/')}`);
+            lines.push(`      path: ${yamlSafeString(p.wsPath || '/')}`);
           }
-          if (p.tls && p.sni) lines.push(`    servername: ${q(p.sni)}`);
+          if (p.tls && p.sni) lines.push(`    servername: ${yamlSafeString(p.sni)}`);
         }
       }
       lines.push('');
@@ -1638,20 +1672,20 @@
         if (activeRuleProvider === 'zkeen' && g.enabled === false) {
           continue;
         }
-        lines.push(`  - name: ${q(g.name)}`);
+        lines.push(`  - name: ${yamlSafeString(g.name)}`);
         lines.push(`    type: ${g.type}`);
         if (g.icon) {
-          lines.push(`    icon: ${q(g.icon)}`);
+          lines.push(`    icon: ${yamlSafeString(g.icon)}`);
         }
         if (g.excludeFilter) {
-          lines.push(`    exclude-filter: ${q(g.excludeFilter)}`);
+          lines.push(`    exclude-filter: ${yamlSafeString(g.excludeFilter)}`);
         }
         if (g.includeAll === true) {
           lines.push(`    include-all: true`);
         }
         if (g.proxies.length > 0) {
           lines.push(`    proxies:`);
-          for (const p of g.proxies) lines.push(`      - ${q(p)}`);
+          for (const p of g.proxies) lines.push(`      - ${yamlSafeString(p)}`);
         }
         if (g.type !== 'select') {
           lines.push(`    url: ${g.url || 'https://www.gstatic.com/generate_204'}`);
@@ -1719,9 +1753,13 @@
           { type: 'GEOIP', val: 'VODAFONE', outbound: 'CDN' },
           { type: 'GEOIP', val: 'VULTR', outbound: 'CDN' },
           { type: 'RULE-SET', val: 'refilter@domain', outbound: 'Заблок. сервисы' },
-          { type: 'GEOSITE', val: 'DOMAINS', outbound: 'Заблок. сервисы' },
-          { type: 'GEOSITE', val: 'OTHER', outbound: 'Заблок. сервисы' },
-          { type: 'GEOSITE', val: 'POLITIC', outbound: 'Заблок. сервисы' },
+          ...(hasZkeenGeodata
+            ? [
+                { type: 'GEOSITE', val: 'DOMAINS', outbound: 'Заблок. сервисы' },
+                { type: 'GEOSITE', val: 'OTHER', outbound: 'Заблок. сервисы' },
+                { type: 'GEOSITE', val: 'POLITIC', outbound: 'Заблок. сервисы' }
+              ]
+            : []),
           { type: 'RULE-SET', val: 'github@domain', outbound: 'GitHub' }
         ];
 
@@ -1794,10 +1832,10 @@
       lines.push(`  enhanced-mode: ${dns.enhancedMode}`);
       if (dns.enhancedMode === 'fake-ip') lines.push(`  fake-ip-range: ${dns.fakeIPRange}`);
       lines.push(`  nameserver:`);
-      for (const ns of dns.nameservers) lines.push(`    - ${q(ns)}`);
+      for (const ns of dns.nameservers) lines.push(`    - ${yamlSafeString(ns)}`);
       if (dns.fallback.length > 0) {
         lines.push(`  fallback:`);
-        for (const fb of dns.fallback) lines.push(`    - ${q(fb)}`);
+        for (const fb of dns.fallback) lines.push(`    - ${yamlSafeString(fb)}`);
       }
     }
     lines.push('');
@@ -1811,7 +1849,7 @@
       lines.push(`  auto-detect-interface: ${tun.autoDetectInterface}`);
       if (tun.dnsHijack.length > 0) {
         lines.push(`  dns-hijack:`);
-        for (const d of tun.dnsHijack) lines.push(`    - ${q(d)}`);
+        for (const d of tun.dnsHijack) lines.push(`    - ${yamlSafeString(d)}`);
       }
     }
     lines.push('');
@@ -1833,6 +1871,7 @@
     void dns.fallback;
     void tun.enabled;
     void tun.stack;
+    void hasZkeenGeodata;
     yaml = generateYAML();
   }
 
