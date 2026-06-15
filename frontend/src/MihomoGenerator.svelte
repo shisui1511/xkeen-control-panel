@@ -2209,11 +2209,11 @@
         'proxy-providers': extractSection(yamlContent, 'proxy-providers')
       };
 
-      const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
-      if (!readRes.ok) {
-        throw new Error(`Failed to read current config: HTTP ${readRes.status}`);
+      const readCurrentRes = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+      if (!readCurrentRes.ok) {
+        throw new Error(`Failed to read current config: HTTP ${readCurrentRes.status}`);
       }
-      let currentYAML = await readRes.text();
+      let currentYAML = await readCurrentRes.text();
 
       for (const [sectionName, newSecContent] of Object.entries(sections)) {
         currentYAML = replaceMihomoTopLevelSection(currentYAML, sectionName, newSecContent);
@@ -3208,6 +3208,7 @@
         </div>
       {/if}
 
+      {#if embedded}
         <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
           <div style="display: flex; gap: 8px; width: 100%;">
              <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
