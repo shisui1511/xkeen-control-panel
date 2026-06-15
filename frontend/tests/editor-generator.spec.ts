@@ -419,6 +419,10 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
       }
     });
 
+    page.on('dialog', async (dialog) => {
+      await dialog.accept();
+    });
+
     await page.goto('/#/editor');
 
     const fileRow = page.locator('.file-row:has-text("config.yaml")').first();
