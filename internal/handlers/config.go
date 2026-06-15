@@ -403,6 +403,37 @@ func (a *API) getBinaryPath(name string) string {
 	return ""
 }
 
+func copyDirRecursive(src, dst string) error {
+	err := os.MkdirAll(dst, 0755)
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			err = copyDirRecursive(srcPath, dstPath)
+			if err != nil {
+				return err
+			}
+		} else {
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return err
+			}
+			err = os.WriteFile(dstPath, data, 0644)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func copyDirConfigs(srcDir, dstDir string, targetFilename string, newContent string, allowedRoots []string) error {
 	// Sanitize and validate targetFilename
 	targetFilename = filepath.Base(targetFilename)
@@ -439,10 +470,15 @@ func copyDirConfigs(srcDir, dstDir string, targetFilename string, newContent str
 
 	for _, entry := range entries {
 		if entry.IsDir() {
+			if entry.Name() == "rules" || entry.Name() == "providers" {
+				if err := copyDirRecursive(filepath.Join(srcDir, entry.Name()), filepath.Join(dstDir, entry.Name())); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		ext := filepath.Ext(entry.Name())
-		if ext != ".json" && ext != ".yaml" && ext != ".yml" {
+		if ext != ".json" && ext != ".yaml" && ext != ".yml" && ext != ".dat" && ext != ".metadb" {
 			continue
 		}
 
