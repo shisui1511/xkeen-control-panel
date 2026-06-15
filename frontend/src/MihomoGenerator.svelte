@@ -117,6 +117,17 @@
     dnsHijack: ['any:53']
   };
   let preservedKeys: string[] = [];
+  let sniffer = {
+    enabled: false,
+    sniffHttp: true,
+    sniffTls: true,
+    sniffQuic: true
+  };
+  let canUndo = false;
+  function checkUndo() {
+    canUndo = !!localStorage.getItem('xcp_prev_mihomo_yaml');
+  }
+
 
   // Import Node states
   let showImportModal = false;
@@ -938,6 +949,8 @@
       let inNameservers = false;
       let inFallback = false;
       let inDnsHijack = false;
+      let inSniffer = false;
+
 
       let currentGroup: any = null;
       let currentProxy: any = null;
@@ -963,6 +976,13 @@
         autoDetectInterface: true,
         dnsHijack: ['any:53']
       };
+      sniffer = {
+        enabled: false,
+        sniffHttp: false,
+        sniffTls: false,
+        sniffQuic: false
+      };
+
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -979,6 +999,7 @@
             inTUN = sec === 'tun';
             inRules = sec === 'rules';
             inRuleProviders = sec === 'rule-providers';
+            inSniffer = sec === 'sniffer';
 
             if (
               sec !== 'proxy-groups' &&
@@ -986,13 +1007,15 @@
               sec !== 'dns' &&
               sec !== 'tun' &&
               sec !== 'rules' &&
-              sec !== 'rule-providers'
+              sec !== 'rule-providers' &&
+              sec !== 'sniffer'
             ) {
               if (!preservedKeys.includes(sec)) {
                 preservedKeys = [...preservedKeys, sec];
               }
             }
           }
+
           continue;
         }
 
@@ -1275,6 +1298,24 @@
           }
         }
 
+        if (inSniffer) {
+          const enableMatch = trimmed.match(/^enable:\s*(.+)$/);
+          if (enableMatch) {
+            sniffer.enabled = unquote(enableMatch[1]) === 'true';
+            continue;
+          }
+          if (trimmed.includes('HTTP:')) {
+            sniffer.sniffHttp = true;
+          }
+          if (trimmed.includes('TLS:')) {
+            sniffer.sniffTls = true;
+          }
+          if (trimmed.includes('QUIC:')) {
+            sniffer.sniffQuic = true;
+          }
+        }
+
+
         if (inRules) {
           const ruleMatch = trimmed.match(
             /^-\s*([A-Z0-9-]+)\s*,\s*([^,]+)\s*,\s*([^,]+?)(?:\s*,\s*([^,]+))?$/
@@ -1427,6 +1468,7 @@
     await loadSchema();
     await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
     await checkZkeenGeodata();
+    checkUndo();
   });
 
   $: {
@@ -1860,6 +1902,18 @@
       lines.push('');
     }
 
+    // Sniffer
+    lines.push('sniffer:');
+    lines.push(`  enable: ${sniffer.enabled}`);
+    if (sniffer.enabled) {
+      lines.push('  sniff:');
+      if (sniffer.sniffHttp) lines.push('    HTTP: { ports: [80, 8080] }');
+      if (sniffer.sniffTls) lines.push('    TLS: { ports: [443, 8443] }');
+      if (sniffer.sniffQuic) lines.push('    QUIC: { ports: [443, 8443] }');
+      lines.push('  skip-dst-address: [rule-set:telegram@ipcidr]');
+    }
+    lines.push('');
+
     // DNS
     lines.push('dns:');
     lines.push(`  enable: ${dns.enabled}`);
@@ -1907,6 +1961,10 @@
     void tun.enabled;
     void tun.stack;
     void hasZkeenGeodata;
+    void sniffer.enabled;
+    void sniffer.sniffHttp;
+    void sniffer.sniffTls;
+    void sniffer.sniffQuic;
     yaml = generateYAML();
   }
 
@@ -2116,6 +2174,11 @@
   }
 
   async function handleApplyMihomo() {
+    if (proxies.length === 0) {
+      if (!confirm($t('editor.empty_proxies_warning') || 'No proxy servers configured.')) {
+        return;
+      }
+    }
     if (!showApplyConfirm) {
       showApplyConfirm = true;
       return;
@@ -2126,6 +2189,14 @@
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       const path = selectedFile || '/opt/etc/mihomo/config.yaml';
+
+      // Save previous state to localStorage for Undo
+      const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+      if (readRes.ok) {
+        const currentYAML = await readRes.text();
+        localStorage.setItem('xcp_prev_mihomo_yaml', currentYAML);
+        checkUndo();
+      }
 
       const yamlContent = generateYAML();
       const sections: Record<string, string> = {
@@ -2191,6 +2262,52 @@
     } catch (err: any) {
       console.error(err);
       showToast('error', err.message || (ru ? 'Ошибка сохранения' : 'Save error'));
+    } finally {
+      applyLoading = false;
+    }
+  }
+
+  async function handleUndo() {
+    const prevYAML = localStorage.getItem('xcp_prev_mihomo_yaml');
+    if (!prevYAML) return;
+    try {
+      applyLoading = true;
+      const csrfToken = localStorage.getItem('csrf_token');
+      const path = selectedFile || '/opt/etc/mihomo/config.yaml';
+
+      // Save back to file
+      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: prevYAML
+      });
+
+      if (!saveRes.ok) {
+        throw new Error('Failed to save rolled back config');
+      }
+
+      // Re-populate state
+      populateMihomoFromYAML(prevYAML);
+      isDirty = false;
+
+      // Restart service
+      const restartRes = await fetch('/api/service/control?action=restart', {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken || ''
+        }
+      });
+      if (!restartRes.ok) {
+        throw new Error('Failed to restart service');
+      }
+
+      showToast('success', $t('editor.undo_success') || 'Last change reverted successfully');
+      checkUndo();
+    } catch (e: any) {
+      showToast('error', `Undo failed: ${e.message}`);
     } finally {
       applyLoading = false;
     }
@@ -2611,6 +2728,9 @@
                         checked={g.enabled !== false}
                         on:change={(e) => {
                           g.enabled = e.currentTarget.checked;
+                          if (g.enabled === false) {
+                            showToast('warning', $t('editor.group_disable_warning', { group: g.name }));
+                          }
                           groups = [...groups];
                         }}
                       />
@@ -3024,6 +3144,28 @@
               />
             </div>
           {/if}
+          <div class="toggle-row" style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px;">
+            <label class="toggle-label">
+              <input type="checkbox" bind:checked={sniffer.enabled} />
+              <span>{$t('editor.sniffer_enable')}</span>
+            </label>
+          </div>
+          {#if sniffer.enabled}
+            <div style="margin-left: 20px; display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+              <label class="checkbox-container" style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;">
+                <input type="checkbox" bind:checked={sniffer.sniffHttp} style="width: auto; margin: 0;" />
+                <span>Sniff HTTP (ports 80, 8080)</span>
+              </label>
+              <label class="checkbox-container" style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;">
+                <input type="checkbox" bind:checked={sniffer.sniffTls} style="width: auto; margin: 0;" />
+                <span>Sniff TLS (ports 443, 8443)</span>
+              </label>
+              <label class="checkbox-container" style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;">
+                <input type="checkbox" bind:checked={sniffer.sniffQuic} style="width: auto; margin: 0;" />
+                <span>Sniff QUIC (ports 443, 8443)</span>
+              </label>
+            </div>
+          {/if}
         </div>
       {/if}
     </div>
@@ -3066,42 +3208,53 @@
         </div>
       {/if}
 
-      {#if embedded}
-        <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
-           <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              style="margin-right:5px"
-              ><path d="M12 20h9" /><path
-                d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
-              /></svg
+        <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; gap: 8px; width: 100%;">
+             <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                style="margin-right:5px"
+                ><path d="M12 20h9" /><path
+                  d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
+                /></svg
+              >
+              {#if selectedFile}
+                {ru ? 'Вставить в редактор' : 'Insert into Editor'}
+              {:else}
+                {ru ? 'Открыть в редакторе' : 'Open in Editor'}
+              {/if}
+            </button>
+            <button
+              class="btn btn-primary"
+              data-testid="apply-changes-btn"
+              on:click={handleApplyMihomo}
+              disabled={applyLoading || !yaml}
+              style="flex: 1;"
             >
-            {#if selectedFile}
-              {ru ? 'Вставить в редактор' : 'Insert into Editor'}
-            {:else}
-              {ru ? 'Открыть в редакторе' : 'Open in Editor'}
-            {/if}
-          </button>
-          <button
-            class="btn btn-primary"
-            data-testid="apply-changes-btn"
-            on:click={handleApplyMihomo}
-            disabled={applyLoading || !yaml}
-            style="flex: 1;"
-          >
-            {applyLoading
-              ? ru
-                ? 'Сохранение...'
-                : 'Saving...'
-              : ru
-                ? 'Применить изменения'
-                : 'Apply Changes'}
-          </button>
+              {applyLoading
+                ? ru
+                  ? 'Сохранение...'
+                  : 'Saving...'
+                : ru
+                  ? 'Применить изменения'
+                  : 'Apply Changes'}
+            </button>
+          </div>
+          {#if canUndo}
+            <button
+              class="btn btn-secondary"
+              on:click={handleUndo}
+              disabled={applyLoading}
+              style="width: 100%;"
+            >
+              {$t('editor.undo')}
+            </button>
+          {/if}
         </div>
       {/if}
     </div>
