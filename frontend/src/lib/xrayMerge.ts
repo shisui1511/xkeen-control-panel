@@ -105,7 +105,7 @@ export function syncDnsPipeline(
 ): { dnsInbounds: any[]; routingRules: any[] } {
   const dnsInbounds: any[] = [];
   const routingRules: any[] = [];
-  let portCounter = 1082;
+  let portCounter = 1253;
 
   for (const srv of dnsServers) {
     if (srv && typeof srv === 'object' && srv.tag) {
