@@ -662,8 +662,10 @@
             tls: n.security === 'tls' || n.security === 'reality'
           };
         });
-        proxies = [...proxies, ...mapped];
-        imported += mapped.length;
+        const existingNames = new Set(proxies.map((p) => p.name));
+        const uniqueMapped = mapped.filter((n) => !existingNames.has(n.name));
+        proxies = [...proxies, ...uniqueMapped];
+        imported += uniqueMapped.length;
       }
       if (imported > 0) {
         showToast('success', $t('editor.import_proxies_done'));
@@ -1514,8 +1516,23 @@
     }
 
     // Rule-providers (if selected)
+    lines.push('rule-providers:');
+    // Always inject quic@inline and netbios@inline
+    lines.push('  quic@inline:');
+    lines.push('    type: inline');
+    lines.push('    behavior: classical');
+    lines.push('    payload:');
+    lines.push('      - "AND,((DST-PORT,443),(NETWORK,UDP))"');
+    lines.push('  netbios@inline:');
+    lines.push('    type: inline');
+    lines.push('    behavior: classical');
+    lines.push('    payload:');
+    lines.push('      - "AND,((DST-PORT,135),(NETWORK,UDP))"');
+    lines.push('      - "AND,((DST-PORT,137),(NETWORK,UDP))"');
+    lines.push('      - "AND,((DST-PORT,138),(NETWORK,UDP))"');
+    lines.push('      - "AND,((DST-PORT,139),(NETWORK,UDP))"');
+
     if (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0) {
-      lines.push('rule-providers:');
       for (const [key, outbound] of selectedMetaRuleSets) {
         const [id, type] = key.split('|') as [string, 'geosite' | 'geoip'];
         const behavior = type === 'geoip' ? 'ipcidr' : 'domain';
@@ -1526,12 +1543,13 @@
         lines.push(`    url: "${buildMetaRuleSetUrl(id, type)}"`);
         lines.push(`    interval: 86400`);
       }
-      lines.push('');
     } else if (activeRuleProvider !== 'none' && activeRuleProvider !== 'metacubex') {
       const providers = activeRuleProvider === 'zkeen' ? ruleProviders : RULE_PROVIDERS[activeRuleProvider];
       if (providers && providers.length > 0) {
-        lines.push('rule-providers:');
         for (const rp of providers) {
+          if (rp.name === 'quic@inline' || rp.name === 'netbios@inline') {
+            continue;
+          }
           lines.push(`  ${rp.name}:`);
           if (rp.format === 'inline') {
             lines.push(`    type: inline`);
@@ -1552,9 +1570,9 @@
             lines.push(`    interval: 86400`);
           }
         }
-        lines.push('');
       }
     }
+    lines.push('');
 
     // Proxies
     if (proxies.length > 0) {
@@ -1730,6 +1748,9 @@
         }
         lines.push('  - MATCH,DIRECT');
       } else {
+        lines.push('  - RULE-SET,quic@inline,REJECT');
+        lines.push('  - RULE-SET,netbios@inline,REJECT');
+
         // Rule-set entries from rule-providers (before user rules, before MATCH)
         if (activeRuleProvider === 'metacubex') {
           for (const [key, outbound] of selectedMetaRuleSets) {
@@ -1740,6 +1761,9 @@
           const providers = activeRuleProvider === 'zkeen' ? ruleProviders : RULE_PROVIDERS[activeRuleProvider];
           if (providers) {
             for (const rp of providers) {
+              if (rp.name === 'quic@inline' || rp.name === 'netbios@inline') {
+                continue;
+              }
               lines.push(`  - RULE-SET,${rp.name},${rp.outbound}`);
             }
           }
