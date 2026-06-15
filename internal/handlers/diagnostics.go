@@ -242,12 +242,12 @@ func (a *API) DiagnosticsDownload(w http.ResponseWriter, r *http.Request) {
 				return nil
 			}
 
-			ext := filepath.Ext(cleanPath)
+			basename := filepath.Base(cleanPath)
 			var sanitized []byte
 			var sanitizeErr error
-			if ext == ".json" {
+			if strings.Contains(basename, ".json") {
 				sanitized, sanitizeErr = sanitizeJSON(data)
-			} else if ext == ".yaml" || ext == ".yml" {
+			} else if strings.Contains(basename, ".yaml") || strings.Contains(basename, ".yml") {
 				sanitized, sanitizeErr = sanitizeYAML(data)
 			} else {
 				sanitized = data
