@@ -1524,6 +1524,20 @@
     return `"${escaped}"`;
   }
 
+  function sanitizeUrl(url: string): string {
+    if (!url) return '';
+    const trimmed = url.trim();
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      return '';
+    }
+    try {
+      new URL(trimmed);
+      return trimmed;
+    } catch {
+      return '';
+    }
+  }
+
   function generateYAML(): string {
     const lines: string[] = [];
 
@@ -1595,7 +1609,7 @@
         lines.push(`    type: http`);
         lines.push(`    format: mrs`);
         lines.push(`    behavior: ${behavior}`);
-        lines.push(`    url: "${buildMetaRuleSetUrl(id, type)}"`);
+        lines.push(`    url: ${yamlSafeString(sanitizeUrl(buildMetaRuleSetUrl(id, type)))}`);
         lines.push(`    interval: 86400`);
       }
     } else if (activeRuleProvider !== 'none' && activeRuleProvider !== 'metacubex') {
@@ -1621,7 +1635,7 @@
               lines.push(`    format: ${rp.format}`);
             }
             lines.push(`    behavior: ${rp.behavior}`);
-            lines.push(`    url: "${rp.url}"`);
+            lines.push(`    url: ${yamlSafeString(sanitizeUrl(rp.url))}`);
             lines.push(`    interval: 86400`);
           }
         }
