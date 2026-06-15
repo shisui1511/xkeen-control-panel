@@ -74,9 +74,90 @@
     domainStrategy: 'IPIfNonMatch'
   });
   let inbounds = $state<XrayInbound[]>([]);
-  let outboundTags = $state<string[]>(['direct', 'block', 'dns-out']);
+
+  // Outbound Management & Reactivity
+  let customOutbounds = $state<any[]>([]);
+  let subscriptionOutbounds = $state<any[]>([]);
   let outboundTagsLoading = $state(false);
-  let outboundDetails = $state<OutboundDetail[]>([]);
+
+  let outboundTags = $derived([
+    'direct',
+    'block',
+    'dns-out',
+    ...customOutbounds.map((o) => o.tag).filter(Boolean),
+    ...subscriptionOutbounds.map((o) => o.tag).filter(Boolean)
+  ]);
+
+  let outboundDetails = $derived.by<OutboundDetail[]>(() => {
+    const list: OutboundDetail[] = [
+      { tag: 'direct', protocol: 'freedom' },
+      { tag: 'block', protocol: 'blackhole' },
+      { tag: 'dns-out', protocol: 'dns' }
+    ];
+    const seen = new Set<string>(['direct', 'block', 'dns-out']);
+
+    for (const o of customOutbounds) {
+      if (o.tag && !seen.has(o.tag)) {
+        seen.add(o.tag);
+        let server = '';
+        if (o.settings?.vnext?.[0]?.address) {
+          server = o.settings.vnext[0].address;
+        } else if (o.settings?.servers?.[0]?.address) {
+          server = o.settings.servers[0].address;
+        }
+        list.push({
+          tag: o.tag,
+          protocol: o.protocol || 'unknown',
+          server: server || undefined
+        });
+      }
+    }
+
+    for (const o of subscriptionOutbounds) {
+      if (o.tag && !seen.has(o.tag)) {
+        seen.add(o.tag);
+        let server = '';
+        if (o.settings?.vnext?.[0]?.address) {
+          server = o.settings.vnext[0].address;
+        } else if (o.settings?.servers?.[0]?.address) {
+          server = o.settings.servers[0].address;
+        }
+        list.push({
+          tag: o.tag,
+          protocol: o.protocol || 'unknown',
+          server: server || undefined
+        });
+      }
+    }
+    return list;
+  });
+
+  let showOutboundForm = $state(false);
+  let editingOutboundIndex = $state<number | null>(null);
+  let outboundForm = $state({
+    tag: '',
+    protocol: 'vless',
+    address: '',
+    port: 443,
+    uuid: '',
+    flow: '',
+    cipher: 'auto',
+    alterId: 0,
+    security: 'none',
+    sni: '',
+    network: 'tcp',
+    path: '/',
+    serviceName: '',
+    publicKey: '',
+    shortId: '',
+    fingerprint: 'chrome'
+  });
+
+  let canUndo = $state(false);
+  function checkUndo() {
+    canUndo = !!localStorage.getItem('xcp_prev_xray_json');
+  }
+
   let proxyTag = $state<string>('');
   let routingRules = $state<XrayRoutingRule[]>([]);
   let policyConfig = $state<{ levels: Record<string, any>; system: Record<string, any> }>({
@@ -193,6 +274,7 @@
     '02_dns.json',
     '03_inbounds.json',
     '04_outbounds.json',
+    '04_outbounds.manual.json',
     '05_routing.json',
     '06_policy.json'
   ];
@@ -200,6 +282,7 @@
   onMount(async () => {
     await loadSchema();
     await loadAllConfigs();
+    checkUndo();
   });
 
   async function loadAllConfigs() {
@@ -219,7 +302,7 @@
 
     await Promise.allSettled(promises);
     populateFromFiles();
-    outboundTags = await loadXrayOutboundTags();
+    await loadXrayOutboundTags();
     if (outboundTags.length > 0) {
       if (!proxyTag) {
         const systemTags = ['direct', 'block', 'dns-out'];
@@ -265,6 +348,26 @@
     const inboundsFile = xrayFiles['03_inbounds.json'] || {};
     inbounds = inboundsFile.inbounds || [];
 
+    // 04_outbounds.json & 04_outbounds.manual.json (populate customOutbounds)
+    const outboundsFile = xrayFiles['04_outbounds.json'] || {};
+    const manualFile = xrayFiles['04_outbounds.manual.json'] || {};
+    const fileOutbounds = (outboundsFile.outbounds ?? []) as any[];
+    const manualOutbounds = (manualFile.outbounds ?? []) as any[];
+
+    const allCustom = [...fileOutbounds, ...manualOutbounds].filter(
+      (o: any) => o && o.tag !== 'direct' && o.tag !== 'block' && o.tag !== 'dns-out'
+    );
+
+    const seenTags = new Set<string>();
+    const uniqueCustom: any[] = [];
+    for (const o of allCustom) {
+      if (o.tag && !seenTags.has(o.tag)) {
+        seenTags.add(o.tag);
+        uniqueCustom.push(o);
+      }
+    }
+    customOutbounds = uniqueCustom;
+
     // 05_routing.json
     const routingFile = xrayFiles['05_routing.json'] || {};
     routingConfig = {
@@ -299,8 +402,6 @@
     );
     proxyTag = proxyRule ? proxyRule.outboundTag : '';
 
-    // Stub detection removed (CONSTR-06)
-
     // 06_policy.json
     const policyFile = xrayFiles['06_policy.json'] || {};
     policyConfig = {
@@ -311,14 +412,10 @@
     };
   }
 
-  async function loadXrayOutboundTags(): Promise<string[]> {
+  async function loadXrayOutboundTags() {
     outboundTagsLoading = true;
-    const tags: string[] = [];
-    const details: OutboundDetail[] = [];
-
-    details.push({ tag: 'direct', protocol: 'freedom' });
-    details.push({ tag: 'block', protocol: 'blackhole' });
-    details.push({ tag: 'dns-out', protocol: 'dns' });
+    const custom: any[] = [];
+    const subs: any[] = [];
 
     try {
       const listRes = await fetch(`/api/config/list?dir=${encodeURIComponent(XRAY_DIR)}`);
@@ -333,53 +430,22 @@
             if (!res.ok) continue;
             const json = await res.json();
             const fileOutbounds = (json.outbounds ?? []) as any[];
-            for (const o of fileOutbounds) {
-              if (o.tag) {
-                tags.push(o.tag);
-                let server = '';
-                if (o.settings?.vnext?.[0]?.address) {
-                  server = o.settings.vnext[0].address;
-                } else if (o.settings?.servers?.[0]?.address) {
-                  server = o.settings.servers[0].address;
+
+            if (f.name === '04_outbounds.json' || f.name === '04_outbounds.manual.json') {
+              for (const o of fileOutbounds) {
+                if (o && o.tag && o.tag !== 'direct' && o.tag !== 'block' && o.tag !== 'dns-out') {
+                  custom.push(o);
                 }
-                details.push({
-                  tag: o.tag,
-                  protocol: o.protocol || 'unknown',
-                  server: server || undefined
-                });
+              }
+            } else {
+              for (const o of fileOutbounds) {
+                if (o && o.tag) {
+                  subs.push(o);
+                }
               }
             }
           } catch {
             /* skip missing/corrupted file */
-          }
-        }
-      } else {
-        // Fallback to static array read if /api/config/list fails
-        for (const name of ['04_outbounds.json', '04_outbounds.manual.json']) {
-          try {
-            const path = `${XRAY_DIR}/${name}`;
-            const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
-            if (!res.ok) continue;
-            const json = await res.json();
-            const fileOutbounds = (json.outbounds ?? []) as any[];
-            for (const o of fileOutbounds) {
-              if (o.tag) {
-                tags.push(o.tag);
-                let server = '';
-                if (o.settings?.vnext?.[0]?.address) {
-                  server = o.settings.vnext[0].address;
-                } else if (o.settings?.servers?.[0]?.address) {
-                  server = o.settings.servers[0].address;
-                }
-                details.push({
-                  tag: o.tag,
-                  protocol: o.protocol || 'unknown',
-                  server: server || undefined
-                });
-              }
-            }
-          } catch {
-            /* skip missing */
           }
         }
       }
@@ -387,18 +453,267 @@
       /* fallback */
     }
 
-    const uniqueDetails: OutboundDetail[] = [];
-    const seen = new Set<string>();
-    for (const d of details) {
-      if (!seen.has(d.tag)) {
-        seen.add(d.tag);
-        uniqueDetails.push(d);
+    // Deduplicate custom by tag
+    const seenCustom = new Set<string>();
+    const uniqueCustom: any[] = [];
+    for (const o of custom) {
+      if (o.tag && !seenCustom.has(o.tag)) {
+        seenCustom.add(o.tag);
+        uniqueCustom.push(o);
       }
     }
-    outboundDetails = uniqueDetails;
-    outboundTagsLoading = false;
 
-    return [...new Set([...tags, 'direct', 'block', 'dns-out'])];
+    // Deduplicate subs by tag
+    const seenSubs = new Set<string>();
+    const uniqueSubs: any[] = [];
+    for (const o of subs) {
+      if (o.tag && !seenSubs.has(o.tag)) {
+        seenSubs.add(o.tag);
+        uniqueSubs.push(o);
+      }
+    }
+
+    customOutbounds = uniqueCustom;
+    subscriptionOutbounds = uniqueSubs;
+    outboundTagsLoading = false;
+  }
+
+  function parseOutboundToForm(o: any) {
+    const form = {
+      tag: o.tag || '',
+      protocol: o.protocol || 'vless',
+      address: '',
+      port: 443,
+      uuid: '',
+      flow: '',
+      cipher: 'auto',
+      alterId: 0,
+      security: 'none',
+      sni: '',
+      network: 'tcp',
+      path: '/',
+      serviceName: '',
+      publicKey: '',
+      shortId: '',
+      fingerprint: 'chrome'
+    };
+
+    const user = o.settings?.vnext?.[0]?.users?.[0];
+    if (o.settings?.vnext?.[0]) {
+      form.address = o.settings.vnext[0].address || '';
+      form.port = o.settings.vnext[0].port || 443;
+    }
+
+    if (user) {
+      form.uuid = user.id || '';
+      form.flow = user.flow || '';
+      form.cipher = user.security || 'auto';
+      form.alterId = user.alterId || 0;
+    }
+
+    const ss = o.streamSettings || {};
+    form.network = ss.network || 'tcp';
+    if (ss.wsSettings?.path) {
+      form.path = ss.wsSettings.path;
+    }
+    if (ss.grpcSettings?.serviceName) {
+      form.serviceName = ss.grpcSettings.serviceName;
+    }
+
+    form.security = ss.security || 'none';
+    if (form.security === 'tls') {
+      form.sni = ss.tlsSettings?.serverName || '';
+    } else if (form.security === 'reality') {
+      form.sni = ss.realitySettings?.serverName || '';
+      form.publicKey = ss.realitySettings?.publicKey || '';
+      form.shortId = ss.realitySettings?.shortId || '';
+      form.fingerprint = ss.realitySettings?.fingerprint || 'chrome';
+    }
+
+    return form;
+  }
+
+  function buildOutboundFromForm(form: typeof outboundForm) {
+    const settings: any = {};
+    if (form.protocol === 'vless') {
+      settings.vnext = [
+        {
+          address: form.address.trim(),
+          port: Number(form.port),
+          users: [
+            {
+              id: form.uuid.trim(),
+              encryption: 'none',
+              flow: form.flow === 'xtls-rprx-vision' ? 'xtls-rprx-vision' : undefined
+            }
+          ]
+        }
+      ];
+    } else if (form.protocol === 'vmess') {
+      settings.vnext = [
+        {
+          address: form.address.trim(),
+          port: Number(form.port),
+          users: [
+            {
+              id: form.uuid.trim(),
+              security: form.cipher || 'auto',
+              alterId: Number(form.alterId) || 0
+            }
+          ]
+        }
+      ];
+    }
+
+    const streamSettings: any = {
+      network: form.network || 'tcp'
+    };
+
+    if (form.network === 'ws') {
+      streamSettings.wsSettings = {
+        path: form.path || '/'
+      };
+    } else if (form.network === 'grpc') {
+      streamSettings.grpcSettings = {
+        serviceName: form.serviceName || ''
+      };
+    }
+
+    if (form.security === 'tls') {
+      streamSettings.security = 'tls';
+      streamSettings.tlsSettings = {
+        serverName: form.sni || ''
+      };
+    } else if (form.security === 'reality') {
+      streamSettings.security = 'reality';
+      streamSettings.realitySettings = {
+        show: false,
+        fingerprint: form.fingerprint || 'chrome',
+        serverName: form.sni || '',
+        publicKey: form.publicKey || '',
+        shortId: form.shortId || '',
+        spiderX: ''
+      };
+    }
+
+    return {
+      tag: form.tag.trim(),
+      protocol: form.protocol,
+      settings,
+      streamSettings
+    };
+  }
+
+  function openAddOutbound() {
+    editingOutboundIndex = null;
+    outboundForm = {
+      tag: '',
+      protocol: 'vless',
+      address: '',
+      port: 443,
+      uuid: crypto.randomUUID(),
+      flow: '',
+      cipher: 'auto',
+      alterId: 0,
+      security: 'none',
+      sni: '',
+      network: 'tcp',
+      path: '/',
+      serviceName: '',
+      publicKey: '',
+      shortId: '',
+      fingerprint: 'chrome'
+    };
+    showOutboundForm = true;
+  }
+
+  function openEditOutbound(index: number) {
+    editingOutboundIndex = index;
+    const o = customOutbounds[index];
+    outboundForm = parseOutboundToForm(o);
+    showOutboundForm = true;
+  }
+
+  function saveOutbound() {
+    if (!outboundForm.tag.trim() || !outboundForm.address.trim() || !outboundForm.port) {
+      showToast('error', ru ? 'Заполните обязательные поля (Тег, Адрес, Порт)' : 'Please fill required fields (Tag, Address, Port)');
+      return;
+    }
+
+    const outboundObj = buildOutboundFromForm(outboundForm);
+
+    if (editingOutboundIndex !== null) {
+      const updated = [...customOutbounds];
+      updated[editingOutboundIndex] = outboundObj;
+      customOutbounds = updated;
+    } else {
+      const exists = customOutbounds.some((o) => o.tag === outboundObj.tag) || ['direct', 'block', 'dns-out'].includes(outboundObj.tag);
+      if (exists) {
+        showToast('error', ru ? 'Исходящий узел с таким тегом уже существует' : 'Outbound with this tag already exists');
+        return;
+      }
+      customOutbounds = [...customOutbounds, outboundObj];
+    }
+
+    showOutboundForm = false;
+    isDirty = true;
+  }
+
+  function removeOutbound(index: number) {
+    const o = customOutbounds[index];
+    if (proxyTag === o.tag) {
+      proxyTag = '';
+    }
+    customOutbounds = customOutbounds.filter((_, idx) => idx !== index);
+    isDirty = true;
+  }
+
+  async function handleUndo() {
+    const prevJson = localStorage.getItem('xcp_prev_xray_json');
+    if (!prevJson) return;
+    try {
+      applyLoading = true;
+      const csrfToken = localStorage.getItem('csrf_token');
+      const parsedObj = JSON.parse(prevJson);
+
+      for (const [name, content] of Object.entries(parsedObj)) {
+        const path = `${XRAY_DIR}/${name}`;
+        const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken || ''
+          },
+          body: JSON.stringify(content, null, 2)
+        });
+
+        if (!saveRes.ok) {
+          throw new Error(`Failed to save ${name}`);
+        }
+      }
+
+      xrayFiles = parsedObj;
+      populateFromFiles();
+      await loadXrayOutboundTags();
+      isDirty = false;
+
+      const restartRes = await fetch('/api/service/control?action=restart', {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken || ''
+        }
+      });
+      if (!restartRes.ok) {
+        throw new Error('Failed to restart service');
+      }
+
+      showToast('success', $t('editor.undo_success') || 'Last change reverted successfully');
+      checkUndo();
+    } catch (e: any) {
+      showToast('error', `Undo failed: ${e.message}`);
+    } finally {
+      applyLoading = false;
+    }
   }
 
   function getChangedFiles(): Array<[string, any]> {
@@ -421,6 +736,12 @@
 
     // 03_inbounds.json
     list.push(['03_inbounds.json', { dnsInbounds }]);
+
+    // 04_outbounds.json
+    list.push(['04_outbounds.json', { outbounds: customOutbounds }]);
+
+    // 04_outbounds.manual.json
+    list.push(['04_outbounds.manual.json', { outbounds: [] }]);
 
     // 05_routing.json
     const rules = [...routingRules];
@@ -479,6 +800,14 @@
       showToast('warning', $t('editor.proxy_tag_warning'));
     }
 
+    // UX-06: Pre-emptive warning if empty proxies list
+    if (customOutbounds.length === 0) {
+      if (!confirm($t('editor.empty_proxies_warning') || 'No proxy servers configured. The configuration might be broken!')) {
+        applyLoading = false;
+        return;
+      }
+    }
+
     try {
       const csrfToken = localStorage.getItem('csrf_token');
 
@@ -488,6 +817,10 @@
         applyLoading = false;
         return;
       }
+
+      // Save previous state to localStorage for Undo
+      localStorage.setItem('xcp_prev_xray_json', JSON.stringify(xrayFiles));
+      checkUndo();
 
       validationError = '';
 
@@ -1126,7 +1459,7 @@
 
       showToast('success', $t('subscr.import_success', { count: importNodes.length }));
       showImportModal = false;
-      outboundTags = await loadXrayOutboundTags();
+      await loadXrayOutboundTags();
     } catch (e: any) {
       importErrorMsg = e.message || $t('subscr.import_error');
     } finally {
@@ -1184,6 +1517,16 @@
               {ru ? 'Открыть в редакторе' : 'Open in Editor'}
             {/if}
           </button>
+          {#if canUndo}
+            <button
+              class="btn btn-secondary"
+              on:click={handleUndo}
+              disabled={applyLoading}
+              style="margin-right: 8px;"
+            >
+              {$t('editor.undo')}
+            </button>
+          {/if}
           <button
             class="btn btn-primary"
             data-testid="apply-changes-btn"
@@ -1735,17 +2078,48 @@
               {$t('subscr.import_node')}
             </button>
           </div>
-          <p class="section-desc">
-            {ru ? 'Доступные исходящие теги (read-only):' : 'Available outbound tags (read-only):'}
-          </p>
+
           <div class="outbounds-list">
-            {#each outboundDetails as item}
+            <!-- Custom Outbounds (Editable) -->
+            {#each customOutbounds as item, idx}
               <div
                 class="card tag-card"
                 style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between;"
               >
                 <div>
                   <span class="badge badge-tag">{item.tag}</span>
+                  <span style="font-size: 0.75rem; color: var(--fg-secondary); margin-left: 8px;">
+                    ({item.protocol} &bull; {getNodeServer(item)}:{getNodePort(item)})
+                  </span>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                  <button
+                    class="rule-move"
+                    on:click={() => openEditOutbound(idx)}
+                    title={ru ? 'Редактировать' : 'Edit'}
+                    style="font-size: 12px;"
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    class="rule-del"
+                    on:click={() => removeOutbound(idx)}
+                    title={ru ? 'Удалить' : 'Remove'}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            {/each}
+
+            <!-- System / Subscription Outbounds (Read-Only) -->
+            {#each outboundDetails.filter(d => ['direct', 'block', 'dns-out'].includes(d.tag) || subscriptionOutbounds.some(s => s.tag === d.tag)) as item}
+              <div
+                class="card tag-card"
+                style="margin-bottom: 8px; padding: 12px; display: flex; align-items: center; justify-content: space-between; opacity: 0.75; background: var(--bg-surface-hover);"
+              >
+                <div>
+                  <span class="badge badge-tag" style="background: var(--bg-surface-active);">{item.tag}</span>
                   {#if item.server}
                     <span style="font-size: 0.75rem; color: var(--fg-secondary); margin-left: 8px;">
                       ({item.protocol} &bull; {item.server})
@@ -1753,26 +2127,158 @@
                   {/if}
                 </div>
                 <span class="tag-desc" style="font-size: 0.8125rem; color: var(--fg-secondary);">
-                  {item.tag === 'direct'
-                    ? ru
-                      ? 'Прямое подключение (freedom)'
-                      : 'Direct connection (freedom)'
-                    : ''}
-                  {item.tag === 'block'
-                    ? ru
-                      ? 'Блокировка трафика (blackhole)'
-                      : 'Block traffic (blackhole)'
-                    : ''}
+                  {item.tag === 'direct' ? (ru ? 'Прямое подключение (freedom)' : 'Direct connection (freedom)') : ''}
+                  {item.tag === 'block' ? (ru ? 'Блокировка трафика (blackhole)' : 'Block traffic (blackhole)') : ''}
                   {item.tag === 'dns-out' ? (ru ? 'Запросы DNS' : 'DNS requests') : ''}
-                  {item.tag !== 'direct' && item.tag !== 'block' && item.tag !== 'dns-out'
-                    ? ru
-                      ? 'Пользовательский outbound'
-                      : 'Custom outbound'
-                    : ''}
+                  {!['direct', 'block', 'dns-out'].includes(item.tag) ? (ru ? 'Подписка' : 'Subscription') : ''}
                 </span>
               </div>
             {/each}
           </div>
+
+          {#if !showOutboundForm}
+            <button class="add-btn" on:click={openAddOutbound}>
+              + {ru ? 'Добавить исходящее соединение (VLESS / VMess)' : 'Add Outbound (VLESS / VMess)'}
+            </button>
+          {/if}
+
+          {#if showOutboundForm}
+            <div class="form-card" style="margin-top: 12px;">
+              <div class="form-row">
+                <label class="form-label" for="outbound-tag">{ru ? 'Тег (название)' : 'Tag (name)'} *</label>
+                <input id="outbound-tag" class="form-input" bind:value={outboundForm.tag} placeholder="PROXY" />
+              </div>
+              <div class="form-row2">
+                <div class="form-col">
+                  <label class="form-label" for="outbound-protocol">{ru ? 'Протокол' : 'Protocol'}</label>
+                  <select id="outbound-protocol" class="form-select" bind:value={outboundForm.protocol}>
+                    <option value="vless">VLESS</option>
+                    <option value="vmess">VMess</option>
+                  </select>
+                </div>
+                <div class="form-col">
+                  <label class="form-label" for="outbound-address">{ru ? 'Адрес сервера' : 'Server address'} *</label>
+                  <input id="outbound-address" class="form-input" bind:value={outboundForm.address} placeholder="server.com" />
+                </div>
+              </div>
+              <div class="form-row2">
+                <div class="form-col">
+                  <label class="form-label" for="outbound-port">{ru ? 'Порт' : 'Port'} *</label>
+                  <input id="outbound-port" class="form-input" type="number" bind:value={outboundForm.port} min="1" max="65535" />
+                </div>
+                <div class="form-col">
+                  <label class="form-label" for="outbound-uuid">UUID *</label>
+                  <div class="input-with-btn">
+                    <input id="outbound-uuid" class="form-input" bind:value={outboundForm.uuid} placeholder="uuid" />
+                    <button
+                      class="btn btn-secondary"
+                      style="padding: 0 8px; min-height: 36px;"
+                      on:click={() => (outboundForm.uuid = crypto.randomUUID())}
+                      title="Generate"
+                      type="button"
+                    >⟳</button>
+                  </div>
+                </div>
+              </div>
+
+              {#if outboundForm.protocol === 'vless'}
+                <div class="form-row">
+                  <label class="form-label" for="outbound-flow">{ru ? 'Flow (поток)' : 'Flow'}</label>
+                  <select id="outbound-flow" class="form-select" bind:value={outboundForm.flow}>
+                    <option value="">{ru ? 'Нет' : 'None'}</option>
+                    <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+                  </select>
+                </div>
+              {:else if outboundForm.protocol === 'vmess'}
+                <div class="form-row2">
+                  <div class="form-col">
+                    <label class="form-label" for="outbound-cipher">{ru ? 'Шифрование' : 'Cipher'}</label>
+                    <select id="outbound-cipher" class="form-select" bind:value={outboundForm.cipher}>
+                      <option value="auto">auto</option>
+                      <option value="aes-128-gcm">aes-128-gcm</option>
+                      <option value="chacha20-poly1305">chacha20-poly1305</option>
+                      <option value="none">none</option>
+                    </select>
+                  </div>
+                  <div class="form-col">
+                    <label class="form-label" for="outbound-alterid">AlterID</label>
+                    <input id="outbound-alterid" class="form-input" type="number" bind:value={outboundForm.alterId} min="0" />
+                  </div>
+                </div>
+              {/if}
+
+              <!-- Security Settings -->
+              <div class="form-row2">
+                <div class="form-col">
+                  <label class="form-label" for="outbound-security">{ru ? 'Безопасность (Security)' : 'Security'}</label>
+                  <select id="outbound-security" class="form-select" bind:value={outboundForm.security}>
+                    <option value="none">none</option>
+                    <option value="tls">TLS</option>
+                    {#if outboundForm.protocol === 'vless'}
+                      <option value="reality">REALITY</option>
+                    {/if}
+                  </select>
+                </div>
+                <div class="form-col">
+                  <label class="form-label" for="outbound-sni">SNI (ServerName)</label>
+                  <input id="outbound-sni" class="form-input" bind:value={outboundForm.sni} placeholder="yahoo.com" />
+                </div>
+              </div>
+
+              {#if outboundForm.security === 'reality'}
+                <div class="form-row2">
+                  <div class="form-col">
+                    <label class="form-label" for="outbound-pubkey">Reality Public Key</label>
+                    <input id="outbound-pubkey" class="form-input" bind:value={outboundForm.publicKey} placeholder="Public Key" />
+                  </div>
+                  <div class="form-col">
+                    <label class="form-label" for="outbound-shortid">Reality Short ID</label>
+                    <input id="outbound-shortid" class="form-input" bind:value={outboundForm.shortId} placeholder="Short ID" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <label class="form-label" for="outbound-fingerprint">Reality Fingerprint</label>
+                  <select id="outbound-fingerprint" class="form-select" bind:value={outboundForm.fingerprint}>
+                    <option value="chrome">chrome</option>
+                    <option value="firefox">firefox</option>
+                    <option value="safari">safari</option>
+                    <option value="edge">edge</option>
+                    <option value="qq">qq</option>
+                  </select>
+                </div>
+              {/if}
+
+              <!-- Transport Settings -->
+              <div class="form-row2">
+                <div class="form-col">
+                  <label class="form-label" for="outbound-network">{ru ? 'Транспорт (Network)' : 'Network'}</label>
+                  <select id="outbound-network" class="form-select" bind:value={outboundForm.network}>
+                    <option value="tcp">tcp</option>
+                    <option value="ws">websocket (ws)</option>
+                    <option value="grpc">gRPC</option>
+                  </select>
+                </div>
+                <div class="form-col">
+                  {#if outboundForm.network === 'ws'}
+                    <label class="form-label" for="outbound-path">WebSocket Path</label>
+                    <input id="outbound-path" class="form-input" bind:value={outboundForm.path} placeholder="/" />
+                  {:else}
+                    <label class="form-label" for="outbound-service">gRPC Service Name</label>
+                    <input id="outbound-service" class="form-input" bind:value={outboundForm.serviceName} placeholder="ServiceName" />
+                  {/if}
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button class="btn btn-secondary" on:click={() => (showOutboundForm = false)} type="button">
+                  {$t('app.cancel')}
+                </button>
+                <button class="btn btn-primary" on:click={saveOutbound} type="button">
+                  {editingOutboundIndex !== null ? (ru ? 'Сохранить' : 'Save') : (ru ? 'Добавить' : 'Add')}
+                </button>
+              </div>
+            </div>
+          {/if}
         </div>
       {/if}
 
@@ -1954,6 +2460,16 @@
               {ru ? 'Открыть в редакторе' : 'Open in Editor'}
             {/if}
           </button>
+          {#if canUndo}
+            <button
+              class="btn btn-secondary"
+              on:click={handleUndo}
+              disabled={applyLoading}
+              style="flex: 1;"
+            >
+              {$t('editor.undo')}
+            </button>
+          {/if}
           <button
             class="btn btn-primary"
             data-testid="apply-changes-btn"
