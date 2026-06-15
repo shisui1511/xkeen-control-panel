@@ -504,3 +504,85 @@ exit 1
 	}
 }
 
+func TestCopyDirConfigs_Symlink(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	// Create a dummy .dat and .metadb file in srcDir
+	datFile := filepath.Join(srcDir, "geoip.dat")
+	if err := os.WriteFile(datFile, []byte("geoip data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	metadbFile := filepath.Join(srcDir, "geosite.metadb")
+	if err := os.WriteFile(metadbFile, []byte("geosite data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a JSON file in srcDir
+	jsonFile := filepath.Join(srcDir, "config.json")
+	if err := os.WriteFile(jsonFile, []byte(`{"foo": "bar"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	allowedRoots := []string{srcDir}
+
+	// Run copyDirConfigs targeting config.json with new content
+	err := copyDirConfigs(srcDir, dstDir, "config.json", `{"foo": "baz"}`, allowedRoots)
+	if err != nil {
+		t.Fatalf("copyDirConfigs failed: %v", err)
+	}
+
+	// Verify config.json contains new content and is a regular file
+	dstJsonPath := filepath.Join(dstDir, "config.json")
+	jsonFi, err := os.Lstat(dstJsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jsonFi.Mode()&os.ModeSymlink != 0 {
+		t.Error("expected config.json NOT to be a symlink")
+	}
+	content, err := os.ReadFile(dstJsonPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != `{"foo": "baz"}` {
+		t.Errorf("expected JSON content '{\"foo\": \"baz\"}', got %q", string(content))
+	}
+
+	// Verify geoip.dat is a symlink pointing to srcDir/geoip.dat
+	dstDatPath := filepath.Join(dstDir, "geoip.dat")
+	datFi, err := os.Lstat(dstDatPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if datFi.Mode()&os.ModeSymlink == 0 {
+		t.Error("expected geoip.dat to be a symlink")
+	}
+	target, err := os.Readlink(dstDatPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != datFile {
+		t.Errorf("expected symlink target %q, got %q", datFile, target)
+	}
+
+	// Verify geosite.metadb is a symlink pointing to srcDir/geosite.metadb
+	dstMetadbPath := filepath.Join(dstDir, "geosite.metadb")
+	metadbFi, err := os.Lstat(dstMetadbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadbFi.Mode()&os.ModeSymlink == 0 {
+		t.Error("expected geosite.metadb to be a symlink")
+	}
+	targetDb, err := os.Readlink(dstMetadbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targetDb != metadbFile {
+		t.Errorf("expected symlink target %q, got %q", metadbFile, targetDb)
+	}
+}
+
+
