@@ -651,6 +651,18 @@
   }
 
   // ── Import proxies from subscriptions ───────────────────────────────────
+  async function loadSubscriptions() {
+    try {
+      const res = await fetch('/api/subscriptions');
+      if (!res.ok) return;
+      const subs: any[] = await res.json();
+      subscriptions = subs.filter((s) => s.enabled);
+    } catch (e: any) {
+      console.error(e);
+    }
+  }
+
+  // ── Import proxies from subscriptions ───────────────────────────────────
   async function loadSubscriptionProxies() {
     try {
       const res = await fetch('/api/subscriptions');
@@ -664,6 +676,7 @@
       let imported = 0;
       for (const sub of subs) {
         if (!sub.enabled) continue;
+        if (sub.type === 'mihomo') continue; // Игнорируем Mihomo-подписки
         const nr = await fetch(`/api/subscriptions/nodes?id=${sub.id}`);
         if (!nr.ok) continue;
         const nodes: any[] = await nr.json();
@@ -1443,7 +1456,7 @@
     } catch (e: any) {
       showToast('error', `Ошибка загрузки конфига: ${e.message}`);
     }
-    await loadSubscriptionProxies();
+    await loadSubscriptions();
   }
 
   async function checkZkeenGeodata() {
@@ -1618,6 +1631,20 @@
         lines.push(`    path: ./providers/${providerName}.yaml`);
         lines.push(`    url: ${yamlSafeString(sub.url)}`);
         lines.push(`    interval: ${sub.interval * 3600 || 86400}`);
+        
+        // Custom headers for User-Agent and x-hwid
+        const mihomoVersion = $capabilities?.kernels?.mihomo?.version || '1.18.10';
+        const ua = `mihomo/${mihomoVersion}`;
+        const subHwid = sub.hwid_token || $capabilities?.global_hwid || '';
+        
+        lines.push(`    header:`);
+        lines.push(`      User-Agent:`);
+        lines.push(`        - ${yamlSafeString(ua)}`);
+        if (subHwid) {
+          lines.push(`      x-hwid:`);
+          lines.push(`        - ${yamlSafeString(subHwid)}`);
+        }
+        
         lines.push(`    health-check:`);
         lines.push(`      enable: true`);
         lines.push(`      url: http://www.gstatic.com/generate_204`);
