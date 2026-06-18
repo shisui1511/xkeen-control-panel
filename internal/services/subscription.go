@@ -430,6 +430,12 @@ func (s *SubscriptionService) Get(id string) *Subscription {
 	return cloned
 }
 
+func (s *SubscriptionService) GetHWID() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.hwid
+}
+
 func (s *SubscriptionService) getProxyCount(sub *Subscription) int {
 	if sub.Type == "mihomo" {
 		// Для Mihomo используем кэшированный счётчик из последнего refresh.
@@ -839,10 +845,10 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription) error {
 	sb.WriteString(fmt.Sprintf("    url: %s\n", yamlSafeScalar(sub.URL)))
 	sb.WriteString(fmt.Sprintf("    path: ./providers/%s.yaml\n", providerName))
 	sb.WriteString(fmt.Sprintf("    interval: %d\n", intervalSec))
-	sb.WriteString("    headers:\n")
-	sb.WriteString(fmt.Sprintf("      User-Agent: %s\n", yamlSafeScalar(ua)))
+	sb.WriteString("    header:\n")
+	sb.WriteString(fmt.Sprintf("      User-Agent:\n        - %s\n", yamlSafeScalar(ua)))
 	if hwid != "" {
-		sb.WriteString(fmt.Sprintf("      x-hwid: %s\n", yamlSafeScalar(hwid)))
+		sb.WriteString(fmt.Sprintf("      x-hwid:\n        - %s\n", yamlSafeScalar(hwid)))
 	}
 	sb.WriteString("    health-check:\n")
 	sb.WriteString("      enable: true\n")

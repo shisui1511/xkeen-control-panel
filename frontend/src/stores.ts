@@ -24,6 +24,7 @@ export interface CapabilitiesData {
     conf_dir: string;
     conf_dir_exists: boolean;
   };
+  global_hwid?: string;
 }
 
 export const capabilities = writable<CapabilitiesData | null>(null);
