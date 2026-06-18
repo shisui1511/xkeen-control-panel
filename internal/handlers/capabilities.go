@@ -14,6 +14,7 @@ type CapabilitiesResponse struct {
 	XRay         XRayCapability              `json:"xray"`
 	ActiveKernel string                      `json:"active_kernel"`
 	XKeenDNS     bool                        `json:"xkeen_dns"`
+	GlobalHwid   string                      `json:"global_hwid,omitempty"`
 }
 
 // XRayCapability describes XRay confdir setup status.
@@ -133,6 +134,10 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 
 	if a.xkeenSvc != nil {
 		resp.XKeenDNS = a.xkeenSvc.IsDNSProxyingEnabled()
+	}
+
+	if a.subscriptionSvc != nil {
+		resp.GlobalHwid = a.subscriptionSvc.GetHWID()
 	}
 
 	a.capsCacheMutex.Lock()
