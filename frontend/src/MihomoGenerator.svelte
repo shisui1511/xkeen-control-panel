@@ -174,8 +174,11 @@
       fingerprint: 'chrome'
     };
   }
-  $: if (np.type)
+  let lastType = 'vless';
+  $: if (np.type && np.type !== lastType) {
+    lastType = np.type;
     np = { ...newProxyDefaults(np.type), name: np.name, server: np.server, port: np.port };
+  }
 
   // New group form
   let ng: Omit<ProxyGroup, 'id'> = {
