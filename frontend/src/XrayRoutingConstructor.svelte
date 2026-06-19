@@ -759,7 +759,7 @@
       rules.unshift({
         id: crypto.randomUUID(),
         type: 'field',
-        port: 53,
+        port: '53',
         outboundTag: 'dns-out'
       });
       rules.unshift({
