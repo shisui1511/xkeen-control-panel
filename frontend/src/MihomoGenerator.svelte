@@ -128,6 +128,7 @@
     sniffQuic: true
   };
   let canUndo = false;
+  let isDirty = false;
   function checkUndo() {
     canUndo = !!localStorage.getItem('xcp_prev_mihomo_yaml');
   }

@@ -43,6 +43,7 @@
     use_provider_interval?: boolean;
     announcement?: string;
     mihomo_integrated?: boolean;
+    mihomo_groups?: string[];
   }
 
   interface SubscriptionNode {
