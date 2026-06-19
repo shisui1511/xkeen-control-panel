@@ -2,7 +2,7 @@ export function parseValidationError(rawError: string, lang: 'ru' | 'en'): strin
   if (!rawError) return '';
 
   // Clean tmp paths: e.g. /tmp/xcp-save-val-12345/05_routing.json -> 05_routing.json
-  let cleaned = rawError.replace(/\/tmp\/xcp-[a-zA-Z0-9\-_*]+\//g, '');
+  const cleaned = rawError.replace(/\/tmp\/xcp-[a-zA-Z0-9\-_*]+\//g, '');
 
   // Common translations/mappings
   if (cleaned.includes('geosite:') && (cleaned.includes('not found') || cleaned.includes('unknown'))) {
