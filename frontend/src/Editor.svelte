@@ -144,6 +144,14 @@
   $: isMihomoAutoEdited =
     selectedFile.includes('/mihomo/') &&
     (selectedFile.endsWith('config.yaml') || selectedFile.endsWith('config.yml'));
+
+  let dismissMihomoAutoEditWarning = false;
+  let lastSelectedFile = '';
+  $: if (selectedFile !== lastSelectedFile) {
+    lastSelectedFile = selectedFile;
+    dismissMihomoAutoEditWarning = false;
+  }
+
   let showSidebar = true;
 
   // Status bar cursor position
@@ -2026,13 +2034,14 @@
             </span>
           </div>
 
-          {#if isMihomoAutoEdited}
-            <div class="alert alert-warning" style="margin: 12px 14px 0;" role="status">
+          {#if isMihomoAutoEdited && !dismissMihomoAutoEditWarning}
+            <div class="alert alert-warning alert-dismissible" style="margin: 12px 14px 0;" role="status">
               <span aria-hidden="true">⚠️</span>
               <div>
                 <strong>{$t('editor.mihomo_autoedit_title')}</strong>
                 <div style="margin-top: 2px;">{$t('editor.mihomo_autoedit_body')}</div>
               </div>
+              <button class="alert-close-btn" on:click={() => (dismissMihomoAutoEditWarning = true)} aria-label="Dismiss">&times;</button>
             </div>
           {/if}
 
