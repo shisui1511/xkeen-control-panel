@@ -40,6 +40,9 @@
     // hy2
     password?: string;
     sni?: string;
+    skipCertVerify?: boolean;
+    obfsType?: 'none' | 'simple';
+    obfsPassword?: string;
     // tuic
     congestion?: string;
     // ss
@@ -159,6 +162,9 @@
       servername: 'www.apple.com',
       password: '',
       sni: '',
+      skipCertVerify: false,
+      obfsType: 'none',
+      obfsPassword: '',
       congestion: 'bbr',
       cipher: 'aes-256-gcm',
       network: 'ws',
@@ -714,7 +720,10 @@
             sni: n.sni || '',
             congestion: n.congestion || '',
             alterID: n.alter_id || 0,
-            tls: n.security === 'tls' || n.security === 'reality'
+            tls: n.security === 'tls' || n.security === 'reality',
+            skipCertVerify: n.insecure || false,
+            obfsType: (n.obfs_type || 'none') as any,
+            obfsPassword: n.obfs_password || ''
           };
         });
         const existingNames = new Set(proxies.map((p) => p.name));
@@ -909,6 +918,12 @@
         p.port = server.port || 443;
         p.password = server.password || '';
         p.sni = parsed.streamSettings?.tlsSettings?.serverName || '';
+        p.skipCertVerify = parsed.streamSettings?.tlsSettings?.allowInsecure || false;
+        const hy2Settings = parsed.settings?.hysteria2Settings;
+        if (hy2Settings?.obfs) {
+          p.obfsType = hy2Settings.obfs.type || 'none';
+          p.obfsPassword = hy2Settings.obfs.password || '';
+        }
       }
     } else if (proto === 'tuic') {
       p.type = 'tuic';
@@ -1517,6 +1532,11 @@
 
   function addProxy() {
     if (!np.name.trim() || !np.server.trim()) return;
+    if (np.type === 'hysteria2' && np.obfsType === 'simple' && !np.obfsPassword?.trim()) {
+      const isRu = $currentLang === 'ru';
+      showToast('error', isRu ? 'Пароль обфускации обязателен при типе simple' : 'Obfuscation password is required when type is simple');
+      return;
+    }
     const { name: cleanName, sanitized } = sanitizeProxyName(np.name);
     if (sanitized) {
       showToast('info', $t('editor.proxy_name_sanitized') || 'Имя прокси очищено от спецсимволов');
@@ -1745,6 +1765,12 @@
         } else if (p.type === 'hysteria2') {
           lines.push(`    password: ${yamlSafeString(p.password || '')}`);
           if (p.sni) lines.push(`    sni: ${yamlSafeString(p.sni)}`);
+          if (p.skipCertVerify) lines.push(`    skip-cert-verify: true`);
+          if (p.obfsType && p.obfsType !== 'none') {
+            lines.push(`    obfs:`);
+            lines.push(`      type: ${p.obfsType}`);
+            if (p.obfsPassword) lines.push(`      password: ${yamlSafeString(p.obfsPassword)}`);
+          }
         } else if (p.type === 'tuic') {
           lines.push(`    uuid: ${p.uuid ?? ''}`);
           lines.push(`    password: ${yamlSafeString(p.password || '')}`);
@@ -2607,6 +2633,28 @@
                 <div class="form-row">
                   <label class="form-label">SNI</label>
                   <input class="form-input" bind:value={np.sni} placeholder="example.com" />
+                </div>
+                <div class="form-row">
+                  <label class="form-label">{$t('editor.obfsType')}</label>
+                  <select class="form-select" bind:value={np.obfsType}>
+                    <option value="none">{$t('editor.none')}</option>
+                    <option value="simple">{$t('editor.simple')}</option>
+                  </select>
+                </div>
+                {#if np.obfsType === 'simple'}
+                  <div class="form-row">
+                    <label class="form-label">{$t('editor.obfsPassword')}</label>
+                    <input class="form-input" bind:value={np.obfsPassword} placeholder="obfs password" />
+                  </div>
+                {/if}
+                <div class="form-row">
+                  <label
+                    class="toggle-label"
+                    style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;"
+                  >
+                    <input type="checkbox" bind:checked={np.skipCertVerify} />
+                    <span>{$t('editor.skipCertVerify')}</span>
+                  </label>
                 </div>
               {:else if np.type === 'tuic'}
                 <div class="form-row">

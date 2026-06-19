@@ -1673,3 +1673,82 @@ func TestRefreshMihomo_ConcurrentRace(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestXrayConfigurationHardening(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	sub := &Subscription{ID: "test", Name: "test"}
+
+	outbounds := []Outbound{
+		{Tag: "vless-node", Protocol: "vless"},
+		{Tag: "hy2-node", Protocol: "hysteria2"},
+		{Tag: "tuic-node", Protocol: "tuic"},
+		{Tag: "vmess-node", Protocol: "vmess"},
+	}
+
+	path := svc.getFragmentPath(sub)
+	nodes, err := svc.writeFragment(path, outbounds, sub)
+	if err != nil {
+		t.Fatalf("writeFragment failed: %v", err)
+	}
+
+	// The returned nodes should contain all 4 items (so frontend can import them)
+	if len(nodes) != 4 {
+		t.Errorf("expected 4 returned nodes, got %d", len(nodes))
+	}
+
+	// But the written JSON file should only contain 2 outbounds (vless and vmess)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wrapper struct {
+		Outbounds []Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(wrapper.Outbounds) != 2 {
+		t.Errorf("expected only 2 outbounds written to file, got %d", len(wrapper.Outbounds))
+	}
+
+	for _, ob := range wrapper.Outbounds {
+		if ob.Protocol == "hysteria2" || ob.Protocol == "tuic" {
+			t.Errorf("unsupported protocol %s was written to file", ob.Protocol)
+		}
+	}
+}
+
+func TestParseHysteria2Link_Synonyms(t *testing.T) {
+	link := "hysteria2://mypassword@hy2.example.com:443?sni=hy2.example.com&obfs=simple&obfs-pass=obfspass&skip-cert-verify=true#hy2server"
+	ob := parseShareLink(link)
+	if ob == nil {
+		t.Fatal("expected non-nil Outbound for hysteria2:// prefix and synonyms")
+	}
+	if ob.Protocol != "hysteria2" {
+		t.Errorf("expected protocol=hysteria2, got %q", ob.Protocol)
+	}
+
+	// Test obfs-pass and skip-cert-verify
+	hy2Settings, ok := ob.Settings["hysteria2Settings"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected hysteria2Settings in settings")
+	}
+	obfsMap, ok := hy2Settings["obfs"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected obfs in hysteria2Settings")
+	}
+	if obfsMap["password"] != "obfspass" {
+		t.Errorf("expected obfs password obfspass, got %v", obfsMap["password"])
+	}
+
+	tlsSettings, ok := ob.StreamSettings["tlsSettings"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected tlsSettings")
+	}
+	if tlsSettings["allowInsecure"] != true {
+		t.Error("expected allowInsecure to be true")
+	}
+}
