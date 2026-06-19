@@ -99,6 +99,7 @@
   let activePreset: string = '';
   let activeRuleProvider: 'none' | 'zkeen' | 'metacubex' = 'none';
   let subscriptions: any[] = [];
+  $: hasXraySubscriptions = subscriptions.some((s) => s.type !== 'mihomo');
   let hasZkeenGeodata = false;
   let existingTproxyPort: number | null = null;
   let existingRedirPort: number | null = null;
@@ -655,8 +656,12 @@
     try {
       const res = await fetch('/api/subscriptions');
       if (!res.ok) return;
-      const subs: any[] = await res.json();
-      subscriptions = subs.filter((s) => s.enabled);
+      const subs = await res.json();
+      if (Array.isArray(subs)) {
+        subscriptions = subs.filter((s) => s.enabled);
+      } else {
+        subscriptions = [];
+      }
     } catch (e: any) {
       console.error(e);
     }
@@ -667,9 +672,13 @@
     try {
       const res = await fetch('/api/subscriptions');
       if (!res.ok) return;
-      const subs: any[] = await res.json();
-      subscriptions = subs.filter((s) => s.enabled);
-      if (!subs || subs.length === 0) {
+      const subs = await res.json();
+      if (Array.isArray(subs)) {
+        subscriptions = subs.filter((s) => s.enabled);
+      } else {
+        subscriptions = [];
+      }
+      if (!Array.isArray(subs) || subs.length === 0) {
         showToast('info', $t('editor.import_proxies_empty'));
         return;
       }
@@ -1481,6 +1490,7 @@
     await loadSchema();
     await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
     await checkZkeenGeodata();
+    await loadSubscriptions();
     checkUndo();
   });
 
@@ -2687,6 +2697,14 @@
                 class="add-btn import-btn"
                 style="flex: 1;"
                 on:click={loadSubscriptionProxies}
+                disabled={!hasXraySubscriptions}
+                title={hasXraySubscriptions
+                  ? ($currentLang === 'ru'
+                    ? 'Импортировать прокси-серверы из существующих активных Xray-подписок. Mihomo использует нативные proxy-providers для собственных подписок.'
+                    : 'Import proxy servers from existing active Xray subscriptions. Mihomo uses native proxy-providers for its own subscriptions.')
+                  : ($currentLang === 'ru'
+                    ? 'Нет доступных активных Xray-подписок для импорта. Создайте или включите Xray-подписку в разделе «Подписки».'
+                    : 'No active Xray subscriptions available for import. Create or enable an Xray subscription in the "Subscriptions" section.')}
               >
                 ↓ {$t('editor.constructor_import_proxies')}
               </button>

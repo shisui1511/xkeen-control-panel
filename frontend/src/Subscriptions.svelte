@@ -199,6 +199,54 @@
   let formUseProviderInterval = $state(false);
   let showAdvanced = $state(false);
 
+  let formType = $state('xray'); // 'xray' | 'mihomo'
+  let formMihomoGroups = $state<string[]>([]);
+  let availableMihomoGroups = $state<string[]>([]);
+
+  const isFormatError = (err?: string) => {
+    if (!err) return false;
+    return err.includes('данная подписка не имеет формата Clash/Mihomo YAML') ||
+           err.toLowerCase().includes('format error') ||
+           err.toLowerCase().includes('ошибка формата');
+  };
+
+  async function loadAvailableMihomoGroups() {
+    try {
+      const res = await fetch('/api/config/read?path=%2Fopt%2Fetc%2Fmihomo%2Fconfig.yaml');
+      if (!res.ok) return;
+      const data = await res.json();
+      const yamlContent = data.content || '';
+      const groupNames: string[] = [];
+      const lines = yamlContent.split('\n');
+      let inProxyGroups = false;
+      for (let line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('proxy-groups:')) {
+          inProxyGroups = true;
+          continue;
+        }
+        if (inProxyGroups) {
+          if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+            inProxyGroups = false;
+            continue;
+          }
+          if (trimmed.startsWith('- name:')) {
+            let name = trimmed.replace('- name:', '');
+            const commentIdx = name.indexOf('#');
+            if (commentIdx !== -1) {
+              name = name.substring(0, commentIdx);
+            }
+            name = name.replace(/['"]/g, '').trim();
+            if (name) groupNames.push(name);
+          }
+        }
+      }
+      availableMihomoGroups = groupNames;
+    } catch (e) {
+      console.error('Failed to load Mihomo groups:', e);
+    }
+  }
+
   async function loadSubscriptions() {
     loading = true;
     try {
@@ -259,13 +307,15 @@
     const sub = {
       name: formName,
       url: formURL,
-      tag_prefix: formTagPrefix,
+      tag_prefix: formType === 'xray' ? formTagPrefix : '',
       interval: formInterval,
       enabled: formEnabled,
-      filter_name: formFilterName || undefined,
-      filter_type: formFilterType || undefined,
-      filter_transport: formFilterTransport || undefined,
-      use_provider_interval: formUseProviderInterval
+      filter_name: formType === 'xray' ? (formFilterName || undefined) : undefined,
+      filter_type: formType === 'xray' ? (formFilterType || undefined) : undefined,
+      filter_transport: formType === 'xray' ? (formFilterTransport || undefined) : undefined,
+      use_provider_interval: formUseProviderInterval,
+      type: formType,
+      mihomo_groups: formType === 'mihomo' ? formMihomoGroups : undefined
     };
 
     try {
@@ -330,7 +380,10 @@
     formEnabled = true;
     formUseProviderInterval = false;
     showAdvanced = false;
+    formType = 'xray';
+    formMihomoGroups = [];
     showAddModal = true;
+    loadAvailableMihomoGroups();
   }
 
   function openEditModal(sub: Subscription) {
@@ -345,7 +398,10 @@
     formEnabled = sub.enabled;
     formUseProviderInterval = !!sub.use_provider_interval;
     showAdvanced = false;
+    formType = sub.type || 'xray';
+    formMihomoGroups = sub.mihomo_groups || [];
     showAddModal = true;
+    loadAvailableMihomoGroups();
   }
 
   function closeModal() {
@@ -824,6 +880,11 @@
               <h2 class="sub-name" on:click={() => toggleExpand(sub.id)}>
                 {sub.profile_title || sub.name}
               </h2>
+              {#if isFormatError(sub.last_error)}
+                <span class="badge badge-error" style="margin-left: 8px;">
+                  {$currentLang === 'ru' ? 'Ошибка формата' : 'Format Error'}
+                </span>
+              {/if}
             </div>
 
             <!-- Правая колонка хедера -->
@@ -929,6 +990,12 @@
               </div>
             </div>
           </div>
+
+          {#if sub.last_error}
+            <div class="sub-error-details" style="font-size: 12.5px; color: var(--danger); margin: -4px 0 8px 34px; line-height: 1.4; font-family: var(--font-family-sans);">
+              {sub.last_error}
+            </div>
+          {/if}
 
           <!-- Подстрока с оставшимся временем и трафиком (Метаданные) -->
           <div class="sub-meta-row">
@@ -1249,6 +1316,28 @@
         </div>
 
         <div class="form-group">
+          <label class="form-label">{$currentLang === 'ru' ? 'Тип подписки' : 'Subscription Type'}</label>
+          <div class="seg-btn" style="margin-bottom: 12px;">
+            <button
+              type="button"
+              class="seg-opt"
+              class:seg-active={formType === 'xray'}
+              on:click={() => (formType = 'xray')}
+            >
+              XRay (JSON / Base64)
+            </button>
+            <button
+              type="button"
+              class="seg-opt"
+              class:seg-active={formType === 'mihomo'}
+              on:click={() => (formType = 'mihomo')}
+            >
+              Mihomo (Clash YAML)
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group">
           <label for="form-url" class="form-label">{$t('subscr.url')}</label>
           <input
             id="form-url"
@@ -1273,62 +1362,116 @@
           />
         </div>
 
-        <button
-          type="button"
-          class="advanced-toggle-btn"
-          on:click={() => (showAdvanced = !showAdvanced)}
-        >
-          <span class="arrow">{showAdvanced ? '▼' : '►'}</span>
-          <span>{$t('subscr.advanced_params') || 'Дополнительные параметры'}</span>
-        </button>
+        {#if formType === 'xray'}
+          <button
+            type="button"
+            class="advanced-toggle-btn"
+            on:click={() => (showAdvanced = !showAdvanced)}
+          >
+            <span class="arrow">{showAdvanced ? '▼' : '►'}</span>
+            <span>{$t('subscr.advanced_params') || 'Дополнительные параметры'}</span>
+          </button>
 
-        {#if showAdvanced}
-          <div class="advanced-fields-box">
-            <div class="form-group">
-              <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
-              <input
-                id="form-tag-prefix"
-                type="text"
-                class="input"
-                bind:value={formTagPrefix}
-                placeholder={$t('subscr.tag_prefix_placeholder')}
-              />
-            </div>
+          {#if showAdvanced}
+            <div class="advanced-fields-box">
+              <div class="form-group">
+                <label for="form-tag-prefix" class="form-label">{$t('subscr.tag_prefix')}</label>
+                <input
+                  id="form-tag-prefix"
+                  type="text"
+                  class="input"
+                  bind:value={formTagPrefix}
+                  placeholder={$t('subscr.tag_prefix_placeholder')}
+                />
+              </div>
 
-            <div class="form-group">
-              <label for="form-filter-name" class="form-label">{$t('subscr.filter_name')}</label>
-              <input
-                id="form-filter-name"
-                type="text"
-                class="input"
-                bind:value={formFilterName}
-                placeholder={$t('subscr.filter_placeholder')}
-              />
-            </div>
+              <div class="form-group">
+                <label for="form-filter-name" class="form-label">{$t('subscr.filter_name')}</label>
+                <input
+                  id="form-filter-name"
+                  type="text"
+                  class="input"
+                  bind:value={formFilterName}
+                  placeholder={$t('subscr.filter_placeholder')}
+                />
+              </div>
 
-            <div class="form-group">
-              <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
-              <input
-                id="form-filter-type"
-                type="text"
-                class="input"
-                bind:value={formFilterType}
-                placeholder="vmess, vless, trojan..."
-              />
-            </div>
+              <div class="form-group">
+                <label for="form-filter-type" class="form-label">{$t('subscr.filter_type')}</label>
+                <input
+                  id="form-filter-type"
+                  type="text"
+                  class="input"
+                  bind:value={formFilterType}
+                  placeholder="vmess, vless, trojan..."
+                />
+              </div>
 
-            <div class="form-group">
-              <label for="form-filter-transport" class="form-label"
-                >{$t('subscr.filter_transport')}</label
-              >
-              <input
-                id="form-filter-transport"
-                type="text"
-                class="input"
-                bind:value={formFilterTransport}
-                placeholder="ws, grpc, tcp..."
-              />
+              <div class="form-group">
+                <label for="form-filter-transport" class="form-label"
+                  >{$t('subscr.filter_transport')}</label
+                >
+                <input
+                  id="form-filter-transport"
+                  type="text"
+                  class="input"
+                  bind:value={formFilterTransport}
+                  placeholder="ws, grpc, tcp..."
+                />
+              </div>
             </div>
+          {/if}
+        {/if}
+
+        {#if formType === 'mihomo'}
+          <div class="form-group">
+            <label class="form-label">{$currentLang === 'ru' ? 'Интегрировать в группы Mihomo' : 'Integrate into Mihomo groups'}</label>
+            
+            {#if $capabilities?.active_kernel === 'xray'}
+              <div class="alert alert-warning" style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);">
+                <strong>{$currentLang === 'ru' ? 'Внимание:' : 'Attention:'}</strong>
+                <span>
+                  {$currentLang === 'ru' 
+                    ? ' сейчас запущено ядро Xray, настройки интеграции вступят в силу при переключении на Mihomo' 
+                    : ' Xray core is currently running, integration settings will take effect when switching to Mihomo'}
+                </span>
+              </div>
+            {/if}
+
+            {#if availableMihomoGroups.length === 0}
+              <div class="alert alert-warning" style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);">
+                <span>
+                  {$currentLang === 'ru' 
+                    ? 'Не удалось найти группы в config.yaml Mihomo. Перейдите в ' 
+                    : 'Could not find any groups in Mihomo config.yaml. Please go to the '}
+                  <a href="#/constructor" on:click={(e) => { e.preventDefault(); closeModal(); window.location.hash = '#/constructor'; }} style="text-decoration: underline; color: var(--accent);">
+                    {$currentLang === 'ru' ? 'визуальный конструктор' : 'visual constructor'}
+                  </a>
+                  {$currentLang === 'ru' ? ' или ' : ' or '}
+                  <a href="#/editor" on:click={(e) => { e.preventDefault(); closeModal(); window.location.hash = '#/editor'; }} style="text-decoration: underline; color: var(--accent);">
+                    {$currentLang === 'ru' ? 'текстовый редактор' : 'text editor'}
+                  </a>
+                  {$currentLang === 'ru' ? ' для создания групп.' : ' to create groups.'}
+                </span>
+              </div>
+            {/if}
+
+            {#if availableMihomoGroups.length > 0}
+              <div class="mihomo-groups-checkboxes" style="display:flex; flex-direction:column; gap:8px; max-height:150px; overflow-y:auto; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background: rgba(0,0,0,0.15);">
+                {#each availableMihomoGroups as group}
+                  <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-primary);">
+                    <input type="checkbox" checked={formMihomoGroups.includes(group)} on:change={(e) => {
+                      if (e.currentTarget.checked) {
+                        formMihomoGroups = [...formMihomoGroups, group];
+                      } else {
+                        formMihomoGroups = formMihomoGroups.filter(g => g !== group);
+                      }
+                    }} />
+                    <span>{group}</span>
+                  </label>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/if}
 
@@ -2676,5 +2819,41 @@
   .preview-value.code {
     font-family: var(--font-family-mono, monospace);
     font-size: 12px;
+  }
+  .seg-btn {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .seg-opt {
+    padding: 6px 12px;
+    font-size: 13px;
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--border);
+    color: var(--fg-secondary);
+    cursor: pointer;
+    transition:
+      background var(--transition-fast, 0.15s),
+      color var(--transition-fast, 0.15s);
+    flex: 1;
+    text-align: center;
+    font-weight: 500;
+  }
+
+  .seg-opt:last-child {
+    border-right: none;
+  }
+
+  .seg-opt:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .seg-opt.seg-active {
+    background: var(--accent);
+    color: #fff;
   }
 </style>
