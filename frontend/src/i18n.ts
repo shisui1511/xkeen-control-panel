@@ -1134,9 +1134,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'apioffline.sec_ago': 'сек назад',
     'apioffline.min_ago': 'мин назад',
     'apioffline.hour_ago': 'ч назад',
-    'svc.xray_active_warning':
-      'Этот раздел доступен только для ядра Mihomo. Сейчас запущено ядро Xray.',
-    'svc.mihomo_stopped_warning': 'Ядро Mihomo остановлено. Запустите его на странице Сервисы.'
+    'svc.mihomo_stopped_warning': 'Ядро Mihomo остановлено. Запустите его на странице Сервисы.',
+    'editor.skipCertVerify': 'Пропускать проверку сертификата',
+    'editor.obfsType': 'Тип обфускации',
+    'editor.obfsPassword': 'Пароль обфускации',
+    'editor.none': 'Нет',
+    'editor.simple': 'Simple'
   },
   en: {
     // Common
@@ -2259,9 +2262,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'apioffline.sec_ago': 'sec ago',
     'apioffline.min_ago': 'min ago',
     'apioffline.hour_ago': 'h ago',
-    'svc.xray_active_warning':
-      'This section is only available for the Mihomo kernel. The Xray kernel is currently running.',
-    'svc.mihomo_stopped_warning': 'The Mihomo kernel is stopped. Start it in the Services section.'
+    'svc.mihomo_stopped_warning': 'The Mihomo kernel is stopped. Start it in the Services section.',
+    'editor.skipCertVerify': 'Skip cert verification',
+    'editor.obfsType': 'Obfuscation type',
+    'editor.obfsPassword': 'Obfuscation password',
+    'editor.none': 'None',
+    'editor.simple': 'Simple'
   }
 };
 

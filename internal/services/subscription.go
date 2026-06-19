@@ -32,6 +32,14 @@ var invalidIDCharsRe = regexp.MustCompile(`[^a-z0-9_-]`)
 var (
 	nonAlphanumericDashRe = regexp.MustCompile(`[^a-zA-Z0-9-]`)
 	multiDashRe           = regexp.MustCompile(`-+`)
+	allowedXrayProtocols  = map[string]bool{
+		"vless":       true,
+		"vmess":       true,
+		"trojan":      true,
+		"shadowsocks": true,
+		"socks":       true,
+		"http":        true,
+	}
 )
 
 // subscriptionUserAgent возвращает User-Agent для подписки на основе реальных
@@ -106,6 +114,9 @@ type SubscriptionNode struct {
 	SNI         string `json:"sni,omitempty"`
 	Congestion  string `json:"congestion,omitempty"`
 	AlterID     int    `json:"alter_id,omitempty"`
+	Insecure     bool   `json:"insecure,omitempty"`
+	ObfsType     string `json:"obfs_type,omitempty"`
+	ObfsPassword string `json:"obfs_password,omitempty"`
 }
 
 // Subscription represents a proxy subscription
@@ -736,7 +747,9 @@ func (s *SubscriptionService) refreshXray(sub *Subscription) error {
 	if live.RoutingMode == "auto" {
 		tags := make([]string, 0, len(outbounds))
 		for _, ob := range outbounds {
-			tags = append(tags, ob.Tag)
+			if allowedXrayProtocols[ob.Protocol] {
+				tags = append(tags, ob.Tag)
+			}
 		}
 		routingPath := s.getRoutingFragmentPath(live)
 		if err := s.writeRoutingFragment(routingPath, live, tags); err != nil {
@@ -1202,7 +1215,7 @@ func skipReasonForScheme(line string) string {
 		return "невалидный URL или порт в trojan://"
 	case strings.HasPrefix(line, "ss://"):
 		return "невалидный URL или порт в ss://"
-	case strings.HasPrefix(line, "hy2://"):
+	case strings.HasPrefix(line, "hy2://"), strings.HasPrefix(line, "hysteria2://"):
 		return "невалидный URL или порт в hy2://"
 	case strings.HasPrefix(line, "tuic://"):
 		return "невалидный URL или порт в tuic://"
@@ -1658,6 +1671,7 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 	}
 
 	nodes := make([]SubscriptionNode, 0, len(outbounds))
+	allowedOutbounds := make([]Outbound, 0, len(outbounds))
 	seen := make(map[string]int)
 	for i := range outbounds {
 		origTag := outbounds[i].Tag
@@ -1703,6 +1717,16 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 			node.Password = getServerField(&outbounds[i], "password")
 		case "hysteria2":
 			node.Password = getServerField(&outbounds[i], "password")
+			if hy2Settings, ok := outbounds[i].Settings["hysteria2Settings"].(map[string]interface{}); ok {
+				if obfsMap, ok := hy2Settings["obfs"].(map[string]interface{}); ok {
+					if ot, _ := obfsMap["type"].(string); ot != "" {
+						node.ObfsType = ot
+					}
+					if op, _ := obfsMap["password"].(string); op != "" {
+						node.ObfsPassword = op
+					}
+				}
+			}
 		}
 
 		if outbounds[i].StreamSettings != nil {
@@ -1742,6 +1766,9 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 						if fp, _ := tsMap["fingerprint"].(string); fp != "" {
 							node.Fingerprint = fp
 						}
+						if insecure, _ := tsMap["allowInsecure"].(bool); insecure {
+							node.Insecure = true
+						}
 					}
 				}
 			}
@@ -1774,13 +1801,19 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 			}
 		}
 
+		if allowedXrayProtocols[node.Protocol] {
+			allowedOutbounds = append(allowedOutbounds, outbounds[i])
+		} else {
+			log.Printf("[Subscriptions] Skipping outbound %q for Xray configuration: unsupported protocol %q", outbounds[i].Tag, node.Protocol)
+		}
+
 		nodes = append(nodes, node)
 	}
 
 	wrapper := struct {
 		Outbounds []Outbound `json:"outbounds"`
 	}{
-		Outbounds: outbounds,
+		Outbounds: allowedOutbounds,
 	}
 
 	data, err := json.MarshalIndent(wrapper, "", "  ")
@@ -1823,7 +1856,7 @@ func parseShareLink(link string) *Outbound {
 	}
 
 	// hy2:// (Hysteria2)
-	if strings.HasPrefix(link, "hy2://") {
+	if strings.HasPrefix(link, "hy2://") || strings.HasPrefix(link, "hysteria2://") {
 		return parseHysteria2Link(link)
 	}
 
@@ -2185,7 +2218,14 @@ func parseHysteria2Link(link string) *Outbound {
 	if sni := q.Get("sni"); sni != "" {
 		tlsSettings["serverName"] = sni
 	}
-	if insecure := q.Get("insecure"); insecure == "1" || insecure == "true" {
+	insecureVal := q.Get("insecure")
+	if insecureVal == "" {
+		insecureVal = q.Get("skip-cert-verify")
+	}
+	if insecureVal == "" {
+		insecureVal = q.Get("skip_cert_verify")
+	}
+	if insecureVal == "1" || insecureVal == "true" {
 		tlsSettings["allowInsecure"] = true
 	}
 
@@ -2208,7 +2248,14 @@ func parseHysteria2Link(link string) *Outbound {
 	// obfs settings placed in settings; unknown params silently ignored
 	if obfs := q.Get("obfs"); obfs != "" {
 		obfsMap := map[string]interface{}{"type": obfs}
-		if obfsPass := q.Get("obfs-password"); obfsPass != "" {
+		obfsPass := q.Get("obfs-password")
+		if obfsPass == "" {
+			obfsPass = q.Get("obfs_password")
+		}
+		if obfsPass == "" {
+			obfsPass = q.Get("obfs-pass")
+		}
+		if obfsPass != "" {
 			obfsMap["password"] = obfsPass
 		}
 		settings["hysteria2Settings"] = map[string]interface{}{
