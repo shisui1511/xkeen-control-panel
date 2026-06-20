@@ -66,3 +66,62 @@
     <button class="btn btn-primary" onclick={onSave}>{ru ? 'Добавить' : 'Add'}</button>
   </div>
 </div>
+
+<style>
+  .form-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .form-row2 {
+    display: flex;
+    gap: 10px;
+  }
+  .form-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+
+  .form-label {
+    font-size: 11px;
+    color: var(--fg-dim);
+    font-weight: 500;
+  }
+
+  .form-input,
+  .form-select {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
+    font-size: 13px;
+    padding: 6px 10px;
+    outline: none;
+    width: 100%;
+    transition: border-color var(--transition-fast);
+  }
+
+  .form-input:focus,
+  .form-select:focus {
+    border-color: var(--primary);
+  }
+
+  .form-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 4px;
+  }
+</style>
