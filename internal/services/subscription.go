@@ -714,7 +714,14 @@ func (s *SubscriptionService) Refresh(id string) error {
 	return refreshErr
 }
 
-func (s *SubscriptionService) refreshXray(sub *Subscription) error {
+func (s *SubscriptionService) refreshXray(sub *Subscription) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in parser: %v", r)
+			log.Printf("[Subscriptions] PANIC recovered: %v", r)
+		}
+	}()
+
 	// Download subscription (outside of lock to avoid blocking other operations)
 	outbounds, skipReasons, body, headers, err := s.downloadAndParse(sub.URL, sub)
 	if err != nil {
@@ -799,7 +806,14 @@ func (s *SubscriptionService) refreshXray(sub *Subscription) error {
 	return nil
 }
 
-func (s *SubscriptionService) refreshMihomo(sub *Subscription) error {
+func (s *SubscriptionService) refreshMihomo(sub *Subscription) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in parser: %v", r)
+			log.Printf("[Subscriptions] PANIC recovered: %v", r)
+		}
+	}()
+
 	body, headers, err := s.downloadRaw(sub.URL, sub)
 	if err != nil {
 		return err
@@ -982,7 +996,14 @@ func (s *SubscriptionService) GetLocked(id string) *Subscription {
 	return nil
 }
 
-func (s *SubscriptionService) downloadAndParse(subURL string, sub *Subscription) ([]Outbound, []SkipReason, []byte, http.Header, error) {
+func (s *SubscriptionService) downloadAndParse(subURL string, sub *Subscription) (outbounds []Outbound, skips []SkipReason, bodyBytes []byte, headers http.Header, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in parser: %v", r)
+			log.Printf("[Subscriptions] PANIC recovered: %v", r)
+		}
+	}()
+
 	// C-6: validate URL scheme
 	parsed, err := url.Parse(subURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -1831,7 +1852,14 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 const maxVmessLinkBytes = 8192
 
 // parseShareLink parses various share link formats
-func parseShareLink(link string) *Outbound {
+func parseShareLink(link string) (out *Outbound) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[Subscriptions] PANIC recovered: %v", r)
+			out = nil
+		}
+	}()
+
 	// vmess://
 	if strings.HasPrefix(link, "vmess://") {
 		if len(link) > maxVmessLinkBytes {
