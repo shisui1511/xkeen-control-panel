@@ -992,7 +992,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'logs.title': 'Логи',
     'logs.h1': 'Логи',
     'logs.h1_sub':
-      'Поток событий XKeen, Xray и Mihomo через WebSocket. Хранится последние 1000 строк.',
+      'Поток событий XKeen, Xray и Mihomo через WebSocket. Хранится последние 500 строк.',
     'logs.unified': 'Unified логи',
     'logs.filter': 'Фильтр',
     'logs.level': 'Уровень',

@@ -1070,7 +1070,7 @@
                 onkeydown={(e) => e.key === 'Enter' && switchTab('logs')}
               >
                 <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
-                <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 1000 строк</span></span
+                <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 500 строк</span></span
                 >
               </div>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
