@@ -469,7 +469,7 @@
     <div class="ph-actions">
       <button
         class="btn btn-secondary"
-        on:click={handleRefreshStatus}
+        onclick={handleRefreshStatus}
         disabled={$isKernelChecking || refreshingStatus}
         class:btn-loading={refreshingStatus}
         title={$t('svc.refresh_status')}
@@ -486,7 +486,7 @@
       </button>
       <button
         class="btn btn-primary"
-        on:click={() => {
+        onclick={() => {
           checkKernelUpdate('xray');
           checkKernelUpdate('mihomo');
         }}
@@ -552,7 +552,7 @@
         {#if isRunning}
           <button
             class="btn btn-secondary"
-            on:click={() => controlService('stop')}
+            onclick={() => controlService('stop')}
             disabled={actionLoading['xkeen-stop']}
             title={$t('app.stop')}
           >
@@ -575,7 +575,7 @@
           </button>
           <button
             class="btn btn-secondary"
-            on:click={() => controlService('restart')}
+            onclick={() => controlService('restart')}
             disabled={actionLoading['xkeen-restart']}
             title={$t('svc.restart')}
           >
@@ -592,7 +592,7 @@
         {:else}
           <button
             class="btn btn-primary"
-            on:click={() => controlService('start')}
+            onclick={() => controlService('start')}
             disabled={actionLoading['xkeen-start']}
             title={$t('app.start')}
           >
@@ -623,7 +623,7 @@
                 class:ks-active={activeKernel === 'xray'}
                 class:ks-switching={switchingKernelTo === 'xray'}
                 disabled={switchingKernelTo !== null || activeKernel === 'xray'}
-                on:click={() => switchKernel('xray')}
+                onclick={() => switchKernel('xray')}
                 title={activeKernel === 'xray'
                   ? $t('svc.active_label')
                   : $t('svc.make_active') + ' Xray'}
@@ -644,7 +644,7 @@
                 class:ks-active={activeKernel === 'mihomo'}
                 class:ks-switching={switchingKernelTo === 'mihomo'}
                 disabled={switchingKernelTo !== null || activeKernel === 'mihomo'}
-                on:click={() => switchKernel('mihomo')}
+                onclick={() => switchKernel('mihomo')}
                 title={activeKernel === 'mihomo'
                   ? $t('svc.active_label')
                   : $t('svc.make_active') + ' Mihomo'}
@@ -667,7 +667,7 @@
           {$t('svc.channel_prefix')} ·
           <select
             value={xray?.channel || mihomo?.channel || 'stable'}
-            on:change={(e) => {
+            onchange={(e) => {
               const ch = e.currentTarget.value;
               setKernelChannel('xray', ch);
               setKernelChannel('mihomo', ch);
@@ -761,7 +761,7 @@
           {#if xray.process_status === 'running'}
             <button
               class="btn btn-secondary"
-              on:click={() => controlService('stop')}
+              onclick={() => controlService('stop')}
               disabled={actionLoading['xkeen-stop']}
               title={$t('app.stop')}
             >
@@ -784,7 +784,7 @@
             </button>
             <button
               class="btn btn-secondary"
-              on:click={() => controlService('restart')}
+              onclick={() => controlService('restart')}
               disabled={actionLoading['xkeen-restart']}
               title={$t('svc.restart')}
             >
@@ -802,7 +802,7 @@
           {#if xray.has_update}
             <button
               class="btn btn-secondary"
-              on:click={() => installKernel('xray')}
+              onclick={() => installKernel('xray')}
               disabled={xray.status !== 'idle'}
               title={$t('svc.install_update')}
             >
@@ -812,7 +812,7 @@
             </button>
             <button
               class="btn btn-secondary"
-              on:click={() => downloadKernelBinary('xray')}
+              onclick={() => downloadKernelBinary('xray')}
               disabled={xray.status === 'downloading' || xray.status === 'installing'}
               title={$t('svc.download')}
             >
@@ -821,7 +821,7 @@
           {/if}
           <button
             class="btn btn-secondary"
-            on:click={() => onSwitchTab('logs')}
+            onclick={() => onSwitchTab('logs')}
             title={$t('svc.logs')}
           >
             {$t('svc.logs')}
@@ -829,7 +829,7 @@
         {:else}
           <button
             class="btn btn-primary"
-            on:click={() => installKernel('xray')}
+            onclick={() => installKernel('xray')}
             title={$t('svc.install_update')}
           >
             {$t('svc.install_update')}
@@ -923,7 +923,7 @@
           {#if mihomo.process_status === 'running'}
             <button
               class="btn btn-secondary"
-              on:click={() => controlService('stop')}
+              onclick={() => controlService('stop')}
               disabled={actionLoading['xkeen-stop']}
               title={$t('app.stop')}
             >
@@ -946,7 +946,7 @@
             </button>
             <button
               class="btn btn-secondary"
-              on:click={() => controlService('restart')}
+              onclick={() => controlService('restart')}
               disabled={actionLoading['xkeen-restart']}
               title={$t('svc.restart')}
             >
@@ -962,7 +962,7 @@
             </button>
             <button
               class="btn btn-secondary"
-              on:click={() => onSwitchTab('proxies')}
+              onclick={() => onSwitchTab('proxies')}
               title={$t('svc.api_test')}
             >
               {$t('svc.api_test')}
@@ -971,7 +971,7 @@
           {#if mihomo.has_update}
             <button
               class="btn btn-secondary"
-              on:click={() => installKernel('mihomo')}
+              onclick={() => installKernel('mihomo')}
               disabled={mihomo.status !== 'idle'}
               title={$t('svc.install_update')}
             >
@@ -981,7 +981,7 @@
             </button>
             <button
               class="btn btn-secondary"
-              on:click={() => downloadKernelBinary('mihomo')}
+              onclick={() => downloadKernelBinary('mihomo')}
               disabled={mihomo.status === 'downloading' || mihomo.status === 'installing'}
               title={$t('svc.download')}
             >
@@ -991,7 +991,7 @@
         {:else}
           <button
             class="btn btn-primary"
-            on:click={() => installKernel('mihomo')}
+            onclick={() => installKernel('mihomo')}
             title={$t('svc.install_update')}
           >
             {$t('svc.install_update')}
@@ -1018,7 +1018,7 @@
           <input
             type="checkbox"
             bind:checked={autostartKeenetic}
-            on:change={() => toggleAutostart('autostart_keenetic', autostartKeenetic)}
+            onchange={() => toggleAutostart('autostart_keenetic', autostartKeenetic)}
           />
           <span class="toggle-slider"></span>
         </label>
@@ -1034,7 +1034,7 @@
           <input
             type="checkbox"
             bind:checked={watchdogEnabled}
-            on:change={() => toggleAutostart('watchdog_enabled', watchdogEnabled)}
+            onchange={() => toggleAutostart('watchdog_enabled', watchdogEnabled)}
           />
           <span class="toggle-slider"></span>
         </label>
@@ -1048,7 +1048,7 @@
       <h2 class="card-title">
         {$t('svc.restart_log_title')}
         <span class="ct-actions">
-          <button on:click={() => (restartLogExpanded = !restartLogExpanded)}>
+          <button onclick={() => (restartLogExpanded = !restartLogExpanded)}>
             {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
           </button>
         </span>
@@ -1073,7 +1073,7 @@
           </div>
         {/each}
         {#if !restartLogExpanded && restartLog.length > 5}
-          <div class="log-more" on:click={() => (restartLogExpanded = true)}>
+          <div class="log-more" onclick={() => (restartLogExpanded = true)}>
             {pluralize(
               restartLog.length - 5,
               $t('svc.log_show_more_one', { count: String(restartLog.length - 5) }),

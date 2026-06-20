@@ -763,29 +763,29 @@
     <button
       class="stab"
       class:active={activeTab === 'general'}
-      on:click={() => (activeTab = 'general')}>{$t('settings.tab_general')}</button
+      onclick={() => (activeTab = 'general')}>{$t('settings.tab_general')}</button
     >
     <button
       class="stab"
       class:active={activeTab === 'updates'}
-      on:click={() => (activeTab = 'updates')}>{$t('settings.tab_updates')}</button
+      onclick={() => (activeTab = 'updates')}>{$t('settings.tab_updates')}</button
     >
     <button
       class="stab"
       class:active={activeTab === 'security'}
-      on:click={() => (activeTab = 'security')}>{$t('settings.tab_security')}</button
+      onclick={() => (activeTab = 'security')}>{$t('settings.tab_security')}</button
     >
     <button
       class="stab"
       class:active={activeTab === 'connection'}
-      on:click={() => (activeTab = 'connection')}>{$t('settings.tab_connection')}</button
+      onclick={() => (activeTab = 'connection')}>{$t('settings.tab_connection')}</button
     >
     <button
       class="stab"
       class:active={activeTab === 'backups'}
-      on:click={() => (activeTab = 'backups')}>{$t('settings.tab_backups')}</button
+      onclick={() => (activeTab = 'backups')}>{$t('settings.tab_backups')}</button
     >
-    <button class="stab" class:active={activeTab === 'about'} on:click={() => (activeTab = 'about')}
+    <button class="stab" class:active={activeTab === 'about'} onclick={() => (activeTab = 'about')}
       >{$t('settings.tab_about')}</button
     >
   </div>
@@ -800,7 +800,7 @@
           <select
             class="field-select"
             value={$currentLang}
-            on:change={handleLangChange}
+            onchange={handleLangChange}
             title={$t('settings.language')}
           >
             {#each langs as lang}
@@ -816,7 +816,7 @@
           <select
             class="field-select"
             bind:value={timezone}
-            on:change={() => saveSetting('timezone', timezone)}
+            onchange={() => saveSetting('timezone', timezone)}
             title={$t('settings.timezone')}
           >
             <option value="UTC">UTC</option>
@@ -844,17 +844,17 @@
             <button
               class="seg-opt"
               class:seg-active={selectedTheme === 'light'}
-              on:click={() => setTheme('light')}>{$t('settings.theme_light_btn')}</button
+              onclick={() => setTheme('light')}>{$t('settings.theme_light_btn')}</button
             >
             <button
               class="seg-opt"
               class:seg-active={selectedTheme === 'dark'}
-              on:click={() => setTheme('dark')}>{$t('settings.theme_dark_btn')}</button
+              onclick={() => setTheme('dark')}>{$t('settings.theme_dark_btn')}</button
             >
             <button
               class="seg-opt"
               class:seg-active={selectedTheme === 'auto'}
-              on:click={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button
+              onclick={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button
             >
           </div>
         </div>
@@ -867,7 +867,7 @@
             <input
               type="checkbox"
               bind:checked={animationsEnabled}
-              on:change={() => saveSetting('animations', String(animationsEnabled))}
+              onchange={() => saveSetting('animations', String(animationsEnabled))}
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -887,7 +887,7 @@
             <input
               type="checkbox"
               bind:checked={autoRefresh}
-              on:change={() => saveSetting('autoRefresh', String(autoRefresh))}
+              onchange={() => saveSetting('autoRefresh', String(autoRefresh))}
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -901,7 +901,7 @@
             <input
               type="checkbox"
               bind:checked={confirmDangerous}
-              on:change={() => saveSetting('confirmDangerous', String(confirmDangerous))}
+              onchange={() => saveSetting('confirmDangerous', String(confirmDangerous))}
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -915,7 +915,7 @@
             <input
               type="checkbox"
               bind:checked={notificationSound}
-              on:change={() => saveSetting('notificationSound', String(notificationSound))}
+              onchange={() => saveSetting('notificationSound', String(notificationSound))}
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -929,7 +929,7 @@
             <input
               type="checkbox"
               checked={$devMode}
-              on:change={(e) => setDevMode((e.target as HTMLInputElement).checked)}
+              onchange={(e) => setDevMode((e.target as HTMLInputElement).checked)}
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -963,7 +963,7 @@
                 <button
                   class="channel-btn"
                   class:active={updateChannel === ch}
-                  on:click={() => saveUpdateChannel(ch)}
+                  onclick={() => saveUpdateChannel(ch)}
                   disabled={updateInstalling}>{$t(`settings.channel_${ch}`)}</button
                 >
               {/each}
@@ -1005,7 +1005,7 @@
       <div class="card-actions">
         <button
           class="btn btn-secondary"
-          on:click={() => checkUpdate()}
+          onclick={() => checkUpdate()}
           disabled={updateChecking || updateInstalling}
           title={$t('settings.check_update')}
         >
@@ -1014,7 +1014,7 @@
         {#if updateInfo?.has_update}
           <button
             class="btn btn-primary"
-            on:click={() => (showConfirmUpdateModal = true)}
+            onclick={() => (showConfirmUpdateModal = true)}
             disabled={updateInstalling}
             title={$t('settings.install_update')}
           >
@@ -1022,7 +1022,7 @@
           </button>
         {/if}
         {#if updateStatus?.status === 'failed'}
-          <button class="btn btn-danger" on:click={rollbackUpdate} title={$t('settings.rollback')}>
+          <button class="btn btn-danger" onclick={rollbackUpdate} title={$t('settings.rollback')}>
             {$t('settings.rollback')}
           </button>
         {/if}
@@ -1063,7 +1063,7 @@
       <div class="card-actions">
         <button
           class="btn btn-secondary"
-          on:click={checkTemplatesUpdates}
+          onclick={checkTemplatesUpdates}
           disabled={checkingTemplates || updatingTemplates}
           title={$t('settings.check_updates')}
         >
@@ -1072,7 +1072,7 @@
         {#if templatesHasUpdate}
           <button
             class="btn btn-primary"
-            on:click={installTemplatesUpdates}
+            onclick={installTemplatesUpdates}
             disabled={updatingTemplates}
             title={$t('settings.install_updates')}
           >
@@ -1088,13 +1088,13 @@
       class="modal-overlay"
       role="button"
       tabindex="0"
-      on:click={() => (showConfirmUpdateModal = false)}
-      on:keydown={(e) => e.key === 'Escape' && (showConfirmUpdateModal = false)}
+      onclick={() => (showConfirmUpdateModal = false)}
+      onkeydown={(e) => e.key === 'Escape' && (showConfirmUpdateModal = false)}
     >
-      <div class="modal-card" role="presentation" on:click|stopPropagation>
+      <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
         <div class="modal-card-header">
           <h2>{$t('settings.update_confirm_title')}</h2>
-          <button class="modal-close-btn" on:click={() => (showConfirmUpdateModal = false)}
+          <button class="modal-close-btn" onclick={() => (showConfirmUpdateModal = false)}
             >&times;</button
           >
         </div>
@@ -1107,12 +1107,12 @@
           {/if}
         </div>
         <div class="modal-card-footer">
-          <button class="btn btn-secondary" on:click={() => (showConfirmUpdateModal = false)}
+          <button class="btn btn-secondary" onclick={() => (showConfirmUpdateModal = false)}
             >{$t('app.cancel')}</button
           >
           <button
             class="btn btn-primary"
-            on:click={() => {
+            onclick={() => {
               showConfirmUpdateModal = false;
               installUpdate();
             }}>{$t('settings.update_install_btn')}</button
@@ -1137,7 +1137,7 @@
               class="input"
               style="min-width: 250px;"
               bind:value={selectedFile}
-              on:change={fetchBackups}
+              onchange={fetchBackups}
               title={$t('settings.backup_file')}
             >
               {#each configFiles as file}
@@ -1146,7 +1146,7 @@
                 <option value="">{$t('settings.no_files')}</option>
               {/each}
             </select>
-            <button class="btn btn-primary btn-sm" on:click={createBackup} disabled={!selectedFile}>
+            <button class="btn btn-primary btn-sm" onclick={createBackup} disabled={!selectedFile}>
               {$t('settings.backup_create_btn')}
             </button>
           </div>
@@ -1175,14 +1175,14 @@
               <div class="ctrl">
                 <button
                   class="btn btn-secondary btn-sm"
-                  on:click={() => restoreBackup(backup)}
+                  onclick={() => restoreBackup(backup)}
                   title={$t('settings.backup_restore_btn')}
                 >
                   {$t('settings.backup_restore_btn')}
                 </button>
                 <button
                   class="btn btn-danger btn-sm"
-                  on:click={() => deleteBackup(backup)}
+                  onclick={() => deleteBackup(backup)}
                   title={$t('app.delete')}
                 >
                   {$t('app.delete')}
@@ -1216,7 +1216,7 @@
           placeholder={$t('settings.snapshot_label_placeholder')}
           bind:value={snapshotLabel}
         />
-        <button class="btn btn-primary" on:click={createSnapshot} disabled={creatingSnapshot}>
+        <button class="btn btn-primary" onclick={createSnapshot} disabled={creatingSnapshot}>
           {creatingSnapshot ? $t('app.loading') : $t('settings.snapshot_create_btn')}
         </button>
       </div>
@@ -1241,14 +1241,14 @@
               </a>
               <button
                 class="btn btn-secondary"
-                on:click={() => restoreSnapshot(snap.id)}
+                onclick={() => restoreSnapshot(snap.id)}
                 disabled={restoringSnapshot === snap.id}
               >
                 {restoringSnapshot === snap.id
                   ? $t('app.loading')
                   : $t('settings.snapshot_restore_btn')}
               </button>
-              <button class="btn btn-danger" on:click={() => deleteSnapshot(snap.id)}>
+              <button class="btn btn-danger" onclick={() => deleteSnapshot(snap.id)}>
                 {$t('settings.snapshot_delete_btn')}
               </button>
             </div>
@@ -1308,7 +1308,7 @@
               {secretVisible ? $capabilities.mihomo.discovered_secret : '••••••••'}
               <button
                 class="btn btn-secondary btn-sm"
-                on:click={() => (secretVisible = !secretVisible)}
+                onclick={() => (secretVisible = !secretVisible)}
               >
                 {secretVisible ? $t('app.hide') : $t('app.show')}
               </button>
@@ -1319,7 +1319,7 @@
       <div class="card-actions">
         <button
           class="btn btn-secondary"
-          on:click={recheckConnection}
+          onclick={recheckConnection}
           disabled={checkingConnection}
           title={$t('settings.recheck_title')}
         >
@@ -1374,7 +1374,7 @@
       <div class="card-actions">
         <button
           class="btn btn-primary"
-          on:click={changePassword}
+          onclick={changePassword}
           disabled={passwordChanging || !currentPassword || !newPassword || !confirmPassword}
           title={$t('settings.save_password')}
         >
@@ -1423,7 +1423,7 @@
       <div class="card-actions">
         <button
           class="btn btn-secondary"
-          on:click={downloadDiagnostics}
+          onclick={downloadDiagnostics}
           disabled={downloadingDiagnostics}
           title={$t('settings.diagnostics_download')}
         >
