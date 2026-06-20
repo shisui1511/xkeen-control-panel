@@ -1752,3 +1752,132 @@ func TestParseHysteria2Link_Synonyms(t *testing.T) {
 		t.Error("expected allowInsecure to be true")
 	}
 }
+
+func TestParseShareLink_EdgeCases(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		wantNil  bool
+		wantType string // "" = don't check
+	}{
+		// Boundary conditions
+		{"empty_string", "", true, ""},
+		{"only_scheme", "vless://", true, ""},
+		{"no_scheme", "host:443", true, ""},
+		{"double_scheme", "vless://vless://host:443", true, ""},
+		{"null_bytes", "vless://\x00@host:443#tag", true, ""},
+
+		// Port validation
+		{"port_zero", "vless://uuid@host:0#tag", true, ""},
+		{"port_overflow", "vless://uuid@host:99999#tag", true, ""},
+		{"port_negative", "vless://uuid@host:-1#tag", true, ""},
+		{"port_non_numeric", "vless://uuid@host:abc#tag", true, ""},
+
+		// VMess base64 edge cases
+		{"vmess_invalid_b64", "vmess://not-valid-base64!", true, ""},
+		{"vmess_empty_json", "vmess://e30=", true, ""},  // {}
+		{"vmess_json_array", "vmess://W10=", true, ""},  // []
+
+		// IPv6
+		{"vless_ipv6_brackets", "vless://uuid@[::1]:443?security=none#ipv6", false, "vless"},
+		{"trojan_ipv6", "trojan://pass@[::1]:443#ipv6", false, "trojan"},
+
+		// URL encoding
+		{"trojan_encoded_pass", "trojan://p%40ss@host:443#tag", false, "trojan"},
+
+		// Unknown scheme
+		{"unknown_scheme", "wireguard://key@host:51820#tag", true, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := parseShareLink(tc.input)
+			if tc.wantNil && result != nil {
+				t.Errorf("expected nil for %q, got %+v", tc.input, result)
+			}
+			if !tc.wantNil && result == nil {
+				t.Errorf("expected non-nil for %q", tc.input)
+			}
+		})
+	}
+}
+
+func TestParseTrojanLink_EdgeCases(t *testing.T) {
+	cases := []struct {
+		name         string
+		input        string
+		wantNil      bool
+		wantPassword string
+	}{
+		{"valid_encoded_password", "trojan://p%40ss%23word@host:443#tag", false, "p@ss#word"},
+		{"empty_password", "trojan://@host:443#tag", false, ""},
+		{"space_in_port", "trojan://pass@host 443#tag", true, ""},
+		{"ipv6_address", "trojan://pass@[::1]:443#tag", false, "pass"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := parseTrojanLink(tc.input)
+			if tc.wantNil {
+				if result != nil {
+					t.Errorf("expected nil for %q, got %+v", tc.input, result)
+				}
+				return
+			}
+			if result == nil {
+				t.Fatalf("expected non-nil for %q", tc.input)
+			}
+			servers, ok := result.Settings["servers"].([]map[string]interface{})
+			if !ok || len(servers) == 0 {
+				t.Fatal("expected non-empty servers list in settings")
+			}
+			gotPassword := servers[0]["password"].(string)
+			if gotPassword != tc.wantPassword {
+				t.Errorf("expected password %q, got %q", tc.wantPassword, gotPassword)
+			}
+		})
+	}
+}
+
+func TestParseSSLink_EdgeCases(t *testing.T) {
+	cases := []struct {
+		name       string
+		input      string
+		wantNil    bool
+		wantMethod string
+		wantPass   string
+	}{
+		{"sip002_format", "ss://method:password@host:8388#tag", false, "method", "password"},
+		{"legacy_base64_format", "ss://YWVzLTEyOC1nY206cGFzc3dvcmQ=@host:8388#tag", false, "aes-128-gcm", "password"},
+		{"legacy_invalid_base64", "ss://YWVzLTEyOC1nY206cGFzc3dvcmQ!@host:8388#tag", false, "YWVzLTEyOC1nY206cGFzc3dvcmQ!", ""},
+		{"missing_userinfo", "ss://@host:8388#tag", false, "", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := parseSSLink(tc.input)
+			if tc.wantNil {
+				if result != nil {
+					t.Errorf("expected nil for %q, got %+v", tc.input, result)
+				}
+				return
+			}
+			if result == nil {
+				t.Fatalf("expected non-nil for %q", tc.input)
+			}
+			servers, ok := result.Settings["servers"].([]map[string]interface{})
+			if !ok || len(servers) == 0 {
+				t.Fatal("expected non-empty servers list in settings")
+			}
+			gotMethod := servers[0]["method"].(string)
+			gotPass := servers[0]["password"].(string)
+			if gotMethod != tc.wantMethod {
+				t.Errorf("expected method %q, got %q", tc.wantMethod, gotMethod)
+			}
+			if gotPass != tc.wantPass {
+				t.Errorf("expected password %q, got %q", tc.wantPass, gotPass)
+			}
+		})
+	}
+}
+
