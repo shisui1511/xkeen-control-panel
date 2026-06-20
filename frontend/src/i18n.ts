@@ -773,6 +773,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.url_placeholder': 'URL для загрузки обновления (https://...)',
     'dat.rollback_success': 'Откат успешно выполнен',
     'dat.rollback_error': 'Ошибка отката',
+    'dat.entries_title': 'Записи тега: {tag}',
+    'dat.load_more': 'Загрузить ещё',
+    'dat.entries_count': 'Записей: {count}',
+    'dat.no_entries': 'Записи не найдены',
+    'dat.search_entries': 'Поиск записи...',
+    'dat.back_to_tags': 'Назад к тегам',
 
     // Console Commands
     'console.title': 'Консоль XKeen',
@@ -1905,6 +1911,12 @@ const translations: Record<Lang, Record<string, string>> = {
     'dat.url_placeholder': 'Update download URL (https://...)',
     'dat.rollback_success': 'Rollback completed successfully.',
     'dat.rollback_error': 'Rollback failed.',
+    'dat.entries_title': 'Tag entries: {tag}',
+    'dat.load_more': 'Load more',
+    'dat.entries_count': 'Entries: {count}',
+    'dat.no_entries': 'No entries found',
+    'dat.search_entries': 'Search entry...',
+    'dat.back_to_tags': 'Back to tags',
 
     // Console Commands
     'console.title': 'XKeen Console',

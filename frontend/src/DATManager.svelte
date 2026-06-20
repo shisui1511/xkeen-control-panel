@@ -44,6 +44,21 @@
     copied: string;
   } = { open: false, file: null, tags: [], loading: false, error: '', search: '', copied: '' };
 
+  // Entry browser state
+  let entryDrawer: {
+    open: boolean;
+    file: DATFile | null;
+    tag: string;
+    entries: string[];
+    total: number;
+    page: number;
+    hasMore: boolean;
+    loading: boolean;
+    error: string;
+    search: string;
+    copied: string;
+  } = { open: false, file: null, tag: '', entries: [], total: 0, page: 0, hasMore: false, loading: false, error: '', search: '', copied: '' };
+
   async function fetchFiles() {
     loading = true;
     try {
@@ -134,6 +149,78 @@
 
   function closeTagBrowser() {
     tagDrawer = { ...tagDrawer, open: false };
+    entryDrawer = { ...entryDrawer, open: false };
+  }
+
+  let searchDebounceTimer: ReturnType<typeof setTimeout>;
+
+  async function openEntryBrowser(file: DATFile, tag: string) {
+    entryDrawer = {
+      open: true,
+      file,
+      tag,
+      entries: [],
+      total: 0,
+      page: 0,
+      hasMore: false,
+      loading: true,
+      error: '',
+      search: '',
+      copied: ''
+    };
+    await fetchEntries(true);
+  }
+
+  async function fetchEntries(replace = false) {
+    if (!entryDrawer.file) return;
+    entryDrawer.loading = true;
+    entryDrawer.error = '';
+    try {
+      const url = `/api/dat/search?name=${encodeURIComponent(entryDrawer.file.name)}&tag=${encodeURIComponent(entryDrawer.tag)}&query=${encodeURIComponent(entryDrawer.search)}&page=${entryDrawer.page}`;
+      const res = await fetch(url);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to search DAT tag');
+
+      if (replace) {
+        entryDrawer.entries = json.entries || [];
+      } else {
+        entryDrawer.entries = [...entryDrawer.entries, ...(json.entries || [])];
+      }
+      entryDrawer.total = json.total || 0;
+      entryDrawer.hasMore = json.has_more || false;
+    } catch (e: any) {
+      entryDrawer.error = e.message;
+    } finally {
+      entryDrawer.loading = false;
+    }
+  }
+
+  function handleEntrySearch() {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      entryDrawer.page = 0;
+      fetchEntries(true);
+    }, 300);
+  }
+
+  function loadMoreEntries() {
+    if (entryDrawer.loading || !entryDrawer.hasMore) return;
+    entryDrawer.page += 1;
+    fetchEntries(false);
+  }
+
+  function closeEntryBrowser() {
+    entryDrawer = { ...entryDrawer, open: false };
+  }
+
+  let entryCopyTimer: ReturnType<typeof setTimeout>;
+  function copyEntry(entry: string) {
+    navigator.clipboard.writeText(entry).catch(() => {});
+    entryDrawer = { ...entryDrawer, copied: entry };
+    clearTimeout(entryCopyTimer);
+    entryCopyTimer = setTimeout(() => {
+      entryDrawer = { ...entryDrawer, copied: '' };
+    }, 1500);
   }
 
   function getTagPrefix(file: DATFile): string {
@@ -725,115 +812,226 @@
   <div class="tag-overlay" onclick={closeTagBrowser}>
     <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
     <div class="tag-drawer" onclick={(e) => e.stopPropagation()}>
-      <div class="td-header">
-        <div class="td-title">
+      {#if entryDrawer.open}
+        <!-- Entry Browser View -->
+        <div class="td-header">
+          <div class="td-title" style="display: flex; align-items: center; gap: 8px;">
+            <button
+              class="td-close"
+              onclick={closeEntryBrowser}
+              style="padding: 4px; display: inline-flex; align-items: center; justify-content: center;"
+              title={$t('dat.back_to_tags')}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+              </svg>
+            </button>
+            <span style="font-weight: 500;">{entryDrawer.tag}</span>
+            {#if !entryDrawer.loading && entryDrawer.total > 0}
+              <span class="td-count">{$t('dat.entries_count', { count: entryDrawer.total.toLocaleString() })}</span>
+            {/if}
+          </div>
+          <button class="td-close" onclick={closeTagBrowser} aria-label="Close">✕</button>
+        </div>
+
+        <div class="td-hint">
+          {#if entryDrawer.file}
+            {$currentLang === 'ru' ? 'Категория:' : 'Category:'}
+            <code class="td-format">{getTagPrefix(entryDrawer.file)}:{entryDrawer.tag}</code>
+          {/if}
+        </div>
+
+        <div class="td-search">
           <svg
-            width="16"
-            height="16"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             stroke-width="2"
-            style="color:var(--primary)"
-            ><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg
+            class="td-search-ico"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg
           >
-          <span>{tagDrawer.file?.name}</span>
-          {#if !tagDrawer.loading && tagDrawer.tags.length > 0}
-            <span class="td-count"
-              >{tagDrawer.tags.length} {$currentLang === 'ru' ? 'тегов' : 'tags'}</span
+          <input
+            class="td-search-input"
+            type="text"
+            placeholder={$t('dat.search_entries')}
+            bind:value={entryDrawer.search}
+            oninput={handleEntrySearch}
+            autofocus
+          />
+          {#if entryDrawer.search}
+            <button class="td-clear" onclick={() => { entryDrawer.search = ''; handleEntrySearch(); }}>✕</button>
+          {/if}
+        </div>
+
+        <div class="td-body">
+          {#if entryDrawer.loading && entryDrawer.entries.length === 0}
+            <div class="td-state">
+              <span class="spinner-circle"></span>
+              <span>{$t('app.loading')}</span>
+            </div>
+          {:else if entryDrawer.error}
+            <div class="td-state td-state-error">{entryDrawer.error}</div>
+          {:else if entryDrawer.entries.length === 0}
+            <div class="td-state">
+              {$t('dat.no_entries')}
+            </div>
+          {:else}
+            <div class="td-list">
+              {#each entryDrawer.entries as entry}
+                {@const isCopied = entryDrawer.copied === entry}
+                <div class="td-entry-row" class:copied={isCopied}>
+                  <code class="td-entry-value">{entry}</code>
+                  <button
+                    class="td-entry-copy-btn"
+                    onclick={() => copyEntry(entry)}
+                    title={$currentLang === 'ru' ? 'Копировать запись' : 'Copy entry'}
+                  >
+                    {#if isCopied}
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    {:else}
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                    {/if}
+                  </button>
+                </div>
+              {/each}
+
+              {#if entryDrawer.hasMore}
+                <div style="padding: 12px 20px; text-align: center;">
+                  <button class="btn btn-secondary btn-sm" onclick={loadMoreEntries} disabled={entryDrawer.loading} style="width: 100%;">
+                    {#if entryDrawer.loading}
+                      <span class="spinner-circle" style="vertical-align: middle; margin-right: 6px;"></span>
+                    {/if}
+                    {$t('dat.load_more')}
+                  </button>
+                </div>
+              {/if}
+            </div>
+          {/if}
+        </div>
+      {:else}
+        <!-- Tag Browser View -->
+        <div class="td-header">
+          <div class="td-title">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="color:var(--primary)"
+              ><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg
+            >
+            <span>{tagDrawer.file?.name}</span>
+            {#if !tagDrawer.loading && tagDrawer.tags.length > 0}
+              <span class="td-count"
+                >{tagDrawer.tags.length} {$currentLang === 'ru' ? 'тегов' : 'tags'}</span
+              >
+            {/if}
+          </div>
+          <button class="td-close" onclick={closeTagBrowser} aria-label="Close">✕</button>
+        </div>
+
+        <div class="td-hint">
+          {#if tagDrawer.file}
+            {$currentLang === 'ru' ? 'Формат для routing rule:' : 'Routing rule format:'}
+            <code class="td-format">{getTagPrefix(tagDrawer.file)}:TAGNAME</code>
+          {/if}
+        </div>
+
+        <div class="td-search">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="td-search-ico"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg
+          >
+          <input
+            class="td-search-input"
+            type="text"
+            placeholder={$currentLang === 'ru' ? 'Поиск тега...' : 'Search tag...'}
+            bind:value={tagDrawer.search}
+            autofocus
+          />
+          {#if tagDrawer.search}
+            <button class="td-clear" onclick={() => (tagDrawer = { ...tagDrawer, search: '' })}
+              >✕</button
             >
           {/if}
         </div>
-        <button class="td-close" onclick={closeTagBrowser} aria-label="Close">✕</button>
-      </div>
 
-      <div class="td-hint">
-        {#if tagDrawer.file}
-          {$currentLang === 'ru' ? 'Формат для routing rule:' : 'Routing rule format:'}
-          <code class="td-format">{getTagPrefix(tagDrawer.file)}:TAGNAME</code>
-        {/if}
-      </div>
-
-      <div class="td-search">
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          class="td-search-ico"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg
-        >
-        <input
-          class="td-search-input"
-          type="text"
-          placeholder={$currentLang === 'ru' ? 'Поиск тега...' : 'Search tag...'}
-          bind:value={tagDrawer.search}
-          autofocus
-        />
-        {#if tagDrawer.search}
-          <button class="td-clear" onclick={() => (tagDrawer = { ...tagDrawer, search: '' })}
-            >✕</button
-          >
-        {/if}
-      </div>
-
-      <div class="td-body">
-        {#if tagDrawer.loading}
-          <div class="td-state">
-            <span class="spinner-circle"></span>
-            <span>{$t('app.loading')}</span>
-          </div>
-        {:else if tagDrawer.error}
-          <div class="td-state td-state-error">{tagDrawer.error}</div>
-        {:else if filteredTags.length === 0}
-          <div class="td-state">
-            {$currentLang === 'ru' ? 'Ничего не найдено' : 'No tags found'}
-          </div>
-        {:else}
-          <div class="td-list">
-            {#each filteredTags as tag}
-              {@const ruleValue = tagDrawer.file ? getRuleValue(tagDrawer.file, tag.tag) : tag.tag}
-              {@const isCopied = tagDrawer.copied === tag.tag}
-              <button
-                class="td-tag"
-                class:copied={isCopied}
-                onclick={() => tagDrawer.file && copyTag(tagDrawer.file, tag.tag)}
-                title={$currentLang === 'ru' ? `Копировать: ${ruleValue}` : `Copy: ${ruleValue}`}
-              >
-                <span class="td-tag-name">{tag.tag}</span>
-                {#if tag.count > 0}
-                  <span class="td-tag-count">{tag.count.toLocaleString()}</span>
-                {/if}
-                <span class="td-tag-copy">
-                  {#if isCopied}
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2.5"><polyline points="20 6 9 17 4 12" /></svg
-                    >
-                  {:else}
-                    <svg
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-                        d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                      /></svg
-                    >
-                  {/if}
-                </span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
+        <div class="td-body">
+          {#if tagDrawer.loading}
+            <div class="td-state">
+              <span class="spinner-circle"></span>
+              <span>{$t('app.loading')}</span>
+            </div>
+          {:else if tagDrawer.error}
+            <div class="td-state td-state-error">{tagDrawer.error}</div>
+          {:else if filteredTags.length === 0}
+            <div class="td-state">
+              {$currentLang === 'ru' ? 'Ничего не найдено' : 'No tags found'}
+            </div>
+          {:else}
+            <div class="td-list">
+              {#each filteredTags as tag}
+                {@const ruleValue = tagDrawer.file ? getRuleValue(tagDrawer.file, tag.tag) : tag.tag}
+                {@const isCopied = tagDrawer.copied === tag.tag}
+                <div class="td-tag-row" class:copied={isCopied}>
+                  <button
+                    class="td-tag-btn"
+                    onclick={() => tagDrawer.file && openEntryBrowser(tagDrawer.file, tag.tag)}
+                    title={$currentLang === 'ru' ? 'Показать записи' : 'Show entries'}
+                  >
+                    <span class="td-tag-name">{tag.tag}</span>
+                    {#if tag.count > 0}
+                      <span class="td-tag-count">{tag.count.toLocaleString()}</span>
+                    {/if}
+                  </button>
+                  <button
+                    class="td-tag-copy-btn"
+                    onclick={() => tagDrawer.file && copyTag(tagDrawer.file, tag.tag)}
+                    title={$currentLang === 'ru' ? `Копировать: ${ruleValue}` : `Copy: ${ruleValue}`}
+                  >
+                    {#if isCopied}
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"><polyline points="20 6 9 17 4 12" /></svg
+                      >
+                    {:else}
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        ><rect x="9" y="9" width="13" height="13" rx="2" /><path
+                          d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                        /></svg
+                      >
+                    {/if}
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
   </div>
 {/if}
@@ -1251,5 +1449,109 @@
     transition:
       opacity var(--transition-fast),
       color var(--transition-fast);
+  }
+
+  /* ── Entry Browser & Tag Browser Row Updates ── */
+  .td-tag-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 20px 2px 8px;
+    transition: background var(--transition-fast);
+  }
+
+  .td-tag-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .td-tag-row.copied {
+    background: rgba(70, 209, 138, 0.07);
+  }
+
+  .td-tag-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    color: var(--fg-primary);
+    min-width: 0;
+  }
+
+  .td-tag-copy-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--fg-dim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    transition: color var(--transition-fast), background var(--transition-fast);
+  }
+
+  .td-tag-copy-btn:hover {
+    color: var(--fg-primary);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .copied .td-tag-copy-btn {
+    color: var(--success);
+  }
+
+  .td-entry-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    gap: 12px;
+    transition: background var(--transition-fast);
+  }
+
+  .td-entry-row:hover {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .td-entry-row.copied {
+    background: rgba(70, 209, 138, 0.05);
+  }
+
+  .td-entry-value {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 13px;
+    color: var(--fg-primary);
+    word-break: break-all;
+  }
+
+  .td-entry-copy-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--fg-dim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+    transition: color var(--transition-fast), background var(--transition-fast);
+  }
+
+  .td-entry-copy-btn:hover {
+    color: var(--fg-primary);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .copied .td-entry-copy-btn {
+    color: var(--success);
   }
 </style>
