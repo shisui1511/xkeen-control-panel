@@ -133,6 +133,15 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mihomoConfigPath := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yaml"))
+	mihomoConfigPathYml := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yml"))
+	isMihomoConfig := (cleanPath == mihomoConfigPath || cleanPath == mihomoConfigPathYml)
+
+	if isMihomoConfig && a.subscriptionSvc != nil {
+		a.subscriptionSvc.LockMihomo()
+		defer a.subscriptionSvc.UnlockMihomo()
+	}
+
 	// T032: extension whitelist — only .json, .yaml, .yml allowed
 	ext := filepath.Ext(cleanPath)
 	if ext != ".json" && ext != ".yaml" && ext != ".yml" {
@@ -654,6 +663,15 @@ func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
 	if ext != ".yaml" && ext != ".yml" {
 		a.errorResponse(w, "only .yaml, .yml files are allowed for merge", http.StatusForbidden)
 		return
+	}
+
+	mihomoConfigPath := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yaml"))
+	mihomoConfigPathYml := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yml"))
+	isMihomoConfig := (cleanPath == mihomoConfigPath || cleanPath == mihomoConfigPathYml)
+
+	if isMihomoConfig && a.subscriptionSvc != nil {
+		a.subscriptionSvc.LockMihomo()
+		defer a.subscriptionSvc.UnlockMihomo()
 	}
 
 	data, err := a.configSvc.Read(cleanPath)

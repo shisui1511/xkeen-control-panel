@@ -2870,3 +2870,12 @@ func parseAnnouncement(body []byte, headers http.Header) string {
 
 	return ""
 }
+
+func (s *SubscriptionService) LockMihomo() {
+	s.mihomoMu.Lock()
+}
+
+func (s *SubscriptionService) UnlockMihomo() {
+	s.mihomoMu.Unlock()
+}
+
