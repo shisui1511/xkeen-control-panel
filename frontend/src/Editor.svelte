@@ -4,6 +4,7 @@
   import { t, currentLang } from './i18n';
   $: ru = $currentLang === 'ru';
   import { showToast, capabilities } from './stores';
+  import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import EditorIcon from './lib/components/icons/Editor.svelte';
@@ -964,40 +965,14 @@
     }
 
     showSaveConfirmModal = true;
-    validationLoading = true;
-    validationResult = null;
-
-    try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/config/validate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
-        },
-        body: JSON.stringify({
-          path: selectedFile,
-          content: content
-        })
-      });
-      if (res.ok) {
-        validationResult = await res.json();
-      } else {
-        const text = await res.text();
-        validationResult = { valid: false, error: text || 'Validation endpoint failed' };
-      }
-    } catch (e: any) {
-      validationResult = { valid: false, error: e.message };
-    } finally {
-      validationLoading = false;
-    }
+    validationLoading = false;
+    validationResult = { valid: true, error: '' };
   }
 
   async function confirmSave() {
     if (!selectedFile || !editorView) return;
 
     saving = true;
-    showSaveConfirmModal = false;
 
     try {
       const content = editorView.state.doc.toString();
@@ -1012,8 +987,13 @@
         body: content
       });
 
-      if (!res.ok) throw new Error('Failed to save file');
+      if (!res.ok) {
+        const text = await res.text();
+        const parsedErr = parseValidationError(text, ru ? 'ru' : 'en');
+        throw new Error(parsedErr || 'Failed to save file');
+      }
 
+      showSaveConfirmModal = false;
       showToast('success', $t('editor.file_saved'));
       originalContent = content;
       isDirty = false;
@@ -1050,7 +1030,11 @@
         body: content
       });
 
-      if (!saveRes.ok) throw new Error('Failed to save file');
+      if (!saveRes.ok) {
+        const text = await saveRes.text();
+        const parsedErr = parseValidationError(text, ru ? 'ru' : 'en');
+        throw new Error(parsedErr || 'Failed to save file');
+      }
 
       originalContent = content;
       isDirty = false;
@@ -1071,31 +1055,7 @@
 
       await loadBackups(selectedFile);
 
-      // 2. POST /api/config/validate
-      backgroundStatusText = $t('editor.validating') || 'Валидация...';
-      const valRes = await fetch('/api/config/validate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
-        },
-        body: JSON.stringify({
-          path: selectedFile,
-          content: content
-        })
-      });
-
-      if (valRes.ok) {
-        const valData = await valRes.json();
-        if (valData && valData.valid === false) {
-          throw new Error(valData.error || 'Configuration validation failed');
-        }
-      } else {
-        const text = await valRes.text();
-        throw new Error(text || 'Validation endpoint failed');
-      }
-
-      // 3. POST /api/service/control?action=restart
+      // 2. POST /api/service/control?action=restart
       backgroundStatusText = $t('editor.restarting') || 'Перезапуск службы...';
       const restartRes = await fetch('/api/service/control?action=restart', {
         method: 'POST',
@@ -1105,7 +1065,7 @@
       const restartText = await restartRes.text();
       if (!restartRes.ok) throw new Error(restartText || 'Failed to restart service');
 
-      // 4. Опрос статуса
+      // 3. Опрос статуса
       startBackgroundStatusCheck();
     } catch (e: any) {
       console.error('handleSaveAndApply error:', e);
