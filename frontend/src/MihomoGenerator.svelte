@@ -82,6 +82,8 @@
     hidden?: boolean;         // NEW (D-02): hides group from Mihomo selector UI
     tolerance?: number;       // NEW (D-02): latency tolerance ms for url-test
     maxFailedTimes?: number;  // NEW (D-02): maps to YAML key max-failed-times
+    useProviders?: string[];
+    strategy?: 'round-robin' | 'consistent-hashing' | 'sticky-sessions';
   }
 
   interface Rule {
@@ -115,7 +117,9 @@
   let activePreset: string = '';
   let activeRuleProvider: 'none' | 'zkeen' | 'metacubex' = 'none';
   let subscriptions: any[] = [];
+  let mihomoProviders: any[] = [];
   $: hasXraySubscriptions = subscriptions.some((s) => s.type !== 'mihomo');
+  $: hasMihomoProviders = mihomoProviders.length > 0;
   let hasZkeenGeodata = false;
   let existingTproxyPort: number | null = null;
   let existingRedirPort: number | null = null;
@@ -219,7 +223,9 @@
     proxies: [],
     includeAll: false,
     url: 'https://www.gstatic.com/generate_204',
-    interval: 300
+    interval: 300,
+    useProviders: [],
+    strategy: undefined
   };
 
   // New rule form
@@ -709,8 +715,10 @@
       const subs = await res.json();
       if (Array.isArray(subs)) {
         subscriptions = subs.filter((s) => s.enabled);
+        mihomoProviders = subs.filter((s) => s.enabled && s.type === 'mihomo');
       } else {
         subscriptions = [];
+        mihomoProviders = [];
       }
     } catch (e: any) {
       console.error(e);
@@ -1020,7 +1028,7 @@
       return;
     }
     try {
-      const res = populateMihomoFromYAML_raw(text);
+      const res = populateMihomoFromYAML_raw(text) as any;
       proxies = res.proxies;
       groups = res.groups;
       rules = res.rules;
@@ -1138,16 +1146,18 @@
 
   function addGroup() {
     if (!ng.name.trim()) return;
-    groups = [...groups, { ...ng, id: crypto.randomUUID(), proxies: [...ng.proxies] }];
+    groups = [...groups, { ...ng, id: crypto.randomUUID(), proxies: [...ng.proxies], useProviders: ng.useProviders ? [...ng.useProviders] : [] }];
     showGroupForm = false;
     ng = {
       name: '',
       type: 'select',
       proxies: [],
+      includeAll: false,
       url: 'https://www.gstatic.com/generate_204',
-      interval: 300
+      interval: 300,
+      useProviders: [],
+      strategy: undefined
     };
-    ngProxyInput = '';
   }
 
   function removeGroup(id: string) {
@@ -1191,6 +1201,7 @@
       existingTproxyPort,
       existingRedirPort,
       subscriptions,
+      mihomoProviders,
       capabilities: $capabilities,
       hasZkeenGeodata,
       ruleProviders
@@ -1206,6 +1217,7 @@
     void activeRuleProvider;
     void selectedMetaRuleSets;
     void subscriptions;
+    void mihomoProviders;
     void dns.enabled;
     void dns.nameservers;
     void dns.fallback;
@@ -1871,6 +1883,21 @@
                     >include-all</span
                   >
                 {/if}
+                {#if g.useProviders && g.useProviders.length > 0}
+                  <span
+                    class="item-badge"
+                    style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; text-transform: none;"
+                    title={g.useProviders.join(', ')}
+                    >use: {g.useProviders.length}</span
+                  >
+                {/if}
+                {#if g.type === 'load-balance' && g.strategy}
+                  <span
+                    class="item-badge"
+                    style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10px; text-transform: none;"
+                    >{g.strategy}</span
+                  >
+                {/if}
                 <span class="item-meta">{g.proxies.length} {ru ? 'прокси' : 'proxies'}</span>
                 <button class="item-del" onclick={() => removeGroup(g.id)}>✕</button>
               </div>
@@ -1880,6 +1907,7 @@
               <GroupForm
                 bind:ng
                 {allProxyNames}
+                {mihomoProviders}
                 onSave={addGroup}
                 onCancel={() => (showGroupForm = false)}
               />

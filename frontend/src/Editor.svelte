@@ -1771,7 +1771,7 @@
                     role="button"
                     tabindex="-1"
                     onclick={( e ) => { e.stopPropagation(); closeTab(tab.path); }}
-                    onkeydown={( e ) => { e.stopPropagation(); (e.key === 'Enter' || e.key === ' ') && closeTab(tab.path); }}
+                    onkeydown={( e ) => { e.stopPropagation(); if (e.key === 'Enter' || e.key === ' ') closeTab(tab.path); }}
                     title="Закрыть"
                     aria-label="Закрыть"
                   >

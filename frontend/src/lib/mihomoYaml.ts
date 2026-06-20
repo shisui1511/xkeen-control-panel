@@ -37,6 +37,8 @@ export interface ProxyGroup {
   hidden?: boolean;
   tolerance?: number;
   maxFailedTimes?: number;
+  useProviders?: string[];
+  strategy?: 'round-robin' | 'consistent-hashing' | 'sticky-sessions';
 }
 
 export interface Rule {
@@ -316,7 +318,7 @@ export function replaceMihomoTopLevelSection(content: string, sectionName: strin
 
   if (start === -1) {
     if (newLines.length === 0) return content;
-    let appended = `\n${sectionName}:\n` + newLines.join('\n') + '\n';
+    const appended = `\n${sectionName}:\n` + newLines.join('\n') + '\n';
     if (content.endsWith('\n')) {
       return content + appended.substring(1);
     }
@@ -352,9 +354,29 @@ export interface MihomoConfigState {
   existingTproxyPort: number | null;
   existingRedirPort: number | null;
   subscriptions: any[];
+  mihomoProviders?: any[];
   capabilities?: any;
   hasZkeenGeodata?: boolean;
   ruleProviders?: RuleProvider[];
+}
+
+const CYRILLIC_MAP: Record<string, string> = {
+  'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'yo',
+  'ж':'zh','з':'z','и':'i','й':'j','к':'k','л':'l','м':'m',
+  'н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u',
+  'ф':'f','х':'kh','ц':'ts','ч':'ch','ш':'sh','щ':'shch',
+  'ы':'y','э':'e','ю':'yu','я':'ya','ь':'','ъ':''
+};
+
+export function slugifyProviderName(name: string, fallback: string): string {
+  const slug = name
+    .toLowerCase()
+    .split('')
+    .map(c => CYRILLIC_MAP[c] ?? c)
+    .join('')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || fallback;
 }
 
 export function generateYAML(state: MihomoConfigState): string {
@@ -369,38 +391,20 @@ export function generateYAML(state: MihomoConfigState): string {
   lines.push(`redir-port: ${state.existingRedirPort ?? 5000}`);
   lines.push('');
 
-  // Proxy-providers (if we have subscriptions)
-  if (state.subscriptions.length > 0) {
+  // Proxy-providers (только Mihomo-подписки)
+  const providers = state.mihomoProviders ?? [];
+  if (providers.length > 0) {
     lines.push('proxy-providers:');
-    for (const [i, sub] of state.subscriptions.entries()) {
-      let path = '';
-      try {
-        if (sub.url) {
-          const parsed = new URL(sub.url);
-          path = parsed.pathname || '';
-        }
-      } catch (e) {}
-      path = path.replace(/\/+$/, '');
-      let urlBase = path ? path.split('/').pop() : '';
-      let providerName = (sub.name || urlBase || `provider-${i}`)
-        .replace(/[^a-zA-Z0-9-]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '')
-        .toLowerCase();
-      if (!providerName) {
-        providerName = sub.id || `provider-${i}`;
-      }
+    for (const [i, sub] of providers.entries()) {
+      const providerName = slugifyProviderName(sub.name || '', sub.id || `provider-${i}`);
       lines.push(`  ${providerName}:`);
       lines.push(`    type: http`);
       lines.push(`    path: ./providers/${providerName}.yaml`);
       lines.push(`    url: ${yamlSafeString(sub.url)}`);
       lines.push(`    interval: ${sub.interval * 3600 || 86400}`);
-      
-      // Custom headers for User-Agent and x-hwid
       const mihomoVersion = state.capabilities?.kernels?.mihomo?.version || '1.18.10';
       const ua = `mihomo/${mihomoVersion}`;
       const subHwid = sub.hwid_token || state.capabilities?.global_hwid || '';
-      
       lines.push(`    header:`);
       lines.push(`      User-Agent:`);
       lines.push(`        - ${yamlSafeString(ua)}`);
@@ -408,7 +412,6 @@ export function generateYAML(state: MihomoConfigState): string {
         lines.push(`      x-hwid:`);
         lines.push(`        - ${yamlSafeString(subHwid)}`);
       }
-      
       lines.push(`    health-check:`);
       lines.push(`      enable: true`);
       lines.push(`      url: http://www.gstatic.com/generate_204`);
@@ -559,6 +562,13 @@ export function generateYAML(state: MihomoConfigState): string {
       }
       if (g.includeAll === true) {
         lines.push(`    include-all: true`);
+      }
+      if (g.useProviders && g.useProviders.length > 0) {
+        lines.push(`    use:`);
+        for (const p of g.useProviders) lines.push(`      - ${yamlSafeString(p)}`);
+      }
+      if (g.type === 'load-balance' && g.strategy) {
+        lines.push(`    strategy: ${g.strategy}`);
       }
       if (g.proxies.length > 0) {
         lines.push(`    proxies:`);
@@ -746,6 +756,20 @@ export function generateYAML(state: MihomoConfigState): string {
   return lines.join('\n').trimEnd();
 }
 
+export interface ParsedMihomoConfig {
+  proxies: Proxy[];
+  groups: ProxyGroup[];
+  rules: Rule[];
+  dns: DNSConfig;
+  tun: TUNConfig;
+  sniffer: SnifferConfig;
+  activeRuleProvider: string;
+  selectedMetaRuleSets: Map<string, string>;
+  preservedKeys: string[];
+  existingTproxyPort: number | null;
+  existingRedirPort: number | null;
+}
+
 export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
   const parsed: ParsedMihomoConfig = {
     proxies: [],
@@ -794,6 +818,7 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     let inFallback = false;
     let inDnsHijack = false;
     let inSniffer = false;
+    let inUselist = false;
 
     let currentGroup: any = null;
     let currentProxy: any = null;
@@ -845,7 +870,11 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
       }
 
       if (inGroups) {
-        if (line.startsWith('  -') || line.startsWith(' -') || trimmed.startsWith('-')) {
+        const indentMatch = line.match(/^(\s*)-/);
+        const indentLength = indentMatch ? indentMatch[1].length : 0;
+        const isNewGroup = line.startsWith('  -') || line.startsWith(' -') || (trimmed.startsWith('-') && indentLength < 4);
+
+        if (isNewGroup) {
           if (currentGroup) {
             parsed.groups.push(currentGroup);
           }
@@ -857,12 +886,20 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
             includeAll: false
           };
           inProxiesList = false;
+          inUselist = false;
 
           const nameMatch = trimmed.match(/^-\s+name:\s*(.+)$/);
           if (nameMatch) {
             currentGroup.name = unquote(nameMatch[1]);
           }
           continue;
+        }
+
+        // Reset list states when encountering other key-value pairs
+        const isKeyValuePair = /^[a-zA-Z0-9_-]+:/.test(trimmed);
+        if (isKeyValuePair && !trimmed.startsWith('proxies:') && !trimmed.startsWith('use:')) {
+          inProxiesList = false;
+          inUselist = false;
         }
 
         if (!currentGroup) continue;
@@ -915,6 +952,30 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
         const maxFailedTimesMatch = trimmed.match(/^max-failed-times:\s*(.+)$/);
         if (maxFailedTimesMatch) {
           currentGroup.maxFailedTimes = parseInt(unquote(maxFailedTimesMatch[1])) || undefined;
+          continue;
+        }
+
+        const useMatch = trimmed.match(/^use:\s*\[(.+)\]$/);
+        if (useMatch) {
+          currentGroup.useProviders = useMatch[1].split(',').map(s => unquote(s.trim())).filter(Boolean);
+          continue;
+        }
+        if (trimmed === 'use:') {
+          inUselist = true;
+          continue;
+        }
+        if (inUselist) {
+          if (trimmed.startsWith('-')) {
+            const item = trimmed.replace(/^-\s*/, '');
+            currentGroup.useProviders = [...(currentGroup.useProviders || []), unquote(item)];
+            continue;
+          } else {
+            inUselist = false;
+          }
+        }
+        const strategyMatch = trimmed.match(/^strategy:\s*(.+)$/);
+        if (strategyMatch) {
+          currentGroup.strategy = unquote(strategyMatch[1]) as any;
           continue;
         }
 
@@ -1211,7 +1272,7 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
       }
 
       if (inRuleProviders) {
-        const nameMatch = trimmed.match(/^([a-zA-Z0-9_\-\@]+):$/);
+        const nameMatch = trimmed.match(/^([a-zA-Z0-9_\-@]+):$/);
         if (nameMatch) {
           const rpName = nameMatch[1];
           if (rpName !== 'quic@inline' && rpName !== 'netbios@inline') {

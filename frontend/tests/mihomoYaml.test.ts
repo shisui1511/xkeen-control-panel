@@ -1,0 +1,124 @@
+/**
+ * mihomoYaml.test.ts — Unit-тесты для генерации и парсинга YAML конфигураций Mihomo.
+ */
+
+import { test, describe, expect } from 'vitest';
+import { slugifyProviderName, generateYAML, populateMihomoFromYAML } from '../src/lib/mihomoYaml';
+
+describe('slugifyProviderName', () => {
+  test('транслитерация кириллических имен подписок', () => {
+    expect(slugifyProviderName('Моя Подписка', 'p0')).toBe('moya-podpiska');
+    expect(slugifyProviderName('Сервис #1!', 'p0')).toBe('servis-1');
+    expect(slugifyProviderName('---', 'sub-0')).toBe('sub-0');
+    expect(slugifyProviderName('', 'provider-0')).toBe('provider-0');
+    expect(slugifyProviderName('Google-dns_123', 'p0')).toBe('google-dns-123');
+  });
+});
+
+describe('Mihomo YAML generation with proxy-providers and groups', () => {
+  test('генерация YAML включает только Mihomo-подписки и новые поля групп', () => {
+    const mockState: any = {
+      existingTproxyPort: 12345,
+      existingRedirPort: 12346,
+      subscriptions: [
+        { id: 'xray-sub', name: 'Xray Sub', enabled: true, type: 'xray', url: 'https://xray.com' }
+      ],
+      mihomoProviders: [
+        {
+          id: 'mihomo-sub',
+          name: 'Моя Подписка',
+          enabled: true,
+          type: 'mihomo',
+          url: 'https://mihomo.com/sub',
+          interval: 2,
+          hwid_token: 'test-hwid'
+        }
+      ],
+      capabilities: {
+        kernels: {
+          mihomo: { version: '1.18.12' }
+        }
+      },
+      proxies: [],
+      groups: [
+        {
+          id: 'group-1',
+          name: 'LoadBalanceGroup',
+          type: 'load-balance',
+          proxies: ['DIRECT'],
+          useProviders: ['moya-podpiska'],
+          strategy: 'consistent-hashing'
+        }
+      ],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: {}
+    };
+
+    const yaml = generateYAML(mockState);
+
+    // Должно содержать proxy-providers с транслитерированным именем
+    expect(yaml).toContain('proxy-providers:');
+    expect(yaml).toContain('  moya-podpiska:');
+    expect(yaml).toContain('    type: http');
+    expect(yaml).toContain('    path: ./providers/moya-podpiska.yaml');
+    expect(yaml).toContain('    url: "https://mihomo.com/sub"');
+    expect(yaml).toContain('    interval: 7200'); // 2 * 3600
+    expect(yaml).toContain('      User-Agent:\n        - "mihomo/1.18.12"');
+    expect(yaml).toContain('      x-hwid:\n        - "test-hwid"');
+
+    // Не должно содержать xray-sub в proxy-providers
+    expect(yaml).not.toContain('xray-sub:');
+    expect(yaml).not.toContain('xray-sub.yaml');
+
+    // Группа должна содержать use и strategy
+    expect(yaml).toContain('  - name: "LoadBalanceGroup"');
+    expect(yaml).toContain('    type: load-balance');
+    expect(yaml).toContain('    use:\n      - "moya-podpiska"');
+    expect(yaml).toContain('    strategy: consistent-hashing');
+    expect(yaml).toContain('    proxies:\n      - "DIRECT"');
+  });
+});
+
+describe('Mihomo YAML parsing (populateMihomoFromYAML)', () => {
+  test('парсинг inline use и strategy', () => {
+    const yaml = `
+proxy-groups:
+  - name: GroupA
+    type: load-balance
+    use: [moya-podpiska, other-provider]
+    strategy: round-robin
+    proxies:
+      - DIRECT
+`;
+    const result = populateMihomoFromYAML(yaml);
+    expect(result.groups).toHaveLength(1);
+    const g = result.groups[0];
+    expect(g.name).toBe('GroupA');
+    expect(g.type).toBe('load-balance');
+    expect(g.useProviders).toEqual(['moya-podpiska', 'other-provider']);
+    expect(g.strategy).toBe('round-robin');
+  });
+
+  test('парсинг multiline use block и strategy', () => {
+    const yaml = `
+proxy-groups:
+  - name: GroupB
+    type: load-balance
+    use:
+      - moya-podpiska
+      - second-provider
+    strategy: sticky-sessions
+    proxies:
+      - DIRECT
+`;
+    const result = populateMihomoFromYAML(yaml);
+    expect(result.groups).toHaveLength(1);
+    const g = result.groups[0];
+    expect(g.name).toBe('GroupB');
+    expect(g.type).toBe('load-balance');
+    expect(g.useProviders).toEqual(['moya-podpiska', 'second-provider']);
+    expect(g.strategy).toBe('sticky-sessions');
+  });
+});

@@ -1,19 +1,23 @@
 <script lang="ts">
   import { currentLang } from '../../i18n';
+  import { slugifyProviderName } from '../../lib/mihomoYaml';
 
   let {
     ng = $bindable(),
     allProxyNames,
+    mihomoProviders = [],
     onSave,
     onCancel
   }: {
     ng: any;
     allProxyNames: string[];
+    mihomoProviders?: any[];
     onSave: () => void;
     onCancel: () => void;
   } = $props();
 
   const ru = $derived($currentLang === 'ru');
+  const hasMihomoProviders = $derived(mihomoProviders.length > 0);
 
   let ngProxyInput = $state('');
   const GROUP_TYPES = ['select', 'url-test', 'fallback', 'load-balance'];
@@ -38,6 +42,51 @@
     <label class="form-label">{ru ? 'Имя группы' : 'Group name'}</label>
     <input class="form-input" bind:value={ng.name} placeholder="Выбор прокси" />
   </div>
+  {#if hasMihomoProviders}
+    <div class="form-row">
+      <label class="form-label">{ru ? 'Провайдеры подписок (use:)' : 'Subscription providers (use:)'}</label>
+      <div class="tag-input-wrap">
+        {#each ng.useProviders || [] as p}
+          <span class="tag-pill" style="background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.25); color: var(--success);">
+            {p}
+            <button
+              class="tag-rm"
+              onclick={() => (ng = { ...ng, useProviders: (ng.useProviders || []).filter((x: string) => x !== p) })}
+              >✕</button
+            >
+          </span>
+        {/each}
+        <select
+          class="form-select-inline"
+          value=""
+          onchange={(e) => {
+            const val = e.currentTarget.value;
+            if (val && !(ng.useProviders || []).includes(val)) {
+              ng = { ...ng, useProviders: [...(ng.useProviders || []), val] };
+            }
+            e.currentTarget.value = "";
+          }}
+        >
+          <option value="">+ {ru ? 'добавить провайдер' : 'add provider'}...</option>
+          {#each mihomoProviders as sub}
+            {@const slug = slugifyProviderName(sub.name || '', sub.id)}
+            <option value={slug}>{sub.name} ({slug})</option>
+          {/each}
+        </select>
+      </div>
+    </div>
+  {/if}
+  {#if ng.type === 'load-balance'}
+    <div class="form-row">
+      <label class="form-label">{ru ? 'Стратегия балансировки' : 'Load-balance strategy'}</label>
+      <select class="form-select" bind:value={ng.strategy}>
+        <option value={undefined}>-- {ru ? 'выберите стратегию' : 'select strategy'} --</option>
+        <option value="round-robin">round-robin</option>
+        <option value="consistent-hashing">consistent-hashing</option>
+        <option value="sticky-sessions">sticky-sessions</option>
+      </select>
+    </div>
+  {/if}
   <div class="form-row">
     <label
       class="toggle-label"
@@ -55,7 +104,7 @@
           {p}
           <button
             class="tag-rm"
-            onclick={() => (ng = { ...ng, proxies: ng.proxies.filter((x) => x !== p) })}
+            onclick={() => (ng = { ...ng, proxies: ng.proxies.filter((x: string) => x !== p) })}
             >✕</button
           >
         </span>
