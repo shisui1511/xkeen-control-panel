@@ -548,6 +548,7 @@
     font-size: 12.5px;
     line-height: 1.5;
     overflow-y: auto;
+    overflow-x: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
   }
@@ -557,8 +558,8 @@
     gap: 10px;
     align-items: center;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-x: visible;
+    text-overflow: clip;
   }
 
   .logs-pane .ts {
@@ -578,24 +579,24 @@
   .logs-pane .lv-info {
     color: var(--fg-primary);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-x: visible;
+    text-overflow: clip;
     flex: 1;
   }
 
   .logs-pane .lv-warning {
     color: var(--warning);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-x: visible;
+    text-overflow: clip;
     flex: 1;
   }
 
   .logs-pane .lv-error {
     color: var(--danger);
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-x: visible;
+    text-overflow: clip;
     flex: 1;
   }
 
