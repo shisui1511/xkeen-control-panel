@@ -214,6 +214,15 @@
   // New rule form
   let nr: Omit<Rule, 'id'> = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
 
+  // Moved state variables to prevent duplicate declarations and temporal dead zone (TDZ) issues
+  let validationError = '';
+  let schema: any = null;
+  let schemaLoading = true;
+  let schemaError = '';
+  let showApplyConfirm = false;
+  let applyLoading = false;
+  let dnsRedirectLoading = false;
+
   // ── Rule-provider URL constants ─────────────────────────────────────────
   const META_BASE_URL = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
   const METACUBEX_BASE = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
@@ -497,7 +506,7 @@
       name: 'QUIC',
       type: 'select',
       includeAll: false,
-      proxies: ['REJECT', 'PASS'],
+      proxies: ['REJECT', 'DIRECT'],
       icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/quic.png'
     }
   ];
@@ -1023,6 +1032,8 @@
       selectedMetaRuleSets = new Map();
       activeRuleProvider = 'none';
       preservedKeys = [];
+      existingTproxyPort = null;
+      existingRedirPort = null;
       dns = {
         enabled: false,
         nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],
@@ -1069,11 +1080,21 @@
               sec !== 'tun' &&
               sec !== 'rules' &&
               sec !== 'rule-providers' &&
-              sec !== 'sniffer'
+              sec !== 'sniffer' &&
+              sec !== 'tproxy-port' &&
+              sec !== 'redir-port'
             ) {
               if (!preservedKeys.includes(sec)) {
                 preservedKeys = [...preservedKeys, sec];
               }
+            }
+
+            if (sec === 'tproxy-port') {
+              const valMatch = line.match(/tproxy-port:\s*["']?(\d+)["']?/);
+              if (valMatch) existingTproxyPort = parseInt(valMatch[1], 10);
+            } else if (sec === 'redir-port') {
+              const valMatch = line.match(/redir-port:\s*["']?(\d+)["']?/);
+              if (valMatch) existingRedirPort = parseInt(valMatch[1], 10);
             }
           }
 
@@ -1655,8 +1676,8 @@
     lines.push('');
 
     // System ports from XKeen (preserve existing values, fall back to defaults)
-    lines.push(`tproxy-port: ${existingTproxyPort ?? 1181}`);
-    lines.push(`redir-port: ${existingRedirPort ?? 1182}`);
+    lines.push(`tproxy-port: ${existingTproxyPort ?? 5001}`);
+    lines.push(`redir-port: ${existingRedirPort ?? 5000}`);
     lines.push('');
 
     // Proxy-providers (if we have subscriptions)
@@ -2070,8 +2091,6 @@
 
   const ru = $currentLang === 'ru';
 
-  let dnsRedirectLoading = false;
-
   async function enableDNSRedirect() {
     dnsRedirectLoading = true;
     try {
@@ -2143,9 +2162,6 @@
     activeSection = 'rulesets';
   }
 
-  let showApplyConfirm = false;
-  let applyLoading = false;
-
   function extractSection(yamlText: string, sectionName: string): string {
     const lines = yamlText.split('\n');
     let start = -1;
@@ -2177,11 +2193,6 @@
     }
     return resultLines.join('\n').trimEnd();
   }
-
-  let schema: any = null;
-  let schemaLoading = true;
-  let schemaError = '';
-  let validationError = '';
 
   async function loadSchema() {
     schemaLoading = true;
@@ -2275,8 +2286,8 @@
 
     // Check port collisions
     const mihomoPorts: PortAllocation[] = [
-      { port: existingTproxyPort ?? 1181, engine: 'mihomo', purpose: 'tproxy-port' },
-      { port: existingRedirPort ?? 1182, engine: 'mihomo', purpose: 'redir-port' },
+      { port: existingTproxyPort ?? 5001, engine: 'mihomo', purpose: 'tproxy-port' },
+      { port: existingRedirPort ?? 5000, engine: 'mihomo', purpose: 'redir-port' },
       { port: 9090, engine: 'mihomo', purpose: 'external-controller' }
     ];
 
@@ -2375,7 +2386,18 @@
         throw new Error(errorText || 'Failed to merge config');
       }
 
-      const restartRes = await fetch('/api/service/control?action=restart', {
+      const activeKernel = $capabilities?.active_kernel;
+      let restartUrl = '/api/service/control?action=restart';
+      if (activeKernel && activeKernel !== 'mihomo') {
+        const msg = ru
+          ? `Активным ядром сейчас является '${activeKernel}'. Хотите переключить его на 'mihomo'?`
+          : `Active kernel is currently '${activeKernel}'. Do you want to switch to 'mihomo'?`;
+        if (confirm(msg)) {
+          restartUrl = '/api/service/control?action=switch_kernel&kernel=mihomo';
+        }
+      }
+
+      const restartRes = await fetch(restartUrl, {
         method: 'POST',
         headers: {
           'X-CSRF-Token': csrfToken || ''
@@ -2385,6 +2407,8 @@
       if (!restartRes.ok) {
         throw new Error('Failed to restart service');
       }
+
+      await fetchCapabilities();
 
       showToast(
         'success',
@@ -2427,7 +2451,18 @@
       isDirty = false;
 
       // Restart service
-      const restartRes = await fetch('/api/service/control?action=restart', {
+      const activeKernel = $capabilities?.active_kernel;
+      let restartUrl = '/api/service/control?action=restart';
+      if (activeKernel && activeKernel !== 'mihomo') {
+        const msg = ru
+          ? `Активным ядром сейчас является '${activeKernel}'. Хотите переключить его на 'mihomo'?`
+          : `Active kernel is currently '${activeKernel}'. Do you want to switch to 'mihomo'?`;
+        if (confirm(msg)) {
+          restartUrl = '/api/service/control?action=switch_kernel&kernel=mihomo';
+        }
+      }
+
+      const restartRes = await fetch(restartUrl, {
         method: 'POST',
         headers: {
           'X-CSRF-Token': csrfToken || ''
@@ -2436,6 +2471,8 @@
       if (!restartRes.ok) {
         throw new Error('Failed to restart service');
       }
+
+      await fetchCapabilities();
 
       showToast('success', $t('editor.undo_success') || 'Last change reverted successfully');
       checkUndo();
@@ -2925,8 +2962,7 @@
                       >
                         <option value="DIRECT">DIRECT</option>
                         <option value="REJECT">REJECT</option>
-                        <option value="PASS">PASS</option>
-                        {#each allProxyNames.filter((n) => n !== 'DIRECT' && n !== 'REJECT' && n !== 'PASS' && n !== g.name) as n}
+                        {#each allProxyNames.filter((n) => n !== 'DIRECT' && n !== 'REJECT' && n !== g.name) as n}
                           <option value={n}>{n}</option>
                         {/each}
                       </select>
