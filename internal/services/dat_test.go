@@ -154,3 +154,33 @@ func TestSearchTag_GeoIP(t *testing.T) {
 	}
 }
 
+func TestSearchTag_MalformedProtobuf(t *testing.T) {
+	// Create a malformed protobuf payload with a wiretype 2 tag, but a huge length
+	// tag: field-1 wiretype 2 -> (1<<3)|2 = 10 (0x0A)
+	data := []byte{0x0A}
+	// Append a huge length varint: 0xFFFFFFFFFFFFFFFF
+	for i := 0; i < 9; i++ {
+		data = append(data, 0xFF)
+	}
+	data = append(data, 0x01)
+
+	tmpXray := t.TempDir()
+	tmpMihomo := t.TempDir()
+
+	os.WriteFile(filepath.Join(tmpXray, "geosite.dat"), data, 0644)
+
+	svc := NewDATManagerService(tmpXray, tmpMihomo)
+
+	// This must not panic
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("SearchTag panicked on malformed input: %v", r)
+		}
+	}()
+
+	_, err := svc.SearchTag("geosite.dat", "any", "", 0, 10)
+	if err != nil {
+		t.Logf("SearchTag returned expected error/nil: %v", err)
+	}
+}
+

@@ -390,11 +390,11 @@ func (s *DATManagerService) SearchTag(filename, tag, query string, page, pageSiz
 		if n == 0 {
 			break
 		}
-		pos += n
-		end := pos + int(length)
-		if end > len(data) {
+		if length > uint64(len(data)-pos-n) {
 			break
 		}
+		pos += n
+		end := pos + int(length)
 
 		if fieldNum == 1 {
 			entryData := data[pos:end]
@@ -477,11 +477,11 @@ func parseDATEntryDomains(data []byte) []string {
 		if n == 0 {
 			break
 		}
-		pos += n
-		end := pos + int(length)
-		if end > len(data) {
+		if length > uint64(len(data)-pos-n) {
 			break
 		}
+		pos += n
+		end := pos + int(length)
 
 		if fieldNum == 2 {
 			dom := parseSingleDomain(data[pos:end])
@@ -511,11 +511,11 @@ func parseSingleDomain(data []byte) string {
 			if n2 == 0 {
 				break
 			}
-			pos += n2
-			end := pos + int(length)
-			if end > len(data) {
+			if length > uint64(len(data)-pos-n2) {
 				break
 			}
+			pos += n2
+			end := pos + int(length)
 			domainVal = string(data[pos:end])
 			pos = end
 		} else {
@@ -550,11 +550,11 @@ func parseDATEntryCIDRs(data []byte) []string {
 		if n == 0 {
 			break
 		}
-		pos += n
-		end := pos + int(length)
-		if end > len(data) {
+		if length > uint64(len(data)-pos-n) {
 			break
 		}
+		pos += n
+		end := pos + int(length)
 
 		if fieldNum == 2 {
 			cidrStr := parseSingleCIDR(data[pos:end])
@@ -585,11 +585,11 @@ func parseSingleCIDR(data []byte) string {
 			if n2 == 0 {
 				break
 			}
-			pos += n2
-			end := pos + int(length)
-			if end > len(data) {
+			if length > uint64(len(data)-pos-n2) {
 				break
 			}
+			pos += n2
+			end := pos + int(length)
 			ip = data[pos:end]
 			pos = end
 		} else if fieldNum == 2 && wireType == 0 {
@@ -651,11 +651,11 @@ func parseDATTags(data []byte) ([]DATTagResult, error) {
 		if n == 0 {
 			break
 		}
-		pos += n
-		end := pos + int(length)
-		if end > len(data) {
+		if length > uint64(len(data)-pos-n) {
 			break
 		}
+		pos += n
+		end := pos + int(length)
 
 		if fieldNum == 1 {
 			// Parse entry sub-message to find country_code (field 1) and count entries (field 2)
@@ -696,12 +696,12 @@ func parseDATEntry(data []byte) (string, int) {
 		if n == 0 {
 			break
 		}
+		if length > uint64(len(data)-pos-n) {
+			break
+		}
 		pos += n
 
 		end := pos + int(length)
-		if end > len(data) {
-			break
-		}
 
 		switch fieldNum {
 		case 1: // country_code
@@ -745,6 +745,9 @@ func pbSkipField(data []byte, pos int, wireType uint64) (int, error) {
 		length, n := pbReadVarint(data, pos)
 		if n == 0 {
 			return pos, fmt.Errorf("truncated length")
+		}
+		if length > uint64(len(data)-pos-n) {
+			return len(data), fmt.Errorf("length exceeds data bounds")
 		}
 		return pos + n + int(length), nil
 	case 5: // 32-bit
