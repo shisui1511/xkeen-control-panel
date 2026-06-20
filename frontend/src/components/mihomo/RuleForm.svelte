@@ -1,12 +1,19 @@
 <script lang="ts">
   import { currentLang } from '../../i18n';
 
-  export let nr: any;
-  export let allProxyNames: string[];
-  export let onSave: () => void;
-  export let onCancel: () => void;
+  let {
+    nr = $bindable(),
+    allProxyNames,
+    onSave,
+    onCancel
+  }: {
+    nr: any;
+    allProxyNames: string[];
+    onSave: () => void;
+    onCancel: () => void;
+  } = $props();
 
-  $: ru = $currentLang === 'ru';
+  const ru = $derived($currentLang === 'ru');
 
   const RULE_TYPES = [
     'DOMAIN-SUFFIX',

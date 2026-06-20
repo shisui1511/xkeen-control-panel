@@ -1,11 +1,17 @@
 <script lang="ts">
   import { currentLang, t } from '../../i18n';
 
-  export let np: any;
-  export let onSave: () => void;
-  export let onCancel: () => void;
+  let {
+    np = $bindable(),
+    onSave,
+    onCancel
+  }: {
+    np: any;
+    onSave: () => void;
+    onCancel: () => void;
+  } = $props();
 
-  $: ru = $currentLang === 'ru';
+  const ru = $derived($currentLang === 'ru');
 
   const PROXY_TYPES = ['vless', 'hysteria2', 'tuic', 'ss', 'vmess'];
   const CIPHERS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-poly1305', '2022-blake3-aes-256-gcm'];

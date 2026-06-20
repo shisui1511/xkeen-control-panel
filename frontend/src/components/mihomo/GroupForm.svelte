@@ -1,14 +1,21 @@
 <script lang="ts">
   import { currentLang } from '../../i18n';
 
-  export let ng: any;
-  export let allProxyNames: string[];
-  export let onSave: () => void;
-  export let onCancel: () => void;
+  let {
+    ng = $bindable(),
+    allProxyNames,
+    onSave,
+    onCancel
+  }: {
+    ng: any;
+    allProxyNames: string[];
+    onSave: () => void;
+    onCancel: () => void;
+  } = $props();
 
-  $: ru = $currentLang === 'ru';
+  const ru = $derived($currentLang === 'ru');
 
-  let ngProxyInput = '';
+  let ngProxyInput = $state('');
   const GROUP_TYPES = ['select', 'url-test', 'fallback', 'load-balance'];
 
   function addGroupProxy() {
