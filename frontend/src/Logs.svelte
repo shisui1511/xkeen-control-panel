@@ -265,7 +265,7 @@
         {connected ? $t('logs.status_connected') : $t('logs.status_disconnected')}
       </span>
       {#if !connected}
-        <button on:click={connect} class="btn btn-primary" title={$t('logs.connect')}
+        <button onclick={connect} class="btn btn-primary" title={$t('logs.connect')}
           >{$t('logs.connect')}</button
         >
       {/if}
@@ -278,7 +278,7 @@
       <div class="toolbar-left">
         <button
           class="btn btn-secondary"
-          on:click={togglePause}
+          onclick={togglePause}
           title={paused ? $t('logs.resume') : $t('logs.pause')}
         >
           {#if paused}
@@ -311,7 +311,7 @@
           {/if}
         </button>
 
-        <button class="btn btn-secondary" on:click={clearLogs} title={$t('logs.clear')}>
+        <button class="btn btn-secondary" onclick={clearLogs} title={$t('logs.clear')}>
           <svg
             width="13"
             height="13"
@@ -326,7 +326,7 @@
           >{$t('logs.clear')}
         </button>
 
-        <button class="btn btn-secondary" on:click={exportLogs} title={$t('logs.export')}>
+        <button class="btn btn-secondary" onclick={exportLogs} title={$t('logs.export')}>
           <svg
             width="13"
             height="13"
@@ -355,13 +355,13 @@
           <button
             class="stab"
             class:stab-active={sourceFilter === ''}
-            on:click={() => (sourceFilter = '')}>{$t('logs.all_sources')}</button
+            onclick={() => (sourceFilter = '')}>{$t('logs.all_sources')}</button
           >
           {#each KNOWN_SOURCES as src}
             <button
               class="stab"
               class:stab-active={sourceFilter === src}
-              on:click={() => (sourceFilter = sourceFilter === src ? '' : src)}>{src}</button
+              onclick={() => (sourceFilter = sourceFilter === src ? '' : src)}>{src}</button
             >
           {/each}
         </div>
@@ -393,7 +393,7 @@
           ><strong>{$t('logs.disconnected_title')}</strong> — {$t('logs.disconnected_desc')}</span
         >
         <button
-          on:click={connect}
+          onclick={connect}
           class="btn btn-secondary btn-small"
           style="padding: 4px 8px; font-size: 12px;"
         >
@@ -450,7 +450,7 @@
           </div>
           {#if !connected}
             <button
-              on:click={connect}
+              onclick={connect}
               class="btn btn-secondary btn-small"
               style="margin-top: 14px; padding: 4px 8px; font-size: 12px;"
             >

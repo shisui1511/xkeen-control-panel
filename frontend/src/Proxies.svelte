@@ -409,7 +409,7 @@
         placeholder={$t('proxies.filter_placeholder')}
         aria-label={$t('proxies.filter_placeholder')}
       />
-      <button class="btn btn-secondary" on:click={fetchProxies} disabled={loading}>
+      <button class="btn btn-secondary" onclick={fetchProxies} disabled={loading}>
         <svg
           width="14"
           height="14"
@@ -421,7 +421,7 @@
         >
         {loading ? $t('app.loading') : $t('app.refresh')}
       </button>
-      <button class="btn btn-primary" on:click={testLatency} disabled={testingLatency}>
+      <button class="btn btn-primary" onclick={testLatency} disabled={testingLatency}>
         <svg
           width="14"
           height="14"
@@ -531,8 +531,8 @@
               role={collapsible ? 'button' : undefined}
               tabindex={collapsible ? 0 : undefined}
               aria-expanded={collapsible ? !isCollapsed : undefined}
-              on:click={() => collapsible && toggleCollapse(group.name)}
-              on:keydown={(e) =>
+              onclick={() => collapsible && toggleCollapse(group.name)}
+              onkeydown={(e) =>
                 (e.key === 'Enter' || e.key === ' ') && collapsible && toggleCollapse(group.name)}
             >
               <span class="name">{group.name}</span>
@@ -568,8 +568,8 @@
                   class:now={isActive}
                   role="button"
                   tabindex="0"
-                  on:click={() => group.type === 'Selector' && selectProxy(group.name, proxyName)}
-                  on:keydown={(e) =>
+                  onclick={() => group.type === 'Selector' && selectProxy(group.name, proxyName)}
+                  onkeydown={(e) =>
                     e.key === 'Enter' &&
                     group.type === 'Selector' &&
                     selectProxy(group.name, proxyName)}
@@ -585,7 +585,7 @@
                     {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
                       <button
                         class="btn-latency-test"
-                        on:click|stopPropagation={() => testProxyLatency(proxyName)}
+                        onclick={( e ) => { e.stopPropagation(); testProxyLatency(proxyName); }}
                         disabled={testingProxy === proxyName}
                         title={$t('proxies.test_single')}
                         style="background: transparent; border: none; padding: 4px; color: var(--fg-dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: color 0.2s;"
@@ -614,7 +614,7 @@
                       <button
                         class="btn-select"
                         style="background: none; border: none; padding: 0 4px; color: var(--accent); cursor: pointer; font-size: 14px;"
-                        on:click|stopPropagation={() => selectProxy(group.name, proxyName)}
+                        onclick={( e ) => { e.stopPropagation(); selectProxy(group.name, proxyName); }}
                       >
                         {isActive ? '●' : '○'}
                       </button>
@@ -630,8 +630,8 @@
                     class="more-hint"
                     role="button"
                     tabindex="0"
-                    on:click={() => toggleCollapse(group.name)}
-                    on:keydown={(e) =>
+                    onclick={() => toggleCollapse(group.name)}
+                    onkeydown={(e) =>
                       (e.key === 'Enter' || e.key === ' ') && toggleCollapse(group.name)}
                   >
                     {$t('proxies.more_hint', { count: hiddenCount })}
