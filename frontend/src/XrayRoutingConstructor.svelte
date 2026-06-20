@@ -1480,7 +1480,7 @@
     <div class="error-state-block" style="padding: 48px; text-align: center;">
       <div class="error-icon" style="color: var(--danger); font-size: 24px; margin-bottom: 12px;">⚠</div>
       <p style="color: var(--danger); margin-bottom: 16px;">{$t('editor.definition_load_error', { error: schemaError })}</p>
-      <button class="btn btn-secondary" on:click={loadSchema}>{ru ? 'Повторить попытку' : 'Retry'}</button>
+      <button class="btn btn-secondary" onclick={loadSchema}>{ru ? 'Повторить попытку' : 'Retry'}</button>
     </div>
   {:else}
     {#if !embedded}
@@ -1498,7 +1498,7 @@
           </p>
         </div>
         <div class="ph-actions">
-          <button class="btn btn-secondary" on:click={openInEditor}>
+          <button class="btn btn-secondary" onclick={openInEditor}>
             <svg
               width="13"
               height="13"
@@ -1520,7 +1520,7 @@
           {#if canUndo}
             <button
               class="btn btn-secondary"
-              on:click={handleUndo}
+              onclick={handleUndo}
               disabled={applyLoading}
               style="margin-right: 8px;"
             >
@@ -1530,7 +1530,7 @@
           <button
             class="btn btn-primary"
             data-testid="apply-changes-btn"
-            on:click={handleApplyChanges}
+            onclick={handleApplyChanges}
           >
             {ru ? 'Применить изменения' : 'Apply Changes'}
           </button>
@@ -1546,11 +1546,11 @@
           <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
           {#if schema && schema.xray && schema.xray.presets}
             {#each schema.xray.presets as p}
-              <button class="scenario-chip" on:click={() => applyPreset(p.id)}>{$t(p.name)}</button>
+              <button class="scenario-chip" onclick={() => applyPreset(p.id)}>{$t(p.name)}</button>
             {/each}
           {:else}
             {#each [['selective-routing', $t('editor.scenario_rule_based')], ['all-proxy-routing', $t('editor.scenario_global_proxy')], ['selective-no-quic', ru ? 'Блокировка QUIC' : 'Block QUIC'], ['only-blocked-routing', $t('preset.only-blocked-routing')]] as [id, label]}
-              <button class="scenario-chip" on:click={() => applyPreset(id as any)}>{label}</button>
+              <button class="scenario-chip" onclick={() => applyPreset(id as any)}>{label}</button>
             {/each}
           {/if}
         </div>
@@ -1565,7 +1565,7 @@
           class="form-select"
           bind:value={proxyTag}
           disabled={outboundTagsLoading}
-          on:change={() => (isDirty = true)}
+          onchange={() => (isDirty = true)}
         >
           {#if outboundTagsLoading}
             <option value="" disabled>{$t('editor.loading_tags')}</option>
@@ -1586,7 +1586,7 @@
             class="sec-tab"
             class:active={activeSection === id}
             data-tab={id}
-            on:click={() => {
+            onclick={() => {
               activeSection = id as any;
               showRuleForm = false;
               showDnsForm = false;
@@ -1612,7 +1612,7 @@
               id="domain-strategy"
               class="form-select"
               bind:value={routingConfig.domainStrategy}
-              on:change={() => (isDirty = true)}
+              onchange={() => (isDirty = true)}
             >
               <option value="AsIs">AsIs</option>
               <option value="IPIfNonMatch">IPIfNonMatch</option>
@@ -1644,16 +1644,16 @@
                   <div class="rule-actions">
                     <button
                       class="rule-move"
-                      on:click={() => moveRule(rule.id, -1)}
+                      onclick={() => moveRule(rule.id, -1)}
                       disabled={routingRules.findIndex((r) => r.id === rule.id) === 0}>▲</button
                     >
                     <button
                       class="rule-move"
-                      on:click={() => moveRule(rule.id, 1)}
+                      onclick={() => moveRule(rule.id, 1)}
                       disabled={routingRules.findIndex((r) => r.id === rule.id) ===
                         routingRules.length - 1}>▼</button
                     >
-                    <button class="rule-del" on:click={() => removeRule(rule.id)}>✕</button>
+                    <button class="rule-del" onclick={() => removeRule(rule.id)}>✕</button>
                   </div>
                 </div>
 
@@ -1787,17 +1787,17 @@
               </div>
 
               <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => (showRuleForm = false)}
+                <button class="btn btn-secondary" onclick={() => (showRuleForm = false)}
                   >{$t('app.cancel')}</button
                 >
-                <button class="btn btn-primary" on:click={addRule}>{$t('app.create')}</button>
+                <button class="btn btn-primary" onclick={addRule}>{$t('app.create')}</button>
               </div>
             </div>
           {:else}
             <button
               class="add-btn"
               data-testid="add-routing-rule"
-              on:click={() => (showRuleForm = true)}
+              onclick={() => (showRuleForm = true)}
             >
               + {$t('editor.xray_routing_add_rule')}
             </button>
@@ -1817,7 +1817,7 @@
                 <button
                   class="item-del"
                   style="margin-left:auto"
-                  on:click={() => removeInbound(inbound.tag)}>✕</button
+                  onclick={() => removeInbound(inbound.tag)}>✕</button
                 >
               </div>
               <div class="form-row2" style="margin-top:var(--spacing-2, 8px)">
@@ -1827,7 +1827,7 @@
                     class="form-input"
                     type="number"
                     bind:value={inbound.port}
-                    on:input={() => (isDirty = true)}
+                    oninput={() => (isDirty = true)}
                     min="1"
                     max="65535"
                   />
@@ -1837,7 +1837,7 @@
                   <input
                     class="form-input"
                     bind:value={inbound.listen}
-                    on:input={() => (isDirty = true)}
+                    oninput={() => (isDirty = true)}
                   />
                 </div>
               </div>
@@ -1873,14 +1873,14 @@
                 </div>
               {/if}
               <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => (showInboundForm = false)}
+                <button class="btn btn-secondary" onclick={() => (showInboundForm = false)}
                   >{$t('app.cancel')}</button
                 >
-                <button class="btn btn-primary" on:click={addInbound}>{$t('app.create')}</button>
+                <button class="btn btn-primary" onclick={addInbound}>{$t('app.create')}</button>
               </div>
             </div>
           {:else}
-            <button class="add-btn" on:click={() => (showInboundForm = true)}>
+            <button class="add-btn" onclick={() => (showInboundForm = true)}>
               + {ru ? 'Добавить входящее соединение' : 'Add Inbound'}
             </button>
           {/if}
@@ -1896,7 +1896,7 @@
                 <span aria-hidden="true">⚠️</span>
                 <span>{$t('editor.dns_intercept_warning')}</span>
               </div>
-              <button class="btn btn-secondary btn-sm" style="font-size: 12px; padding: 4px 8px; display: flex; align-items: center; gap: 4px;" on:click={enableDNSRedirect} disabled={dnsRedirectLoading}>
+              <button class="btn btn-secondary btn-sm" style="font-size: 12px; padding: 4px 8px; display: flex; align-items: center; gap: 4px;" onclick={enableDNSRedirect} disabled={dnsRedirectLoading}>
                 {#if dnsRedirectLoading}
                   <span class="spinner" style="display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span>
                 {/if}
@@ -1913,7 +1913,7 @@
               id="dns-query-strategy"
               class="form-select"
               bind:value={dnsConfig.queryStrategy}
-              on:change={() => (isDirty = true)}
+              onchange={() => (isDirty = true)}
             >
               <option value="UseIP">UseIP</option>
               <option value="UseIPv4">UseIPv4</option>
@@ -1926,7 +1926,7 @@
               <input
                 type="checkbox"
                 bind:checked={dnsOverVless}
-                on:change={() => (isDirty = true)}
+                onchange={() => (isDirty = true)}
               />
               <span class="checkmark" style="top: 1px;"></span>
               <span style="font-weight: 600; color: var(--fg);">{$t('editor.dns_over_vless')}</span>
@@ -1957,7 +1957,7 @@
                     </div>
                   </div>
                 {/if}
-                <button class="item-del" on:click={() => removeDNSServer(idx)}>✕</button>
+                <button class="item-del" onclick={() => removeDNSServer(idx)}>✕</button>
               </div>
             {/each}
           </div>
@@ -1998,14 +1998,14 @@
                 </div>
               {/if}
               <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => (showDnsForm = false)}
+                <button class="btn btn-secondary" onclick={() => (showDnsForm = false)}
                   >{$t('app.cancel')}</button
                 >
-                <button class="btn btn-primary" on:click={addDNSServer}>{$t('app.create')}</button>
+                <button class="btn btn-primary" onclick={addDNSServer}>{$t('app.create')}</button>
               </div>
             </div>
           {:else}
-            <button class="add-btn" on:click={() => (showDnsForm = true)}>
+            <button class="add-btn" onclick={() => (showDnsForm = true)}>
               + {ru ? 'Добавить DNS-сервер' : 'Add DNS Server'}
             </button>
           {/if}
@@ -2017,7 +2017,7 @@
                 <div style="flex: 1;">
                   <code>{domain}</code> &rarr; <code>{ip}</code>
                 </div>
-                <button class="item-del" on:click={() => removeHost(domain)}>✕</button>
+                <button class="item-del" onclick={() => removeHost(domain)}>✕</button>
               </div>
             {/each}
           </div>
@@ -2035,14 +2035,14 @@
                 </div>
               </div>
               <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => (showHostForm = false)}
+                <button class="btn btn-secondary" onclick={() => (showHostForm = false)}
                   >{$t('app.cancel')}</button
                 >
-                <button class="btn btn-primary" on:click={addHost}>{$t('app.create')}</button>
+                <button class="btn btn-primary" onclick={addHost}>{$t('app.create')}</button>
               </div>
             </div>
           {:else}
-            <button class="add-btn" style="margin-top: 8px;" on:click={() => (showHostForm = true)}>
+            <button class="add-btn" style="margin-top: 8px;" onclick={() => (showHostForm = true)}>
               + {ru ? 'Добавить Host' : 'Add Host'}
             </button>
           {/if}
@@ -2060,7 +2060,7 @@
             </div>
             <button
               class="btn btn-secondary"
-              on:click={openImportModal}
+              onclick={openImportModal}
               style="padding: 4px 10px; font-size: 12px; display: flex; align-items: center; gap: 4px;"
             >
               <svg
@@ -2095,7 +2095,7 @@
                 <div style="display: flex; gap: 8px;">
                   <button
                     class="rule-move"
-                    on:click={() => openEditOutbound(idx)}
+                    onclick={() => openEditOutbound(idx)}
                     title={ru ? 'Редактировать' : 'Edit'}
                     style="font-size: 12px;"
                   >
@@ -2103,7 +2103,7 @@
                   </button>
                   <button
                     class="rule-del"
-                    on:click={() => removeOutbound(idx)}
+                    onclick={() => removeOutbound(idx)}
                     title={ru ? 'Удалить' : 'Remove'}
                   >
                     ✕
@@ -2137,7 +2137,7 @@
           </div>
 
           {#if !showOutboundForm}
-            <button class="add-btn" on:click={openAddOutbound}>
+            <button class="add-btn" onclick={openAddOutbound}>
               + {ru ? 'Добавить исходящее соединение (VLESS / VMess)' : 'Add Outbound (VLESS / VMess)'}
             </button>
           {/if}
@@ -2173,7 +2173,7 @@
                     <button
                       class="btn btn-secondary"
                       style="padding: 0 8px; min-height: 36px;"
-                      on:click={() => (outboundForm.uuid = crypto.randomUUID())}
+                      onclick={() => (outboundForm.uuid = crypto.randomUUID())}
                       title="Generate"
                       type="button"
                     >⟳</button>
@@ -2270,10 +2270,10 @@
               </div>
 
               <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => (showOutboundForm = false)} type="button">
+                <button class="btn btn-secondary" onclick={() => (showOutboundForm = false)} type="button">
                   {$t('app.cancel')}
                 </button>
-                <button class="btn btn-primary" on:click={saveOutbound} type="button">
+                <button class="btn btn-primary" onclick={saveOutbound} type="button">
                   {editingOutboundIndex !== null ? (ru ? 'Сохранить' : 'Save') : (ru ? 'Добавить' : 'Add')}
                 </button>
               </div>
@@ -2295,7 +2295,7 @@
               id="log-level"
               class="form-select"
               bind:value={logConfig.loglevel}
-              on:change={() => (isDirty = true)}
+              onchange={() => (isDirty = true)}
             >
               <option value="none">none</option>
               <option value="error">error</option>
@@ -2310,7 +2310,7 @@
               <input
                 type="checkbox"
                 bind:checked={logConfig.dnsLog}
-                on:change={() => (isDirty = true)}
+                onchange={() => (isDirty = true)}
               />
               <span class="checkmark"></span>
               {ru ? 'Включить логирование DNS' : 'Enable DNS Logging'}
@@ -2352,7 +2352,7 @@
                   class="form-input"
                   type="number"
                   bind:value={policyConfig.levels['0'].handshake}
-                  on:input={() => (isDirty = true)}
+                  oninput={() => (isDirty = true)}
                 />
               </div>
               <div class="form-col">
@@ -2362,7 +2362,7 @@
                   class="form-input"
                   type="number"
                   bind:value={policyConfig.levels['0'].connIdle}
-                  on:input={() => (isDirty = true)}
+                  oninput={() => (isDirty = true)}
                 />
               </div>
             </div>
@@ -2374,7 +2374,7 @@
                   class="form-input"
                   type="number"
                   bind:value={policyConfig.levels['0'].uplinkOnly}
-                  on:input={() => (isDirty = true)}
+                  oninput={() => (isDirty = true)}
                 />
               </div>
               <div class="form-col">
@@ -2384,7 +2384,7 @@
                   class="form-input"
                   type="number"
                   bind:value={policyConfig.levels['0'].downlinkOnly}
-                  on:input={() => (isDirty = true)}
+                  oninput={() => (isDirty = true)}
                 />
               </div>
             </div>
@@ -2397,7 +2397,7 @@
                 <input
                   type="checkbox"
                   bind:checked={policyConfig.system.statsInboundUplink}
-                  on:change={() => (isDirty = true)}
+                  onchange={() => (isDirty = true)}
                 />
                 <span class="checkmark"></span>
                 Stats Inbound Uplink
@@ -2408,7 +2408,7 @@
                 <input
                   type="checkbox"
                   bind:checked={policyConfig.system.statsInboundDownlink}
-                  on:change={() => (isDirty = true)}
+                  onchange={() => (isDirty = true)}
                 />
                 <span class="checkmark"></span>
                 Stats Inbound Downlink
@@ -2441,7 +2441,7 @@
 
       {#if embedded}
         <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
-          <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
+          <button class="btn btn-secondary" style="flex: 1;" onclick={openInEditor}>
             <svg
               width="13"
               height="13"
@@ -2463,7 +2463,7 @@
           {#if canUndo}
             <button
               class="btn btn-secondary"
-              on:click={handleUndo}
+              onclick={handleUndo}
               disabled={applyLoading}
               style="flex: 1;"
             >
@@ -2473,7 +2473,7 @@
           <button
             class="btn btn-primary"
             data-testid="apply-changes-btn"
-            on:click={handleApplyChanges}
+            onclick={handleApplyChanges}
             style="flex: 1;"
           >
             {ru ? 'Применить изменения' : 'Apply Changes'}
@@ -2491,13 +2491,13 @@
     role="button"
     tabindex="0"
     data-testid="apply-confirm-dialog"
-    on:click={() => (showApplyConfirm = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}
+    onclick={() => (showApplyConfirm = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}
   >
-    <div class="modal-card" role="presentation" on:click|stopPropagation>
+    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
       <div class="modal-card-header">
         <h2>{$t('editor.apply_confirm_title')}</h2>
-        <button class="modal-close-btn" on:click={() => (showApplyConfirm = false)}>&times;</button>
+        <button class="modal-close-btn" onclick={() => (showApplyConfirm = false)}>&times;</button>
       </div>
       <div class="modal-card-body">
         <p>{$t('editor.apply_confirm_body')}</p>
@@ -2530,10 +2530,10 @@
         </div>
       </div>
       <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={() => (showApplyConfirm = false)}>
+        <button class="btn btn-secondary" onclick={() => (showApplyConfirm = false)}>
           {$t('app.cancel')}
         </button>
-        <button class="btn btn-primary" on:click={handleApplyChanges} disabled={applyLoading}>
+        <button class="btn btn-primary" onclick={handleApplyChanges} disabled={applyLoading}>
           {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
         </button>
       </div>
@@ -2546,13 +2546,13 @@
     class="modal-overlay"
     role="button"
     tabindex="0"
-    on:click={closeImportModal}
-    on:keydown={(e) => e.key === 'Escape' && closeImportModal()}
+    onclick={closeImportModal}
+    onkeydown={(e) => e.key === 'Escape' && closeImportModal()}
   >
-    <div class="modal-card" role="presentation" on:click|stopPropagation>
+    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
       <div class="modal-card-header">
         <h2>{$t('subscr.import_modal_title')}</h2>
-        <button class="modal-close-btn" on:click={closeImportModal}>&times;</button>
+        <button class="modal-close-btn" onclick={closeImportModal}>&times;</button>
       </div>
       <div class="modal-card-body">
         {#if importErrorMsg}
@@ -2593,7 +2593,7 @@
                   >
                     <button
                       type="button"
-                      on:click={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                      onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
                       style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
                       aria-label="Remove">✕</button
                     >
@@ -2615,7 +2615,7 @@
                   >
                     <button
                       type="button"
-                      on:click={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                      onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
                       style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
                       aria-label="Remove">✕</button
                     >
@@ -2650,13 +2650,13 @@
         {/if}
       </div>
       <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={closeImportModal} disabled={importLoading}>
+        <button class="btn btn-secondary" onclick={closeImportModal} disabled={importLoading}>
           {$t('app.cancel')}
         </button>
         {#if importStep === 1}
           <button
             class="btn btn-primary"
-            on:click={parseImportLink}
+            onclick={parseImportLink}
             disabled={!importLink.trim() || importLoading}
           >
             {#if importLoading}
@@ -2667,7 +2667,7 @@
         {:else}
           <button
             class="btn btn-primary"
-            on:click={confirmImportNode}
+            onclick={confirmImportNode}
             disabled={importLoading ||
               importNodes.length === 0 ||
               importNodes.some((n) => n.rowError)}

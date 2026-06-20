@@ -2410,7 +2410,7 @@
     <div class="error-state-block" style="padding: 48px; text-align: center;">
       <div class="error-icon" style="color: var(--danger); font-size: 24px; margin-bottom: 12px;">⚠</div>
       <p style="color: var(--danger); margin-bottom: 16px;">{$t('editor.definition_load_error', { error: schemaError })}</p>
-      <button class="btn btn-secondary" on:click={loadSchema}>{ru ? 'Повторить попытку' : 'Retry'}</button>
+      <button class="btn btn-secondary" onclick={loadSchema}>{ru ? 'Повторить попытку' : 'Retry'}</button>
     </div>
   {:else}
     {#if !embedded}
@@ -2428,7 +2428,7 @@
         </p>
       </div>
       <div class="ph-actions">
-        <button class="btn btn-secondary" on:click={openInEditor}>
+        <button class="btn btn-secondary" onclick={openInEditor}>
           <svg
             width="13"
             height="13"
@@ -2447,7 +2447,7 @@
             {ru ? 'Открыть в редакторе' : 'Open in Editor'}
           {/if}
         </button>
-        <button class="btn btn-primary" on:click={copyYAML} disabled={!yaml}>
+        <button class="btn btn-primary" onclick={copyYAML} disabled={!yaml}>
           <svg
             width="13"
             height="13"
@@ -2475,7 +2475,7 @@
           {$t('editor.constructor_merge_warning_body', { keys: preservedKeys.join(', ') })}
         </div>
       </div>
-      <button type="button" class="alert-close-btn" on:click={() => {
+      <button type="button" class="alert-close-btn" onclick={() => {
         dismissMergeWarning = true;
         localStorage.setItem('xcp:dismissed_warning:preserved_keys', preservedKeys.join(','));
       }} aria-label={$t('app.close') || 'Close'}>&times;</button>
@@ -2497,7 +2497,7 @@
           style="max-width: 250px;"
           data-testid="preset-select"
           value={activePreset}
-          on:change={(e) => {
+          onchange={(e) => {
             const val = e.currentTarget.value;
             applyPreset(val);
             if (val === 'rule-based') {
@@ -2525,7 +2525,7 @@
         <div class="alert alert-warning alert-dismissible" style="margin-bottom: 16px; padding: 8px 12px; font-size: 13px; display: flex; align-items: center; gap: 8px; border-radius: var(--radius-sm);">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           <span>{$t('editor.requires_zkeen_geodata')}</span>
-          <button type="button" class="alert-close-btn" style="top: 50%; transform: translateY(-50%);" on:click={() => {
+          <button type="button" class="alert-close-btn" style="top: 50%; transform: translateY(-50%);" onclick={() => {
             dismissZkeenGeodataWarning = true;
             localStorage.setItem('xcp:dismissed_warning:zkeen_geodata', activePreset);
           }} aria-label={$t('app.close') || 'Close'}>&times;</button>
@@ -2539,7 +2539,7 @@
           id="rp-select"
           class="form-select rp-select"
           bind:value={activeRuleProvider}
-          on:change={(e) => {
+          onchange={(e) => {
             if (e.currentTarget.value === 'metacubex') {
               activeSection = 'rulesets';
             }
@@ -2557,7 +2557,7 @@
           <button
             class="sec-tab"
             class:active={activeSection === id}
-            on:click={() => {
+            onclick={() => {
               activeSection = id as typeof activeSection;
               showProxyForm = false;
               showGroupForm = false;
@@ -2591,7 +2591,7 @@
               <span class="item-meta">{p.server}:{p.port}</span>
               <button
                 class="item-del"
-                on:click={() => removeProxy(p.id)}
+                onclick={() => removeProxy(p.id)}
                 title={ru ? 'Удалить' : 'Remove'}>✕</button
               >
             </div>
@@ -2633,7 +2633,7 @@
                     <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
                     <button
                       class="btn-gen"
-                      on:click={() => (np.uuid = crypto.randomUUID())}
+                      onclick={() => (np.uuid = crypto.randomUUID())}
                       title="Generate">⟳</button
                     >
                   </div>
@@ -2694,7 +2694,7 @@
                     <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
                     <button
                       class="btn-gen"
-                      on:click={() => (np.uuid = crypto.randomUUID())}
+                      onclick={() => (np.uuid = crypto.randomUUID())}
                       title="Generate">⟳</button
                     >
                   </div>
@@ -2725,7 +2725,7 @@
                     <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
                     <button
                       class="btn-gen"
-                      on:click={() => (np.uuid = crypto.randomUUID())}
+                      onclick={() => (np.uuid = crypto.randomUUID())}
                       title="Generate">⟳</button
                     >
                   </div>
@@ -2759,23 +2759,23 @@
               {/if}
 
               <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => (showProxyForm = false)}
+                <button class="btn btn-secondary" onclick={() => (showProxyForm = false)}
                   >{ru ? 'Отмена' : 'Cancel'}</button
                 >
-                <button class="btn btn-primary" on:click={addProxy}
+                <button class="btn btn-primary" onclick={addProxy}
                   >{ru ? 'Добавить' : 'Add'}</button
                 >
               </div>
             </div>
           {:else}
             <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
-              <button class="add-btn" style="flex: 1;" on:click={() => (showProxyForm = true)}>
+              <button class="add-btn" style="flex: 1;" onclick={() => (showProxyForm = true)}>
                 + {ru ? 'Добавить прокси' : 'Add proxy'}
               </button>
               <button
                 class="add-btn import-btn"
                 style="flex: 1;"
-                on:click={loadSubscriptionProxies}
+                onclick={loadSubscriptionProxies}
                 disabled={!hasXraySubscriptions}
                 title={hasXraySubscriptions
                   ? ($currentLang === 'ru'
@@ -2787,7 +2787,7 @@
               >
                 ↓ {$t('editor.constructor_import_proxies')}
               </button>
-              <button class="add-btn import-btn" style="flex: 1;" on:click={openImportModal}>
+              <button class="add-btn import-btn" style="flex: 1;" onclick={openImportModal}>
                 <svg
                   width="12"
                   height="12"
@@ -2822,7 +2822,7 @@
                         src={g.icon}
                         alt={g.name}
                         class="zkeen-group-icon"
-                        on:error={() => {
+                        onerror={() => {
                           const fallback =
                             'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png';
                           if (g.icon !== fallback) {
@@ -2850,7 +2850,7 @@
                       <input
                         type="checkbox"
                         checked={g.enabled !== false}
-                        on:change={(e) => {
+                        onchange={(e) => {
                           g.enabled = e.currentTarget.checked;
                           if (g.enabled === false) {
                             showToast('warning', $t('editor.group_disable_warning', { group: g.name }));
@@ -2870,7 +2870,7 @@
                       <select
                         class="form-select"
                         value={g.proxies[0] || 'DIRECT'}
-                        on:change={(e) => {
+                        onchange={(e) => {
                           const val = e.currentTarget.value;
                           g.proxies = [val, ...g.proxies.slice(1).filter((p) => p !== val)];
                           groups = [...groups];
@@ -2901,7 +2901,7 @@
                   >
                 {/if}
                 <span class="item-meta">{g.proxies.length} {ru ? 'прокси' : 'proxies'}</span>
-                <button class="item-del" on:click={() => removeGroup(g.id)}>✕</button>
+                <button class="item-del" onclick={() => removeGroup(g.id)}>✕</button>
               </div>
             {/each}
 
@@ -2938,7 +2938,7 @@
                         {p}
                         <button
                           class="tag-rm"
-                          on:click={() =>
+                          onclick={() =>
                             (ng = { ...ng, proxies: ng.proxies.filter((x) => x !== p) })}>✕</button
                         >
                       </span>
@@ -2946,7 +2946,7 @@
                     <select
                       class="form-select-inline"
                       bind:value={ngProxyInput}
-                      on:change={addGroupProxy}
+                      onchange={addGroupProxy}
                     >
                       <option value="">+ {ru ? 'добавить' : 'add'}...</option>
                       {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
@@ -2966,17 +2966,17 @@
                   </div>
                 {/if}
                 <div class="form-actions">
-                  <button class="btn btn-secondary" on:click={() => (showGroupForm = false)}
+                  <button class="btn btn-secondary" onclick={() => (showGroupForm = false)}
                     >{ru ? 'Отмена' : 'Cancel'}</button
                   >
-                  <button class="btn btn-primary" on:click={addGroup}
+                  <button class="btn btn-primary" onclick={addGroup}
                     >{ru ? 'Добавить' : 'Add'}</button
                   >
                 </div>
               </div>
             {:else}
               <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
-                <button class="add-btn" style="flex: 1;" on:click={() => (showGroupForm = true)}>
+                <button class="add-btn" style="flex: 1;" onclick={() => (showGroupForm = true)}>
                   + {ru ? 'Добавить группу' : 'Add group'}
                 </button>
               </div>
@@ -3033,7 +3033,7 @@
                           id="ruleset-{item.type}-{item.id}"
                           value={key}
                           checked={isChecked}
-                          on:change={(e) => {
+                          onchange={(e) => {
                             if (e.currentTarget.checked) {
                               let outbound = item.defaultOutbound;
                               if (
@@ -3073,7 +3073,7 @@
                           class="ruleset-outbound-select"
                           style="font-size:12px; background:var(--bg-surface); border:1px solid var(--border); color:var(--fg-primary); border-radius:var(--radius-sm); padding:2px 6px; max-width:120px; outline:none;"
                           value={selectedMetaRuleSets.get(key)}
-                          on:change={(e) => {
+                          onchange={(e) => {
                             selectedMetaRuleSets.set(key, e.currentTarget.value);
                             selectedMetaRuleSets = selectedMetaRuleSets;
                           }}
@@ -3098,12 +3098,12 @@
           {#each rules as r, i (r.id)}
             <div class="item-row item-row-rule">
               <div class="rule-order">
-                <button class="order-btn" on:click={() => moveRule(r.id, -1)} disabled={i === 0}
+                <button class="order-btn" onclick={() => moveRule(r.id, -1)} disabled={i === 0}
                   >▲</button
                 >
                 <button
                   class="order-btn"
-                  on:click={() => moveRule(r.id, 1)}
+                  onclick={() => moveRule(r.id, 1)}
                   disabled={i === rules.length - 1}>▼</button
                 >
               </div>
@@ -3112,7 +3112,7 @@
                 <span class="item-name rule-value">{r.value}</span>
               {/if}
               <span class="item-meta">→ {r.outbound}</span>
-              <button class="item-del" on:click={() => removeRule(r.id)}>✕</button>
+              <button class="item-del" onclick={() => removeRule(r.id)}>✕</button>
             </div>
           {/each}
 
@@ -3149,15 +3149,15 @@
                 </div>
               {/if}
               <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => (showRuleForm = false)}
+                <button class="btn btn-secondary" onclick={() => (showRuleForm = false)}
                   >{ru ? 'Отмена' : 'Cancel'}</button
                 >
-                <button class="btn btn-primary" on:click={addRule}>{ru ? 'Добавить' : 'Add'}</button
+                <button class="btn btn-primary" onclick={addRule}>{ru ? 'Добавить' : 'Add'}</button
                 >
               </div>
             </div>
           {:else}
-            <button class="add-btn" on:click={() => (showRuleForm = true)}>
+            <button class="add-btn" onclick={() => (showRuleForm = true)}>
               + {ru ? 'Добавить правило' : 'Add rule'}
             </button>
           {/if}
@@ -3180,7 +3180,7 @@
                   <span aria-hidden="true">⚠️</span>
                   <span>{$t('editor.dns_intercept_warning')}</span>
                 </div>
-                <button class="btn btn-secondary btn-sm" style="font-size: 12px; padding: 4px 8px; display: flex; align-items: center; gap: 4px;" on:click={enableDNSRedirect} disabled={dnsRedirectLoading}>
+                <button class="btn btn-secondary btn-sm" style="font-size: 12px; padding: 4px 8px; display: flex; align-items: center; gap: 4px;" onclick={enableDNSRedirect} disabled={dnsRedirectLoading}>
                   {#if dnsRedirectLoading}
                     <span class="spinner" style="display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span>
                   {/if}
@@ -3207,7 +3207,7 @@
                 class="form-textarea"
                 value={dns.nameservers.join('\n')}
                 rows="3"
-                on:change={(e) =>
+                onchange={(e) =>
                   (dns.nameservers = e.currentTarget.value.split('\n').filter(Boolean))}
               ></textarea>
             </div>
@@ -3217,7 +3217,7 @@
                 class="form-textarea"
                 value={dns.fallback.join('\n')}
                 rows="2"
-                on:change={(e) =>
+                onchange={(e) =>
                   (dns.fallback = e.currentTarget.value.split('\n').filter(Boolean))}
               ></textarea>
             </div>
@@ -3260,7 +3260,7 @@
               <input
                 class="form-input"
                 value={tun.dnsHijack.join(', ')}
-                on:change={(e) =>
+                onchange={(e) =>
                   (tun.dnsHijack = e.currentTarget.value
                     .split(',')
                     .map((s) => s.trim())
@@ -3299,7 +3299,7 @@
       <div class="preview-header">
         <span class="preview-title">YAML {ru ? 'превью' : 'preview'}</span>
         {#if yaml}
-          <button class="btn btn-secondary btn-sm" on:click={copyYAML}>
+          <button class="btn btn-secondary btn-sm" onclick={copyYAML}>
             <svg
               width="12"
               height="12"
@@ -3335,7 +3335,7 @@
       {#if embedded}
         <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
           <div style="display: flex; gap: 8px; width: 100%;">
-             <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
+             <button class="btn btn-secondary" style="flex: 1;" onclick={openInEditor}>
               <svg
                 width="13"
                 height="13"
@@ -3357,7 +3357,7 @@
             <button
               class="btn btn-primary"
               data-testid="apply-changes-btn"
-              on:click={handleApplyMihomo}
+              onclick={handleApplyMihomo}
               disabled={applyLoading || !yaml}
               style="flex: 1;"
             >
@@ -3373,7 +3373,7 @@
           {#if canUndo}
             <button
               class="btn btn-secondary"
-              on:click={handleUndo}
+              onclick={handleUndo}
               disabled={applyLoading}
               style="width: 100%;"
             >
@@ -3393,13 +3393,13 @@
     role="button"
     tabindex="0"
     data-testid="apply-confirm-dialog"
-    on:click={() => (showApplyConfirm = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}
+    onclick={() => (showApplyConfirm = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}
   >
-    <div class="modal-card" role="presentation" on:click|stopPropagation>
+    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
       <div class="modal-card-header">
         <h2>{$t('editor.apply_confirm_title')}</h2>
-        <button class="modal-close-btn" on:click={() => (showApplyConfirm = false)}>&times;</button>
+        <button class="modal-close-btn" onclick={() => (showApplyConfirm = false)}>&times;</button>
       </div>
       <div class="modal-card-body">
         <p>{$t('editor.apply_confirm_body')}</p>
@@ -3423,10 +3423,10 @@
         </div>
       </div>
       <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={() => (showApplyConfirm = false)}>
+        <button class="btn btn-secondary" onclick={() => (showApplyConfirm = false)}>
           {$t('app.cancel')}
         </button>
-        <button class="btn btn-primary" on:click={handleApplyMihomo} disabled={applyLoading}>
+        <button class="btn btn-primary" onclick={handleApplyMihomo} disabled={applyLoading}>
           {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
         </button>
       </div>
@@ -3439,13 +3439,13 @@
     class="modal-overlay"
     role="button"
     tabindex="0"
-    on:click={closeImportModal}
-    on:keydown={(e) => e.key === 'Escape' && closeImportModal()}
+    onclick={closeImportModal}
+    onkeydown={(e) => e.key === 'Escape' && closeImportModal()}
   >
-    <div class="modal-card" role="presentation" on:click|stopPropagation>
+    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
       <div class="modal-card-header">
         <h2>{$t('subscr.import_modal_title')}</h2>
-        <button class="modal-close-btn" on:click={closeImportModal}>&times;</button>
+        <button class="modal-close-btn" onclick={closeImportModal}>&times;</button>
       </div>
       <div class="modal-card-body">
         {#if importErrorMsg}
@@ -3486,7 +3486,7 @@
                   >
                     <button
                       type="button"
-                      on:click={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                      onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
                       style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
                       aria-label="Remove">✕</button
                     >
@@ -3508,7 +3508,7 @@
                   >
                     <button
                       type="button"
-                      on:click={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                      onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
                       style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
                       aria-label="Remove">✕</button
                     >
@@ -3543,13 +3543,13 @@
         {/if}
       </div>
       <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={closeImportModal} disabled={importLoading}>
+        <button class="btn btn-secondary" onclick={closeImportModal} disabled={importLoading}>
           {$t('app.cancel')}
         </button>
         {#if importStep === 1}
           <button
             class="btn btn-primary"
-            on:click={parseImportLink}
+            onclick={parseImportLink}
             disabled={!importLink.trim() || importLoading}
           >
             {#if importLoading}
@@ -3560,7 +3560,7 @@
         {:else}
           <button
             class="btn btn-primary"
-            on:click={confirmImportNode}
+            onclick={confirmImportNode}
             disabled={importLoading ||
               importNodes.length === 0 ||
               importNodes.some((n) => n.rowError)}

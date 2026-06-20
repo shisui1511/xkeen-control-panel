@@ -1546,7 +1546,7 @@
   });
 </script>
 
-<svelte:window on:keydown={handleGlobalKeydown} />
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="container">
   <div class="page-head">
@@ -1568,7 +1568,7 @@
       <div class="ph-actions">
         <button
           class="btn btn-primary"
-          on:click={() => {
+          onclick={() => {
             showCreateModal = true;
             newFileName = '';
           }}
@@ -1589,7 +1589,7 @@
         {#if selectedFile}
           <button
             class="btn btn-secondary"
-            on:click={() => loadFile(selectedFile)}
+            onclick={() => loadFile(selectedFile)}
             disabled={loading}
             title={$t('editor.reload')}
           >
@@ -1608,7 +1608,7 @@
           </button>
           <button
             class="btn btn-secondary"
-            on:click={checkBeforeSave}
+            onclick={checkBeforeSave}
             disabled={saving || applyLoading}
             title={$t('app.save')}
           >
@@ -1629,7 +1629,7 @@
           </button>
           <button
             class="btn btn-accent"
-            on:click={handleSaveAndApply}
+            onclick={handleSaveAndApply}
             disabled={saving || applyLoading}
             title={$t('editor.save_and_apply')}
           >
@@ -1665,14 +1665,14 @@
   </div>
 
   <div class="editor-tabs">
-    <button class="tab-btn" class:active={activeTab === 'files'} on:click={() => setTab('files')}>
+    <button class="tab-btn" class:active={activeTab === 'files'} onclick={() => setTab('files')}>
       <Icon name="editor" size={14} />
       {$t('editor.tab_files')}
     </button>
     <button
       class="tab-btn"
       class:active={activeTab === 'constructor'}
-      on:click={() => setTab('constructor')}
+      onclick={() => setTab('constructor')}
     >
       <Icon name="settings" size={14} />
       {$t('editor.tab_constructor')}
@@ -1694,7 +1694,7 @@
             />
             {#if fileSearchQuery}
               <button
-                on:click={() => (fileSearchQuery = '')}
+                onclick={() => (fileSearchQuery = '')}
                 style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--fg-dim); cursor: pointer; font-size: 16px; padding: 0 4px;"
                 title="Очистить"
               >
@@ -1727,8 +1727,8 @@
                 <button
                   class="file-row"
                   class:active={file.path === selectedFile}
-                  on:click={() => loadFile(file.path, true)}
-                  on:dblclick={() => loadFile(file.path, false)}
+                  onclick={() => loadFile(file.path, true)}
+                  ondblclick={() => loadFile(file.path, false)}
                 >
                   <span class="fr-name">{file.name}</span>
                   <span class="fr-meta">{formatBytes(file.size)}</span>
@@ -1763,8 +1763,8 @@
                 <button
                   class="file-row"
                   class:active={file.path === selectedFile}
-                  on:click={() => loadFile(file.path, true)}
-                  on:dblclick={() => loadFile(file.path, false)}
+                  onclick={() => loadFile(file.path, true)}
+                  ondblclick={() => loadFile(file.path, false)}
                 >
                   <span class="fr-name">{file.name}</span>
                   <span class="fr-meta">{formatBytes(file.size)}</span>
@@ -1799,8 +1799,8 @@
                   class="editor-tab"
                   class:active={tab.path === activeTabPath}
                   class:preview={tab.isPreview}
-                  on:click={() => switchTab(tab.path)}
-                  on:dblclick={() => pinTab(tab.path)}
+                  onclick={() => switchTab(tab.path)}
+                  ondblclick={() => pinTab(tab.path)}
                 >
                   <span class="tab-name">{tab.name}</span>
                   {#if tab.isDirty}
@@ -1810,9 +1810,8 @@
                     class="tab-close-btn"
                     role="button"
                     tabindex="-1"
-                    on:click|stopPropagation={() => closeTab(tab.path)}
-                    on:keydown|stopPropagation={(e) =>
-                      (e.key === 'Enter' || e.key === ' ') && closeTab(tab.path)}
+                    onclick={( e ) => { e.stopPropagation(); closeTab(tab.path); }}
+                    onkeydown={( e ) => { e.stopPropagation(); (e.key === 'Enter' || e.key === ' ') && closeTab(tab.path); }}
                     title="Закрыть"
                     aria-label="Закрыть"
                   >
@@ -1838,7 +1837,7 @@
                 {#if i > 0}
                   <span class="breadcrumb-divider">&gt;</span>
                 {/if}
-                <button class="breadcrumb-segment" on:click={() => jumpToSegment(segment.pos)}>
+                <button class="breadcrumb-segment" onclick={() => jumpToSegment(segment.pos)}>
                   {segment.label}
                 </button>
               {/each}
@@ -1848,7 +1847,7 @@
             <button
               class="btn btn-secondary"
               style="padding: 6px 10px; margin-right: 8px;"
-              on:click={() => (showSidebar = !showSidebar)}
+              onclick={() => (showSidebar = !showSidebar)}
               title={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
               aria-label={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
             >
@@ -1891,11 +1890,11 @@
                 style="margin-left: 12px; display: inline-flex; align-items: center; gap: 6px;"
               >
                 <span>{$t('editor.has_draft') || 'Есть черновик'}</span>
-                <button on:click={restoreDraft} class="btn btn-sm btn-warning">
+                <button onclick={restoreDraft} class="btn btn-sm btn-warning">
                   {$t('editor.restore_draft') || 'Восстановить'}
                 </button>
                 <button
-                  on:click={discardDraft}
+                  onclick={discardDraft}
                   class="btn btn-sm btn-secondary"
                   style="padding: 2px 8px;"
                 >
@@ -1916,7 +1915,7 @@
                       id="schema-toggle"
                       type="checkbox"
                       bind:checked={schemaEnabled}
-                      on:change={toggleSchema}
+                      onchange={toggleSchema}
                     />
                     <span class="toggle-slider"></span>
                   </label>
@@ -1933,7 +1932,7 @@
                       id="expert-toggle"
                       type="checkbox"
                       bind:checked={expertMode}
-                      on:change={toggleExpertMode}
+                      onchange={toggleExpertMode}
                     />
                     <span class="toggle-slider"></span>
                   </label>
@@ -1945,7 +1944,7 @@
                   <button
                     class="btn btn-secondary"
                     style="padding:6px 10px;"
-                    on:click={toggleKebab}
+                    onclick={toggleKebab}
                     title="Дополнительные действия"
                     aria-label="Дополнительные действия"
                   >
@@ -1963,11 +1962,11 @@
                     <div
                       class="kebab-dropdown"
                       style="right:0;top:calc(100% + 4px);"
-                      on:click|stopPropagation
+                      onclick={(e) => e.stopPropagation()}
                     >
                       <button
                         class="kebab-item"
-                        on:click={() => {
+                        onclick={() => {
                           showKebabMenu = false;
                           applyQuickFixes();
                         }}
@@ -1977,7 +1976,7 @@
                       </button>
                       <button
                         class="kebab-item"
-                        on:click={() => {
+                        onclick={() => {
                           showKebabMenu = false;
                           openTemplatesModal();
                           loadTemplates();
@@ -1988,7 +1987,7 @@
                       </button>
                       <button
                         class="kebab-item"
-                        on:click={() => {
+                        onclick={() => {
                           showKebabMenu = false;
                           showGeneratorModal = true;
                         }}
@@ -1998,7 +1997,7 @@
                       </button>
                       <button
                         class="kebab-item"
-                        on:click={() => {
+                        onclick={() => {
                           showKebabMenu = false;
                           showRenameModal = true;
                           renameTarget = selectedFile.split('/').pop() || '';
@@ -2009,7 +2008,7 @@
                       <div class="kebab-divider"></div>
                       <button
                         class="kebab-item danger"
-                        on:click={() => {
+                        onclick={() => {
                           showKebabMenu = false;
                           deleteFile();
                         }}
@@ -2022,7 +2021,7 @@
                 </div>
 
                 <button
-                  on:click={downloadFile}
+                  onclick={downloadFile}
                   class="btn btn-secondary"
                   style="padding: 6px 10px;"
                   title="Скачать файл"
@@ -2050,7 +2049,7 @@
                 <strong>{$t('editor.mihomo_autoedit_title')}</strong>
                 <div style="margin-top: 2px;">{$t('editor.mihomo_autoedit_body')}</div>
               </div>
-              <button type="button" class="alert-close-btn" on:click={() => {
+              <button type="button" class="alert-close-btn" onclick={() => {
                 dismissMihomoAutoEditWarning = true;
                 localStorage.setItem('xcp:dismissed_warning:mihomo_auto_edit', selectedFile);
               }} aria-label={$t('app.close') || 'Close'}>&times;</button>
@@ -2104,7 +2103,7 @@
               {#if backups.length > 0}
                 <button
                   class="backups-toggle-btn"
-                  on:click={() => (drawerOpen = !drawerOpen)}
+                  onclick={() => (drawerOpen = !drawerOpen)}
                   title="История резервных копий"
                   aria-label="История резервных копий"
                 >
@@ -2138,15 +2137,15 @@
                         class:active={selectedBackup === backup}
                         role="button"
                         tabindex="0"
-                        on:click={() => selectBackup(backup)}
-                        on:keydown={(e) =>
+                        onclick={() => selectBackup(backup)}
+                        onkeydown={(e) =>
                           (e.key === 'Enter' || e.key === ' ') &&
                           (e.preventDefault(), selectBackup(backup))}
                       >
                         <span class="backup-time">{formatBackupDate(backup)}</span>
                         <button
                           class="btn btn-sm btn-secondary restore-inline-btn"
-                          on:click|stopPropagation={() => restoreBackup(backup)}
+                          onclick={( e ) => { e.stopPropagation(); restoreBackup(backup); }}
                         >
                           Восстановить
                         </button>
@@ -2219,14 +2218,14 @@
     class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
-    on:click={() => (showCreateModal = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showCreateModal = false)}
+    onclick={() => (showCreateModal = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showCreateModal = false)}
   >
     <div
       class="confirm-modal"
       role="presentation"
-      on:click|stopPropagation
-      on:keydown|stopPropagation
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
     >
       <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">
         {$t('editor.create_file')}
@@ -2239,13 +2238,13 @@
         placeholder={$t('editor.file_name')}
         class="input"
         style="margin-bottom: 16px;"
-        on:keydown={(e) => e.key === 'Enter' && createFile()}
+        onkeydown={(e) => e.key === 'Enter' && createFile()}
       />
       <div class="confirm-modal-actions">
-        <button on:click={() => (showCreateModal = false)} class="btn btn-secondary">
+        <button onclick={() => (showCreateModal = false)} class="btn btn-secondary">
           {$t('app.cancel')}
         </button>
-        <button on:click={createFile} class="btn btn-primary">
+        <button onclick={createFile} class="btn btn-primary">
           {$t('app.create')}
         </button>
       </div>
@@ -2258,14 +2257,14 @@
     class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
-    on:click={() => (showRenameModal = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showRenameModal = false)}
+    onclick={() => (showRenameModal = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showRenameModal = false)}
   >
     <div
       class="confirm-modal"
       role="presentation"
-      on:click|stopPropagation
-      on:keydown|stopPropagation
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
     >
       <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">
         {$t('editor.rename_file')}
@@ -2278,13 +2277,13 @@
         placeholder={$t('editor.new_name')}
         class="input"
         style="margin-bottom: 16px;"
-        on:keydown={(e) => e.key === 'Enter' && renameFile()}
+        onkeydown={(e) => e.key === 'Enter' && renameFile()}
       />
       <div class="confirm-modal-actions">
-        <button on:click={() => (showRenameModal = false)} class="btn btn-secondary">
+        <button onclick={() => (showRenameModal = false)} class="btn btn-secondary">
           {$t('app.cancel')}
         </button>
-        <button on:click={renameFile} class="btn btn-primary">
+        <button onclick={renameFile} class="btn btn-primary">
           {$t('app.rename')}
         </button>
       </div>
@@ -2297,15 +2296,15 @@
     class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
-    on:click={() => (showTemplatesModal = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showTemplatesModal = false)}
+    onclick={() => (showTemplatesModal = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showTemplatesModal = false)}
   >
     <div
       class="confirm-modal templates-wide-modal"
       role="presentation"
       aria-modal="true"
-      on:click|stopPropagation
-      on:keydown|stopPropagation
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
     >
       <!-- Header -->
       <div class="modal-header">
@@ -2331,7 +2330,7 @@
         <div class="templates-modal-header-actions">
           <button
             class="btn btn-secondary templates-update-btn"
-            on:click={updateTemplates}
+            onclick={updateTemplates}
             disabled={updatingTemplates}
             title={$t('editor.templates_update')}
           >
@@ -2343,7 +2342,7 @@
           <button
             class="btn-close"
             aria-label="Закрыть"
-            on:click={() => (showTemplatesModal = false)}
+            onclick={() => (showTemplatesModal = false)}
           >
             <Icon name="cross" size={14} />
           </button>
@@ -2359,7 +2358,7 @@
               class="tab-btn"
               class:active={templateTab === 'xray'}
               aria-pressed={templateTab === 'xray'}
-              on:click={async () => {
+              onclick={async () => {
                 templateTab = 'xray';
                 selectedTemplate = null;
                 templatePreview = '';
@@ -2373,7 +2372,7 @@
               class="tab-btn"
               class:active={templateTab === 'mihomo'}
               aria-pressed={templateTab === 'mihomo'}
-              on:click={async () => {
+              onclick={async () => {
                 templateTab = 'mihomo';
                 selectedTemplate = null;
                 templatePreview = '';
@@ -2390,7 +2389,7 @@
               <button
                 class="template-item"
                 class:selected={selectedTemplate?.name === template.name}
-                on:click={() => loadTemplatePreview(template)}
+                onclick={() => loadTemplatePreview(template)}
                 disabled={templateLoading}
               >
                 <div class="template-info">
@@ -2432,7 +2431,7 @@
           class="btn btn-primary"
           disabled={!selectedTemplate || !editorView || templateLoading}
           title={!editorView ? $t('editor.no_file_for_template') : undefined}
-          on:click={() => selectedTemplate && applyTemplate(selectedTemplate)}
+          onclick={() => selectedTemplate && applyTemplate(selectedTemplate)}
         >
           {$t('editor.apply_template')}
         </button>
@@ -2446,21 +2445,21 @@
     class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
-    on:click={() => (showGeneratorModal = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showGeneratorModal = false)}
+    onclick={() => (showGeneratorModal = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showGeneratorModal = false)}
   >
     <div
       class="confirm-modal"
       style="max-width: 500px;"
       role="presentation"
-      on:click|stopPropagation
-      on:keydown|stopPropagation
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
     >
       <div class="modal-header">
         <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
           {$t('editor.generator')}
         </h3>
-        <button class="btn-close" on:click={() => (showGeneratorModal = false)}>
+        <button class="btn-close" onclick={() => (showGeneratorModal = false)}>
           <Icon name="cross" size={14} />
         </button>
       </div>
@@ -2516,7 +2515,7 @@
           <button
             class="btn btn-secondary"
             style="padding: 0 12px;"
-            on:click={() => (genUUID = crypto.randomUUID())}
+            onclick={() => (genUUID = crypto.randomUUID())}
             title={$t('editor.generate_uuid')}
           >
             <Icon name="refresh" size={14} />
@@ -2576,10 +2575,10 @@
       {/if}
 
       <div class="confirm-modal-actions">
-        <button on:click={() => (showGeneratorModal = false)} class="btn btn-secondary">
+        <button onclick={() => (showGeneratorModal = false)} class="btn btn-secondary">
           {$t('app.cancel')}
         </button>
-        <button on:click={generateOutbound} class="btn btn-primary">
+        <button onclick={generateOutbound} class="btn btn-primary">
           {$t('app.generate')}
         </button>
       </div>
@@ -2592,15 +2591,15 @@
     class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
-    on:click={() => (showSaveConfirmModal = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showSaveConfirmModal = false)}
+    onclick={() => (showSaveConfirmModal = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showSaveConfirmModal = false)}
   >
     <div
       class="confirm-modal"
       style="max-width: 700px; width: 90%; display: flex; flex-direction: column; max-height: 85vh;"
       role="presentation"
-      on:click|stopPropagation
-      on:keydown|stopPropagation
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
     >
       <div class="modal-header">
         <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
@@ -2608,7 +2607,7 @@
         </h3>
         <button
           class="btn-close"
-          on:click={() => (showSaveConfirmModal = false)}
+          onclick={() => (showSaveConfirmModal = false)}
           aria-label="Close modal"
         >
           <Icon name="cross" size={14} />
@@ -2687,11 +2686,11 @@
       </div>
 
       <div class="confirm-modal-actions" style="margin-top: 16px;">
-        <button on:click={() => (showSaveConfirmModal = false)} class="btn btn-secondary">
+        <button onclick={() => (showSaveConfirmModal = false)} class="btn btn-secondary">
           {$t('app.cancel')}
         </button>
         <button
-          on:click={confirmSave}
+          onclick={confirmSave}
           class="btn btn-primary"
           disabled={saving || (validationResult && !validationResult.valid && !expertMode)}
         >
