@@ -330,7 +330,7 @@
       <button
         class="btn btn-secondary btn-reset"
         style="color:var(--danger);"
-        on:click={resetStatistics}
+        onclick={resetStatistics}
       >
         {$t('traffic.reset_stats')}
       </button>

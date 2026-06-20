@@ -31,7 +31,7 @@
       class="tab-btn"
       class:active={kernel === 'xray'}
       aria-pressed={kernel === 'xray'}
-      on:click={() => {
+      onclick={() => {
         kernel = 'xray';
         kernelInitialized = true;
       }}
@@ -42,7 +42,7 @@
       class="tab-btn"
       class:active={kernel === 'mihomo'}
       aria-pressed={kernel === 'mihomo'}
-      on:click={() => {
+      onclick={() => {
         kernel = 'mihomo';
         kernelInitialized = true;
       }}

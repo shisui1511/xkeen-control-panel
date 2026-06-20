@@ -103,7 +103,7 @@
         type="password"
         class="input"
         bind:value={password}
-        on:keydown={handleKeydown}
+        onkeydown={handleKeydown}
         placeholder={$t('auth.enter_password')}
         disabled={loading}
         autocomplete="current-password"
@@ -113,7 +113,7 @@
     <button
       class="btn btn-primary"
       style="width:100%;padding:11px 14px;font-size:13.5px;"
-      on:click={handleLogin}
+      onclick={handleLogin}
       disabled={loading}
     >
       {loading ? $t('auth.logging_in') : $t('auth.login_btn')}

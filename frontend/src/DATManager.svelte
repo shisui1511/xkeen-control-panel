@@ -275,7 +275,7 @@
     <div class="ph-actions">
       <button
         class="btn btn-secondary"
-        on:click={rollbackAll}
+        onclick={rollbackAll}
         disabled={rollbacking || loading || globalUpdating || updatingFile !== null}
         title={$currentLang === 'ru'
           ? 'Откатить DAT-файлы из бэкапа'
@@ -305,7 +305,7 @@
       </button>
       <button
         class="btn btn-primary"
-        on:click={() => updateAll()}
+        onclick={() => updateAll()}
         disabled={globalUpdating || loading || updatingFile !== null}
         title={$t('dat.update_all')}
       >
@@ -438,7 +438,7 @@
                 {#if isDatFile(file) && file.exists}
                   <button
                     class="btn btn-secondary"
-                    on:click={() => openTagBrowser(file)}
+                    onclick={() => openTagBrowser(file)}
                     title={$currentLang === 'ru' ? 'Просмотр тегов' : 'Browse tags'}
                   >
                     <svg
@@ -458,7 +458,7 @@
                   <button
                     class="btn btn-primary"
                     class:btn-loading={updatingFile === file.name}
-                    on:click={() => updateAll(file.name)}
+                    onclick={() => updateAll(file.name)}
                     disabled={globalUpdating || updatingFile !== null}
                     title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
                   >
@@ -472,7 +472,7 @@
                   <button
                     class="btn btn-secondary btn-icon-only"
                     class:btn-loading={updatingFile === file.name}
-                    on:click={() => updateAll(file.name)}
+                    onclick={() => updateAll(file.name)}
                     disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_all')}
                   >
@@ -568,7 +568,7 @@
                 {#if isDatFile(file) && file.exists}
                   <button
                     class="btn btn-secondary"
-                    on:click={() => openTagBrowser(file)}
+                    onclick={() => openTagBrowser(file)}
                     title={$currentLang === 'ru' ? 'Просмотр тегов' : 'Browse tags'}
                   >
                     <svg
@@ -588,7 +588,7 @@
                   <button
                     class="btn btn-primary"
                     class:btn-loading={updatingFile === file.name}
-                    on:click={() => updateAll(file.name)}
+                    onclick={() => updateAll(file.name)}
                     disabled={globalUpdating || updatingFile !== null}
                     title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
                   >
@@ -602,7 +602,7 @@
                   <button
                     class="btn btn-secondary btn-icon-only"
                     class:btn-loading={updatingFile === file.name}
-                    on:click={() => updateAll(file.name)}
+                    onclick={() => updateAll(file.name)}
                     disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_all')}
                   >
@@ -685,7 +685,7 @@
                   <button
                     class="btn btn-primary"
                     class:btn-loading={updatingFile === file.name}
-                    on:click={() => updateAll(file.name)}
+                    onclick={() => updateAll(file.name)}
                     disabled={globalUpdating || updatingFile !== null}
                     title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
                   >
@@ -699,7 +699,7 @@
                   <button
                     class="btn btn-secondary btn-icon-only"
                     class:btn-loading={updatingFile === file.name}
-                    on:click={() => updateAll(file.name)}
+                    onclick={() => updateAll(file.name)}
                     disabled={globalUpdating || updatingFile !== null}
                     title={$t('dat.update_all')}
                   >
@@ -722,9 +722,9 @@
 <!-- Tag Browser Modal -->
 {#if tagDrawer.open}
   <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-  <div class="tag-overlay" on:click={closeTagBrowser}>
+  <div class="tag-overlay" onclick={closeTagBrowser}>
     <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-    <div class="tag-drawer" on:click|stopPropagation>
+    <div class="tag-drawer" onclick={(e) => e.stopPropagation()}>
       <div class="td-header">
         <div class="td-title">
           <svg
@@ -744,7 +744,7 @@
             >
           {/if}
         </div>
-        <button class="td-close" on:click={closeTagBrowser} aria-label="Close">✕</button>
+        <button class="td-close" onclick={closeTagBrowser} aria-label="Close">✕</button>
       </div>
 
       <div class="td-hint">
@@ -772,7 +772,7 @@
           autofocus
         />
         {#if tagDrawer.search}
-          <button class="td-clear" on:click={() => (tagDrawer = { ...tagDrawer, search: '' })}
+          <button class="td-clear" onclick={() => (tagDrawer = { ...tagDrawer, search: '' })}
             >✕</button
           >
         {/if}
@@ -798,7 +798,7 @@
               <button
                 class="td-tag"
                 class:copied={isCopied}
-                on:click={() => tagDrawer.file && copyTag(tagDrawer.file, tag.tag)}
+                onclick={() => tagDrawer.file && copyTag(tagDrawer.file, tag.tag)}
                 title={$currentLang === 'ru' ? `Копировать: ${ruleValue}` : `Copy: ${ruleValue}`}
               >
                 <span class="td-tag-name">{tag.tag}</span>

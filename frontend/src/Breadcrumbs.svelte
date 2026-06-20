@@ -10,7 +10,7 @@
 <!-- Visual rules live in global.css under .breadcrumbs etc. -->
 <nav class="breadcrumbs">
   {#if !hideHome}
-    <button class="breadcrumb-home" on:click={() => onNavigate('dashboard')}>
+    <button class="breadcrumb-home" onclick={() => onNavigate('dashboard')}>
       <Icon name="dashboard" size={12} />
       {$t('nav.dashboard')}
     </button>
@@ -20,7 +20,7 @@
       <span class="breadcrumb-separator">/</span>
     {/if}
     {#if item.tab && i < items.length - 1}
-      <button class="breadcrumb-link" on:click={() => onNavigate(item.tab || '')}
+      <button class="breadcrumb-link" onclick={() => onNavigate(item.tab || '')}
         >{item.label}</button
       >
     {:else}

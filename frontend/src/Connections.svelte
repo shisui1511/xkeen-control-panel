@@ -315,7 +315,7 @@
           <input
             type="checkbox"
             bind:checked={showProcessName}
-            on:change={onToggleProcessName}
+            onchange={onToggleProcessName}
             disabled={!isMihomoActive || processModePatchPending}
           />
           <span class="toggle-slider"></span>
@@ -325,7 +325,7 @@
       <button
         class="btn btn-secondary"
         style="color:var(--danger);"
-        on:click={closeAllConnections}
+        onclick={closeAllConnections}
         disabled={connections.length === 0}
       >
         {$t('conn.close_all')}
@@ -483,7 +483,7 @@
                   <button
                     class="btn btn-secondary btn-close-conn"
                     style="padding: 4px 8px; color: var(--danger); border-color: transparent;"
-                    on:click={() => closeConnection(conn.id)}
+                    onclick={() => closeConnection(conn.id)}
                     title={$t('app.close')}
                   >
                     ×

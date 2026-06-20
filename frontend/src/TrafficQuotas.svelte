@@ -379,11 +379,11 @@
     </div>
     <div class="ph-actions">
       {#if stats}
-        <button class="btn btn-secondary" on:click={clearAlerts}>
+        <button class="btn btn-secondary" onclick={clearAlerts}>
           {$t('trafficquotas.clear_alerts')}
         </button>
       {/if}
-      <button class="btn btn-primary" on:click={startCreate}>
+      <button class="btn btn-primary" onclick={startCreate}>
         <svg
           width="14"
           height="14"
@@ -416,7 +416,7 @@
           <p class="info-banner-description">{$t('trafficquotas.banner_text')}</p>
         </div>
       </div>
-      <button class="info-banner-close" on:click={dismissBanner} aria-label="Dismiss banner">
+      <button class="info-banner-close" onclick={dismissBanner} aria-label="Dismiss banner">
         &times;
       </button>
     </div>
@@ -604,7 +604,7 @@
                         type="checkbox"
                         checked={q.enabled}
                         disabled={togglingQuotas[q.id]}
-                        on:change={() => toggleEnabled(q)}
+                        onchange={() => toggleEnabled(q)}
                       />
                       <span class="toggle-slider"></span>
                     </label>
@@ -612,23 +612,23 @@
                     <div class="dropdown-container">
                       <button
                         class="btn btn-secondary action-btn-dots"
-                        on:click={(e) => toggleDropdown(q.id, e)}>⋯</button
+                        onclick={(e) => toggleDropdown(q.id, e)}>⋯</button
                       >
                       {#if activeDropdownId === q.id}
                         <div class="dropdown-menu">
                           <button
-                            on:click={() => {
+                            onclick={() => {
                               resetQuota(q.id);
                               activeDropdownId = null;
                             }}
                           >
                             {$t('trafficquotas.reset')}
                           </button>
-                          <button on:click={() => startEdit(q)}>
+                          <button onclick={() => startEdit(q)}>
                             {$t('app.edit')}
                           </button>
                           <button
-                            on:click={() => {
+                            onclick={() => {
                               deleteQuota(q.id);
                               activeDropdownId = null;
                             }}
@@ -689,13 +689,13 @@
     class="modal-overlay"
     role="button"
     tabindex="0"
-    on:click={cancelEdit}
-    on:keydown={handleKeydown}
+    onclick={cancelEdit}
+    onkeydown={handleKeydown}
   >
-    <div class="modal-card" role="presentation" on:click|stopPropagation>
+    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
       <div class="modal-card-header">
         <h2>{editingQuota ? $t('trafficquotas.edit_quota') : $t('trafficquotas.new_quota')}</h2>
-        <button class="modal-close-btn" on:click={cancelEdit}>&times;</button>
+        <button class="modal-close-btn" onclick={cancelEdit}>&times;</button>
       </div>
       <div class="modal-card-body">
         <div class="form-group">
@@ -801,8 +801,8 @@
         </div>
       </div>
       <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={cancelEdit}>{$t('app.cancel')}</button>
-        <button class="btn btn-primary" on:click={saveQuota}>{$t('app.save')}</button>
+        <button class="btn btn-secondary" onclick={cancelEdit}>{$t('app.cancel')}</button>
+        <button class="btn btn-primary" onclick={saveQuota}>{$t('app.save')}</button>
       </div>
     </div>
   </div>
