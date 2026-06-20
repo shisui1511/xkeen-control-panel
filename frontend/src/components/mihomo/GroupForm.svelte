@@ -91,3 +91,118 @@
     >
   </div>
 </div>
+
+<style>
+  .form-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .form-row2 {
+    display: flex;
+    gap: 10px;
+  }
+  .form-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+  .form-col-sm {
+    flex: 0 0 100px;
+  }
+
+  .form-label {
+    font-size: 11px;
+    color: var(--fg-dim);
+    font-weight: 500;
+  }
+
+  .form-input,
+  .form-select {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
+    font-size: 13px;
+    padding: 6px 10px;
+    outline: none;
+    width: 100%;
+    transition: border-color var(--transition-fast);
+  }
+
+  .form-input:focus,
+  .form-select:focus {
+    border-color: var(--primary);
+  }
+
+  .form-select-inline {
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--fg-secondary);
+    font-size: 12px;
+    padding: 2px 4px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  .tag-input-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    align-items: center;
+  }
+
+  .tag-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(41, 194, 240, 0.12);
+    border: 1px solid rgba(41, 194, 240, 0.25);
+    color: var(--primary);
+    font-size: 11px;
+    border-radius: 10px;
+    padding: 2px 8px;
+  }
+
+  .tag-rm {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 10px;
+    padding: 0;
+    line-height: 1;
+  }
+
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--fg-primary);
+  }
+
+  .form-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 4px;
+  }
+</style>

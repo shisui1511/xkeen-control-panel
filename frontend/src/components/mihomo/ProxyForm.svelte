@@ -186,3 +186,102 @@
     >
   </div>
 </div>
+
+<style>
+  .form-card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .form-row2 {
+    display: flex;
+    gap: 10px;
+  }
+  .form-col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+  }
+  .form-col-sm {
+    flex: 0 0 100px;
+  }
+
+  .form-label {
+    font-size: 11px;
+    color: var(--fg-dim);
+    font-weight: 500;
+    text-transform: none; /* Keep label lowercase/normal text as standard */
+  }
+
+  .form-input,
+  .form-select {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-primary);
+    font-size: 13px;
+    padding: 6px 10px;
+    outline: none;
+    width: 100%;
+    transition: border-color var(--transition-fast);
+  }
+
+  .form-input:focus,
+  .form-select:focus {
+    border-color: var(--primary);
+  }
+
+  .input-with-btn {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .input-with-btn .form-input {
+    flex: 1;
+  }
+
+  .btn-gen {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    color: var(--fg-secondary);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background var(--transition-fast);
+    flex-shrink: 0;
+  }
+
+  .btn-gen:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--fg-primary);
+  }
+
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--fg-primary);
+  }
+
+  .form-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 4px;
+  }
+</style>
