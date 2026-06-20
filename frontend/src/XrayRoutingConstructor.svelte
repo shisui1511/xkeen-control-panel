@@ -4,6 +4,7 @@
   import { capabilities, showToast, fetchCapabilities } from './stores';
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
   import { parseValidationError } from './lib/errorParser';
+  import { findPortCollisions, parseMihomoPorts, type PortAllocation } from './lib/portChecker';
 
   let {
     onSwitchTab = () => {},
@@ -803,6 +804,49 @@
     // UX-06: Pre-emptive warning if empty proxies list
     if (customOutbounds.length === 0) {
       if (!confirm($t('editor.empty_proxies_warning') || 'No proxy servers configured. The configuration might be broken!')) {
+        applyLoading = false;
+        return;
+      }
+    }
+
+    // Check port collisions
+    const xrayPorts: PortAllocation[] = [];
+    const { dnsInbounds } = syncDnsPipeline(dnsConfig.servers, proxyTag);
+    const activeInbounds = [...inbounds.filter(ib => !String(ib.tag || '').startsWith('dns-in-')), ...dnsInbounds];
+    for (const ib of activeInbounds) {
+      if (ib && ib.port) {
+        xrayPorts.push({
+          port: Number(ib.port),
+          engine: 'xray',
+          purpose: ib.tag || 'inbound'
+        });
+      }
+    }
+
+    let mihomoPorts: PortAllocation[] = [];
+    try {
+      const res = await fetch('/api/config/read?path=' + encodeURIComponent('/opt/etc/mihomo/config.yaml'));
+      if (res.ok) {
+        const yamlText = await res.text();
+        mihomoPorts = parseMihomoPorts(yamlText);
+      }
+    } catch (e) {
+      console.warn('Failed to load Mihomo config for port checking:', e);
+    }
+
+    const allPorts = [...xrayPorts, ...mihomoPorts];
+    const collisions = findPortCollisions(allPorts);
+    if (collisions.length > 0) {
+      const details = collisions.map(group => {
+        const portNum = group[0].port;
+        const descriptions = group.map(p => `${p.engine} (${p.purpose})`).join(' vs ');
+        return `Port ${portNum}: ${descriptions}`;
+      }).join('\n');
+      
+      const msg = ru 
+        ? `Обнаружен конфликт портов:\n${details}\n\nПродолжить применение?`
+        : `Port collisions detected:\n${details}\n\nDo you want to proceed?`;
+      if (!confirm(msg)) {
         applyLoading = false;
         return;
       }
