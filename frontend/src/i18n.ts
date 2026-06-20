@@ -1145,7 +1145,13 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.obfsType': 'Тип обфускации',
     'editor.obfsPassword': 'Пароль обфускации',
     'editor.none': 'Нет',
-    'editor.simple': 'Simple'
+    'editor.simple': 'Simple',
+    'groups.use_providers': 'Провайдеры подписок (use:)',
+    'groups.use_providers_hint': 'Прокси из этих Mihomo-подписок будут доступны группе',
+    'groups.strategy': 'Стратегия балансировки',
+    'groups.strategy_round_robin': 'Последовательная (round-robin)',
+    'groups.strategy_consistent_hashing': 'Стабильная (consistent-hashing)',
+    'groups.strategy_sticky_sessions': 'Сессионная (sticky-sessions)'
   },
   en: {
     // Common
@@ -2279,7 +2285,13 @@ const translations: Record<Lang, Record<string, string>> = {
     'editor.obfsType': 'Obfuscation type',
     'editor.obfsPassword': 'Obfuscation password',
     'editor.none': 'None',
-    'editor.simple': 'Simple'
+    'editor.simple': 'Simple',
+    'groups.use_providers': 'Subscription providers (use:)',
+    'groups.use_providers_hint': 'Proxies from these Mihomo subscriptions will be available to the group',
+    'groups.strategy': 'Load-balance strategy',
+    'groups.strategy_round_robin': 'Sequential (round-robin)',
+    'groups.strategy_consistent_hashing': 'Stable (consistent-hashing)',
+    'groups.strategy_sticky_sessions': 'Session-based (sticky-sessions)'
   }
 };
 
