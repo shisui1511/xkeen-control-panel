@@ -275,7 +275,6 @@
     '02_dns.json',
     '03_inbounds.json',
     '04_outbounds.json',
-    '04_outbounds.manual.json',
     '05_routing.json',
     '06_policy.json'
   ];
@@ -349,13 +348,11 @@
     const inboundsFile = xrayFiles['03_inbounds.json'] || {};
     inbounds = inboundsFile.inbounds || [];
 
-    // 04_outbounds.json & 04_outbounds.manual.json (populate customOutbounds)
+    // 04_outbounds.json (populate customOutbounds)
     const outboundsFile = xrayFiles['04_outbounds.json'] || {};
-    const manualFile = xrayFiles['04_outbounds.manual.json'] || {};
     const fileOutbounds = (outboundsFile.outbounds ?? []) as any[];
-    const manualOutbounds = (manualFile.outbounds ?? []) as any[];
 
-    const allCustom = [...fileOutbounds, ...manualOutbounds].filter(
+    const allCustom = fileOutbounds.filter(
       (o: any) => o && o.tag !== 'direct' && o.tag !== 'block' && o.tag !== 'dns-out'
     );
 
@@ -432,7 +429,7 @@
             const json = await res.json();
             const fileOutbounds = (json.outbounds ?? []) as any[];
 
-            if (f.name === '04_outbounds.json' || f.name === '04_outbounds.manual.json') {
+            if (f.name === '04_outbounds.json') {
               for (const o of fileOutbounds) {
                 if (o && o.tag && o.tag !== 'direct' && o.tag !== 'block' && o.tag !== 'dns-out') {
                   custom.push(o);
@@ -740,9 +737,6 @@
 
     // 04_outbounds.json
     list.push(['04_outbounds.json', { outbounds: customOutbounds }]);
-
-    // 04_outbounds.manual.json
-    list.push(['04_outbounds.manual.json', { outbounds: [] }]);
 
     // 05_routing.json
     const rules = [...routingRules];
