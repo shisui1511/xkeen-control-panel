@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,7 +76,7 @@ func TestConfigSaveRace(t *testing.T) {
 			default:
 				req := httptest.NewRequest(
 					http.MethodPost,
-					"/api/config/save?path="+urlQueryEscape(configPath),
+					"/api/config/save?path="+url.QueryEscape(configPath),
 					strings.NewReader("external-controller: 0.0.0.0:9090\ntproxy-port: 5001\n"),
 				)
 				rr := httptest.NewRecorder()
@@ -88,9 +89,4 @@ func TestConfigSaveRace(t *testing.T) {
 	}()
 
 	wg.Wait()
-}
-
-// urlQueryEscape escapes path for query string
-func urlQueryEscape(s string) string {
-	return strings.ReplaceAll(s, "+", "%2B")
 }
