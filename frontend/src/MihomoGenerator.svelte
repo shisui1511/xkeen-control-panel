@@ -125,14 +125,19 @@
   let lastPreservedKeysStr = '';
   $: if (preservedKeys.join(',') !== lastPreservedKeysStr) {
     lastPreservedKeysStr = preservedKeys.join(',');
-    dismissMergeWarning = false;
+    const dismissed = localStorage.getItem('xcp:dismissed_warning:preserved_keys');
+    dismissMergeWarning = (dismissed === lastPreservedKeysStr);
   }
 
   let dismissZkeenGeodataWarning = false;
   let lastActivePreset = '';
   $: if (activePreset !== lastActivePreset) {
+    if (lastActivePreset && activePreset !== lastActivePreset) {
+      localStorage.removeItem('xcp:dismissed_warning:zkeen_geodata');
+    }
     lastActivePreset = activePreset;
-    dismissZkeenGeodataWarning = false;
+    const dismissed = localStorage.getItem('xcp:dismissed_warning:zkeen_geodata');
+    dismissZkeenGeodataWarning = (dismissed === activePreset);
   }
 
   let sniffer = {
@@ -2470,7 +2475,10 @@
           {$t('editor.constructor_merge_warning_body', { keys: preservedKeys.join(', ') })}
         </div>
       </div>
-      <button class="alert-close-btn" on:click={() => (dismissMergeWarning = true)} aria-label="Dismiss">&times;</button>
+      <button type="button" class="alert-close-btn" on:click={() => {
+        dismissMergeWarning = true;
+        localStorage.setItem('xcp:dismissed_warning:preserved_keys', preservedKeys.join(','));
+      }} aria-label={$t('app.close') || 'Close'}>&times;</button>
     </div>
   {/if}
 
@@ -2517,7 +2525,10 @@
         <div class="alert alert-warning alert-dismissible" style="margin-bottom: 16px; padding: 8px 12px; font-size: 13px; display: flex; align-items: center; gap: 8px; border-radius: var(--radius-sm);">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink: 0;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           <span>{$t('editor.requires_zkeen_geodata')}</span>
-          <button class="alert-close-btn" style="top: 50%; transform: translateY(-50%);" on:click={() => (dismissZkeenGeodataWarning = true)} aria-label="Dismiss">&times;</button>
+          <button type="button" class="alert-close-btn" style="top: 50%; transform: translateY(-50%);" on:click={() => {
+            dismissZkeenGeodataWarning = true;
+            localStorage.setItem('xcp:dismissed_warning:zkeen_geodata', activePreset);
+          }} aria-label={$t('app.close') || 'Close'}>&times;</button>
         </div>
       {/if}
 

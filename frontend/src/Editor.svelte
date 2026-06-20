@@ -148,8 +148,12 @@
   let dismissMihomoAutoEditWarning = false;
   let lastSelectedFile = '';
   $: if (selectedFile !== lastSelectedFile) {
+    if (lastSelectedFile && selectedFile !== lastSelectedFile) {
+      localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
+    }
     lastSelectedFile = selectedFile;
-    dismissMihomoAutoEditWarning = false;
+    const dismissed = localStorage.getItem('xcp:dismissed_warning:mihomo_auto_edit');
+    dismissMihomoAutoEditWarning = (dismissed === selectedFile);
   }
 
   let showSidebar = true;
@@ -1016,6 +1020,8 @@
       localStorage.removeItem(`editor.draft.${selectedFile}`);
       hasDraft = false;
       draftContent = '';
+      localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
+      dismissMihomoAutoEditWarning = false;
       await loadBackups(selectedFile);
     } catch (e: any) {
       showToast('error', $t('editor.save_error') + ': ' + e.message);
@@ -1051,6 +1057,9 @@
       localStorage.removeItem(`editor.draft.${selectedFile}`);
       hasDraft = false;
       draftContent = '';
+
+      localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
+      dismissMihomoAutoEditWarning = false;
 
       // Update tab state
       const activeT = tabs.find((t) => t.path === selectedFile);
@@ -2041,7 +2050,10 @@
                 <strong>{$t('editor.mihomo_autoedit_title')}</strong>
                 <div style="margin-top: 2px;">{$t('editor.mihomo_autoedit_body')}</div>
               </div>
-              <button class="alert-close-btn" on:click={() => (dismissMihomoAutoEditWarning = true)} aria-label="Dismiss">&times;</button>
+              <button type="button" class="alert-close-btn" on:click={() => {
+                dismissMihomoAutoEditWarning = true;
+                localStorage.setItem('xcp:dismissed_warning:mihomo_auto_edit', selectedFile);
+              }} aria-label={$t('app.close') || 'Close'}>&times;</button>
             </div>
           {/if}
 
