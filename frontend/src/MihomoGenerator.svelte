@@ -3,6 +3,7 @@
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities } from './stores';
   import { parseValidationError } from './lib/errorParser';
+  import { findPortCollisions, type PortAllocation } from './lib/portChecker';
 
   export let onSwitchTab: (tab: string) => void = () => {};
   export let selectedFile: string = '';
@@ -2271,6 +2272,52 @@
     }
     showApplyConfirm = false;
     applyLoading = true;
+
+    // Check port collisions
+    const mihomoPorts: PortAllocation[] = [
+      { port: existingTproxyPort ?? 1181, engine: 'mihomo', purpose: 'tproxy-port' },
+      { port: existingRedirPort ?? 1182, engine: 'mihomo', purpose: 'redir-port' },
+      { port: 9090, engine: 'mihomo', purpose: 'external-controller' }
+    ];
+
+    let xrayPorts: PortAllocation[] = [];
+    try {
+      const res = await fetch('/api/config/read?path=' + encodeURIComponent('/opt/etc/xray/03_inbounds.json'));
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.inbounds)) {
+          for (const ib of data.inbounds) {
+            if (ib && ib.port) {
+              xrayPorts.push({
+                port: Number(ib.port),
+                engine: 'xray',
+                purpose: ib.tag || 'inbound'
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load Xray inbounds for port checking:', e);
+    }
+
+    const allPorts = [...mihomoPorts, ...xrayPorts];
+    const collisions = findPortCollisions(allPorts);
+    if (collisions.length > 0) {
+      const details = collisions.map(group => {
+        const portNum = group[0].port;
+        const descriptions = group.map(p => `${p.engine} (${p.purpose})`).join(' vs ');
+        return `Port ${portNum}: ${descriptions}`;
+      }).join('\n');
+      
+      const msg = ru 
+        ? `Обнаружен конфликт портов:\n${details}\n\nПродолжить применение?`
+        : `Port collisions detected:\n${details}\n\nDo you want to proceed?`;
+      if (!confirm(msg)) {
+        applyLoading = false;
+        return;
+      }
+    }
 
     try {
       const csrfToken = localStorage.getItem('csrf_token');
