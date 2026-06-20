@@ -741,7 +741,7 @@
       <p class="sub">{$t('subscr.subtitle')}</p>
     </div>
     <div class="ph-actions">
-      <button class="btn btn-secondary" on:click={refreshAll} disabled={loading}>
+      <button class="btn btn-secondary" onclick={refreshAll} disabled={loading}>
         <svg
           width="14"
           height="14"
@@ -754,7 +754,7 @@
         {$t('subscr.refresh_all')}
       </button>
 
-      <button class="btn btn-primary" on:click={openAddModal}>
+      <button class="btn btn-primary" onclick={openAddModal}>
         <svg
           width="14"
           height="14"
@@ -793,7 +793,7 @@
       style="padding: 3rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;"
     >
       <p style="color: var(--fg-secondary); margin: 0;">{$t('subscr.empty')}</p>
-      <button class="btn btn-primary" on:click={openAddModal}>
+      <button class="btn btn-primary" onclick={openAddModal}>
         <svg
           width="14"
           height="14"
@@ -853,7 +853,7 @@
               <button
                 class="collapse-toggle"
                 class:expanded={expandedSubs[sub.id]}
-                on:click={() => toggleExpand(sub.id)}
+                onclick={() => toggleExpand(sub.id)}
                 aria-label="Toggle node list"
               >
                 <svg
@@ -878,7 +878,7 @@
               ></div>
 
               <!-- Имя подписки -->
-              <h2 class="sub-name" on:click={() => toggleExpand(sub.id)}>
+              <h2 class="sub-name" onclick={() => toggleExpand(sub.id)}>
                 {sub.profile_title || sub.name}
               </h2>
               {#if isFormatError(sub.last_error)}
@@ -901,7 +901,7 @@
               <!-- Синий чип количества нод -->
               <span
                 class="nodes-count-badge"
-                on:click={() => toggleExpand(sub.id)}
+                onclick={() => toggleExpand(sub.id)}
                 title={$t('subscr.nodes_count').replace('{count}', String(sub.proxy_count || 0))}
               >
                 {sub.proxy_count || 0}
@@ -910,7 +910,7 @@
               <!-- Кнопка Обновить подписку (круговая стрелочка) -->
               <button
                 class="action-icon-btn"
-                on:click={() => refreshSubscription(sub.id)}
+                onclick={() => refreshSubscription(sub.id)}
                 disabled={refreshLoading[sub.id]}
                 title={$t('subscr.refresh')}
               >
@@ -930,7 +930,7 @@
               <!-- Кнопка редактирования -->
               <button
                 class="action-icon-btn"
-                on:click={() => openEditModal(sub)}
+                onclick={() => openEditModal(sub)}
                 title={$t('app.edit')}
               >
                 <svg
@@ -951,7 +951,7 @@
               <div class="dropdown-container">
                 <button
                   class="action-icon-btn dots-btn"
-                  on:click={() => toggleDropdown(sub.id)}
+                  onclick={() => toggleDropdown(sub.id)}
                   aria-label="More actions"
                 >
                   <svg
@@ -973,14 +973,14 @@
                   <div class="dropdown-menu">
                     {#if $devMode}
                       <button
-                        on:click={() => {
+                        onclick={() => {
                           openDiagnosticModal(sub);
                           activeDropdownId = null;
                         }}>🔍 {$t('subscr.diag_btn')}</button
                       >
                     {/if}
                     <button
-                      on:click={() => {
+                      onclick={() => {
                         deleteSubscription(sub.id);
                         activeDropdownId = null;
                       }}
@@ -1164,7 +1164,7 @@
                       <div
                         class="sub-node-row"
                         class:active={isNodeActive}
-                        on:click={() => {
+                        onclick={() => {
                           if (sub.type !== 'mihomo') {
                             setActiveNode(sub.id, node.tag, sub.type);
                           }
@@ -1217,7 +1217,7 @@
 
                           <button
                             class="sub-node-ping-btn"
-                            on:click={(e) => {
+                            onclick={(e) => {
                               e.stopPropagation();
                               checkNodeHealth(sub.id, node.tag);
                             }}
@@ -1296,13 +1296,13 @@
     class="modal-overlay"
     role="button"
     tabindex="0"
-    on:click={closeModal}
-    on:keydown={handleKeydown}
+    onclick={closeModal}
+    onkeydown={handleKeydown}
   >
-    <div class="modal-card" role="presentation" on:click|stopPropagation>
+    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
       <div class="modal-card-header">
         <h2>{editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}</h2>
-        <button class="modal-close-btn" on:click={closeModal}>&times;</button>
+        <button class="modal-close-btn" onclick={closeModal}>&times;</button>
       </div>
       <div class="modal-card-body">
         <div class="form-group">
@@ -1323,7 +1323,7 @@
               type="button"
               class="seg-opt"
               class:seg-active={formType === 'xray'}
-              on:click={() => (formType = 'xray')}
+              onclick={() => (formType = 'xray')}
             >
               XRay (JSON / Base64)
             </button>
@@ -1331,7 +1331,7 @@
               type="button"
               class="seg-opt"
               class:seg-active={formType === 'mihomo'}
-              on:click={() => (formType = 'mihomo')}
+              onclick={() => (formType = 'mihomo')}
             >
               Mihomo (Clash YAML)
             </button>
@@ -1367,7 +1367,7 @@
           <button
             type="button"
             class="advanced-toggle-btn"
-            on:click={() => (showAdvanced = !showAdvanced)}
+            onclick={() => (showAdvanced = !showAdvanced)}
           >
             <span class="arrow">{showAdvanced ? '▼' : '►'}</span>
             <span>{$t('subscr.advanced_params') || 'Дополнительные параметры'}</span>
@@ -1445,11 +1445,11 @@
                   {$currentLang === 'ru' 
                     ? 'Не удалось найти группы в config.yaml Mihomo. Перейдите в ' 
                     : 'Could not find any groups in Mihomo config.yaml. Please go to the '}
-                  <a href="#/constructor" on:click={(e) => { e.preventDefault(); closeModal(); window.location.hash = '#/constructor'; }} style="text-decoration: underline; color: var(--accent);">
+                  <a href="#/constructor" onclick={(e) => { e.preventDefault(); closeModal(); window.location.hash = '#/constructor'; }} style="text-decoration: underline; color: var(--accent);">
                     {$currentLang === 'ru' ? 'визуальный конструктор' : 'visual constructor'}
                   </a>
                   {$currentLang === 'ru' ? ' или ' : ' or '}
-                  <a href="#/editor" on:click={(e) => { e.preventDefault(); closeModal(); window.location.hash = '#/editor'; }} style="text-decoration: underline; color: var(--accent);">
+                  <a href="#/editor" onclick={(e) => { e.preventDefault(); closeModal(); window.location.hash = '#/editor'; }} style="text-decoration: underline; color: var(--accent);">
                     {$currentLang === 'ru' ? 'текстовый редактор' : 'text editor'}
                   </a>
                   {$currentLang === 'ru' ? ' для создания групп.' : ' to create groups.'}
@@ -1461,7 +1461,7 @@
               <div class="mihomo-groups-checkboxes" style="display:flex; flex-direction:column; gap:8px; max-height:150px; overflow-y:auto; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background: rgba(0,0,0,0.15);">
                 {#each availableMihomoGroups as group}
                   <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-primary);">
-                    <input type="checkbox" checked={formMihomoGroups.includes(group)} on:change={(e) => {
+                    <input type="checkbox" checked={formMihomoGroups.includes(group)} onchange={(e) => {
                       if (e.currentTarget.checked) {
                         formMihomoGroups = [...formMihomoGroups, group];
                       } else {
@@ -1507,8 +1507,8 @@
         </div>
       </div>
       <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={closeModal}>{$t('app.cancel')}</button>
-        <button class="btn btn-primary" on:click={saveSubscription}>{$t('app.save')}</button>
+        <button class="btn btn-secondary" onclick={closeModal}>{$t('app.cancel')}</button>
+        <button class="btn btn-primary" onclick={saveSubscription}>{$t('app.save')}</button>
       </div>
     </div>
   </div>
@@ -1519,34 +1519,34 @@
     class="modal-overlay"
     role="button"
     tabindex="0"
-    on:click={closeDiagnosticModal}
-    on:keydown={handleKeydown}
+    onclick={closeDiagnosticModal}
+    onkeydown={handleKeydown}
   >
-    <div class="modal-card modal-large" role="presentation" on:click|stopPropagation>
+    <div class="modal-card modal-large" role="presentation" onclick={(e) => e.stopPropagation()}>
       <div class="modal-card-header">
         <h2>{$t('subscr.diag_title').replace('{name}', diagnosticSub.name)}</h2>
-        <button class="modal-close-btn" on:click={closeDiagnosticModal}>&times;</button>
+        <button class="modal-close-btn" onclick={closeDiagnosticModal}>&times;</button>
       </div>
 
       <div class="diag-tabs">
         <button
           class="diag-tab-btn"
           class:active={diagnosticTab === 'report'}
-          on:click={() => (diagnosticTab = 'report')}
+          onclick={() => (diagnosticTab = 'report')}
         >
           {$t('subscr.tab_report')}
         </button>
         <button
           class="diag-tab-btn"
           class:active={diagnosticTab === 'headers'}
-          on:click={() => (diagnosticTab = 'headers')}
+          onclick={() => (diagnosticTab = 'headers')}
         >
           {$t('subscr.tab_headers')}
         </button>
         <button
           class="diag-tab-btn"
           class:active={diagnosticTab === 'raw'}
-          on:click={() => (diagnosticTab = 'raw')}
+          onclick={() => (diagnosticTab = 'raw')}
         >
           {$t('subscr.tab_raw')}
         </button>
@@ -1629,7 +1629,7 @@
       </div>
 
       <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={closeDiagnosticModal}>{$t('app.close')}</button>
+        <button class="btn btn-secondary" onclick={closeDiagnosticModal}>{$t('app.close')}</button>
       </div>
     </div>
   </div>

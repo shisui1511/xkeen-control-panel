@@ -76,7 +76,7 @@
       href="#/dashboard"
       class="nav-item"
       class:active={currentTab === 'dashboard'}
-      on:click={() => isSidebarOpen.set(false)}
+      onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.dashboard')}
     >
       <Icon name="dashboard" size={16} />
@@ -86,7 +86,7 @@
       href="#/services"
       class="nav-item"
       class:active={currentTab === 'services'}
-      on:click={() => isSidebarOpen.set(false)}
+      onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.services')}
     >
       <Icon name="services" size={16} />
@@ -96,7 +96,7 @@
       href="#/editor"
       class="nav-item"
       class:active={currentTab === 'editor'}
-      on:click={() => isSidebarOpen.set(false)}
+      onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.editor')}
     >
       <Icon name="editor" size={16} />
@@ -106,7 +106,7 @@
       href="#/settings"
       class="nav-item"
       class:active={currentTab === 'settings'}
-      on:click={() => isSidebarOpen.set(false)}
+      onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.settings')}
     >
       <Icon name="settings" size={16} />
@@ -149,7 +149,7 @@
       href="#/logs"
       class="nav-item"
       class:active={currentTab === 'logs'}
-      on:click={() => isSidebarOpen.set(false)}
+      onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.logs')}
     >
       <Icon name="logs" size={16} />
@@ -160,7 +160,7 @@
         href="#/connections"
         class="nav-item"
         class:active={currentTab === 'connections'}
-        on:click={() => isSidebarOpen.set(false)}
+        onclick={() => isSidebarOpen.set(false)}
         title={$t('nav.connections')}
       >
         <Icon name="connections" size={16} />
@@ -178,7 +178,7 @@
       href="#/dat"
       class="nav-item"
       class:active={currentTab === 'dat'}
-      on:click={() => isSidebarOpen.set(false)}
+      onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.dat')}
     >
       <Icon name="dat" size={16} />
@@ -189,7 +189,7 @@
       href="#/console"
       class="nav-item"
       class:active={currentTab === 'console'}
-      on:click={() => isSidebarOpen.set(false)}
+      onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.console')}
     >
       <Icon name="console" size={16} />
@@ -221,7 +221,7 @@
         href="#/proxies"
         class="nav-item"
         class:active={currentTab === 'proxies'}
-        on:click={() => isSidebarOpen.set(false)}
+        onclick={() => isSidebarOpen.set(false)}
         title={$t('nav.proxies')}
       >
         <Icon name="proxies" size={16} />
@@ -238,7 +238,7 @@
         href="#/rules"
         class="nav-item"
         class:active={currentTab === 'rules'}
-        on:click={() => isSidebarOpen.set(false)}
+        onclick={() => isSidebarOpen.set(false)}
         title={$t('nav.rules')}
       >
         <Icon name="rules" size={16} />
@@ -256,7 +256,7 @@
       href="#/subscriptions"
       class="nav-item"
       class:active={currentTab === 'subscriptions'}
-      on:click={() => isSidebarOpen.set(false)}
+      onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.subscriptions')}
     >
       <Icon name="subscriptions" size={16} />
@@ -267,7 +267,7 @@
         href="#/smartproxy"
         class="nav-item"
         class:active={currentTab === 'smartproxy'}
-        on:click={() => isSidebarOpen.set(false)}
+        onclick={() => isSidebarOpen.set(false)}
         title={$t('nav.smartproxy')}
       >
         <Icon name="smartproxy" size={16} />
@@ -302,7 +302,7 @@
         href="#/traffic"
         class="nav-item"
         class:active={currentTab === 'traffic'}
-        on:click={() => isSidebarOpen.set(false)}
+        onclick={() => isSidebarOpen.set(false)}
         title={$t('nav.traffic')}
       >
         <Icon name="traffic" size={16} />
@@ -312,7 +312,7 @@
         href="#/trafficquotas"
         class="nav-item"
         class:active={currentTab === 'trafficquotas'}
-        on:click={() => isSidebarOpen.set(false)}
+        onclick={() => isSidebarOpen.set(false)}
         title={$t('nav.trafficquotas')}
       >
         <Icon name="trafficquotas" size={16} />
@@ -323,7 +323,7 @@
       href="#/network"
       class="nav-item"
       class:active={currentTab === 'network'}
-      on:click={() => isSidebarOpen.set(false)}
+      onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.network')}
     >
       <Icon name="network" size={16} />
@@ -356,7 +356,7 @@
       href="#/settings"
       class="nav-item nav-item-preview"
       class:active={currentTab === 'settings'}
-      on:click={() => isSidebarOpen.set(false)}
+      onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.settings')}
     >
       <Icon name="settings" size={16} />
@@ -368,20 +368,20 @@
 
 <div style="border-top: 1px solid #03101e; padding: 0.5rem 0; background: var(--bg-deep);">
   {#if pwaInstallPrompt}
-    <button class="nav-item" on:click={onInstallPWA} title={$t('nav.install_pwa')}>
+    <button class="nav-item" onclick={onInstallPWA} title={$t('nav.install_pwa')}>
       <Icon name="pwa" size={16} />
       {$t('nav.install_pwa')}
     </button>
   {/if}
   <button
     class="nav-item"
-    on:click={onToggleTheme}
+    onclick={onToggleTheme}
     title={theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
   >
     <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
     {theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
   </button>
-  <button class="nav-item" on:click={onLogout} disabled={loading} title={$t('auth.logout')}>
+  <button class="nav-item" onclick={onLogout} disabled={loading} title={$t('auth.logout')}>
     <Icon name="logout" size={16} />
     {loading ? $t('auth.logging_out') : $t('auth.logout')}
   </button>
