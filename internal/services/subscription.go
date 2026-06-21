@@ -266,6 +266,8 @@ type SubscriptionService struct {
 	consoleSvc      *ConsoleService
 	kernelSvc       *KernelService // для получения реальных версий ядер
 	hwid            string         // постоянный UUID устройства, передаётся как x-hwid
+	mihomoAPIURL    string
+	mihomoSecret    string
 }
 
 // SetConsoleService подключает ConsoleService для триггера xkeen -restart
@@ -278,6 +280,15 @@ func (s *SubscriptionService) SetConsoleService(svc *ConsoleService) {
 // ядер xray и mihomo, используемых в User-Agent при запросах подписок.
 func (s *SubscriptionService) SetKernelService(svc *KernelService) {
 	s.kernelSvc = svc
+}
+
+// SetMihomoAPI настраивает адрес REST API Mihomo и секретный токен авторизации
+// для динамической перезагрузки proxy-providers.
+func (s *SubscriptionService) SetMihomoAPI(apiURL, secret string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mihomoAPIURL = apiURL
+	s.mihomoSecret = secret
 }
 
 // loadOrGenerateHWID читает UUID устройства из файла xcp_hwid.txt или
@@ -949,6 +960,7 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription) (err error) {
 
 	if newHash == oldHash {
 		sub.LastChanged = false
+		s.triggerMihomoProviderReload(providerName)
 		return nil
 	}
 
@@ -2880,5 +2892,47 @@ func (s *SubscriptionService) LockMihomo() {
 
 func (s *SubscriptionService) UnlockMihomo() {
 	s.mihomoMu.Unlock()
+}
+
+func (s *SubscriptionService) triggerMihomoProviderReload(providerName string) {
+	s.mu.RLock()
+	apiURL := s.mihomoAPIURL
+	secret := s.mihomoSecret
+	s.mu.RUnlock()
+
+	if apiURL == "" {
+		return
+	}
+
+	// Clean trailing slash
+	apiURL = strings.TrimRight(apiURL, "/")
+	url := fmt.Sprintf("%s/providers/proxies/%s", apiURL, providerName)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, nil)
+	if err != nil {
+		log.Printf("[Subscriptions] Failed to create PUT request for Mihomo provider reload: %v", err)
+		return
+	}
+
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		log.Printf("[Subscriptions] Failed to reload Mihomo provider %q via REST API: %v", providerName, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		log.Printf("[Subscriptions] Mihomo REST API returned HTTP %d for provider %q reload", resp.StatusCode, providerName)
+		return
+	}
+
+	log.Printf("[Subscriptions] Successfully reloaded Mihomo provider %q via REST API", providerName)
 }
 
