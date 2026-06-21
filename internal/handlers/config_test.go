@@ -585,4 +585,53 @@ func TestCopyDirConfigs_Symlink(t *testing.T) {
 	}
 }
 
+func TestMihomoMergeSave_CleanInstall(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	targetPath := filepath.Join(tmpDir, "non-existent-mihomo.yaml")
+
+	body := `{
+		"path": "` + strings.ReplaceAll(targetPath, "\\", "\\\\") + `",
+		"sections": {
+			"proxy-groups": "  - name: \"new-group\"\n    type: select\n    proxies:\n      - DIRECT",
+			"rules": "  - DOMAIN,google.com,new-group\n  - MATCH,DIRECT"
+		}
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/mihomo-merge", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	api.MihomoMergeSave(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	mergedData, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergedStr := string(mergedData)
+
+	// Check for default system parameters
+	if !strings.Contains(mergedStr, "log-level: silent") {
+		t.Error("expected default 'log-level: silent' in config")
+	}
+	if !strings.Contains(mergedStr, "allow-lan: true") {
+		t.Error("expected default 'allow-lan: true' in config")
+	}
+	if !strings.Contains(mergedStr, "routing-mark: 255") {
+		t.Error("expected default 'routing-mark: 255' in config")
+	}
+
+	// Check for merged sections
+	if !strings.Contains(mergedStr, "new-group") {
+		t.Error("expected new-group to be in merged config")
+	}
+	if !strings.Contains(mergedStr, "DOMAIN,google.com,new-group") {
+		t.Error("expected new rules to be in merged config")
+	}
+}
+
 

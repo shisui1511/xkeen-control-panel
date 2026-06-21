@@ -46,6 +46,7 @@ export interface Rule {
   type: string;
   value: string;
   outbound: string;
+  noResolve?: boolean;
 }
 
 export interface DNSConfig {
@@ -110,18 +111,18 @@ export const ZKEEN_RULE_PROVIDERS: RuleProvider[] = [
     outbound: 'Spotify'
   },
   {
-    name: 'speedtest@domain',
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/speedtest.mrs',
-    behavior: 'domain',
-    format: 'mrs',
-    outbound: 'Speedtest'
-  },
-  {
     name: 'reddit@domain',
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/reddit.mrs',
     behavior: 'domain',
     format: 'mrs',
     outbound: 'Reddit'
+  },
+  {
+    name: 'youtube@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'YouTube'
   },
   {
     name: 'twitch@domain',
@@ -138,6 +139,27 @@ export const ZKEEN_RULE_PROVIDERS: RuleProvider[] = [
     outbound: 'Twitter'
   },
   {
+    name: 'tiktok@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tiktok.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'TikTok'
+  },
+  {
+    name: 'discord@classical',
+    url: 'https://github.com/zxc-rv/assets/raw/main/rules/discord.list',
+    behavior: 'classical',
+    format: 'text',
+    outbound: 'Discord'
+  },
+  {
+    name: 'speedtest@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/speedtest.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'Speedtest'
+  },
+  {
     name: 'meta@domain',
     url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/meta.mrs',
     behavior: 'domain',
@@ -145,25 +167,39 @@ export const ZKEEN_RULE_PROVIDERS: RuleProvider[] = [
     outbound: 'Meta'
   },
   {
-    name: 'discord@classical',
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/classical/discord.txt',
-    behavior: 'classical',
-    format: 'text',
-    outbound: 'Discord'
+    name: 'meta@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/meta@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'Meta'
+  },
+  {
+    name: 'telegram@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/telegram.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'Telegram'
+  },
+  {
+    name: 'telegram@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/telegram@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'Telegram'
   },
   {
     name: 'refilter@domain',
-    url: 'https://raw.githubusercontent.com/1andrevich/Re-filter-lists/release/refilter_domains.mrs',
+    url: 'https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs',
     behavior: 'domain',
     format: 'mrs',
     outbound: 'Заблок. сервисы'
   },
   {
-    name: 'telegram@ipcidr',
-    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs',
-    behavior: 'ipcidr',
+    name: 'roblox@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/roblox.mrs',
+    behavior: 'domain',
     format: 'mrs',
-    outbound: 'Telegram'
+    outbound: 'Заблок. сервисы'
   },
   {
     name: 'github@domain',
@@ -171,6 +207,160 @@ export const ZKEEN_RULE_PROVIDERS: RuleProvider[] = [
     behavior: 'domain',
     format: 'mrs',
     outbound: 'GitHub'
+  },
+  {
+    name: 'google@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'Google'
+  },
+  {
+    name: 'google@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/google@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'Google'
+  },
+  {
+    name: 'amazon@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/amazon.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'amazon@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/amazon@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'akamai@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/akamai.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'akamai@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/akamai@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'cloudflare@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cloudflare.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'cloudflare@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cloudflare@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'digitalocean@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/digitalocean.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'digitalocean@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/digitalocean@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'fastly@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/fastly.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'fastly@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/fastly@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'oracle@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/oracle.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'oracle@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/oracle@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'hetzner@domain',
+    url: 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hetzner.mrs',
+    behavior: 'domain',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'hetzner@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/hetzner@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'scaleway@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/scaleway@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'ovh@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/ovh@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'vultr@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'vodafone@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vodafone@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'gcore@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/gcore@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
+  },
+  {
+    name: 'cdn77@ipcidr',
+    url: 'https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cdn77@ipcidr.mrs',
+    behavior: 'ipcidr',
+    format: 'mrs',
+    outbound: 'CDN'
   },
   {
     name: 'private@ip',
@@ -184,7 +374,7 @@ export const ZKEEN_RULE_PROVIDERS: RuleProvider[] = [
     url: '',
     behavior: 'classical',
     format: 'inline',
-    outbound: 'QUIC',
+    outbound: 'REJECT',
     payload: ['AND,((DST-PORT,443),(NETWORK,UDP))']
   },
   {
@@ -200,6 +390,43 @@ export const ZKEEN_RULE_PROVIDERS: RuleProvider[] = [
       'AND,((DST-PORT,139),(NETWORK,UDP))'
     ]
   }
+];
+
+export const ZKEEN_STANDARD_RULES = [
+  { type: 'RULE-SET', value: 'adlist@domain', outbound: 'REJECT' },
+  { type: 'RULE-SET', value: 'quic@inline', outbound: 'REJECT' },
+  { type: 'RULE-SET', value: 'netbios@inline', outbound: 'REJECT' },
+  { type: 'OR', value: '((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net))', outbound: 'Заблок. сервисы' },
+  { type: 'RULE-SET', value: 'category-ai@domain', outbound: 'AI' },
+  { type: 'RULE-SET', value: 'steam@domain', outbound: 'Steam' },
+  { type: 'RULE-SET', value: 'spotify@domain', outbound: 'Spotify' },
+  { type: 'RULE-SET', value: 'reddit@domain', outbound: 'Reddit' },
+  { type: 'RULE-SET', value: 'youtube@domain', outbound: 'YouTube' },
+  { type: 'RULE-SET', value: 'twitch@domain', outbound: 'Twitch' },
+  { type: 'RULE-SET', value: 'twitter@domain', outbound: 'Twitter' },
+  { type: 'RULE-SET', value: 'tiktok@domain', outbound: 'TikTok' },
+  { type: 'RULE-SET', value: 'discord@classical', outbound: 'Discord' },
+  { type: 'RULE-SET', value: 'speedtest@domain', outbound: 'Speedtest' },
+  { type: 'OR', value: '((RULE-SET,meta@domain),(RULE-SET,meta@ipcidr,no-resolve))', outbound: 'Meta' },
+  { type: 'OR', value: '((RULE-SET,telegram@domain),(RULE-SET,telegram@ipcidr,no-resolve))', outbound: 'Telegram' },
+  { type: 'RULE-SET', value: 'refilter@domain', outbound: 'Заблок. сервисы' },
+  { type: 'OR', value: '((RULE-SET,roblox@domain))', outbound: 'Заблок. сервисы' },
+  { type: 'RULE-SET', value: 'github@domain', outbound: 'GitHub' },
+  { type: 'OR', value: '((RULE-SET,google@domain),(RULE-SET,google@ipcidr))', outbound: 'Google' },
+  { type: 'OR', value: '((RULE-SET,amazon@domain),(RULE-SET,amazon@ipcidr))', outbound: 'CDN' },
+  { type: 'OR', value: '((RULE-SET,akamai@domain),(RULE-SET,akamai@ipcidr))', outbound: 'CDN' },
+  { type: 'OR', value: '((RULE-SET,cloudflare@domain),(RULE-SET,cloudflare@ipcidr))', outbound: 'CDN' },
+  { type: 'OR', value: '((RULE-SET,digitalocean@domain),(RULE-SET,digitalocean@ipcidr))', outbound: 'CDN' },
+  { type: 'OR', value: '((RULE-SET,fastly@domain),(RULE-SET,fastly@ipcidr))', outbound: 'CDN' },
+  { type: 'OR', value: '((RULE-SET,oracle@domain),(RULE-SET,oracle@ipcidr))', outbound: 'CDN' },
+  { type: 'OR', value: '((RULE-SET,hetzner@domain),(RULE-SET,hetzner@ipcidr))', outbound: 'CDN' },
+  { type: 'RULE-SET', value: 'scaleway@ipcidr', outbound: 'CDN' },
+  { type: 'RULE-SET', value: 'ovh@ipcidr', outbound: 'CDN' },
+  { type: 'RULE-SET', value: 'vultr@ipcidr', outbound: 'CDN' },
+  { type: 'RULE-SET', value: 'vodafone@ipcidr', outbound: 'CDN' },
+  { type: 'RULE-SET', value: 'gcore@ipcidr', outbound: 'CDN' },
+  { type: 'RULE-SET', value: 'cdn77@ipcidr', outbound: 'CDN' },
+  { type: 'RULE-SET', value: 'private@ip', outbound: 'DIRECT' }
 ];
 
 export const RULE_PROVIDERS: Record<string, RuleProvider[]> = {
@@ -570,7 +797,7 @@ export function generateYAML(state: MihomoConfigState): string {
       if (g.type === 'load-balance' && g.strategy) {
         lines.push(`    strategy: ${g.strategy}`);
       }
-      if (g.proxies.length > 0) {
+      if (g.proxies && g.proxies.length > 0) {
         lines.push(`    proxies:`);
         for (const p of g.proxies) lines.push(`      - ${yamlSafeString(p)}`);
       }
@@ -599,63 +826,24 @@ export function generateYAML(state: MihomoConfigState): string {
   if (hasRules) {
     lines.push('rules:');
     if (state.activeRuleProvider === 'zkeen') {
-      const zkeenRules = [
-        { type: 'RULE-SET', val: 'adlist@domain', outbound: 'REJECT' },
-        { type: 'RULE-SET', val: 'quic@inline', outbound: 'REJECT' },
-        { type: 'RULE-SET', val: 'netbios@inline', outbound: 'REJECT' },
-        {
-          type: 'OR',
-          val: '((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),Заблок. сервисы',
-          outbound: 'Заблок. сервисы'
-        },
-        { type: 'RULE-SET', val: 'category-ai@domain', outbound: 'AI' },
-        { type: 'RULE-SET', val: 'steam@domain', outbound: 'Steam' },
-        { type: 'RULE-SET', val: 'spotify@domain', outbound: 'Spotify' },
-        { type: 'RULE-SET', val: 'reddit@domain', outbound: 'Reddit' },
-        { type: 'RULE-SET', val: 'twitch@domain', outbound: 'Twitch' },
-        { type: 'RULE-SET', val: 'twitter@domain', outbound: 'Twitter' },
-        { type: 'RULE-SET', val: 'discord@classical', outbound: 'Discord' },
-        { type: 'RULE-SET', val: 'speedtest@domain', outbound: 'Speedtest' },
-        { type: 'GEOSITE', val: 'YOUTUBE', outbound: 'YouTube' },
-        { type: 'GEOIP', val: 'YOUTUBE', outbound: 'YouTube' },
-        { type: 'RULE-SET', val: 'meta@domain', outbound: 'Meta' },
-        { type: 'GEOIP', val: 'META', outbound: 'Meta' },
-        { type: 'GEOIP', val: 'AKAMAI', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'AMAZON', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'CDN77', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'CLOUDFLARE', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'COLOCROSSING', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'CONTABO', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'DIGITALOCEAN', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'FASTLY', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'GCORE', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'GOOGLE', outbound: 'Google' },
-        { type: 'GEOIP', val: 'HETZNER', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'LINODE', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'MEGA', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'ORACLE', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'OVH', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'SCALEWAY', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'TELEGRAM', outbound: 'Telegram' },
-        { type: 'GEOIP', val: 'VODAFONE', outbound: 'CDN' },
-        { type: 'GEOIP', val: 'VULTR', outbound: 'CDN' },
-        { type: 'RULE-SET', val: 'refilter@domain', outbound: 'Заблок. сервисы' },
-        ...(state.hasZkeenGeodata
-          ? [
-              { type: 'GEOSITE', val: 'DOMAINS', outbound: 'Заблок. сервисы' },
-              { type: 'GEOSITE', val: 'OTHER', outbound: 'Заблок. сервисы' },
-              { type: 'GEOSITE', val: 'POLITIC', outbound: 'Заблок. сервисы' }
-            ]
-          : []),
-        { type: 'RULE-SET', val: 'github@domain', outbound: 'GitHub' }
-      ];
+      const activeRules = [...ZKEEN_STANDARD_RULES];
+      if (state.hasZkeenGeodata) {
+        const refilterIdx = activeRules.findIndex(r => r.value === 'refilter@domain');
+        if (refilterIdx !== -1) {
+          activeRules.splice(refilterIdx + 1, 0,
+            { type: 'GEOSITE', value: 'DOMAINS', outbound: 'Заблок. сервисы' },
+            { type: 'GEOSITE', value: 'OTHER', outbound: 'Заблок. сервисы' },
+            { type: 'GEOSITE', value: 'POLITIC', outbound: 'Заблок. сервисы' }
+          );
+        }
+      }
 
-      for (const r of zkeenRules) {
+      for (const r of activeRules) {
         if (isOutboundEnabled(r.outbound)) {
           if (r.type === 'OR') {
-            lines.push(`  - OR,${r.val}`);
+            lines.push(`  - OR,${r.value},${r.outbound}`);
           } else {
-            lines.push(`  - ${r.type},${r.val},${r.outbound}`);
+            lines.push(`  - ${r.type},${r.value},${r.outbound}`);
           }
         }
       }
@@ -664,13 +852,15 @@ export function generateYAML(state: MihomoConfigState): string {
       for (const r of state.rules) {
         if (isOutboundEnabled(r.outbound)) {
           if (r.type === 'MATCH') continue;
-          lines.push(`  - ${r.type},${r.value},${r.outbound}`);
+          if (r.type === 'OR') {
+            lines.push(`  - OR,${r.value},${r.outbound}`);
+          } else {
+            const suffix = r.noResolve ? ',no-resolve' : '';
+            lines.push(`  - ${r.type},${r.value},${r.outbound}${suffix}`);
+          }
         }
       }
 
-      if (isOutboundEnabled('DIRECT')) {
-        lines.push('  - RULE-SET,private@ip,DIRECT');
-      }
       lines.push('  - MATCH,DIRECT');
     } else {
       lines.push('  - RULE-SET,quic@inline,REJECT');
@@ -1219,54 +1409,70 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
 
       if (inRules) {
         if (trimmed.startsWith('-')) {
-          const parts = trimmed
-            .substring(1)
-            .split(',')
-            .map((s) => s.trim());
-          if (parts[0] === 'RULE-SET' || parts[0] === 'GEOSITE' || parts[0] === 'GEOIP') {
-            const ruleName = parts[1];
-            const ruleOutbound = parts[2];
-            
-            // Check if it is a zkeen geosite rule-provider
-            const rp = ZKEEN_RULE_PROVIDERS.find((x) => x.name === ruleName || (x.behavior === 'domain' && `domain:${x.name.split('@')[0]}` === ruleName));
-            if (rp) {
+          let ruleType = '';
+          let ruleValue = '';
+          let ruleOutbound = '';
+          let noResolve = false;
+
+          if (trimmed.startsWith('- OR,')) {
+            ruleType = 'OR';
+            const valStr = trimmed.substring(5).trim();
+            const lastCommaIdx = valStr.lastIndexOf(',');
+            if (lastCommaIdx !== -1) {
+              ruleValue = valStr.substring(0, lastCommaIdx).trim();
+              ruleOutbound = valStr.substring(lastCommaIdx + 1).trim();
+            } else {
+              ruleValue = valStr;
+              ruleOutbound = 'DIRECT';
+            }
+          } else {
+            const rawParts = trimmed.substring(1).split(',').map(s => s.trim());
+            if (rawParts.length > 0) {
+              ruleType = rawParts[0];
+              let remaining = rawParts.slice(1);
+              if (remaining.length > 0 && remaining[remaining.length - 1] === 'no-resolve') {
+                noResolve = true;
+                remaining.pop();
+              }
+              if (remaining.length > 1) {
+                ruleOutbound = remaining[remaining.length - 1];
+                ruleValue = remaining.slice(0, remaining.length - 1).join(',');
+              } else if (remaining.length === 1) {
+                ruleOutbound = remaining[0];
+                ruleValue = '';
+              }
+            }
+          }
+
+          if (ruleType) {
+            // Check if it is a standard Zkeen rule
+            const isZkeenRule = ZKEEN_STANDARD_RULES.some(zr => 
+              zr.type === ruleType && zr.value === ruleValue && zr.outbound === ruleOutbound
+            );
+            const isZkeenGeodataRule = (ruleType === 'GEOSITE' && ['DOMAINS', 'OTHER', 'POLITIC'].includes(ruleValue) && ruleOutbound === 'Заблок. сервисы');
+
+            if (isZkeenRule || isZkeenGeodataRule) {
               parsed.activeRuleProvider = 'zkeen';
-            } else if (ruleName.startsWith('geosite-') || ruleName.startsWith('geoip-')) {
+            } else if (ruleType === 'RULE-SET' && (ruleValue.startsWith('geosite-') || ruleValue.startsWith('geoip-'))) {
               parsed.activeRuleProvider = 'metacubex';
-              const parts2 = ruleName.split('-');
+              const parts2 = ruleValue.split('-');
               const type = parts2[0] as 'geosite' | 'geoip';
               const originalId = parts2.slice(1).join('-');
               parsed.selectedMetaRuleSets.set(`${originalId}|${type}`, ruleOutbound);
             } else {
-              // Custom manual rule
-              parsed.rules.push({
-                id: crypto.randomUUID(),
-                type: parts[0],
-                value: ruleName,
-                outbound: ruleOutbound
-              });
+              // Custom rule
+              if (ruleType === 'MATCH' && ruleOutbound === 'DIRECT') {
+                // skip standard MATCH,DIRECT
+              } else {
+                parsed.rules.push({
+                  id: crypto.randomUUID(),
+                  type: ruleType,
+                  value: ruleValue,
+                  outbound: ruleOutbound,
+                  noResolve
+                });
+              }
             }
-          } else if (parts[0] === 'MATCH') {
-            const ruleOutbound = parts[1];
-            if (ruleOutbound !== 'DIRECT') {
-              parsed.rules.push({
-                id: crypto.randomUUID(),
-                type: 'MATCH',
-                value: '',
-                outbound: ruleOutbound
-              });
-            }
-          } else if (parts[0] === 'OR') {
-            // Twitch OR rules
-            parsed.activeRuleProvider = 'zkeen';
-          } else {
-            // General rule
-            parsed.rules.push({
-              id: crypto.randomUUID(),
-              type: parts[0],
-              value: parts[1] || '',
-              outbound: parts[2] || 'DIRECT'
-            });
           }
         }
       }

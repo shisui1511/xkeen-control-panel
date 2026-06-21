@@ -676,11 +676,28 @@ func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
 
 	data, err := a.configSvc.Read(cleanPath)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
-		return
+		if os.IsNotExist(err) {
+			data = []byte{}
+		} else {
+			a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	content := string(data)
+	if strings.TrimSpace(content) == "" {
+		content = `log-level: silent
+allow-lan: true
+routing-mark: 255
+find-process-mode: off
+unified-delay: true
+tproxy-port: 5001
+redir-port: 5000
+external-controller: 0.0.0.0:9090
+profile:
+  store-selected: true
+`
+	}
 
 	for sectionName, newSecContent := range req.Sections {
 		if sectionName != "proxy-groups" && sectionName != "rule-providers" && sectionName != "rules" &&
