@@ -120,7 +120,7 @@
   let activeRuleProvider: 'none' | 'zkeen' | 'metacubex' = 'none';
   let subscriptions: any[] = [];
   let mihomoProviders: any[] = [];
-  $: hasXraySubscriptions = subscriptions.some((s) => s.type !== 'mihomo');
+  $: hasXraySubscriptions = subscriptions.some((s) => s.enable_xray);
   $: hasMihomoProviders = mihomoProviders.length > 0;
   let hasZkeenGeodata = false;
   let existingTproxyPort: number | null = null;
@@ -586,7 +586,7 @@
       const subs = await res.json();
       if (Array.isArray(subs)) {
         subscriptions = subs.filter((s) => s.enabled);
-        mihomoProviders = subs.filter((s) => s.enabled && s.type === 'mihomo');
+        mihomoProviders = subs.filter((s) => s.enabled && s.enable_mihomo);
       } else {
         subscriptions = [];
         mihomoProviders = [];
@@ -614,7 +614,7 @@
       let imported = 0;
       for (const sub of subs) {
         if (!sub.enabled) continue;
-        if (sub.type === 'mihomo') continue; // Игнорируем Mihomo-подписки
+        if (!sub.enable_xray) continue; // Игнорируем подписки без Xray интеграции
         const nr = await fetch(`/api/subscriptions/nodes?id=${sub.id}`);
         if (!nr.ok) continue;
         const nodes: any[] = await nr.json();
