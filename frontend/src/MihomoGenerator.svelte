@@ -185,6 +185,8 @@
   let showProxyForm = false;
   let showGroupForm = false;
   let showRuleForm = false;
+  let editingProxyId: string | null = null;
+  let editingGroupId: string | null = null;
 
   // New proxy form
   let np: Omit<Proxy, 'id'> = newProxyDefaults('vless');
@@ -387,11 +389,11 @@
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png'
     },
     {
-      name: 'QUIC',
+      name: 'TikTok',
       type: 'select',
-      includeAll: false,
-      proxies: ['REJECT', 'DIRECT'],
-      icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/quic.png'
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/TikTok.png'
     }
   ];
 
@@ -1006,9 +1008,20 @@
     if (sanitized) {
       showToast('info', $t('editor.proxy_name_sanitized') || 'Имя прокси очищено от спецсимволов');
     }
-    proxies = [...proxies, { ...np, name: cleanName, id: crypto.randomUUID() }];
+    if (editingProxyId) {
+      proxies = proxies.map(p => p.id === editingProxyId ? { ...np, name: cleanName, id: editingProxyId } : p);
+      editingProxyId = null;
+    } else {
+      proxies = [...proxies, { ...np, name: cleanName, id: crypto.randomUUID() }];
+    }
     showProxyForm = false;
     np = newProxyDefaults('vless');
+  }
+
+  function editProxy(p: Proxy) {
+    np = { ...p };
+    editingProxyId = p.id;
+    showProxyForm = true;
   }
 
   function removeProxy(id: string) {
@@ -1017,7 +1030,12 @@
 
   function addGroup() {
     if (!ng.name.trim()) return;
-    groups = [...groups, { ...ng, id: crypto.randomUUID(), proxies: [...ng.proxies], useProviders: ng.useProviders ? [...ng.useProviders] : [] }];
+    if (editingGroupId) {
+      groups = groups.map(g => g.id === editingGroupId ? { ...ng, id: editingGroupId, proxies: [...ng.proxies], useProviders: ng.useProviders ? [...ng.useProviders] : [] } : g);
+      editingGroupId = null;
+    } else {
+      groups = [...groups, { ...ng, id: crypto.randomUUID(), proxies: [...ng.proxies], useProviders: ng.useProviders ? [...ng.useProviders] : [] }];
+    }
     showGroupForm = false;
     ng = {
       name: '',
@@ -1029,6 +1047,21 @@
       useProviders: [],
       strategy: undefined
     };
+  }
+
+  function editGroup(g: ProxyGroup) {
+    ng = {
+      name: g.name,
+      type: g.type,
+      proxies: [...g.proxies],
+      includeAll: g.includeAll || false,
+      url: g.url || 'https://www.gstatic.com/generate_204',
+      interval: g.interval || 300,
+      useProviders: g.useProviders ? [...g.useProviders] : [],
+      strategy: g.strategy
+    };
+    editingGroupId = g.id;
+    showGroupForm = true;
   }
 
   function removeGroup(id: string) {
@@ -1115,7 +1148,7 @@
     }
   }
 
-  const ru = $currentLang === 'ru';
+  $: ru = $currentLang === 'ru';
 
   async function enableDNSRedirect() {
     dnsRedirectLoading = true;
@@ -1291,16 +1324,6 @@
         tun: extractSection(yamlContent, 'tun'),
         'proxy-providers': extractSection(yamlContent, 'proxy-providers')
       };
-
-      const readCurrentRes = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
-      if (!readCurrentRes.ok) {
-        throw new Error(`Failed to read current config: HTTP ${readCurrentRes.status}`);
-      }
-      let currentYAML = await readCurrentRes.text();
-
-      for (const [sectionName, newSecContent] of Object.entries(sections)) {
-        currentYAML = replaceMihomoTopLevelSection(currentYAML, sectionName, newSecContent);
-      }
 
       validationError = '';
 
@@ -1613,6 +1636,11 @@
               <span class="item-name">{p.name}</span>
               <span class="item-meta">{p.server}:{p.port}</span>
               <button
+                class="item-edit"
+                onclick={() => editProxy(p)}
+                title={ru ? 'Редактировать' : 'Edit'}>✎</button
+              >
+              <button
                 class="item-del"
                 onclick={() => removeProxy(p.id)}
                 title={ru ? 'Удалить' : 'Remove'}>✕</button
@@ -1621,7 +1649,16 @@
           {/each}
 
           {#if showProxyForm}
-            <ProxyForm bind:np onSave={addProxy} onCancel={() => (showProxyForm = false)} />
+            <ProxyForm
+              bind:np
+              isEdit={!!editingProxyId}
+              onSave={addProxy}
+              onCancel={() => {
+                showProxyForm = false;
+                editingProxyId = null;
+                np = newProxyDefaults('vless');
+              }}
+            />
           {:else}
             <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
               <button class="add-btn" style="flex: 1;" onclick={() => (showProxyForm = true)}>
@@ -1770,6 +1807,11 @@
                   >
                 {/if}
                 <span class="item-meta">{g.proxies.length} {ru ? 'прокси' : 'proxies'}</span>
+                <button
+                  class="item-edit"
+                  onclick={() => editGroup(g)}
+                  title={ru ? 'Редактировать' : 'Edit'}>✎</button
+                >
                 <button class="item-del" onclick={() => removeGroup(g.id)}>✕</button>
               </div>
             {/each}
@@ -1777,10 +1819,24 @@
             {#if showGroupForm}
               <GroupForm
                 bind:ng
+                isEdit={!!editingGroupId}
                 {allProxyNames}
                 {mihomoProviders}
                 onSave={addGroup}
-                onCancel={() => (showGroupForm = false)}
+                onCancel={() => {
+                  showGroupForm = false;
+                  editingGroupId = null;
+                  ng = {
+                    name: '',
+                    type: 'select',
+                    proxies: [],
+                    includeAll: false,
+                    url: 'https://www.gstatic.com/generate_204',
+                    interval: 300,
+                    useProviders: [],
+                    strategy: 'consistent-hash'
+                  };
+                }}
               />
             {:else}
               <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
@@ -2495,6 +2551,23 @@
     font-size: 11px;
     color: var(--fg-dim);
     flex-shrink: 0;
+  }
+
+  .item-edit {
+    background: none;
+    border: none;
+    color: var(--fg-faint);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    transition: color var(--transition-fast);
+    flex-shrink: 0;
+    line-height: 1;
+  }
+
+  .item-edit:hover {
+    color: var(--primary);
   }
 
   .item-del {
