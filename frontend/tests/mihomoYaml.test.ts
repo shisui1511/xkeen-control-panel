@@ -193,4 +193,58 @@ rules:
     expect(yaml).toContain('- DOMAIN,google.com,DIRECT');
     expect(yaml).toContain('- OR,((DOMAIN,test.com),(DOMAIN,test2.com)),DIRECT');
   });
+
+  test('parsing nested proxy options (reality-opts, ws-opts, obfs) and preservedKeys exclusions', () => {
+    const yaml = `
+external-controller: 127.0.0.1:9090
+proxy-providers:
+  test:
+    type: http
+proxies:
+  - name: "vless-reality"
+    type: vless
+    server: server.com
+    port: 443
+    uuid: my-uuid
+    reality-opts:
+      public-key: my-pubkey
+      short-id: my-shortid
+  - name: "hysteria-obfs"
+    type: hysteria2
+    server: server.com
+    port: 443
+    obfs:
+      type: simple
+      password: my-obfs-pass
+  - name: "vmess-ws"
+    type: vmess
+    server: server.com
+    port: 443
+    uuid: my-uuid
+    network: ws
+    ws-opts:
+      path: /my-path
+`;
+    const result = populateMihomoFromYAML(yaml);
+    
+    expect(result.preservedKeys).not.toContain('external-controller');
+    expect(result.preservedKeys).not.toContain('proxy-providers');
+    
+    expect(result.proxies).toHaveLength(3);
+    
+    const p1 = result.proxies[0];
+    expect(p1.name).toBe('vless-reality');
+    expect(p1.publicKey).toBe('my-pubkey');
+    expect(p1.shortId).toBe('my-shortid');
+    
+    const p2 = result.proxies[1];
+    expect(p2.name).toBe('hysteria-obfs');
+    expect(p2.obfsType).toBe('simple');
+    expect(p2.obfsPassword).toBe('my-obfs-pass');
+    
+    const p3 = result.proxies[2];
+    expect(p3.name).toBe('vmess-ws');
+    expect(p3.wsPath).toBe('/my-path');
+  });
 });
+

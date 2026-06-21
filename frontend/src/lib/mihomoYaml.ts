@@ -628,7 +628,8 @@ export function generateYAML(state: MihomoConfigState): string {
       lines.push(`    type: http`);
       lines.push(`    path: ./providers/${providerName}.yaml`);
       lines.push(`    url: ${yamlSafeString(sub.url)}`);
-      lines.push(`    interval: ${sub.interval * 3600 || 86400}`);
+      const intervalSec = sub.interval > 720 ? sub.interval : (sub.interval * 3600 || 86400);
+      lines.push(`    interval: ${intervalSec}`);
       const mihomoVersion = state.capabilities?.kernels?.mihomo?.version || '1.18.10';
       const ua = `mihomo/${mihomoVersion}`;
       const subHwid = sub.hwid_token || state.capabilities?.global_hwid || '';
@@ -1013,6 +1014,8 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     let currentGroup: any = null;
     let currentProxy: any = null;
     let inProxiesList = false;
+    let currentParentKey = '';
+    let parentKeyIndent = 0;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -1040,7 +1043,9 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
             sec !== 'rule-providers' &&
             sec !== 'sniffer' &&
             sec !== 'tproxy-port' &&
-            sec !== 'redir-port'
+            sec !== 'redir-port' &&
+            sec !== 'external-controller' &&
+            sec !== 'proxy-providers'
           ) {
             if (!parsed.preservedKeys.includes(sec)) {
               parsed.preservedKeys = [...parsed.preservedKeys, sec];
@@ -1191,6 +1196,12 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
       }
 
       if (inProxies) {
+        const lineIndent = line.length - line.trimStart().length;
+        if (currentParentKey && lineIndent <= parentKeyIndent) {
+          currentParentKey = '';
+          parentKeyIndent = 0;
+        }
+
         if (line.startsWith('  -') || line.startsWith(' -') || trimmed.startsWith('-')) {
           if (currentProxy) {
             parsed.proxies.push(currentProxy);
@@ -1202,6 +1213,8 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
             server: '',
             port: 443
           };
+          currentParentKey = '';
+          parentKeyIndent = 0;
 
           const nameMatch = trimmed.match(/^-\s+name:\s*(.+)$/);
           if (nameMatch) {
@@ -1212,104 +1225,108 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
 
         if (!currentProxy) continue;
 
+        if (trimmed.endsWith(':') && !trimmed.startsWith('-')) {
+          currentParentKey = trimmed.slice(0, -1).trim();
+          parentKeyIndent = lineIndent;
+          continue;
+        }
+
         const nameMatch = trimmed.match(/^name:\s*(.+)$/);
-        if (nameMatch) {
+        if (nameMatch && !currentParentKey) {
           currentProxy.name = unquote(nameMatch[1]);
           continue;
         }
         const typeMatch = trimmed.match(/^type:\s*(.+)$/);
         if (typeMatch) {
-          currentProxy.type = unquote(typeMatch[1]);
+          if (currentParentKey === 'obfs') {
+            currentProxy.obfsType = unquote(typeMatch[1]) as any;
+          } else if (!currentParentKey) {
+            currentProxy.type = unquote(typeMatch[1]);
+          }
           continue;
         }
         const serverMatch = trimmed.match(/^server:\s*(.+)$/);
-        if (serverMatch) {
+        if (serverMatch && !currentParentKey) {
           currentProxy.server = unquote(serverMatch[1]);
           continue;
         }
         const portMatch = trimmed.match(/^port:\s*(.+)$/);
-        if (portMatch) {
+        if (portMatch && !currentParentKey) {
           currentProxy.port = parseInt(unquote(portMatch[1])) || 443;
           continue;
         }
         const uuidMatch = trimmed.match(/^uuid:\s*(.+)$/);
-        if (uuidMatch) {
+        if (uuidMatch && !currentParentKey) {
           currentProxy.uuid = unquote(uuidMatch[1]);
           continue;
         }
         const passwordMatch = trimmed.match(/^password:\s*(.+)$/);
         if (passwordMatch) {
-          currentProxy.password = unquote(passwordMatch[1]);
+          if (currentParentKey === 'obfs') {
+            currentProxy.obfsPassword = unquote(passwordMatch[1]);
+          } else if (!currentParentKey) {
+            currentProxy.password = unquote(passwordMatch[1]);
+          }
           continue;
         }
         const flowMatch = trimmed.match(/^flow:\s*(.+)$/);
-        if (flowMatch) {
+        if (flowMatch && !currentParentKey) {
           currentProxy.flow = unquote(flowMatch[1]);
           continue;
         }
         const publicKeyMatch = trimmed.match(/^public-key:\s*(.+)$/);
-        if (publicKeyMatch) {
+        if (publicKeyMatch && currentParentKey === 'reality-opts') {
           currentProxy.publicKey = unquote(publicKeyMatch[1]);
           continue;
         }
         const shortIdMatch = trimmed.match(/^short-id:\s*(.+)$/);
-        if (shortIdMatch) {
+        if (shortIdMatch && currentParentKey === 'reality-opts') {
           currentProxy.shortId = unquote(shortIdMatch[1]);
           continue;
         }
         const servernameMatch = trimmed.match(/^servername:\s*(.+)$/);
-        if (servernameMatch) {
+        if (servernameMatch && !currentParentKey) {
           currentProxy.servername = unquote(servernameMatch[1]);
           continue;
         }
         const sniMatch = trimmed.match(/^sni:\s*(.+)$/);
-        if (sniMatch) {
+        if (sniMatch && !currentParentKey) {
           currentProxy.sni = unquote(sniMatch[1]);
           continue;
         }
         const congestionMatch = trimmed.match(/^congestion-controller:\s*(.+)$/);
-        if (congestionMatch) {
+        if (congestionMatch && !currentParentKey) {
           currentProxy.congestion = unquote(congestionMatch[1]);
           continue;
         }
         const cipherMatch = trimmed.match(/^cipher:\s*(.+)$/);
-        if (cipherMatch) {
+        if (cipherMatch && !currentParentKey) {
           currentProxy.cipher = unquote(cipherMatch[1]);
           continue;
         }
         const networkMatch = trimmed.match(/^network:\s*(.+)$/);
-        if (networkMatch) {
+        if (networkMatch && !currentParentKey) {
           currentProxy.network = unquote(networkMatch[1]);
           continue;
         }
         const wsPathMatch = trimmed.match(/^path:\s*(.+)$/);
-        if (wsPathMatch) {
+        if (wsPathMatch && currentParentKey === 'ws-opts') {
           currentProxy.wsPath = unquote(wsPathMatch[1]);
           continue;
         }
         const tlsMatch = trimmed.match(/^tls:\s*(.+)$/);
-        if (tlsMatch) {
+        if (tlsMatch && !currentParentKey) {
           currentProxy.tls = unquote(tlsMatch[1]) === 'true';
           continue;
         }
         const fingerprintMatch = trimmed.match(/^client-fingerprint:\s*(.+)$/);
-        if (fingerprintMatch) {
+        if (fingerprintMatch && !currentParentKey) {
           currentProxy.fingerprint = unquote(fingerprintMatch[1]);
           continue;
         }
         const skipCertVerifyMatch = trimmed.match(/^skip-cert-verify:\s*(.+)$/);
-        if (skipCertVerifyMatch) {
+        if (skipCertVerifyMatch && !currentParentKey) {
           currentProxy.skipCertVerify = unquote(skipCertVerifyMatch[1]) === 'true';
-          continue;
-        }
-        const obfsTypeMatch = trimmed.match(/^type:\s*(.+)$/);
-        if (obfsTypeMatch && line.includes('obfs:')) {
-          currentProxy.obfsType = unquote(obfsTypeMatch[1]) as any;
-          continue;
-        }
-        const obfsPasswordMatch = trimmed.match(/^password:\s*(.+)$/);
-        if (obfsPasswordMatch && line.includes('obfs:')) {
-          currentProxy.obfsPassword = unquote(obfsPasswordMatch[1]);
           continue;
         }
       }

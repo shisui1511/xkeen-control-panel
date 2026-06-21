@@ -7,13 +7,15 @@
     allProxyNames,
     mihomoProviders = [],
     onSave,
-    onCancel
+    onCancel,
+    isEdit = false
   }: {
     ng: any;
     allProxyNames: string[];
     mihomoProviders?: any[];
     onSave: () => void;
     onCancel: () => void;
+    isEdit?: boolean;
   } = $props();
 
   const ru = $derived($currentLang === 'ru');
@@ -136,7 +138,7 @@
       >{ru ? 'Отмена' : 'Cancel'}</button
     >
     <button class="btn btn-primary" onclick={onSave}
-      >{ru ? 'Добавить' : 'Add'}</button
+      >{isEdit ? (ru ? 'Сохранить' : 'Save') : (ru ? 'Добавить' : 'Add')}</button
     >
   </div>
 </div>

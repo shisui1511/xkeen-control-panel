@@ -860,6 +860,9 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription) (err error) {
 	ua := s.subscriptionUserAgent("mihomo")
 
 	intervalSec := sub.Interval * 3600
+	if sub.Interval > 720 {
+		intervalSec = sub.Interval
+	}
 	if intervalSec <= 0 {
 		intervalSec = 3600
 	}
