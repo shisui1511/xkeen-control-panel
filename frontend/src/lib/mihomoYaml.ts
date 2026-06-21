@@ -21,6 +21,7 @@ export interface Proxy {
   tls?: boolean;
   fingerprint?: string;
   alterID?: number;
+  username?: string;
 }
 
 export interface ProxyGroup {
@@ -636,25 +637,57 @@ export function generateYAML(state: MihomoConfigState): string {
     for (const [i, sub] of providers.entries()) {
       const providerName = slugifyProviderName(sub.name || '', sub.url || '', sub.id || `provider-${i}`);
       lines.push(`  ${providerName}:`);
-      lines.push(`    type: http`);
-      lines.push(`    path: ./providers/${providerName}.yaml`);
-      lines.push(`    url: ${yamlSafeString(sub.url)}`);
-      const intervalSec = sub.interval > 720 ? sub.interval : (sub.interval * 3600 || 86400);
-      lines.push(`    interval: ${intervalSec}`);
-      const mihomoVersion = state.capabilities?.kernels?.mihomo?.version || '1.18.10';
-      const ua = `mihomo/${mihomoVersion}`;
-      const subHwid = sub.hwid_token || state.capabilities?.global_hwid || '';
-      lines.push(`    header:`);
-      lines.push(`      User-Agent:`);
-      lines.push(`        - ${yamlSafeString(ua)}`);
-      if (subHwid) {
-        lines.push(`      x-hwid:`);
-        lines.push(`        - ${yamlSafeString(subHwid)}`);
+      if (sub.rawLines && sub.rawLines.length > 0) {
+        let currentParent = '';
+        let parentIndent = 0;
+        for (const rawLine of sub.rawLines) {
+          let processedLine = rawLine;
+          const trimmed = rawLine.trim();
+          const lineIndent = rawLine.length - rawLine.trimStart().length;
+          
+          if (currentParent && lineIndent <= parentIndent) {
+            currentParent = '';
+            parentIndent = 0;
+          }
+          
+          if (trimmed.endsWith(':') && !trimmed.startsWith('-')) {
+            currentParent = trimmed.slice(0, -1).trim();
+            parentIndent = lineIndent;
+          }
+          
+          if (trimmed.startsWith('url:')) {
+            processedLine = rawLine.substring(0, rawLine.indexOf('url:') + 4) + ` ${yamlSafeString(sub.url)}`;
+          } else if (trimmed.startsWith('interval:')) {
+            const intervalSec = sub.interval > 720 ? sub.interval : (sub.interval * 3600 || 86400);
+            processedLine = rawLine.substring(0, rawLine.indexOf('interval:') + 9) + ` ${intervalSec}`;
+          } else if (currentParent === 'x-hwid' && trimmed.startsWith('-')) {
+            if (sub.hwid_token) {
+              processedLine = rawLine.substring(0, rawLine.indexOf('-') + 1) + ` ${yamlSafeString(sub.hwid_token)}`;
+            }
+          }
+          lines.push(processedLine);
+        }
+      } else {
+        lines.push(`    type: http`);
+        lines.push(`    path: ./providers/${providerName}.yaml`);
+        lines.push(`    url: ${yamlSafeString(sub.url)}`);
+        const intervalSec = sub.interval > 720 ? sub.interval : (sub.interval * 3600 || 86400);
+        lines.push(`    interval: ${intervalSec}`);
+        const mihomoVersion = state.capabilities?.kernels?.mihomo?.version || '1.18.10';
+        const ua = `mihomo/${mihomoVersion}`;
+        const subHwid = sub.hwid_token || state.capabilities?.global_hwid || '';
+        lines.push(`    header:`);
+        lines.push(`      User-Agent:`);
+        lines.push(`        - ${yamlSafeString(ua)}`);
+        if (subHwid) {
+          lines.push(`      x-hwid:`);
+          lines.push(`        - ${yamlSafeString(subHwid)}`);
+        }
+        lines.push(`    health-check:`);
+        lines.push(`      enable: true`);
+        lines.push(`      url: http://www.gstatic.com/generate_204`);
+        lines.push(`      interval: 300`);
       }
-      lines.push(`    health-check:`);
-      lines.push(`      enable: true`);
-      lines.push(`      url: http://www.gstatic.com/generate_204`);
-      lines.push(`      interval: 300`);
     }
     lines.push('');
   }
@@ -771,6 +804,25 @@ export function generateYAML(state: MihomoConfigState): string {
           lines.push(`      path: ${yamlSafeString(p.wsPath || '/')}`);
         }
         if (p.tls && p.sni) lines.push(`    servername: ${yamlSafeString(p.sni)}`);
+      } else if (p.type === 'trojan') {
+        lines.push(`    password: ${yamlSafeString(p.password || '')}`);
+        if (p.sni) lines.push(`    sni: ${yamlSafeString(p.sni)}`);
+        if (p.skipCertVerify) lines.push(`    skip-cert-verify: true`);
+        if (p.network) {
+          lines.push(`    network: ${p.network}`);
+          if (p.network === 'ws') {
+            lines.push(`    ws-opts:`);
+            lines.push(`      path: ${yamlSafeString(p.wsPath || '/')}`);
+          }
+        }
+      } else if (p.type === 'socks') {
+        if (p.username) lines.push(`    username: ${yamlSafeString(p.username)}`);
+        if (p.password) lines.push(`    password: ${yamlSafeString(p.password)}`);
+      } else if (p.type === 'http') {
+        if (p.username) lines.push(`    username: ${yamlSafeString(p.username)}`);
+        if (p.password) lines.push(`    password: ${yamlSafeString(p.password)}`);
+        if (p.tls) lines.push(`    tls: true`);
+        if (p.skipCertVerify) lines.push(`    skip-cert-verify: true`);
       }
     }
     lines.push('');
@@ -973,6 +1025,7 @@ export interface ParsedMihomoConfig {
   preservedKeys: string[];
   existingTproxyPort: number | null;
   existingRedirPort: number | null;
+  mihomoProviders?: any[];
 }
 
 export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
@@ -1004,7 +1057,8 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     selectedMetaRuleSets: new Map(),
     preservedKeys: [],
     existingTproxyPort: null,
-    existingRedirPort: null
+    existingRedirPort: null,
+    mihomoProviders: []
   };
 
   if (!text || text.trim() === '') {
@@ -1024,12 +1078,16 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     let inDnsHijack = false;
     let inSniffer = false;
     let inUselist = false;
+    let inProxyProviders = false;
 
     let currentGroup: any = null;
     let currentProxy: any = null;
+    let currentProvider: any = null;
     let inProxiesList = false;
     let currentParentKey = '';
     let parentKeyIndent = 0;
+    let currentProviderParentKey = '';
+    let providerParentIndent = 0;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -1047,6 +1105,7 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           inRules = sec === 'rules';
           inRuleProviders = sec === 'rule-providers';
           inSniffer = sec === 'sniffer';
+          inProxyProviders = sec === 'proxy-providers';
 
           if (
             sec !== 'proxy-groups' &&
@@ -1343,6 +1402,11 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           currentProxy.skipCertVerify = unquote(skipCertVerifyMatch[1]) === 'true';
           continue;
         }
+        const usernameMatch = trimmed.match(/^username:\s*(.+)$/);
+        if (usernameMatch && !currentParentKey) {
+          currentProxy.username = unquote(usernameMatch[1]);
+          continue;
+        }
       }
 
       if (inDNS) {
@@ -1508,15 +1572,61 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
         }
       }
 
-      if (inRuleProviders) {
-        const nameMatch = trimmed.match(/^([a-zA-Z0-9_\-@]+):$/);
-        if (nameMatch) {
-          const rpName = nameMatch[1];
-          if (rpName !== 'quic@inline' && rpName !== 'netbios@inline') {
-            const existsInZkeen = ZKEEN_RULE_PROVIDERS.some((rp) => rp.name === rpName);
-            if (existsInZkeen) {
-              parsed.activeRuleProvider = 'zkeen';
-            }
+      if (inProxyProviders) {
+        const lineIndent = line.length - line.trimStart().length;
+        if (currentProviderParentKey && lineIndent <= providerParentIndent) {
+          currentProviderParentKey = '';
+          providerParentIndent = 0;
+        }
+
+        // Detect a new provider block: "  provider-name:"
+        const providerNameMatch = line.match(/^  ([a-zA-Z0-9_\-@\.]+):\s*$/);
+        if (providerNameMatch) {
+          if (currentProvider) {
+            parsed.mihomoProviders.push(currentProvider);
+          }
+          currentProvider = {
+            id: providerNameMatch[1],
+            name: providerNameMatch[1],
+            type: 'mihomo',
+            url: '',
+            interval: 24,
+            hwid_token: '',
+            rawLines: []
+          };
+          currentProviderParentKey = '';
+          providerParentIndent = 0;
+          continue;
+        }
+
+        if (currentProvider) {
+          if (lineIndent > 2) {
+            currentProvider.rawLines.push(line);
+          }
+
+          if (trimmed.endsWith(':') && !trimmed.startsWith('-')) {
+            currentProviderParentKey = trimmed.slice(0, -1).trim();
+            providerParentIndent = lineIndent;
+            continue;
+          }
+
+          const urlMatch = trimmed.match(/^url:\s*(.+)$/);
+          if (urlMatch && !currentProviderParentKey) {
+            currentProvider.url = unquote(urlMatch[1]);
+            continue;
+          }
+
+          const intervalMatch = trimmed.match(/^interval:\s*(.+)$/);
+          if (intervalMatch && !currentProviderParentKey) {
+            const val = parseInt(unquote(intervalMatch[1])) || 3600;
+            currentProvider.interval = val > 720 ? Math.round(val / 3600) : val;
+            continue;
+          }
+
+          if (currentProviderParentKey === 'x-hwid' && trimmed.startsWith('-')) {
+            const hwidVal = trimmed.replace(/^-\s*/, '');
+            currentProvider.hwid_token = unquote(hwidVal);
+            continue;
           }
         }
       }
@@ -1527,6 +1637,9 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     }
     if (currentProxy) {
       parsed.proxies.push(currentProxy);
+    }
+    if (currentProvider) {
+      parsed.mihomoProviders.push(currentProvider);
     }
   } catch (e) {
     console.error('Failed to parse Mihomo config:', e);

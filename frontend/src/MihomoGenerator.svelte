@@ -188,6 +188,8 @@
   let editingProxyId: string | null = null;
   let editingGroupId: string | null = null;
 
+
+
   // New proxy form
   let np: Omit<Proxy, 'id'> = newProxyDefaults('vless');
   function newProxyDefaults(type: ProxyType): Omit<Proxy, 'id'> {
@@ -996,6 +998,8 @@
     return { name: cleaned, sanitized: cleaned !== original };
   }
 
+
+
   function addProxy() {
     if (!np.name.trim() || !np.server.trim()) return;
     if (np.type === 'hysteria2' && np.obfsType === 'simple' && !np.obfsPassword?.trim()) {
@@ -1659,13 +1663,28 @@
               }}
             />
           {:else}
-            <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
-              <button class="add-btn" style="flex: 1;" onclick={() => (showProxyForm = true)}>
+            {#if mihomoProviders && mihomoProviders.length > 0}
+              <div class="sec-subtitle" style="margin-top: 16px; margin-bottom: 8px; border-top: 1px solid var(--border); padding-top: 12px; font-weight: 600; font-size: 13px; color: var(--fg-secondary);">
+                {ru ? 'Провайдеры подписок (proxy-providers)' : 'Subscription providers (proxy-providers)'}
+              </div>
+              {#each mihomoProviders as sub}
+                <div class="item-row" style="border-left: 3px solid var(--success);">
+                  <span class="item-badge type-mihomo" style="background: rgba(16, 185, 129, 0.15); color: var(--success); border-color: rgba(16, 185, 129, 0.3);">mihomo</span>
+                  <span class="item-name">{sub.name}</span>
+                  <span class="item-meta" title={sub.url} style="max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    {sub.url}
+                  </span>
+                </div>
+              {/each}
+            {/if}
+
+            <div class="constructor-proxy-list" style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="add-btn" style="flex: 1; min-width: 120px;" onclick={() => (showProxyForm = true)}>
                 + {ru ? 'Добавить прокси' : 'Add proxy'}
               </button>
               <button
                 class="add-btn import-btn"
-                style="flex: 1;"
+                style="flex: 1; min-width: 120px;"
                 onclick={loadSubscriptionProxies}
                 disabled={!hasXraySubscriptions}
                 title={hasXraySubscriptions
@@ -1678,7 +1697,7 @@
               >
                 ↓ {$t('editor.constructor_import_proxies')}
               </button>
-              <button class="add-btn import-btn" style="flex: 1;" onclick={openImportModal}>
+              <button class="add-btn import-btn" style="flex: 1; min-width: 120px;" onclick={openImportModal}>
                 <svg
                   width="12"
                   height="12"

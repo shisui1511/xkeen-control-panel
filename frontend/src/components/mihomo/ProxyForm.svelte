@@ -15,7 +15,7 @@
 
   const ru = $derived($currentLang === 'ru');
 
-  const PROXY_TYPES = ['vless', 'hysteria2', 'tuic', 'ss', 'vmess'];
+  const PROXY_TYPES = ['vless', 'hysteria2', 'tuic', 'ss', 'vmess', 'trojan', 'socks', 'http'];
   const CIPHERS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-poly1305', '2022-blake3-aes-256-gcm'];
 </script>
 
@@ -175,6 +175,77 @@
       <div class="form-row">
         <label class="form-label">SNI</label>
         <input class="form-input" bind:value={np.sni} placeholder="example.com" />
+      </div>
+    {/if}
+  {:else if np.type === 'trojan'}
+    <div class="form-row">
+      <label class="form-label">{ru ? 'Пароль' : 'Password'}</label>
+      <input class="form-input" bind:value={np.password} placeholder="password" />
+    </div>
+    <div class="form-row">
+      <label class="form-label">SNI</label>
+      <input class="form-input" bind:value={np.sni} placeholder="example.com" />
+    </div>
+    <div class="form-row2">
+      <div class="form-col">
+        <label class="form-label">Network</label>
+        <select class="form-select" bind:value={np.network}>
+          <option value="tcp">TCP</option>
+          <option value="ws">WebSocket</option>
+        </select>
+      </div>
+    </div>
+    {#if np.network === 'ws'}
+      <div class="form-row">
+        <label class="form-label">WS Path</label>
+        <input class="form-input" bind:value={np.wsPath} placeholder="/" />
+      </div>
+    {/if}
+    <div class="form-row">
+      <label
+        class="toggle-label"
+        style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;"
+      >
+        <input type="checkbox" bind:checked={np.skipCertVerify} />
+        <span>{$t('editor.skipCertVerify')}</span>
+      </label>
+    </div>
+  {:else if np.type === 'socks'}
+    <div class="form-row">
+      <label class="form-label">{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label>
+      <input class="form-input" bind:value={np.username} placeholder="username" />
+    </div>
+    <div class="form-row">
+      <label class="form-label">{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label>
+      <input class="form-input" bind:value={np.password} placeholder="password" />
+    </div>
+  {:else if np.type === 'http'}
+    <div class="form-row">
+      <label class="form-label">{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label>
+      <input class="form-input" bind:value={np.username} placeholder="username" />
+    </div>
+    <div class="form-row">
+      <label class="form-label">{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label>
+      <input class="form-input" bind:value={np.password} placeholder="password" />
+    </div>
+    <div class="form-row">
+      <label
+        class="toggle-label"
+        style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;"
+      >
+        <input type="checkbox" bind:checked={np.tls} />
+        <span>TLS</span>
+      </label>
+    </div>
+    {#if np.tls}
+      <div class="form-row">
+        <label
+          class="toggle-label"
+          style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;"
+        >
+          <input type="checkbox" bind:checked={np.skipCertVerify} />
+          <span>{$t('editor.skipCertVerify')}</span>
+        </label>
       </div>
     {/if}
   {/if}
