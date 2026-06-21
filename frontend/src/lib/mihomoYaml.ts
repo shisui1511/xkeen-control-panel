@@ -877,8 +877,10 @@ export function generateYAML(state: MihomoConfigState): string {
 
       lines.push('  - MATCH,DIRECT');
     } else {
-      lines.push('  - RULE-SET,quic@inline,REJECT');
-      lines.push('  - RULE-SET,netbios@inline,REJECT');
+      if (state.activeRuleProvider !== 'none') {
+        lines.push('  - RULE-SET,quic@inline,REJECT');
+        lines.push('  - RULE-SET,netbios@inline,REJECT');
+      }
 
       // Rule-set entries from rule-providers (before user rules, before MATCH)
       if (state.activeRuleProvider === 'metacubex') {

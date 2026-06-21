@@ -273,6 +273,26 @@ describe('Phase 43: Mihomo Configurator Deep Analysis fixes', () => {
     expect(yaml).not.toContain('netbios@inline');
   });
 
+  test('activeRuleProvider = none with custom rules generates rules without quic/netbios inline rule-sets', () => {
+    const mockState: any = {
+      activeRuleProvider: 'none',
+      selectedMetaRuleSets: new Map(),
+      proxies: [],
+      groups: [],
+      rules: [
+        { id: '1', type: 'DOMAIN', value: 'google.com', outbound: 'DIRECT' }
+      ],
+      dns: {},
+      tun: {},
+      sniffer: { enabled: false }
+    };
+    const yaml = generateYAML(mockState);
+    expect(yaml).toContain('rules:');
+    expect(yaml).toContain('- DOMAIN,google.com,DIRECT');
+    expect(yaml).not.toContain('quic@inline');
+    expect(yaml).not.toContain('netbios@inline');
+  });
+
   test('sniffer enabled does not contain skip-dst-address', () => {
     const mockState: any = {
       activeRuleProvider: 'none',
