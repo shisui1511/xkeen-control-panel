@@ -355,6 +355,90 @@ describe('Phase 43: Mihomo Configurator Deep Analysis fixes', () => {
     expect(yaml).toContain('  geosite-telegram:');
     expect(yaml).toContain('  geoip-cn:');
   });
+
+  test('parsing proxy-providers from YAML', () => {
+    const yaml = `
+proxy-providers:
+  provider1:
+    type: http
+    path: ./providers/provider1.yaml
+    url: "https://example.com/sub"
+    interval: 3600
+    header:
+      User-Agent:
+        - "mihomo/1.18.10"
+      x-hwid:
+        - "my-hwid"
+`;
+    const result = populateMihomoFromYAML(yaml);
+    expect(result.mihomoProviders).toHaveLength(1);
+    const p = result.mihomoProviders![0];
+    expect(p.id).toBe('provider1');
+    expect(p.url).toBe('https://example.com/sub');
+    expect(p.interval).toBe(1); // 3600 seconds = 1 hour
+    expect(p.hwid_token).toBe('my-hwid');
+  });
+
+  test('generating YAML for trojan, socks and http proxies', () => {
+    const mockState: any = {
+      proxies: [
+        {
+          name: 'trojan-proxy',
+          type: 'trojan',
+          server: 'server.com',
+          port: 443,
+          password: 'pass',
+          sni: 'sni.com',
+          skipCertVerify: true,
+          network: 'ws',
+          wsPath: '/path'
+        },
+        {
+          name: 'socks-proxy',
+          type: 'socks',
+          server: 'server.com',
+          port: 1080,
+          username: 'user',
+          password: 'pass'
+        },
+        {
+          name: 'http-proxy',
+          type: 'http',
+          server: 'server.com',
+          port: 8080,
+          username: 'user',
+          password: 'pass',
+          tls: true,
+          skipCertVerify: true
+        }
+      ],
+      groups: [],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: { enabled: false }
+    };
+    const yaml = generateYAML(mockState);
+    expect(yaml).toContain('  - name: "trojan-proxy"');
+    expect(yaml).toContain('    type: trojan');
+    expect(yaml).toContain('    password: "pass"');
+    expect(yaml).toContain('    sni: "sni.com"');
+    expect(yaml).toContain('    skip-cert-verify: true');
+    expect(yaml).toContain('    network: ws');
+    expect(yaml).toContain('      path: "/path"');
+
+    expect(yaml).toContain('  - name: "socks-proxy"');
+    expect(yaml).toContain('    type: socks');
+    expect(yaml).toContain('    username: "user"');
+    expect(yaml).toContain('    password: "pass"');
+
+    expect(yaml).toContain('  - name: "http-proxy"');
+    expect(yaml).toContain('    type: http');
+    expect(yaml).toContain('    username: "user"');
+    expect(yaml).toContain('    password: "pass"');
+    expect(yaml).toContain('    tls: true');
+    expect(yaml).toContain('    skip-cert-verify: true');
+  });
 });
 
 
