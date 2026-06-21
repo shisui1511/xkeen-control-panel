@@ -41,10 +41,23 @@ func (s *AssetsService) GetDefinition() ([]byte, error) {
 		if err == nil {
 			var diskSchema map[string]interface{}
 			if err := json.Unmarshal(data, &diskSchema); err == nil {
-				updated, err := s.migrateRuleProvidersIfNeeded(diskSchema)
-				if err == nil && updated != nil {
-					if writeErr := utils.AtomicWriteFile(diskPath, updated, 0600); writeErr == nil {
-						return updated, nil
+				latestData := data
+				var anyModified bool
+
+				if updated, err := s.migrateRuleProvidersIfNeeded(diskSchema); err == nil && updated != nil {
+					latestData = updated
+					anyModified = true
+					// Re-parse for next migration step
+					json.Unmarshal(updated, &diskSchema) //nolint:errcheck
+				}
+				if updated, err := s.migratePresetsIfNeeded(diskSchema); err == nil && updated != nil {
+					latestData = updated
+					anyModified = true
+				}
+
+				if anyModified {
+					if writeErr := utils.AtomicWriteFile(diskPath, latestData, 0600); writeErr == nil {
+						return latestData, nil
 					}
 				}
 				return data, nil
@@ -141,6 +154,88 @@ func (s *AssetsService) migrateRuleProvidersIfNeeded(diskSchema map[string]inter
 		return updated, nil
 	}
 
+	return nil, nil
+}
+
+// migratePresetsIfNeeded compares embedded presets (from default_assets.json) against
+// the disk version. If any preset in the embedded list differs from the corresponding
+// preset on disk (by matching "id"), the disk preset is overwritten with the embedded
+// version. New embedded presets are appended. This ensures that changes like adding
+// a new proxy group propagate automatically to existing installations.
+func (s *AssetsService) migratePresetsIfNeeded(diskSchema map[string]interface{}) ([]byte, error) {
+	var defaultSchema map[string]interface{}
+	if err := json.Unmarshal(defaultAssets, &defaultSchema); err != nil {
+		return nil, err
+	}
+
+	embeddedMihomo, ok := defaultSchema["mihomo"].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+	embeddedPresets, ok := embeddedMihomo["presets"].([]interface{})
+	if !ok {
+		return nil, nil
+	}
+
+	diskMihomo, ok := diskSchema["mihomo"].(map[string]interface{})
+	if !ok {
+		diskMihomo = make(map[string]interface{})
+		diskSchema["mihomo"] = diskMihomo
+	}
+	diskPresetsRaw, _ := diskMihomo["presets"].([]interface{})
+
+	// Build a map of embedded presets by id.
+	embeddedByID := make(map[string]interface{})
+	embeddedOrder := make([]string, 0, len(embeddedPresets))
+	for _, p := range embeddedPresets {
+		if pMap, ok := p.(map[string]interface{}); ok {
+			if id, ok := pMap["id"].(string); ok {
+				embeddedByID[id] = pMap
+				embeddedOrder = append(embeddedOrder, id)
+			}
+		}
+	}
+
+	// Build a map of disk presets by id for fast lookup.
+	diskByID := make(map[string]int) // id → index in diskPresetsRaw
+	for i, p := range diskPresetsRaw {
+		if pMap, ok := p.(map[string]interface{}); ok {
+			if id, ok := pMap["id"].(string); ok {
+				diskByID[id] = i
+			}
+		}
+	}
+
+	var modified bool
+
+	// Update or append each embedded preset onto the disk list.
+	for _, id := range embeddedOrder {
+		embedPreset := embeddedByID[id]
+		if idx, exists := diskByID[id]; exists {
+			// Overwrite the disk preset with the embedded canonical version.
+			embJSON, _ := json.Marshal(embedPreset)
+			diskJSON, _ := json.Marshal(diskPresetsRaw[idx])
+			if string(embJSON) != string(diskJSON) {
+				diskPresetsRaw[idx] = embedPreset
+				modified = true
+			}
+		} else {
+			// New preset not present on disk — append it.
+			diskPresetsRaw = append(diskPresetsRaw, embedPreset)
+			modified = true
+		}
+	}
+
+	if modified {
+		diskMihomo["presets"] = diskPresetsRaw
+		diskSchema["mihomo"] = diskMihomo
+		updated, err := json.MarshalIndent(diskSchema, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("[AssetsService] migrated presets in assets-definition.json")
+		return updated, nil
+	}
 	return nil, nil
 }
 

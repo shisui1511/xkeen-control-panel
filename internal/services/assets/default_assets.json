@@ -321,6 +321,13 @@
             "include_all": true,
             "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
             "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png"
+          },
+          {
+            "name": "TikTok",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/TikTok.png"
           }
         ],
         "rules": [],
