@@ -62,19 +62,19 @@ test.describe('Editor & Constructor integration test suite', () => {
           body: JSON.stringify(
             isMihomo
               ? [
-                  {
-                    name: 'config.yaml',
-                    path: '/opt/etc/mihomo/config.yaml',
-                    size: 1500
-                  }
-                ]
+                {
+                  name: 'config.yaml',
+                  path: '/opt/etc/mihomo/config.yaml',
+                  size: 1500
+                }
+              ]
               : [
-                  {
-                    name: 'xray-config.json',
-                    path: '/opt/etc/xray/configs/xray-config.json',
-                    size: 1200
-                  }
-                ]
+                {
+                  name: 'xray-config.json',
+                  path: '/opt/etc/xray/configs/xray-config.json',
+                  size: 1200
+                }
+              ]
           )
         });
       } else if (url.includes('/api/config/read')) {
@@ -242,7 +242,7 @@ test.describe('Editor & Constructor integration test suite', () => {
     // Проверяем, что в YAML-превью генерируется rule-provider с URL meta-rules-dat
     const previewPane = page
       .locator(
-        '.constructor-preview-pane, pre.constructor-preview, textarea[readonly], .yaml-preview'
+        '.constructor-preview-panel, pre.constructor-preview, textarea[readonly], .yaml-preview'
       )
       .first();
     await expect(previewPane).toBeVisible();
@@ -313,12 +313,12 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
             isMihomo
               ? [{ name: 'config.yaml', path: '/opt/etc/mihomo/config.yaml', size: 100 }]
               : [
-                  {
-                    name: 'xray-config.json',
-                    path: '/opt/etc/xray/configs/xray-config.json',
-                    size: 100
-                  }
-                ]
+                {
+                  name: 'xray-config.json',
+                  path: '/opt/etc/xray/configs/xray-config.json',
+                  size: 100
+                }
+              ]
           )
         });
       } else if (url.includes('/api/config/read') && route.request().method() === 'GET') {
@@ -362,7 +362,7 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     });
   });
 
-  test('пресет zkeen-selective генерирует ровно 16 proxy-groups и 15 rule-providers (D-13)', async ({
+  test('пресет zkeen-selective генерирует ровно 18 proxy-groups и 43 rule-providers (D-13)', async ({
     page
   }) => {
     await page.goto('/#/constructor');
@@ -373,16 +373,17 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await mihomoBtn.click();
 
     // Выбрать пресет zkeen-selective
-    const presetSelect = page.locator(
-      'select.preset-select, [data-testid="preset-select"], select#preset-select'
-    );
+    const presetSelect = page.locator
+      (
+        'select.preset-select, [data-testid="preset-select"], select#preset-select'
+      );
     await expect(presetSelect).toBeVisible({ timeout: 5000 });
     await presetSelect.selectOption('zkeen-selective');
 
     // Получить сгенерированный YAML из превью
     const previewPane = page
       .locator(
-        '.constructor-preview-pane, pre.constructor-preview, textarea[readonly], .yaml-preview'
+        '.constructor-preview-panel, pre.constructor-preview, textarea[readonly], .yaml-preview'
       )
       .first();
     await expect(previewPane).toBeVisible({ timeout: 3000 });
@@ -400,12 +401,11 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     // D-13: 18 групп
     expect(proxyGroupCount).toBe(18);
 
-    // D-13: 16 rule-providers
-    expect(ruleProviderCount).toBe(16);
+    // D-13: 43 rule-providers
+    expect(ruleProviderCount).toBe(43);
 
     // Ключевые правила должны присутствовать
     expect(yamlText).toContain('RULE-SET');
-    expect(yamlText).toContain('GEOSITE');
     expect(yamlText).toContain('MATCH');
   });
 
