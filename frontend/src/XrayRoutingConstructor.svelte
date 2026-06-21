@@ -2462,7 +2462,7 @@
       <div class="preview-header">
         <span class="preview-title">JSON {ru ? 'превью' : 'preview'}</span>
       </div>
-      <pre class="constructor-preview-pane" data-testid="xray-json-preview">{previewJson}</pre>
+      <pre class="constructor-preview-panel" data-testid="xray-json-preview">{previewJson}</pre>
 
       {#if validationError}
         <div class="validation-error-block" style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;">
@@ -3165,7 +3165,7 @@
     text-transform: uppercase;
   }
 
-  .constructor-preview-pane {
+  .constructor-preview-panel {
     flex: 1;
     margin: 0;
     padding: var(--spacing-4, 16px);

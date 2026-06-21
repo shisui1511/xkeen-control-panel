@@ -164,7 +164,7 @@ test.describe('Xray Constructor integration test suite', () => {
     // Находим JSON preview-панель
     const previewPane = page
       .locator(
-        '[data-testid="xray-json-preview"], .xray-routing-preview, .json-preview, .constructor-preview-pane'
+        '[data-testid="xray-json-preview"], .xray-routing-preview, .json-preview, .constructor-preview-panel'
       )
       .first();
     await expect(previewPane).toBeVisible({ timeout: 5000 });

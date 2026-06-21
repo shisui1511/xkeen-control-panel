@@ -84,9 +84,9 @@ test.describe('Mihomo Generator fallback hidden rendering', () => {
     // Wait, let's mock /api/assets/definition to return default assets!
     // But since the actual test runs on the running app (dev server or preview),
     // it will fetch definition from the Go backend.
-    
+
     // Find preview container for yaml
-    const yamlPreview = page.locator('.mihomo-yaml-preview, .yaml-preview, .constructor-preview-pane').first();
+    const yamlPreview = page.locator('.mihomo-yaml-preview, .yaml-preview, .constructor-preview-panel').first();
     await expect(yamlPreview).toBeVisible({ timeout: 8000 });
     const text = await yamlPreview.textContent();
 
