@@ -255,3 +255,86 @@ proxies:
   });
 });
 
+describe('Phase 43: Mihomo Configurator Deep Analysis fixes', () => {
+  test('activeRuleProvider = none does not generate rule-providers section', () => {
+    const mockState: any = {
+      activeRuleProvider: 'none',
+      selectedMetaRuleSets: new Map(),
+      proxies: [],
+      groups: [],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: { enabled: false }
+    };
+    const yaml = generateYAML(mockState);
+    expect(yaml).not.toContain('rule-providers:');
+    expect(yaml).not.toContain('quic@inline');
+    expect(yaml).not.toContain('netbios@inline');
+  });
+
+  test('sniffer enabled does not contain skip-dst-address', () => {
+    const mockState: any = {
+      activeRuleProvider: 'none',
+      selectedMetaRuleSets: new Map(),
+      proxies: [],
+      groups: [],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: {
+        enabled: true,
+        sniffHttp: true,
+        sniffTls: true,
+        sniffQuic: true
+      }
+    };
+    const yaml = generateYAML(mockState);
+    expect(yaml).toContain('sniffer:');
+    expect(yaml).toContain('  enable: true');
+    expect(yaml).toContain('  sniff:');
+    expect(yaml).toContain('    HTTP: { ports: [80, 8080] }');
+    expect(yaml).not.toContain('skip-dst-address');
+  });
+
+  test('activeRuleProvider = zkeen generates quic and netbios inline providers', () => {
+    const mockState: any = {
+      activeRuleProvider: 'zkeen',
+      selectedMetaRuleSets: new Map(),
+      proxies: [],
+      groups: [],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: { enabled: false }
+    };
+    const yaml = generateYAML(mockState);
+    expect(yaml).toContain('rule-providers:');
+    expect(yaml).toContain('  quic@inline:');
+    expect(yaml).toContain('  netbios@inline:');
+  });
+
+  test('activeRuleProvider = metacubex with selectedMetaRuleSets generates quic, netbios and meta rule providers', () => {
+    const mockState: any = {
+      activeRuleProvider: 'metacubex',
+      selectedMetaRuleSets: new Map([
+        ['telegram|geosite', 'Telegram'],
+        ['cn|geoip', 'DIRECT']
+      ]),
+      proxies: [],
+      groups: [],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: { enabled: false }
+    };
+    const yaml = generateYAML(mockState);
+    expect(yaml).toContain('rule-providers:');
+    expect(yaml).toContain('  quic@inline:');
+    expect(yaml).toContain('  netbios@inline:');
+    expect(yaml).toContain('  geosite-telegram:');
+    expect(yaml).toContain('  geoip-cn:');
+  });
+});
+
+

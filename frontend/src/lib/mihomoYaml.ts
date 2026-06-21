@@ -660,66 +660,68 @@ export function generateYAML(state: MihomoConfigState): string {
   }
 
   // Rule-providers (if selected)
-  lines.push('rule-providers:');
-  // Always inject quic@inline and netbios@inline
-  lines.push('  quic@inline:');
-  lines.push('    type: inline');
-  lines.push('    behavior: classical');
-  lines.push('    payload:');
-  lines.push('      - "AND,((DST-PORT,443),(NETWORK,UDP))"');
-  lines.push('  netbios@inline:');
-  lines.push('    type: inline');
-  lines.push('    behavior: classical');
-  lines.push('    payload:');
-  lines.push('      - "AND,((DST-PORT,135),(NETWORK,UDP))"');
-  lines.push('      - "AND,((DST-PORT,137),(NETWORK,UDP))"');
-  lines.push('      - "AND,((DST-PORT,138),(NETWORK,UDP))"');
-  lines.push('      - "AND,((DST-PORT,139),(NETWORK,UDP))"');
+  if (state.activeRuleProvider !== 'none') {
+    lines.push('rule-providers:');
+    // Always inject quic@inline and netbios@inline
+    lines.push('  quic@inline:');
+    lines.push('    type: inline');
+    lines.push('    behavior: classical');
+    lines.push('    payload:');
+    lines.push('      - "AND,((DST-PORT,443),(NETWORK,UDP))"');
+    lines.push('  netbios@inline:');
+    lines.push('    type: inline');
+    lines.push('    behavior: classical');
+    lines.push('    payload:');
+    lines.push('      - "AND,((DST-PORT,135),(NETWORK,UDP))"');
+    lines.push('      - "AND,((DST-PORT,137),(NETWORK,UDP))"');
+    lines.push('      - "AND,((DST-PORT,138),(NETWORK,UDP))"');
+    lines.push('      - "AND,((DST-PORT,139),(NETWORK,UDP))"');
 
-  const metaBaseUrl = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
-  const buildMetaRuleSetUrl = (id: string, type: 'geosite' | 'geoip') => `${metaBaseUrl}/${type}/${id}.mrs`;
+    const metaBaseUrl = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
+    const buildMetaRuleSetUrl = (id: string, type: 'geosite' | 'geoip') => `${metaBaseUrl}/${type}/${id}.mrs`;
 
-  if (state.activeRuleProvider === 'metacubex' && state.selectedMetaRuleSets.size > 0) {
-    for (const [key, outbound] of state.selectedMetaRuleSets) {
-      const [id, type] = key.split('|') as [string, 'geosite' | 'geoip'];
-      const behavior = type === 'geoip' ? 'ipcidr' : 'domain';
-      lines.push(`  ${type}-${id.replace(/[^a-z0-9-]/g, '-')}:`);
-      lines.push(`    type: http`);
-      lines.push(`    format: mrs`);
-      lines.push(`    behavior: ${behavior}`);
-      lines.push(`    url: ${yamlSafeString(sanitizeUrl(buildMetaRuleSetUrl(id, type)))}`);
-      lines.push(`    interval: 86400`);
-    }
-  } else if (state.activeRuleProvider !== 'none' && state.activeRuleProvider !== 'metacubex') {
-    const providers = state.activeRuleProvider === 'zkeen' ? (state.ruleProviders || ZKEEN_RULE_PROVIDERS) : RULE_PROVIDERS[state.activeRuleProvider];
-    if (providers && providers.length > 0) {
-      for (const rp of providers) {
-        if (rp.name === 'quic@inline' || rp.name === 'netbios@inline') {
-          continue;
-        }
-        lines.push(`  ${rp.name}:`);
-        if (rp.format === 'inline') {
-          lines.push(`    type: inline`);
-          lines.push(`    behavior: ${rp.behavior}`);
-          lines.push(`    payload:`);
-          if (rp.payload) {
-            for (const item of rp.payload) {
-              lines.push(`      - ${yamlSafeString(item)}`);
+    if (state.activeRuleProvider === 'metacubex' && state.selectedMetaRuleSets.size > 0) {
+      for (const [key, outbound] of state.selectedMetaRuleSets) {
+        const [id, type] = key.split('|') as [string, 'geosite' | 'geoip'];
+        const behavior = type === 'geoip' ? 'ipcidr' : 'domain';
+        lines.push(`  ${type}-${id.replace(/[^a-z0-9-]/g, '-')}:`);
+        lines.push(`    type: http`);
+        lines.push(`    format: mrs`);
+        lines.push(`    behavior: ${behavior}`);
+        lines.push(`    url: ${yamlSafeString(sanitizeUrl(buildMetaRuleSetUrl(id, type)))}`);
+        lines.push(`    interval: 86400`);
+      }
+    } else if (state.activeRuleProvider !== 'none' && state.activeRuleProvider !== 'metacubex') {
+      const providers = state.activeRuleProvider === 'zkeen' ? (state.ruleProviders || ZKEEN_RULE_PROVIDERS) : RULE_PROVIDERS[state.activeRuleProvider];
+      if (providers && providers.length > 0) {
+        for (const rp of providers) {
+          if (rp.name === 'quic@inline' || rp.name === 'netbios@inline') {
+            continue;
+          }
+          lines.push(`  ${rp.name}:`);
+          if (rp.format === 'inline') {
+            lines.push(`    type: inline`);
+            lines.push(`    behavior: ${rp.behavior}`);
+            lines.push(`    payload:`);
+            if (rp.payload) {
+              for (const item of rp.payload) {
+                lines.push(`      - ${yamlSafeString(item)}`);
+              }
             }
+          } else {
+            lines.push(`    type: http`);
+            if (rp.format) {
+              lines.push(`    format: ${rp.format}`);
+            }
+            lines.push(`    behavior: ${rp.behavior}`);
+            lines.push(`    url: ${yamlSafeString(sanitizeUrl(rp.url))}`);
+            lines.push(`    interval: 86400`);
           }
-        } else {
-          lines.push(`    type: http`);
-          if (rp.format) {
-            lines.push(`    format: ${rp.format}`);
-          }
-          lines.push(`    behavior: ${rp.behavior}`);
-          lines.push(`    url: ${yamlSafeString(sanitizeUrl(rp.url))}`);
-          lines.push(`    interval: 86400`);
         }
       }
     }
+    lines.push('');
   }
-  lines.push('');
 
   // Proxies
   if (state.proxies.length > 0) {
@@ -922,7 +924,6 @@ export function generateYAML(state: MihomoConfigState): string {
     if (state.sniffer.sniffHttp) lines.push('    HTTP: { ports: [80, 8080] }');
     if (state.sniffer.sniffTls) lines.push('    TLS: { ports: [443, 8443] }');
     if (state.sniffer.sniffQuic) lines.push('    QUIC: { ports: [443, 8443] }');
-    lines.push('  skip-dst-address: [rule-set:telegram@ipcidr]');
   }
   lines.push('');
 
