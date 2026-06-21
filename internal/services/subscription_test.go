@@ -86,10 +86,11 @@ func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 	svc := NewSubscriptionService(tmp, xrayDir, mihomoDir)
 
 	sub := Subscription{
-		Name:    "Transition Test",
-		URL:     "https://example.com/sub",
-		Enabled: true,
-		Type:    "xray",
+		Name:         "Transition Test",
+		URL:          "https://example.com/sub",
+		Enabled:      true,
+		EnableXray:   true,
+		EnableMihomo: false,
 	}
 	svc.Add(&sub)
 
@@ -99,9 +100,10 @@ func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 	fragmentPath := filepath.Join(xrayDir, fmt.Sprintf("04_outbounds.%s.json", id))
 	_ = os.WriteFile(fragmentPath, []byte(`[]`), 0600)
 
-	// Update type to mihomo
+	// Update flags to enable mihomo and disable xray
 	updatedSub := sub
-	updatedSub.Type = "mihomo"
+	updatedSub.EnableXray = false
+	updatedSub.EnableMihomo = true
 	err := svc.Update(id, &updatedSub)
 	if err != nil {
 		t.Fatalf("Update failed: %v", err)
@@ -120,9 +122,10 @@ func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(mihomoDir, "providers"), 0755)
 	_ = os.WriteFile(providerPath, []byte(""), 0600)
 
-	// Update type back to xray
+	// Update flags back: enable xray and disable mihomo
 	updatedSub2 := updatedSub
-	updatedSub2.Type = "xray"
+	updatedSub2.EnableXray = true
+	updatedSub2.EnableMihomo = false
 	err = svc.Update(id, &updatedSub2)
 	if err != nil {
 		t.Fatalf("Update failed: %v", err)
@@ -617,6 +620,7 @@ func TestSubscriptionScheduler_FrozenClock(t *testing.T) {
 		URL:        ts.URL,
 		TagPrefix:  "s1-",
 		Enabled:    true,
+		EnableXray: true,
 		Interval:   1,
 		LastUpdate: pastTime,
 	}
@@ -631,6 +635,7 @@ func TestSubscriptionScheduler_FrozenClock(t *testing.T) {
 		URL:        ts.URL,
 		TagPrefix:  "s2-",
 		Enabled:    true,
+		EnableXray: true,
 		Interval:   1,
 		LastUpdate: recentTime,
 	}
@@ -968,10 +973,11 @@ func TestMihomoSubscriptionType(t *testing.T) {
 	defer ts.Close()
 
 	sub := Subscription{
-		Name:    "Mihomo Sub",
-		URL:     ts.URL,
-		Type:    "mihomo",
-		Enabled: true,
+		Name:         "Mihomo Sub",
+		URL:          ts.URL,
+		EnableMihomo: true,
+		EnableXray:   false,
+		Enabled:      true,
 	}
 	if err := svc.Add(&sub); err != nil {
 		t.Fatalf("Add: %v", err)
@@ -1065,10 +1071,11 @@ proxies:
 	defer ts.Close()
 
 	sub := Subscription{
-		Name:    "Traffic Sub",
-		URL:     ts.URL,
-		Type:    "mihomo",
-		Enabled: true,
+		Name:         "Traffic Sub",
+		URL:          ts.URL,
+		EnableMihomo: true,
+		EnableXray:   false,
+		Enabled:      true,
 	}
 	if err := svc.Add(&sub); err != nil {
 		t.Fatal(err)
@@ -1189,10 +1196,11 @@ func TestSubscriptionDiagnostics(t *testing.T) {
 	defer ts.Close()
 
 	sub := Subscription{
-		ID:      "diag_test",
-		Name:    "Diag Test",
-		URL:     ts.URL,
-		Enabled: true,
+		ID:         "diag_test",
+		Name:       "Diag Test",
+		URL:        ts.URL,
+		Enabled:    true,
+		EnableXray: true,
 	}
 	if err := svc.Add(&sub); err != nil {
 		t.Fatalf("Add failed: %v", err)
@@ -1480,7 +1488,8 @@ proxy-groups:
 		ID:           "mihomo-sub",
 		Name:         "Mihomo Sub Test",
 		URL:          srv.URL,
-		Type:         "mihomo",
+		EnableMihomo: true,
+		EnableXray:   false,
 		Enabled:      true,
 		Interval:     1,
 		MihomoGroups: []string{"PROXY"},
@@ -1590,12 +1599,13 @@ func TestRefreshXray_DoesNotRestartXray(t *testing.T) {
 
 	// 3. Добавить Xray подписку
 	sub := Subscription{
-		ID:       "xray-sub",
-		Name:     "Xray Sub Test",
-		URL:      srv.URL,
-		Type:     "xray",
-		Enabled:  true,
-		Interval: 1,
+		ID:           "xray-sub",
+		Name:         "Xray Sub Test",
+		URL:          srv.URL,
+		EnableXray:   true,
+		EnableMihomo: false,
+		Enabled:      true,
+		Interval:     1,
 	}
 	if err := svc.Add(&sub); err != nil {
 		t.Fatal(err)
@@ -1651,10 +1661,11 @@ func TestRefreshMihomo_ConcurrentRace(t *testing.T) {
 	svc.httpClient = srv.Client()
 
 	sub := Subscription{
-		ID:      "race-sub",
-		URL:     srv.URL,
-		Type:    "mihomo",
-		Enabled: true,
+		ID:           "race-sub",
+		URL:          srv.URL,
+		EnableMihomo: true,
+		EnableXray:   false,
+		Enabled:      true,
 	}
 	if err := svc.Add(&sub); err != nil {
 		t.Fatalf("Add subscription failed: %v", err)
@@ -1667,7 +1678,10 @@ func TestRefreshMihomo_ConcurrentRace(t *testing.T) {
 			defer wg.Done()
 			subCopy := svc.Get("race-sub")
 			if subCopy != nil {
-				_ = svc.refreshMihomo(subCopy)
+				body, headers, err := svc.downloadRaw(subCopy.URL, subCopy)
+				if err == nil {
+					_ = svc.refreshMihomo(subCopy, body, headers)
+				}
 			}
 		}()
 	}
@@ -1933,7 +1947,8 @@ proxy-groups:
 		ID:           "mihomo-reload-test",
 		Name:         "Mihomo reload test",
 		URL:          subServer.URL,
-		Type:         "mihomo",
+		EnableMihomo: true,
+		EnableXray:   false,
 		Enabled:      true,
 		Interval:     1,
 		MihomoGroups: []string{"PROXY"},
@@ -2008,11 +2023,12 @@ func TestSubscriptionService_ClashYAMLToXrayOutbounds(t *testing.T) {
 	svc.httpClient = srv.Client()
 
 	sub := Subscription{
-		ID:      "clash-to-xray-test",
-		Name:    "Clash to Xray Test",
-		URL:     srv.URL,
-		Type:    "xray", // Xray sub type, but receives Clash YAML!
-		Enabled: true,
+		ID:           "clash-to-xray-test",
+		Name:         "Clash to Xray Test",
+		URL:          srv.URL,
+		EnableXray:   true,
+		EnableMihomo: false,
+		Enabled:      true,
 	}
 	_ = svc.Add(&sub)
 

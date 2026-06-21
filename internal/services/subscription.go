@@ -67,13 +67,33 @@ func (s *SubscriptionService) subscriptionUserAgent(subType string) string {
 	return "v2rayN/" + ver
 }
 
+// selectUserAgent выбирает User-Agent на основе флагов интеграции и состояния ядер.
+func (s *SubscriptionService) selectUserAgent(sub *Subscription) string {
+	if sub.EnableXray && !sub.EnableMihomo {
+		return s.subscriptionUserAgent("xray")
+	}
+	if sub.EnableMihomo && !sub.EnableXray {
+		return s.subscriptionUserAgent("mihomo")
+	}
+	if sub.EnableXray && sub.EnableMihomo {
+		if s.kernelSvc != nil {
+			info := s.kernelSvc.Get("mihomo")
+			if info != nil && info.ProcessStatus == "running" {
+				return s.subscriptionUserAgent("mihomo")
+			}
+		}
+		return s.subscriptionUserAgent("xray")
+	}
+	return s.subscriptionUserAgent("xray")
+}
+
 // fetchWithUserAgent выполняет GET с правильным User-Agent и HWID-заголовками.
-func (s *SubscriptionService) fetchWithUserAgent(subURL string, sub *Subscription) (*http.Response, error) {
+func (s *SubscriptionService) fetchWithUserAgent(subURL string, sub *Subscription, ua string) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodGet, subURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", s.subscriptionUserAgent(sub.Type))
+	req.Header.Set("User-Agent", ua)
 
 	// HWID Device Limit: per-subscription override or global device HWID.
 	hwid := sub.HwidToken
@@ -128,8 +148,9 @@ type Subscription struct {
 	Interval   int       `json:"interval"` // hours
 	LastUpdate time.Time `json:"last_update"`
 	Enabled    bool      `json:"enabled"`
-	// Type defines the format of the subscription: "xray" (default) or "mihomo"
-	Type string `json:"type,omitempty"`
+
+	EnableXray   bool `json:"enable_xray"`
+	EnableMihomo bool `json:"enable_mihomo"`
 
 	// Filters (Xray only)
 	FilterName      string `json:"filter_name,omitempty"`
@@ -170,16 +191,18 @@ type Subscription struct {
 	// при refresh старые блоки удаляются по этим именам и заменяются новыми.
 	// ManagedYAML — последний снимок YAML блоков (для diff/drift detection).
 	// LastHash — хэш контента, чтобы не дёргать restart если ничего не изменилось.
+	// LastHashMihomo — хэш контента Mihomo, чтобы избежать коллизий при одновременном использовании двух ядер.
 	// LastChanged — true если последний refresh принёс изменения (для UI badge).
 	// MihomoGroups — имена proxy-groups в config.yaml, в которых нужно
 	// автоматически держать ссылки на прокси этой подписки.
-	ProxyNames   []string `json:"proxy_names,omitempty"`
-	ManagedYAML  string   `json:"managed_yaml,omitempty"`
-	LastCount    int      `json:"last_count,omitempty"`
-	LastSkipped  int      `json:"last_skipped,omitempty"`
-	LastHash     string   `json:"last_hash,omitempty"`
-	LastChanged  bool     `json:"last_changed,omitempty"`
-	MihomoGroups []string `json:"mihomo_groups,omitempty"`
+	ProxyNames     []string `json:"proxy_names,omitempty"`
+	ManagedYAML    string   `json:"managed_yaml,omitempty"`
+	LastCount      int      `json:"last_count,omitempty"`
+	LastSkipped    int      `json:"last_skipped,omitempty"`
+	LastHash       string   `json:"last_hash,omitempty"`
+	LastHashMihomo string   `json:"last_hash_mihomo,omitempty"`
+	LastChanged    bool     `json:"last_changed,omitempty"`
+	MihomoGroups   []string `json:"mihomo_groups,omitempty"`
 
 	Nodes        []SubscriptionNode `json:"nodes,omitempty"`
 	Announcement string             `json:"announcement,omitempty"`
@@ -459,7 +482,7 @@ func (s *SubscriptionService) GetHWID() string {
 }
 
 func (s *SubscriptionService) getProxyCount(sub *Subscription) int {
-	if sub.Type == "mihomo" {
+	if sub.EnableMihomo {
 		// Для Mihomo используем кэшированный счётчик из последнего refresh.
 		return sub.LastCount
 	}
@@ -519,56 +542,57 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				existing.FilterTransport = sub.FilterTransport
 			}
 			existing.UseProviderInterval = sub.UseProviderInterval
-			// Type, RoutingMode, MihomoGroups — обновляем только если явно указаны.
-			if sub.Type != "" {
-				if sub.Type != existing.Type {
-					if existing.Type == "mihomo" && sub.Type == "xray" {
-						// Clean up Mihomo configurations
-						configDir := s.mihomoConfigDir
-						if configDir == "" {
-							configDir = "/opt/etc/mihomo"
-						}
-						configPath := filepath.Join(configDir, "config.yaml")
 
-						providerName := getMihomoProviderName(existing.Name, existing.URL, existing.ID)
-
-						s.mihomoMu.Lock()
-						rawConfig, err := os.ReadFile(configPath)
-						if err == nil {
-							newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, "")
-							for _, group := range existing.MihomoGroups {
-								newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, true)
-							}
-							newConfig = ReplaceMihomoProxies(newConfig, existing.ProxyNames, nil)
-							for _, group := range existing.MihomoGroups {
-								newConfig = UpdateMihomoGroupProxies(newConfig, group, nil, existing.ProxyNames)
-							}
-							_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
-						}
-						s.mihomoMu.Unlock()
-
-						// Delete provider file; sanitize id to prevent path traversal (CWE-22).
-						providersDir := filepath.Join(configDir, "providers")
-						providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", providerName))
-						// Explicit guard: path must be within providersDir (CWE-22).
-						if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
-							os.Remove(providerFilePath)
-						}
-
-						// Reset Mihomo specific fields in existing subscription
-						existing.ProxyNames = nil
-						existing.ManagedYAML = ""
-						existing.LastCount = 0
-						existing.LastHash = ""
-					} else if (existing.Type == "xray" || existing.Type == "") && sub.Type == "mihomo" {
-						// Clean up Xray fragment files
-						os.Remove(s.getFragmentPath(existing))
-						os.Remove(s.getRoutingFragmentPath(existing))
-						existing.LastHash = ""
-					}
-					existing.Type = sub.Type
-				}
+			// Clean up Xray if it was enabled and is now disabled
+			if existing.EnableXray && !sub.EnableXray {
+				os.Remove(s.getFragmentPath(existing))
+				os.Remove(s.getRoutingFragmentPath(existing))
+				existing.LastHash = ""
 			}
+
+			// Clean up Mihomo if it was enabled and is now disabled
+			if existing.EnableMihomo && !sub.EnableMihomo {
+				configDir := s.mihomoConfigDir
+				if configDir == "" {
+					configDir = "/opt/etc/mihomo"
+				}
+				configPath := filepath.Join(configDir, "config.yaml")
+
+				providerName := getMihomoProviderName(existing.Name, existing.URL, existing.ID)
+
+				s.mihomoMu.Lock()
+				rawConfig, err := os.ReadFile(configPath)
+				if err == nil {
+					newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, "")
+					for _, group := range existing.MihomoGroups {
+						newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, true)
+					}
+					newConfig = ReplaceMihomoProxies(newConfig, existing.ProxyNames, nil)
+					for _, group := range existing.MihomoGroups {
+						newConfig = UpdateMihomoGroupProxies(newConfig, group, nil, existing.ProxyNames)
+					}
+					_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
+				}
+				s.mihomoMu.Unlock()
+
+				// Delete provider file; sanitize id to prevent path traversal (CWE-22).
+				providersDir := filepath.Join(configDir, "providers")
+				providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", providerName))
+				// Explicit guard: path must be within providersDir (CWE-22).
+				if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
+					os.Remove(providerFilePath)
+				}
+
+				// Reset Mihomo specific fields in existing subscription
+				existing.ProxyNames = nil
+				existing.ManagedYAML = ""
+				existing.LastCount = 0
+				existing.LastHashMihomo = ""
+			}
+
+			existing.EnableXray = sub.EnableXray
+			existing.EnableMihomo = sub.EnableMihomo
+
 			if sub.RoutingMode != "" {
 				existing.RoutingMode = sub.RoutingMode
 			}
@@ -612,10 +636,11 @@ func (s *SubscriptionService) Delete(id string) error {
 	s.subscriptions = newList
 
 	// Delete managed fragment files.
-	if sub.Type != "mihomo" {
+	if sub.EnableXray {
 		os.Remove(s.getFragmentPath(sub))
 		os.Remove(s.getRoutingFragmentPath(sub)) // noop если файла нет
-	} else {
+	}
+	if sub.EnableMihomo {
 		configDir := s.mihomoConfigDir
 		if configDir == "" {
 			configDir = "/opt/etc/mihomo"
@@ -679,12 +704,47 @@ func (s *SubscriptionService) Refresh(id string) error {
 		return fmt.Errorf("subscription not found")
 	}
 
-	var refreshErr error
-	if subCopy.Type == "mihomo" {
-		refreshErr = s.refreshMihomo(&subCopy)
-	} else {
-		refreshErr = s.refreshXray(&subCopy)
+	if !subCopy.EnableXray && !subCopy.EnableMihomo {
+		return fmt.Errorf("subscription is not enabled for any kernel")
 	}
+
+	// Download subscription once (outside of lock to avoid blocking other operations)
+	ua := s.selectUserAgent(&subCopy)
+	body, headers, err := s.downloadWithUA(subCopy.URL, &subCopy, ua)
+	if err != nil {
+		s.mu.Lock()
+		if live := s.GetLocked(safeID); live != nil {
+			live.LastError = err.Error()
+			_ = s.save()
+		}
+		s.mu.Unlock()
+		return err
+	}
+
+	var refreshErr error
+	xrayChanged := false
+	mihomoChanged := false
+
+	if subCopy.EnableXray {
+		err := s.refreshXray(&subCopy, body, headers)
+		if err != nil {
+			refreshErr = err
+		} else {
+			xrayChanged = subCopy.LastChanged
+		}
+	}
+	if subCopy.EnableMihomo {
+		err := s.refreshMihomo(&subCopy, body, headers)
+		if err != nil {
+			if refreshErr == nil {
+				refreshErr = err
+			}
+		} else {
+			mihomoChanged = subCopy.LastChanged
+		}
+	}
+
+	subCopy.LastChanged = xrayChanged || mihomoChanged
 
 	// Persist last_error so frontend can show error state
 	s.mu.Lock()
@@ -713,11 +773,9 @@ func (s *SubscriptionService) Refresh(id string) error {
 			live.Nodes = subCopy.Nodes
 			live.Announcement = subCopy.Announcement
 			live.LastHash = subCopy.LastHash
+			live.LastHashMihomo = subCopy.LastHashMihomo
 			live.LastChanged = subCopy.LastChanged
-			if subCopy.Type == "mihomo" {
-				live.ProxyNames = subCopy.ProxyNames
-				live.DetectedFormat = "clash-meta"
-			}
+			live.ProxyNames = subCopy.ProxyNames
 		}
 		_ = s.save()
 	}
@@ -725,7 +783,7 @@ func (s *SubscriptionService) Refresh(id string) error {
 	return refreshErr
 }
 
-func (s *SubscriptionService) refreshXray(sub *Subscription) (err error) {
+func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, headers http.Header) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic in parser: %v", r)
@@ -733,8 +791,7 @@ func (s *SubscriptionService) refreshXray(sub *Subscription) (err error) {
 		}
 	}()
 
-	// Download subscription (outside of lock to avoid blocking other operations)
-	outbounds, skipReasons, body, headers, err := s.downloadAndParse(sub.URL, sub)
+	outbounds, skipReasons, err := parseSubscriptionBody(body, headers.Get("Content-Type"), sub)
 	if err != nil {
 		return err
 	}
@@ -817,7 +874,7 @@ func (s *SubscriptionService) refreshXray(sub *Subscription) (err error) {
 	return nil
 }
 
-func (s *SubscriptionService) refreshMihomo(sub *Subscription) (err error) {
+func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, headers http.Header) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic in parser: %v", r)
@@ -825,13 +882,8 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription) (err error) {
 		}
 	}()
 
-	body, headers, err := s.downloadRaw(sub.URL, sub)
-	if err != nil {
-		return err
-	}
-
 	if !looksLikeClashYAML(string(body)) {
-		return fmt.Errorf("данная подписка не имеет формата Clash/Mihomo YAML и не поддерживается ядром Mihomo. Пожалуйста, переключите тип подписки на XRay в её настройках")
+		return fmt.Errorf("данная подписка не имеет формата Clash/Mihomo YAML и не поддерживается ядром Mihomo. Пожалуйста, убедитесь, что подписка возвращает Clash YAML формат")
 	}
 
 	s.mihomoMu.Lock()
@@ -925,12 +977,13 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription) (err error) {
 	// Сравниваем хэши — restart только при реальных изменениях.
 	h := sha256.Sum256([]byte(newConfig))
 	newHash := fmt.Sprintf("%x", h[:])
-	oldHash := sub.LastHash
+	oldHash := sub.LastHashMihomo
 
 	sub.ProxyNames = newNames
 	sub.LastCount = len(newNames)
 	sub.RuleCount = countMihomoRules(string(body))
-	sub.LastHash = newHash
+	sub.DetectedFormat = "clash-meta"
+	sub.LastHashMihomo = newHash
 	sub.LastUpdate = time.Now()
 
 	// Генерация списка нод для Mihomo подписки
@@ -979,12 +1032,12 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription) (err error) {
 	return nil
 }
 
-func (s *SubscriptionService) downloadRaw(subURL string, sub *Subscription) ([]byte, http.Header, error) {
+func (s *SubscriptionService) downloadWithUA(subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
 	parsed, err := url.Parse(subURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, nil, fmt.Errorf("only http and https URLs are allowed for subscriptions")
 	}
-	resp, err := s.fetchWithUserAgent(subURL, sub)
+	resp, err := s.fetchWithUserAgent(subURL, sub, ua)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1000,6 +1053,11 @@ func (s *SubscriptionService) downloadRaw(subURL string, sub *Subscription) ([]b
 		return nil, nil, err
 	}
 	return body, resp.Header, nil
+}
+
+func (s *SubscriptionService) downloadRaw(subURL string, sub *Subscription) ([]byte, http.Header, error) {
+	ua := s.selectUserAgent(sub)
+	return s.downloadWithUA(subURL, sub, ua)
 }
 
 func (s *SubscriptionService) GetLocked(id string) *Subscription {
@@ -1019,35 +1077,17 @@ func (s *SubscriptionService) downloadAndParse(subURL string, sub *Subscription)
 		}
 	}()
 
-	// C-6: validate URL scheme
-	parsed, err := url.Parse(subURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return nil, nil, nil, nil, fmt.Errorf("only http and https URLs are allowed for subscriptions")
-	}
-
-	resp, err := s.fetchWithUserAgent(subURL, sub)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	defer resp.Body.Close()
-
-	applySubscriptionHeaders(resp.Header, sub)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, nil, nil, nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	// C-4: cap download size to 10 MB
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSubscriptionBytes))
+	ua := s.selectUserAgent(sub)
+	body, headers, err := s.downloadWithUA(subURL, sub, ua)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	outs, skipReasons, err := parseSubscriptionBody(body, resp.Header.Get("Content-Type"), sub)
+	outs, skipReasons, err := parseSubscriptionBody(body, headers.Get("Content-Type"), sub)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	return outs, skipReasons, body, resp.Header, nil
+	return outs, skipReasons, body, headers, nil
 }
 
 // parseSubscriptionBody detects the format of a subscription response and parses it
@@ -1603,8 +1643,8 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 	if sub == nil {
 		return fmt.Errorf("subscription not found")
 	}
-	if sub.Type == "mihomo" {
-		return fmt.Errorf("active node selection is not supported for Mihomo subscriptions")
+	if !sub.EnableXray {
+		return fmt.Errorf("active node selection is only supported for Xray subscriptions")
 	}
 	if sub.RoutingMode == "auto" {
 		return fmt.Errorf("cannot set active node in auto routing mode (balancer is managing selection)")

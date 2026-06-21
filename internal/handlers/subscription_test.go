@@ -54,7 +54,7 @@ func TestSubscriptionList(t *testing.T) {
 	}
 
 	// 2. Non-empty List
-	sub := &services.Subscription{Name: "Sub 1", URL: "http://example.com/sub"}
+	sub := &services.Subscription{Name: "Sub 1", URL: "http://example.com/sub", EnableXray: true}
 	subSvc.Add(sub)
 
 	req = httptest.NewRequest(http.MethodGet, "/api/subscriptions", nil)
@@ -120,7 +120,7 @@ func TestSubscriptionAdd(t *testing.T) {
 func TestSubscriptionUpdate(t *testing.T) {
 	api, subSvc := newSubTestAPI(t)
 
-	sub := &services.Subscription{Name: "Old Name", URL: "http://example.com/sub"}
+	sub := &services.Subscription{Name: "Old Name", URL: "http://example.com/sub", EnableXray: true}
 	subSvc.Add(sub)
 	id := subSvc.List()[0].ID
 
@@ -152,7 +152,7 @@ func TestSubscriptionUpdate(t *testing.T) {
 func TestSubscriptionDelete(t *testing.T) {
 	api, subSvc := newSubTestAPI(t)
 
-	sub := &services.Subscription{Name: "To Delete", URL: "http://example.com/sub"}
+	sub := &services.Subscription{Name: "To Delete", URL: "http://example.com/sub", EnableXray: true}
 	subSvc.Add(sub)
 	id := subSvc.List()[0].ID
 
@@ -179,7 +179,7 @@ func TestSubscriptionRefresh(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sub := &services.Subscription{Name: "Refresh Sub", URL: ts.URL, Enabled: true}
+	sub := &services.Subscription{Name: "Refresh Sub", URL: ts.URL, Enabled: true, EnableXray: true}
 	subSvc.Add(sub)
 	id := subSvc.List()[0].ID
 
@@ -209,8 +209,8 @@ func TestSubscriptionRefreshAll(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sub1 := &services.Subscription{Name: "Sub 1", URL: ts.URL, Enabled: true}
-	sub2 := &services.Subscription{Name: "Sub 2", URL: ts.URL, Enabled: false}
+	sub1 := &services.Subscription{Name: "Sub 1", URL: ts.URL, Enabled: true, EnableXray: true}
+	sub2 := &services.Subscription{Name: "Sub 2", URL: ts.URL, Enabled: false, EnableXray: true}
 	subSvc.Add(sub1)
 	subSvc.Add(sub2)
 
@@ -246,7 +246,7 @@ func TestSubscriptionRawAndReport(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sub := &services.Subscription{Name: "Raw Sub", URL: ts.URL, Enabled: true}
+	sub := &services.Subscription{Name: "Raw Sub", URL: ts.URL, Enabled: true, EnableXray: true}
 	subSvc.Add(sub)
 	id := subSvc.List()[0].ID
 
@@ -289,9 +289,10 @@ func TestSubscriptionSetActive(t *testing.T) {
 
 	// Set up subscription with nodes
 	sub := &services.Subscription{
-		Name:    "Routing Sub",
-		URL:     "http://example.com/sub",
-		Enabled: true,
+		Name:       "Routing Sub",
+		URL:        "http://example.com/sub",
+		Enabled:    true,
+		EnableXray: true,
 		Nodes: []services.SubscriptionNode{
 			{Tag: "node-1", Name: "Node 1", Protocol: "vless"},
 			{Tag: "node-2", Name: "Node 2", Protocol: "vless"},
@@ -319,6 +320,7 @@ func TestSubscriptionSetActive(t *testing.T) {
 	// 2. Balancer Auto Conflict
 	subSvc.Update(id, &services.Subscription{
 		RoutingMode: "auto",
+		EnableXray:  true,
 	})
 	reqConf := httptest.NewRequest(http.MethodPost, "/api/subscriptions/active?id="+id, strings.NewReader(body))
 	rrConf := httptest.NewRecorder()

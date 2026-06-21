@@ -54,12 +54,12 @@ func TestSubscriptionE2E(t *testing.T) {
 
 	// 3. Добавление новой подписки через API (POST /api/subscriptions/add)
 	addPayload := map[string]interface{}{
-		"name":       "Integration Sub",
-		"url":        ts.URL,
-		"type":       "xray",
-		"enabled":    true,
-		"interval":   12,
-		"tag_prefix": "test-pfx",
+		"name":        "Integration Sub",
+		"url":         ts.URL,
+		"enable_xray": true,
+		"enabled":     true,
+		"interval":    12,
+		"tag_prefix":  "test-pfx",
 	}
 	payloadBytes, _ := json.Marshal(addPayload)
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/add", bytes.NewReader(payloadBytes))
