@@ -1968,3 +1968,105 @@ proxy-groups:
 	}
 }
 
+func TestSubscriptionService_ClashYAMLToXrayOutbounds(t *testing.T) {
+	tmp := t.TempDir()
+	xrayDir := filepath.Join(tmp, "xray")
+	_ = os.MkdirAll(xrayDir, 0755)
+
+	// Mock Clash YAML subscription source
+	yamlContent := `proxies:
+  - name: "🇩🇪 Germany VLESS"
+    type: vless
+    server: de.example.com
+    port: 443
+    uuid: uuid-vless
+    tls: true
+    servername: de.example.com
+  - name: "🇳🇱 Netherlands VMess"
+    type: vmess
+    server: nl.example.com
+    port: 8080
+    uuid: uuid-vmess
+    alterId: 0
+    network: ws
+    ws-opts:
+      path: /vmessws
+  - name: "🇸🇬 Singapore Shadowsocks"
+    type: ss
+    server: sg.example.com
+    port: 8388
+    cipher: aes-256-gcm
+    password: ss-pass
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/yaml")
+		_, _ = w.Write([]byte(yamlContent))
+	}))
+	defer srv.Close()
+
+	svc := NewSubscriptionService(tmp, xrayDir, tmp)
+	svc.httpClient = srv.Client()
+
+	sub := Subscription{
+		ID:      "clash-to-xray-test",
+		Name:    "Clash to Xray Test",
+		URL:     srv.URL,
+		Type:    "xray", // Xray sub type, but receives Clash YAML!
+		Enabled: true,
+	}
+	_ = svc.Add(&sub)
+
+	// Run Refresh. This should download Clash YAML and parse it successfully as Xray outbounds!
+	err := svc.Refresh("clash-to-xray-test")
+	if err != nil {
+		t.Fatalf("Refresh failed: %v", err)
+	}
+
+	// Read generated fragment file
+	fragmentPath := svc.getFragmentPath(&sub)
+	data, err := os.ReadFile(fragmentPath)
+	if err != nil {
+		t.Fatalf("fragment file not found: %v", err)
+	}
+
+	var wrapper struct {
+		Outbounds []Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		t.Fatalf("failed to unmarshal generated outbounds: %v", err)
+	}
+
+	// We expect 3 parsed outbounds
+	if len(wrapper.Outbounds) != 3 {
+		t.Fatalf("expected 3 outbounds, got %d", len(wrapper.Outbounds))
+	}
+
+	// Check VLESS
+	o0 := wrapper.Outbounds[0]
+	if o0.Tag != "🇩🇪 Germany VLESS" || o0.Protocol != "vless" {
+		t.Errorf("o0 invalid: Tag=%q, Protocol=%q", o0.Tag, o0.Protocol)
+	}
+	if o0.StreamSettings["security"] != "tls" {
+		t.Errorf("o0 security expected tls, got %v", o0.StreamSettings["security"])
+	}
+
+	// Check VMess
+	o1 := wrapper.Outbounds[1]
+	if o1.Tag != "🇳🇱 Netherlands VMess" || o1.Protocol != "vmess" {
+		t.Errorf("o1 invalid: Tag=%q, Protocol=%q", o1.Tag, o1.Protocol)
+	}
+	if o1.StreamSettings["network"] != "ws" {
+		t.Errorf("o1 network expected ws, got %v", o1.StreamSettings["network"])
+	}
+	wsSettings := o1.StreamSettings["wsSettings"].(map[string]interface{})
+	if wsSettings["path"] != "/vmessws" {
+		t.Errorf("o1 ws path expected /vmessws, got %v", wsSettings["path"])
+	}
+
+	// Check Shadowsocks
+	o2 := wrapper.Outbounds[2]
+	if o2.Tag != "🇸🇬 Singapore Shadowsocks" || o2.Protocol != "shadowsocks" {
+		t.Errorf("o2 invalid: Tag=%q, Protocol=%q", o2.Tag, o2.Protocol)
+	}
+}
+

@@ -1106,7 +1106,10 @@ func parseSubscriptionBody(body []byte, contentTypeHeader string, sub *Subscript
 
 	// 5) Clash/Mihomo YAML Check
 	if looksLikeClashYAML(content) {
-		return nil, nil, fmt.Errorf("данная подписка имеет формат Clash/Mihomo YAML и не поддерживается ядром XRay. Пожалуйста, переключите тип подписки на Mihomo в её настройках")
+		if outs, skips, err := parseClashYAMLToXray(content, sub); err == nil && len(outs) > 0 {
+			return outs, skips, nil
+		}
+		return nil, nil, fmt.Errorf("данная подписка имеет формат Clash/Mihomo YAML, но её не удалось распарсить для ядра XRay")
 	}
 
 	// 6) Base64 or plain share-links
@@ -1125,6 +1128,227 @@ func looksLikeClashYAML(content string) bool {
 		}
 	}
 	return false
+}
+
+func parseClashYAMLToXray(content string, sub *Subscription) ([]Outbound, []SkipReason, error) {
+	newBlocks, _ := ParseMihomoSubscriptionBlocks(content)
+	if len(newBlocks) == 0 {
+		return nil, nil, fmt.Errorf("no proxy blocks found in subscription YAML")
+	}
+
+	var outbounds []Outbound
+	var skipReasons []SkipReason
+	skipped := 0
+
+	for idx, block := range newBlocks {
+		node := ParseClashProxyNode(block)
+		if node.Tag == "" {
+			continue
+		}
+		outbound := convertSubscriptionNodeToOutbound(&node)
+		if outbound != nil {
+			outbounds = append(outbounds, *outbound)
+		} else {
+			skipped++
+			snippet := node.Tag
+			if len(snippet) > 60 {
+				snippet = snippet[:57] + "..."
+			}
+			skipReasons = append(skipReasons, SkipReason{
+				Line:    idx + 1,
+				Reason:  fmt.Sprintf("неподдерживаемый протокол Clash: %s", node.Protocol),
+				Snippet: snippet,
+			})
+		}
+	}
+
+	sub.LastCount = len(outbounds)
+	sub.LastSkipped = skipped
+	sub.DetectedFormat = "clash-meta"
+
+	return outbounds, skipReasons, nil
+}
+
+func convertSubscriptionNodeToOutbound(node *SubscriptionNode) *Outbound {
+	protocol := node.Protocol
+	if protocol == "ss" {
+		protocol = "shadowsocks"
+	}
+
+	switch protocol {
+	case "direct", "block", "dns", "selector", "urltest", "":
+		return nil
+	}
+
+	lastColon := strings.LastIndex(node.Server, ":")
+	if lastColon == -1 {
+		return nil
+	}
+	address := node.Server[:lastColon]
+	portStr := node.Server[lastColon+1:]
+	address = strings.Trim(address, "[]")
+
+	portInt, err := strconv.Atoi(portStr)
+	if err != nil || portInt < 1 || portInt > 65535 {
+		return nil
+	}
+
+	// Build StreamSettings
+	streamSettings := map[string]interface{}{}
+	network := "tcp"
+	if node.Transport != "" {
+		network = node.Transport
+	}
+	streamSettings["network"] = network
+
+	switch network {
+	case "ws":
+		ws := map[string]interface{}{}
+		if node.WSPath != "" {
+			ws["path"] = node.WSPath
+		}
+		if node.ServerName != "" {
+			ws["headers"] = map[string]interface{}{"Host": node.ServerName}
+		}
+		if len(ws) > 0 {
+			streamSettings["wsSettings"] = ws
+		}
+	case "grpc":
+		if node.WSPath != "" {
+			streamSettings["grpcSettings"] = map[string]interface{}{
+				"serviceName": node.WSPath,
+			}
+		}
+	case "http", "httpupgrade":
+		h := map[string]interface{}{}
+		if node.ServerName != "" {
+			h["host"] = []string{node.ServerName}
+		}
+		if node.WSPath != "" {
+			h["path"] = node.WSPath
+		}
+		if len(h) > 0 {
+			streamSettings[network+"Settings"] = h
+		}
+	}
+
+	// Security
+	if node.Security == "reality" {
+		streamSettings["security"] = "reality"
+		reality := map[string]interface{}{}
+		if node.PublicKey != "" {
+			reality["publicKey"] = node.PublicKey
+		}
+		if node.ShortID != "" {
+			reality["shortId"] = node.ShortID
+		}
+		if node.ServerName != "" {
+			reality["serverName"] = node.ServerName
+		}
+		if node.Fingerprint != "" {
+			reality["fingerprint"] = node.Fingerprint
+		}
+		streamSettings["realitySettings"] = reality
+	} else if node.Security == "tls" {
+		streamSettings["security"] = "tls"
+		tls := map[string]interface{}{}
+		if node.ServerName != "" {
+			tls["serverName"] = node.ServerName
+		}
+		if node.Insecure {
+			tls["allowInsecure"] = true
+		}
+		if node.Fingerprint != "" {
+			tls["fingerprint"] = node.Fingerprint
+		}
+		streamSettings["tlsSettings"] = tls
+	}
+
+	// Protocol settings
+	switch protocol {
+	case "vless":
+		user := map[string]interface{}{
+			"id":         node.UUID,
+			"encryption": "none",
+		}
+		if node.Flow != "" {
+			user["flow"] = node.Flow
+		}
+		return &Outbound{
+			Tag:      node.Tag,
+			Protocol: "vless",
+			Settings: map[string]interface{}{
+				"vnext": []map[string]interface{}{{
+					"address": address,
+					"port":    portInt,
+					"users":   []map[string]interface{}{user},
+				}},
+			},
+			StreamSettings: streamSettings,
+		}
+
+	case "vmess":
+		return &Outbound{
+			Tag:      node.Tag,
+			Protocol: "vmess",
+			Settings: map[string]interface{}{
+				"vnext": []map[string]interface{}{{
+					"address": address,
+					"port":    portInt,
+					"users": []map[string]interface{}{{
+						"id":       node.UUID,
+						"alterId":  node.AlterID,
+						"security": "auto",
+					}},
+				}},
+			},
+			StreamSettings: streamSettings,
+		}
+
+	case "trojan":
+		return &Outbound{
+			Tag:      node.Tag,
+			Protocol: "trojan",
+			Settings: map[string]interface{}{
+				"servers": []map[string]interface{}{{
+					"address":  address,
+					"port":     portInt,
+					"password": node.Password,
+				}},
+			},
+			StreamSettings: streamSettings,
+		}
+
+	case "shadowsocks":
+		return &Outbound{
+			Tag:      node.Tag,
+			Protocol: "shadowsocks",
+			Settings: map[string]interface{}{
+				"servers": []map[string]interface{}{{
+					"address":  address,
+					"port":     portInt,
+					"method":   node.Cipher,
+					"password": node.Password,
+				}},
+			},
+		}
+
+	case "hysteria2", "hysteria":
+		return &Outbound{
+			Tag:      node.Tag,
+			Protocol: "hysteria2",
+			Settings: map[string]interface{}{
+				"servers": []map[string]interface{}{{
+					"address":  address,
+					"port":     portInt,
+					"password": node.Password,
+				}},
+			},
+			StreamSettings: streamSettings,
+		}
+	}
+
+	return nil
 }
 
 // parseXrayConfigArray parses a subscription where the response is a JSON array
