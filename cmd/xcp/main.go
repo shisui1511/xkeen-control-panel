@@ -252,6 +252,7 @@ func main() {
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
 	subscriptionSvc.SetConsoleService(consoleSvc)
+	subscriptionSvc.SetMihomoAPI(cfg.MihomoAPIURL, cfg.MihomoSecret)
 	api.SetSubscriptionService(subscriptionSvc)
 
 	// Start subscription auto-refresh scheduler. It checks every 15 minutes

@@ -1881,3 +1881,90 @@ func TestParseSSLink_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestSubscriptionService_MihomoAPIProviderReload(t *testing.T) {
+	var calledPath string
+	var calledMethod string
+	var authHeader string
+
+	// 1. Mock Mihomo REST API server
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calledPath = r.URL.Path
+		calledMethod = r.Method
+		authHeader = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer apiServer.Close()
+
+	tmp := t.TempDir()
+	mihomoDir := filepath.Join(tmp, "mihomo")
+	_ = os.MkdirAll(mihomoDir, 0755)
+	configPath := filepath.Join(mihomoDir, "config.yaml")
+
+	// Set initial configuration
+	initialConfig := `port: 9090
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - DIRECT
+`
+	_ = os.WriteFile(configPath, []byte(initialConfig), 0600)
+
+	// Mock subscription source server
+	yamlContent := `proxies:
+  - name: node1
+    type: ss
+    server: 1.2.3.4
+    port: 443
+    cipher: chacha20-ietf-poly1305
+    password: test
+`
+	subServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/yaml")
+		_, _ = w.Write([]byte(yamlContent))
+	}))
+	defer subServer.Close()
+
+	svc := NewSubscriptionService(tmp, tmp, mihomoDir)
+	svc.httpClient = subServer.Client()
+	svc.SetMihomoAPI(apiServer.URL, "test-secret-token")
+
+	sub := Subscription{
+		ID:           "mihomo-reload-test",
+		Name:         "Mihomo reload test",
+		URL:          subServer.URL,
+		Type:         "mihomo",
+		Enabled:      true,
+		Interval:     1,
+		MihomoGroups: []string{"PROXY"},
+	}
+	_ = svc.Add(&sub)
+
+	// Run first refresh to populate config.yaml (this will trigger a restart because config changes, not REST API PUT)
+	_ = svc.Refresh("mihomo-reload-test")
+
+	// Clear API server tracker
+	calledPath = ""
+	calledMethod = ""
+	authHeader = ""
+
+	// Run second refresh with identical proxies (no config change, newHash == oldHash) -> this MUST trigger REST API PUT!
+	err := svc.Refresh("mihomo-reload-test")
+	if err != nil {
+		t.Fatalf("Refresh failed: %v", err)
+	}
+
+	providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
+	expectedPath := "/providers/proxies/" + providerName
+
+	if calledMethod != http.MethodPut {
+		t.Errorf("expected Method PUT, got %q", calledMethod)
+	}
+	if calledPath != expectedPath {
+		t.Errorf("expected Path %q, got %q", expectedPath, calledPath)
+	}
+	if authHeader != "Bearer test-secret-token" {
+		t.Errorf("expected Authorization header 'Bearer test-secret-token', got %q", authHeader)
+	}
+}
+
