@@ -312,7 +312,7 @@
 
   async function saveSubscription() {
     if (!formEnableXray && !formEnableMihomo) {
-      showToast('error', $currentLang === 'ru' ? 'Выберите хотя бы одно ядро для интеграции' : 'Select at least one kernel for integration');
+      showToast('error', $t('subscr.no_kernel_warning'));
       return;
     }
     const csrfToken = localStorage.getItem('csrf_token');
@@ -1360,6 +1360,12 @@
               <span>Mihomo (Clash YAML)</span>
             </label>
           </div>
+          {#if !formEnableXray && !formEnableMihomo}
+            <div class="alert alert-danger" style="margin-top: 8px; margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm); border: 1px solid var(--danger); background: rgba(220, 38, 38, 0.1); color: var(--danger);">
+              <strong>{$currentLang === 'ru' ? 'Внимание:' : 'Attention:'}</strong>
+              <span>{$t('subscr.no_kernel_warning')}</span>
+            </div>
+          {/if}
         </div>
 
         <div class="form-group">

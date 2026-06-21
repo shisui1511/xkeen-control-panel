@@ -543,11 +543,13 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			}
 			existing.UseProviderInterval = sub.UseProviderInterval
 
+			needRestart := false
 			// Clean up Xray if it was enabled and is now disabled
 			if existing.EnableXray && !sub.EnableXray {
 				os.Remove(s.getFragmentPath(existing))
 				os.Remove(s.getRoutingFragmentPath(existing))
 				existing.LastHash = ""
+				needRestart = true
 			}
 
 			// Clean up Mihomo if it was enabled and is now disabled
@@ -588,6 +590,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				existing.ManagedYAML = ""
 				existing.LastCount = 0
 				existing.LastHashMihomo = ""
+				needRestart = true
 			}
 
 			existing.EnableXray = sub.EnableXray
@@ -599,7 +602,17 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			if sub.MihomoGroups != nil {
 				existing.MihomoGroups = sub.MihomoGroups
 			}
-			return s.save()
+			
+			if err := s.save(); err != nil {
+				return err
+			}
+
+			if needRestart && s.consoleSvc != nil {
+				if _, err := s.consoleSvc.Execute("-restart"); err != nil {
+					log.Printf("subscription %s: xkeen -restart after update (disabled integration): %v", safeID, err)
+				}
+			}
+			return nil
 		}
 	}
 	return fmt.Errorf("subscription not found")
@@ -626,6 +639,9 @@ func (s *SubscriptionService) Delete(id string) error {
 		return fmt.Errorf("subscription not found")
 	}
 
+	enableXray := sub.EnableXray
+	enableMihomo := sub.EnableMihomo
+
 	// Remove from list
 	newList := make([]Subscription, 0, len(s.subscriptions)-1)
 	for _, s := range s.subscriptions {
@@ -636,11 +652,11 @@ func (s *SubscriptionService) Delete(id string) error {
 	s.subscriptions = newList
 
 	// Delete managed fragment files.
-	if sub.EnableXray {
+	if enableXray {
 		os.Remove(s.getFragmentPath(sub))
 		os.Remove(s.getRoutingFragmentPath(sub)) // noop если файла нет
 	}
-	if sub.EnableMihomo {
+	if enableMihomo {
 		configDir := s.mihomoConfigDir
 		if configDir == "" {
 			configDir = "/opt/etc/mihomo"
@@ -678,7 +694,16 @@ func (s *SubscriptionService) Delete(id string) error {
 	os.Remove(s.subPath("sub_" + safeID + "_headers.json"))
 	os.Remove(s.subPath("sub_" + safeID + "_parse_report.json"))
 
-	return s.save()
+	if err := s.save(); err != nil {
+		return err
+	}
+
+	if (enableXray || enableMihomo) && s.consoleSvc != nil {
+		if _, err := s.consoleSvc.Execute("-restart"); err != nil {
+			log.Printf("subscription %s: xkeen -restart after delete: %v", safeID, err)
+		}
+	}
+	return nil
 }
 
 func (s *SubscriptionService) Refresh(id string) error {
@@ -724,6 +749,8 @@ func (s *SubscriptionService) Refresh(id string) error {
 	var refreshErr error
 	xrayChanged := false
 	mihomoChanged := false
+	xraySuccess := false
+	mihomoSuccess := false
 
 	if subCopy.EnableXray {
 		err := s.refreshXray(&subCopy, body, headers)
@@ -731,6 +758,7 @@ func (s *SubscriptionService) Refresh(id string) error {
 			refreshErr = err
 		} else {
 			xrayChanged = subCopy.LastChanged
+			xraySuccess = true
 		}
 	}
 	if subCopy.EnableMihomo {
@@ -741,12 +769,13 @@ func (s *SubscriptionService) Refresh(id string) error {
 			}
 		} else {
 			mihomoChanged = subCopy.LastChanged
+			mihomoSuccess = true
 		}
 	}
 
 	subCopy.LastChanged = xrayChanged || mihomoChanged
 
-	// Persist last_error so frontend can show error state
+	// Persist last_error and successfully parsed fields so frontend can show error state
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if live := s.GetLocked(safeID); live != nil {
@@ -754,29 +783,49 @@ func (s *SubscriptionService) Refresh(id string) error {
 			live.LastError = refreshErr.Error()
 		} else {
 			live.LastError = ""
-			live.LastUpdate = subCopy.LastUpdate
-			live.Upload = subCopy.Upload
-			live.Download = subCopy.Download
-			live.Total = subCopy.Total
-			live.Expire = subCopy.Expire
-			live.RuleCount = subCopy.RuleCount
-			// Метаданные из headers подписки.
-			live.ProfileTitle = subCopy.ProfileTitle
-			live.ProfileUpdateHours = subCopy.ProfileUpdateHours
-			live.SupportURL = subCopy.SupportURL
-			live.ProfileWebPageURL = subCopy.ProfileWebPageURL
-			// Tracking полей (parse stats + mihomo in-place).
-			live.LastCount = subCopy.LastCount
+		}
+
+		// Always update HTTP headers metadata as the download itself succeeded.
+		live.LastUpdate = subCopy.LastUpdate
+		live.Upload = subCopy.Upload
+		live.Download = subCopy.Download
+		live.Total = subCopy.Total
+		live.Expire = subCopy.Expire
+		live.ProfileTitle = subCopy.ProfileTitle
+		live.ProfileUpdateHours = subCopy.ProfileUpdateHours
+		live.SupportURL = subCopy.SupportURL
+		live.ProfileWebPageURL = subCopy.ProfileWebPageURL
+		live.ProviderType = subCopy.ProviderType
+
+		// Update Xray state if its step succeeded
+		if xraySuccess {
+			live.LastHash = subCopy.LastHash
 			live.LastSkipped = subCopy.LastSkipped
 			live.DetectedFormat = subCopy.DetectedFormat
-			live.ProviderType = subCopy.ProviderType
+		}
+
+		// Update Mihomo state if its step succeeded
+		if mihomoSuccess {
+			live.LastHashMihomo = subCopy.LastHashMihomo
+			live.ProxyNames = subCopy.ProxyNames
+			live.RuleCount = subCopy.RuleCount
+			live.DetectedFormat = subCopy.DetectedFormat
+		}
+
+		// Update shared/derived fields based on which kernel succeeded.
+		// Mihomo has priority for Nodes, Announcement and LastCount if both are enabled and succeeded.
+		if mihomoSuccess {
 			live.Nodes = subCopy.Nodes
 			live.Announcement = subCopy.Announcement
-			live.LastHash = subCopy.LastHash
-			live.LastHashMihomo = subCopy.LastHashMihomo
-			live.LastChanged = subCopy.LastChanged
-			live.ProxyNames = subCopy.ProxyNames
+			live.LastCount = subCopy.LastCount
+		} else if xraySuccess {
+			live.Nodes = subCopy.Nodes
+			live.Announcement = subCopy.Announcement
+			live.LastCount = subCopy.LastCount
 		}
+
+		live.LastChanged = (xraySuccess && xrayChanged) || (mihomoSuccess && mihomoChanged)
+
 		_ = s.save()
 	}
 
