@@ -88,11 +88,11 @@ test.describe('Mihomo Generator Hysteria 2 Support and Validation', () => {
     // 3. Confirm hysteria2 specific fields are rendered
     await expect(page.locator('input[placeholder="password"]')).toBeVisible();
     await expect(page.locator('input[placeholder="example.com"]').first()).toBeVisible(); // Server/SNI
-    
+
     // Obfs Select and Skip Cert Checkbox
     const obfsSelect = page.locator('div.form-row:has(label:has-text("Тип обфускации")), div.form-row:has(label:has-text("Obfuscation type"))').locator('select');
     await expect(obfsSelect).toBeVisible();
-    
+
     const skipCertCheckbox = page.locator('input[type="checkbox"]');
     await expect(skipCertCheckbox).toBeVisible();
 
@@ -105,7 +105,7 @@ test.describe('Mihomo Generator Hysteria 2 Support and Validation', () => {
 
     // 5. Test validation for obfsType == 'simple' with empty password
     await obfsSelect.selectOption('simple');
-    
+
     // Obfs password input should now be visible
     const obfsPasswordInput = page.locator('div.form-row:has(label:has-text("Пароль обфускации")), div.form-row:has(label:has-text("Obfuscation password"))').locator('input');
     await expect(obfsPasswordInput).toBeVisible();
@@ -136,7 +136,7 @@ test.describe('Mihomo Generator Hysteria 2 Support and Validation', () => {
     await expect(itemRow.locator('.type-hysteria2')).toBeVisible();
 
     // 8. Verify generated YAML contains all details
-    const yamlPreview = page.locator('.mihomo-yaml-preview, .yaml-preview, .constructor-preview-pane').first();
+    const yamlPreview = page.locator('.mihomo-yaml-preview, .yaml-preview, .constructor-preview-panel').first();
     await expect(yamlPreview).toBeVisible();
     const yamlText = await yamlPreview.textContent();
 
