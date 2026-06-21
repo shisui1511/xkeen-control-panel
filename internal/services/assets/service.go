@@ -29,16 +29,24 @@ func NewService(dataDir string) *AssetsService {
 
 // GetDefinition loads assets schema from disk (assets-definition.json in dataDir).
 // If missing or syntax error, it falls back to defaultAssets.
+// Additionally, it automatically migrates the disk version to ensure all rule-providers
+// from the embedded schema are synchronized and up-to-date.
 func (s *AssetsService) GetDefinition() ([]byte, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	diskPath := filepath.Join(s.dataDir, "assets-definition.json")
 	if _, err := os.Stat(diskPath); err == nil {
 		data, err := os.ReadFile(diskPath)
 		if err == nil {
-			var temp map[string]interface{}
-			if err := json.Unmarshal(data, &temp); err == nil {
+			var diskSchema map[string]interface{}
+			if err := json.Unmarshal(data, &diskSchema); err == nil {
+				updated, err := s.migrateRuleProvidersIfNeeded(diskSchema)
+				if err == nil && updated != nil {
+					if writeErr := utils.AtomicWriteFile(diskPath, updated, 0600); writeErr == nil {
+						return updated, nil
+					}
+				}
 				return data, nil
 			}
 			log.Printf("WARNING: assets-definition.json on disk has invalid syntax: %v. Falling back to embedded schema.", err)
@@ -50,6 +58,120 @@ func (s *AssetsService) GetDefinition() ([]byte, error) {
 	}
 
 	return defaultAssets, nil
+}
+
+func (s *AssetsService) migrateRuleProvidersIfNeeded(diskSchema map[string]interface{}) ([]byte, error) {
+	var defaultSchema map[string]interface{}
+	if err := json.Unmarshal(defaultAssets, &defaultSchema); err != nil {
+		return nil, err
+	}
+
+	embeddedMihomo, ok := defaultSchema["mihomo"].(map[string]interface{})
+	if !ok {
+		return nil, nil
+	}
+	embeddedProviders, ok := embeddedMihomo["rule_providers"].([]interface{})
+	if !ok {
+		return nil, nil
+	}
+
+	diskMihomo, ok := diskSchema["mihomo"].(map[string]interface{})
+	if !ok {
+		diskMihomo = make(map[string]interface{})
+		diskSchema["mihomo"] = diskMihomo
+	}
+	diskProvidersRaw, ok := diskMihomo["rule_providers"].([]interface{})
+	if !ok {
+		diskProvidersRaw = []interface{}{}
+	}
+
+	embeddedProvidersMap := make(map[string]map[string]interface{})
+	for _, p := range embeddedProviders {
+		if pMap, ok := p.(map[string]interface{}); ok {
+			if name, ok := pMap["name"].(string); ok {
+				embeddedProvidersMap[name] = pMap
+			}
+		}
+	}
+
+	var updatedProviders []interface{}
+	diskSeen := make(map[string]bool)
+	var modified bool
+
+	for _, p := range diskProvidersRaw {
+		pMap, ok := p.(map[string]interface{})
+		if !ok {
+			updatedProviders = append(updatedProviders, p)
+			continue
+		}
+		name, ok := pMap["name"].(string)
+		if !ok {
+			updatedProviders = append(updatedProviders, p)
+			continue
+		}
+
+		diskSeen[name] = true
+		embMap, exists := embeddedProvidersMap[name]
+		if exists {
+			if !areProviderFieldsEqual(pMap, embMap) {
+				updatedProviders = append(updatedProviders, embMap)
+				modified = true
+			} else {
+				updatedProviders = append(updatedProviders, pMap)
+			}
+		} else {
+			updatedProviders = append(updatedProviders, pMap)
+		}
+	}
+
+	for name, embMap := range embeddedProvidersMap {
+		if !diskSeen[name] {
+			updatedProviders = append(updatedProviders, embMap)
+			modified = true
+		}
+	}
+
+	if modified {
+		diskMihomo["rule_providers"] = updatedProviders
+		diskSchema["mihomo"] = diskMihomo
+		updated, err := json.MarshalIndent(diskSchema, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		return updated, nil
+	}
+
+	return nil, nil
+}
+
+func areProviderFieldsEqual(a, b map[string]interface{}) bool {
+	keys := []string{"url", "behavior", "format", "outbound"}
+	for _, k := range keys {
+		aVal, _ := a[k].(string)
+		bVal, _ := b[k].(string)
+		if aVal != bVal {
+			return false
+		}
+	}
+
+	aPayload, aHas := a["payload"].([]interface{})
+	bPayload, bHas := b["payload"].([]interface{})
+	if aHas != bHas {
+		return false
+	}
+	if aHas && bHas {
+		if len(aPayload) != len(bPayload) {
+			return false
+		}
+		for i := range aPayload {
+			aS, _ := aPayload[i].(string)
+			bS, _ := bPayload[i].(string)
+			if aS != bS {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // UpdateDefinition validates incoming schema JSON, creates a .bak backup of the existing schema,
