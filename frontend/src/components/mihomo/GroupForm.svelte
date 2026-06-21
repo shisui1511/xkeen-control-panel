@@ -71,7 +71,7 @@
         >
           <option value="">+ {ru ? 'добавить провайдер' : 'add provider'}...</option>
           {#each mihomoProviders as sub}
-            {@const slug = slugifyProviderName(sub.name || '', sub.id)}
+            {@const slug = slugifyProviderName(sub.name || '', sub.url || '', sub.id)}
             <option value={slug}>{sub.name} ({slug})</option>
           {/each}
         </select>

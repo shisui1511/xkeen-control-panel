@@ -1896,6 +1896,36 @@ func getServerField(ob *Outbound, field string) string {
 	return val
 }
 
+// cyrillicMap maps Cyrillic runes to their Latin transliterations,
+// matching the CYRILLIC_MAP used in the frontend's slugifyProviderName.
+var cyrillicMap = map[rune]string{
+	'а': "a", 'б': "b", 'в': "v", 'г': "g", 'д': "d", 'е': "e", 'ё': "yo",
+	'ж': "zh", 'з': "z", 'и': "i", 'й': "j", 'к': "k", 'л': "l", 'м': "m",
+	'н': "n", 'о': "o", 'п': "p", 'р': "r", 'с': "s", 'т': "t", 'у': "u",
+	'ф': "f", 'х': "kh", 'ц': "ts", 'ч': "ch", 'ш': "sh", 'щ': "shch",
+	'ы': "y", 'э': "e", 'ю': "yu", 'я': "ya", 'ь': "", 'ъ': "",
+}
+
+// transliterateCyrillic replaces each Cyrillic rune with its Latin equivalent.
+func transliterateCyrillic(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) * 2)
+	for _, r := range s {
+		lower := r
+		if r >= 'А' && r <= 'Я' {
+			lower = r - 'А' + 'а' // uppercase → lowercase Cyrillic
+		} else if r == 'Ё' {
+			lower = 'ё'
+		}
+		if lat, ok := cyrillicMap[lower]; ok {
+			b.WriteString(lat)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func getMihomoProviderName(name string, urlStr string, fallback string) string {
 	providerName := name
 	if providerName == "" {
@@ -1907,10 +1937,12 @@ func getMihomoProviderName(name string, urlStr string, fallback string) string {
 		providerName = fallback
 	}
 
+	// Transliterate Cyrillic before sanitizing, matching frontend slugifyProviderName.
+	providerName = transliterateCyrillic(providerName)
+	providerName = strings.ToLower(providerName)
 	providerName = nonAlphanumericDashRe.ReplaceAllString(providerName, "-")
 	providerName = multiDashRe.ReplaceAllString(providerName, "-")
 	providerName = strings.Trim(providerName, "-")
-	providerName = strings.ToLower(providerName)
 
 	if providerName == "" {
 		providerName = fallback

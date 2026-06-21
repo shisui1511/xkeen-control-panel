@@ -595,8 +595,19 @@ const CYRILLIC_MAP: Record<string, string> = {
   'ы':'y','э':'e','ю':'yu','я':'ya','ь':'','ъ':''
 };
 
-export function slugifyProviderName(name: string, fallback: string): string {
-  const slug = name
+export function slugifyProviderName(name: string, urlStr: string, fallback: string): string {
+  let source = name;
+  if (!source) {
+    try {
+      const parsed = new URL(urlStr);
+      const base = parsed.pathname.split('/').filter(Boolean).pop() || '';
+      if (base) source = base;
+    } catch {
+      // ignore invalid URL
+    }
+  }
+  if (!source) source = fallback;
+  const slug = source
     .toLowerCase()
     .split('')
     .map(c => CYRILLIC_MAP[c] ?? c)
@@ -623,7 +634,7 @@ export function generateYAML(state: MihomoConfigState): string {
   if (providers.length > 0) {
     lines.push('proxy-providers:');
     for (const [i, sub] of providers.entries()) {
-      const providerName = slugifyProviderName(sub.name || '', sub.id || `provider-${i}`);
+      const providerName = slugifyProviderName(sub.name || '', sub.url || '', sub.id || `provider-${i}`);
       lines.push(`  ${providerName}:`);
       lines.push(`    type: http`);
       lines.push(`    path: ./providers/${providerName}.yaml`);
