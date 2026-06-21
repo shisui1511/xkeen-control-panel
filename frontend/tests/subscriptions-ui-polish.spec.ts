@@ -79,7 +79,7 @@ proxy-groups:
     });
   });
 
-  test('modal contains type selector and hides/shows advanced settings', async ({ page }) => {
+  test('modal contains kernel checkboxes and hides/shows advanced settings', async ({ page }) => {
     // 1. Visit subscriptions page and click add
     await page.goto('/#/subscriptions');
     const addBtn = page.locator('button:has-text("Добавить")').first();
@@ -89,13 +89,13 @@ proxy-groups:
     const modal = page.locator('.modal-card');
     await expect(modal).toBeVisible();
 
-    // 2. Verify segmented control selector exists
-    const xrayBtn = modal.locator('button:has-text("XRay (JSON / Base64)")');
-    const mihomoBtn = modal.locator('button:has-text("Mihomo (Clash YAML)")');
-    await expect(xrayBtn).toBeVisible();
-    await expect(mihomoBtn).toBeVisible();
+    // 2. Verify checkboxes exist
+    const xrayCheckbox = modal.locator('label:has-text("XRay (JSON / Base64)")');
+    const mihomoCheckbox = modal.locator('label:has-text("Mihomo (Clash YAML)")');
+    await expect(xrayCheckbox).toBeVisible();
+    await expect(mihomoCheckbox).toBeVisible();
 
-    // Default type should be xray, so advanced settings are toggleable
+    // Default should have xray checked, so advanced settings are toggleable
     const advancedToggle = modal.locator('button:has-text("Дополнительные параметры")');
     await expect(advancedToggle).toBeVisible();
 
@@ -103,12 +103,8 @@ proxy-groups:
     await advancedToggle.click();
     await expect(modal.locator('input#form-tag-prefix')).toBeVisible();
 
-    // 3. Switch type to Mihomo
-    await mihomoBtn.click();
-
-    // Advanced toggle and tag prefix should now be hidden
-    await expect(advancedToggle).not.toBeVisible();
-    await expect(modal.locator('input#form-tag-prefix')).not.toBeVisible();
+    // Check Mihomo integration
+    await mihomoCheckbox.click();
 
     // Mihomo groups selection panel should be displayed with parsed groups
     await expect(modal.locator('label:has-text("Интегрировать в группы Mihomo")')).toBeVisible();
@@ -116,9 +112,16 @@ proxy-groups:
     const proxyCheckbox = modal.locator('input[type="checkbox"] + span:has-text("Proxy")');
     await expect(selectiveCheckbox).toBeVisible();
     await expect(proxyCheckbox).toBeVisible();
+
+    // Uncheck XRay integration
+    await xrayCheckbox.click();
+
+    // Advanced toggle and tag prefix should now be hidden
+    await expect(advancedToggle).not.toBeVisible();
+    await expect(modal.locator('input#form-tag-prefix')).not.toBeVisible();
   });
 
-  test('saves subscription with selected type and mihomo groups', async ({ page }) => {
+  test('saves subscription with selected kernel flags and mihomo groups', async ({ page }) => {
     let savedPayload: any = null;
     await page.route('**/api/subscriptions/add', async (route: Route) => {
       savedPayload = route.request().postDataJSON();
@@ -136,11 +139,14 @@ proxy-groups:
     await modal.locator('input#form-name').fill('My test sub');
     await modal.locator('input#form-url').fill('https://example.com/sub.yaml');
 
-    // Switch to Mihomo
-    await modal.locator('button:has-text("Mihomo (Clash YAML)")').click();
+    // Enable Mihomo
+    await modal.locator('label:has-text("Mihomo (Clash YAML)")').click();
 
     // Select Selective group
     await modal.locator('input[type="checkbox"] ~ span:has-text("Selective")').click();
+
+    // Disable XRay
+    await modal.locator('label:has-text("XRay (JSON / Base64)")').click();
 
     // Save
     await modal.locator('button:has-text("Сохранить")').click();
@@ -148,7 +154,8 @@ proxy-groups:
     // Verify correct payload was sent
     expect(savedPayload).not.toBeNull();
     expect(savedPayload.name).toBe('My test sub');
-    expect(savedPayload.type).toBe('mihomo');
+    expect(savedPayload.enable_xray).toBe(false);
+    expect(savedPayload.enable_mihomo).toBe(true);
     expect(savedPayload.mihomo_groups).toContain('Selective');
     expect(savedPayload.tag_prefix).toBe('');
   });
@@ -164,9 +171,10 @@ proxy-groups:
             id: 'sub_error',
             name: 'Broken Sub',
             url: 'https://example.com/bad',
-            type: 'mihomo',
+            enable_mihomo: true,
+            enable_xray: false,
             enabled: true,
-            last_error: 'данная подписка не имеет формата Clash/Mihomo YAML и не поддерживается ядром Mihomo. Пожалуйста, переключите тип подписки на XRay в её настройках',
+            last_error: 'данная подписка не имеет формата Clash/Mihomo YAML и не поддерживается ядром Mihomo. Пожалуйста, убедитесь, что подписка возвращает Clash YAML формат',
             proxy_count: 0
           }
         ])
@@ -201,7 +209,8 @@ proxy-groups:
             id: 'sub_mihomo',
             name: 'Mihomo Sub',
             url: 'https://example.com/mihomo',
-            type: 'mihomo',
+            enable_mihomo: true,
+            enable_xray: false,
             enabled: true
           }
         ])
@@ -228,7 +237,8 @@ proxy-groups:
             id: 'sub_xray',
             name: 'Xray Sub',
             url: 'https://example.com/xray',
-            type: 'xray',
+            enable_xray: true,
+            enable_mihomo: false,
             enabled: true
           }
         ])

@@ -20,7 +20,9 @@
     interval: number;
     last_update: string;
     enabled: boolean;
-    type?: string;
+    enable_xray?: boolean;
+    enable_mihomo?: boolean;
+    routing_mode?: string;
     filter_name?: string;
     filter_type?: string;
     filter_transport?: string;
@@ -68,7 +70,10 @@
   }
 
   function getFormatBadge(sub: Subscription): string {
-    if (sub.type === 'mihomo') return 'clash · YAML';
+    if (sub.enable_xray && sub.enable_mihomo) {
+      return 'XRay + Mihomo';
+    }
+    if (sub.enable_mihomo) return 'clash · YAML';
     if (sub.detected_format === 'sing-box') return 'xray · sing-box';
     if (sub.detected_format === 'clash-meta') return 'xray · clash';
     if (sub.detected_format === 'base64') return 'xray · base64';
@@ -200,7 +205,9 @@
   let formUseProviderInterval = $state(false);
   let showAdvanced = $state(false);
 
-  let formType = $state('xray'); // 'xray' | 'mihomo'
+  let formEnableXray = $state(true);
+  let formEnableMihomo = $state(false);
+  let formRoutingMode = $state('manual'); // 'manual' | 'auto'
   let formMihomoGroups = $state<string[]>([]);
   let availableMihomoGroups = $state<string[]>([]);
 
@@ -304,19 +311,25 @@
   }
 
   async function saveSubscription() {
+    if (!formEnableXray && !formEnableMihomo) {
+      showToast('error', $currentLang === 'ru' ? 'Выберите хотя бы одно ядро для интеграции' : 'Select at least one kernel for integration');
+      return;
+    }
     const csrfToken = localStorage.getItem('csrf_token');
     const sub = {
       name: formName,
       url: formURL,
-      tag_prefix: formType === 'xray' ? formTagPrefix : '',
+      tag_prefix: formEnableXray ? formTagPrefix : '',
       interval: formInterval,
       enabled: formEnabled,
-      filter_name: formType === 'xray' ? (formFilterName || undefined) : undefined,
-      filter_type: formType === 'xray' ? (formFilterType || undefined) : undefined,
-      filter_transport: formType === 'xray' ? (formFilterTransport || undefined) : undefined,
+      filter_name: formEnableXray ? (formFilterName || undefined) : undefined,
+      filter_type: formEnableXray ? (formFilterType || undefined) : undefined,
+      filter_transport: formEnableXray ? (formFilterTransport || undefined) : undefined,
       use_provider_interval: formUseProviderInterval,
-      type: formType,
-      mihomo_groups: formType === 'mihomo' ? formMihomoGroups : undefined
+      enable_xray: formEnableXray,
+      enable_mihomo: formEnableMihomo,
+      routing_mode: formEnableXray ? formRoutingMode : undefined,
+      mihomo_groups: formEnableMihomo ? formMihomoGroups : undefined
     };
 
     try {
@@ -381,7 +394,16 @@
     formEnabled = true;
     formUseProviderInterval = false;
     showAdvanced = false;
-    formType = 'xray';
+    
+    const active = $capabilities?.active_kernel;
+    if (active === 'mihomo') {
+      formEnableXray = false;
+      formEnableMihomo = true;
+    } else {
+      formEnableXray = true;
+      formEnableMihomo = false;
+    }
+    formRoutingMode = 'manual';
     formMihomoGroups = [];
     showAddModal = true;
     loadAvailableMihomoGroups();
@@ -399,7 +421,9 @@
     formEnabled = sub.enabled;
     formUseProviderInterval = !!sub.use_provider_interval;
     showAdvanced = false;
-    formType = sub.type || 'xray';
+    formEnableXray = !!sub.enable_xray;
+    formEnableMihomo = !!sub.enable_mihomo;
+    formRoutingMode = sub.routing_mode || 'manual';
     formMihomoGroups = sub.mihomo_groups || [];
     showAddModal = true;
     loadAvailableMihomoGroups();
@@ -596,8 +620,7 @@
     }
   }
 
-  async function setActiveNode(subId: string, nodeTag: string, subType?: string) {
-    if (subType === 'mihomo') return;
+  async function setActiveNode(subId: string, nodeTag: string) {
     const csrfToken = localStorage.getItem('csrf_token');
     if (!activatingNode[subId]) activatingNode[subId] = null;
     activatingNode[subId] = nodeTag;
@@ -871,7 +894,8 @@
               <!-- LED точка статуса (активна / выключена) -->
               <div
                 class="type-dot"
-                class:mihomo={sub.type === 'mihomo'}
+                class:mihomo={!sub.enable_xray && sub.enable_mihomo}
+                class:both={sub.enable_xray && sub.enable_mihomo}
                 class:disabled={!sub.enabled}
                 class:has-error={!!sub.last_error}
                 title={sub.last_error || (sub.enabled ? $t('app.active') : $t('app.disabled'))}
@@ -1013,7 +1037,15 @@
                 <span class="meta-divider">|</span>
               {/if}
 
-              <span class="sub-type-label">{sub.type === 'mihomo' ? 'Mihomo' : 'XRay'}</span>
+              <span class="sub-type-label">
+                {#if sub.enable_xray && sub.enable_mihomo}
+                  XRay · Mihomo
+                {:else if sub.enable_mihomo}
+                  Mihomo
+                {:else}
+                  XRay
+                {/if}
+              </span>
 
               <span class="meta-divider">|</span>
               {#if sub.mihomo_integrated}
@@ -1165,8 +1197,8 @@
                         class="sub-node-row"
                         class:active={isNodeActive}
                         onclick={() => {
-                          if (sub.type !== 'mihomo') {
-                            setActiveNode(sub.id, node.tag, sub.type);
+                          if (sub.enable_xray) {
+                            setActiveNode(sub.id, node.tag);
                           }
                         }}
                       >
@@ -1212,7 +1244,7 @@
                         <div class="sub-node-status-container">
                           <!-- Золотой чип формата/протокола -->
                           <span class="sub-node-chip-gold"
-                            >{sub.type === 'mihomo' ? 'YAML' : 'JSON'}</span
+                            >{sub.enable_mihomo ? 'YAML' : 'JSON'}</span
                           >
 
                           <button
@@ -1317,24 +1349,16 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">{$currentLang === 'ru' ? 'Тип подписки' : 'Subscription Type'}</label>
-          <div class="seg-btn" style="margin-bottom: 12px;">
-            <button
-              type="button"
-              class="seg-opt"
-              class:seg-active={formType === 'xray'}
-              onclick={() => (formType = 'xray')}
-            >
-              XRay (JSON / Base64)
-            </button>
-            <button
-              type="button"
-              class="seg-opt"
-              class:seg-active={formType === 'mihomo'}
-              onclick={() => (formType = 'mihomo')}
-            >
-              Mihomo (Clash YAML)
-            </button>
+          <label class="form-label">{$currentLang === 'ru' ? 'Интеграция в ядра' : 'Kernel Integration'}</label>
+          <div style="display: flex; gap: 20px; margin-bottom: 12px;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; color: var(--fg-primary);">
+              <input type="checkbox" bind:checked={formEnableXray} />
+              <span>XRay (JSON / Base64)</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; color: var(--fg-primary);">
+              <input type="checkbox" bind:checked={formEnableMihomo} />
+              <span>Mihomo (Clash YAML)</span>
+            </label>
           </div>
         </div>
 
@@ -1363,7 +1387,29 @@
           />
         </div>
 
-        {#if formType === 'xray'}
+        {#if formEnableXray}
+          <div class="form-group">
+            <label class="form-label">{$currentLang === 'ru' ? 'Режим маршрутизации XRay' : 'XRay Routing Mode'}</label>
+            <div class="seg-btn" style="margin-bottom: 12px;">
+              <button
+                type="button"
+                class="seg-opt"
+                class:seg-active={formRoutingMode === 'manual'}
+                onclick={() => (formRoutingMode = 'manual')}
+              >
+                {$currentLang === 'ru' ? 'Ручной' : 'Manual'}
+              </button>
+              <button
+                type="button"
+                class="seg-opt"
+                class:seg-active={formRoutingMode === 'auto'}
+                onclick={() => (formRoutingMode = 'auto')}
+              >
+                {$currentLang === 'ru' ? 'Автоматический (!CN)' : 'Automatic (!CN)'}
+              </button>
+            </div>
+          </div>
+
           <button
             type="button"
             class="advanced-toggle-btn"
@@ -1424,7 +1470,7 @@
           {/if}
         {/if}
 
-        {#if formType === 'mihomo'}
+        {#if formEnableMihomo}
           <div class="form-group">
             <label class="form-label">{$currentLang === 'ru' ? 'Интегрировать в группы Mihomo' : 'Integrate into Mihomo groups'}</label>
             
@@ -1722,6 +1768,10 @@
   }
   .type-dot.mihomo {
     background: #8b5cf6;
+    box-shadow: 0 0 8px #8b5cf6;
+  }
+  .type-dot.both {
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
     box-shadow: 0 0 8px #8b5cf6;
   }
   .type-dot.disabled {
