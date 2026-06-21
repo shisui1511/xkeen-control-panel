@@ -378,18 +378,18 @@
         "outbound": "Spotify"
       },
       {
-        "name": "speedtest@domain",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/speedtest.mrs",
-        "behavior": "domain",
-        "format": "mrs",
-        "outbound": "Speedtest"
-      },
-      {
         "name": "reddit@domain",
         "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/reddit.mrs",
         "behavior": "domain",
         "format": "mrs",
         "outbound": "Reddit"
+      },
+      {
+        "name": "youtube@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "YouTube"
       },
       {
         "name": "twitch@domain",
@@ -406,6 +406,27 @@
         "outbound": "Twitter"
       },
       {
+        "name": "tiktok@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tiktok.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "TikTok"
+      },
+      {
+        "name": "discord@classical",
+        "url": "https://github.com/zxc-rv/assets/raw/main/rules/discord.list",
+        "behavior": "classical",
+        "format": "text",
+        "outbound": "Discord"
+      },
+      {
+        "name": "speedtest@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/speedtest.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Speedtest"
+      },
+      {
         "name": "meta@domain",
         "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/meta.mrs",
         "behavior": "domain",
@@ -413,25 +434,39 @@
         "outbound": "Meta"
       },
       {
-        "name": "discord@classical",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/classical/discord.txt",
-        "behavior": "classical",
-        "format": "text",
-        "outbound": "Discord"
+        "name": "meta@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/meta@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "Meta"
+      },
+      {
+        "name": "telegram@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/telegram.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Telegram"
+      },
+      {
+        "name": "telegram@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/telegram@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "Telegram"
       },
       {
         "name": "refilter@domain",
-        "url": "https://raw.githubusercontent.com/1andrevich/Re-filter-lists/release/refilter_domains.mrs",
+        "url": "https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs",
         "behavior": "domain",
         "format": "mrs",
         "outbound": "Заблок. сервисы"
       },
       {
-        "name": "telegram@ipcidr",
-        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs",
-        "behavior": "ipcidr",
+        "name": "roblox@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/roblox.mrs",
+        "behavior": "domain",
         "format": "mrs",
-        "outbound": "Telegram"
+        "outbound": "Заблок. сервисы"
       },
       {
         "name": "github@domain",
@@ -439,6 +474,160 @@
         "behavior": "domain",
         "format": "mrs",
         "outbound": "GitHub"
+      },
+      {
+        "name": "google@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Google"
+      },
+      {
+        "name": "google@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/google@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "Google"
+      },
+      {
+        "name": "amazon@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/amazon.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "amazon@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/amazon@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "akamai@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/akamai.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "akamai@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/akamai@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "cloudflare@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cloudflare.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "cloudflare@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cloudflare@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "digitalocean@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/digitalocean.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "digitalocean@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/digitalocean@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "fastly@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/fastly.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "fastly@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/fastly@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "oracle@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/oracle.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "oracle@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/oracle@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "hetzner@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hetzner.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "hetzner@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/hetzner@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "scaleway@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/scaleway@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "ovh@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/ovh@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "vultr@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "vodafone@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vodafone@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "gcore@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/gcore@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "cdn77@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cdn77@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
       },
       {
         "name": "private@ip",
@@ -453,7 +642,9 @@
         "behavior": "classical",
         "format": "inline",
         "outbound": "REJECT",
-        "payload": ["AND,((DST-PORT,443),(NETWORK,UDP))"]
+        "payload": [
+          "AND,((DST-PORT,443),(NETWORK,UDP))"
+        ]
       },
       {
         "name": "netbios@inline",

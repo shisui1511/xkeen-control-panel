@@ -274,3 +274,95 @@ func TestAssetsService_UpdateDefinition_BackupRollback(t *testing.T) {
 		t.Errorf("expected val to be 'A', got '%v'", s["val"])
 	}
 }
+
+func TestAssetsService_AutoMigration(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. Write an outdated mock assets file to disk (missing youtube@domain and having an outdated url for telegram@ipcidr)
+	diskSchema := map[string]interface{}{
+		"schema_version": "1.0.0",
+		"mihomo": map[string]interface{}{
+			"presets": []interface{}{},
+			"rule_providers": []interface{}{
+				map[string]interface{}{
+					"name": "telegram@ipcidr",
+					"url":  "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs",
+				},
+				map[string]interface{}{
+					"name": "custom@domain",
+					"url":  "https://example.com/custom.mrs",
+				},
+			},
+		},
+	}
+	diskData, err := json.Marshal(diskSchema)
+	if err != nil {
+		t.Fatalf("failed to marshal disk schema: %v", err)
+	}
+
+	diskPath := filepath.Join(tempDir, "assets-definition.json")
+	if err := os.WriteFile(diskPath, diskData, 0600); err != nil {
+		t.Fatalf("failed to write disk schema: %v", err)
+	}
+
+	// 2. Initialize service and trigger GetDefinition
+	svc := NewService(tempDir)
+	def, err := svc.GetDefinition()
+	if err != nil {
+		t.Fatalf("failed to get definition: %v", err)
+	}
+
+	// 3. Verify that:
+	// - youtube@domain (missing from disk but present in embedded defaultAssets) was added.
+	// - telegram@ipcidr URL was updated to the embedded version.
+	// - custom@domain (not in embedded defaultAssets but present on disk) was preserved.
+	var migrated map[string]interface{}
+	if err := json.Unmarshal(def, &migrated); err != nil {
+		t.Fatalf("failed to unmarshal migrated schema: %v", err)
+	}
+
+	mihomo, ok := migrated["mihomo"].(map[string]interface{})
+	if !ok {
+		t.Fatal("mihomo section missing in migrated schema")
+	}
+	providers, ok := mihomo["rule_providers"].([]interface{})
+	if !ok {
+		t.Fatal("rule_providers missing in migrated schema")
+	}
+
+	foundYoutube := false
+	foundTelegramUpdated := false
+	foundCustom := false
+
+	for _, p := range providers {
+		pMap, ok := p.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name := pMap["name"].(string)
+		url := pMap["url"].(string)
+
+		if name == "youtube@domain" {
+			foundYoutube = true
+		}
+		if name == "telegram@ipcidr" {
+			// Embedded url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/telegram@ipcidr.mrs"
+			if url == "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/telegram@ipcidr.mrs" {
+				foundTelegramUpdated = true
+			}
+		}
+		if name == "custom@domain" {
+			foundCustom = true
+		}
+	}
+
+	if !foundYoutube {
+		t.Error("youtube@domain was not added during migration")
+	}
+	if !foundTelegramUpdated {
+		t.Error("telegram@ipcidr URL was not updated to embedded version")
+	}
+	if !foundCustom {
+		t.Error("custom@domain was not preserved during migration")
+	}
+}
