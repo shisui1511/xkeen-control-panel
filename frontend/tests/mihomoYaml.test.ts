@@ -122,3 +122,75 @@ proxy-groups:
     expect(g.strategy).toBe('sticky-sessions');
   });
 });
+
+describe('Mihomo YAML parsing (populateMihomoFromYAML) OR and no-resolve', () => {
+  test('parsing OR rules and no-resolve rules', () => {
+    const yaml = `
+rules:
+  - OR,((RULE-SET,meta@domain),(RULE-SET,meta@ipcidr,no-resolve)),Meta
+  - OR,((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),Заблок. сервисы
+  - IP-CIDR,192.168.1.0/24,DIRECT,no-resolve
+  - DOMAIN,google.com,ProxyGroup
+`;
+    const result = populateMihomoFromYAML(yaml);
+    
+    expect(result.activeRuleProvider).toBe('zkeen');
+    
+    const customRules = result.rules;
+    expect(customRules).toHaveLength(2);
+    
+    expect(customRules[0].type).toBe('IP-CIDR');
+    expect(customRules[0].value).toBe('192.168.1.0/24');
+    expect(customRules[0].outbound).toBe('DIRECT');
+    expect(customRules[0].noResolve).toBe(true);
+
+    expect(customRules[1].type).toBe('DOMAIN');
+    expect(customRules[1].value).toBe('google.com');
+    expect(customRules[1].outbound).toBe('ProxyGroup');
+    expect(customRules[1].noResolve).toBeFalsy();
+  });
+
+  test('generating OR rules and no-resolve rules', () => {
+    const mockState: any = {
+      activeRuleProvider: 'zkeen',
+      proxies: [],
+      groups: [
+        { name: 'Meta', enabled: true, proxies: [] },
+        { name: 'Telegram', enabled: true, proxies: [] },
+        { name: 'Google', enabled: true, proxies: [] },
+        { name: 'DIRECT', enabled: true, proxies: [] },
+        { name: 'Заблок. сервисы', enabled: true, proxies: [] },
+        { name: 'AI', enabled: true, proxies: [] },
+        { name: 'Steam', enabled: true, proxies: [] },
+        { name: 'Spotify', enabled: true, proxies: [] },
+        { name: 'Reddit', enabled: true, proxies: [] },
+        { name: 'YouTube', enabled: true, proxies: [] },
+        { name: 'Twitch', enabled: true, proxies: [] },
+        { name: 'Twitter', enabled: true, proxies: [] },
+        { name: 'Discord', enabled: true, proxies: [] },
+        { name: 'Speedtest', enabled: true, proxies: [] },
+        { name: 'GitHub', enabled: true, proxies: [] },
+        { name: 'CDN', enabled: true, proxies: [] },
+        { name: 'TikTok', enabled: true, proxies: [] }
+      ],
+      rules: [
+        { id: '1', type: 'IP-CIDR', value: '192.168.1.0/24', outbound: 'DIRECT', noResolve: true },
+        { id: '2', type: 'DOMAIN', value: 'google.com', outbound: 'DIRECT' },
+        { id: '3', type: 'OR', value: '((DOMAIN,test.com),(DOMAIN,test2.com))', outbound: 'DIRECT' }
+      ],
+      dns: {},
+      tun: {},
+      sniffer: {}
+    };
+
+    const yaml = generateYAML(mockState);
+    
+    expect(yaml).toContain('- OR,((RULE-SET,meta@domain),(RULE-SET,meta@ipcidr,no-resolve)),Meta');
+    expect(yaml).toContain('- OR,((RULE-SET,telegram@domain),(RULE-SET,telegram@ipcidr,no-resolve)),Telegram');
+    expect(yaml).toContain('- OR,((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),Заблок. сервисы');
+
+    expect(yaml).toContain('- IP-CIDR,192.168.1.0/24,DIRECT,no-resolve');
+    expect(yaml).toContain('- DOMAIN,google.com,DIRECT');
+    expect(yaml).toContain('- OR,((DOMAIN,test.com),(DOMAIN,test2.com)),DIRECT');
+  });
+});

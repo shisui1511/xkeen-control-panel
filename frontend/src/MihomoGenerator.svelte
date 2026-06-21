@@ -11,7 +11,9 @@
     extractSection,
     replaceMihomoTopLevelSection,
     generateYAML as generateMihomoYAML,
-    populateMihomoFromYAML as populateMihomoFromYAML_raw
+    populateMihomoFromYAML as populateMihomoFromYAML_raw,
+    ZKEEN_RULE_PROVIDERS,
+    type RuleProvider
   } from './lib/mihomoYaml';
   import ProxyForm from './components/mihomo/ProxyForm.svelte';
   import GroupForm from './components/mihomo/GroupForm.svelte';
@@ -239,141 +241,6 @@
   let showApplyConfirm = false;
   let applyLoading = false;
   let dnsRedirectLoading = false;
-
-  // ── Rule-provider URL constants ─────────────────────────────────────────
-  const META_BASE_URL = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
-  const METACUBEX_BASE = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
-
-  interface RuleProvider {
-    name: string;
-    url: string;
-    behavior: string;
-    outbound: string;
-    format: string;
-    payload?: string[];
-  }
-
-  const ZKEEN_RULE_PROVIDERS: RuleProvider[] = [
-    {
-      name: 'adlist@domain',
-      url: 'https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs',
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'REJECT'
-    },
-    {
-      name: 'category-ai@domain',
-      url: `${METACUBEX_BASE}/geosite/category-ai-!cn.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'AI'
-    },
-    {
-      name: 'steam@domain',
-      url: `${METACUBEX_BASE}/geosite/steam.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Steam'
-    },
-    {
-      name: 'spotify@domain',
-      url: `${METACUBEX_BASE}/geosite/spotify.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Spotify'
-    },
-    {
-      name: 'speedtest@domain',
-      url: `${METACUBEX_BASE}/geosite/speedtest.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Speedtest'
-    },
-    {
-      name: 'reddit@domain',
-      url: `${METACUBEX_BASE}/geosite/reddit.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Reddit'
-    },
-    {
-      name: 'twitch@domain',
-      url: `${METACUBEX_BASE}/geosite/twitch.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Twitch'
-    },
-    {
-      name: 'twitter@domain',
-      url: `${METACUBEX_BASE}/geosite/twitter.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Twitter'
-    },
-    {
-      name: 'meta@domain',
-      url: `${METACUBEX_BASE}/geosite/meta.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Meta'
-    },
-    {
-      name: 'discord@classical',
-      url: `${METACUBEX_BASE}/classical/discord.txt`,
-      behavior: 'classical',
-      format: 'text',
-      outbound: 'Discord'
-    },
-    {
-      name: 'refilter@domain',
-      url: 'https://raw.githubusercontent.com/1andrevich/Re-filter-lists/release/refilter_domains.mrs',
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Заблок. сервисы'
-    },
-    {
-      name: 'telegram@ipcidr',
-      url: `${METACUBEX_BASE}/geoip/telegram.mrs`,
-      behavior: 'ipcidr',
-      format: 'mrs',
-      outbound: 'Telegram'
-    },
-    {
-      name: 'github@domain',
-      url: `${METACUBEX_BASE}/geosite/github.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'GitHub'
-    },
-    {
-      name: 'private@ip',
-      url: `${METACUBEX_BASE}/geoip/private.mrs`,
-      behavior: 'ipcidr',
-      format: 'mrs',
-      outbound: 'DIRECT'
-    },
-    {
-      name: 'quic@inline',
-      url: '',
-      behavior: 'classical',
-      format: 'inline',
-      outbound: 'QUIC',
-      payload: ['AND,((DST-PORT,443),(NETWORK,UDP))']
-    },
-    {
-      name: 'netbios@inline',
-      url: '',
-      behavior: 'classical',
-      format: 'inline',
-      outbound: 'REJECT',
-      payload: [
-        'AND,((DST-PORT,135),(NETWORK,UDP))',
-        'AND,((DST-PORT,137),(NETWORK,UDP))',
-        'AND,((DST-PORT,138),(NETWORK,UDP))',
-        'AND,((DST-PORT,139),(NETWORK,UDP))'
-      ]
-    }
-  ];
 
   const RULE_PROVIDERS: Record<
     string,
@@ -1065,6 +932,10 @@
     configLoadedForPath = path;
     try {
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+      if (res.status === 404) {
+        populateMihomoFromYAML('');
+        return;
+      }
       if (!res.ok) {
         const errText = await res.text();
         throw new Error(errText || `HTTP ${res.status}`);
