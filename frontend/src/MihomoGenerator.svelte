@@ -972,7 +972,6 @@
     await loadSchema();
     await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
     await checkZkeenGeodata();
-    await loadSubscriptions();
     checkUndo();
   });
 
