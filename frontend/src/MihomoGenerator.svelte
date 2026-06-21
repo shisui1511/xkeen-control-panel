@@ -2816,6 +2816,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 14px;
+    background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -2838,10 +2839,11 @@
     overflow-y: auto;
     margin: 0;
     padding: 14px 16px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 11.5px;
-    line-height: 1.6;
-    color: var(--fg-secondary);
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: var(--font-mono, monospace);
+    font-size: var(--font-size-xs, 0.75rem);
+    line-height: 1.5;
     white-space: pre;
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong) transparent;
