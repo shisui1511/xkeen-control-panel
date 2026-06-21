@@ -912,6 +912,7 @@ const translations: Record<Lang, Record<string, string>> = {
     'subscr.hwid_locked_warning': 'Провайдер не принял HWID — могут приходить заглушки вместо нод',
     'subscr.confdir_warning':
       'Директория конфигов XRay не найдена ({dir}). Fragment-файлы подписок не будут применены.',
+    'subscr.no_kernel_warning': 'Необходимо выбрать хотя бы одно ядро для интеграции',
     'subscr.provider_interval': 'Провайдер рекомендует этот интервал обновления',
     'subscr.diag_btn': 'Диагностика',
     'subscr.diag_title': 'Диагностика подписки: {name}',
@@ -2056,6 +2057,7 @@ const translations: Record<Lang, Record<string, string>> = {
       'Provider rejected HWID — stub nodes may appear instead of real ones',
     'subscr.confdir_warning':
       'XRay config directory not found ({dir}). Subscription fragment files will not be applied.',
+    'subscr.no_kernel_warning': 'You must select at least one kernel for integration',
     'subscr.provider_interval': 'Provider recommends this update interval',
     'subscr.diag_btn': 'Diagnostics',
     'subscr.diag_title': 'Subscription Diagnostics: {name}',
