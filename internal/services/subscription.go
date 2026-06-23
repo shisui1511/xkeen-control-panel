@@ -1967,11 +1967,17 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 		host := ""
 		port := 0
 		if n.Server != "" {
-			parts := strings.Split(n.Server, ":")
-			if len(parts) >= 2 {
-				host = parts[0]
-				if p, err := strconv.Atoi(parts[1]); err == nil {
+			if lastColon := strings.LastIndex(n.Server, ":"); lastColon >= 0 {
+				portStr := n.Server[lastColon+1:]
+				if p, err := strconv.Atoi(portStr); err == nil {
 					port = p
+					host = n.Server[:lastColon]
+					// Strip square brackets around IPv6 addresses if present
+					if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+						host = host[1 : len(host)-1]
+					}
+				} else {
+					host = n.Server
 				}
 			} else {
 				host = n.Server
