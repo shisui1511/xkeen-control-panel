@@ -506,6 +506,9 @@ func ParseClashProxyNode(blockStr string) SubscriptionNode {
 	if wspath == "" {
 		wspath = p.get("xhttp-opts.path")
 	}
+	if wspath == "" {
+		wspath = p.get("grpc-opts.grpc-service-name")
+	}
 	node.WSPath = wspath
 
 	aidStr := p.get("alter-id")

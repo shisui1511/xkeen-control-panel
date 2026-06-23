@@ -2086,3 +2086,225 @@ func TestSubscriptionService_ClashYAMLToXrayOutbounds(t *testing.T) {
 	}
 }
 
+func TestConvertSubscriptionNodesToClashYAML(t *testing.T) {
+	svc := &SubscriptionService{}
+	nodes := []SubscriptionNode{
+		{
+			Tag:       "vless-node",
+			Protocol:  "vless",
+			Server:    "vless.example.com:443",
+			UUID:      "vless-uuid",
+			Security:  "reality",
+			PublicKey: "pubkey",
+			ShortID:   "shortid",
+			ServerName: "dest.com",
+			Transport: "grpc",
+			WSPath:    "service-name",
+		},
+		{
+			Tag:       "vmess-node",
+			Protocol:  "vmess",
+			Server:    "vmess.example.com:8080",
+			UUID:      "vmess-uuid",
+			AlterID:   2,
+			Security:  "tls",
+			Insecure:  true,
+			Transport: "ws",
+			WSPath:    "/path",
+			ServerName: "sni.com",
+		},
+		{
+			Tag:       "trojan-node",
+			Protocol:  "trojan",
+			Server:    "trojan.example.com:443",
+			Password:  "trojan-pass",
+			ServerName: "trojan-sni",
+			Insecure:  true,
+		},
+		{
+			Tag:      "ss-node",
+			Protocol: "ss",
+			Server:   "ss.example.com:8388",
+			Cipher:   "aes-128-gcm",
+			Password: "ss-password",
+		},
+		{
+			Tag:          "hy2-node",
+			Protocol:     "hysteria2",
+			Server:       "hy2.example.com:443",
+			Password:     "hy2-pass",
+			ServerName:   "hy2-sni",
+			Insecure:     true,
+			ObfsType:     "simple",
+			ObfsPassword: "obfs-password",
+		},
+	}
+
+	yamlContent, names := svc.convertSubscriptionNodesToClashYAML(nodes)
+
+	expectedNames := []string{"vless-node", "vmess-node", "trojan-node", "ss-node", "hy2-node"}
+	if len(names) != len(expectedNames) {
+		t.Fatalf("expected names length %d, got %d", len(expectedNames), len(names))
+	}
+	for i, name := range names {
+		if name != expectedNames[i] {
+			t.Errorf("expected name %q at %d, got %q", expectedNames[i], i, name)
+		}
+	}
+
+	// Parse it back to make sure it's valid Clash YAML
+	blocks, parsedNames := ParseMihomoSubscriptionBlocks(yamlContent)
+	if len(blocks) != 5 {
+		t.Fatalf("expected 5 parsed blocks, got %d. YAML:\n%s", len(blocks), yamlContent)
+	}
+
+	n0 := ParseClashProxyNode(blocks[0])
+	if n0.Tag != "vless-node" || n0.Protocol != "vless" || n0.UUID != "vless-uuid" || n0.Security != "reality" || n0.PublicKey != "pubkey" || n0.ShortID != "shortid" || n0.ServerName != "dest.com" || n0.Transport != "grpc" || n0.WSPath != "service-name" {
+		t.Errorf("vless-node parsed incorrectly: %+v", n0)
+	}
+
+	n1 := ParseClashProxyNode(blocks[1])
+	if n1.Tag != "vmess-node" || n1.Protocol != "vmess" || n1.UUID != "vmess-uuid" || n1.AlterID != 2 || n1.Security != "tls" || !n1.Insecure || n1.Transport != "ws" || n1.WSPath != "/path" || n1.ServerName != "sni.com" {
+		t.Errorf("vmess-node parsed incorrectly: %+v", n1)
+	}
+
+	n2 := ParseClashProxyNode(blocks[2])
+	if n2.Tag != "trojan-node" || n2.Protocol != "trojan" || n2.Password != "trojan-pass" || n2.Security != "tls" || n2.ServerName != "trojan-sni" || !n2.Insecure {
+		t.Errorf("trojan-node parsed incorrectly: %+v", n2)
+	}
+
+	n3 := ParseClashProxyNode(blocks[3])
+	if n3.Tag != "ss-node" || n3.Protocol != "shadowsocks" || n3.Cipher != "aes-128-gcm" || n3.Password != "ss-password" {
+		t.Errorf("ss-node parsed incorrectly: %+v", n3)
+	}
+
+	n4 := ParseClashProxyNode(blocks[4])
+	if n4.Tag != "hy2-node" || n4.Protocol != "hysteria2" || n4.Password != "hy2-pass" || n4.ServerName != "hy2-sni" || !n4.Insecure || n4.ObfsType != "simple" || n4.ObfsPassword != "obfs-password" {
+		t.Errorf("hy2-node parsed incorrectly: %+v", n4)
+	}
+
+	if len(parsedNames) != 5 {
+		t.Fatalf("expected 5 parsed names, got %d", len(parsedNames))
+	}
+}
+
+func TestApplyClashFilters(t *testing.T) {
+	svc := &SubscriptionService{}
+	blocks := []string{
+		"- name: us-vless\n  type: vless\n  network: tcp",
+		"- name: de-vmess\n  type: vmess\n  network: ws",
+		"- name: de-ss\n  type: ss\n  network: tcp",
+	}
+	names := []string{"us-vless", "de-vmess", "de-ss"}
+
+	// 1. Test FilterName
+	sub1 := &Subscription{FilterName: "de-"}
+	fb1, fn1 := svc.applyClashFilters(blocks, names, sub1)
+	if len(fb1) != 2 || fn1[0] != "de-vmess" || fn1[1] != "de-ss" {
+		t.Errorf("FilterName failed: got %v", fn1)
+	}
+
+	// 2. Test FilterType
+	sub2 := &Subscription{FilterType: "vless"}
+	fb2, fn2 := svc.applyClashFilters(blocks, names, sub2)
+	if len(fb2) != 1 || fn2[0] != "us-vless" {
+		t.Errorf("FilterType failed: got %v", fn2)
+	}
+
+	// 3. Test FilterTransport
+	sub3 := &Subscription{FilterTransport: "ws"}
+	fb3, fn3 := svc.applyClashFilters(blocks, names, sub3)
+	if len(fb3) != 1 || fn3[0] != "de-vmess" {
+		t.Errorf("FilterTransport failed: got %v", fn3)
+	}
+}
+
+func TestUniversalRefreshMihomo(t *testing.T) {
+	// Mock a non-Clash YAML format (e.g. Base64 list of share links)
+	rawOutboundLink := "vless://uuid-vless@vless.example.com:443?security=reality&pbk=pubkey&sid=shortid&sni=dest.com&type=grpc&serviceName=service-name#vless-node\n"
+	base64Body := base64.StdEncoding.EncodeToString([]byte(rawOutboundLink))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(base64Body))
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	mihomoDir := filepath.Join(tmp, "mihomo")
+	_ = os.MkdirAll(mihomoDir, 0755)
+	configPath := filepath.Join(mihomoDir, "config.yaml")
+
+	// Set initial configuration
+	initialConfig := `port: 9090
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - DIRECT
+`
+	_ = os.WriteFile(configPath, []byte(initialConfig), 0600)
+
+	svc := NewSubscriptionService(tmp, tmp, mihomoDir)
+	svc.httpClient = srv.Client()
+
+	sub := Subscription{
+		ID:           "universal-sub",
+		Name:         "Universal Sub Test",
+		URL:          srv.URL,
+		EnableMihomo: true,
+		EnableXray:   false,
+		Enabled:      true,
+		Interval:     1,
+		MihomoGroups: []string{"PROXY"},
+	}
+	_ = svc.Add(&sub)
+
+	// Run Refresh
+	t.Logf("Base64 body: %s", base64Body)
+	decodedBytes, _ := base64.StdEncoding.DecodeString(base64Body)
+	t.Logf("Decoded body: %q", string(decodedBytes))
+	parsedOb := parseShareLink(strings.TrimSpace(string(decodedBytes)))
+	t.Logf("parseShareLink result: %+v", parsedOb)
+
+	err := svc.Refresh("universal-sub")
+	if err != nil {
+		t.Fatalf("Refresh failed: %v", err)
+	}
+
+	// Verify that the config.yaml contains file-provider settings
+	configBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configStr := string(configBytes)
+
+	providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
+	if !strings.Contains(configStr, "type: file") {
+		t.Errorf("expected type: file in config.yaml, got:\n%s", configStr)
+	}
+	if strings.Contains(configStr, "            url:") || strings.Contains(configStr, "            interval:") {
+		t.Errorf("provider in config.yaml should not contain HTTP properties, got:\n%s", configStr)
+	}
+
+	// Verify that the provider file exists and has valid YAML proxies
+	providerFilePath := filepath.Join(mihomoDir, "providers", providerName+".yaml")
+	providerBytes, err := os.ReadFile(providerFilePath)
+	if err != nil {
+		t.Fatalf("provider file not found at %s: %v", providerFilePath, err)
+	}
+	providerStr := string(providerBytes)
+
+	blocks, names := ParseMihomoSubscriptionBlocks(providerStr)
+	if len(blocks) != 1 || names[0] != "vless-node" {
+		t.Errorf("provider file has invalid content, got:\n%s", providerStr)
+	}
+
+	node := ParseClashProxyNode(blocks[0])
+	if node.Tag != "vless-node" || node.Protocol != "vless" || node.Server != "vless.example.com:443" || node.Security != "reality" {
+		t.Errorf("converted node parsed incorrectly: %+v", node)
+	}
+}
+
+

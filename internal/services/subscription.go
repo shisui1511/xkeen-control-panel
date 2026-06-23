@@ -931,18 +931,66 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 		}
 	}()
 
-	if !looksLikeClashYAML(string(body)) {
-		return fmt.Errorf("данная подписка не имеет формата Clash/Mihomo YAML и не поддерживается ядром Mihomo. Пожалуйста, убедитесь, что подписка возвращает Clash YAML формат")
+	var yamlContent string
+	var newBlocks []string
+	var newNames []string
+	var skipReasons []SkipReason
+
+	s.mu.Lock()
+	// Re-get sub in case it was modified
+	live := s.GetLocked(sub.ID)
+	if live == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("subscription not found")
+	}
+	s.mu.Unlock()
+
+	if looksLikeClashYAML(string(body)) {
+		var allBlocks []string
+		var allNames []string
+		allBlocks, allNames = ParseMihomoSubscriptionBlocks(string(body))
+		if len(allBlocks) == 0 {
+			return fmt.Errorf("no proxy blocks found in subscription YAML")
+		}
+
+		// Apply Clash filters
+		newBlocks, newNames = s.applyClashFilters(allBlocks, allNames, live)
+
+		hasFilters := live.FilterName != "" || live.FilterType != "" || live.FilterTransport != ""
+		if hasFilters {
+			var sb strings.Builder
+			sb.WriteString("proxies:\n")
+			for _, block := range newBlocks {
+				sb.WriteString(block)
+				sb.WriteString("\n")
+			}
+			yamlContent = sb.String()
+		} else {
+			yamlContent = string(body)
+		}
+		sub.DetectedFormat = "clash-meta"
+	} else {
+		// Non-clash format (Base64, Share links, Sing-box JSON, etc.)
+		var outbounds []Outbound
+		outbounds, skipReasons, err = parseSubscriptionBody(body, headers.Get("Content-Type"), sub)
+		if err != nil {
+			return err
+		}
+
+		// Apply Xray filters to outbounds
+		outbounds = s.applyFilters(outbounds, live)
+
+		// Convert to SubscriptionNodes
+		nodes := s.outboundsToNodes(outbounds, live)
+
+		// Convert nodes to Clash YAML
+		yamlContent, newNames = s.convertSubscriptionNodesToClashYAML(nodes)
+
+		newBlocks, _ = ParseMihomoSubscriptionBlocks(yamlContent)
 	}
 
 	s.mihomoMu.Lock()
 	defer s.mihomoMu.Unlock()
-
-	// Извлечь блоки прокси из YAML подписки.
-	newBlocks, newNames := ParseMihomoSubscriptionBlocks(string(body))
-	if len(newBlocks) == 0 {
-		return fmt.Errorf("no proxy blocks found in subscription YAML")
-	}
 
 	configDir := s.mihomoConfigDir
 	if configDir == "" {
@@ -964,34 +1012,13 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 		rawConfig = []byte("# Mihomo config — managed by xkeen-control-panel\n")
 	}
 
-	// Сгенерировать блок YAML провайдера
-	hwid := sub.HwidToken
-	if hwid == "" {
-		hwid = s.hwid
-	}
-	ua := s.subscriptionUserAgent("mihomo")
+	providerName := getMihomoProviderName(live.Name, live.URL, live.ID)
 
-	intervalSec := sub.Interval * 3600
-	if sub.Interval > 720 {
-		intervalSec = sub.Interval
-	}
-	if intervalSec <= 0 {
-		intervalSec = 3600
-	}
-
-	providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
-
+	// Сгенерировать блок YAML провайдера с type: file
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("  %s:\n", providerName))
-	sb.WriteString("    type: http\n")
-	sb.WriteString(fmt.Sprintf("    url: %s\n", yamlSafeScalar(sub.URL)))
+	sb.WriteString("    type: file\n")
 	sb.WriteString(fmt.Sprintf("    path: ./providers/%s.yaml\n", providerName))
-	sb.WriteString(fmt.Sprintf("    interval: %d\n", intervalSec))
-	sb.WriteString("    header:\n")
-	sb.WriteString(fmt.Sprintf("      User-Agent:\n        - %s\n", yamlSafeScalar(ua)))
-	if hwid != "" {
-		sb.WriteString(fmt.Sprintf("      x-hwid:\n        - %s\n", yamlSafeScalar(hwid)))
-	}
 	sb.WriteString("    health-check:\n")
 	sb.WriteString("      enable: true\n")
 	sb.WriteString("      url: http://www.gstatic.com/generate_204\n")
@@ -1000,18 +1027,18 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 	providerBlock := sb.String()
 
 	// 1. Очистка старых индивидуальных нод из proxies (для миграции)
-	newConfig := ReplaceMihomoProxies(string(rawConfig), sub.ProxyNames, nil)
+	newConfig := ReplaceMihomoProxies(string(rawConfig), live.ProxyNames, nil)
 
 	// 2. Очистка старых индивидуальных нод из proxy-groups
-	for _, group := range sub.MihomoGroups {
-		newConfig = UpdateMihomoGroupProxies(newConfig, group, nil, sub.ProxyNames)
+	for _, group := range live.MihomoGroups {
+		newConfig = UpdateMihomoGroupProxies(newConfig, group, nil, live.ProxyNames)
 	}
 
 	// 3. Добавление/обновление proxy-provider в config.yaml
 	newConfig = ReplaceMihomoProxyProvider(newConfig, providerName, providerBlock)
 
 	// 4. Привязка proxy-provider к группам через use:
-	for _, group := range sub.MihomoGroups {
+	for _, group := range live.MihomoGroups {
 		newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, false)
 	}
 
@@ -1019,7 +1046,7 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 	providersDir := filepath.Join(configDir, "providers")
 	_ = os.MkdirAll(providersDir, 0755)
 	providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", providerName))
-	if err := utils.AtomicWriteFile(providerFilePath, body, 0600); err != nil {
+	if err := utils.AtomicWriteFile(providerFilePath, []byte(yamlContent), 0600); err != nil {
 		return fmt.Errorf("write provider file: %w", err)
 	}
 
@@ -1030,8 +1057,7 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 
 	sub.ProxyNames = newNames
 	sub.LastCount = len(newNames)
-	sub.RuleCount = countMihomoRules(string(body))
-	sub.DetectedFormat = "clash-meta"
+	sub.RuleCount = countMihomoRules(yamlContent)
 	sub.LastHashMihomo = newHash
 	sub.LastUpdate = time.Now()
 
@@ -1048,14 +1074,14 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 	sub.Announcement = parseAnnouncement(body, headers)
 
 	// Логирование UA-ответа
-	log.Printf("[Subscriptions] Refresh Mihomo ID: %s, Format: clash-meta, Size: %d bytes, Proxies: %d, Skipped: 0",
-		sub.ID, len(body), sub.LastCount)
+	log.Printf("[Subscriptions] Refresh Mihomo ID: %s, Format: %s, Size: %d bytes, Proxies: %d, Skipped: 0",
+		sub.ID, sub.DetectedFormat, len(body), sub.LastCount)
 
 	// Сохранение файлов отладки
 	report := &ParseReport{
 		ParsedCount:  sub.LastCount,
-		SkippedCount: 0,
-		Skipped:      nil,
+		SkippedCount: len(skipReasons),
+		Skipped:      skipReasons,
 		Timestamp:    sub.LastUpdate,
 	}
 	s.saveDebugFiles(sub.ID, body, headers, report)
@@ -1797,262 +1823,8 @@ func (s *SubscriptionService) applyFilters(outbounds []Outbound, sub *Subscripti
 	return filtered
 }
 
-func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {
-	safeID := filepath.Base(sub.ID)
-	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
-	if matched, _ := regexp.MatchString(`^[a-z0-9_-]+$`, safeID); !matched {
-		safeID = "safe_id"
-	}
-	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", safeID))
-}
-
-func (s *SubscriptionService) getRoutingFragmentPath(sub *Subscription) string {
-	safeID := filepath.Base(sub.ID)
-	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
-	if matched, _ := regexp.MatchString(`^[a-z0-9_-]+$`, safeID); !matched {
-		safeID = "safe_id"
-	}
-	return filepath.Join(s.configDir, fmt.Sprintf("05_routing.%s.json", safeID))
-}
-
-// writeRoutingFragment записывает XRay confdir-фрагмент с balancer и routing-правилом.
-//
-// Структура:
-//
-//	{
-//	  "routing": {
-//	    "balancers": [{"tag": "{id}-balancer", "selector": ["{prefix}-"]}],
-//	    "rules": [{"type":"field","domain":["geosite:geolocation-!cn"],"balancerTag":"{id}-balancer"}]
-//	  }
-//	}
-//
-// Если у подписки нет TagPrefix — маршрутизируем напрямую к первому прокси.
-func (s *SubscriptionService) writeRoutingFragment(path string, sub *Subscription, tags []string) error {
-	if len(tags) == 0 {
-		return nil
-	}
-
-	type Rule struct {
-		Type        string   `json:"type"`
-		Domain      []string `json:"domain"`
-		OutboundTag string   `json:"outboundTag,omitempty"`
-		BalancerTag string   `json:"balancerTag,omitempty"`
-	}
-	type Balancer struct {
-		Tag      string   `json:"tag"`
-		Selector []string `json:"selector"`
-	}
-	type Routing struct {
-		Balancers []Balancer `json:"balancers,omitempty"`
-		Rules     []Rule     `json:"rules"`
-	}
-	type Fragment struct {
-		Routing Routing `json:"routing"`
-	}
-
-	var frag Fragment
-	domains := []string{"geosite:geolocation-!cn", "geoip:!cn"}
-
-	if sub.TagPrefix != "" {
-		// Balancer выбирает прокси по префиксу тега — работает для любого числа прокси.
-		balancerTag := sub.ID + "-balancer"
-		frag = Fragment{
-			Routing: Routing{
-				Balancers: []Balancer{{
-					Tag:      balancerTag,
-					Selector: []string{sub.TagPrefix + "-"},
-				}},
-				Rules: []Rule{{
-					Type:        "field",
-					Domain:      domains,
-					BalancerTag: balancerTag,
-				}},
-			},
-		}
-	} else {
-		// Без префикса — напрямую к первому тегу.
-		frag = Fragment{
-			Routing: Routing{
-				Rules: []Rule{{
-					Type:        "field",
-					Domain:      domains,
-					OutboundTag: tags[0],
-				}},
-			},
-		}
-	}
-
-	data, err := json.MarshalIndent(frag, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	return utils.AtomicWriteFile(path, data, 0600)
-}
-
-func getVNextUserField(ob *Outbound, field string) string {
-	if ob.Settings == nil {
-		return ""
-	}
-	vnextRaw, ok := ob.Settings["vnext"]
-	if !ok {
-		return ""
-	}
-	vnextSlice, ok := vnextRaw.([]interface{})
-	if !ok || len(vnextSlice) == 0 {
-		return ""
-	}
-	firstVN, ok := vnextSlice[0].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	usersRaw, ok := firstVN["users"]
-	if !ok {
-		return ""
-	}
-	usersSlice, ok := usersRaw.([]interface{})
-	if !ok || len(usersSlice) == 0 {
-		return ""
-	}
-	firstUser, ok := usersSlice[0].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	val, _ := firstUser[field].(string)
-	return val
-}
-
-func getVNextUserInt(ob *Outbound, field string) int {
-	if ob.Settings == nil {
-		return 0
-	}
-	vnextRaw, ok := ob.Settings["vnext"]
-	if !ok {
-		return 0
-	}
-	vnextSlice, ok := vnextRaw.([]interface{})
-	if !ok || len(vnextSlice) == 0 {
-		return 0
-	}
-	firstVN, ok := vnextSlice[0].(map[string]interface{})
-	if !ok {
-		return 0
-	}
-	usersRaw, ok := firstVN["users"]
-	if !ok {
-		return 0
-	}
-	usersSlice, ok := usersRaw.([]interface{})
-	if !ok || len(usersSlice) == 0 {
-		return 0
-	}
-	firstUser, ok := usersSlice[0].(map[string]interface{})
-	if !ok {
-		return 0
-	}
-	switch v := firstUser[field].(type) {
-	case float64:
-		return int(v)
-	case int:
-		return v
-	case string:
-		if i, err := strconv.Atoi(v); err == nil {
-			return i
-		}
-	}
-	return 0
-}
-
-func getServerField(ob *Outbound, field string) string {
-	if ob.Settings == nil {
-		return ""
-	}
-	serversRaw, ok := ob.Settings["servers"]
-	if !ok {
-		return ""
-	}
-	serversSlice, ok := serversRaw.([]interface{})
-	if !ok || len(serversSlice) == 0 {
-		return ""
-	}
-	firstSrv, ok := serversSlice[0].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	val, _ := firstSrv[field].(string)
-	return val
-}
-
-// cyrillicMap maps Cyrillic runes to their Latin transliterations,
-// matching the CYRILLIC_MAP used in the frontend's slugifyProviderName.
-var cyrillicMap = map[rune]string{
-	'а': "a", 'б': "b", 'в': "v", 'г': "g", 'д': "d", 'е': "e", 'ё': "yo",
-	'ж': "zh", 'з': "z", 'и': "i", 'й': "j", 'к': "k", 'л': "l", 'м': "m",
-	'н': "n", 'о': "o", 'п': "p", 'р': "r", 'с': "s", 'т': "t", 'у': "u",
-	'ф': "f", 'х': "kh", 'ц': "ts", 'ч': "ch", 'ш': "sh", 'щ': "shch",
-	'ы': "y", 'э': "e", 'ю': "yu", 'я': "ya", 'ь': "", 'ъ': "",
-}
-
-// transliterateCyrillic replaces each Cyrillic rune with its Latin equivalent.
-func transliterateCyrillic(s string) string {
-	var b strings.Builder
-	b.Grow(len(s) * 2)
-	for _, r := range s {
-		lower := r
-		if r >= 'А' && r <= 'Я' {
-			lower = r - 'А' + 'а' // uppercase → lowercase Cyrillic
-		} else if r == 'Ё' {
-			lower = 'ё'
-		}
-		if lat, ok := cyrillicMap[lower]; ok {
-			b.WriteString(lat)
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-func getMihomoProviderName(name string, urlStr string, fallback string) string {
-	providerName := name
-	if providerName == "" {
-		if parsed, err := url.Parse(urlStr); err == nil && parsed.Path != "" {
-			providerName = path.Base(parsed.Path)
-		}
-	}
-	if providerName == "" || providerName == "." || providerName == "/" {
-		providerName = fallback
-	}
-
-	// Transliterate Cyrillic before sanitizing, matching frontend slugifyProviderName.
-	providerName = transliterateCyrillic(providerName)
-	providerName = strings.ToLower(providerName)
-	providerName = nonAlphanumericDashRe.ReplaceAllString(providerName, "-")
-	providerName = multiDashRe.ReplaceAllString(providerName, "-")
-	providerName = strings.Trim(providerName, "-")
-
-	if providerName == "" {
-		providerName = fallback
-	}
-	if matched, _ := regexp.MatchString(`^[a-z0-9\-]+$`, providerName); !matched {
-		providerName = "safe-provider-" + fallback
-		providerName = nonAlphanumericDashRe.ReplaceAllString(providerName, "-")
-		providerName = strings.ToLower(providerName)
-	}
-	return providerName
-}
-
-func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, sub *Subscription) ([]SubscriptionNode, error) {
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, err
-	}
-
+func (s *SubscriptionService) outboundsToNodes(outbounds []Outbound, sub *Subscription) []SubscriptionNode {
 	nodes := make([]SubscriptionNode, 0, len(outbounds))
-	allowedOutbounds := make([]Outbound, 0, len(outbounds))
 	seen := make(map[string]int)
 	for i := range outbounds {
 		origTag := outbounds[i].Tag
@@ -2182,13 +1954,548 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 			}
 		}
 
+		nodes = append(nodes, node)
+	}
+	return nodes
+}
+
+func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []SubscriptionNode) (string, []string) {
+	var sb strings.Builder
+	sb.WriteString("proxies:\n")
+	var names []string
+
+	for _, n := range nodes {
+		// Извлекаем хост и порт
+		host := ""
+		port := 0
+		if n.Server != "" {
+			parts := strings.Split(n.Server, ":")
+			if len(parts) >= 2 {
+				host = parts[0]
+				if p, err := strconv.Atoi(parts[1]); err == nil {
+					port = p
+				}
+			} else {
+				host = n.Server
+			}
+		}
+
+		if host == "" {
+			continue
+		}
+
+		// Выбираем тип протокола
+		pType := strings.ToLower(n.Protocol)
+		if pType == "ss" {
+			pType = "shadowsocks"
+		}
+
+		// Для Shadowsocks, VMess, VLESS, Trojan, Hysteria 2
+		if pType != "vless" && pType != "vmess" && pType != "trojan" && pType != "shadowsocks" && pType != "hysteria2" && pType != "hysteria" {
+			continue // Неподдерживаемый протокол для Mihomo YAML конвертера
+		}
+
+		if pType == "hysteria" {
+			pType = "hysteria2"
+		}
+
+		names = append(names, n.Tag)
+
+		sb.WriteString(fmt.Sprintf("  - name: %s\n", yamlSafeScalar(n.Tag)))
+		sb.WriteString(fmt.Sprintf("    type: %s\n", pType))
+		sb.WriteString(fmt.Sprintf("    server: %s\n", yamlSafeScalar(host)))
+		if port > 0 {
+			sb.WriteString(fmt.Sprintf("    port: %d\n", port))
+		}
+
+		switch pType {
+		case "vless":
+			sb.WriteString(fmt.Sprintf("    uuid: %s\n", yamlSafeScalar(n.UUID)))
+			cipher := n.Cipher
+			if cipher == "" {
+				cipher = "auto"
+			}
+			sb.WriteString(fmt.Sprintf("    cipher: %s\n", yamlSafeScalar(cipher)))
+			if n.Flow != "" {
+				sb.WriteString(fmt.Sprintf("    flow: %s\n", yamlSafeScalar(n.Flow)))
+			}
+
+			// reality / tls
+			if n.Security == "reality" {
+				sb.WriteString("    reality-opts:\n")
+				sb.WriteString(fmt.Sprintf("      public-key: %s\n", yamlSafeScalar(n.PublicKey)))
+				if n.ShortID != "" {
+					sb.WriteString(fmt.Sprintf("      short-id: %s\n", yamlSafeScalar(n.ShortID)))
+				}
+				// В VLESS/Reality sni передается в servername/sni
+				if n.ServerName != "" {
+					sb.WriteString(fmt.Sprintf("    servername: %s\n", yamlSafeScalar(n.ServerName)))
+				}
+			} else if n.Security == "tls" {
+				sb.WriteString("    tls: true\n")
+				if n.ServerName != "" {
+					sb.WriteString(fmt.Sprintf("    servername: %s\n", yamlSafeScalar(n.ServerName)))
+				}
+				if n.Insecure {
+					sb.WriteString("    skip-cert-verify: true\n")
+				}
+			}
+
+			if n.Fingerprint != "" {
+				sb.WriteString(fmt.Sprintf("    client-fingerprint: %s\n", yamlSafeScalar(n.Fingerprint)))
+			}
+
+			// network transport
+			writeTransportOpts(&sb, n)
+
+		case "vmess":
+			sb.WriteString(fmt.Sprintf("    uuid: %s\n", yamlSafeScalar(n.UUID)))
+			sb.WriteString(fmt.Sprintf("    alter-id: %d\n", n.AlterID))
+			cipher := n.Cipher
+			if cipher == "" {
+				cipher = "auto"
+			}
+			sb.WriteString(fmt.Sprintf("    cipher: %s\n", yamlSafeScalar(cipher)))
+
+			if n.Security == "tls" {
+				sb.WriteString("    tls: true\n")
+				if n.ServerName != "" {
+					sb.WriteString(fmt.Sprintf("    servername: %s\n", yamlSafeScalar(n.ServerName)))
+				}
+				if n.Insecure {
+					sb.WriteString("    skip-cert-verify: true\n")
+				}
+			}
+
+			if n.Fingerprint != "" {
+				sb.WriteString(fmt.Sprintf("    client-fingerprint: %s\n", yamlSafeScalar(n.Fingerprint)))
+			}
+
+			// network transport
+			writeTransportOpts(&sb, n)
+
+		case "trojan":
+			sb.WriteString(fmt.Sprintf("    password: %s\n", yamlSafeScalar(n.Password)))
+			sb.WriteString("    tls: true\n")
+			if n.ServerName != "" {
+				sb.WriteString(fmt.Sprintf("    sni: %s\n", yamlSafeScalar(n.ServerName)))
+			}
+			if n.Insecure {
+				sb.WriteString("    skip-cert-verify: true\n")
+			}
+			if n.Fingerprint != "" {
+				sb.WriteString(fmt.Sprintf("    client-fingerprint: %s\n", yamlSafeScalar(n.Fingerprint)))
+			}
+
+		case "shadowsocks":
+			cipher := n.Cipher
+			if cipher == "" {
+				cipher = "aes-256-gcm"
+			}
+			sb.WriteString(fmt.Sprintf("    cipher: %s\n", yamlSafeScalar(cipher)))
+			sb.WriteString(fmt.Sprintf("    password: %s\n", yamlSafeScalar(n.Password)))
+
+		case "hysteria2":
+			sb.WriteString(fmt.Sprintf("    password: %s\n", yamlSafeScalar(n.Password)))
+			if n.ServerName != "" {
+				sb.WriteString(fmt.Sprintf("    sni: %s\n", yamlSafeScalar(n.ServerName)))
+			}
+			if n.Insecure {
+				sb.WriteString("    skip-cert-verify: true\n")
+			}
+			if n.ObfsType != "" {
+				sb.WriteString("    obfs:\n")
+				sb.WriteString(fmt.Sprintf("      type: %s\n", yamlSafeScalar(n.ObfsType)))
+				if n.ObfsPassword != "" {
+					sb.WriteString(fmt.Sprintf("      password: %s\n", yamlSafeScalar(n.ObfsPassword)))
+				}
+			}
+		}
+	}
+
+	return sb.String(), names
+}
+
+func writeTransportOpts(sb *strings.Builder, n SubscriptionNode) {
+	trans := strings.ToLower(n.Transport)
+	if trans == "" {
+		return
+	}
+	sb.WriteString(fmt.Sprintf("    network: %s\n", yamlSafeScalar(trans)))
+	switch trans {
+	case "ws":
+		sb.WriteString("    ws-opts:\n")
+		path := n.WSPath
+		if path == "" {
+			path = "/"
+		}
+		sb.WriteString(fmt.Sprintf("      path: %s\n", yamlSafeScalar(path)))
+		if n.ServerName != "" {
+			sb.WriteString("      headers:\n")
+			sb.WriteString(fmt.Sprintf("        Host: %s\n", yamlSafeScalar(n.ServerName)))
+		}
+	case "grpc":
+		sb.WriteString("    grpc-opts:\n")
+		serviceName := n.WSPath
+		if serviceName == "" {
+			serviceName = "TunVPN"
+		}
+		sb.WriteString(fmt.Sprintf("      grpc-service-name: %s\n", yamlSafeScalar(serviceName)))
+	case "httpupgrade":
+		sb.WriteString("    httpupgrade-opts:\n")
+		path := n.WSPath
+		if path == "" {
+			path = "/"
+		}
+		sb.WriteString(fmt.Sprintf("      path: %s\n", yamlSafeScalar(path)))
+		if n.ServerName != "" {
+			sb.WriteString("      headers:\n")
+			sb.WriteString(fmt.Sprintf("        Host: %s\n", yamlSafeScalar(n.ServerName)))
+		}
+	}
+}
+
+func (s *SubscriptionService) applyClashFilters(blocks []string, names []string, sub *Subscription) ([]string, []string) {
+	if sub.FilterName == "" && sub.FilterType == "" && sub.FilterTransport == "" {
+		return blocks, names
+	}
+
+	var nameRe *regexp.Regexp
+	if sub.FilterName != "" {
+		if r, err := regexp.Compile("(?i)" + sub.FilterName); err == nil {
+			nameRe = r
+		}
+	}
+
+	var filteredBlocks []string
+	var filteredNames []string
+
+	for idx, block := range blocks {
+		node := ParseClashProxyNode(block)
+		if node.Tag == "" {
+			continue
+		}
+
+		if nameRe != nil && !nameRe.MatchString(node.Tag) {
+			continue
+		}
+		if sub.FilterType != "" && !strings.EqualFold(node.Protocol, sub.FilterType) {
+			continue
+		}
+		if sub.FilterTransport != "" && !strings.EqualFold(node.Transport, sub.FilterTransport) {
+			continue
+		}
+
+		filteredBlocks = append(filteredBlocks, block)
+		filteredNames = append(filteredNames, names[idx])
+	}
+
+	return filteredBlocks, filteredNames
+}
+
+func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {
+	safeID := filepath.Base(sub.ID)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+	if matched, _ := regexp.MatchString(`^[a-z0-9_-]+$`, safeID); !matched {
+		safeID = "safe_id"
+	}
+	return filepath.Join(s.configDir, fmt.Sprintf("04_outbounds.%s.json", safeID))
+}
+
+func (s *SubscriptionService) getRoutingFragmentPath(sub *Subscription) string {
+	safeID := filepath.Base(sub.ID)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+	if matched, _ := regexp.MatchString(`^[a-z0-9_-]+$`, safeID); !matched {
+		safeID = "safe_id"
+	}
+	return filepath.Join(s.configDir, fmt.Sprintf("05_routing.%s.json", safeID))
+}
+
+// writeRoutingFragment записывает XRay confdir-фрагмент с balancer и routing-правилом.
+//
+// Структура:
+//
+//	{
+//	  "routing": {
+//	    "balancers": [{"tag": "{id}-balancer", "selector": ["{prefix}-"]}],
+//	    "rules": [{"type":"field","domain":["geosite:geolocation-!cn"],"balancerTag":"{id}-balancer"}]
+//	  }
+//	}
+//
+// Если у подписки нет TagPrefix — маршрутизируем напрямую к первому прокси.
+func (s *SubscriptionService) writeRoutingFragment(path string, sub *Subscription, tags []string) error {
+	if len(tags) == 0 {
+		return nil
+	}
+
+	type Rule struct {
+		Type        string   `json:"type"`
+		Domain      []string `json:"domain"`
+		OutboundTag string   `json:"outboundTag,omitempty"`
+		BalancerTag string   `json:"balancerTag,omitempty"`
+	}
+	type Balancer struct {
+		Tag      string   `json:"tag"`
+		Selector []string `json:"selector"`
+	}
+	type Routing struct {
+		Balancers []Balancer `json:"balancers,omitempty"`
+		Rules     []Rule     `json:"rules"`
+	}
+	type Fragment struct {
+		Routing Routing `json:"routing"`
+	}
+
+	var frag Fragment
+	domains := []string{"geosite:geolocation-!cn", "geoip:!cn"}
+
+	if sub.TagPrefix != "" {
+		// Balancer выбирает прокси по префиксу тега — работает для любого числа прокси.
+		balancerTag := sub.ID + "-balancer"
+		frag = Fragment{
+			Routing: Routing{
+				Balancers: []Balancer{{
+					Tag:      balancerTag,
+					Selector: []string{sub.TagPrefix + "-"},
+				}},
+				Rules: []Rule{{
+					Type:        "field",
+					Domain:      domains,
+					BalancerTag: balancerTag,
+				}},
+			},
+		}
+	} else {
+		// Без префикса — напрямую к первому тегу.
+		frag = Fragment{
+			Routing: Routing{
+				Rules: []Rule{{
+					Type:        "field",
+					Domain:      domains,
+					OutboundTag: tags[0],
+				}},
+			},
+		}
+	}
+
+	data, err := json.MarshalIndent(frag, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	return utils.AtomicWriteFile(path, data, 0600)
+}
+
+func getVNextUserField(ob *Outbound, field string) string {
+	if ob.Settings == nil {
+		return ""
+	}
+	vnextRaw, ok := ob.Settings["vnext"]
+	if !ok {
+		return ""
+	}
+
+	var firstVN map[string]interface{}
+	switch v := vnextRaw.(type) {
+	case []interface{}:
+		if len(v) > 0 {
+			firstVN, _ = v[0].(map[string]interface{})
+		}
+	case []map[string]interface{}:
+		if len(v) > 0 {
+			firstVN = v[0]
+		}
+	}
+	if firstVN == nil {
+		return ""
+	}
+
+	usersRaw, ok := firstVN["users"]
+	if !ok {
+		return ""
+	}
+
+	var firstUser map[string]interface{}
+	switch u := usersRaw.(type) {
+	case []interface{}:
+		if len(u) > 0 {
+			firstUser, _ = u[0].(map[string]interface{})
+		}
+	case []map[string]interface{}:
+		if len(u) > 0 {
+			firstUser = u[0]
+		}
+	}
+	if firstUser == nil {
+		return ""
+	}
+
+	val, _ := firstUser[field].(string)
+	return val
+}
+
+func getVNextUserInt(ob *Outbound, field string) int {
+	if ob.Settings == nil {
+		return 0
+	}
+	vnextRaw, ok := ob.Settings["vnext"]
+	if !ok {
+		return 0
+	}
+
+	var firstVN map[string]interface{}
+	switch v := vnextRaw.(type) {
+	case []interface{}:
+		if len(v) > 0 {
+			firstVN, _ = v[0].(map[string]interface{})
+		}
+	case []map[string]interface{}:
+		if len(v) > 0 {
+			firstVN = v[0]
+		}
+	}
+	if firstVN == nil {
+		return 0
+	}
+
+	usersRaw, ok := firstVN["users"]
+	if !ok {
+		return 0
+	}
+
+	var firstUser map[string]interface{}
+	switch u := usersRaw.(type) {
+	case []interface{}:
+		if len(u) > 0 {
+			firstUser, _ = u[0].(map[string]interface{})
+		}
+	case []map[string]interface{}:
+		if len(u) > 0 {
+			firstUser = u[0]
+		}
+	}
+	if firstUser == nil {
+		return 0
+	}
+
+	switch v := firstUser[field].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case string:
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return 0
+}
+
+func getServerField(ob *Outbound, field string) string {
+	if ob.Settings == nil {
+		return ""
+	}
+	serversRaw, ok := ob.Settings["servers"]
+	if !ok {
+		return ""
+	}
+
+	var firstSrv map[string]interface{}
+	switch s := serversRaw.(type) {
+	case []interface{}:
+		if len(s) > 0 {
+			firstSrv, _ = s[0].(map[string]interface{})
+		}
+	case []map[string]interface{}:
+		if len(s) > 0 {
+			firstSrv = s[0]
+		}
+	}
+	if firstSrv == nil {
+		return ""
+	}
+
+	val, _ := firstSrv[field].(string)
+	return val
+}
+
+// cyrillicMap maps Cyrillic runes to their Latin transliterations,
+// matching the CYRILLIC_MAP used in the frontend's slugifyProviderName.
+var cyrillicMap = map[rune]string{
+	'а': "a", 'б': "b", 'в': "v", 'г': "g", 'д': "d", 'е': "e", 'ё': "yo",
+	'ж': "zh", 'з': "z", 'и': "i", 'й': "j", 'к': "k", 'л': "l", 'м': "m",
+	'н': "n", 'о': "o", 'п': "p", 'р': "r", 'с': "s", 'т': "t", 'у': "u",
+	'ф': "f", 'х': "kh", 'ц': "ts", 'ч': "ch", 'ш': "sh", 'щ': "shch",
+	'ы': "y", 'э': "e", 'ю': "yu", 'я': "ya", 'ь': "", 'ъ': "",
+}
+
+// transliterateCyrillic replaces each Cyrillic rune with its Latin equivalent.
+func transliterateCyrillic(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) * 2)
+	for _, r := range s {
+		lower := r
+		if r >= 'А' && r <= 'Я' {
+			lower = r - 'А' + 'а' // uppercase → lowercase Cyrillic
+		} else if r == 'Ё' {
+			lower = 'ё'
+		}
+		if lat, ok := cyrillicMap[lower]; ok {
+			b.WriteString(lat)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func getMihomoProviderName(name string, urlStr string, fallback string) string {
+	providerName := name
+	if providerName == "" {
+		if parsed, err := url.Parse(urlStr); err == nil && parsed.Path != "" {
+			providerName = path.Base(parsed.Path)
+		}
+	}
+	if providerName == "" || providerName == "." || providerName == "/" {
+		providerName = fallback
+	}
+
+	// Transliterate Cyrillic before sanitizing, matching frontend slugifyProviderName.
+	providerName = transliterateCyrillic(providerName)
+	providerName = strings.ToLower(providerName)
+	providerName = nonAlphanumericDashRe.ReplaceAllString(providerName, "-")
+	providerName = multiDashRe.ReplaceAllString(providerName, "-")
+	providerName = strings.Trim(providerName, "-")
+
+	if providerName == "" {
+		providerName = fallback
+	}
+	if matched, _ := regexp.MatchString(`^[a-z0-9\-]+$`, providerName); !matched {
+		providerName = "safe-provider-" + fallback
+		providerName = nonAlphanumericDashRe.ReplaceAllString(providerName, "-")
+		providerName = strings.ToLower(providerName)
+	}
+	return providerName
+}
+
+func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, sub *Subscription) ([]SubscriptionNode, error) {
+	// Ensure directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return nil, err
+	}
+
+	nodes := s.outboundsToNodes(outbounds, sub)
+
+	allowedOutbounds := make([]Outbound, 0, len(outbounds))
+	for i, node := range nodes {
 		if allowedXrayProtocols[node.Protocol] {
 			allowedOutbounds = append(allowedOutbounds, outbounds[i])
 		} else {
 			log.Printf("[Subscriptions] Skipping outbound %q for Xray configuration: unsupported protocol %q", outbounds[i].Tag, node.Protocol)
 		}
-
-		nodes = append(nodes, node)
 	}
 
 	wrapper := struct {
@@ -3133,13 +3440,24 @@ func extractServer(ob *Outbound) string {
 		return ""
 	}
 	// Для vmess / vless
-	if vnext, ok := ob.Settings["vnext"].([]interface{}); ok && len(vnext) > 0 {
-		if serverMap, ok := vnext[0].(map[string]interface{}); ok {
-			address, _ := serverMap["address"].(string)
+	if vnextRaw, ok := ob.Settings["vnext"]; ok {
+		var firstVN map[string]interface{}
+		switch v := vnextRaw.(type) {
+		case []interface{}:
+			if len(v) > 0 {
+				firstVN, _ = v[0].(map[string]interface{})
+			}
+		case []map[string]interface{}:
+			if len(v) > 0 {
+				firstVN = v[0]
+			}
+		}
+		if firstVN != nil {
+			address, _ := firstVN["address"].(string)
 			var port float64
-			if p, ok := serverMap["port"].(float64); ok {
+			if p, ok := firstVN["port"].(float64); ok {
 				port = p
-			} else if p, ok := serverMap["port"].(int); ok {
+			} else if p, ok := firstVN["port"].(int); ok {
 				port = float64(p)
 			}
 			if address != "" && port > 0 {
@@ -3148,13 +3466,24 @@ func extractServer(ob *Outbound) string {
 		}
 	}
 	// Для trojan / shadowsocks / hysteria2 / socks / http
-	if servers, ok := ob.Settings["servers"].([]interface{}); ok && len(servers) > 0 {
-		if serverMap, ok := servers[0].(map[string]interface{}); ok {
-			address, _ := serverMap["address"].(string)
+	if serversRaw, ok := ob.Settings["servers"]; ok {
+		var firstS map[string]interface{}
+		switch v := serversRaw.(type) {
+		case []interface{}:
+			if len(v) > 0 {
+				firstS, _ = v[0].(map[string]interface{})
+			}
+		case []map[string]interface{}:
+			if len(v) > 0 {
+				firstS = v[0]
+			}
+		}
+		if firstS != nil {
+			address, _ := firstS["address"].(string)
 			var port float64
-			if p, ok := serverMap["port"].(float64); ok {
+			if p, ok := firstS["port"].(float64); ok {
 				port = p
-			} else if p, ok := serverMap["port"].(int); ok {
+			} else if p, ok := firstS["port"].(int); ok {
 				port = float64(p)
 			}
 			if address != "" && port > 0 {
