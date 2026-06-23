@@ -936,14 +936,12 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 	var newNames []string
 	var skipReasons []SkipReason
 
-	s.mu.Lock()
-	// Re-get sub in case it was modified
-	live := s.GetLocked(sub.ID)
-	if live == nil {
-		s.mu.Unlock()
+	s.mu.RLock()
+	exists := s.GetLocked(sub.ID) != nil
+	s.mu.RUnlock()
+	if !exists {
 		return fmt.Errorf("subscription not found")
 	}
-	s.mu.Unlock()
 
 	if looksLikeClashYAML(string(body)) {
 		var allBlocks []string
@@ -954,9 +952,9 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 		}
 
 		// Apply Clash filters
-		newBlocks, newNames = s.applyClashFilters(allBlocks, allNames, live)
+		newBlocks, newNames = s.applyClashFilters(allBlocks, allNames, sub)
 
-		hasFilters := live.FilterName != "" || live.FilterType != "" || live.FilterTransport != ""
+		hasFilters := sub.FilterName != "" || sub.FilterType != "" || sub.FilterTransport != ""
 		if hasFilters {
 			var sb strings.Builder
 			sb.WriteString("proxies:\n")
@@ -978,10 +976,10 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 		}
 
 		// Apply Xray filters to outbounds
-		outbounds = s.applyFilters(outbounds, live)
+		outbounds = s.applyFilters(outbounds, sub)
 
 		// Convert to SubscriptionNodes
-		nodes := s.outboundsToNodes(outbounds, live)
+		nodes := s.outboundsToNodes(outbounds, sub)
 
 		// Convert nodes to Clash YAML
 		yamlContent, newNames = s.convertSubscriptionNodesToClashYAML(nodes)
@@ -1012,7 +1010,7 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 		rawConfig = []byte("# Mihomo config — managed by xkeen-control-panel\n")
 	}
 
-	providerName := getMihomoProviderName(live.Name, live.URL, live.ID)
+	providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
 
 	// Сгенерировать блок YAML провайдера с type: file
 	var sb strings.Builder
@@ -1027,18 +1025,18 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 	providerBlock := sb.String()
 
 	// 1. Очистка старых индивидуальных нод из proxies (для миграции)
-	newConfig := ReplaceMihomoProxies(string(rawConfig), live.ProxyNames, nil)
+	newConfig := ReplaceMihomoProxies(string(rawConfig), sub.ProxyNames, nil)
 
 	// 2. Очистка старых индивидуальных нод из proxy-groups
-	for _, group := range live.MihomoGroups {
-		newConfig = UpdateMihomoGroupProxies(newConfig, group, nil, live.ProxyNames)
+	for _, group := range sub.MihomoGroups {
+		newConfig = UpdateMihomoGroupProxies(newConfig, group, nil, sub.ProxyNames)
 	}
 
 	// 3. Добавление/обновление proxy-provider в config.yaml
 	newConfig = ReplaceMihomoProxyProvider(newConfig, providerName, providerBlock)
 
 	// 4. Привязка proxy-provider к группам через use:
-	for _, group := range live.MihomoGroups {
+	for _, group := range sub.MihomoGroups {
 		newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, false)
 	}
 
