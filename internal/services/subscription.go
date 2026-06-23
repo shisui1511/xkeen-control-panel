@@ -530,6 +530,35 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			// Partial update: preserve ID and all runtime-fetched data.
 			// Only overwrite user-editable config fields from the form.
 			existing := &s.subscriptions[i]
+
+			// Clean up old Mihomo provider if the name or URL is changing
+			configDir := s.mihomoConfigDir
+			if configDir == "" {
+				configDir = "/opt/etc/mihomo"
+			}
+			configPath := filepath.Join(configDir, "config.yaml")
+
+			oldProviderName := getMihomoProviderName(existing.Name, existing.URL, existing.ID)
+			newProviderName := getMihomoProviderName(sub.Name, sub.URL, existing.ID)
+
+			if oldProviderName != newProviderName && existing.EnableMihomo {
+				s.mihomoMu.Lock()
+				if rawConfig, err := os.ReadFile(configPath); err == nil {
+					newConfig := ReplaceMihomoProxyProvider(string(rawConfig), oldProviderName, "")
+					for _, group := range existing.MihomoGroups {
+						newConfig = UpdateMihomoGroupProviders(newConfig, group, oldProviderName, true)
+					}
+					_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
+				}
+				s.mihomoMu.Unlock()
+
+				providersDir := filepath.Join(configDir, "providers")
+				providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", oldProviderName))
+				if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
+					os.Remove(providerFilePath)
+				}
+			}
+
 			existing.Name = sub.Name
 			existing.URL = sub.URL
 			existing.TagPrefix = sub.TagPrefix
