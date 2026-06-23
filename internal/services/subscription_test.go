@@ -2138,11 +2138,17 @@ func TestConvertSubscriptionNodesToClashYAML(t *testing.T) {
 			ObfsType:     "simple",
 			ObfsPassword: "obfs-password",
 		},
+		{
+			Tag:          "ipv6-node",
+			Protocol:     "trojan",
+			Server:       "[2001:db8::1]:8080",
+			Password:     "trojan-pass",
+		},
 	}
 
 	yamlContent, names := svc.convertSubscriptionNodesToClashYAML(nodes)
 
-	expectedNames := []string{"vless-node", "vmess-node", "trojan-node", "ss-node", "hy2-node"}
+	expectedNames := []string{"vless-node", "vmess-node", "trojan-node", "ss-node", "hy2-node", "ipv6-node"}
 	if len(names) != len(expectedNames) {
 		t.Fatalf("expected names length %d, got %d", len(expectedNames), len(names))
 	}
@@ -2154,8 +2160,8 @@ func TestConvertSubscriptionNodesToClashYAML(t *testing.T) {
 
 	// Parse it back to make sure it's valid Clash YAML
 	blocks, parsedNames := ParseMihomoSubscriptionBlocks(yamlContent)
-	if len(blocks) != 5 {
-		t.Fatalf("expected 5 parsed blocks, got %d. YAML:\n%s", len(blocks), yamlContent)
+	if len(blocks) != 6 {
+		t.Fatalf("expected 6 parsed blocks, got %d. YAML:\n%s", len(blocks), yamlContent)
 	}
 
 	n0 := ParseClashProxyNode(blocks[0])
@@ -2183,8 +2189,13 @@ func TestConvertSubscriptionNodesToClashYAML(t *testing.T) {
 		t.Errorf("hy2-node parsed incorrectly: %+v", n4)
 	}
 
-	if len(parsedNames) != 5 {
-		t.Fatalf("expected 5 parsed names, got %d", len(parsedNames))
+	n5 := ParseClashProxyNode(blocks[5])
+	if n5.Tag != "ipv6-node" || n5.Protocol != "trojan" || n5.Password != "trojan-pass" {
+		t.Errorf("ipv6-node parsed incorrectly: %+v", n5)
+	}
+
+	if len(parsedNames) != 6 {
+		t.Fatalf("expected 6 parsed names, got %d", len(parsedNames))
 	}
 }
 
