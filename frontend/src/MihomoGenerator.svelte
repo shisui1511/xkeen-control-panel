@@ -614,7 +614,6 @@
       let imported = 0;
       for (const sub of subs) {
         if (!sub.enabled) continue;
-        if (!sub.enable_xray) continue; // Игнорируем подписки без Xray интеграции
         const nr = await fetch(`/api/subscriptions/nodes?id=${sub.id}`);
         if (!nr.ok) continue;
         const nodes: any[] = await nr.json();
