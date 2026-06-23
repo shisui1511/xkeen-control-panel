@@ -142,6 +142,61 @@ func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 	}
 }
 
+func TestSubscriptionService_UpdateMihomoProviderNameChange(t *testing.T) {
+	tmp := t.TempDir()
+	xrayDir := filepath.Join(tmp, "xray")
+	mihomoDir := filepath.Join(tmp, "mihomo")
+	_ = os.MkdirAll(xrayDir, 0755)
+	_ = os.MkdirAll(mihomoDir, 0755)
+
+	svc := NewSubscriptionService(tmp, xrayDir, mihomoDir)
+
+	sub := Subscription{
+		Name:         "Old Name",
+		URL:          "https://example.com/old-sub",
+		Enabled:      true,
+		EnableXray:   false,
+		EnableMihomo: true,
+		MihomoGroups: []string{"Proxy"},
+	}
+	svc.Add(&sub)
+
+	id := svc.List()[0].ID
+
+	// Create dummy config.yaml and provider file for old name
+	configPath := filepath.Join(mihomoDir, "config.yaml")
+	oldProviderName := getMihomoProviderName("Old Name", "https://example.com/old-sub", id)
+	_ = os.WriteFile(configPath, []byte("proxy-groups:\n  - name: Proxy\n    use:\n      - "+oldProviderName+"\nproxy-providers:\n  "+oldProviderName+":\n    type: http\n"), 0600)
+	
+	providerDir := filepath.Join(mihomoDir, "providers")
+	_ = os.MkdirAll(providerDir, 0755)
+	providerPath := filepath.Join(providerDir, fmt.Sprintf("%s.yaml", oldProviderName))
+	_ = os.WriteFile(providerPath, []byte(""), 0600)
+
+	// Update subscription name and URL
+	updatedSub := sub
+	updatedSub.Name = "New Name"
+	updatedSub.URL = "https://example.com/new-sub"
+	err := svc.Update(id, &updatedSub)
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	// Verify old mihomo provider file was deleted
+	if _, err := os.Stat(providerPath); !os.IsNotExist(err) {
+		t.Error("old mihomo provider file should have been deleted when subscription name/URL changed")
+	}
+
+	// Verify old provider is removed from config.yaml
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config.yaml: %v", err)
+	}
+	if strings.Contains(string(data), oldProviderName) {
+		t.Error("old provider name should have been removed from config.yaml")
+	}
+}
+
 // TestBase64FallbackURLRaw: VMess link encoded with RawURLEncoding is parsed correctly.
 func TestBase64FallbackURLRaw(t *testing.T) {
 	vmess := map[string]interface{}{
