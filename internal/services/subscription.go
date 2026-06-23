@@ -1236,9 +1236,9 @@ func looksLikeClashYAML(content string) bool {
 	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		return false
 	}
-	for _, line := range strings.SplitN(trimmed, "\n", 50) {
+	for _, line := range strings.SplitN(trimmed, "\n", 300) {
 		l := strings.TrimSpace(line)
-		if l == "proxies:" || strings.HasPrefix(l, "proxies:") {
+		if l == "proxies:" || strings.HasPrefix(l, "proxies:") || l == "proxy-providers:" || strings.HasPrefix(l, "proxy-providers:") {
 			return true
 		}
 	}
