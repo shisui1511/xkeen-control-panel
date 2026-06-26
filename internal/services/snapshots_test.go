@@ -232,3 +232,100 @@ func (dummyZeroReader) Read(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
+
+func TestSnapshotService_EdgeCases(t *testing.T) {
+	tmpDataDir := t.TempDir()
+	configDir := filepath.Join(tmpDataDir, "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewSnapshotService(tmpDataDir, []string{configDir})
+
+	// 1. Test symlink skipping during Create
+	regFile := filepath.Join(configDir, "regular.txt")
+	if err := os.WriteFile(regFile, []byte("regular content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	symLink := filepath.Join(configDir, "link.txt")
+	hasSymlink := true
+	if err := os.Symlink("regular.txt", symLink); err != nil {
+		hasSymlink = false
+	}
+
+	meta, err := svc.Create("Edge Case Test")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Verify the archive doesn't contain the symlink
+	archFile, err := os.Open(svc.archivePath(meta.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer archFile.Close()
+	gr, err := gzip.NewReader(archFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+
+	foundSymlink := false
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(hdr.Name, "link.txt") {
+			foundSymlink = true
+		}
+	}
+	if hasSymlink && foundSymlink {
+		t.Error("symlink was included in snapshot archive, but it should have been skipped")
+	}
+
+	// 2. Test restore file size limit (> 10MB)
+	largeTarGz := filepath.Join(tmpDataDir, "large.tar.gz")
+	f, err := os.Create(largeTarGz)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	hdr := &tar.Header{
+		Name:     "config/large_file.txt",
+		Mode:     0644,
+		Size:     11 * 1024 * 1024,
+		Typeflag: tar.TypeReg,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	largeMeta := SnapshotMeta{
+		ID:        "large-id",
+		Label:     "Too Large",
+		CreatedAt: meta.CreatedAt + 2,
+	}
+	if err := svc.saveMeta("large-id", largeMeta); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(largeTarGz, svc.archivePath("large-id")); err != nil {
+		t.Fatal(err)
+	}
+
+	err = svc.Restore("large-id")
+	if err == nil {
+		t.Error("expected restore to fail due to file exceeding 10 MB limit")
+	} else if !strings.Contains(err.Error(), "exceeds maximum allowed size of 10 MB") {
+		t.Errorf("expected size limit error, got: %v", err)
+	}
+}

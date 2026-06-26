@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -31,6 +32,7 @@ type SnapshotMeta struct {
 type SnapshotService struct {
 	dataDir    string
 	configDirs []string // directories to include in snapshot
+	mu         sync.Mutex
 }
 
 func NewSnapshotService(dataDir string, configDirs []string) *SnapshotService {
@@ -48,6 +50,9 @@ func (s *SnapshotService) ensureDir() error {
 // Create builds a tar.gz snapshot of all config dirs and saves it.
 // label is an optional human-readable name.
 func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := s.ensureDir(); err != nil {
 		return SnapshotMeta{}, fmt.Errorf("snapshots dir: %w", err)
 	}
@@ -82,6 +87,9 @@ func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
 			if err != nil {
 				return nil // skip unreadable entries
 			}
+			if d.Type()&fs.ModeSymlink != 0 {
+				return nil // skip symlinks
+			}
 			if d.IsDir() {
 				if path == filepath.Join(s.dataDir, "snapshots") || path == filepath.Join(s.dataDir, "tmp") {
 					return filepath.SkipDir
@@ -94,7 +102,7 @@ func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
 			if err != nil {
 				return nil
 			}
-			arcName := filepath.Join(base, rel)
+			arcName := filepath.ToSlash(filepath.Join(base, rel))
 
 			fi, err := d.Info()
 			if err != nil {
@@ -177,6 +185,9 @@ func (s *SnapshotService) saveMeta(id string, meta SnapshotMeta) error {
 
 // List returns all snapshots sorted newest-first.
 func (s *SnapshotService) List() ([]SnapshotMeta, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := s.ensureDir(); err != nil {
 		return nil, err
 	}
@@ -221,6 +232,9 @@ func (s *SnapshotService) ArchivePath(id string) (string, error) {
 // Restore extracts a snapshot archive back to the original config dirs.
 // Only files whose path prefix matches a known config dir base name are restored.
 func (s *SnapshotService) Restore(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if !snapshotIDRx.MatchString(id) {
 		return fmt.Errorf("invalid snapshot id")
 	}
@@ -244,11 +258,12 @@ func (s *SnapshotService) Restore(id string) error {
 	tr := tar.NewReader(gr)
 
 	// 1. Create temporary restore directory
-	tmpRestoreDir := filepath.Join(s.dataDir, "tmp", "restore")
-	if err := os.RemoveAll(tmpRestoreDir); err != nil {
-		return fmt.Errorf("clean temp restore dir: %w", err)
+	tmpParentDir := filepath.Join(s.dataDir, "tmp")
+	if err := os.MkdirAll(tmpParentDir, 0750); err != nil {
+		return fmt.Errorf("create temp parent dir: %w", err)
 	}
-	if err := os.MkdirAll(tmpRestoreDir, 0750); err != nil {
+	tmpRestoreDir, err := os.MkdirTemp(tmpParentDir, "restore-*")
+	if err != nil {
 		return fmt.Errorf("create temp restore dir: %w", err)
 	}
 	defer os.RemoveAll(tmpRestoreDir) // 6. Always clean up
@@ -267,6 +282,11 @@ func (s *SnapshotService) Restore(id string) error {
 		}
 		if err != nil {
 			return fmt.Errorf("read tar: %w", err)
+		}
+
+		// Only allow regular files and directories
+		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA && hdr.Typeflag != tar.TypeDir {
+			continue // skip symlinks, hardlinks, devices, etc.
 		}
 
 		if strings.Contains(hdr.Name, "..") {
@@ -289,6 +309,10 @@ func (s *SnapshotService) Restore(id string) error {
 
 		if err := os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
 			return fmt.Errorf("create temp subdir: %w", err)
+		}
+
+		if hdr.Size > 10*1024*1024 {
+			return fmt.Errorf("file %s exceeds maximum allowed size of 10 MB", hdr.Name)
 		}
 
 		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, hdr.FileInfo().Mode().Perm())
@@ -393,6 +417,9 @@ func (s *SnapshotService) Restore(id string) error {
 // SaveUploaded receives a reader for a tar.gz upload, limits it to 15 MB,
 // and saves it to the snapshots directory.
 func (s *SnapshotService) SaveUploaded(r io.Reader, filename string) (SnapshotMeta, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := s.ensureDir(); err != nil {
 		return SnapshotMeta{}, fmt.Errorf("snapshots dir: %w", err)
 	}
@@ -445,6 +472,9 @@ func (s *SnapshotService) SaveUploaded(r io.Reader, filename string) (SnapshotMe
 
 // Delete removes a snapshot archive and its metadata.
 func (s *SnapshotService) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// Sanitize id: only alphanumeric + dash
 	for _, c := range id {
 		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
