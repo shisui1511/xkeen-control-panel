@@ -198,3 +198,23 @@ func TestXkeenNoShellInjection(t *testing.T) {
 		t.Error("sentinel file was created — shell injection may have occurred")
 	}
 }
+
+func TestXKeenService_LocalhostBypass(t *testing.T) {
+	svc := NewXKeenService("/nonexistent/path/to/xkeen-control-panel/xkeen", t.TempDir())
+	out, err := svc.Start()
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !strings.Contains(out, "Bypassed service command") {
+		t.Fatalf("expected bypass message, got %s", out)
+	}
+
+	out2, err2 := svc.Restart()
+	if err2 != nil {
+		t.Fatalf("expected no error, got %v", err2)
+	}
+	if !strings.Contains(out2, "Bypassed service command") {
+		t.Fatalf("expected bypass message, got %s", out2)
+	}
+}
+
