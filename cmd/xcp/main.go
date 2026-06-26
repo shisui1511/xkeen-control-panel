@@ -204,10 +204,18 @@ func main() {
 	defer trafficQuotaSvc.Stop()
 
 	// Config Snapshots
-	snapshotSvc := services.NewSnapshotService(cfg.DataDir, []string{cfg.XRayConfigDir, cfg.MihomoConfigDir})
+	xrayDir := filepath.Dir(cfg.XRayConfigDir) // e.g. /opt/etc/xray
+	xkeenDir := filepath.Join(filepath.Dir(cfg.MihomoConfigDir), "xkeen") // e.g. /opt/etc/xkeen
+	snapshotSvc := services.NewSnapshotService(cfg.DataDir, []string{
+		xrayDir,
+		cfg.MihomoConfigDir,
+		xkeenDir,
+		cfg.DataDir,
+	})
 	api.SetSnapshotService(snapshotSvc)
 	srv.HandleProtected("/api/snapshots/list", api.SnapshotList)
 	srv.HandleProtected("/api/snapshots/create", api.SnapshotCreate)
+	srv.HandleProtected("/api/snapshots/upload", api.SnapshotUpload)
 	srv.HandleProtected("/api/snapshots/", api.SnapshotRouter)
 
 	// DAT Manager

@@ -76,8 +76,53 @@ func (a *API) SnapshotRestore(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Automatically restart active kernels and services after restore
+	if _, err := a.xkeenSvc.Restart(); err != nil {
+		a.errorResponse(w, fmt.Sprintf("Restore succeeded, but service restart failed: %s", err.Error()), http.StatusInternalServerError)
+		return
+	}
+
 	JSONSuccess(w, nil)
 }
+
+func (a *API) SnapshotUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Limit request body to 15 MB
+	r.Body = http.MaxBytesReader(w, r.Body, 15*1024*1024)
+
+	// Parse multipart form (up to 15 MB)
+	if err := r.ParseMultipartForm(15 * 1024 * 1024); err != nil {
+		a.errorResponse(w, "Unable to parse multipart form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("backup")
+	if err != nil {
+		a.errorResponse(w, "Missing backup file in request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	filename := header.Filename
+	if !strings.HasSuffix(strings.ToLower(filename), ".tar.gz") {
+		a.errorResponse(w, "Invalid file format, only .tar.gz is allowed", http.StatusBadRequest)
+		return
+	}
+
+	meta, err := a.snapshotSvc.SaveUploaded(file, filename)
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	a.jsonResponse(w, meta)
+}
+
 
 func (a *API) SnapshotDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
