@@ -3,6 +3,7 @@ package services
 import (
 	"archive/tar"
 	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ func TestSnapshotService(t *testing.T) {
 
 	file1 := filepath.Join(configDir1, "test1.json")
 	file2 := filepath.Join(configDir2, "test2.yaml")
+	datFile := filepath.Join(configDir1, "geoip.dat")
 
 	if err := os.WriteFile(file1, []byte(`{"ok":true}`), 0644); err != nil {
 		t.Fatal(err)
@@ -30,8 +32,29 @@ func TestSnapshotService(t *testing.T) {
 	if err := os.WriteFile(file2, []byte("key: value"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(datFile, []byte("large geoip database content"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
-	svc := NewSnapshotService(tmpDataDir, []string{configDir1, configDir2})
+	// Create snapshots and tmp subdirs inside tmpDataDir to test exclusions
+	snapshotsSubdir := filepath.Join(tmpDataDir, "snapshots")
+	tmpSubdir := filepath.Join(tmpDataDir, "tmp")
+	if err := os.MkdirAll(snapshotsSubdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(tmpSubdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	dummyBackupFile := filepath.Join(snapshotsSubdir, "dummy.tar.gz")
+	if err := os.WriteFile(dummyBackupFile, []byte("dummy archive"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dummyTmpFile := filepath.Join(tmpSubdir, "dummy_temp.txt")
+	if err := os.WriteFile(dummyTmpFile, []byte("dummy temp"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewSnapshotService(tmpDataDir, []string{configDir1, configDir2, tmpDataDir})
 
 	// 1. Create Snapshot
 	meta, err := svc.Create("Test Backup")
@@ -49,6 +72,40 @@ func TestSnapshotService(t *testing.T) {
 	}
 	if _, err := os.Stat(svc.archivePath(meta.ID)); err != nil {
 		t.Errorf("archive file does not exist: %v", err)
+	}
+
+	// Verify exclusions and filtering:
+	// Let's read the created archive and verify that snapshots/, tmp/, and geoip.dat are NOT inside
+	archFile, err := os.Open(svc.archivePath(meta.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer archFile.Close()
+	gr, err := gzip.NewReader(archFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := hdr.Name
+		if strings.Contains(name, "snapshots") {
+			t.Errorf("snapshots directory/file %s should be excluded but was found in archive", name)
+		}
+		if strings.Contains(name, "tmp") {
+			t.Errorf("tmp directory/file %s should be excluded but was found in archive", name)
+		}
+		if strings.HasSuffix(strings.ToLower(name), ".dat") {
+			t.Errorf("DAT file %s should be filtered out but was found in archive", name)
+		}
 	}
 
 	// 2. List Snapshots
@@ -90,25 +147,24 @@ func TestSnapshotService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gw := gzip.NewWriter(f)
-	tw := tar.NewWriter(gw)
+	gw2 := gzip.NewWriter(f)
+	tw2 := tar.NewWriter(gw2)
 
 	// Write an entry with directory traversal path
 	traversalPath := filepath.Join("config1", "..", "..", "escaped.txt")
-	// tar header uses forward slashes
 	hdr := &tar.Header{
 		Name: strings.ReplaceAll(traversalPath, "\\", "/"),
 		Mode: 0600,
 		Size: int64(len("evil")),
 	}
-	if err := tw.WriteHeader(hdr); err != nil {
+	if err := tw2.WriteHeader(hdr); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tw.Write([]byte("evil")); err != nil {
+	if _, err := tw2.Write([]byte("evil")); err != nil {
 		t.Fatal(err)
 	}
-	tw.Close()
-	gw.Close()
+	tw2.Close()
+	gw2.Close()
 	f.Close()
 
 	// Rename it to match the service naming pattern
@@ -124,9 +180,9 @@ func TestSnapshotService(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Trigger restore
-	if err := svc.Restore("escaped-id"); err != nil {
-		t.Fatalf("restore returned error instead of skipping: %v", err)
+	// Trigger restore - should FAIL (return error) due to Zip Slip detection
+	if err := svc.Restore("escaped-id"); err == nil {
+		t.Fatal("restore should have failed due to Zip Slip path")
 	}
 
 	// Verify the escaped file was NOT created outside target directories
@@ -135,11 +191,44 @@ func TestSnapshotService(t *testing.T) {
 		t.Errorf("Zip Slip vulnerability detected: file created at %s", escapedFile)
 	}
 
-	// 5. Delete Snapshot
+	// 5. Test SaveUploaded
+	uploadContent := "test upload data"
+	uploadReader := strings.NewReader(uploadContent)
+	uploadMeta, err := svc.SaveUploaded(uploadReader, "backup.tar.gz")
+	if err != nil {
+		t.Fatalf("SaveUploaded failed: %v", err)
+	}
+	if !strings.HasPrefix(uploadMeta.Label, "Загружен:") {
+		t.Errorf("expected label prefix 'Загружен:', got %s", uploadMeta.Label)
+	}
+	// Verify uploaded file content
+	uploadedData, err := os.ReadFile(svc.archivePath(uploadMeta.ID))
+	if err != nil || string(uploadedData) != uploadContent {
+		t.Errorf("uploaded data mismatch: %v, content=%q", err, string(uploadedData))
+	}
+
+	// Test SaveUploaded file size limit (15MB)
+	// We pass a large reader
+	largeReader := io.LimitReader(dummyZeroReader{}, 16*1024*1024) // 16MB
+	_, err = svc.SaveUploaded(largeReader, "too_large.tar.gz")
+	if err == nil {
+		t.Fatal("expected SaveUploaded to fail for files > 15MB")
+	}
+
+	// 6. Delete Snapshot
 	if err := svc.Delete(meta.ID); err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
 	if _, err := os.Stat(svc.archivePath(meta.ID)); !os.IsNotExist(err) {
 		t.Error("archive was not deleted")
 	}
+}
+
+type dummyZeroReader struct{}
+
+func (dummyZeroReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0
+	}
+	return len(p), nil
 }
