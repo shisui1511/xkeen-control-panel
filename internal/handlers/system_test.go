@@ -48,6 +48,17 @@ func TestSystemStats_NoProc(t *testing.T) {
 	if stats.GoRuntime.GoVersion == "" {
 		t.Error("expected GoVersion to be populated")
 	}
+
+	// Disk space stats should be populated (either real or fallback mock)
+	if stats.Disk.Total == 0 {
+		t.Error("expected Disk.Total to be greater than 0")
+	}
+	if stats.Disk.Free == 0 {
+		t.Error("expected Disk.Free to be greater than 0")
+	}
+	if stats.Disk.Used != stats.Disk.Total-stats.Disk.Free {
+		t.Errorf("expected Disk.Used to be %d, got %d", stats.Disk.Total-stats.Disk.Free, stats.Disk.Used)
+	}
 }
 
 func TestCountDirLines(t *testing.T) {

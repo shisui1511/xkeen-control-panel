@@ -3643,3 +3643,77 @@ func (s *SubscriptionService) triggerMihomoProviderReload(providerName string) {
 	log.Printf("[Subscriptions] Successfully reloaded Mihomo provider %q via REST API", providerName)
 }
 
+// CleanOrphanedSubscriptions deletes cached files for subscriptions that are no longer active in the panel,
+// but only if those files are older than 7 days, and system time is synchronized (at least 2026-01-01).
+func (s *SubscriptionService) CleanOrphanedSubscriptions() {
+	if time.Now().Before(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)) {
+		log.Println("[Cleanup] System time is before 2026-01-01, skipping orphaned subscription cleanup")
+		return
+	}
+
+	s.mu.RLock()
+	activeIDs := make(map[string]bool)
+	for _, sub := range s.subscriptions {
+		safeID := filepath.Base(sub.ID)
+		safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+		activeIDs[safeID] = true
+	}
+	s.mu.RUnlock()
+
+	dir := filepath.Join(s.dataDir, "subscriptions")
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		log.Printf("[Cleanup] Failed to read subscriptions directory: %v", err)
+		return
+	}
+
+	re := regexp.MustCompile(`^sub_([a-z0-9_-]+)_(raw\.txt|headers\.json|parse_report\.json)$`)
+	cleanedIDs := make(map[string]bool)
+
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		name := file.Name()
+		matches := re.FindStringSubmatch(name)
+		if len(matches) < 2 {
+			continue
+		}
+
+		safeID := matches[1]
+		if activeIDs[safeID] {
+			continue
+		}
+
+		if cleanedIDs[safeID] {
+			continue
+		}
+
+		info, err := file.Info()
+		if err != nil {
+			log.Printf("[Cleanup] Failed to get file info for %s: %v", name, err)
+			continue
+		}
+
+		if time.Since(info.ModTime()) > 7*24*time.Hour {
+			cleanedIDs[safeID] = true
+			log.Printf("[Cleanup] Removing orphaned files for subscription safeID: %s", safeID)
+
+			pathsToDelete := []string{
+				s.subPath("sub_" + safeID + "_raw.txt"),
+				s.subPath("sub_" + safeID + "_headers.json"),
+				s.subPath("sub_" + safeID + "_parse_report.json"),
+			}
+			for _, p := range pathsToDelete {
+				if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+					log.Printf("[Cleanup] Failed to remove orphaned subscription file %s: %v", p, err)
+				}
+			}
+		}
+	}
+}
+
