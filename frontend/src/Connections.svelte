@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t } from './i18n';
-  import { capabilities, fetchCapabilities, showToast } from './stores';
+  import { capabilities, fetchCapabilities, showToast, showConfirm } from './stores';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
@@ -29,6 +29,24 @@
   }
 
   let connections: Connection[] = [];
+
+  interface TrafficHistory {
+    upload: number;
+    download: number;
+    timestamp: number;
+  }
+  let trafficHistory = new Map<string, TrafficHistory>();
+  let connectionSpeeds = new Map<string, { uploadSpeed: number; downloadSpeed: number }>();
+
+  function getLatency(conn: any): number | null {
+    if (conn.metadata && typeof conn.metadata.latency === 'number' && conn.metadata.latency > 0) {
+      return conn.metadata.latency;
+    }
+    if (typeof conn.latency === 'number' && conn.latency > 0) {
+      return conn.latency;
+    }
+    return null;
+  }
   let loading = false;
   let error = '';
   let wsConnected = false;
@@ -107,7 +125,31 @@
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        connections = data.connections || [];
+        const now = Date.now();
+        const nextSpeeds = new Map<string, { uploadSpeed: number; downloadSpeed: number }>();
+        const nextHistory = new Map<string, TrafficHistory>();
+
+        const rawConnections = data.connections || [];
+        for (const conn of rawConnections) {
+          const prev = trafficHistory.get(conn.id);
+          let uploadSpeed = 0;
+          let downloadSpeed = 0;
+
+          if (prev) {
+            const durationSec = (now - prev.timestamp) / 1000;
+            if (durationSec > 0.2) {
+              uploadSpeed = Math.max(0, (conn.upload - prev.upload) / durationSec);
+              downloadSpeed = Math.max(0, (conn.download - prev.download) / durationSec);
+            }
+          }
+
+          nextSpeeds.set(conn.id, { uploadSpeed, downloadSpeed });
+          nextHistory.set(conn.id, { upload: conn.upload, download: conn.download, timestamp: now });
+        }
+
+        connectionSpeeds = nextSpeeds;
+        trafficHistory = nextHistory;
+        connections = rawConnections;
         loading = false;
       } catch (_) {}
     };
@@ -158,7 +200,13 @@
   }
 
   async function closeAllConnections() {
-    if (!confirm($t('conn.close_all_confirm'))) return;
+    const confirmed = await showConfirm(
+      $t('conn.close_all'),
+      $t('conn.close_all_confirm'),
+      $t('app.yes') || 'Да',
+      $t('app.no') || 'Нет'
+    );
+    if (!confirmed) return;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch('/api/mihomo/proxy/connections', {
@@ -356,25 +404,22 @@
     />
   {:else}
     <div class="toolbar mb-2">
-      <div class="filters" style="display: flex; gap: 8px; flex-wrap: wrap; width: 100%;">
+      <div class="filters">
         <input
           type="text"
           placeholder={$t('conn.source') + ' (IP)...'}
           bind:value={filterSource}
-          class="filter-input"
-          style="flex: 1; min-width: 140px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary);"
+          class="filter-input filter-src"
         />
         <input
           type="text"
           placeholder={$t('conn.destination') + ' (host / IP)...'}
           bind:value={filterDest}
-          class="filter-input"
-          style="flex: 1; min-width: 180px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary);"
+          class="filter-input filter-dest"
         />
         <select
           bind:value={filterRule}
-          class="filter-input"
-          style="flex: 1; min-width: 140px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary); font-family: inherit; font-size: 13px;"
+          class="filter-select filter-rule"
         >
           <option value="">{$t('conn.all_rules')}</option>
           {#each uniqueRules as rule}
@@ -383,8 +428,7 @@
         </select>
         <select
           bind:value={filterProxy}
-          class="filter-input"
-          style="flex: 1; min-width: 140px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary); font-family: inherit; font-size: 13px;"
+          class="filter-select filter-proxy"
         >
           <option value="">{$t('conn.all_chains')}</option>
           {#each uniqueChains as chain}
@@ -470,15 +514,30 @@
                 </td>
                 <td
                   class="mono col-traffic col-upload"
-                  style="text-align:right;color:var(--accent);">{formatBytes(conn.upload)}</td
+                  style="text-align:right;color:var(--accent);"
                 >
+                  <div>{formatBytes(conn.upload)}</div>
+                  {#if connectionSpeeds.has(conn.id)}
+                    <div class="speed-sub">{formatBytes(connectionSpeeds.get(conn.id).uploadSpeed)}/s</div>
+                  {/if}
+                </td>
                 <td
                   class="mono col-traffic col-download"
-                  style="text-align:right;color:var(--accent);">{formatBytes(conn.download)}</td
+                  style="text-align:right;color:var(--accent);"
                 >
-                <td class="mono col-duration" style="text-align:right;color:var(--fg-dim);"
-                  >{getDuration(conn.start)}</td
-                >
+                  <div>{formatBytes(conn.download)}</div>
+                  {#if connectionSpeeds.has(conn.id)}
+                    <div class="speed-sub">{formatBytes(connectionSpeeds.get(conn.id).downloadSpeed)}/s</div>
+                  {/if}
+                </td>
+                <td class="mono col-duration" style="text-align:right;color:var(--fg-dim);">
+                  <div>{getDuration(conn.start)}</div>
+                  {#if getLatency(conn) !== null}
+                    <div class="latency-sub" class:high-latency={getLatency(conn) > 300}>
+                      {getLatency(conn)} ms
+                    </div>
+                  {/if}
+                </td>
                 <td style="text-align:center;">
                   <button
                     class="btn btn-secondary btn-close-conn"
@@ -505,6 +564,57 @@
 </div>
 
 <style>
+  /* Filters toolbar layout and controls */
+  .filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .filters .filter-input,
+  .filters .filter-select {
+    flex: 1;
+    min-width: 140px;
+    height: 34px;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--bg-card);
+    color: var(--fg-primary);
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow var(--transition-fast);
+  }
+  .filters .filter-input {
+    cursor: text;
+  }
+  .filters .filter-input:focus,
+  .filters .filter-select:focus {
+    border-color: var(--color-accent, var(--accent, #29c2f0));
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .filters .filter-dest {
+    min-width: 180px;
+  }
+
+  /* Speed and latency displays in connections table */
+  .speed-sub {
+    font-size: 11px;
+    color: var(--fg-dim);
+    margin-top: 2px;
+  }
+  .latency-sub {
+    font-size: 11px;
+    color: #10b981;
+    margin-top: 2px;
+  }
+  .latency-sub.high-latency {
+    color: var(--danger);
+  }
+
   /* Toggle disabled state */
   .toggle-label.disabled {
     opacity: 0.45;
