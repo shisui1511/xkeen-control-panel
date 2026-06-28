@@ -19,6 +19,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/services/assets"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 var (
@@ -47,17 +48,14 @@ func main() {
 		}
 	}
 
-	// Setup logging to file if configured
+	// Setup logging to file if configured with size-based rotation (1 MB)
 	if cfg.XCPLogPath != "" {
-		if err := os.MkdirAll(filepath.Dir(cfg.XCPLogPath), 0755); err == nil {
-			logFile, err := os.OpenFile(cfg.XCPLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-			if err == nil {
-				log.SetOutput(logFile)
-			} else {
-				log.Printf("Failed to open log file %s: %v", cfg.XCPLogPath, err)
-			}
+		logWriter, err := utils.NewRotateWriter(cfg.XCPLogPath, 1*1024*1024)
+		if err == nil {
+			log.SetOutput(logWriter)
+			defer logWriter.Close()
 		} else {
-			log.Printf("Failed to create log directory for %s: %v", cfg.XCPLogPath, err)
+			log.Printf("Failed to initialize log rotator for %s: %v", cfg.XCPLogPath, err)
 		}
 	}
 
@@ -268,6 +266,21 @@ func main() {
 	schedulerCtx, cancelScheduler := context.WithCancel(context.Background())
 	go subscriptionSvc.RunScheduler(schedulerCtx, 15*time.Minute)
 	defer cancelScheduler()
+
+	// Run orphaned subscriptions cleanup at startup and schedule it every 24 hours
+	go subscriptionSvc.CleanOrphanedSubscriptions()
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-schedulerCtx.Done():
+				return
+			case <-ticker.C:
+				subscriptionSvc.CleanOrphanedSubscriptions()
+			}
+		}
+	}()
 
 	// Subscription health checker (TCP-dial каждые 5 минут)
 	healthSvc := services.NewSubscriptionHealthService(cfg.DataDir, subscriptionSvc)

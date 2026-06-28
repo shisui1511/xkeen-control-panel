@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -20,6 +21,11 @@ type SystemStats struct {
 		Used  uint64 `json:"used"`
 		Free  uint64 `json:"free"`
 	} `json:"memory"`
+	Disk struct {
+		Total uint64 `json:"total"`
+		Used  uint64 `json:"used"`
+		Free  uint64 `json:"free"`
+	} `json:"disk"`
 	Load   [3]float64 `json:"load"`
 	Uptime struct {
 		Seconds float64 `json:"seconds"`
@@ -134,6 +140,31 @@ func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
 	if stats.Uptime.Seconds > 0 {
 		bootTime := time.Now().Add(-time.Duration(stats.Uptime.Seconds) * time.Second)
 		stats.BootTime = bootTime.Format("02.01.06 15:04:05") + " " + getUTCOffset()
+	}
+
+	// Disk space calculation using Statfs
+	var stat syscall.Statfs_t
+	var diskErr error
+	if diskErr = syscall.Statfs("/opt", &stat); diskErr != nil {
+		diskErr = syscall.Statfs("/", &stat)
+	}
+
+	if diskErr != nil {
+		// Mock fallback (512 MB total, 100 MB free)
+		stats.Disk.Total = 512 * 1024 * 1024
+		stats.Disk.Free = 100 * 1024 * 1024
+		stats.Disk.Used = stats.Disk.Total - stats.Disk.Free
+	} else {
+		stats.Disk.Total = stat.Blocks * uint64(stat.Bsize)
+		stats.Disk.Free = stat.Bavail * uint64(stat.Bsize)
+		stats.Disk.Used = stats.Disk.Total - stats.Disk.Free
+
+		// Emergency trigger if free disk space is less than 10 MB
+		if stats.Disk.Free < 10*1024*1024 {
+			if a.subscriptionSvc != nil {
+				go a.subscriptionSvc.CleanOrphanedSubscriptions()
+			}
+		}
 	}
 
 	a.jsonResponse(w, stats)
