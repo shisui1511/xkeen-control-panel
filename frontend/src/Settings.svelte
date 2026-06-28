@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { t, setLang, currentLang, getAvailableLangs, type Lang } from './i18n';
   import Icon from './lib/components/Icon.svelte';
+  import StorageCard from './lib/components/StorageCard.svelte';
   import {
     capabilities,
     fetchCapabilities,
@@ -782,6 +783,8 @@
     }
   }
 
+
+
   onMount(async () => {
     fetchVersion();
     fetchCapabilities();
@@ -891,6 +894,8 @@
         </div>
       </div>
     </div>
+
+    <StorageCard />
 
     <div class="card mb-2">
       <div class="card-label">{$t('settings.section_appearance')}</div>
