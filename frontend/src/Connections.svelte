@@ -28,15 +28,15 @@
     rulePayload: string;
   }
 
-  let connections: Connection[] = [];
+  let connections = $state<Connection[]>([]);
 
   interface TrafficHistory {
     upload: number;
     download: number;
     timestamp: number;
   }
-  let trafficHistory = new Map<string, TrafficHistory>();
-  let connectionSpeeds = new Map<string, { uploadSpeed: number; downloadSpeed: number }>();
+  let trafficHistory = $state(new Map<string, TrafficHistory>());
+  let connectionSpeeds = $state(new Map<string, { uploadSpeed: number; downloadSpeed: number }>());
 
   function getLatency(conn: any): number | null {
     if (conn.metadata && typeof conn.metadata.latency === 'number' && conn.metadata.latency > 0) {
@@ -47,11 +47,11 @@
     }
     return null;
   }
-  let loading = false;
-  let error = '';
-  let wsConnected = false;
-  let wsReconnecting = false;
-  let destroyed = false;
+  let loading = $state(false);
+  let error = $state('');
+  let wsConnected = $state(false);
+  let wsReconnecting = $state(false);
+  let destroyed = $state(false);
 
   // WebSocket
   let ws: WebSocket | null = null;
@@ -60,18 +60,18 @@
   const MAX_RECONNECT_DELAY = 30000;
 
   // Filters
-  let filterSource = '';
-  let filterDest = '';
-  let filterRule = '';
-  let filterProxy = '';
+  let filterSource = $state('');
+  let filterDest = $state('');
+  let filterRule = $state('');
+  let filterProxy = $state('');
 
   // Source-name toggle
-  let showProcessName = false;
-  let processModePatchPending = false;
+  let showProcessName = $state(false);
+  let processModePatchPending = $state(false);
 
-  $: uniqueRules = [...new Set(connections.map((c) => c.rule).filter(Boolean))].sort();
-  $: uniqueChains = [...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort();
-  $: isMihomoActive = $capabilities === null || $capabilities.mihomo.reachable;
+  let uniqueRules = $derived([...new Set(connections.map((c) => c.rule).filter(Boolean))].sort());
+  let uniqueChains = $derived([...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort());
+  let isMihomoActive = $derived($capabilities === null || $capabilities.mihomo.reachable);
 
   async function loadProcessMode() {
     try {
@@ -140,11 +140,22 @@
             if (durationSec > 0.2) {
               uploadSpeed = Math.max(0, (conn.upload - prev.upload) / durationSec);
               downloadSpeed = Math.max(0, (conn.download - prev.download) / durationSec);
+              nextHistory.set(conn.id, { upload: conn.upload, download: conn.download, timestamp: now });
+            } else {
+              // Carry forward the previous speed if interval is too small
+              const prevSpeed = connectionSpeeds.get(conn.id);
+              if (prevSpeed) {
+                uploadSpeed = prevSpeed.uploadSpeed;
+                downloadSpeed = prevSpeed.downloadSpeed;
+              }
+              // Carry forward the previous history entry without updating timestamp to accumulate delta
+              nextHistory.set(conn.id, prev);
             }
+          } else {
+            nextHistory.set(conn.id, { upload: conn.upload, download: conn.download, timestamp: now });
           }
 
           nextSpeeds.set(conn.id, { uploadSpeed, downloadSpeed });
-          nextHistory.set(conn.id, { upload: conn.upload, download: conn.download, timestamp: now });
         }
 
         connectionSpeeds = nextSpeeds;
@@ -270,7 +281,7 @@
     }
   }
 
-  let mihomoLaunching = false;
+  let mihomoLaunching = $state(false);
 
   async function launchMihomo() {
     mihomoLaunching = true;
@@ -299,28 +310,25 @@
     }
   }
 
-  $: totalUpload = connections.reduce((acc, c) => acc + c.upload, 0);
-  $: totalDownload = connections.reduce((acc, c) => acc + c.download, 0);
-  // Явное реактивное выражение — Svelte отслеживает connections, filterSource, filterDest, filterRule, filterProxy
-  $: filteredConnections = connections.filter((conn) => {
-    if (filterSource) {
-      // Match against the value shown in the source column (process name or IP:port)
-      const sourceName =
-        showProcessName && conn.metadata.process
-          ? conn.metadata.process
-          : conn.metadata.sourceIP || '';
-      if (!sourceName.includes(filterSource)) return false;
-    }
-    if (
-      filterDest &&
-      !(conn.metadata.host || '').includes(filterDest) &&
-      !(conn.metadata.destinationIP || '').includes(filterDest)
-    )
-      return false;
-    if (filterRule && conn.rule !== filterRule) return false;
-    if (filterProxy && getChainPath(conn) !== filterProxy) return false;
-    return true;
-  });
+  let totalUpload = $derived(connections.reduce((acc, c) => acc + c.upload, 0));
+  let totalDownload = $derived(connections.reduce((acc, c) => acc + c.download, 0));
+  let filteredConnections = $derived(
+    connections.filter((conn) => {
+      if (filterSource) {
+        const sourceName = getSourceName(conn);
+        if (!sourceName.toLowerCase().includes(filterSource.toLowerCase())) return false;
+      }
+      if (
+        filterDest &&
+        !(conn.metadata.host || '').toLowerCase().includes(filterDest.toLowerCase()) &&
+        !(conn.metadata.destinationIP || '').toLowerCase().includes(filterDest.toLowerCase())
+      )
+        return false;
+      if (filterRule && conn.rule !== filterRule) return false;
+      if (filterProxy && getChainPath(conn) !== filterProxy) return false;
+      return true;
+    })
+  );
 
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {
@@ -358,9 +366,11 @@
         class="toggle-label"
         class:disabled={!isMihomoActive}
         title={!isMihomoActive ? $t('conn.process_mode_disabled_hint') : ''}
+        for="show-process-name-toggle"
       >
         <label class="toggle-switch">
           <input
+            id="show-process-name-toggle"
             type="checkbox"
             bind:checked={showProcessName}
             onchange={onToggleProcessName}
@@ -375,6 +385,7 @@
         style="color:var(--danger);"
         onclick={closeAllConnections}
         disabled={connections.length === 0}
+        title={$t('conn.close_all')}
       >
         {$t('conn.close_all')}
       </button>
@@ -405,30 +416,42 @@
   {:else}
     <div class="toolbar mb-2">
       <div class="filters">
+        <label for="filter-source" class="sr-only">{$t('conn.source')}</label>
         <input
+          id="filter-source"
           type="text"
           placeholder={$t('conn.source') + ' (IP)...'}
           bind:value={filterSource}
           class="filter-input filter-src"
+          title={$t('conn.source')}
         />
+        <label for="filter-dest" class="sr-only">{$t('conn.destination')}</label>
         <input
+          id="filter-dest"
           type="text"
           placeholder={$t('conn.destination') + ' (host / IP)...'}
           bind:value={filterDest}
           class="filter-input filter-dest"
+          title={$t('conn.destination')}
         />
+        <label for="filter-rule" class="sr-only">{$t('conn.rule')}</label>
         <select
+          id="filter-rule"
           bind:value={filterRule}
           class="filter-select filter-rule"
+          title={$t('conn.rule')}
         >
           <option value="">{$t('conn.all_rules')}</option>
           {#each uniqueRules as rule}
             <option value={rule}>{rule}</option>
           {/each}
         </select>
+        <label for="filter-proxy" class="sr-only">{$t('conn.chain')}</label>
         <select
+          id="filter-proxy"
           bind:value={filterProxy}
           class="filter-select filter-proxy"
+          title={$t('conn.chain')}
         >
           <option value="">{$t('conn.all_chains')}</option>
           {#each uniqueChains as chain}
