@@ -38,15 +38,7 @@
   let trafficHistory = $state(new Map<string, TrafficHistory>());
   let connectionSpeeds = $state(new Map<string, { uploadSpeed: number; downloadSpeed: number }>());
 
-  function getLatency(conn: any): number | null {
-    if (conn.metadata && typeof conn.metadata.latency === 'number' && conn.metadata.latency > 0) {
-      return conn.metadata.latency;
-    }
-    if (typeof conn.latency === 'number' && conn.latency > 0) {
-      return conn.latency;
-    }
-    return null;
-  }
+
   let loading = $state(false);
   let error = $state('');
   let wsConnected = $state(false);
@@ -554,12 +546,7 @@
                   {/if}
                 </td>
                 <td class="mono col-duration" style="text-align:right;color:var(--fg-dim);">
-                  <div>{getDuration(conn.start)}</div>
-                  {#if getLatency(conn) !== null}
-                    <div class="latency-sub" class:high-latency={getLatency(conn) > 300}>
-                      {getLatency(conn)} ms
-                    </div>
-                  {/if}
+                  {getDuration(conn.start)}
                 </td>
                 <td style="text-align:center;">
                   <button
@@ -629,14 +616,7 @@
     color: var(--fg-dim);
     margin-top: 2px;
   }
-  .latency-sub {
-    font-size: 11px;
-    color: #10b981;
-    margin-top: 2px;
-  }
-  .latency-sub.high-latency {
-    color: var(--danger);
-  }
+
 
   /* Toggle disabled state */
   .toggle-label.disabled {
