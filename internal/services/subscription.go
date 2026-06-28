@@ -291,6 +291,7 @@ type SubscriptionService struct {
 	hwid            string         // постоянный UUID устройства, передаётся как x-hwid
 	mihomoAPIURL    string
 	mihomoSecret    string
+	lastCleanup     time.Time
 }
 
 // SetConsoleService подключает ConsoleService для триггера xkeen -restart
@@ -3645,11 +3646,20 @@ func (s *SubscriptionService) triggerMihomoProviderReload(providerName string) {
 
 // CleanOrphanedSubscriptions deletes cached files for subscriptions that are no longer active in the panel,
 // but only if those files are older than 7 days, and system time is synchronized (at least 2026-01-01).
+// This execution is throttled to run at most once per hour.
 func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 	if time.Now().Before(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)) {
 		log.Println("[Cleanup] System time is before 2026-01-01, skipping orphaned subscription cleanup")
 		return
 	}
+
+	s.mu.Lock()
+	if time.Since(s.lastCleanup) < 1*time.Hour {
+		s.mu.Unlock()
+		return
+	}
+	s.lastCleanup = time.Now()
+	s.mu.Unlock()
 
 	s.mu.RLock()
 	activeIDs := make(map[string]bool)
