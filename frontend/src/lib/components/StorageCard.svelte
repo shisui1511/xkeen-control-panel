@@ -1,15 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t } from '../../i18n';
+  import { formatBytes } from '../format';
 
   let diskStats = $state<{ total: number; used: number; free: number } | null>(null);
-
-  function formatDiskSize(bytes: number): string {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
-  }
 
   async function fetchDiskStats() {
     try {
@@ -52,8 +46,8 @@
           <span style="color: var(--fg-secondary);">{$t('settings.section_storage')}</span>
           <span style="color: var(--fg-primary);">
             {$t('settings.storage_free_of')
-              .replace('{free}', formatDiskSize(diskStats.free))
-              .replace('{total}', formatDiskSize(diskStats.total))}
+              .replace('{free}', formatBytes(diskStats.free))
+              .replace('{total}', formatBytes(diskStats.total))}
           </span>
         </div>
 
@@ -62,12 +56,16 @@
             class="progress-bar" 
             style="width: {usedPercent}%; height: 100%; background-color: {barColor}; transition: width 0.3s ease; border-radius: var(--radius-sm, 4px);"
             title="{usedPercent}%"
+            role="progressbar"
+            aria-valuenow={usedPercent}
+            aria-valuemin="0"
+            aria-valuemax="100"
           ></div>
         </div>
 
         <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-muted);">
           <span>
-            {$t('settings.storage_used').replace('{used}', formatDiskSize(diskStats.used))}
+            {$t('settings.storage_used').replace('{used}', formatBytes(diskStats.used))}
           </span>
           <span>{usedPercent}%</span>
         </div>
