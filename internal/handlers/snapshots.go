@@ -92,11 +92,11 @@ func (a *API) SnapshotUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Limit request body to 15 MB
-	r.Body = http.MaxBytesReader(w, r.Body, 15*1024*1024)
+	// Limit request body to 10 MB
+	r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
 
-	// Parse multipart form (up to 15 MB)
-	if err := r.ParseMultipartForm(15 * 1024 * 1024); err != nil {
+	// Parse multipart form (up to 10 MB)
+	if err := r.ParseMultipartForm(10 * 1024 * 1024); err != nil {
 		a.errorResponse(w, "Unable to parse multipart form: "+err.Error(), http.StatusBadRequest)
 		return
 	}

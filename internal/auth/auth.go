@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -281,6 +282,21 @@ func (rl *RateLimiter) ResetAttempts(ip string) {
 	rl.mu.Unlock()
 }
 
+// GetLockoutRemaining returns the duration remaining for the lockout of the given IP address.
+func (rl *RateLimiter) GetLockoutRemaining(ip string) time.Duration {
+	rl.mu.RLock()
+	defer rl.mu.RUnlock()
+	attempts, exists := rl.attempts[ip]
+	if !exists {
+		return 0
+	}
+	remaining := time.Until(attempts.LockedUntil)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
 // Middleware
 func (a *AuthService) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -321,7 +337,18 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		ip = r.RemoteAddr
 	}
 	if err := a.rateLimiter.CheckLimit(ip, a.maxLoginAttempts, a.lockoutDuration); err != nil {
-		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		remaining := a.rateLimiter.GetLockoutRemaining(ip)
+		seconds := int(remaining.Seconds())
+		if seconds <= 0 {
+			seconds = int(a.lockoutDuration.Seconds())
+		}
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", seconds))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":       "too many attempts, account locked",
+			"retry_after": seconds,
+		})
 		return
 	}
 
@@ -426,8 +453,19 @@ func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		ip = r.RemoteAddr
 	}
-	if err := a.rateLimiter.CheckLimit(ip, 3, 15*time.Minute); err != nil {
-		http.Error(w, err.Error(), http.StatusTooManyRequests)
+	if err := a.rateLimiter.CheckLimit(ip, a.maxLoginAttempts, a.lockoutDuration); err != nil {
+		remaining := a.rateLimiter.GetLockoutRemaining(ip)
+		seconds := int(remaining.Seconds())
+		if seconds <= 0 {
+			seconds = int(a.lockoutDuration.Seconds())
+		}
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", seconds))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":       "too many attempts, account locked",
+			"retry_after": seconds,
+		})
 		return
 	}
 
