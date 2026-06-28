@@ -24,7 +24,6 @@ const (
 type AuthService struct {
 	passwordHash     string
 	secureCookie     bool
-	sessionSecret    []byte
 	sessions         map[string]*Session
 	rateLimiter      *RateLimiter
 	mu               sync.RWMutex
@@ -53,9 +52,6 @@ type LoginAttempts struct {
 }
 
 func NewAuthService(passwordHash string, secureCookie bool, maxLoginAttempts int, lockoutDuration time.Duration, onPasswordSet func(string) error) *AuthService {
-	secret := make([]byte, 32)
-	rand.Read(secret)
-
 	if maxLoginAttempts <= 0 {
 		maxLoginAttempts = 5
 	}
@@ -66,7 +62,6 @@ func NewAuthService(passwordHash string, secureCookie bool, maxLoginAttempts int
 	svc := &AuthService{
 		passwordHash:     passwordHash,
 		secureCookie:     secureCookie,
-		sessionSecret:    secret,
 		sessions:         make(map[string]*Session),
 		rateLimiter:      &RateLimiter{attempts: make(map[string]*LoginAttempts)},
 		onPasswordSet:    onPasswordSet,
@@ -134,7 +129,8 @@ func (a *AuthService) cleanupRateLimiter() {
 			now := time.Now()
 			a.rateLimiter.mu.Lock()
 			for k, v := range a.rateLimiter.attempts {
-				if v.Count == 0 && now.Sub(v.LastAttempt) > a.lockoutDuration*2 {
+				// Удаляем запись, если блокировка истекла и с момента последней попытки прошло достаточно времени
+				if now.After(v.LockedUntil) && now.Sub(v.LastAttempt) > a.lockoutDuration*2 {
 					delete(a.rateLimiter.attempts, k)
 				}
 			}
