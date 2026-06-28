@@ -93,14 +93,14 @@ func (w *RotateWriter) rotate() error {
 	if _, err := os.Stat(log1); err == nil {
 		_ = os.Remove(log2)
 		if err := os.Rename(log1, log2); err != nil {
-			return err
+			_, _ = fmt.Fprintf(os.Stderr, "RotateWriter: failed to rename %s to %s: %v\n", log1, log2, err)
 		}
 	}
 
 	// Shift current log to log.1
 	if _, err := os.Stat(w.filePath); err == nil {
 		if err := os.Rename(w.filePath, log1); err != nil {
-			return err
+			_, _ = fmt.Fprintf(os.Stderr, "RotateWriter: failed to rename %s to %s: %v\n", w.filePath, log1, err)
 		}
 	}
 
