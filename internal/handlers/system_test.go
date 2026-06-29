@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/cert"
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
@@ -92,5 +93,74 @@ func TestCountDirLines(t *testing.T) {
 	expected := 5
 	if cnt := countDirLines(tmpDir); cnt != expected {
 		t.Errorf("expected %d lines, got %d", expected, cnt)
+	}
+}
+
+func TestSystemStats_SSLCertDays(t *testing.T) {
+	tmpDir := t.TempDir()
+	certPath := filepath.Join(tmpDir, "cert.pem")
+	keyPath := filepath.Join(tmpDir, "key.pem")
+
+	// 1. HTTPS disabled
+	cfg := &config.Config{
+		XRayConfigDir:   tmpDir,
+		MihomoConfigDir: tmpDir,
+		AllowedRoots:    []string{tmpDir},
+		HTTPS: config.HTTPSConfig{
+			Enabled:  false,
+			CertPath: certPath,
+			KeyPath:  keyPath,
+		},
+	}
+	api := &API{
+		cfg:     cfg,
+		pathVal: utils.NewPathValidator(cfg.AllowedRoots),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/system/stats", nil)
+	rr := httptest.NewRecorder()
+	api.SystemStats(rr, req)
+
+	var stats SystemStats
+	if err := json.Unmarshal(rr.Body.Bytes(), &stats); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if stats.SSLCertDays != -1 {
+		t.Errorf("expected SSLCertDays = -1 when HTTPS disabled, got %d", stats.SSLCertDays)
+	}
+
+	// 2. HTTPS enabled but cert file missing
+	cfg.HTTPS.Enabled = true
+	rr2 := httptest.NewRecorder()
+	api.SystemStats(rr2, req)
+	var stats2 SystemStats
+	if err := json.Unmarshal(rr2.Body.Bytes(), &stats2); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if stats2.SSLCertDays != -1 {
+		t.Errorf("expected SSLCertDays = -1 when cert file missing, got %d", stats2.SSLCertDays)
+	}
+
+	// 3. HTTPS enabled with valid cert
+	if err := cert.GenerateSelfSigned(certPath, keyPath, []string{"localhost"}); err != nil {
+		t.Fatalf("failed to generate cert: %v", err)
+	}
+
+	// Clear cache by manually setting cache time to 2 minutes ago or creating a new API instance
+	api = &API{
+		cfg:     cfg,
+		pathVal: utils.NewPathValidator(cfg.AllowedRoots),
+	}
+
+	rr3 := httptest.NewRecorder()
+	api.SystemStats(rr3, req)
+	var stats3 SystemStats
+	if err := json.Unmarshal(rr3.Body.Bytes(), &stats3); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	// The generated cert by GenerateSelfSigned has 365 days of validity.
+	// Since we calculate it, it should be around 364-365 days.
+	if stats3.SSLCertDays < 360 || stats3.SSLCertDays > 366 {
+		t.Errorf("expected SSLCertDays around 365, got %d", stats3.SSLCertDays)
 	}
 }

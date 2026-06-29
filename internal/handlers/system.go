@@ -3,11 +3,14 @@ package handlers
 import (
 	"bufio"
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -57,6 +60,7 @@ type SystemStats struct {
 	ConfigPath    string `json:"config_path"`
 	ConfigLines   int    `json:"config_lines"`
 	BootTime      string `json:"boot_time"`
+	SSLCertDays   int    `json:"ssl_cert_days"`
 }
 
 func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
@@ -167,7 +171,60 @@ func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	stats.SSLCertDays = a.getSSLCertDays()
+
 	a.jsonResponse(w, stats)
+}
+
+func (a *API) getSSLCertDays() int {
+	if !a.cfg.HTTPS.Enabled {
+		return -1
+	}
+
+	a.sslDaysCacheMutex.Lock()
+	if time.Since(a.sslDaysCacheTime) < 1*time.Minute {
+		days := a.sslDaysCache
+		a.sslDaysCacheMutex.Unlock()
+		return days
+	}
+	a.sslDaysCacheMutex.Unlock()
+
+	certPath := a.cfg.HTTPS.CertPath
+	if certPath == "" {
+		certPath = filepath.Join(a.cfg.DataDir, "ssl", "cert.pem")
+	}
+
+	days := a.calculateSSLCertDays(certPath)
+
+	a.sslDaysCacheMutex.Lock()
+	a.sslDaysCache = days
+	a.sslDaysCacheTime = time.Now()
+	a.sslDaysCacheMutex.Unlock()
+
+	return days
+}
+
+func (a *API) calculateSSLCertDays(certPath string) int {
+	certBytes, err := os.ReadFile(certPath)
+	if err != nil {
+		return -1
+	}
+
+	block, _ := pem.Decode(certBytes)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return -1
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return -1
+	}
+
+	days := int(time.Until(cert.NotAfter).Hours() / 24)
+	if days < 0 {
+		return 0
+	}
+	return days
 }
 
 func getRouterModel() string {
