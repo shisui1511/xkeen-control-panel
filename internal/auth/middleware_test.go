@@ -74,8 +74,8 @@ func TestSecurityHeaders(t *testing.T) {
 		middleware.ServeHTTP(rr, req)
 
 		hsts := rr.Header().Get("Strict-Transport-Security")
-		if hsts != "max-age=31536000" {
-			t.Errorf("expected Strict-Transport-Security header to be %q, got %q", "max-age=31536000", hsts)
+		if hsts != "max-age=31536000; includeSubDomains" {
+			t.Errorf("expected Strict-Transport-Security header to be %q, got %q", "max-age=31536000; includeSubDomains", hsts)
 		}
 	})
 }

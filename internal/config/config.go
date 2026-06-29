@@ -54,7 +54,6 @@ func findXKeen() string {
 		"/opt/bin/xkeen",
 		"/usr/local/bin/xkeen",
 		"/usr/bin/xkeen",
-		"/usr/bin/xkeen",
 	}
 	for _, p := range paths {
 		if _, err := os.Stat(p); err == nil {

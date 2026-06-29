@@ -81,6 +81,10 @@ func (a *API) SetAssetsService(svc *assets.AssetsService) {
 	a.assetsSvc = svc
 }
 
+func (a *API) GetAssetsService() *assets.AssetsService {
+	return a.assetsSvc
+}
+
 func (a *API) SetKernelService(svc *services.KernelService) {
 	a.kernelSvc = svc
 }

@@ -28,7 +28,7 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet, http.MethodPut, http.MethodPost, http.MethodDelete, http.MethodPatch:
 		// allowed
 	default:
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		a.errorResponse(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -49,7 +49,7 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		http.Error(w, a.t(r, "mihomo.not_running")+": "+err.Error(), http.StatusBadGateway)
+		a.errorResponse(w, a.t(r, "mihomo.not_running")+": "+err.Error(), http.StatusBadGateway)
 	}
 
 	secret := a.cfg.MihomoSecret
