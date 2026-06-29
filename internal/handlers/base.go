@@ -38,6 +38,9 @@ type API struct {
 	capsCache             interface{}
 	capsCacheTime         time.Time
 	capsCacheMutex        sync.Mutex
+	sslDaysCache          int
+	sslDaysCacheTime      time.Time
+	sslDaysCacheMutex     sync.Mutex
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
