@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 )
@@ -11,7 +12,12 @@ func Recovery(next http.Handler) http.Handler {
 		defer func() {
 			if rec := recover(); rec != nil {
 				log.Printf("Panic recovered: %v", rec)
-				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"success": false,
+					"error":   "Internal Server Error",
+				})
 			}
 		}()
 		next.ServeHTTP(w, r)

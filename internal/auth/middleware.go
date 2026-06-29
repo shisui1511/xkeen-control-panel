@@ -32,7 +32,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 
 		// HSTS: enforce HTTPS for one year when served over TLS
 		if r.TLS != nil {
-			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 
 		next.ServeHTTP(w, r)

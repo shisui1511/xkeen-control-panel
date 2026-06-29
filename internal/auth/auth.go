@@ -293,18 +293,27 @@ func (rl *RateLimiter) GetLockoutRemaining(ip string) time.Duration {
 	return remaining
 }
 
+func jsonError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": false,
+		"error":   msg,
+	})
+}
+
 // Middleware
 func (a *AuthService) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie(SessionCookieName)
 		if err != nil {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			jsonError(w, http.StatusUnauthorized, "Unauthorized")
 			return
 		}
 
 		session, err := a.ValidateSession(cookie.Value)
 		if err != nil {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			jsonError(w, http.StatusUnauthorized, "Unauthorized")
 			return
 		}
 
@@ -312,7 +321,7 @@ func (a *AuthService) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			csrfToken := r.Header.Get(CSRFHeaderName)
 			if !a.ValidateCSRF(session, csrfToken) {
-				http.Error(w, "CSRF validation failed", http.StatusForbidden)
+				jsonError(w, http.StatusForbidden, "CSRF validation failed")
 				return
 			}
 		}
@@ -324,7 +333,7 @@ func (a *AuthService) RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 // Handlers
 func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -353,12 +362,12 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+		jsonError(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
 
 	if err := a.VerifyPassword(req.Password); err != nil {
-		http.Error(w, "Invalid password", http.StatusUnauthorized)
+		jsonError(w, http.StatusUnauthorized, "Invalid password")
 		return
 	}
 
@@ -366,7 +375,7 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 	session, err := a.CreateSession()
 	if err != nil {
-		http.Error(w, "Failed to create session", http.StatusInternalServerError)
+		jsonError(w, http.StatusInternalServerError, "Failed to create session")
 		return
 	}
 
@@ -387,7 +396,7 @@ func (a *AuthService) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 func (a *AuthService) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -436,12 +445,12 @@ func (a *AuthService) HandleMe(w http.ResponseWriter, r *http.Request) {
 
 func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	if a.GetPasswordHash() != "" {
-		http.Error(w, "Setup already completed", http.StatusForbidden)
+		jsonError(w, http.StatusForbidden, "Setup already completed")
 		return
 	}
 
@@ -470,18 +479,18 @@ func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+		jsonError(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
 
 	if len(req.Password) < 8 {
-		http.Error(w, "Password must be at least 8 characters", http.StatusBadRequest)
+		jsonError(w, http.StatusBadRequest, "Password must be at least 8 characters")
 		return
 	}
 
 	hash, err := a.HashPassword(req.Password)
 	if err != nil {
-		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		jsonError(w, http.StatusInternalServerError, "Failed to hash password")
 		return
 	}
 
@@ -489,7 +498,7 @@ func (a *AuthService) HandleSetup(w http.ResponseWriter, r *http.Request) {
 
 	if a.onPasswordSet != nil {
 		if err := a.onPasswordSet(hash); err != nil {
-			http.Error(w, "Failed to save password", http.StatusInternalServerError)
+			jsonError(w, http.StatusInternalServerError, "Failed to save password")
 			return
 		}
 	}

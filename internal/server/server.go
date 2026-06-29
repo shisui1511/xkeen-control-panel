@@ -80,21 +80,10 @@ func (s *Server) GetAuthService() *auth.AuthService {
 	return s.authService
 }
 
-// hstsMiddleware injects the Strict-Transport-Security header on HTTPS responses.
-func hstsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.TLS != nil {
-			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (s *Server) Start() error {
 	// Wrap mux with middleware chain
 	var handler http.Handler = s.mux
 	handler = i18n.Middleware(handler)
-	handler = hstsMiddleware(handler)
 	handler = auth.SecurityHeaders(handler)
 	handler = middleware.Recovery(handler)
 	handler = middleware.MaxBytes(handler)

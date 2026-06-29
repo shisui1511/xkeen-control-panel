@@ -18,7 +18,6 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/handlers"
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
-	"github.com/shisui1511/xkeen-control-panel/internal/services/assets"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -233,8 +232,6 @@ func main() {
 	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)
 
 	// Assets Service
-	assetsSvc := assets.NewService(cfg.DataDir)
-	api.SetAssetsService(assetsSvc)
 	srv.HandleProtected("/api/assets/definition", api.AssetsDefinition)
 
 	// Templates
@@ -242,7 +239,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load embedded templates: %v", err)
 	}
-	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir, cfg.TemplatesRepoURL, assetsSvc)
+	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir, cfg.TemplatesRepoURL, api.GetAssetsService())
 	api.SetTemplateService(templateSvc)
 	srv.HandleProtected("/api/templates/list", api.TemplateList)
 	srv.HandleProtected("/api/templates/fetch", api.TemplateFetch)
