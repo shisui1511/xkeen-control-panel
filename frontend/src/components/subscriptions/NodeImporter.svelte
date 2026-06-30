@@ -171,3 +171,277 @@
     </div>
   </div>
 </div>
+
+<style>
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+  }
+
+  .modal-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    width: 100%;
+    max-width: 520px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    max-height: 90vh;
+    animation: modal-anim 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes modal-anim {
+    from {
+      transform: scale(0.95) translateY(10px);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
+  }
+
+  .modal-card-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .modal-card-header h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--fg-primary);
+  }
+
+  .modal-close-btn {
+    background: none;
+    border: none;
+    color: var(--fg-dim);
+    font-size: 24px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 4px;
+  }
+
+  .modal-close-btn:hover {
+    color: var(--fg-primary);
+  }
+
+  .modal-card-body {
+    padding: 24px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) var(--bg-card);
+  }
+  .modal-card-body::-webkit-scrollbar {
+    width: 6px;
+  }
+  .modal-card-body::-webkit-scrollbar-track {
+    background: var(--bg-card);
+  }
+  .modal-card-body::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 4px;
+  }
+  .modal-card-body::-webkit-scrollbar-thumb:hover {
+    background: var(--accent);
+  }
+
+  .modal-card-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+
+  .modal-large {
+    max-width: 800px;
+    width: 100%;
+  }
+
+  .diag-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.08);
+  }
+
+  .diag-tab-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 12px;
+    color: var(--fg-dim);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .diag-tab-btn:hover {
+    color: var(--fg-primary);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .diag-tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .diag-body {
+    padding: 20px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .diag-summary-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .diag-sum-card {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+  }
+
+  .diag-sum-card.success {
+    background: rgba(16, 185, 129, 0.06);
+    border-color: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+  }
+
+  .diag-sum-card.warning {
+    background: rgba(245, 158, 11, 0.06);
+    border-color: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+  }
+
+  .diag-sum-card .title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-dim);
+  }
+
+  .diag-sum-card .val {
+    font-size: 20px;
+    font-weight: 700;
+    margin-top: 4px;
+    font-family: var(--font-family-mono);
+  }
+
+  .diag-table-wrapper {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .diag-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .diag-table th,
+  .diag-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .diag-table th {
+    background: rgba(0, 0, 0, 0.15);
+    color: var(--fg-primary);
+    font-weight: 600;
+  }
+
+  .diag-table tr:last-child td {
+    border-bottom: none;
+  }
+
+  .diag-table .line-num {
+    font-family: var(--font-family-mono);
+    color: var(--fg-dim);
+  }
+
+  .diag-table .reason {
+    color: var(--danger);
+  }
+
+  .diag-table .snippet code {
+    font-family: var(--font-family-mono);
+    background: rgba(0, 0, 0, 0.2);
+    padding: 2px 4px;
+    border-radius: 3px;
+    word-break: break-all;
+  }
+
+  .diag-headers-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .hdr-item {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+  }
+
+  .hdr-key {
+    font-weight: 700;
+    font-size: 12px;
+    color: var(--accent);
+    font-family: var(--font-family-mono);
+  }
+
+  .hdr-val {
+    font-size: 12px;
+    font-family: var(--font-family-mono);
+    margin-top: 4px;
+    word-break: break-all;
+    color: var(--fg-primary);
+  }
+
+  .raw-body-pre {
+    margin: 0;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    overflow: auto;
+    max-height: 45vh;
+    font-family: var(--font-family-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+</style>
