@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
@@ -290,4 +293,71 @@ func (a *API) SubscriptionSetActive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSONSuccess(w, map[string]string{"active_node": body.NodeTag})
+}
+
+func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 1. Проверка RemoteAddr (isLoopback)
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if host != "127.0.0.1" && host != "::1" {
+		a.errorResponse(w, "Access forbidden", http.StatusForbidden)
+		return
+	}
+
+	// 2. Получение query-параметра url
+	urlStr := r.URL.Query().Get("url")
+	if urlStr == "" {
+		a.errorResponse(w, "url parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	// 3. Поиск подписки по URL
+	var foundSub *services.Subscription
+	subs := a.subscriptionSvc.List()
+	for i := range subs {
+		if subs[i].URL == urlStr {
+			foundSub = &subs[i]
+			break
+		}
+	}
+
+	if foundSub == nil {
+		a.errorResponse(w, "Subscription not found", http.StatusNotFound)
+		return
+	}
+
+	// 4. Генерация имени файла провайдера
+	providerName := services.GetMihomoProviderName(foundSub.ProfileTitle, foundSub.Name, foundSub.URL, foundSub.ID)
+
+	// 5. Определение путей
+	configDir := a.cfg.MihomoConfigDir
+	if configDir == "" {
+		configDir = "/opt/etc/mihomo"
+	}
+	filePath := filepath.Join(configDir, "proxy_providers", providerName+".yaml")
+
+	// 6. Валидация пути
+	cleanPath, err := a.pathVal.Validate(filePath)
+	if err != nil {
+		a.errorResponse(w, "Invalid path: "+err.Error(), http.StatusForbidden)
+		return
+	}
+
+	// 7. Чтение и отдача файла кэша
+	yamlContent, err := os.ReadFile(cleanPath)
+	if err != nil {
+		a.errorResponse(w, "Failed to read provider cache: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(yamlContent)
 }
