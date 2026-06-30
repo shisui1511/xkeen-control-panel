@@ -286,6 +286,20 @@
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
+    if (e.ctrlKey && e.key === 'Tab') {
+      e.preventDefault();
+      if (tabs.length <= 1) return;
+      const currentIndex = tabs.findIndex((t) => t.path === activeTabPath);
+      if (currentIndex === -1) return;
+      let nextIndex = 0;
+      if (e.shiftKey) {
+        nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      } else {
+        nextIndex = (currentIndex + 1) % tabs.length;
+      }
+      switchTab(tabs[nextIndex].path);
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
       if (selectedFile && activeTab === 'files') {
@@ -1475,7 +1489,7 @@
                 class="btn btn-secondary"
                 style="padding: 6px 10px;"
                 onclick={toggleKebab}
-                aria-label="Действия с файлом"
+                aria-label="Дополнительные действия"
               >
                 <svg
                   width="14"
@@ -1609,6 +1623,10 @@
           <div
             style="padding: 6px 14px; background: rgba(0,0,0,0.2); border-top: 1px solid var(--border); display:flex; align-items:center; font-family: var(--font-family-mono); font-size: 11px; color: var(--fg-dim); min-height:30px;"
           >
+            <span class="status-indicator" class:status-dirty={isDirty} style="margin-right: 14px;">
+              <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
+              {isDirty ? $t('editor.unsaved') || 'Изменён' : $t('editor.saved') || 'Сохранён'}
+            </span>
             <span>Ln {cursorLine}, Col {cursorCol}</span>
             <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
@@ -2186,6 +2204,10 @@
 {/if}
 
 <style>
+  .status-dirty {
+    color: var(--warning) !important;
+  }
+
   .editor-tabs {
     display: inline-flex;
     gap: 4px;
