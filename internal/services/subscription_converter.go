@@ -593,8 +593,11 @@ func transliterateCyrillic(s string) string {
 	return b.String()
 }
 
-func getMihomoProviderName(name string, urlStr string, fallback string) string {
-	providerName := name
+func GetMihomoProviderName(profileTitle, name, urlStr, fallback string) string {
+	providerName := profileTitle
+	if providerName == "" {
+		providerName = name
+	}
 	if providerName == "" {
 		if parsed, err := url.Parse(urlStr); err == nil && parsed.Path != "" {
 			providerName = path.Base(parsed.Path)

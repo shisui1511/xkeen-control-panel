@@ -335,7 +335,7 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 		rawConfig = []byte("# Mihomo config — managed by xkeen-control-panel\n")
 	}
 
-	providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
+	providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
 
 	// Сгенерировать блок YAML провайдера с type: file
 	var sb strings.Builder

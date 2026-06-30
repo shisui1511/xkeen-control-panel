@@ -50,7 +50,7 @@ func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 	}
 
 	configPath := filepath.Join(mihomoDir, "config.yaml")
-	providerName := getMihomoProviderName(sub.Name, sub.URL, id)
+	providerName := GetMihomoProviderName("", sub.Name, sub.URL, id)
 	_ = os.WriteFile(configPath, []byte("proxy-providers:\n  "+providerName+":\n    type: http\n"), 0600)
 	providerPath := filepath.Join(mihomoDir, "providers", fmt.Sprintf("%s.yaml", providerName))
 	_ = os.MkdirAll(filepath.Join(mihomoDir, "providers"), 0755)
@@ -96,7 +96,7 @@ func TestSubscriptionService_UpdateMihomoProviderNameChange(t *testing.T) {
 	id := svc.List()[0].ID
 
 	configPath := filepath.Join(mihomoDir, "config.yaml")
-	oldProviderName := getMihomoProviderName("Old Name", "https://example.com/old-sub", id)
+	oldProviderName := GetMihomoProviderName("", "Old Name", "https://example.com/old-sub", id)
 	_ = os.WriteFile(configPath, []byte("proxy-groups:\n  - name: Proxy\n    use:\n      - "+oldProviderName+"\nproxy-providers:\n  "+oldProviderName+":\n    type: http\n"), 0600)
 	
 	providerDir := filepath.Join(mihomoDir, "providers")
@@ -287,7 +287,7 @@ func TestMihomoSubscriptionType(t *testing.T) {
 
 	got := svc.List()[0]
 
-	providerName := getMihomoProviderName(sub.Name, sub.URL, id)
+	providerName := GetMihomoProviderName("", sub.Name, sub.URL, id)
 	configPath := filepath.Join(tmp, "config.yaml")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -534,7 +534,7 @@ proxy-groups:
 	if !strings.Contains(configStr, "proxy-providers:") {
 		t.Error("config.yaml should contain proxy-providers:")
 	}
-	providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
+	providerName := GetMihomoProviderName("", sub.Name, sub.URL, sub.ID)
 	if !strings.Contains(configStr, providerName+":") {
 		t.Errorf("config.yaml should contain provider name %q", providerName)
 	}
@@ -766,7 +766,7 @@ proxy-groups:
 		t.Fatalf("Refresh failed: %v", err)
 	}
 
-	providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
+	providerName := GetMihomoProviderName("", sub.Name, sub.URL, sub.ID)
 	expectedPath := "/providers/proxies/" + providerName
 
 	if calledMethod != http.MethodPut {
@@ -837,7 +837,7 @@ proxy-groups:
 	}
 	configStr := string(configBytes)
 
-	providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
+	providerName := GetMihomoProviderName("", sub.Name, sub.URL, sub.ID)
 	if !strings.Contains(configStr, "type: file") {
 		t.Errorf("expected type: file in config.yaml, got:\n%s", configStr)
 	}

@@ -122,7 +122,7 @@ func (s *SubscriptionService) populateMihomoIntegrated(subs []Subscription) {
 	}
 
 	for i := range subs {
-		providerName := getMihomoProviderName(subs[i].Name, subs[i].URL, subs[i].ID)
+		providerName := GetMihomoProviderName(subs[i].ProfileTitle, subs[i].Name, subs[i].URL, subs[i].ID)
 		if activeProviders[providerName] {
 			subs[i].MihomoIntegrated = true
 		} else {
@@ -227,8 +227,8 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			}
 			configPath := filepath.Join(configDir, "config.yaml")
 
-			oldProviderName := getMihomoProviderName(existing.Name, existing.URL, existing.ID)
-			newProviderName := getMihomoProviderName(sub.Name, sub.URL, existing.ID)
+			oldProviderName := GetMihomoProviderName(existing.ProfileTitle, existing.Name, existing.URL, existing.ID)
+			newProviderName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, existing.ID)
 
 			if oldProviderName != newProviderName && existing.EnableMihomo {
 				s.mihomoMu.Lock()
@@ -278,7 +278,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				}
 				configPath := filepath.Join(configDir, "config.yaml")
 
-				providerName := getMihomoProviderName(existing.Name, existing.URL, existing.ID)
+				providerName := GetMihomoProviderName(existing.ProfileTitle, existing.Name, existing.URL, existing.ID)
 
 				s.mihomoMu.Lock()
 				rawConfig, err := os.ReadFile(configPath)
@@ -381,7 +381,7 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 		configPath := filepath.Join(configDir, "config.yaml")
 
-		providerName := getMihomoProviderName(sub.Name, sub.URL, sub.ID)
+		providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
 
 		s.mihomoMu.Lock()
 		rawConfig, err := os.ReadFile(configPath)
