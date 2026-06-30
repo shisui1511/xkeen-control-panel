@@ -1563,7 +1563,7 @@
           {/if}
 
           <!-- CodeMirror editor component -->
-          <div style="flex:1; min-height:0; position:relative; background: #050d16;">
+          <div style="height: 520px; position:relative; background: #050d16; min-height:0;">
             {#if loading}
               <div style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:rgba(5,13,22,0.7);z-index:10;">
                 <div class="spinner"></div>
