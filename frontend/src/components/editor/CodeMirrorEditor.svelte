@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import {
     EditorView,
     keymap,
@@ -144,7 +144,7 @@
     const schemaExts = getSchemaExtensions(currentPath, currentExpertMode);
 
     const state = EditorState.create({
-      doc: content,
+      doc: untrack(() => content),
       extensions: [
         lineNumbers(),
         highlightActiveLineGutter(),
