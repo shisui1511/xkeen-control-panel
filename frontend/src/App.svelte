@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { t } from './i18n';
+  import { t, i18nReady } from './i18n';
   import Login from './Login.svelte';
   import Setup from './Setup.svelte';
   import Dashboard from './Dashboard.svelte';
@@ -12,6 +12,7 @@
   let authError = '';
 
   async function checkAuth() {
+    await i18nReady;
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
