@@ -431,7 +431,7 @@
       if (!res.ok) throw new Error($t('proxies.load_error'));
       const data = await res.json();
       proxies = data.proxies || {};
-      groups = Object.values(proxies)
+      const mappedGroups = Object.values(proxies)
         .filter((p: Proxy) => {
           return ['Selector', 'URLTest', 'Fallback', 'LoadBalance'].includes(p.type);
         })
@@ -444,6 +444,27 @@
           delay: p.history?.[p.history.length - 1]?.delay,
           history: p.history || []
         }));
+
+      const groupNames = new Set(mappedGroups.map((g) => g.name));
+      const isLeaf = (g: any) => {
+        if (g.name === 'GLOBAL') return false;
+        return !g.all.some((member: string) => member !== g.name && groupNames.has(member));
+      };
+
+      mappedGroups.sort((a, b) => {
+        if (a.name === 'GLOBAL') return 1;
+        if (b.name === 'GLOBAL') return -1;
+
+        const aLeaf = isLeaf(a);
+        const bLeaf = isLeaf(b);
+
+        if (aLeaf && !bLeaf) return -1;
+        if (!aLeaf && bLeaf) return 1;
+
+        return a.name.localeCompare(b.name);
+      });
+
+      groups = mappedGroups;
       Object.keys(proxies).forEach((name) => {
         if (data.proxies[name]?.history) {
           proxies[name].history = data.proxies[name].history;
