@@ -670,7 +670,10 @@ export function generateYAML(state: MihomoConfigState): string {
       } else {
         lines.push(`    type: http`);
         lines.push(`    path: ./proxy_providers/${providerName}.yaml`);
-        lines.push(`    url: "http://127.0.0.1:8090/mihomo/provider.yaml?url=${encodeURIComponent(sub.url || '')}"`);
+        const currentPort = (typeof window !== 'undefined' && window.location.port && window.location.port !== '5173')
+          ? window.location.port
+          : '8090';
+        lines.push(`    url: "http://127.0.0.1:${currentPort}/mihomo/provider.yaml?url=${encodeURIComponent(sub.url || '')}"`);
         const intervalSec = sub.interval > 720 ? sub.interval : (sub.interval * 3600 || 86400);
         lines.push(`    interval: ${intervalSec}`);
         lines.push(`    health-check:`);
