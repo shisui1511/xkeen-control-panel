@@ -234,6 +234,35 @@
     position: relative;
   }
   :global(.cm-editor) {
-    height: 100%;
+    height: 100% !important;
+    font-size: 13.5px;
+    background: #050d16 !important;
+  }
+  :global(.cm-scroller) {
+    overflow: auto !important;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  :global(.cm-gutter) {
+    background: #050d16 !important;
+    border-right: 1px solid #0e2034 !important;
+    color: var(--fg-faint) !important;
+  }
+  :global(.cm-content) {
+    font-family: var(--font-family-mono) !important;
+  }
+  :global(.cm-scroller::-webkit-scrollbar) {
+    width: 6px;
+    height: 6px;
+  }
+  :global(.cm-scroller::-webkit-scrollbar-track) {
+    background: transparent;
+  }
+  :global(.cm-scroller::-webkit-scrollbar-thumb) {
+    background: var(--border);
+    border-radius: var(--radius-sm);
+  }
+  :global(.cm-scroller::-webkit-scrollbar-thumb:hover) {
+    background: var(--fg-dim);
   }
 </style>
