@@ -243,10 +243,21 @@
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
   }
-  :global(.cm-gutter) {
+  :global(.cm-gutters) {
     background: #050d16 !important;
     border-right: 1px solid #0e2034 !important;
     color: var(--fg-faint) !important;
+  }
+  :global(.cm-gutter) {
+    background: #050d16 !important;
+    color: var(--fg-faint) !important;
+  }
+  :global(.cm-activeLineGutter) {
+    background-color: #0b1a2d !important;
+    color: var(--accent) !important;
+  }
+  :global(.cm-activeLine) {
+    background-color: #0b1a2d !important;
   }
   :global(.cm-content) {
     font-family: var(--font-family-mono) !important;
