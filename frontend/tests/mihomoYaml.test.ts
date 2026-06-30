@@ -445,4 +445,36 @@ proxy-providers:
   });
 });
 
+describe('Virtual proxy-providers in generateYAML', () => {
+  test('виртуальный провайдер сохраняет свой id без slugify', () => {
+    const mockState: any = {
+      existingTproxyPort: 12345,
+      existingRedirPort: 12346,
+      subscriptions: [],
+      mihomoProviders: [
+        {
+          id: 'xkeen-ui-provider',
+          name: 'xkeen-ui-provider',
+          enabled: true,
+          type: 'mihomo',
+          url: 'https://mihomo.com/sub',
+          interval: 2,
+          isVirtual: true
+        }
+      ],
+      proxies: [],
+      groups: [],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: {}
+    };
+
+    const yaml = generateYAML(mockState);
+    expect(yaml).toContain('proxy-providers:');
+    expect(yaml).toContain('  xkeen-ui-provider:');
+    expect(yaml).not.toContain('  xkeen-ui-provider-');
+  });
+});
+
 
