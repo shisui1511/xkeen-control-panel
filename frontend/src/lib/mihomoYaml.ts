@@ -596,8 +596,8 @@ const CYRILLIC_MAP: Record<string, string> = {
   'ы':'y','э':'e','ю':'yu','я':'ya','ь':'','ъ':''
 };
 
-export function slugifyProviderName(name: string, urlStr: string, fallback: string): string {
-  let source = name;
+export function slugifyProviderName(profileTitle: string, name: string, urlStr: string, fallback: string): string {
+  let source = profileTitle || name;
   if (!source) {
     try {
       const parsed = new URL(urlStr);
@@ -635,7 +635,7 @@ export function generateYAML(state: MihomoConfigState): string {
   if (providers.length > 0) {
     lines.push('proxy-providers:');
     for (const [i, sub] of providers.entries()) {
-      const providerName = slugifyProviderName(sub.name || '', sub.url || '', sub.id || `provider-${i}`);
+      const providerName = slugifyProviderName(sub.profile_title || '', sub.name || '', sub.url || '', sub.id || `provider-${i}`);
       lines.push(`  ${providerName}:`);
       if (sub.rawLines && sub.rawLines.length > 0) {
         let currentParent = '';
@@ -669,20 +669,10 @@ export function generateYAML(state: MihomoConfigState): string {
         }
       } else {
         lines.push(`    type: http`);
-        lines.push(`    path: ./providers/${providerName}.yaml`);
-        lines.push(`    url: ${yamlSafeString(sub.url)}`);
+        lines.push(`    path: ./proxy_providers/${providerName}.yaml`);
+        lines.push(`    url: "http://127.0.0.1:8090/mihomo/provider.yaml?url=${encodeURIComponent(sub.url || '')}"`);
         const intervalSec = sub.interval > 720 ? sub.interval : (sub.interval * 3600 || 86400);
         lines.push(`    interval: ${intervalSec}`);
-        const mihomoVersion = state.capabilities?.kernels?.mihomo?.version || '1.18.10';
-        const ua = `mihomo/${mihomoVersion}`;
-        const subHwid = sub.hwid_token || state.capabilities?.global_hwid || '';
-        lines.push(`    header:`);
-        lines.push(`      User-Agent:`);
-        lines.push(`        - ${yamlSafeString(ua)}`);
-        if (subHwid) {
-          lines.push(`      x-hwid:`);
-          lines.push(`        - ${yamlSafeString(subHwid)}`);
-        }
         lines.push(`    health-check:`);
         lines.push(`      enable: true`);
         lines.push(`      url: http://www.gstatic.com/generate_204`);
