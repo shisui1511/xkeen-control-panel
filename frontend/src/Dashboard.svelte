@@ -24,7 +24,6 @@
   import Connections from './Connections.svelte';
   import Rules from './Rules.svelte';
   import Traffic from './Traffic.svelte';
-  import Subscriptions from './Subscriptions.svelte';
   import NetworkTools from './NetworkTools.svelte';
   import SmartProxy from './SmartProxy.svelte';
   import TrafficQuotas from './TrafficQuotas.svelte';
@@ -384,18 +383,22 @@
     const hash = window.location.hash;
     if (hash && hash.startsWith('#/')) {
       const path = hash.slice(2);
-      if (path.startsWith('subscriptions/')) {
-        const id = path.slice('subscriptions/'.length);
-        if (id) {
-          sessionStorage.setItem('expand_subscription_id', id);
-        }
-        window.location.hash = '#/subscriptions';
-        return 'subscriptions';
+      const queryIdx = path.indexOf('?');
+      const basePath = queryIdx !== -1 ? path.slice(0, queryIdx) : path;
+
+      if (basePath.startsWith('subscriptions/')) {
+        const id = basePath.slice('subscriptions/'.length);
+        window.location.hash = `#/proxies?tab=providers&expand=${id}`;
+        return 'proxies';
       }
-      if (path === 'mihomo-gen' || path === 'constructor') {
+      if (basePath === 'subscriptions') {
+        window.location.hash = '#/proxies?tab=providers';
+        return 'proxies';
+      }
+      if (basePath === 'mihomo-gen' || basePath === 'constructor') {
         return 'editor';
       }
-      return path;
+      return basePath;
     }
     return 'dashboard';
   }
@@ -644,8 +647,8 @@
                   {#if !hasSubscription}
                     <a
                       class="btn btn-secondary qs-cta"
-                      href="#/subscriptions"
-                      onclick={() => switchTab('subscriptions')}
+                      href="#/proxies?tab=providers"
+                      onclick={() => switchTab('proxies')}
                     >
                       {$t('dash.quickstart.step2_cta')}
                     </a>
@@ -1135,10 +1138,10 @@
               <!-- svelte-ignore a11y-no-static-element-interactions -->
               <div
                 class="qa-mini"
-                onclick={() => switchTab('subscriptions')}
+                onclick={() => { switchTab('proxies'); window.location.hash = '#/proxies?tab=providers'; }}
                 role="button"
                 tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('subscriptions')}
+                onkeydown={(e) => e.key === 'Enter' && (switchTab('proxies'), window.location.hash = '#/proxies?tab=providers')}
               >
                 <span class="qa-mini-ico"><Icon name="subscriptions" size={18} /></span>
                 <span
@@ -1230,10 +1233,7 @@
       <div transition:fade={{ duration: 150 }}>
         <Traffic />
       </div>
-    {:else if currentTab === 'subscriptions'}
-      <div transition:fade={{ duration: 150 }}>
-        <Subscriptions onSwitchTab={switchTab} />
-      </div>
+
     {:else if currentTab === 'services'}
       <div transition:fade={{ duration: 150 }}>
         <Services onSwitchTab={switchTab} />

@@ -252,16 +252,6 @@
         {/if}
       </a>
     {/if}
-    <a
-      href="#/subscriptions"
-      class="nav-item"
-      class:active={currentTab === 'subscriptions'}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.subscriptions')}
-    >
-      <Icon name="subscriptions" size={16} />
-      {$t('nav.subscriptions')}
-    </a>
     {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
       <a
         href="#/smartproxy"
