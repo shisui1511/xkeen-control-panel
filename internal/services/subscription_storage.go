@@ -123,7 +123,7 @@ func (s *SubscriptionService) populateMihomoIntegrated(subs []Subscription) {
 	providers := extractProviderBlocks(lines, start, end, indent)
 	activeProviders := make(map[string]bool)
 	for _, p := range providers {
-		activeProviders[p.ID] = true
+		activeProviders[strings.ToLower(p.ID)] = true
 	}
 
 	for i := range subs {
@@ -781,11 +781,11 @@ func (s *SubscriptionService) migrateFromMihomoConfig() bool {
 		match := regexp.MustCompile(`[?&]url=([^&]+)`).FindStringSubmatch(urlStr)
 		if len(match) > 1 {
 			if decoded, err := url.QueryUnescape(match[1]); err == nil {
-				return strings.TrimSpace(strings.ToLower(decoded))
+				return strings.TrimSpace(decoded)
 			}
-			return strings.TrimSpace(strings.ToLower(match[1]))
+			return strings.TrimSpace(match[1])
 		}
-		return strings.TrimSpace(strings.ToLower(urlStr))
+		return strings.TrimSpace(urlStr)
 	}
 
 	for _, block := range blocks {
@@ -833,7 +833,8 @@ func (s *SubscriptionService) migrateFromMihomoConfig() bool {
 			continue
 		}
 
-		if _, exists := existingURLs[originalURL]; exists {
+		urlLower := strings.ToLower(originalURL)
+		if _, exists := existingURLs[urlLower]; exists {
 			continue
 		}
 
@@ -857,7 +858,7 @@ func (s *SubscriptionService) migrateFromMihomoConfig() bool {
 		}
 
 		s.subscriptions = append(s.subscriptions, newSub)
-		existingURLs[originalURL] = len(s.subscriptions) - 1
+		existingURLs[urlLower] = len(s.subscriptions) - 1
 		migrated = true
 	}
 

@@ -328,10 +328,10 @@ tproxy-port: 5001
 redir-port: 5000
 
 proxy-providers:
-  xkeen-ui-provider:
+  Xkeen-UI-Provider:
     type: http
-    path: ./proxy_providers/xkeen-ui-provider.yaml
-    url: "http://127.0.0.1:8088/mihomo/provider.yaml?url=https%3A%2F%2Fexample.com%2Fmy-clean-sub&insecure=1"
+    path: ./proxy_providers/Xkeen-UI-Provider.yaml
+    url: "http://127.0.0.1:8088/mihomo/provider.yaml?url=https%3A%2F%2Fexample.com%2Fmy-Clean-Sub&insecure=1"
     interval: 7200
     health-check:
       enable: true
@@ -358,11 +358,11 @@ proxy-providers:
 	}
 
 	sub := &subs[0]
-	if sub.Name != "xkeen-ui-provider" {
-		t.Errorf("expected name 'xkeen-ui-provider', got %s", sub.Name)
+	if sub.Name != "Xkeen-UI-Provider" {
+		t.Errorf("expected name 'Xkeen-UI-Provider', got %s", sub.Name)
 	}
-	if sub.URL != "https://example.com/my-clean-sub" {
-		t.Errorf("expected clean URL 'https://example.com/my-clean-sub', got %s", sub.URL)
+	if sub.URL != "https://example.com/my-Clean-Sub" {
+		t.Errorf("expected clean URL 'https://example.com/my-Clean-Sub', got %s", sub.URL)
 	}
 	if sub.Interval != 2 { // 7200 / 3600
 		t.Errorf("expected interval 2, got %d", sub.Interval)
@@ -372,5 +372,8 @@ proxy-providers:
 	}
 	if !sub.Enabled {
 		t.Errorf("expected subscription to be enabled")
+	}
+	if !sub.MihomoIntegrated {
+		t.Errorf("expected subscription to be MihomoIntegrated")
 	}
 }
