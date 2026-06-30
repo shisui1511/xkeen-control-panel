@@ -439,7 +439,7 @@
   async function restartXkeen() {
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/service/restart', {
+      const res = await fetch('/api/service/control?action=restart', {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
       });
