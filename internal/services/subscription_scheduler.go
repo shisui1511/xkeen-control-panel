@@ -303,11 +303,8 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 		// Apply Xray filters to outbounds
 		outbounds = s.applyFilters(outbounds, sub)
 
-		// Convert to SubscriptionNodes
-		nodes := s.outboundsToNodes(outbounds, sub)
-
 		// Convert nodes to Clash YAML
-		yamlContent, newNames = s.convertSubscriptionNodesToClashYAML(nodes)
+		yamlContent, newNames = s.convertSubscriptionNodesToClashYAML(s.outboundsToNodes(outbounds, sub))
 
 		newBlocks, _ = ParseMihomoSubscriptionBlocks(yamlContent)
 	}
@@ -319,62 +316,19 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 	if configDir == "" {
 		configDir = "/opt/etc/mihomo"
 	}
-	configPath := filepath.Join(configDir, "config.yaml")
-
-	// Бэкап перед правкой.
-	if err := backupMihomoConfig(s.dataDir, configPath); err != nil {
-		return fmt.Errorf("backup mihomo config: %w", err)
-	}
-
-	// Читаем текущий config.yaml (если нет — создаём минимальный).
-	rawConfig, err := os.ReadFile(configPath)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("read mihomo config: %w", err)
-		}
-		rawConfig = []byte("# Mihomo config — managed by xkeen-control-panel\n")
-	}
 
 	providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
 
-	// Сгенерировать блок YAML провайдера с type: file
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("  %s:\n", providerName))
-	sb.WriteString("    type: file\n")
-	sb.WriteString(fmt.Sprintf("    path: ./providers/%s.yaml\n", providerName))
-	sb.WriteString("    health-check:\n")
-	sb.WriteString("      enable: true\n")
-	sb.WriteString("      url: http://www.gstatic.com/generate_204\n")
-	sb.WriteString("      interval: 600\n")
-
-	providerBlock := sb.String()
-
-	// 1. Очистка старых индивидуальных нод из proxies (для миграции)
-	newConfig := ReplaceMihomoProxies(string(rawConfig), sub.ProxyNames, nil)
-
-	// 2. Очистка старых индивидуальных нод из proxy-groups
-	for _, group := range sub.MihomoGroups {
-		newConfig = UpdateMihomoGroupProxies(newConfig, group, nil, sub.ProxyNames)
-	}
-
-	// 3. Добавление/обновление proxy-provider в config.yaml
-	newConfig = ReplaceMihomoProxyProvider(newConfig, providerName, providerBlock)
-
-	// 4. Привязка proxy-provider к группам через use:
-	for _, group := range sub.MihomoGroups {
-		newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, false)
-	}
-
-	// Записать скачанный контент в файл провайдера
-	providersDir := filepath.Join(configDir, "providers")
-	_ = os.MkdirAll(providersDir, 0755)
-	providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", providerName))
+	// Записать скачанный контент в файл провайдера в proxy_providers
+	proxyProvidersDir := filepath.Join(configDir, "proxy_providers")
+	_ = os.MkdirAll(proxyProvidersDir, 0755)
+	providerFilePath := filepath.Join(proxyProvidersDir, fmt.Sprintf("%s.yaml", providerName))
 	if err := utils.AtomicWriteFile(providerFilePath, []byte(yamlContent), 0600); err != nil {
 		return fmt.Errorf("write provider file: %w", err)
 	}
 
-	// Сравниваем хэши — restart только при реальных изменениях.
-	h := sha256.Sum256([]byte(newConfig))
+	// Сравниваем хэши скачанного кэша подписки
+	h := sha256.Sum256([]byte(yamlContent))
 	newHash := fmt.Sprintf("%x", h[:])
 	oldHash := sub.LastHashMihomo
 
@@ -415,18 +369,8 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 		return nil
 	}
 
-	if err := utils.AtomicWriteFile(configPath, []byte(newConfig), 0600); err != nil {
-		return fmt.Errorf("write mihomo config: %w", err)
-	}
 	sub.LastChanged = true
-
-	// Триггер рестарта через ConsoleService.
-	if s.consoleSvc != nil {
-		if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-			log.Printf("subscription %s: xkeen -restart after mihomo config update: %v", sub.ID, err)
-		}
-	}
-
+	s.triggerMihomoProviderReload(providerName)
 	return nil
 }
 

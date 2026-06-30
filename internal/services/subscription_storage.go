@@ -241,7 +241,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				}
 				s.mihomoMu.Unlock()
 
-				providersDir := filepath.Join(configDir, "providers")
+				providersDir := filepath.Join(configDir, "proxy_providers")
 				providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", oldProviderName))
 				if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
 					os.Remove(providerFilePath)
@@ -296,7 +296,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				s.mihomoMu.Unlock()
 
 				// Delete provider file; sanitize id to prevent path traversal (CWE-22).
-				providersDir := filepath.Join(configDir, "providers")
+				providersDir := filepath.Join(configDir, "proxy_providers")
 				providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", providerName))
 				// Explicit guard: path must be within providersDir (CWE-22).
 				if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
@@ -400,7 +400,7 @@ func (s *SubscriptionService) Delete(id string) error {
 		s.mihomoMu.Unlock()
 
 		// Удалить файл провайдера; санитизируем путь к файлу провайдера (CWE-22)
-		providersDir := filepath.Join(configDir, "providers")
+		providersDir := filepath.Join(configDir, "proxy_providers")
 		providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", providerName))
 		if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
 			os.Remove(providerFilePath)
