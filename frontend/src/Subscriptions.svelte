@@ -105,11 +105,11 @@
     rawResponseData = null;
 
     try {
-      const resReport = await fetch(`/api/subscription/parse-report?id=${sub.id}`);
+      const resReport = await fetch(`/api/subscriptions/parse-report?id=${sub.id}`);
       if (resReport.ok) {
         parseReportData = await resReport.json();
       }
-      const resRaw = await fetch(`/api/subscription/raw-response?id=${sub.id}`);
+      const resRaw = await fetch(`/api/subscriptions/raw?id=${sub.id}`);
       if (resRaw.ok) {
         rawResponseData = await resRaw.json();
       }
@@ -127,7 +127,7 @@
 
   async function loadAvailableMihomoGroups() {
     try {
-      const res = await fetch('/api/subscription/mihomo-groups');
+      const res = await fetch('/api/subscriptions/mihomo-groups');
       if (res.ok) {
         const data = await res.json();
         availableMihomoGroups = Array.isArray(data) ? data : [];
@@ -142,7 +142,7 @@
   async function loadSubscriptions() {
     loading = true;
     try {
-      const res = await fetch('/api/subscription/list');
+      const res = await fetch('/api/subscriptions');
       if (res.ok) {
         subscriptions = await res.json();
       }
@@ -157,7 +157,7 @@
     refreshLoading[id] = true;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/subscription/refresh?id=${id}`, {
+      const res = await fetch(`/api/subscriptions/refresh?id=${id}`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
       });
@@ -184,7 +184,7 @@
     loading = true;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/subscription/refresh-all', {
+      const res = await fetch('/api/subscriptions/refresh-all', {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
       });
@@ -231,7 +231,7 @@
     };
 
     try {
-      const url = editingSub ? '/api/subscription/update' : '/api/subscription/create';
+      const url = editingSub ? '/api/subscriptions/update' : '/api/subscriptions/add';
       const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -266,7 +266,7 @@
 
     const csrfToken = localStorage.getItem('csrf_token');
     try {
-      const res = await fetch(`/api/subscription/delete?id=${id}`, {
+      const res = await fetch(`/api/subscriptions/delete?id=${id}`, {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
       });
@@ -351,7 +351,7 @@
   async function loadNodes(subId: string) {
     subNodesLoading[subId] = true;
     try {
-      const res = await fetch(`/api/subscription/nodes?id=${subId}`);
+      const res = await fetch(`/api/subscriptions/nodes?id=${subId}`);
       if (res.ok) {
         subNodes[subId] = await res.json();
       }
@@ -374,7 +374,7 @@
     checkingNodes[subId][nodeTag] = true;
     try {
       const res = await fetch(
-        `/api/subscription/node-health?id=${subId}&tag=${encodeURIComponent(nodeTag)}`
+        `/api/subscriptions/health?id=${subId}&tag=${encodeURIComponent(nodeTag)}`
       );
       if (res.ok) {
         const health = await res.json();
@@ -392,7 +392,7 @@
     const csrfToken = localStorage.getItem('csrf_token');
     try {
       const res = await fetch(
-        `/api/subscription/set-active-node?id=${subId}&tag=${encodeURIComponent(nodeTag)}`,
+        `/api/subscriptions/active?id=${subId}&tag=${encodeURIComponent(nodeTag)}`,
         {
           method: 'POST',
           headers: { 'X-CSRF-Token': csrfToken || '' }
