@@ -793,6 +793,12 @@ func (s *SubscriptionService) migrateFromMihomoConfig() bool {
 		var pInterval int = 24
 
 		for i := block.StartLine + 1; i < block.EndLine; i++ {
+			trimmedLeft := strings.TrimLeft(lines[i], " \t")
+			lineIndent := len(lines[i]) - len(trimmedLeft)
+			if lineIndent != indent+2 {
+				continue
+			}
+
 			line := strings.TrimSpace(lines[i])
 			if line == "" || strings.HasPrefix(line, "#") {
 				continue
