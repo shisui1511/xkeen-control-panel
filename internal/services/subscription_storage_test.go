@@ -311,3 +311,62 @@ func TestSubscriptionService_MigrateFromXkeenUI(t *testing.T) {
 		t.Errorf("expected sub to be disabled")
 	}
 }
+
+func TestSubscriptionService_MigrateFromMihomoConfig(t *testing.T) {
+	tmp := t.TempDir()
+	xcpDir := filepath.Join(tmp, "xcp")
+	mihomoDir := filepath.Join(tmp, "mihomo")
+
+	err := os.MkdirAll(mihomoDir, 0755)
+	if err != nil {
+		t.Fatalf("failed to create mihomo dir: %v", err)
+	}
+
+	// 1. Создаем тестовый config.yaml
+	configYAML := `
+tproxy-port: 5001
+redir-port: 5000
+
+proxy-providers:
+  legacy-ui-provider:
+    type: http
+    path: ./proxy_providers/legacy-ui-provider.yaml
+    url: "http://127.0.0.1:8088/mihomo/provider.yaml?url=https%3A%2F%2Fexample.com%2Fmy-clean-sub&insecure=1"
+    interval: 7200
+  local-provider:
+    type: file
+    path: ./local.yaml
+`
+	err = os.WriteFile(filepath.Join(mihomoDir, "config.yaml"), []byte(configYAML), 0600)
+	if err != nil {
+		t.Fatalf("failed to write config.yaml: %v", err)
+	}
+
+	// 2. Создаем сервис подписок. Он должен автоматически импортировать провайдер.
+	svc := NewSubscriptionService(xcpDir, filepath.Join(tmp, "xray"), mihomoDir)
+	if svc == nil {
+		t.Fatal("expected non-nil service")
+	}
+
+	subs := svc.List()
+	if len(subs) != 1 {
+		t.Fatalf("expected 1 migrated subscription, got %d", len(subs))
+	}
+
+	sub := &subs[0]
+	if sub.Name != "legacy-ui-provider" {
+		t.Errorf("expected name 'legacy-ui-provider', got %s", sub.Name)
+	}
+	if sub.URL != "https://example.com/my-clean-sub" {
+		t.Errorf("expected clean URL 'https://example.com/my-clean-sub', got %s", sub.URL)
+	}
+	if sub.Interval != 2 { // 7200 / 3600
+		t.Errorf("expected interval 2, got %d", sub.Interval)
+	}
+	if !sub.EnableMihomo || sub.EnableXray {
+		t.Errorf("expected Mihomo enabled and Xray disabled, got EnableMihomo=%t, EnableXray=%t", sub.EnableMihomo, sub.EnableXray)
+	}
+	if !sub.Enabled {
+		t.Errorf("expected subscription to be enabled")
+	}
+}
