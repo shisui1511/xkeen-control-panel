@@ -5,6 +5,7 @@
   import { parseValidationError } from './lib/errorParser';
   import { findPortCollisions, type PortAllocation } from './lib/portChecker';
   import {
+    slugifyProviderName,
     yamlSafeString,
     sanitizeUrl,
     unquote,
@@ -120,6 +121,58 @@
   let activeRuleProvider: 'none' | 'zkeen' | 'metacubex' = 'none';
   let subscriptions: any[] = [];
   let mihomoProviders: any[] = [];
+  let lastParsedProviders: any[] = [];
+
+  function mergeMihomoProviders(dbSubs: any[], parsedProviders: any[]) {
+    const dbMapByUrl = new Map<string, any>();
+    const dbMapByName = new Map<string, any>();
+
+    function cleanUrl(urlStr: string): string {
+      if (!urlStr) return '';
+      try {
+        const match = urlStr.match(/[?&]url=([^&]+)/);
+        if (match) {
+          return decodeURIComponent(match[1]).trim().toLowerCase();
+        }
+        return urlStr.trim().toLowerCase();
+      } catch {
+        return urlStr.trim().toLowerCase();
+      }
+    }
+
+    for (const sub of dbSubs) {
+      const originalUrl = cleanUrl(sub.url || '');
+      if (originalUrl) {
+        dbMapByUrl.set(originalUrl, sub);
+      }
+      const providerName = slugifyProviderName(sub.profile_title || '', sub.name || '', sub.url || '', sub.id);
+      dbMapByName.set(providerName, sub);
+    }
+
+    const merged = [...dbSubs];
+
+    for (const p of parsedProviders) {
+      const originalUrl = cleanUrl(p.url || '');
+      const hasMatch = (originalUrl && dbMapByUrl.has(originalUrl)) || dbMapByName.has(p.name);
+      
+      if (!hasMatch) {
+        const rawUrl = originalUrl || p.url;
+        merged.push({
+          id: p.id,
+          name: p.name,
+          url: rawUrl,
+          interval: p.interval,
+          enabled: true,
+          enable_mihomo: true,
+          isVirtual: true,
+          rawLines: p.rawLines
+        });
+      }
+    }
+
+    return merged;
+  }
+
   $: hasXraySubscriptions = subscriptions.some((s) => s.enable_xray);
   $: hasMihomoProviders = mihomoProviders.length > 0;
   let hasZkeenGeodata = false;
@@ -586,10 +639,11 @@
       const subs = await res.json();
       if (Array.isArray(subs)) {
         subscriptions = subs.filter((s) => s.enabled);
-        mihomoProviders = subs.filter((s) => s.enabled && s.enable_mihomo);
+        const dbMihomo = subs.filter((s) => s.enabled && s.enable_mihomo);
+        mihomoProviders = mergeMihomoProviders(dbMihomo, lastParsedProviders);
       } else {
         subscriptions = [];
-        mihomoProviders = [];
+        mihomoProviders = mergeMihomoProviders([], lastParsedProviders);
       }
     } catch (e: any) {
       console.error(e);
@@ -895,6 +949,8 @@
   function populateMihomoFromYAML(text: string) {
     if (!text || text.trim() === '') {
       applyPreset('zkeen-selective', true);
+      lastParsedProviders = [];
+      mihomoProviders = mergeMihomoProviders(subscriptions.filter((s) => s.enable_mihomo), []);
       return;
     }
     try {
@@ -910,6 +966,9 @@
       preservedKeys = res.preservedKeys;
       existingTproxyPort = res.existingTproxyPort;
       existingRedirPort = res.existingRedirPort;
+      
+      lastParsedProviders = res.mihomoProviders || [];
+      mihomoProviders = mergeMihomoProviders(subscriptions.filter((s) => s.enable_mihomo), lastParsedProviders);
       
       if (res.groups.length === 0 && res.proxies.length === 0) {
         applyPreset('zkeen-selective', true);

@@ -635,7 +635,9 @@ export function generateYAML(state: MihomoConfigState): string {
   if (providers.length > 0) {
     lines.push('proxy-providers:');
     for (const [i, sub] of providers.entries()) {
-      const providerName = slugifyProviderName(sub.profile_title || '', sub.name || '', sub.url || '', sub.id || `provider-${i}`);
+      const providerName = sub.isVirtual
+        ? sub.id
+        : slugifyProviderName(sub.profile_title || '', sub.name || '', sub.url || '', sub.id || `provider-${i}`);
       lines.push(`  ${providerName}:`);
       if (sub.rawLines && sub.rawLines.length > 0) {
         let currentParent = '';
