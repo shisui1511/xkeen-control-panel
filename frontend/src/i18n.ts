@@ -155,6 +155,16 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.problems.kernel_missing_desc':
       'Ни одно ядро (Xray или Mihomo) не установлено. Пожалуйста, установите ядро в разделе управления сервисами.',
     'dash.problems.kernel_missing_cta': 'Установить ядро',
+    'dash.disk': 'Накопитель',
+    'dash.disk_free': '{free} свободно',
+    'dash.problems.kernel_crash_title': 'Сбой активного ядра',
+    'dash.problems.kernel_crash_desc': 'Выбранное активное ядро ({kernel}) остановлено, хотя служба XKeen запущена.',
+    'dash.problems.kernel_crash_cta': 'Перезапустить службу',
+    'dash.problems.disk_low_title': 'Недостаточно свободного места',
+    'dash.problems.disk_low_desc': 'На накопителе (/opt) осталось менее {free}. Это может нарушить работу служб.',
+    'dash.problems.disk_low_cta': 'Перейти в настройки',
+    'dash.problems.ssl_expire_title': 'Истекает SSL-сертификат панели',
+    'dash.problems.ssl_expire_desc': 'Срок действия SSL-сертификата веб-интерфейса истекает через {days} дней. Пожалуйста, обновите его.',
     // Quickstart checklist (Phase 19)
     'dash.quickstart.title': 'Быстрый старт',
     'dash.quickstart.progress': '{done} из {total}',
@@ -1315,6 +1325,16 @@ const translations: Record<Lang, Record<string, string>> = {
     'dash.problems.kernel_missing_desc':
       'No kernels (Xray or Mihomo) are currently installed. Please install a kernel in the services management section.',
     'dash.problems.kernel_missing_cta': 'Install Kernel',
+    'dash.disk': 'Storage',
+    'dash.disk_free': '{free} free',
+    'dash.problems.kernel_crash_title': 'Active Kernel Failure',
+    'dash.problems.kernel_crash_desc': 'The selected active kernel ({kernel}) is stopped, although the XKeen service is running.',
+    'dash.problems.kernel_crash_cta': 'Restart Service',
+    'dash.problems.disk_low_title': 'Low Disk Space',
+    'dash.problems.disk_low_desc': 'Less than {free} of free space remaining on /opt. This may disrupt services.',
+    'dash.problems.disk_low_cta': 'Go to settings',
+    'dash.problems.ssl_expire_title': 'SSL Certificate Expiring',
+    'dash.problems.ssl_expire_desc': 'Web panel SSL certificate will expire in {days} days. Please renew it.',
     // Quickstart checklist (Phase 19)
     'dash.quickstart.title': 'Quick Start',
     'dash.quickstart.progress': '{done} of {total}',
