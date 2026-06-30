@@ -6,10 +6,10 @@
   import Dashboard from './Dashboard.svelte';
   import './styles/global.css';
 
-  let authenticated = false;
-  let setupRequired = false;
-  let loading = true;
-  let authError = '';
+  let authenticated = $state(false);
+  let setupRequired = $state(false);
+  let loading = $state(true);
+  let authError = $state('');
 
   async function checkAuth() {
     await i18nReady;
