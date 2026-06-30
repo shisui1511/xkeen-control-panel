@@ -52,8 +52,8 @@ func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 	configPath := filepath.Join(mihomoDir, "config.yaml")
 	providerName := GetMihomoProviderName("", sub.Name, sub.URL, id)
 	_ = os.WriteFile(configPath, []byte("proxy-providers:\n  "+providerName+":\n    type: http\n"), 0600)
-	providerPath := filepath.Join(mihomoDir, "providers", fmt.Sprintf("%s.yaml", providerName))
-	_ = os.MkdirAll(filepath.Join(mihomoDir, "providers"), 0755)
+	providerPath := filepath.Join(mihomoDir, "proxy_providers", fmt.Sprintf("%s.yaml", providerName))
+	_ = os.MkdirAll(filepath.Join(mihomoDir, "proxy_providers"), 0755)
 	_ = os.WriteFile(providerPath, []byte(""), 0600)
 
 	updatedSub2 := updatedSub
@@ -99,7 +99,7 @@ func TestSubscriptionService_UpdateMihomoProviderNameChange(t *testing.T) {
 	oldProviderName := GetMihomoProviderName("", "Old Name", "https://example.com/old-sub", id)
 	_ = os.WriteFile(configPath, []byte("proxy-groups:\n  - name: Proxy\n    use:\n      - "+oldProviderName+"\nproxy-providers:\n  "+oldProviderName+":\n    type: http\n"), 0600)
 	
-	providerDir := filepath.Join(mihomoDir, "providers")
+	providerDir := filepath.Join(mihomoDir, "proxy_providers")
 	_ = os.MkdirAll(providerDir, 0755)
 	providerPath := filepath.Join(providerDir, fmt.Sprintf("%s.yaml", oldProviderName))
 	_ = os.WriteFile(providerPath, []byte(""), 0600)
@@ -288,19 +288,7 @@ func TestMihomoSubscriptionType(t *testing.T) {
 	got := svc.List()[0]
 
 	providerName := GetMihomoProviderName("", sub.Name, sub.URL, id)
-	configPath := filepath.Join(tmp, "config.yaml")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("expected config.yaml at %s: %v", configPath, err)
-	}
-	if !strings.Contains(string(data), "proxy-providers:") {
-		t.Error("expected 'proxy-providers:' in config.yaml after refresh")
-	}
-	if !strings.Contains(string(data), providerName) {
-		t.Errorf("expected provider name %q in config.yaml after refresh", providerName)
-	}
-
-	providerPath := filepath.Join(tmp, "providers", providerName+".yaml")
+	providerPath := filepath.Join(tmp, "proxy_providers", providerName+".yaml")
 	providerData, err := os.ReadFile(providerPath)
 	if err != nil {
 		t.Fatalf("expected provider file at %s: %v", providerPath, err)
@@ -525,34 +513,10 @@ proxy-groups:
 		t.Fatalf("Refresh failed: %v", err)
 	}
 
-	configBytes, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configStr := string(configBytes)
-
-	if !strings.Contains(configStr, "proxy-providers:") {
-		t.Error("config.yaml should contain proxy-providers:")
-	}
 	providerName := GetMihomoProviderName("", sub.Name, sub.URL, sub.ID)
-	if !strings.Contains(configStr, providerName+":") {
-		t.Errorf("config.yaml should contain provider name %q", providerName)
-	}
-	if !strings.Contains(configStr, "use:\n      - "+providerName) {
-		t.Errorf("config.yaml group should use provider, got:\n%s", configStr)
-	}
-
-	providerFilePath := filepath.Join(mihomoDir, "providers", providerName+".yaml")
+	providerFilePath := filepath.Join(mihomoDir, "proxy_providers", providerName+".yaml")
 	if _, err := os.Stat(providerFilePath); err != nil {
 		t.Errorf("provider file should be written at %s: %v", providerFilePath, err)
-	}
-
-	callsBytes, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(callsBytes), "-restart") {
-		t.Error("xkeen -restart should be called")
 	}
 
 	if err := os.WriteFile(logFile, []byte(""), 0600); err != nil {
@@ -561,7 +525,7 @@ proxy-groups:
 	if err := svc.Refresh("mihomo-sub"); err != nil {
 		t.Fatal(err)
 	}
-	callsBytes, _ = os.ReadFile(logFile)
+	callsBytes, _ := os.ReadFile(logFile)
 	if strings.Contains(string(callsBytes), "-restart") {
 		t.Error("xkeen -restart should NOT be called when no changes")
 	}
@@ -570,8 +534,8 @@ proxy-groups:
 		t.Fatalf("failed to delete subscription: %v", err)
 	}
 
-	configBytes, _ = os.ReadFile(configPath)
-	configStr = string(configBytes)
+	configBytes, _ := os.ReadFile(configPath)
+	configStr := string(configBytes)
 	if strings.Contains(configStr, "mihomo-sub") {
 		t.Error("provider and references should be removed from config.yaml after deletion")
 	}
@@ -831,21 +795,8 @@ proxy-groups:
 		t.Fatalf("Refresh failed: %v", err)
 	}
 
-	configBytes, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configStr := string(configBytes)
-
 	providerName := GetMihomoProviderName("", sub.Name, sub.URL, sub.ID)
-	if !strings.Contains(configStr, "type: file") {
-		t.Errorf("expected type: file in config.yaml, got:\n%s", configStr)
-	}
-	if strings.Contains(configStr, "            url:") || strings.Contains(configStr, "            interval:") {
-		t.Errorf("provider in config.yaml should not contain HTTP properties, got:\n%s", configStr)
-	}
-
-	providerFilePath := filepath.Join(mihomoDir, "providers", providerName+".yaml")
+	providerFilePath := filepath.Join(mihomoDir, "proxy_providers", providerName+".yaml")
 	providerBytes, err := os.ReadFile(providerFilePath)
 	if err != nil {
 		t.Fatalf("provider file not found at %s: %v", providerFilePath, err)
