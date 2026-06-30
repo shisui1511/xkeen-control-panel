@@ -157,4 +157,24 @@
     color: var(--fg-dim);
     font-weight: 700;
   }
+  .file-list {
+    max-height: 250px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .file-list::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .file-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .file-list::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .file-list::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-dim);
+  }
 </style>
