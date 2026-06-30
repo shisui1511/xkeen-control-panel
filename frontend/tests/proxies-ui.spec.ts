@@ -74,10 +74,12 @@ const MOCK_SUBSCRIPTIONS = [
 test.describe('Proxies UI Improvements (Phase 57)', () => {
   let putRequests: { url: string; body: any }[] = [];
   let postRequests: { url: string; body: any }[] = [];
+  let currentProxies: any;
 
   test.beforeEach(async ({ page }) => {
     putRequests = [];
     postRequests = [];
+    currentProxies = JSON.parse(JSON.stringify(MOCK_PROXIES));
 
     // Mock Service Worker
     await page.addInitScript(() => {
@@ -125,10 +127,20 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(MOCK_PROXIES)
+          body: JSON.stringify(currentProxies)
         });
       } else if (url.includes('/api/mihomo/proxy/proxies/') && method === 'PUT') {
-        putRequests.push({ url, body: request.postDataJSON() });
+        const body = request.postDataJSON();
+        putRequests.push({ url, body });
+
+        const groupMatch = url.match(/\/api\/mihomo\/proxy\/proxies\/([^?#/]+)/);
+        if (groupMatch) {
+          const groupName = decodeURIComponent(groupMatch[1]);
+          if (body && body.name && currentProxies.proxies[groupName]) {
+            currentProxies.proxies[groupName].now = body.name;
+          }
+        }
+
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
