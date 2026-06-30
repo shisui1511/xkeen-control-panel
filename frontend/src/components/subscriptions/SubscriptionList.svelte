@@ -500,9 +500,21 @@
             sub.total > 0
               ? formatTraffic(sub.total)
               : '∞'}
+            {#if sub.total && sub.total > 0}
+              {@const used = (sub.upload || 0) + (sub.download || 0)}
+              ({Math.min(100, Math.round((used / sub.total) * 100))}%)
+            {/if}
           </span>
         </div>
       </div>
+
+      {#if sub.total && sub.total > 0}
+        {@const used = (sub.upload || 0) + (sub.download || 0)}
+        {@const pct = Math.min(100, Math.round((used / sub.total) * 100))}
+        <div class="progress-bar traffic-bar" style="height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 4px 0 12px 34px; display: flex;">
+          <div class="traffic-bar-fill" style="width: {pct}%; height: 100%; background: var(--accent); border-radius: 2px;"></div>
+        </div>
+      {/if}
 
       <!-- Support / Announcement Row -->
       {#if sub.support_url || sub.announcement}
