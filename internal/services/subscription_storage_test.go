@@ -333,6 +333,10 @@ proxy-providers:
     path: ./proxy_providers/legacy-ui-provider.yaml
     url: "http://127.0.0.1:8088/mihomo/provider.yaml?url=https%3A%2F%2Fexample.com%2Fmy-clean-sub&insecure=1"
     interval: 7200
+    health-check:
+      enable: true
+      url: 'https://www.gstatic.com/generate_204'
+      interval: 300
   local-provider:
     type: file
     path: ./local.yaml
