@@ -7,18 +7,22 @@ import { slugifyProviderName, generateYAML, populateMihomoFromYAML } from '../sr
 
 describe('slugifyProviderName', () => {
   test('транслитерация кириллических имен подписок', () => {
-    expect(slugifyProviderName('Моя Подписка', '', 'p0')).toBe('moya-podpiska');
-    expect(slugifyProviderName('Сервис #1!', '', 'p0')).toBe('servis-1');
-    expect(slugifyProviderName('---', '', 'sub-0')).toBe('sub-0');
-    expect(slugifyProviderName('', '', 'provider-0')).toBe('provider-0');
-    expect(slugifyProviderName('Google-dns_123', '', 'p0')).toBe('google-dns-123');
+    expect(slugifyProviderName('', 'Моя Подписка', '', 'p0')).toBe('moya-podpiska');
+    expect(slugifyProviderName('', 'Сервис #1!', '', 'p0')).toBe('servis-1');
+    expect(slugifyProviderName('', '---', '', 'sub-0')).toBe('sub-0');
+    expect(slugifyProviderName('', '', '', 'provider-0')).toBe('provider-0');
+    expect(slugifyProviderName('', 'Google-dns_123', '', 'p0')).toBe('google-dns-123');
   });
 
   test('URL fallback when name is empty', () => {
-    expect(slugifyProviderName('', 'https://example.com/subscriptions/my-sub.yaml', 'fallback')).toBe('my-sub-yaml');
-    expect(slugifyProviderName('', 'https://example.com/api/v1/sub', 'fallback')).toBe('sub');
-    expect(slugifyProviderName('', 'invalid-url', 'fallback')).toBe('fallback');
-    expect(slugifyProviderName('', '', 'fallback')).toBe('fallback');
+    expect(slugifyProviderName('', '', 'https://example.com/subscriptions/my-sub.yaml', 'fallback')).toBe('my-sub-yaml');
+    expect(slugifyProviderName('', '', 'https://example.com/api/v1/sub', 'fallback')).toBe('sub');
+    expect(slugifyProviderName('', '', 'invalid-url', 'fallback')).toBe('fallback');
+    expect(slugifyProviderName('', '', '', 'fallback')).toBe('fallback');
+  });
+
+  test('приоритет profileTitle над остальными полями', () => {
+    expect(slugifyProviderName('Профиль 1', 'Имя 1', '', 'p0')).toBe('profil-1');
   });
 });
 
@@ -69,11 +73,11 @@ describe('Mihomo YAML generation with proxy-providers and groups', () => {
     expect(yaml).toContain('proxy-providers:');
     expect(yaml).toContain('  moya-podpiska:');
     expect(yaml).toContain('    type: http');
-    expect(yaml).toContain('    path: ./providers/moya-podpiska.yaml');
-    expect(yaml).toContain('    url: "https://mihomo.com/sub"');
+    expect(yaml).toContain('    path: ./proxy_providers/moya-podpiska.yaml');
+    expect(yaml).toContain('    url: "http://127.0.0.1:8090/mihomo/provider.yaml?url=https%3A%2F%2Fmihomo.com%2Fsub"');
     expect(yaml).toContain('    interval: 7200'); // 2 * 3600
-    expect(yaml).toContain('      User-Agent:\n        - "mihomo/1.18.12"');
-    expect(yaml).toContain('      x-hwid:\n        - "test-hwid"');
+    expect(yaml).not.toContain('User-Agent:');
+    expect(yaml).not.toContain('x-hwid:');
 
     // Не должно содержать xray-sub в proxy-providers
     expect(yaml).not.toContain('xray-sub:');
