@@ -164,6 +164,8 @@ async function setupMocks(
         contentType: 'application/json',
         body: JSON.stringify({
           memory: { total: 524288000, used: 131072000, free: 393216000 },
+          disk: { total: 536870912, used: 209715200, free: 327155712 },
+          ssl_cert_days: 10,
           load: [0.5, 0.4, 0.3],
           uptime: { seconds: 3600, days: 0, hours: 1, minutes: 0 },
           go_runtime: {

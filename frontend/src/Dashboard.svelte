@@ -120,7 +120,7 @@
   );
 
   const isDiskLow = $derived(
-    systemStats !== null && systemStats.disk.free < 10 * 1024 * 1024
+    systemStats !== null && systemStats.disk && systemStats.disk.free < 10 * 1024 * 1024
   );
 
   const isSSLExpiring = $derived(
@@ -128,6 +128,9 @@
   );
 
   function getDiskBarColor(stats: SystemStats): string {
+    if (!stats.disk) {
+      return 'var(--color-success, var(--color-primary, #2ecc71))';
+    }
     const pct = (stats.disk.used / stats.disk.total) * 100;
     const freeMB = stats.disk.free / 1024 / 1024;
     if (pct > 90 || freeMB < 10) {
@@ -749,7 +752,7 @@
                   </div>
                 {/if}
 
-                {#if isDiskLow && systemStats}
+                {#if isDiskLow && systemStats && systemStats.disk}
                   <div class="problem-item alert-error">
                     <div class="problem-content">
                       <span class="problem-icon"><Icon name="warning" size={16} /></span>
@@ -939,21 +942,23 @@
           <div style="margin-bottom: 18px;">
             <Card title={$t('dash.system_stats')}>
               <div class="stats-grid">
-                <div class="stat-box">
-                  <div class="stat-label">{$t('dash.disk')}</div>
-                  <div class="stat-value">
-                    {formatBytes(systemStats.disk.free)}
+                {#if systemStats.disk}
+                  <div class="stat-box">
+                    <div class="stat-label">{$t('dash.disk')}</div>
+                    <div class="stat-value">
+                      {formatBytes(systemStats.disk.free)}
+                    </div>
+                    <div class="res-sub">
+                      {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })} из {formatBytes(systemStats.disk.total)} · {((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)}%
+                    </div>
+                    <div class="stat-bar">
+                      <div
+                        class="stat-bar-fill"
+                        style="width: {((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)}%; background: {getDiskBarColor(systemStats)}; box-shadow: 0 0 8px {getDiskBarColor(systemStats)};"
+                      ></div>
+                    </div>
                   </div>
-                  <div class="res-sub">
-                    {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })} из {formatBytes(systemStats.disk.total)} · {((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)}%
-                  </div>
-                  <div class="stat-bar">
-                    <div
-                      class="stat-bar-fill"
-                      style="width: {((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)}%; background: {getDiskBarColor(systemStats)}; box-shadow: 0 0 8px {getDiskBarColor(systemStats)};"
-                    ></div>
-                  </div>
-                </div>
+                {/if}
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.ram')}</div>
                   <div class="stat-value">
