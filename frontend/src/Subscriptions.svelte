@@ -36,7 +36,7 @@
     filter_type?: string;
     filter_transport?: string;
     mihomo_groups?: string[];
-    xray_routing_mode?: 'manual' | 'auto';
+    routing_mode?: 'manual' | 'auto';
   }
 
   interface Node {
@@ -127,13 +127,31 @@
 
   async function loadAvailableMihomoGroups() {
     try {
-      const res = await fetch('/api/subscriptions/mihomo-groups');
-      if (res.ok) {
-        const data = await res.json();
-        availableMihomoGroups = Array.isArray(data) ? data : [];
-      } else {
-        availableMihomoGroups = [];
+      const res = await fetch('/api/config/read?path=%2Fopt%2Fetc%2Fmihomo%2Fconfig.yaml');
+      if (!res.ok) return;
+      const data = await res.json();
+      const yamlContent = data.content || '';
+      const groupNames: string[] = [];
+      const lines = yamlContent.split('\n');
+      let inProxyGroups = false;
+      for (let line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('proxy-groups:')) {
+          inProxyGroups = true;
+          continue;
+        }
+        if (inProxyGroups) {
+          if (line.startsWith('-') || line.startsWith(' ') || line.trim() === '') {
+            if (trimmed.startsWith('- name:')) {
+              const name = trimmed.replace('- name:', '').trim().replace(/^['"]|['"]$/g, '');
+              if (name) groupNames.push(name);
+            }
+          } else {
+            break;
+          }
+        }
       }
+      availableMihomoGroups = groupNames;
     } catch (e) {
       availableMihomoGroups = [];
     }
@@ -227,7 +245,7 @@
       filter_type: formFilterType,
       filter_transport: formFilterTransport,
       mihomo_groups: formMihomoGroups,
-      xray_routing_mode: formRoutingMode
+      routing_mode: formRoutingMode
     };
 
     try {
@@ -306,15 +324,15 @@
     formURL = sub.url;
     formInterval = sub.interval;
     formEnabled = sub.enabled;
-    formUseProviderInterval = sub.use_provider_interval;
-    formEnableXray = sub.enable_xray;
-    formEnableMihomo = sub.enable_mihomo;
-    formRoutingMode = sub.xray_routing_mode || 'manual';
-    formTagPrefix = sub.tag_prefix || '';
-    formFilterName = sub.filter_name || '';
-    formFilterType = sub.filter_type || '';
-    formFilterTransport = sub.filter_transport || '';
-    formMihomoGroups = sub.mihomo_groups || [];
+    formUseProviderInterval = sub.use_provider_interval ?? false;
+    formEnableXray = sub.enable_xray ?? false;
+    formEnableMihomo = sub.enable_mihomo ?? false;
+    formRoutingMode = sub.routing_mode ?? 'manual';
+    formTagPrefix = sub.tag_prefix ?? '';
+    formFilterName = sub.filter_name ?? '';
+    formFilterType = sub.filter_type ?? '';
+    formFilterTransport = sub.filter_transport ?? '';
+    formMihomoGroups = sub.mihomo_groups ?? [];
     showAddModal = true;
     loadAvailableMihomoGroups();
   }
