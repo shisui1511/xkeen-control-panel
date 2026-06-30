@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -71,9 +72,11 @@ func (s *SubscriptionService) load() {
 	}
 
 	// Импортируем подписки из Xkeen-UI, если они есть и еще не были импортированы
-	migrated := s.migrateFromXkeenUI()
+	migrated1 := s.migrateFromXkeenUI()
+	// Импортируем подписки из config.yaml Mihomo (для существующих провайдеров на роутере)
+	migrated2 := s.migrateFromMihomoConfig()
 
-	needSave := migrated
+	needSave := migrated1 || migrated2
 	for i := range s.subscriptions {
 		if s.subscriptions[i].ID == "" {
 			s.subscriptions[i].ID = fmt.Sprintf("sub_%d_%d", time.Now().Unix(), i)
@@ -734,6 +737,122 @@ func (s *SubscriptionService) migrateFromXkeenUI() bool {
 
 	for _, xSub := range xraySubs {
 		importSub(xSub, false)
+	}
+
+	return migrated
+}
+
+func (s *SubscriptionService) migrateFromMihomoConfig() bool {
+	configDir := s.mihomoConfigDir
+	if configDir == "" {
+		configDir = "/opt/etc/mihomo"
+	}
+	configPath := filepath.Join(configDir, "config.yaml")
+
+	rawConfig, err := os.ReadFile(configPath)
+	if err != nil {
+		return false
+	}
+
+	lines := strings.Split(string(rawConfig), "\n")
+	start, end, indent := findTopLevelSection(lines, "proxy-providers")
+	if start == -1 {
+		return false
+	}
+
+	blocks := extractProviderBlocks(lines, start, end, indent)
+	if len(blocks) == 0 {
+		return false
+	}
+
+	migrated := false
+
+	existingURLs := make(map[string]int)
+	for i := range s.subscriptions {
+		urlClean := strings.TrimSpace(strings.ToLower(s.subscriptions[i].URL))
+		existingURLs[urlClean] = i
+	}
+
+	cleanUrl := func(urlStr string) string {
+		urlStr = strings.Trim(strings.TrimSpace(urlStr), `'"`)
+		if urlStr == "" {
+			return ""
+		}
+		match := regexp.MustCompile(`[?&]url=([^&]+)`).FindStringSubmatch(urlStr)
+		if len(match) > 1 {
+			if decoded, err := url.QueryUnescape(match[1]); err == nil {
+				return strings.TrimSpace(strings.ToLower(decoded))
+			}
+			return strings.TrimSpace(strings.ToLower(match[1]))
+		}
+		return strings.TrimSpace(strings.ToLower(urlStr))
+	}
+
+	for _, block := range blocks {
+		var pType, pURL string
+		var pInterval int = 24
+
+		for i := block.StartLine + 1; i < block.EndLine; i++ {
+			line := strings.TrimSpace(lines[i])
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+
+			if strings.HasPrefix(line, "url:") {
+				val := strings.TrimSpace(strings.TrimPrefix(line, "url:"))
+				pURL = strings.Trim(val, `'"`)
+			} else if strings.HasPrefix(line, "type:") {
+				val := strings.TrimSpace(strings.TrimPrefix(line, "type:"))
+				pType = strings.Trim(val, `'"`)
+			} else if strings.HasPrefix(line, "interval:") {
+				val := strings.TrimSpace(strings.TrimPrefix(line, "interval:"))
+				val = strings.Trim(val, `'"`)
+				var sec int
+				if _, err := fmt.Sscanf(val, "%d", &sec); err == nil {
+					if sec > 720 {
+						pInterval = sec / 3600
+					} else {
+						pInterval = sec
+					}
+				}
+			}
+		}
+
+		if pType != "http" || pURL == "" {
+			continue
+		}
+
+		originalURL := cleanUrl(pURL)
+		if originalURL == "" {
+			continue
+		}
+
+		if _, exists := existingURLs[originalURL]; exists {
+			continue
+		}
+
+		newID := fmt.Sprintf("sub_%d_%d", time.Now().Unix(), len(s.subscriptions))
+
+		name := block.ID
+		if name == "" {
+			name = "Imported Provider"
+		}
+
+		newSub := Subscription{
+			ID:           newID,
+			Name:         name,
+			URL:          originalURL,
+			TagPrefix:    name,
+			Interval:     pInterval,
+			Enabled:      true,
+			EnableMihomo: true,
+			EnableXray:   false,
+			LastUpdate:   time.Time{},
+		}
+
+		s.subscriptions = append(s.subscriptions, newSub)
+		existingURLs[originalURL] = len(s.subscriptions) - 1
+		migrated = true
 	}
 
 	return migrated
