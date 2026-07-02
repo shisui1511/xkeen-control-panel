@@ -1030,6 +1030,30 @@
     }
   }
 
+  interface ChainItem {
+    name: string;
+    isGroup: boolean;
+  }
+
+  function getSelectionChain(groupName: string): ChainItem[] {
+    const chain: ChainItem[] = [];
+    let current = groupName;
+    const visited = new Set<string>();
+    while (current && !visited.has(current)) {
+      visited.add(current);
+      const grp = groups.find((g) => g.name === current);
+      if (!grp) {
+        break;
+      }
+      const selected = grp.now;
+      if (!selected) break;
+      const isSelectedGroup = groups.some((g) => g.name === selected);
+      chain.push({ name: selected, isGroup: isSelectedGroup });
+      current = selected;
+    }
+    return chain;
+  }
+
   onMount(() => {
     const hash = window.location.hash;
     if (hash.includes('tab=providers') || window.location.search.includes('tab=providers')) {
@@ -1280,19 +1304,49 @@
                 onkeydown={(e) =>
                   (e.key === 'Enter' || e.key === ' ') && collapsible && toggleCollapse(group.name)}
               >
-                {#if getGroupIcon(group.name)}
-                  {@const icon = getGroupIcon(group.name)}
-                  <span class="group-icon-wrap" style="color: {icon.color}; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 6px;">
-                    {@html icon.svg}
-                  </span>
-                {/if}
-                <span class="name">{group.name}</span>
-                <span class="type-badge">{group.type.toUpperCase()} · {group.all.length}</span>
-                {#if collapsible}
-                  <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
-                    <ChevronDown size={14} color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'} />
-                  </span>
-                {/if}
+                <div class="gc-head-row1">
+                  {#if getGroupIcon(group.name)}
+                    {@const icon = getGroupIcon(group.name)}
+                    <span class="group-icon-wrap" style="color: {icon.color}; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 6px;">
+                      {@html icon.svg}
+                    </span>
+                  {/if}
+                  <span class="name">{group.name}</span>
+                  <span class="type-badge">{group.type.toUpperCase()}</span>
+                  
+                  {#if group.now}
+                    {@const latencyClass = getLatencyClass(group.now)}
+                    {@const latencyText = getLatencyText(group.now)}
+                    <div class="gc-lat-box {latencyClass}">{latencyText}</div>
+                  {/if}
+                  
+                  {#if collapsible}
+                    <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
+                      <ChevronDown size={14} color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'} />
+                    </span>
+                  {/if}
+                </div>
+                
+                <div class="gc-head-row2">
+                  <span class="gc-count-text">{group.all.length} {$t('proxies.obs_unreachable_sub') ? 'узлов' : 'nodes'}</span>
+                  <span class="gc-separator">·</span>
+                  <span class="gc-active-label">{$t('proxies.active') || 'Активен'}:</span>
+                  
+                  {#each getSelectionChain(group.name) as item, index}
+                    {@const itemFlag = !item.isGroup ? getCountryFlag(item.name) : null}
+                    {@const itemLatencyText = getLatencyText(item.name)}
+                    {@const itemLatencyClass = getLatencyClass(item.name)}
+                    {#if index > 0}
+                      <span class="gc-arrow">›</span>
+                    {/if}
+                    <div class="gc-now-pill" class:is-leaf={!item.isGroup} class:lat-ok={itemLatencyClass === 'lat ok'} class:lat-mid={itemLatencyClass === 'lat mid'} class:lat-bad={itemLatencyClass === 'lat bad'}>
+                      <div class="gc-now-dot" class:is-leaf={!item.isGroup} class:lat-ok={itemLatencyClass === 'lat ok'} class:lat-mid={itemLatencyClass === 'lat mid'} class:lat-bad={itemLatencyClass === 'lat bad'}></div>
+                      {#if itemFlag}{itemFlag} {/if}{item.name}
+                    </div>
+                  {:else}
+                    <span style="color:var(--fg-dim)">—</span>
+                  {/each}
+                </div>
               </div>
 
               {#if isCollapsed}
@@ -1349,14 +1403,13 @@
                       <div class="p-footer">
                         <span class={healthClass}>{healthText}</span>
 
-                        <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="p-actions-wrap">
                           {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
                             <button
                               class="btn-latency-test"
-                              onclick={( e ) => { e.stopPropagation(); testProxyLatency(proxyName); }}
+                              onclick={(e) => { e.stopPropagation(); testProxyLatency(proxyName); }}
                               disabled={testingProxy === proxyName}
                               title={$t('proxies.test_single')}
-                              style="background: transparent; border: none; padding: 4px; color: var(--fg-dim); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: color 0.2s;"
                             >
                               {#if testingProxy === proxyName}
                                 <span class="spinner" style="font-size: 10px; font-family: monospace;">...</span>
@@ -1368,8 +1421,8 @@
                                   fill="none"
                                   stroke="currentColor"
                                   stroke-width="2"
-                                  style="opacity: 0.6;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
-                                >
+                                  style="opacity: 0.6;"
+                                ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>
                               {/if}
                             </button>
                           {/if}
@@ -1546,20 +1599,34 @@
   .group-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg, 10px);
     overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.2s ease;
+  }
+  .group-card:hover {
+    box-shadow: 0 4px 20px rgba(0,0,0,0.35), 0 0 0 1px rgba(41, 194, 240, 0.15);
   }
   .group-card.skeleton-card {
     border-style: dashed;
     background: transparent;
   }
   .group-card .gc-head {
-    background: var(--bg-card-head);
+    background: linear-gradient(135deg, rgba(20, 51, 79, 0.9), rgba(16, 42, 68, 0.95));
     padding: 14px 18px;
     display: flex;
-    align-items: center;
-    gap: 10px;
-    border-bottom: 1px solid var(--border);
+    flex-direction: column;
+    gap: 8px;
+    border-bottom: 1px solid var(--border-strong);
+    position: relative;
+    overflow: hidden;
+  }
+  .group-card .gc-head::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(ellipse at top left, rgba(41, 194, 240, 0.05), transparent 60%);
+    pointer-events: none;
   }
   .group-card .gc-head.collapsible {
     cursor: pointer;
@@ -1568,45 +1635,174 @@
   .group-card .gc-head.collapsible:hover {
     background: var(--hover);
   }
+  .gc-head-row1 {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 10px;
+  }
+  .gc-head-row2 {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--fg-secondary);
+    width: 100%;
+    margin-top: 2px;
+  }
   .group-card .gc-head .name {
-    font-weight: 700;
+    font-weight: 800;
     color: var(--fg-primary);
-    font-size: 14px;
+    font-size: 15px;
+    letter-spacing: -0.01em;
   }
   .type-badge {
-    color: var(--fg-dim);
-    font-size: 11px;
-    font-family: var(--font-family-mono);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-weight: 600;
     margin-left: auto;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 99px;
+    background: rgba(41, 194, 240, 0.1);
+    border: 1px solid rgba(41, 194, 240, 0.2);
+    color: var(--accent);
+    font-family: var(--font-family-mono);
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .gc-lat-box {
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .gc-lat-box.lat.ok {
+    color: var(--success);
+    background: rgba(70, 209, 138, 0.15);
+    border: 1px solid rgba(70, 209, 138, 0.35);
+  }
+  .gc-lat-box.lat.mid {
+    color: var(--warning);
+    background: rgba(240, 180, 80, 0.15);
+    border: 1px solid rgba(240, 180, 80, 0.35);
+  }
+  .gc-lat-box.lat.bad {
+    color: var(--danger);
+    background: rgba(239, 91, 107, 0.15);
+    border: 1px solid rgba(239, 91, 107, 0.35);
+  }
+  .gc-lat-box.lat.dim {
+    color: var(--fg-dim);
+    background: rgba(92, 116, 145, 0.15);
+    border: 1px solid rgba(92, 116, 145, 0.35);
+  }
+  .gc-count-text {
+    color: var(--fg-dim);
+  }
+  .gc-separator {
+    color: var(--fg-faint);
+  }
+  .gc-active-label {
+    color: var(--fg-secondary);
+    font-size: 11px;
+  }
+  .gc-arrow {
+    color: var(--fg-faint);
+    margin: 0 2px;
+  }
+  .gc-now-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 10px;
+    border-radius: var(--radius-lg, 10px);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    color: var(--fg-primary);
+    font-size: 11px;
+    font-weight: 600;
+    transition: all 0.2s;
+  }
+  .gc-now-pill.is-leaf {
+    background: rgba(41, 194, 240, 0.08);
+    border-color: rgba(41, 194, 240, 0.2);
+    color: var(--accent);
+  }
+  .gc-now-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--fg-dim);
+  }
+  .gc-now-dot.is-leaf {
+    background: var(--accent);
+  }
+  .gc-now-dot.lat-ok {
+    background: var(--success);
+  }
+  .gc-now-dot.lat-mid {
+    background: var(--warning);
+  }
+  .gc-now-dot.lat-bad {
+    background: var(--danger);
+  }
+  .gc-now-pill.lat-ok {
+    background: rgba(70, 209, 138, 0.08);
+    border-color: rgba(70, 209, 138, 0.2);
+    color: var(--success);
+  }
+  .gc-now-pill.lat-mid {
+    background: rgba(240, 180, 80, 0.08);
+    border-color: rgba(240, 180, 80, 0.2);
+    color: var(--warning);
+  }
+  .gc-now-pill.lat-bad {
+    background: rgba(239, 91, 107, 0.08);
+    border-color: rgba(239, 91, 107, 0.2);
+    color: var(--danger);
   }
 
   .proxy-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 8px;
     padding: 12px;
   }
 
   .proxy-card {
-    background: var(--bg-card);
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     padding: 10px 12px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    min-height: 80px;
-    transition: background 0.2s, border-color 0.2s;
+    min-height: 84px;
+    position: relative;
+    transition: all var(--transition-fast);
+  }
+  .proxy-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, rgba(41, 194, 240, 0.03), transparent);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+    pointer-events: none;
   }
   .proxy-card:hover {
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
     background: var(--hover);
   }
+  .proxy-card:hover::after {
+    opacity: 1;
+  }
   .proxy-card.now {
-    background: color-mix(in srgb, var(--accent) 15%, transparent);
-    border-left: 3px solid var(--accent);
+    background: linear-gradient(135deg, rgba(41, 194, 240, 0.12), rgba(41, 194, 240, 0.04));
+    border-color: rgba(41, 194, 240, 0.45);
+    box-shadow: inset 0 0 0 1px rgba(41, 194, 240, 0.08), 0 2px 8px rgba(41, 194, 240, 0.08);
   }
   .proxy-card .p-header {
     display: flex;
@@ -1615,7 +1811,7 @@
     margin-bottom: 8px;
   }
   .proxy-card .p-name {
-    font-weight: 500;
+    font-weight: 600;
     color: var(--fg-primary);
     font-size: 13px;
     word-break: break-all;
@@ -1632,24 +1828,48 @@
     gap: 6px;
     margin-top: auto;
   }
+  .p-actions-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-latency-test {
+    background: transparent;
+    border: none;
+    padding: 4px;
+    color: var(--fg-dim);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    border-radius: var(--radius-sm);
+  }
+  .btn-latency-test:hover {
+    color: var(--fg-primary);
+    background: rgba(255, 255, 255, 0.05);
+  }
 
   .dot-container {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
-    padding: 8px 18px 12px;
+    gap: 6px;
+    padding: 10px 18px 14px;
   }
   .dot-indicator {
-    width: 6px;
-    height: 6px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     border: none;
     padding: 0;
     background: var(--fg-dim);
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .dot-indicator:hover {
+    transform: scale(1.4);
   }
   .dot-indicator.now {
-    outline: 1.5px solid var(--accent);
-    outline-offset: 1px;
+    box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent);
   }
   .dot-indicator.ok {
     background: var(--success);
@@ -1667,6 +1887,7 @@
   .selector-dot {
     font-size: 14px;
     color: var(--fg-dim);
+    font-weight: 700;
   }
   .selector-dot.active {
     color: var(--accent);
