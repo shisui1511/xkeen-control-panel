@@ -209,9 +209,9 @@ func TestSubscription_ConcurrencyRace(t *testing.T) {
 func TestSubscriptionService_MigrateFromLegacyUI(t *testing.T) {
 	tmp := t.TempDir()
 	xcpDir := filepath.Join(tmp, "xcp")
-	xkeenUIDir := filepath.Join(tmp, "legacy-ui")
+	legacyUIDir := filepath.Join(tmp, "legacy-ui")
 
-	err := os.MkdirAll(xkeenUIDir, 0755)
+	err := os.MkdirAll(legacyUIDir, 0755)
 	if err != nil {
 		t.Fatalf("failed to create legacy-ui dir: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestSubscriptionService_MigrateFromLegacyUI(t *testing.T) {
 			}
 		]
 	}`
-	err = os.WriteFile(filepath.Join(xkeenUIDir, "mihomo_subscriptions.json"), []byte(mihomoData), 0600)
+	err = os.WriteFile(filepath.Join(legacyUIDir, "mihomo_subscriptions.json"), []byte(mihomoData), 0600)
 	if err != nil {
 		t.Fatalf("failed to write mihomo state: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestSubscriptionService_MigrateFromLegacyUI(t *testing.T) {
 			}
 		]
 	}`
-	err = os.WriteFile(filepath.Join(xkeenUIDir, "xray_subscriptions.json"), []byte(xrayData), 0600)
+	err = os.WriteFile(filepath.Join(legacyUIDir, "xray_subscriptions.json"), []byte(xrayData), 0600)
 	if err != nil {
 		t.Fatalf("failed to write xray state: %v", err)
 	}
