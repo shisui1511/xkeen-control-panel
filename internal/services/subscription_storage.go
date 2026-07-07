@@ -71,12 +71,10 @@ func (s *SubscriptionService) load() {
 		json.Unmarshal(data, &s.subscriptions)
 	}
 
-	// Импортируем подписки из другой панели (если есть файлы подписок на роутере)
-	migrated1 := s.migrateFromLegacyUI()
 	// Импортируем подписки из config.yaml Mihomo (для существующих провайдеров на роутере)
 	migrated2 := s.migrateFromMihomoConfig()
 
-	needSave := migrated1 || migrated2
+	needSave := migrated2
 	for i := range s.subscriptions {
 		if s.subscriptions[i].ID == "" {
 			s.subscriptions[i].ID = fmt.Sprintf("sub_%d_%d", time.Now().Unix(), i)
@@ -623,123 +621,6 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 			}
 		}
 	}
-}
-
-type legacyUISubscription struct {
-	ID            string `json:"id"`
-	URL           string `json:"url"`
-	Tag           string `json:"tag"`
-	Enabled       bool   `json:"enabled"`
-	IntervalHours int    `json:"interval_hours"`
-}
-
-type legacyUIState struct {
-	Subscriptions []legacyUISubscription `json:"subscriptions"`
-}
-
-func (s *SubscriptionService) migrateFromLegacyUI() bool {
-	legacyUIDir := "/opt/etc/legacy-ui"
-	if s.dataDir != "" {
-		parentDir := filepath.Dir(s.dataDir)
-		testDir := filepath.Join(parentDir, "legacy-ui")
-		if _, err := os.Stat(testDir); err == nil {
-			legacyUIDir = testDir
-		}
-	}
-
-	mihomoPath := filepath.Join(legacyUIDir, "mihomo_subscriptions.json")
-	xrayPath := filepath.Join(legacyUIDir, "xray_subscriptions.json")
-
-	migrated := false
-
-	loadLegacyUIFile := func(filePath string) []legacyUISubscription {
-		data, err := os.ReadFile(filePath)
-		if err != nil {
-			return nil
-		}
-		var state legacyUIState
-		if err := json.Unmarshal(data, &state); err != nil {
-			return nil
-		}
-		return state.Subscriptions
-	}
-
-	mihomoSubs := loadLegacyUIFile(mihomoPath)
-	xraySubs := loadLegacyUIFile(xrayPath)
-
-	if len(mihomoSubs) == 0 && len(xraySubs) == 0 {
-		return false
-	}
-
-	existingURLs := make(map[string]int)
-	for i := range s.subscriptions {
-		urlClean := strings.TrimSpace(strings.ToLower(s.subscriptions[i].URL))
-		existingURLs[urlClean] = i
-	}
-
-	importSub := func(xSub legacyUISubscription, isMihomo bool) {
-		urlClean := strings.TrimSpace(strings.ToLower(xSub.URL))
-		if urlClean == "" {
-			return
-		}
-
-		if idx, exists := existingURLs[urlClean]; exists {
-			updated := false
-			if isMihomo && !s.subscriptions[idx].EnableMihomo {
-				s.subscriptions[idx].EnableMihomo = true
-				updated = true
-			}
-			if !isMihomo && !s.subscriptions[idx].EnableXray {
-				s.subscriptions[idx].EnableXray = true
-				updated = true
-			}
-			if updated {
-				migrated = true
-			}
-			return
-		}
-
-		newID := fmt.Sprintf("sub_%d_%d", time.Now().Unix(), len(s.subscriptions))
-
-		name := xSub.Tag
-		if name == "" {
-			name = xSub.ID
-		}
-		if name == "" {
-			name = "Imported Sub"
-		}
-
-		interval := xSub.IntervalHours
-		if interval <= 0 {
-			interval = 24
-		}
-
-		newSub := Subscription{
-			ID:           newID,
-			Name:         name,
-			URL:          xSub.URL,
-			TagPrefix:    xSub.Tag,
-			Interval:     interval,
-			Enabled:      xSub.Enabled,
-			EnableMihomo: isMihomo,
-			EnableXray:   !isMihomo,
-			LastUpdate:   time.Time{},
-		}
-
-		s.subscriptions = append(s.subscriptions, newSub)
-		existingURLs[urlClean] = len(s.subscriptions) - 1
-		migrated = true
-	}
-
-	for _, xSub := range mihomoSubs {
-		importSub(xSub, true)
-	}
-
-	for _, xSub := range xraySubs {
-		importSub(xSub, false)
-	}
-
-	return migrated
 }
 
 func (s *SubscriptionService) migrateFromMihomoConfig() bool {
