@@ -51,11 +51,12 @@ jobs:
         run: go mod download
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@v6
         with:
           version: v1.64
           working-directory: .
           args: --timeout=5m
+          install-mode: goinstall
 
       - name: Run govulncheck
         uses: golang/govulncheck-action@v1
@@ -147,7 +148,7 @@ jobs:
           cwd: frontend
           pattern: "dist/assets/*.{js,css}"
           strip-hash: "-[a-zA-Z0-9_-]{8}"
-          build-script: "build"
+          build-script: "npm run build"
 
   # Job 4: Тестирование Frontend (E2E)
   test-frontend:
