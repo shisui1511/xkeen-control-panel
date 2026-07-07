@@ -25,7 +25,7 @@ jobs:
     name: Lint Go
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Frontend нужен для go:embed (embed.go ссылается на frontend/dist)
       - name: Set up Node.js
@@ -69,7 +69,7 @@ jobs:
     name: Test Go
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Frontend нужен для go:embed
       - name: Set up Node.js
@@ -112,7 +112,7 @@ jobs:
     name: Lint Frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -142,19 +142,20 @@ jobs:
           npm run build
 
       - name: Report bundle size
-        uses: preactjs/compressed-size-action@v2
+        uses: preactjs/compressed-size-action@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           cwd: frontend
           pattern: "dist/assets/*.{js,css}"
           strip-hash: "-[a-zA-Z0-9_-]{8}"
+          build-script: "npm run build"
 
   # Job 4: Тестирование Frontend (E2E)
   test-frontend:
     name: Test Frontend E2E
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -229,7 +230,7 @@ jobs:
             name: mipsle
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -276,7 +277,7 @@ jobs:
     name: Verify Commits & i18n
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
