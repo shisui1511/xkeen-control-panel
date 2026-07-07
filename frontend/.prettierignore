@@ -3,3 +3,4 @@ node_modules/
 playwright-report/
 .svelte-kit/
 package-lock.json
+test-results/

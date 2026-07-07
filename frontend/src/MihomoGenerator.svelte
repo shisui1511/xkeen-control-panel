@@ -2599,8 +2599,7 @@
                 value={dns.nameservers.join('\n')}
                 rows="3"
                 on:change={(e) =>
-                  (dns.nameservers = e.currentTarget.value.split('\n').filter(Boolean))}
-              ></textarea>
+                  (dns.nameservers = e.currentTarget.value.split('\n').filter(Boolean))}></textarea>
             </div>
             <div class="form-row">
               <label class="form-label">Fallback</label>
@@ -2609,8 +2608,7 @@
                 value={dns.fallback.join('\n')}
                 rows="2"
                 on:change={(e) =>
-                  (dns.fallback = e.currentTarget.value.split('\n').filter(Boolean))}
-              ></textarea>
+                  (dns.fallback = e.currentTarget.value.split('\n').filter(Boolean))}></textarea>
             </div>
           {/if}
         </div>
