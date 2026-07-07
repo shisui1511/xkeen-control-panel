@@ -206,7 +206,7 @@ func TestSubscription_ConcurrencyRace(t *testing.T) {
 	wg.Wait()
 }
 
-func TestSubscriptionService_MigrateFromXkeenUI(t *testing.T) {
+func TestSubscriptionService_MigrateFromLegacyUI(t *testing.T) {
 	tmp := t.TempDir()
 	xcpDir := filepath.Join(tmp, "xcp")
 	xkeenUIDir := filepath.Join(tmp, "legacy-ui")

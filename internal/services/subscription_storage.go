@@ -71,8 +71,8 @@ func (s *SubscriptionService) load() {
 		json.Unmarshal(data, &s.subscriptions)
 	}
 
-	// Импортируем подписки из Legacy-UI, если они есть и еще не были импортированы
-	migrated1 := s.migrateFromXkeenUI()
+	// Импортируем подписки из другой панели (если есть файлы подписок на роутере)
+	migrated1 := s.migrateFromLegacyUI()
 	// Импортируем подписки из config.yaml Mihomo (для существующих провайдеров на роутере)
 	migrated2 := s.migrateFromMihomoConfig()
 
@@ -625,7 +625,7 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 	}
 }
 
-type xkeenUISubscription struct {
+type legacyUISubscription struct {
 	ID            string `json:"id"`
 	URL           string `json:"url"`
 	Tag           string `json:"tag"`
@@ -633,39 +633,39 @@ type xkeenUISubscription struct {
 	IntervalHours int    `json:"interval_hours"`
 }
 
-type xkeenUIState struct {
-	Subscriptions []xkeenUISubscription `json:"subscriptions"`
+type legacyUIState struct {
+	Subscriptions []legacyUISubscription `json:"subscriptions"`
 }
 
-func (s *SubscriptionService) migrateFromXkeenUI() bool {
-	xkeenUIDir := "/opt/etc/legacy-ui"
+func (s *SubscriptionService) migrateFromLegacyUI() bool {
+	legacyUIDir := "/opt/etc/legacy-ui"
 	if s.dataDir != "" {
 		parentDir := filepath.Dir(s.dataDir)
 		testDir := filepath.Join(parentDir, "legacy-ui")
 		if _, err := os.Stat(testDir); err == nil {
-			xkeenUIDir = testDir
+			legacyUIDir = testDir
 		}
 	}
 
-	mihomoPath := filepath.Join(xkeenUIDir, "mihomo_subscriptions.json")
-	xrayPath := filepath.Join(xkeenUIDir, "xray_subscriptions.json")
+	mihomoPath := filepath.Join(legacyUIDir, "mihomo_subscriptions.json")
+	xrayPath := filepath.Join(legacyUIDir, "xray_subscriptions.json")
 
 	migrated := false
 
-	loadXkeenUIFile := func(filePath string) []xkeenUISubscription {
+	loadLegacyUIFile := func(filePath string) []legacyUISubscription {
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return nil
 		}
-		var state xkeenUIState
+		var state legacyUIState
 		if err := json.Unmarshal(data, &state); err != nil {
 			return nil
 		}
 		return state.Subscriptions
 	}
 
-	mihomoSubs := loadXkeenUIFile(mihomoPath)
-	xraySubs := loadXkeenUIFile(xrayPath)
+	mihomoSubs := loadLegacyUIFile(mihomoPath)
+	xraySubs := loadLegacyUIFile(xrayPath)
 
 	if len(mihomoSubs) == 0 && len(xraySubs) == 0 {
 		return false
@@ -677,7 +677,7 @@ func (s *SubscriptionService) migrateFromXkeenUI() bool {
 		existingURLs[urlClean] = i
 	}
 
-	importSub := func(xSub xkeenUISubscription, isMihomo bool) {
+	importSub := func(xSub legacyUISubscription, isMihomo bool) {
 		urlClean := strings.TrimSpace(strings.ToLower(xSub.URL))
 		if urlClean == "" {
 			return
