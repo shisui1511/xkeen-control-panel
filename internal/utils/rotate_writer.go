@@ -39,7 +39,7 @@ func NewRotateWriter(filePath string, maxSize int64) (*RotateWriter, error) {
 
 	info, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	w.currentSize = info.Size()

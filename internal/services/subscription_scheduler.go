@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"net/http"
 	"os"
@@ -327,9 +328,10 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 		return fmt.Errorf("write provider file: %w", err)
 	}
 
-	// Сравниваем хэши скачанного кэша подписки
-	h := sha256.Sum256([]byte(yamlContent))
-	newHash := fmt.Sprintf("%x", h[:])
+	// Сравниваем хэши скачанного кэша подписки с помощью FNV-1a 64-bit (некриптографический хэш)
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(yamlContent))
+	newHash := fmt.Sprintf("%x", h.Sum(nil))
 	oldHash := sub.LastHashMihomo
 
 	sub.ProxyNames = newNames

@@ -321,10 +321,12 @@ func (s *SnapshotService) Restore(id string) error {
 		}
 		// Write with size limit: 10 MB per file
 		if _, err := io.Copy(out, io.LimitReader(tr, 10*1024*1024)); err != nil {
-			out.Close()
+			_ = out.Close()
 			return fmt.Errorf("write temp file: %w", err)
 		}
-		out.Close()
+		if err := out.Close(); err != nil {
+			return fmt.Errorf("close temp file: %w", err)
+		}
 	}
 
 	// 4. Validate structure: check that we have at least one valid folder
@@ -403,7 +405,9 @@ func (s *SnapshotService) Restore(id string) error {
 			}
 			_, err = io.Copy(out, in)
 			in.Close()
-			out.Close()
+			if closeErr := out.Close(); closeErr != nil && err == nil {
+				err = closeErr
+			}
 			return err
 		})
 		if err != nil {

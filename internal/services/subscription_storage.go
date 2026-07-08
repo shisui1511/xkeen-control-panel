@@ -330,7 +330,8 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 
 			if needRestart && s.consoleSvc != nil {
 				if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-					log.Printf("subscription %s: xkeen -restart after update (disabled integration): %v", safeID, err)
+					cleanID := strings.NewReplacer("\n", "", "\r", "").Replace(safeID)
+					log.Printf("subscription %s: xkeen -restart after update (disabled integration): %v", cleanID, err)
 				}
 			}
 			return nil
@@ -421,7 +422,8 @@ func (s *SubscriptionService) Delete(id string) error {
 
 	if (enableXray || enableMihomo) && s.consoleSvc != nil {
 		if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-			log.Printf("subscription %s: xkeen -restart after delete: %v", safeID, err)
+			cleanID := strings.NewReplacer("\n", "", "\r", "").Replace(safeID)
+			log.Printf("subscription %s: xkeen -restart after delete: %v", cleanID, err)
 		}
 	}
 	return nil
