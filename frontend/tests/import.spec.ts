@@ -271,8 +271,7 @@ test.describe('Import Node из конструкторов (D-15, D-16, D-17)', 
   });
 
   test('кнопка «Импорт узла» отсутствует в Subscriptions (D-16)', async ({ page }) => {
-    await page.goto('/#/subscriptions');
-    await page.waitForURL(/.*proxies.*/);
+    await page.goto('/#/proxies?tab=providers');
     await expect(page.locator('button:has-text("Импорт узла")')).not.toBeVisible();
   });
 
