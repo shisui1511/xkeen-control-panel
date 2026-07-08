@@ -292,7 +292,7 @@
   function getCountryFlag(nodeName: string): string {
     const lower = nodeName.toLowerCase();
     for (const [key, emoji] of Object.entries(flagMap)) {
-      const escapedKey = key.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const escapedKey = key.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
       const regex = new RegExp(`\\b${escapedKey}\\b|${escapedKey}`, 'i');
       if (regex.test(lower)) {
         return emoji;
@@ -1293,6 +1293,7 @@
             {@const isCollapsed = collapsedGroups.has(group.name)}
             {@const collapsible = group.all.length > 8}
             {@const nodes = getFilteredNodes(group, searchDebouncedQuery)}
+            {@const icon = getGroupIcon(group.name)}
             <div class="group-card">
               <div
                 class="gc-head"
@@ -1305,9 +1306,9 @@
                   (e.key === 'Enter' || e.key === ' ') && collapsible && toggleCollapse(group.name)}
               >
                 <div class="gc-head-row1">
-                  {#if getGroupIcon(group.name)}
-                    {@const icon = getGroupIcon(group.name)}
+                  {#if icon}
                     <span class="group-icon-wrap" style="color: {icon.color}; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 6px;">
+                      <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                       {@html icon.svg}
                     </span>
                   {/if}

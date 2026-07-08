@@ -501,6 +501,7 @@
             {/each}
           {:else}
             {#each filteredConnections as conn (conn.id)}
+              {@const speed = connectionSpeeds.get(conn.id)}
               <tr class="conn-row">
                 <td class="mono col-src">{getSourceName(conn)}</td>
                 <td class="mono col-host">
@@ -532,8 +533,8 @@
                   style="text-align:right;color:var(--accent);"
                 >
                   <div>{formatBytes(conn.upload)}</div>
-                  {#if connectionSpeeds.has(conn.id)}
-                    <div class="speed-sub">{formatBytes(connectionSpeeds.get(conn.id).uploadSpeed)}/s</div>
+                  {#if speed}
+                    <div class="speed-sub">{formatBytes(speed.uploadSpeed)}/s</div>
                   {/if}
                 </td>
                 <td
@@ -541,8 +542,8 @@
                   style="text-align:right;color:var(--accent);"
                 >
                   <div>{formatBytes(conn.download)}</div>
-                  {#if connectionSpeeds.has(conn.id)}
-                    <div class="speed-sub">{formatBytes(connectionSpeeds.get(conn.id).downloadSpeed)}/s</div>
+                  {#if speed}
+                    <div class="speed-sub">{formatBytes(speed.downloadSpeed)}/s</div>
                   {/if}
                 </td>
                 <td class="mono col-duration" style="text-align:right;color:var(--fg-dim);">

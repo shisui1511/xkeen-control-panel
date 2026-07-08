@@ -7,7 +7,10 @@
     id: string;
     name: string;
     profile_title?: string;
+    url: string;
     enabled: boolean;
+    interval: number;
+    use_provider_interval: boolean;
     enable_xray: boolean;
     enable_mihomo: boolean;
     mihomo_integrated: boolean;

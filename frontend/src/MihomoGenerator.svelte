@@ -510,6 +510,8 @@
 
   let selectedMetaRuleSets: Map<string, string> = new Map();
 
+  const META_BASE_URL = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
+
   function buildMetaRuleSetUrl(id: string, type: 'geosite' | 'geoip'): string {
     return `${META_BASE_URL}/${type}/${id}.mrs`;
   }
@@ -1910,7 +1912,7 @@
                     url: 'https://www.gstatic.com/generate_204',
                     interval: 300,
                     useProviders: [],
-                    strategy: 'consistent-hash'
+                    strategy: 'consistent-hashing'
                   };
                 }}
               />

@@ -1402,7 +1402,9 @@
             {$t('settings.snapshot_uploading')}
           </div>
         {:else}
-          <Icon name="upload" size={32} color={isDragOver ? '#29c2f0' : 'var(--fg-dim)'} style="transition: color 0.3s; margin-bottom: 4px;" />
+          <span style="transition: color 0.3s; margin-bottom: 4px; display: inline-flex;">
+            <Icon name="upload" size={32} color={isDragOver ? '#29c2f0' : 'var(--fg-dim)'} />
+          </span>
           <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
             {isDragOver ? 'Отпустите файл для загрузки' : 'Выберите или перетащите файл резервной копии (.tar.gz) сюда'}
           </div>

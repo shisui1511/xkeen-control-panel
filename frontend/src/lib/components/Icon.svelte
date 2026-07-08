@@ -33,6 +33,7 @@
   import Download from './icons/Download.svelte';
   import Trash from './icons/Trash.svelte';
   import ArrowDown from './icons/ArrowDown.svelte';
+  import Upload from './icons/Upload.svelte';
 
   let {
     name,
@@ -113,4 +114,6 @@
   <Download {size} {color} class={className} />
 {:else if name === 'arrow-down'}
   <ArrowDown {size} {color} class={className} />
+{:else if name === 'upload'}
+  <Upload {size} {color} class={className} />
 {/if}

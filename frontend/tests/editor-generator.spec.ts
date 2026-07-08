@@ -373,10 +373,9 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await mihomoBtn.click();
 
     // Выбрать пресет zkeen-selective
-    const presetSelect = page.locator
-      (
-        'select.preset-select, [data-testid="preset-select"], select#preset-select'
-      );
+    const presetSelect = page.locator(
+      'select.preset-select, [data-testid="preset-select"], select#preset-select'
+    );
     await expect(presetSelect).toBeVisible({ timeout: 5000 });
     await presetSelect.selectOption('zkeen-selective');
 

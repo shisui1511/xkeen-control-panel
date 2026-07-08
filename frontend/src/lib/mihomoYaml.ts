@@ -1020,7 +1020,7 @@ export interface ParsedMihomoConfig {
   preservedKeys: string[];
   existingTproxyPort: number | null;
   existingRedirPort: number | null;
-  mihomoProviders?: any[];
+  mihomoProviders: any[];
 }
 
 export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
@@ -1519,7 +1519,7 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
             const rawParts = trimmed.substring(1).split(',').map(s => s.trim());
             if (rawParts.length > 0) {
               ruleType = rawParts[0];
-              let remaining = rawParts.slice(1);
+              const remaining = rawParts.slice(1);
               if (remaining.length > 0 && remaining[remaining.length - 1] === 'no-resolve') {
                 noResolve = true;
                 remaining.pop();
@@ -1575,7 +1575,7 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
         }
 
         // Detect a new provider block: "  provider-name:"
-        const providerNameMatch = line.match(/^  ([a-zA-Z0-9_\-@\.]+):\s*$/);
+        const providerNameMatch = line.match(/^ {2}([a-zA-Z0-9_\-@.]+):\s*$/);
         if (providerNameMatch) {
           if (currentProvider) {
             parsed.mihomoProviders.push(currentProvider);
