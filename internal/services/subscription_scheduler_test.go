@@ -98,7 +98,7 @@ func TestSubscriptionService_UpdateMihomoProviderNameChange(t *testing.T) {
 	configPath := filepath.Join(mihomoDir, "config.yaml")
 	oldProviderName := GetMihomoProviderName("", "Old Name", "https://example.com/old-sub", id)
 	_ = os.WriteFile(configPath, []byte("proxy-groups:\n  - name: Proxy\n    use:\n      - "+oldProviderName+"\nproxy-providers:\n  "+oldProviderName+":\n    type: http\n"), 0600)
-	
+
 	providerDir := filepath.Join(mihomoDir, "proxy_providers")
 	_ = os.MkdirAll(providerDir, 0755)
 	providerPath := filepath.Join(providerDir, fmt.Sprintf("%s.yaml", oldProviderName))

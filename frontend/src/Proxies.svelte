@@ -109,7 +109,9 @@
 
   // Active tab state: 'groups' | 'providers'
   let activeTab = $state<'groups' | 'providers'>(
-    (typeof window !== 'undefined' && (window.location.hash.includes('tab=providers') || window.location.search.includes('tab=providers')))
+    typeof window !== 'undefined' &&
+      (window.location.hash.includes('tab=providers') ||
+        window.location.search.includes('tab=providers'))
       ? 'providers'
       : 'groups'
   );
@@ -272,21 +274,53 @@
 
   // Country Flag Emoji definitions
   const flagMap: Record<string, string> = {
-    RU: '🇷🇺', Russia: '🇷🇺', Россия: '🇷🇺',
-    US: '🇺🇸', USA: '🇺🇸', США: '🇺🇸',
-    GB: '🇬🇧', UK: '🇬🇧', 'United Kingdom': '🇬🇧', Англия: '🇬🇧',
-    DE: '🇩🇪', Germany: '🇩🇪', Германия: '🇩🇪',
-    NL: '🇳🇱', Netherlands: '🇳🇱', Нидерланды: '🇳🇱',
-    FR: '🇫🇷', France: '🇫🇷', Франция: '🇫🇷',
-    FI: '🇫🇮', Finland: '🇫🇮', Финляндия: '🇫🇮',
-    TR: '🇹🇷', Turkey: '🇹🇷', Турция: '🇹🇷',
-    SG: '🇸🇬', Singapore: '🇸🇬', Сингапур: '🇸🇬',
-    JP: '🇯🇵', Japan: '🇯🇵', Япония: '🇯🇵',
-    HK: '🇭🇰', 'Hong Kong': '🇭🇰', Гонконг: '🇭🇰',
-    TW: '🇹🇼', Taiwan: '🇹🇼', Тайвань: '🇹🇼',
-    KR: '🇰🇷', 'South Korea': '🇰🇷', Корея: '🇰🇷', Seoul: '🇰🇷',
-    IN: '🇮🇳', India: '🇮🇳', Индия: '🇮🇳',
-    BR: '🇧🇷', Brazil: '🇧🇷', Бразилия: '🇧🇷'
+    RU: '🇷🇺',
+    Russia: '🇷🇺',
+    Россия: '🇷🇺',
+    US: '🇺🇸',
+    USA: '🇺🇸',
+    США: '🇺🇸',
+    GB: '🇬🇧',
+    UK: '🇬🇧',
+    'United Kingdom': '🇬🇧',
+    Англия: '🇬🇧',
+    DE: '🇩🇪',
+    Germany: '🇩🇪',
+    Германия: '🇩🇪',
+    NL: '🇳🇱',
+    Netherlands: '🇳🇱',
+    Нидерланды: '🇳🇱',
+    FR: '🇫🇷',
+    France: '🇫🇷',
+    Франция: '🇫🇷',
+    FI: '🇫🇮',
+    Finland: '🇫🇮',
+    Финляндия: '🇫🇮',
+    TR: '🇹🇷',
+    Turkey: '🇹🇷',
+    Турция: '🇹🇷',
+    SG: '🇸🇬',
+    Singapore: '🇸🇬',
+    Сингапур: '🇸🇬',
+    JP: '🇯🇵',
+    Japan: '🇯🇵',
+    Япония: '🇯🇵',
+    HK: '🇭🇰',
+    'Hong Kong': '🇭🇰',
+    Гонконг: '🇭🇰',
+    TW: '🇹🇼',
+    Taiwan: '🇹🇼',
+    Тайвань: '🇹🇼',
+    KR: '🇰🇷',
+    'South Korea': '🇰🇷',
+    Корея: '🇰🇷',
+    Seoul: '🇰🇷',
+    IN: '🇮🇳',
+    India: '🇮🇳',
+    Индия: '🇮🇳',
+    BR: '🇧🇷',
+    Brazil: '🇧🇷',
+    Бразилия: '🇧🇷'
   };
 
   function getCountryFlag(nodeName: string): string {
@@ -333,8 +367,12 @@
     searchDebouncedQuery.trim() === ''
       ? groups
       : groups.filter((g) => {
-          const groupMatch = g.name.toLowerCase().includes(searchDebouncedQuery.trim().toLowerCase());
-          const nodesMatch = g.all.some((node) => node.toLowerCase().includes(searchDebouncedQuery.trim().toLowerCase()));
+          const groupMatch = g.name
+            .toLowerCase()
+            .includes(searchDebouncedQuery.trim().toLowerCase());
+          const nodesMatch = g.all.some((node) =>
+            node.toLowerCase().includes(searchDebouncedQuery.trim().toLowerCase())
+          );
           return groupMatch || nodesMatch;
         })
   );
@@ -727,7 +765,10 @@
         if (inProxyGroups) {
           if (line.startsWith('-') || line.startsWith(' ') || line.trim() === '') {
             if (trimmed.startsWith('- name:')) {
-              const name = trimmed.replace('- name:', '').trim().replace(/^['"]|['"]$/g, '');
+              const name = trimmed
+                .replace('- name:', '')
+                .trim()
+                .replace(/^['"]|['"]$/g, '');
               if (name) groupNames.push(name);
             }
           } else {
@@ -1107,14 +1148,30 @@
     {#if activeTab === 'groups'}
       <div class="ph-actions">
         <button class="btn btn-secondary" onclick={collapseAll} title={$t('proxies.collapse_all')}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right: 6px;"
+          >
             <polyline points="18 15 12 9 6 15" />
             <polyline points="18 20 12 14 6 20" />
           </svg>
           {$t('proxies.collapse_all') || 'Свернуть все'}
         </button>
         <button class="btn btn-secondary" onclick={expandAll} title={$t('proxies.expand_all')}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right: 6px;"
+          >
             <polyline points="6 9 12 15 18 9" />
             <polyline points="6 4 12 10 18 4" />
           </svg>
@@ -1188,14 +1245,14 @@
     <button
       class="tab-btn"
       class:active={activeTab === 'groups'}
-      onclick={() => activeTab = 'groups'}
+      onclick={() => (activeTab = 'groups')}
     >
       {$t('proxies.tab_groups') || 'Группы'}
     </button>
     <button
       class="tab-btn"
       class:active={activeTab === 'providers'}
-      onclick={() => activeTab = 'providers'}
+      onclick={() => (activeTab = 'providers')}
     >
       {$t('proxies.tab_providers') || 'Провайдеры'}
     </button>
@@ -1233,7 +1290,9 @@
             <div class="stat-box">
               <div class="stat-label">{$t('proxies.obs_total')}</div>
               <div class="stat-value">{stats.totalProxies}</div>
-              <div class="res-sub">{$t('proxies.obs_total_sub', { groupsCount: groups.length })}</div>
+              <div class="res-sub">
+                {$t('proxies.obs_total_sub', { groupsCount: groups.length })}
+              </div>
             </div>
             <div class="stat-box">
               <div class="stat-label">{$t('proxies.obs_healthy')}</div>
@@ -1307,32 +1366,41 @@
               >
                 <div class="gc-head-row1">
                   {#if icon}
-                    <span class="group-icon-wrap" style="color: {icon.color}; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 6px;">
+                    <span
+                      class="group-icon-wrap"
+                      style="color: {icon.color}; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 6px;"
+                    >
                       <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                       {@html icon.svg}
                     </span>
                   {/if}
                   <span class="name">{group.name}</span>
                   <span class="type-badge">{group.type.toUpperCase()}</span>
-                  
+
                   {#if group.now}
                     {@const latencyClass = getLatencyClass(group.now)}
                     {@const latencyText = getLatencyText(group.now)}
                     <div class="gc-lat-box {latencyClass}">{latencyText}</div>
                   {/if}
-                  
+
                   {#if collapsible}
                     <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
-                      <ChevronDown size={14} color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'} />
+                      <ChevronDown
+                        size={14}
+                        color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
+                      />
                     </span>
                   {/if}
                 </div>
-                
+
                 <div class="gc-head-row2">
-                  <span class="gc-count-text">{group.all.length} {$t('proxies.obs_unreachable_sub') ? 'узлов' : 'nodes'}</span>
+                  <span class="gc-count-text"
+                    >{group.all.length}
+                    {$t('proxies.obs_unreachable_sub') ? 'узлов' : 'nodes'}</span
+                  >
                   <span class="gc-separator">·</span>
                   <span class="gc-active-label">{$t('proxies.active') || 'Активен'}:</span>
-                  
+
                   {#each getSelectionChain(group.name) as item, index}
                     {@const itemFlag = !item.isGroup ? getCountryFlag(item.name) : null}
                     {@const itemLatencyText = getLatencyText(item.name)}
@@ -1340,9 +1408,22 @@
                     {#if index > 0}
                       <span class="gc-arrow">›</span>
                     {/if}
-                    <div class="gc-now-pill" class:is-leaf={!item.isGroup} class:lat-ok={itemLatencyClass === 'lat ok'} class:lat-mid={itemLatencyClass === 'lat mid'} class:lat-bad={itemLatencyClass === 'lat bad'}>
-                      <div class="gc-now-dot" class:is-leaf={!item.isGroup} class:lat-ok={itemLatencyClass === 'lat ok'} class:lat-mid={itemLatencyClass === 'lat mid'} class:lat-bad={itemLatencyClass === 'lat bad'}></div>
-                      {#if itemFlag}{itemFlag} {/if}{item.name}
+                    <div
+                      class="gc-now-pill"
+                      class:is-leaf={!item.isGroup}
+                      class:lat-ok={itemLatencyClass === 'lat ok'}
+                      class:lat-mid={itemLatencyClass === 'lat mid'}
+                      class:lat-bad={itemLatencyClass === 'lat bad'}
+                    >
+                      <div
+                        class="gc-now-dot"
+                        class:is-leaf={!item.isGroup}
+                        class:lat-ok={itemLatencyClass === 'lat ok'}
+                        class:lat-mid={itemLatencyClass === 'lat mid'}
+                        class:lat-bad={itemLatencyClass === 'lat bad'}
+                      ></div>
+                      {#if itemFlag}{itemFlag}
+                      {/if}{item.name}
                     </div>
                   {:else}
                     <span style="color:var(--fg-dim)">—</span>
@@ -1359,7 +1440,9 @@
                     <button
                       class="dot-indicator {healthClass}"
                       class:now={isActive}
-                      title={group.type === 'Selector' ? `${proxyName}: ${healthText}` : $t('proxies.managed_automatically')}
+                      title={group.type === 'Selector'
+                        ? `${proxyName}: ${healthText}`
+                        : $t('proxies.managed_automatically')}
                       aria-label="{proxyName}: {healthText}"
                       style={group.type === 'Selector' ? 'cursor: pointer;' : 'cursor: default;'}
                       onclick={(e) => {
@@ -1386,8 +1469,11 @@
                       class:now={isActive}
                       role="button"
                       tabindex={group.type === 'Selector' ? 0 : -1}
-                      title={group.type !== 'Selector' ? $t('proxies.managed_automatically') : undefined}
-                      onclick={() => group.type === 'Selector' && selectProxy(group.name, proxyName)}
+                      title={group.type !== 'Selector'
+                        ? $t('proxies.managed_automatically')
+                        : undefined}
+                      onclick={() =>
+                        group.type === 'Selector' && selectProxy(group.name, proxyName)}
                       onkeydown={(e) =>
                         e.key === 'Enter' &&
                         group.type === 'Selector' &&
@@ -1396,7 +1482,8 @@
                     >
                       <div class="p-header">
                         <span class="p-name">
-                          {#if flag}{flag} {/if}{proxyName}
+                          {#if flag}{flag}
+                          {/if}{proxyName}
                         </span>
                         <span class="p-type">{getProxyTypeLabel(proxy)}</span>
                       </div>
@@ -1408,12 +1495,18 @@
                           {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
                             <button
                               class="btn-latency-test"
-                              onclick={(e) => { e.stopPropagation(); testProxyLatency(proxyName); }}
+                              onclick={(e) => {
+                                e.stopPropagation();
+                                testProxyLatency(proxyName);
+                              }}
                               disabled={testingProxy === proxyName}
                               title={$t('proxies.test_single')}
                             >
                               {#if testingProxy === proxyName}
-                                <span class="spinner" style="font-size: 10px; font-family: monospace;">...</span>
+                                <span
+                                  class="spinner"
+                                  style="font-size: 10px; font-family: monospace;">...</span
+                                >
                               {:else}
                                 <svg
                                   width="12"
@@ -1423,13 +1516,16 @@
                                   stroke="currentColor"
                                   stroke-width="2"
                                   style="opacity: 0.6;"
-                                ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg>
+                                  ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
+                                >
                               {/if}
                             </button>
                           {/if}
 
                           {#if group.type === 'Selector'}
-                            <span class="selector-dot" class:active={isActive}>{isActive ? '●' : '○'}</span>
+                            <span class="selector-dot" class:active={isActive}
+                              >{isActive ? '●' : '○'}</span
+                            >
                           {/if}
                         </div>
                       </div>
@@ -1467,7 +1563,9 @@
           class="card text-center"
           style="padding: 3rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;"
         >
-          <p style="color: var(--fg-secondary); margin: 0;">{$t('subscr.empty') || 'Список подписок пуст'}</p>
+          <p style="color: var(--fg-secondary); margin: 0;">
+            {$t('subscr.empty') || 'Список подписок пуст'}
+          </p>
           <button class="btn btn-primary" onclick={openAddModal}>
             <svg
               width="14"
@@ -1535,10 +1633,10 @@
 {#if showDiagnosticModal && diagnosticSub}
   <NodeImporter
     {diagnosticSub}
-    diagnosticTab={diagnosticTab}
-    diagnosticLoading={diagnosticLoading}
-    parseReportData={parseReportData}
-    rawResponseData={rawResponseData}
+    {diagnosticTab}
+    {diagnosticLoading}
+    {parseReportData}
+    {rawResponseData}
     onClose={closeDiagnosticModal}
     onTabChange={(tab) => (diagnosticTab = tab)}
   />
@@ -1606,7 +1704,9 @@
     transition: all 0.2s ease;
   }
   .group-card:hover {
-    box-shadow: 0 4px 20px rgba(0,0,0,0.35), 0 0 0 1px rgba(41, 194, 240, 0.15);
+    box-shadow:
+      0 4px 20px rgba(0, 0, 0, 0.35),
+      0 0 0 1px rgba(41, 194, 240, 0.15);
   }
   .group-card.skeleton-card {
     border-style: dashed;
@@ -1625,7 +1725,10 @@
   .group-card .gc-head::before {
     content: '';
     position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     background: radial-gradient(ellipse at top left, rgba(41, 194, 240, 0.05), transparent 60%);
     pointer-events: none;
   }
@@ -1803,7 +1906,9 @@
   .proxy-card.now {
     background: linear-gradient(135deg, rgba(41, 194, 240, 0.12), rgba(41, 194, 240, 0.04));
     border-color: rgba(41, 194, 240, 0.45);
-    box-shadow: inset 0 0 0 1px rgba(41, 194, 240, 0.08), 0 2px 8px rgba(41, 194, 240, 0.08);
+    box-shadow:
+      inset 0 0 0 1px rgba(41, 194, 240, 0.08),
+      0 2px 8px rgba(41, 194, 240, 0.08);
   }
   .proxy-card .p-header {
     display: flex;
@@ -1864,13 +1969,17 @@
     border: none;
     padding: 0;
     background: var(--fg-dim);
-    transition: transform 0.2s, box-shadow 0.2s;
+    transition:
+      transform 0.2s,
+      box-shadow 0.2s;
   }
   .dot-indicator:hover {
     transform: scale(1.4);
   }
   .dot-indicator.now {
-    box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px var(--accent);
+    box-shadow:
+      0 0 0 2px var(--bg-card),
+      0 0 0 4px var(--accent);
   }
   .dot-indicator.ok {
     background: var(--success);

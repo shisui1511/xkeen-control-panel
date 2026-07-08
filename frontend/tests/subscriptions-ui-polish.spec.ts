@@ -160,7 +160,9 @@ proxy-groups:
     expect(savedPayload.tag_prefix).toBe('');
   });
 
-  test('displays format error badge and detailed message if subscription has last_error', async ({ page }) => {
+  test('displays format error badge and detailed message if subscription has last_error', async ({
+    page
+  }) => {
     // Mock subscriptions with one format error subscription
     await page.route('**/api/subscriptions', async (route: Route) => {
       await route.fulfill({
@@ -174,7 +176,8 @@ proxy-groups:
             enable_mihomo: true,
             enable_xray: false,
             enabled: true,
-            last_error: 'данная подписка не имеет формата Clash/Mihomo YAML и не поддерживается ядром Mihomo. Пожалуйста, убедитесь, что подписка возвращает Clash YAML формат',
+            last_error:
+              'данная подписка не имеет формата Clash/Mihomo YAML и не поддерживается ядром Mihomo. Пожалуйста, убедитесь, что подписка возвращает Clash YAML формат',
             proxy_count: 0
           }
         ])
@@ -198,7 +201,9 @@ proxy-groups:
     await expect(errorDesc).toContainText('данная подписка не имеет формата Clash/Mihomo YAML');
   });
 
-  test('MihomoGenerator import button is disabled if there are no Xray subscriptions', async ({ page }) => {
+  test('MihomoGenerator import button is disabled if there are no Xray subscriptions', async ({
+    page
+  }) => {
     // Mock subscription to return only a Mihomo subscription, meaning no Xray subscriptions exist
     await page.route('**/api/subscriptions', async (route: Route) => {
       await route.fulfill({
@@ -220,7 +225,9 @@ proxy-groups:
     await page.goto('/#/constructor');
     await page.locator('.constructor-kernel-toggle button:has-text("Mihomo")').click();
 
-    const importBtn = page.locator('.constructor-proxy-list button').filter({ hasText: 'Импортировать из Xray-подписок' });
+    const importBtn = page
+      .locator('.constructor-proxy-list button')
+      .filter({ hasText: 'Импортировать из Xray-подписок' });
     await expect(importBtn).toBeVisible();
     await expect(importBtn).toBeDisabled();
     await expect(importBtn).toHaveAttribute('title', /Нет доступных активных Xray-подписок/);
@@ -248,9 +255,14 @@ proxy-groups:
     await page.goto('/#/constructor');
     await page.locator('.constructor-kernel-toggle button:has-text("Mihomo")').click();
 
-    const importBtn = page.locator('.constructor-proxy-list button').filter({ hasText: 'Импортировать из Xray-подписок' });
+    const importBtn = page
+      .locator('.constructor-proxy-list button')
+      .filter({ hasText: 'Импортировать из Xray-подписок' });
     await expect(importBtn).toBeVisible();
     await expect(importBtn).toBeEnabled();
-    await expect(importBtn).toHaveAttribute('title', /Импортировать прокси-серверы из существующих/);
+    await expect(importBtn).toHaveAttribute(
+      'title',
+      /Импортировать прокси-серверы из существующих/
+    );
   });
 });

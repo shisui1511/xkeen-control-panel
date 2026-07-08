@@ -11,21 +11,21 @@ import (
 
 // Config represents the main application configuration structure.
 type Config struct {
-	Port            int         `json:"port"`
-	XRayConfigDir   string      `json:"xray_config_dir"`
-	XKeenBinary     string      `json:"xkeen_binary"`
-	MihomoConfigDir string      `json:"mihomo_config_dir"`
-	MihomoBinary    string      `json:"mihomo_binary"`
-	MihomoAPIURL    string      `json:"mihomo_api_url"`
-	AllowedRoots    []string    `json:"allowed_roots"`
-	LogLevel        string      `json:"log_level"`
-	LogPath         string      `json:"log_path"`
-	XCPLogPath      string      `json:"xcp_log_path"`
-	LogSources      []string    `json:"log_sources"`
-	DataDir         string      `json:"data_dir"`
-	Auth            AuthConfig  `json:"auth"`
-	HTTPS           HTTPSConfig `json:"https"`
-	MihomoSecret    string      `json:"mihomo_secret"`
+	Port             int         `json:"port"`
+	XRayConfigDir    string      `json:"xray_config_dir"`
+	XKeenBinary      string      `json:"xkeen_binary"`
+	MihomoConfigDir  string      `json:"mihomo_config_dir"`
+	MihomoBinary     string      `json:"mihomo_binary"`
+	MihomoAPIURL     string      `json:"mihomo_api_url"`
+	AllowedRoots     []string    `json:"allowed_roots"`
+	LogLevel         string      `json:"log_level"`
+	LogPath          string      `json:"log_path"`
+	XCPLogPath       string      `json:"xcp_log_path"`
+	LogSources       []string    `json:"log_sources"`
+	DataDir          string      `json:"data_dir"`
+	Auth             AuthConfig  `json:"auth"`
+	HTTPS            HTTPSConfig `json:"https"`
+	MihomoSecret     string      `json:"mihomo_secret"`
 	UpdateChannel    string      `json:"update_channel"` // stable, beta, dev
 	TemplatesRepoURL string      `json:"templates_repo_url"`
 	DevMode          bool        `json:"dev_mode"`

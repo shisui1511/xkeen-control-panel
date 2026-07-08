@@ -39,7 +39,10 @@
           class="tab-close-btn"
           role="button"
           tabindex="-1"
-          onclick={(e) => { e.stopPropagation(); onCloseTab(tab.path); }}
+          onclick={(e) => {
+            e.stopPropagation();
+            onCloseTab(tab.path);
+          }}
           onkeydown={(e) => {
             e.stopPropagation();
             if (e.key === 'Enter' || e.key === ' ') onCloseTab(tab.path);

@@ -15,7 +15,9 @@ describe('slugifyProviderName', () => {
   });
 
   test('URL fallback when name is empty', () => {
-    expect(slugifyProviderName('', '', 'https://example.com/subscriptions/my-sub.yaml', 'fallback')).toBe('my-sub-yaml');
+    expect(
+      slugifyProviderName('', '', 'https://example.com/subscriptions/my-sub.yaml', 'fallback')
+    ).toBe('my-sub-yaml');
     expect(slugifyProviderName('', '', 'https://example.com/api/v1/sub', 'fallback')).toBe('sub');
     expect(slugifyProviderName('', '', 'invalid-url', 'fallback')).toBe('fallback');
     expect(slugifyProviderName('', '', '', 'fallback')).toBe('fallback');
@@ -74,7 +76,9 @@ describe('Mihomo YAML generation with proxy-providers and groups', () => {
     expect(yaml).toContain('  moya-podpiska:');
     expect(yaml).toContain('    type: http');
     expect(yaml).toContain('    path: ./proxy_providers/moya-podpiska.yaml');
-    expect(yaml).toContain('    url: "http://127.0.0.1:8090/mihomo/provider.yaml?url=https%3A%2F%2Fmihomo.com%2Fsub"');
+    expect(yaml).toContain(
+      '    url: "http://127.0.0.1:8090/mihomo/provider.yaml?url=https%3A%2F%2Fmihomo.com%2Fsub"'
+    );
     expect(yaml).toContain('    interval: 7200'); // 2 * 3600
     expect(yaml).not.toContain('User-Agent:');
     expect(yaml).not.toContain('x-hwid:');
@@ -144,12 +148,12 @@ rules:
   - DOMAIN,google.com,ProxyGroup
 `;
     const result = populateMihomoFromYAML(yaml);
-    
+
     expect(result.activeRuleProvider).toBe('zkeen');
-    
+
     const customRules = result.rules;
     expect(customRules).toHaveLength(2);
-    
+
     expect(customRules[0].type).toBe('IP-CIDR');
     expect(customRules[0].value).toBe('192.168.1.0/24');
     expect(customRules[0].outbound).toBe('DIRECT');
@@ -195,10 +199,14 @@ rules:
     };
 
     const yaml = generateYAML(mockState);
-    
+
     expect(yaml).toContain('- OR,((RULE-SET,meta@domain),(RULE-SET,meta@ipcidr,no-resolve)),Meta');
-    expect(yaml).toContain('- OR,((RULE-SET,telegram@domain),(RULE-SET,telegram@ipcidr,no-resolve)),Telegram');
-    expect(yaml).toContain('- OR,((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),Заблок. сервисы');
+    expect(yaml).toContain(
+      '- OR,((RULE-SET,telegram@domain),(RULE-SET,telegram@ipcidr,no-resolve)),Telegram'
+    );
+    expect(yaml).toContain(
+      '- OR,((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),Заблок. сервисы'
+    );
 
     expect(yaml).toContain('- IP-CIDR,192.168.1.0/24,DIRECT,no-resolve');
     expect(yaml).toContain('- DOMAIN,google.com,DIRECT');
@@ -237,22 +245,22 @@ proxies:
       path: /my-path
 `;
     const result = populateMihomoFromYAML(yaml);
-    
+
     expect(result.preservedKeys).not.toContain('external-controller');
     expect(result.preservedKeys).not.toContain('proxy-providers');
-    
+
     expect(result.proxies).toHaveLength(3);
-    
+
     const p1 = result.proxies[0];
     expect(p1.name).toBe('vless-reality');
     expect(p1.publicKey).toBe('my-pubkey');
     expect(p1.shortId).toBe('my-shortid');
-    
+
     const p2 = result.proxies[1];
     expect(p2.name).toBe('hysteria-obfs');
     expect(p2.obfsType).toBe('simple');
     expect(p2.obfsPassword).toBe('my-obfs-pass');
-    
+
     const p3 = result.proxies[2];
     expect(p3.name).toBe('vmess-ws');
     expect(p3.wsPath).toBe('/my-path');
@@ -283,9 +291,7 @@ describe('Phase 43: Mihomo Configurator Deep Analysis fixes', () => {
       selectedMetaRuleSets: new Map(),
       proxies: [],
       groups: [],
-      rules: [
-        { id: '1', type: 'DOMAIN', value: 'google.com', outbound: 'DIRECT' }
-      ],
+      rules: [{ id: '1', type: 'DOMAIN', value: 'google.com', outbound: 'DIRECT' }],
       dns: {},
       tun: {},
       sniffer: { enabled: false }
@@ -476,5 +482,3 @@ describe('Virtual proxy-providers in generateYAML', () => {
     expect(yaml).not.toContain('  legacy-ui-provider-');
   });
 });
-
-

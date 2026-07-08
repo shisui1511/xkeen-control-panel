@@ -38,7 +38,6 @@
   let trafficHistory = $state(new Map<string, TrafficHistory>());
   let connectionSpeeds = $state(new Map<string, { uploadSpeed: number; downloadSpeed: number }>());
 
-
   let loading = $state(false);
   let error = $state('');
   let wsConnected = $state(false);
@@ -62,7 +61,9 @@
   let processModePatchPending = $state(false);
 
   let uniqueRules = $derived([...new Set(connections.map((c) => c.rule).filter(Boolean))].sort());
-  let uniqueChains = $derived([...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort());
+  let uniqueChains = $derived(
+    [...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort()
+  );
   let isMihomoActive = $derived($capabilities === null || $capabilities.mihomo.reachable);
 
   async function loadProcessMode() {
@@ -132,7 +133,11 @@
             if (durationSec > 0.2) {
               uploadSpeed = Math.max(0, (conn.upload - prev.upload) / durationSec);
               downloadSpeed = Math.max(0, (conn.download - prev.download) / durationSec);
-              nextHistory.set(conn.id, { upload: conn.upload, download: conn.download, timestamp: now });
+              nextHistory.set(conn.id, {
+                upload: conn.upload,
+                download: conn.download,
+                timestamp: now
+              });
             } else {
               // Carry forward the previous speed if interval is too small
               const prevSpeed = connectionSpeeds.get(conn.id);
@@ -144,7 +149,11 @@
               nextHistory.set(conn.id, prev);
             }
           } else {
-            nextHistory.set(conn.id, { upload: conn.upload, download: conn.download, timestamp: now });
+            nextHistory.set(conn.id, {
+              upload: conn.upload,
+              download: conn.download,
+              timestamp: now
+            });
           }
 
           nextSpeeds.set(conn.id, { uploadSpeed, downloadSpeed });
@@ -597,7 +606,9 @@
     font-size: 13px;
     outline: none;
     cursor: pointer;
-    transition: border-color 0.2s, box-shadow var(--transition-fast);
+    transition:
+      border-color 0.2s,
+      box-shadow var(--transition-fast);
   }
   .filters .filter-input {
     cursor: text;
@@ -617,7 +628,6 @@
     color: var(--fg-dim);
     margin-top: 2px;
   }
-
 
   /* Toggle disabled state */
   .toggle-label.disabled {

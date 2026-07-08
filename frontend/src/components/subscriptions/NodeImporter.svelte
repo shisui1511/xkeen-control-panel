@@ -53,13 +53,7 @@
   }
 </script>
 
-<div
-  class="modal-overlay"
-  role="button"
-  tabindex="0"
-  onclick={onClose}
-  onkeydown={handleKeydown}
->
+<div class="modal-overlay" role="button" tabindex="0" onclick={onClose} onkeydown={handleKeydown}>
   <div class="modal-card modal-large" role="presentation" onclick={(e) => e.stopPropagation()}>
     <div class="modal-card-header">
       <h2>{diagnosticSub ? $t('subscr.diag_title').replace('{name}', diagnosticSub.name) : ''}</h2>

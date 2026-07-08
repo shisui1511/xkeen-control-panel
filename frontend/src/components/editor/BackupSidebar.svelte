@@ -54,13 +54,15 @@
           tabindex="0"
           onclick={() => onSelectBackup(backup)}
           onkeydown={(e) =>
-            (e.key === 'Enter' || e.key === ' ') &&
-            (e.preventDefault(), onSelectBackup(backup))}
+            (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onSelectBackup(backup))}
         >
           <span class="backup-time">{formatBackupDate(backup)}</span>
           <button
             class="btn btn-sm btn-secondary restore-inline-btn"
-            onclick={(e) => { e.stopPropagation(); onRestoreBackup(backup); }}
+            onclick={(e) => {
+              e.stopPropagation();
+              onRestoreBackup(backup);
+            }}
           >
             Восстановить
           </button>
@@ -102,9 +104,7 @@
           </div>
         </div>
       {:else}
-        <div class="drawer-empty-state">
-          Выберите резервную копию слева для сравнения изменений
-        </div>
+        <div class="drawer-empty-state">Выберите резервную копию слева для сравнения изменений</div>
       {/if}
     </div>
   </div>

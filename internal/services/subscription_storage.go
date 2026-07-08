@@ -323,7 +323,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			if sub.MihomoGroups != nil {
 				existing.MihomoGroups = sub.MihomoGroups
 			}
-			
+
 			if err := s.save(); err != nil {
 				return err
 			}
@@ -654,7 +654,7 @@ func (s *SubscriptionService) migrateFromMihomoConfig() bool {
 		existingURLs[urlClean] = i
 	}
 
-	cleanUrl := func(urlStr string) string {
+	cleanURL := func(urlStr string) string {
 		urlStr = strings.Trim(strings.TrimSpace(urlStr), `'"`)
 		if urlStr == "" {
 			return ""
@@ -709,7 +709,7 @@ func (s *SubscriptionService) migrateFromMihomoConfig() bool {
 			continue
 		}
 
-		originalURL := cleanUrl(pURL)
+		originalURL := cleanURL(pURL)
 		if originalURL == "" {
 			continue
 		}

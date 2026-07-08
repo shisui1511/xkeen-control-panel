@@ -397,7 +397,11 @@ export const ZKEEN_STANDARD_RULES = [
   { type: 'RULE-SET', value: 'adlist@domain', outbound: 'REJECT' },
   { type: 'RULE-SET', value: 'quic@inline', outbound: 'REJECT' },
   { type: 'RULE-SET', value: 'netbios@inline', outbound: 'REJECT' },
-  { type: 'OR', value: '((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net))', outbound: 'Заблок. сервисы' },
+  {
+    type: 'OR',
+    value: '((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net))',
+    outbound: 'Заблок. сервисы'
+  },
   { type: 'RULE-SET', value: 'category-ai@domain', outbound: 'AI' },
   { type: 'RULE-SET', value: 'steam@domain', outbound: 'Steam' },
   { type: 'RULE-SET', value: 'spotify@domain', outbound: 'Spotify' },
@@ -408,16 +412,32 @@ export const ZKEEN_STANDARD_RULES = [
   { type: 'RULE-SET', value: 'tiktok@domain', outbound: 'TikTok' },
   { type: 'RULE-SET', value: 'discord@classical', outbound: 'Discord' },
   { type: 'RULE-SET', value: 'speedtest@domain', outbound: 'Speedtest' },
-  { type: 'OR', value: '((RULE-SET,meta@domain),(RULE-SET,meta@ipcidr,no-resolve))', outbound: 'Meta' },
-  { type: 'OR', value: '((RULE-SET,telegram@domain),(RULE-SET,telegram@ipcidr,no-resolve))', outbound: 'Telegram' },
+  {
+    type: 'OR',
+    value: '((RULE-SET,meta@domain),(RULE-SET,meta@ipcidr,no-resolve))',
+    outbound: 'Meta'
+  },
+  {
+    type: 'OR',
+    value: '((RULE-SET,telegram@domain),(RULE-SET,telegram@ipcidr,no-resolve))',
+    outbound: 'Telegram'
+  },
   { type: 'RULE-SET', value: 'refilter@domain', outbound: 'Заблок. сервисы' },
   { type: 'OR', value: '((RULE-SET,roblox@domain))', outbound: 'Заблок. сервисы' },
   { type: 'RULE-SET', value: 'github@domain', outbound: 'GitHub' },
   { type: 'OR', value: '((RULE-SET,google@domain),(RULE-SET,google@ipcidr))', outbound: 'Google' },
   { type: 'OR', value: '((RULE-SET,amazon@domain),(RULE-SET,amazon@ipcidr))', outbound: 'CDN' },
   { type: 'OR', value: '((RULE-SET,akamai@domain),(RULE-SET,akamai@ipcidr))', outbound: 'CDN' },
-  { type: 'OR', value: '((RULE-SET,cloudflare@domain),(RULE-SET,cloudflare@ipcidr))', outbound: 'CDN' },
-  { type: 'OR', value: '((RULE-SET,digitalocean@domain),(RULE-SET,digitalocean@ipcidr))', outbound: 'CDN' },
+  {
+    type: 'OR',
+    value: '((RULE-SET,cloudflare@domain),(RULE-SET,cloudflare@ipcidr))',
+    outbound: 'CDN'
+  },
+  {
+    type: 'OR',
+    value: '((RULE-SET,digitalocean@domain),(RULE-SET,digitalocean@ipcidr))',
+    outbound: 'CDN'
+  },
   { type: 'OR', value: '((RULE-SET,fastly@domain),(RULE-SET,fastly@ipcidr))', outbound: 'CDN' },
   { type: 'OR', value: '((RULE-SET,oracle@domain),(RULE-SET,oracle@ipcidr))', outbound: 'CDN' },
   { type: 'OR', value: '((RULE-SET,hetzner@domain),(RULE-SET,hetzner@ipcidr))', outbound: 'CDN' },
@@ -480,7 +500,11 @@ export function findTopLevelSection(lines: string[], sectionName: string) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trimEnd();
-    if (trimmed === header || trimmed.startsWith(header + ' ') || trimmed.startsWith(header + '\t')) {
+    if (
+      trimmed === header ||
+      trimmed.startsWith(header + ' ') ||
+      trimmed.startsWith(header + '\t')
+    ) {
       if (line.length === line.trimStart().length) {
         start = i;
         break;
@@ -515,7 +539,9 @@ export function extractSection(yamlText: string, sectionName: string): string {
     const line = lines[i];
     const trimmed = line.trimEnd();
     if (
-      (trimmed === header || trimmed.startsWith(header + ' ') || trimmed.startsWith(header + '\t')) &&
+      (trimmed === header ||
+        trimmed.startsWith(header + ' ') ||
+        trimmed.startsWith(header + '\t')) &&
       line.length === line.trimStart().length
     ) {
       start = i;
@@ -539,7 +565,11 @@ export function extractSection(yamlText: string, sectionName: string): string {
   return resultLines.join('\n').trimEnd();
 }
 
-export function replaceMihomoTopLevelSection(content: string, sectionName: string, newContent: string): string {
+export function replaceMihomoTopLevelSection(
+  content: string,
+  sectionName: string,
+  newContent: string
+): string {
   const lines = content.split('\n');
   const { start, end } = findTopLevelSection(lines, sectionName);
   const newLines = newContent.trim() !== '' ? newContent.trimEnd().split('\n') : [];
@@ -589,14 +619,47 @@ export interface MihomoConfigState {
 }
 
 const CYRILLIC_MAP: Record<string, string> = {
-  'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'yo',
-  'ж':'zh','з':'z','и':'i','й':'j','к':'k','л':'l','м':'m',
-  'н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u',
-  'ф':'f','х':'kh','ц':'ts','ч':'ch','ш':'sh','щ':'shch',
-  'ы':'y','э':'e','ю':'yu','я':'ya','ь':'','ъ':''
+  а: 'a',
+  б: 'b',
+  в: 'v',
+  г: 'g',
+  д: 'd',
+  е: 'e',
+  ё: 'yo',
+  ж: 'zh',
+  з: 'z',
+  и: 'i',
+  й: 'j',
+  к: 'k',
+  л: 'l',
+  м: 'm',
+  н: 'n',
+  о: 'o',
+  п: 'p',
+  р: 'r',
+  с: 's',
+  т: 't',
+  у: 'u',
+  ф: 'f',
+  х: 'kh',
+  ц: 'ts',
+  ч: 'ch',
+  ш: 'sh',
+  щ: 'shch',
+  ы: 'y',
+  э: 'e',
+  ю: 'yu',
+  я: 'ya',
+  ь: '',
+  ъ: ''
 };
 
-export function slugifyProviderName(profileTitle: string, name: string, urlStr: string, fallback: string): string {
+export function slugifyProviderName(
+  profileTitle: string,
+  name: string,
+  urlStr: string,
+  fallback: string
+): string {
   let source = profileTitle || name;
   if (!source) {
     try {
@@ -611,7 +674,7 @@ export function slugifyProviderName(profileTitle: string, name: string, urlStr: 
   const slug = source
     .toLowerCase()
     .split('')
-    .map(c => CYRILLIC_MAP[c] ?? c)
+    .map((c) => CYRILLIC_MAP[c] ?? c)
     .join('')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
@@ -637,7 +700,12 @@ export function generateYAML(state: MihomoConfigState): string {
     for (const [i, sub] of providers.entries()) {
       const providerName = sub.isVirtual
         ? sub.id
-        : slugifyProviderName(sub.profile_title || '', sub.name || '', sub.url || '', sub.id || `provider-${i}`);
+        : slugifyProviderName(
+            sub.profile_title || '',
+            sub.name || '',
+            sub.url || '',
+            sub.id || `provider-${i}`
+          );
       lines.push(`  ${providerName}:`);
       if (sub.rawLines && sub.rawLines.length > 0) {
         let currentParent = '';
@@ -646,25 +714,29 @@ export function generateYAML(state: MihomoConfigState): string {
           let processedLine = rawLine;
           const trimmed = rawLine.trim();
           const lineIndent = rawLine.length - rawLine.trimStart().length;
-          
+
           if (currentParent && lineIndent <= parentIndent) {
             currentParent = '';
             parentIndent = 0;
           }
-          
+
           if (trimmed.endsWith(':') && !trimmed.startsWith('-')) {
             currentParent = trimmed.slice(0, -1).trim();
             parentIndent = lineIndent;
           }
-          
+
           if (trimmed.startsWith('url:')) {
-            processedLine = rawLine.substring(0, rawLine.indexOf('url:') + 4) + ` ${yamlSafeString(sub.url)}`;
+            processedLine =
+              rawLine.substring(0, rawLine.indexOf('url:') + 4) + ` ${yamlSafeString(sub.url)}`;
           } else if (trimmed.startsWith('interval:')) {
-            const intervalSec = sub.interval > 720 ? sub.interval : (sub.interval * 3600 || 86400);
-            processedLine = rawLine.substring(0, rawLine.indexOf('interval:') + 9) + ` ${intervalSec}`;
+            const intervalSec = sub.interval > 720 ? sub.interval : sub.interval * 3600 || 86400;
+            processedLine =
+              rawLine.substring(0, rawLine.indexOf('interval:') + 9) + ` ${intervalSec}`;
           } else if (currentParent === 'x-hwid' && trimmed.startsWith('-')) {
             if (sub.hwid_token) {
-              processedLine = rawLine.substring(0, rawLine.indexOf('-') + 1) + ` ${yamlSafeString(sub.hwid_token)}`;
+              processedLine =
+                rawLine.substring(0, rawLine.indexOf('-') + 1) +
+                ` ${yamlSafeString(sub.hwid_token)}`;
             }
           }
           lines.push(processedLine);
@@ -672,11 +744,14 @@ export function generateYAML(state: MihomoConfigState): string {
       } else {
         lines.push(`    type: http`);
         lines.push(`    path: ./proxy_providers/${providerName}.yaml`);
-        const currentPort = (typeof window !== 'undefined' && window.location.port && window.location.port !== '5173')
-          ? window.location.port
-          : '8090';
-        lines.push(`    url: "http://127.0.0.1:${currentPort}/mihomo/provider.yaml?url=${encodeURIComponent(sub.url || '')}"`);
-        const intervalSec = sub.interval > 720 ? sub.interval : (sub.interval * 3600 || 86400);
+        const currentPort =
+          typeof window !== 'undefined' && window.location.port && window.location.port !== '5173'
+            ? window.location.port
+            : '8090';
+        lines.push(
+          `    url: "http://127.0.0.1:${currentPort}/mihomo/provider.yaml?url=${encodeURIComponent(sub.url || '')}"`
+        );
+        const intervalSec = sub.interval > 720 ? sub.interval : sub.interval * 3600 || 86400;
         lines.push(`    interval: ${intervalSec}`);
         lines.push(`    health-check:`);
         lines.push(`      enable: true`);
@@ -706,7 +781,8 @@ export function generateYAML(state: MihomoConfigState): string {
     lines.push('      - "AND,((DST-PORT,139),(NETWORK,UDP))"');
 
     const metaBaseUrl = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
-    const buildMetaRuleSetUrl = (id: string, type: 'geosite' | 'geoip') => `${metaBaseUrl}/${type}/${id}.mrs`;
+    const buildMetaRuleSetUrl = (id: string, type: 'geosite' | 'geoip') =>
+      `${metaBaseUrl}/${type}/${id}.mrs`;
 
     if (state.activeRuleProvider === 'metacubex' && state.selectedMetaRuleSets.size > 0) {
       for (const [key, outbound] of state.selectedMetaRuleSets) {
@@ -720,7 +796,10 @@ export function generateYAML(state: MihomoConfigState): string {
         lines.push(`    interval: 86400`);
       }
     } else if (state.activeRuleProvider !== 'none' && state.activeRuleProvider !== 'metacubex') {
-      const providers = state.activeRuleProvider === 'zkeen' ? (state.ruleProviders || ZKEEN_RULE_PROVIDERS) : RULE_PROVIDERS[state.activeRuleProvider];
+      const providers =
+        state.activeRuleProvider === 'zkeen'
+          ? state.ruleProviders || ZKEEN_RULE_PROVIDERS
+          : RULE_PROVIDERS[state.activeRuleProvider];
       if (providers && providers.length > 0) {
         for (const rp of providers) {
           if (rp.name === 'quic@inline' || rp.name === 'netbios@inline') {
@@ -889,9 +968,11 @@ export function generateYAML(state: MihomoConfigState): string {
     if (state.activeRuleProvider === 'zkeen') {
       const activeRules = [...ZKEEN_STANDARD_RULES];
       if (state.hasZkeenGeodata) {
-        const refilterIdx = activeRules.findIndex(r => r.value === 'refilter@domain');
+        const refilterIdx = activeRules.findIndex((r) => r.value === 'refilter@domain');
         if (refilterIdx !== -1) {
-          activeRules.splice(refilterIdx + 1, 0,
+          activeRules.splice(
+            refilterIdx + 1,
+            0,
             { type: 'GEOSITE', value: 'DOMAINS', outbound: 'Заблок. сервисы' },
             { type: 'GEOSITE', value: 'OTHER', outbound: 'Заблок. сервисы' },
             { type: 'GEOSITE', value: 'POLITIC', outbound: 'Заблок. сервисы' }
@@ -936,7 +1017,10 @@ export function generateYAML(state: MihomoConfigState): string {
           lines.push(`  - RULE-SET,${type}-${id.replace(/[^a-z0-9-]/g, '-')},${outbound}`);
         }
       } else if (state.activeRuleProvider !== 'none') {
-        const providers = state.activeRuleProvider === 'zkeen' ? (state.ruleProviders || ZKEEN_RULE_PROVIDERS) : RULE_PROVIDERS[state.activeRuleProvider];
+        const providers =
+          state.activeRuleProvider === 'zkeen'
+            ? state.ruleProviders || ZKEEN_RULE_PROVIDERS
+            : RULE_PROVIDERS[state.activeRuleProvider];
         if (providers) {
           for (const rp of providers) {
             if (rp.name === 'quic@inline' || rp.name === 'netbios@inline') {
@@ -981,7 +1065,8 @@ export function generateYAML(state: MihomoConfigState): string {
   lines.push(`  enable: ${state.dns.enabled}`);
   if (state.dns.enabled) {
     lines.push(`  enhanced-mode: ${state.dns.enhancedMode}`);
-    if (state.dns.enhancedMode === 'fake-ip') lines.push(`  fake-ip-range: ${state.dns.fakeIPRange}`);
+    if (state.dns.enhancedMode === 'fake-ip')
+      lines.push(`  fake-ip-range: ${state.dns.fakeIPRange}`);
     lines.push(`  nameserver:`);
     for (const ns of state.dns.nameservers) lines.push(`    - ${yamlSafeString(ns)}`);
     if (state.dns.fallback.length > 0) {
@@ -1135,7 +1220,10 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
       if (inGroups) {
         const indentMatch = line.match(/^(\s*)-/);
         const indentLength = indentMatch ? indentMatch[1].length : 0;
-        const isNewGroup = line.startsWith('  -') || line.startsWith(' -') || (trimmed.startsWith('-') && indentLength < 4);
+        const isNewGroup =
+          line.startsWith('  -') ||
+          line.startsWith(' -') ||
+          (trimmed.startsWith('-') && indentLength < 4);
 
         if (isNewGroup) {
           if (currentGroup) {
@@ -1220,7 +1308,10 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
 
         const useMatch = trimmed.match(/^use:\s*\[(.+)\]$/);
         if (useMatch) {
-          currentGroup.useProviders = useMatch[1].split(',').map(s => unquote(s.trim())).filter(Boolean);
+          currentGroup.useProviders = useMatch[1]
+            .split(',')
+            .map((s) => unquote(s.trim()))
+            .filter(Boolean);
           continue;
         }
         if (trimmed === 'use:') {
@@ -1255,7 +1346,10 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           continue;
         }
 
-        if (inProxiesList && (trimmed.startsWith('-') || trimmed.startsWith('  -') || line.startsWith('    -'))) {
+        if (
+          inProxiesList &&
+          (trimmed.startsWith('-') || trimmed.startsWith('  -') || line.startsWith('    -'))
+        ) {
           const proxyItemMatch = trimmed.match(/^-\s*(.+)$/);
           if (proxyItemMatch) {
             currentGroup.proxies.push(unquote(proxyItemMatch[1]));
@@ -1432,13 +1526,19 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           parsed.dns.fallback = [];
           continue;
         }
-        if (inNameservers && (trimmed.startsWith('-') || trimmed.startsWith('  -') || line.startsWith('    -'))) {
+        if (
+          inNameservers &&
+          (trimmed.startsWith('-') || trimmed.startsWith('  -') || line.startsWith('    -'))
+        ) {
           const listMatch = trimmed.match(/^-\s*(.+)$/);
           if (listMatch) {
             parsed.dns.nameservers = [...parsed.dns.nameservers, unquote(listMatch[1])];
           }
         }
-        if (inFallback && (trimmed.startsWith('-') || trimmed.startsWith('  -') || line.startsWith('    -'))) {
+        if (
+          inFallback &&
+          (trimmed.startsWith('-') || trimmed.startsWith('  -') || line.startsWith('    -'))
+        ) {
           const listMatch = trimmed.match(/^-\s*(.+)$/);
           if (listMatch) {
             parsed.dns.fallback = [...parsed.dns.fallback, unquote(listMatch[1])];
@@ -1472,7 +1572,10 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           parsed.tun.dnsHijack = [];
           continue;
         }
-        if (inDnsHijack && (trimmed.startsWith('-') || trimmed.startsWith('  -') || line.startsWith('    -'))) {
+        if (
+          inDnsHijack &&
+          (trimmed.startsWith('-') || trimmed.startsWith('  -') || line.startsWith('    -'))
+        ) {
           const listMatch = trimmed.match(/^-\s*(.+)$/);
           if (listMatch) {
             parsed.tun.dnsHijack = [...parsed.tun.dnsHijack, unquote(listMatch[1])];
@@ -1516,7 +1619,10 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
               ruleOutbound = 'DIRECT';
             }
           } else {
-            const rawParts = trimmed.substring(1).split(',').map(s => s.trim());
+            const rawParts = trimmed
+              .substring(1)
+              .split(',')
+              .map((s) => s.trim());
             if (rawParts.length > 0) {
               ruleType = rawParts[0];
               const remaining = rawParts.slice(1);
@@ -1536,14 +1642,20 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
 
           if (ruleType) {
             // Check if it is a standard Zkeen rule
-            const isZkeenRule = ZKEEN_STANDARD_RULES.some(zr => 
-              zr.type === ruleType && zr.value === ruleValue && zr.outbound === ruleOutbound
+            const isZkeenRule = ZKEEN_STANDARD_RULES.some(
+              (zr) => zr.type === ruleType && zr.value === ruleValue && zr.outbound === ruleOutbound
             );
-            const isZkeenGeodataRule = (ruleType === 'GEOSITE' && ['DOMAINS', 'OTHER', 'POLITIC'].includes(ruleValue) && ruleOutbound === 'Заблок. сервисы');
+            const isZkeenGeodataRule =
+              ruleType === 'GEOSITE' &&
+              ['DOMAINS', 'OTHER', 'POLITIC'].includes(ruleValue) &&
+              ruleOutbound === 'Заблок. сервисы';
 
             if (isZkeenRule || isZkeenGeodataRule) {
               parsed.activeRuleProvider = 'zkeen';
-            } else if (ruleType === 'RULE-SET' && (ruleValue.startsWith('geosite-') || ruleValue.startsWith('geoip-'))) {
+            } else if (
+              ruleType === 'RULE-SET' &&
+              (ruleValue.startsWith('geosite-') || ruleValue.startsWith('geoip-'))
+            ) {
               parsed.activeRuleProvider = 'metacubex';
               const parts2 = ruleValue.split('-');
               const type = parts2[0] as 'geosite' | 'geoip';

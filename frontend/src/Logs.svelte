@@ -425,21 +425,30 @@
       </div>
     {/if}
 
-    <div 
-      class="logs-pane" 
-      bind:this={logContainer} 
+    <div
+      class="logs-pane"
+      bind:this={logContainer}
       bind:clientHeight={containerHeight}
       onscroll={handleScroll}
       style="position: relative;"
     >
       {#if totalItems > 0}
-        <div class="logs-spacer" style="height: {totalItems * ROW_HEIGHT}px; width: 100%; pointer-events: none; position: absolute; top: 0; left: 0;"></div>
-        
+        <div
+          class="logs-spacer"
+          style="height: {totalItems *
+            ROW_HEIGHT}px; width: 100%; pointer-events: none; position: absolute; top: 0; left: 0;"
+        ></div>
+
         {#each visibleLogs as item}
-          <div class="line" style="position: absolute; top: 0; left: 16px; right: 16px; height: {ROW_HEIGHT}px; transform: translateY({item.y}px); display: flex; align-items: center; box-sizing: border-box;">
+          <div
+            class="line"
+            style="position: absolute; top: 0; left: 16px; right: 16px; height: {ROW_HEIGHT}px; transform: translateY({item.y}px); display: flex; align-items: center; box-sizing: border-box;"
+          >
             <span class="ts">{item.log.timestamp}</span>
             {#if item.log.source}
-              <span class="src" style="color: {getSourceColor(item.log.source)};">[{item.log.source}]</span>
+              <span class="src" style="color: {getSourceColor(item.log.source)};"
+                >[{item.log.source}]</span
+              >
             {/if}
             <span class="lv-{item.log.level || 'info'}">{item.log.text}</span>
           </div>

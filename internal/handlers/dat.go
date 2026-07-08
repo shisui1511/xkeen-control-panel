@@ -141,4 +141,3 @@ func (a *API) DATSearch(w http.ResponseWriter, r *http.Request) {
 
 	JSONSuccess(w, res)
 }
-

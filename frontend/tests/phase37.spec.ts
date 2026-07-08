@@ -125,9 +125,7 @@ test.describe('Phase 37 integration tests (DAT Deep Search & Port Collision Warn
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
-            inbounds: [
-              { port: 1182, protocol: 'socks', tag: 'socks-inbound' }
-            ]
+            inbounds: [{ port: 1182, protocol: 'socks', tag: 'socks-inbound' }]
           })
         });
       } else if (url.includes('/api/config/read') && url.includes('config.yaml')) {
@@ -170,12 +168,18 @@ proxies:
     await page.waitForLoadState('networkidle');
 
     // 2. Click Tags button for geosite.dat
-    const tagsButton = page.locator('.dat-row:has-text("geosite.dat") button:has-text("Теги"), .dat-row:has-text("geosite.dat") button:has-text("Tags")').first();
+    const tagsButton = page
+      .locator(
+        '.dat-row:has-text("geosite.dat") button:has-text("Теги"), .dat-row:has-text("geosite.dat") button:has-text("Tags")'
+      )
+      .first();
     await expect(tagsButton).toBeVisible();
     await tagsButton.click();
 
     // 3. Verify tag drawer opens and shows the tags list
-    const googleTag = page.locator('.tag-item-name:has-text("google"), button:has-text("google")').first();
+    const googleTag = page
+      .locator('.tag-item-name:has-text("google"), button:has-text("google")')
+      .first();
     await expect(googleTag).toBeVisible({ timeout: 5000 });
     await googleTag.click();
 
@@ -184,7 +188,9 @@ proxies:
     await expect(page.locator('text=google.ru')).toBeVisible();
 
     // 5. Click "Load More" button to get page 1 entries
-    const loadMoreBtn = page.locator('button:has-text("Загрузить еще"), button:has-text("Load More")');
+    const loadMoreBtn = page.locator(
+      'button:has-text("Загрузить еще"), button:has-text("Load More")'
+    );
     await expect(loadMoreBtn).toBeVisible();
     await loadMoreBtn.click();
 
@@ -232,7 +238,9 @@ proxies:
     await expect(confirmModal).toBeVisible({ timeout: 5000 });
 
     // Click the "Apply and Restart" button in the modal to trigger the collision check
-    const confirmBtn = confirmModal.locator('button:has-text("Apply and Restart"), button:has-text("Применить и перезапустить")').first();
+    const confirmBtn = confirmModal
+      .locator('button:has-text("Apply and Restart"), button:has-text("Применить и перезапустить")')
+      .first();
     await expect(confirmBtn).toBeVisible();
     await confirmBtn.click();
 

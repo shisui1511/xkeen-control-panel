@@ -57,7 +57,19 @@
     error: string;
     search: string;
     copied: string;
-  } = { open: false, file: null, tag: '', entries: [], total: 0, page: 0, hasMore: false, loading: false, error: '', search: '', copied: '' };
+  } = {
+    open: false,
+    file: null,
+    tag: '',
+    entries: [],
+    total: 0,
+    page: 0,
+    hasMore: false,
+    loading: false,
+    error: '',
+    search: '',
+    copied: ''
+  };
 
   async function fetchFiles() {
     loading = true;
@@ -822,14 +834,25 @@
               style="padding: 4px; display: inline-flex; align-items: center; justify-content: center;"
               title={$t('dat.back_to_tags')}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
                 <line x1="19" y1="12" x2="5" y2="12"></line>
                 <polyline points="12 19 5 12 12 5"></polyline>
               </svg>
             </button>
             <span style="font-weight: 500;">{entryDrawer.tag}</span>
             {#if !entryDrawer.loading && entryDrawer.total > 0}
-              <span class="td-count">{$t('dat.entries_count', { count: entryDrawer.total.toLocaleString() })}</span>
+              <span class="td-count"
+                >{$t('dat.entries_count', { count: entryDrawer.total.toLocaleString() })}</span
+              >
             {/if}
           </div>
           <button class="td-close" onclick={closeTagBrowser} aria-label="Close">✕</button>
@@ -861,7 +884,13 @@
             autofocus
           />
           {#if entryDrawer.search}
-            <button class="td-clear" onclick={() => { entryDrawer.search = ''; handleEntrySearch(); }}>✕</button>
+            <button
+              class="td-clear"
+              onclick={() => {
+                entryDrawer.search = '';
+                handleEntrySearch();
+              }}>✕</button
+            >
           {/if}
         </div>
 
@@ -889,11 +918,25 @@
                     title={$currentLang === 'ru' ? 'Копировать запись' : 'Copy entry'}
                   >
                     {#if isCopied}
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                      >
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     {:else}
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                      >
                         <rect x="9" y="9" width="13" height="13" rx="2" />
                         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                       </svg>
@@ -904,9 +947,17 @@
 
               {#if entryDrawer.hasMore}
                 <div style="padding: 12px 20px; text-align: center;">
-                  <button class="btn btn-secondary btn-sm" onclick={loadMoreEntries} disabled={entryDrawer.loading} style="width: 100%;">
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    onclick={loadMoreEntries}
+                    disabled={entryDrawer.loading}
+                    style="width: 100%;"
+                  >
                     {#if entryDrawer.loading}
-                      <span class="spinner-circle" style="vertical-align: middle; margin-right: 6px;"></span>
+                      <span
+                        class="spinner-circle"
+                        style="vertical-align: middle; margin-right: 6px;"
+                      ></span>
                     {/if}
                     {$t('dat.load_more')}
                   </button>
@@ -985,7 +1036,9 @@
           {:else}
             <div class="td-list">
               {#each filteredTags as tag}
-                {@const ruleValue = tagDrawer.file ? getRuleValue(tagDrawer.file, tag.tag) : tag.tag}
+                {@const ruleValue = tagDrawer.file
+                  ? getRuleValue(tagDrawer.file, tag.tag)
+                  : tag.tag}
                 {@const isCopied = tagDrawer.copied === tag.tag}
                 <div class="td-tag-row" class:copied={isCopied}>
                   <button
@@ -1001,7 +1054,9 @@
                   <button
                     class="td-tag-copy-btn"
                     onclick={() => tagDrawer.file && copyTag(tagDrawer.file, tag.tag)}
-                    title={$currentLang === 'ru' ? `Копировать: ${ruleValue}` : `Copy: ${ruleValue}`}
+                    title={$currentLang === 'ru'
+                      ? `Копировать: ${ruleValue}`
+                      : `Copy: ${ruleValue}`}
                   >
                     {#if isCopied}
                       <svg
@@ -1494,7 +1549,9 @@
     width: 28px;
     height: 28px;
     border-radius: var(--radius-sm);
-    transition: color var(--transition-fast), background var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .td-tag-copy-btn:hover {
@@ -1543,7 +1600,9 @@
     height: 24px;
     border-radius: var(--radius-sm);
     flex-shrink: 0;
-    transition: color var(--transition-fast), background var(--transition-fast);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast);
   }
 
   .td-entry-copy-btn:hover {

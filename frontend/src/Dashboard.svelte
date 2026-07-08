@@ -112,10 +112,10 @@
 
   const isKernelCrashed = $derived(
     serviceStatus.xkeen === 'running' &&
-    $capabilities?.active_kernel &&
-    $capabilities.active_kernel !== 'none' &&
-    (($capabilities.active_kernel === 'mihomo' && serviceStatus.mihomo === 'stopped') ||
-     ($capabilities.active_kernel === 'xray' && serviceStatus.xray === 'stopped'))
+      $capabilities?.active_kernel &&
+      $capabilities.active_kernel !== 'none' &&
+      (($capabilities.active_kernel === 'mihomo' && serviceStatus.mihomo === 'stopped') ||
+        ($capabilities.active_kernel === 'xray' && serviceStatus.xray === 'stopped'))
   );
 
   const isDiskLow = $derived(
@@ -313,15 +313,19 @@
     return JSON.stringify({ line, fill });
   }
 
-  const sparklineData = $derived(loadHistory.length >= 2 ? JSON.parse(buildSparklinePath(loadHistory)) : null);
+  const sparklineData = $derived(
+    loadHistory.length >= 2 ? JSON.parse(buildSparklinePath(loadHistory)) : null
+  );
 
   // Quickstart checklist reactive state
-  const quickstartDoneCount = $derived([
-    true, // step 1 always done when card is visible (active_kernel === 'mihomo')
-    hasSubscription,
-    $mihomoApiAvailable,
-    serviceStatus.mihomo === 'running'
-  ].filter(Boolean).length);
+  const quickstartDoneCount = $derived(
+    [
+      true, // step 1 always done when card is visible (active_kernel === 'mihomo')
+      hasSubscription,
+      $mihomoApiAvailable,
+      serviceStatus.mihomo === 'running'
+    ].filter(Boolean).length
+  );
   const allQuickstartComplete = $derived(quickstartDoneCount === 4);
 
   function formatBytes(bytes: number): string {
@@ -745,7 +749,10 @@
                           >{$t('dash.problems.kernel_crash_title')}</strong
                         >
                         <div class="problem-desc">
-                          {$t('dash.problems.kernel_crash_desc').replace('{kernel}', $capabilities?.active_kernel || '')}
+                          {$t('dash.problems.kernel_crash_desc').replace(
+                            '{kernel}',
+                            $capabilities?.active_kernel || ''
+                          )}
                         </div>
                       </div>
                     </div>
@@ -760,11 +767,12 @@
                     <div class="problem-content">
                       <span class="problem-icon"><Icon name="warning" size={16} /></span>
                       <div>
-                        <strong class="problem-title"
-                          >{$t('dash.problems.disk_low_title')}</strong
-                        >
+                        <strong class="problem-title">{$t('dash.problems.disk_low_title')}</strong>
                         <div class="problem-desc">
-                          {$t('dash.problems.disk_low_desc').replace('{free}', formatBytes(systemStats.disk.free))}
+                          {$t('dash.problems.disk_low_desc').replace(
+                            '{free}',
+                            formatBytes(systemStats.disk.free)
+                          )}
                         </div>
                       </div>
                     </div>
@@ -779,11 +787,13 @@
                     <div class="problem-content">
                       <span class="problem-icon"><Icon name="warning" size={16} /></span>
                       <div>
-                        <strong class="problem-title"
-                          >{$t('dash.problems.ssl_expire_title')}</strong
+                        <strong class="problem-title">{$t('dash.problems.ssl_expire_title')}</strong
                         >
                         <div class="problem-desc">
-                          {$t('dash.problems.ssl_expire_desc').replace('{days}', String(systemStats.ssl_cert_days))}
+                          {$t('dash.problems.ssl_expire_desc').replace(
+                            '{days}',
+                            String(systemStats.ssl_cert_days)
+                          )}
                         </div>
                       </div>
                     </div>
@@ -952,12 +962,19 @@
                       {formatBytes(systemStats.disk.free)}
                     </div>
                     <div class="res-sub">
-                      {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })} из {formatBytes(systemStats.disk.total)} · {((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)}%
+                      {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })} из {formatBytes(
+                        systemStats.disk.total
+                      )} · {((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)}%
                     </div>
                     <div class="stat-bar">
                       <div
                         class="stat-bar-fill"
-                        style="width: {((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)}%; background: {getDiskBarColor(systemStats)}; box-shadow: 0 0 8px {getDiskBarColor(systemStats)};"
+                        style="width: {(
+                          (systemStats.disk.used / systemStats.disk.total) *
+                          100
+                        ).toFixed(1)}%; background: {getDiskBarColor(
+                          systemStats
+                        )}; box-shadow: 0 0 8px {getDiskBarColor(systemStats)};"
                       ></div>
                     </div>
                   </div>
@@ -1138,10 +1155,15 @@
               <!-- svelte-ignore a11y-no-static-element-interactions -->
               <div
                 class="qa-mini"
-                onclick={() => { switchTab('proxies'); window.location.hash = '#/proxies?tab=providers'; }}
+                onclick={() => {
+                  switchTab('proxies');
+                  window.location.hash = '#/proxies?tab=providers';
+                }}
                 role="button"
                 tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && (switchTab('proxies'), window.location.hash = '#/proxies?tab=providers')}
+                onkeydown={(e) =>
+                  e.key === 'Enter' &&
+                  (switchTab('proxies'), (window.location.hash = '#/proxies?tab=providers'))}
               >
                 <span class="qa-mini-ico"><Icon name="subscriptions" size={18} /></span>
                 <span
@@ -1177,8 +1199,7 @@
                 onkeydown={(e) => e.key === 'Enter' && switchTab('logs')}
               >
                 <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
-                <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 500 строк</span></span
-                >
+                <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 500 строк</span></span>
               </div>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -1233,7 +1254,6 @@
       <div transition:fade={{ duration: 150 }}>
         <Traffic />
       </div>
-
     {:else if currentTab === 'services'}
       <div transition:fade={{ duration: 150 }}>
         <Services onSwitchTab={switchTab} />

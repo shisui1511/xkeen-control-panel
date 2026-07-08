@@ -311,11 +311,10 @@ describe('mergeXrayFile (DNS-over-VLESS) — DNS-over-VLESS & tag preservation',
     const outbounds = result.outbounds as any[];
 
     expect(outbounds).toHaveLength(4);
-    expect(outbounds.find(o => o.tag === 'direct')).toBeDefined();
-    expect(outbounds.find(o => o.tag === 'block')).toBeDefined();
-    expect(outbounds.find(o => o.tag === 'dns-out')).toBeDefined();
-    expect(outbounds.find(o => o.tag === 'old-custom')).toBeUndefined();
-    expect(outbounds.find(o => o.tag === 'new-custom')).toBeDefined();
+    expect(outbounds.find((o) => o.tag === 'direct')).toBeDefined();
+    expect(outbounds.find((o) => o.tag === 'block')).toBeDefined();
+    expect(outbounds.find((o) => o.tag === 'dns-out')).toBeDefined();
+    expect(outbounds.find((o) => o.tag === 'old-custom')).toBeUndefined();
+    expect(outbounds.find((o) => o.tag === 'new-custom')).toBeDefined();
   });
 });
-

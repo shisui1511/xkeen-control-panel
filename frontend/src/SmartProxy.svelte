@@ -774,7 +774,10 @@
                     <div
                       class="grid-cell"
                       class:active={isCellActive}
-                      onmousedown={( e ) => { e.preventDefault(); handleCellMouseDown(d, h); }}
+                      onmousedown={(e) => {
+                        e.preventDefault();
+                        handleCellMouseDown(d, h);
+                      }}
                       onmouseenter={() => handleCellMouseEnter(d, h)}
                       role="presentation"
                     ></div>

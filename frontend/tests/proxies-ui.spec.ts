@@ -34,18 +34,78 @@ const MOCK_PROXIES = {
       alive: true
     },
     // Individual proxies with latency data
-    'RU-Node-01': { name: 'RU-Node-01', type: 'Vless', alive: true, history: [{ delay: 45, time: '' }] },
-    'US-Node-02': { name: 'US-Node-02', type: 'Vless', alive: true, history: [{ delay: 150, time: '' }] },
-    'NL-Node-03': { name: 'NL-Node-03', type: 'Vless', alive: true, history: [{ delay: 350, time: '' }] },
-    'DE-Node-04': { name: 'DE-Node-04', type: 'Vless', alive: false, history: [{ delay: 0, time: '' }] },
-    'LT-Node-05': { name: 'LT-Node-05', type: 'Vless', alive: true, history: [{ delay: 80, time: '' }] },
-    'EE-Node-06': { name: 'EE-Node-06', type: 'Vless', alive: true, history: [{ delay: 90, time: '' }] },
-    'SE-Node-07': { name: 'SE-Node-07', type: 'Vless', alive: true, history: [{ delay: 120, time: '' }] },
-    'AM-Node-08': { name: 'AM-Node-08', type: 'Vless', alive: true, history: [{ delay: 180, time: '' }] },
-    'ES-Node-09': { name: 'ES-Node-09', type: 'Vless', alive: true, history: [{ delay: 240, time: '' }] },
-    'FI-Node-10': { name: 'FI-Node-10', type: 'Vless', alive: true, history: [{ delay: 400, time: '' }] },
-    'SG-Node-11': { name: 'SG-Node-11', type: 'Vless', alive: true, history: [{ delay: 600, time: '' }] },
-    'GB-Node-12': { name: 'GB-Node-12', type: 'Vless', alive: true, history: [{ delay: 900, time: '' }] }
+    'RU-Node-01': {
+      name: 'RU-Node-01',
+      type: 'Vless',
+      alive: true,
+      history: [{ delay: 45, time: '' }]
+    },
+    'US-Node-02': {
+      name: 'US-Node-02',
+      type: 'Vless',
+      alive: true,
+      history: [{ delay: 150, time: '' }]
+    },
+    'NL-Node-03': {
+      name: 'NL-Node-03',
+      type: 'Vless',
+      alive: true,
+      history: [{ delay: 350, time: '' }]
+    },
+    'DE-Node-04': {
+      name: 'DE-Node-04',
+      type: 'Vless',
+      alive: false,
+      history: [{ delay: 0, time: '' }]
+    },
+    'LT-Node-05': {
+      name: 'LT-Node-05',
+      type: 'Vless',
+      alive: true,
+      history: [{ delay: 80, time: '' }]
+    },
+    'EE-Node-06': {
+      name: 'EE-Node-06',
+      type: 'Vless',
+      alive: true,
+      history: [{ delay: 90, time: '' }]
+    },
+    'SE-Node-07': {
+      name: 'SE-Node-07',
+      type: 'Vless',
+      alive: true,
+      history: [{ delay: 120, time: '' }]
+    },
+    'AM-Node-08': {
+      name: 'AM-Node-08',
+      type: 'Vless',
+      alive: true,
+      history: [{ delay: 180, time: '' }]
+    },
+    'ES-Node-09': {
+      name: 'ES-Node-09',
+      type: 'Vless',
+      alive: true,
+      history: [{ delay: 240, time: '' }]
+    },
+    'FI-Node-10': {
+      name: 'FI-Node-10',
+      type: 'Vless',
+      alive: true,
+      history: [{ delay: 400, time: '' }]
+    },
+    'SG-Node-11': {
+      name: 'SG-Node-11',
+      type: 'Vless',
+      alive: true,
+      history: [{ delay: 600, time: '' }]
+    },
+    'GB-Node-12': {
+      name: 'GB-Node-12',
+      type: 'Vless',
+      alive: true,
+      history: [{ delay: 900, time: '' }]
+    }
   }
 };
 
@@ -105,7 +165,11 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ authenticated: true, setup_required: false, csrf_token: 'mock-csrf-token' })
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf-token'
+          })
         });
       } else if (url.includes('/api/capabilities')) {
         await route.fulfill({
@@ -119,7 +183,12 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
                 mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
               },
               active_kernel: 'mihomo',
-              mihomo: { reachable: true, process_running: true, api_reachable: true, api_authenticated: true }
+              mihomo: {
+                reachable: true,
+                process_running: true,
+                api_reachable: true,
+                api_authenticated: true
+              }
             }
           })
         });
@@ -182,7 +251,7 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     // Expand YouTube group
     const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
     const gcHead = ytGroup.locator('.gc-head').first();
-    
+
     // Check if collapsed initially and expand
     const isCollapsed = await ytGroup.locator('.dot-container').isVisible();
     if (isCollapsed) {
@@ -234,7 +303,7 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
   test('Active node highlight - active node has accent border and background', async ({ page }) => {
     const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
     const gcHead = ytGroup.locator('.gc-head').first();
-    
+
     // Ensure expanded
     const isCollapsed = await ytGroup.locator('.dot-container').isVisible();
     if (isCollapsed) {
@@ -254,7 +323,7 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
   test('Country flag - flag emoji is parsed and displayed', async ({ page }) => {
     const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
     const gcHead = ytGroup.locator('.gc-head').first();
-    
+
     // Ensure expanded
     if (await ytGroup.locator('.dot-container').isVisible()) {
       await gcHead.click();
@@ -302,7 +371,7 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
 
     // Click collapse all
     await collapseAllBtn.click();
-    
+
     const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
     const fastGroup = page.locator('.group-card').filter({ hasText: 'FastGroup' }).first();
     await expect(ytGroup.locator('.dot-container')).toBeVisible();
@@ -341,7 +410,10 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
 
     await providersTab.click();
 
-    const subCard = page.locator('.card, .provider-card').filter({ hasText: 'Primary VPN' }).first();
+    const subCard = page
+      .locator('.card, .provider-card')
+      .filter({ hasText: 'Primary VPN' })
+      .first();
     await expect(subCard).toBeVisible();
 
     await expect(subCard.locator('.progress-bar, .traffic-bar')).toBeVisible();

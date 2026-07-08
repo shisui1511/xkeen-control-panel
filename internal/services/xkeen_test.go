@@ -217,4 +217,3 @@ func TestXKeenService_LocalhostBypass(t *testing.T) {
 		t.Fatalf("expected bypass message, got %s", out2)
 	}
 }
-

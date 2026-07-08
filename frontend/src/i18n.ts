@@ -95,7 +95,7 @@ export async function loadLanguage(lang: Lang): Promise<void> {
 
     const moduleData = dict.default || dict;
 
-    translationsStore.update(current => {
+    translationsStore.update((current) => {
       current[lang] = {
         ...baseTranslations[lang],
         ...moduleData
@@ -111,28 +111,25 @@ export async function loadLanguage(lang: Lang): Promise<void> {
 export const i18nReady = loadLanguage(initialLang);
 
 // Derived store for translations
-export const t = derived(
-  [currentLang, translationsStore],
-  ([$lang, $translations]) => {
-    return (key: string, params?: Record<string, string | number>): string => {
-      const dict = $translations[$lang] || $translations.en || {};
-      let text = dict[key];
-      if (text === undefined) {
-        // Fallback to base translation or key
-        const baseDict = baseTranslations[$lang] || baseTranslations.en;
-        text = baseDict[key] || key;
-      }
+export const t = derived([currentLang, translationsStore], ([$lang, $translations]) => {
+  return (key: string, params?: Record<string, string | number>): string => {
+    const dict = $translations[$lang] || $translations.en || {};
+    let text = dict[key];
+    if (text === undefined) {
+      // Fallback to base translation or key
+      const baseDict = baseTranslations[$lang] || baseTranslations.en;
+      text = baseDict[key] || key;
+    }
 
-      if (params) {
-        Object.entries(params).forEach(([k, v]) => {
-          text = text.replace(new RegExp(`{${k}}`, 'g'), String(v));
-        });
-      }
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        text = text.replace(new RegExp(`{${k}}`, 'g'), String(v));
+      });
+    }
 
-      return text;
-    };
-  }
-);
+    return text;
+  };
+});
 
 /**
  * Хелпер для выбора правильной формы числительного.

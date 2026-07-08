@@ -55,13 +55,7 @@
   }
 </script>
 
-<div
-  class="modal-overlay"
-  role="button"
-  tabindex="0"
-  onclick={onClose}
-  onkeydown={handleKeydown}
->
+<div class="modal-overlay" role="button" tabindex="0" onclick={onClose} onkeydown={handleKeydown}>
   <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
     <div class="modal-card-header">
       <h2>{editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}</h2>
@@ -80,19 +74,28 @@
       </div>
 
       <div class="form-group">
-        <label class="form-label">{$currentLang === 'ru' ? 'Интеграция в ядра' : 'Kernel Integration'}</label>
+        <label class="form-label"
+          >{$currentLang === 'ru' ? 'Интеграция в ядра' : 'Kernel Integration'}</label
+        >
         <div style="display: flex; gap: 20px; margin-bottom: 12px;">
-          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; color: var(--fg-primary);">
+          <label
+            style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; color: var(--fg-primary);"
+          >
             <input type="checkbox" bind:checked={formEnableXray} />
             <span>XRay (JSON / Base64)</span>
           </label>
-          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; color: var(--fg-primary);">
+          <label
+            style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; color: var(--fg-primary);"
+          >
             <input type="checkbox" bind:checked={formEnableMihomo} />
             <span>Mihomo (Clash YAML)</span>
           </label>
         </div>
         {#if !formEnableXray && !formEnableMihomo}
-          <div class="alert alert-danger" style="margin-top: 8px; margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm); border: 1px solid var(--danger); background: rgba(220, 38, 38, 0.1); color: var(--danger);">
+          <div
+            class="alert alert-danger"
+            style="margin-top: 8px; margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm); border: 1px solid var(--danger); background: rgba(220, 38, 38, 0.1); color: var(--danger);"
+          >
             <strong>{$currentLang === 'ru' ? 'Внимание:' : 'Attention:'}</strong>
             <span>{$t('subscr.no_kernel_warning')}</span>
           </div>
@@ -126,7 +129,9 @@
 
       {#if formEnableXray}
         <div class="form-group">
-          <label class="form-label">{$currentLang === 'ru' ? 'Режим маршрутизации XRay' : 'XRay Routing Mode'}</label>
+          <label class="form-label"
+            >{$currentLang === 'ru' ? 'Режим маршрутизации XRay' : 'XRay Routing Mode'}</label
+          >
           <div class="seg-btn" style="margin-bottom: 12px;">
             <button
               type="button"
@@ -209,30 +214,56 @@
 
       {#if formEnableMihomo}
         <div class="form-group">
-          <label class="form-label">{$currentLang === 'ru' ? 'Интегрировать в группы Mihomo' : 'Integrate into Mihomo groups'}</label>
-          
+          <label class="form-label"
+            >{$currentLang === 'ru'
+              ? 'Интегрировать в группы Mihomo'
+              : 'Integrate into Mihomo groups'}</label
+          >
+
           {#if $capabilities?.active_kernel === 'xray'}
-            <div class="alert alert-warning" style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);">
+            <div
+              class="alert alert-warning"
+              style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);"
+            >
               <strong>{$currentLang === 'ru' ? 'Внимание:' : 'Attention:'}</strong>
               <span>
-                {$currentLang === 'ru' 
-                  ? ' сейчас запущено ядро Xray, настройки интеграции вступят в силу при переключении на Mihomo' 
+                {$currentLang === 'ru'
+                  ? ' сейчас запущено ядро Xray, настройки интеграции вступят в силу при переключении на Mihomo'
                   : ' Xray core is currently running, integration settings will take effect when switching to Mihomo'}
               </span>
             </div>
           {/if}
 
           {#if availableMihomoGroups.length === 0}
-            <div class="alert alert-warning" style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);">
+            <div
+              class="alert alert-warning"
+              style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);"
+            >
               <span>
-                {$currentLang === 'ru' 
-                  ? 'Не удалось найти группы в config.yaml Mihomo. Перейдите в ' 
+                {$currentLang === 'ru'
+                  ? 'Не удалось найти группы в config.yaml Mihomo. Перейдите в '
                   : 'Could not find any groups in Mihomo config.yaml. Please go to the '}
-                <a href="#/constructor" onclick={(e) => { e.preventDefault(); onClose(); window.location.hash = '#/constructor'; }} style="text-decoration: underline; color: var(--accent);">
+                <a
+                  href="#/constructor"
+                  onclick={(e) => {
+                    e.preventDefault();
+                    onClose();
+                    window.location.hash = '#/constructor';
+                  }}
+                  style="text-decoration: underline; color: var(--accent);"
+                >
                   {$currentLang === 'ru' ? 'визуальный конструктор' : 'visual constructor'}
                 </a>
                 {$currentLang === 'ru' ? ' или ' : ' or '}
-                <a href="#/editor" onclick={(e) => { e.preventDefault(); onClose(); window.location.hash = '#/editor'; }} style="text-decoration: underline; color: var(--accent);">
+                <a
+                  href="#/editor"
+                  onclick={(e) => {
+                    e.preventDefault();
+                    onClose();
+                    window.location.hash = '#/editor';
+                  }}
+                  style="text-decoration: underline; color: var(--accent);"
+                >
                   {$currentLang === 'ru' ? 'текстовый редактор' : 'text editor'}
                 </a>
                 {$currentLang === 'ru' ? ' для создания групп.' : ' to create groups.'}
@@ -241,16 +272,25 @@
           {/if}
 
           {#if availableMihomoGroups.length > 0}
-            <div class="mihomo-groups-checkboxes" style="display:flex; flex-direction:column; gap:8px; max-height:150px; overflow-y:auto; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background: rgba(0,0,0,0.15);">
+            <div
+              class="mihomo-groups-checkboxes"
+              style="display:flex; flex-direction:column; gap:8px; max-height:150px; overflow-y:auto; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background: rgba(0,0,0,0.15);"
+            >
               {#each availableMihomoGroups as group}
-                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-primary);">
-                  <input type="checkbox" checked={formMihomoGroups.includes(group)} onchange={(e) => {
-                    if (e.currentTarget.checked) {
-                      formMihomoGroups = [...formMihomoGroups, group];
-                    } else {
-                      formMihomoGroups = formMihomoGroups.filter(g => g !== group);
-                    }
-                  }} />
+                <label
+                  style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-primary);"
+                >
+                  <input
+                    type="checkbox"
+                    checked={formMihomoGroups.includes(group)}
+                    onchange={(e) => {
+                      if (e.currentTarget.checked) {
+                        formMihomoGroups = [...formMihomoGroups, group];
+                      } else {
+                        formMihomoGroups = formMihomoGroups.filter((g) => g !== group);
+                      }
+                    }}
+                  />
                   <span>{group}</span>
                 </label>
               {/each}

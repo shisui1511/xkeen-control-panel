@@ -271,10 +271,12 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
   });
 
   // D-07: Клик по dot-indicator переключает активный прокси
-  test('D-07: клик по .dot-indicator в Selector-группе переключает активный прокси', async ({ page }) => {
+  test('D-07: клик по .dot-indicator в Selector-группе переключает активный прокси', async ({
+    page
+  }) => {
     const largeGroup = page.locator('.group-card').filter({ hasText: 'LargeGroup' }).first();
     const dots = largeGroup.locator('.dot-indicator');
-    
+
     // Перехватываем PUT-запрос
     let putRequest: any = null;
     await page.route('**/api/mihomo/proxy/proxies/LargeGroup', async (route) => {
@@ -290,7 +292,7 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
     // Кликаем по второй точке (proxy-02)
     await dots.nth(1).click();
-    
+
     expect(putRequest).not.toBeNull();
     expect(putRequest.name).toBe('proxy-02');
   });

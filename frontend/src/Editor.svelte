@@ -126,7 +126,7 @@
 
   let isMihomoAutoEdited = $derived(
     selectedFile.includes('/mihomo/') &&
-    (selectedFile.endsWith('config.yaml') || selectedFile.endsWith('config.yml'))
+      (selectedFile.endsWith('config.yaml') || selectedFile.endsWith('config.yml'))
   );
 
   let dismissMihomoAutoEditWarning = $state(false);
@@ -139,7 +139,7 @@
       }
       lastSelectedFile = selectedFile;
       const dismissed = localStorage.getItem('xcp:dismissed_warning:mihomo_auto_edit');
-      dismissMihomoAutoEditWarning = (dismissed === selectedFile);
+      dismissMihomoAutoEditWarning = dismissed === selectedFile;
     }
   });
 
@@ -257,11 +257,11 @@
     try {
       const resXray = await fetch(`/api/config/list?dir=${encodeURIComponent(xrayDir)}`);
       if (resXray.ok) {
-        xrayFiles = await resXray.ok ? await resXray.json() : [];
+        xrayFiles = (await resXray.ok) ? await resXray.json() : [];
       }
       const resMihomo = await fetch(`/api/config/list?dir=${encodeURIComponent(mihomoDir)}`);
       if (resMihomo.ok) {
-        mihomoFiles = await resMihomo.ok ? await resMihomo.json() : [];
+        mihomoFiles = (await resMihomo.ok) ? await resMihomo.json() : [];
       }
     } catch (e) {
       showToast('error', $t('editor.load_error'));
@@ -1402,7 +1402,7 @@
         <div class="editor-main-card">
           <EditorTabs
             {tabs}
-            activeTabPath={activeTabPath}
+            {activeTabPath}
             onSwitchTab={switchTab}
             onPinTab={pinTab}
             onCloseTab={closeTab}
@@ -1437,8 +1437,7 @@
                   stroke="currentColor"
                   stroke-width="2"
                   stroke-linecap="round"
-                  stroke-linejoin="round"
-                  ><polyline points="15 18 9 12 15 6" /></svg
+                  stroke-linejoin="round"><polyline points="15 18 9 12 15 6" /></svg
                 >
               {:else}
                 <svg
@@ -1449,8 +1448,7 @@
                   stroke="currentColor"
                   stroke-width="2"
                   stroke-linecap="round"
-                  stroke-linejoin="round"
-                  ><polyline points="9 18 15 12 9 6" /></svg
+                  stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg
                 >
               {/if}
             </button>
@@ -1579,7 +1577,9 @@
           <!-- CodeMirror editor component -->
           <div style="height: 520px; position:relative; background: #050d16; min-height:0;">
             {#if loading}
-              <div style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:rgba(5,13,22,0.7);z-index:10;">
+              <div
+                style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:rgba(5,13,22,0.7);z-index:10;"
+              >
                 <div class="spinner"></div>
               </div>
             {/if}
@@ -1588,8 +1588,8 @@
                 <CodeMirrorEditor
                   content={tab.currentContent}
                   path={tab.path}
-                  expertMode={expertMode}
-                  schemaEnabled={schemaEnabled}
+                  {expertMode}
+                  {schemaEnabled}
                   bind:view={editorView}
                   onContentChange={(newContent) => {
                     tab.currentContent = newContent;
@@ -1629,7 +1629,9 @@
             </span>
             <span>Ln {cursorLine}, Col {cursorCol}</span>
             <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
+              <label
+                style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"
+              >
                 <input
                   type="checkbox"
                   checked={schemaEnabled}
@@ -1638,7 +1640,9 @@
                 />
                 Схема
               </label>
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
+              <label
+                style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"
+              >
                 <input
                   type="checkbox"
                   checked={expertMode}
@@ -1811,7 +1815,9 @@
       <!-- Header -->
       <div class="modal-header">
         <div class="templates-modal-title-block">
-          <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px;">
+          <h3
+            style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px;"
+          >
             {$t('editor.templates') || 'Шаблоны'}
             {#if templateStatus}
               {#if templateStatus.has_update}
@@ -1827,7 +1833,9 @@
               {/if}
             {/if}
           </h3>
-          <p class="templates-modal-subtitle">{$t('editor.templates_desc') || 'Шаблоны конфигураций'}</p>
+          <p class="templates-modal-subtitle">
+            {$t('editor.templates_desc') || 'Шаблоны конфигураций'}
+          </p>
         </div>
         <div class="templates-modal-header-actions">
           <button

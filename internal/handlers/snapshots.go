@@ -120,7 +120,6 @@ func (a *API) SnapshotUpload(w http.ResponseWriter, r *http.Request) {
 	a.jsonResponse(w, meta)
 }
 
-
 func (a *API) SnapshotDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)

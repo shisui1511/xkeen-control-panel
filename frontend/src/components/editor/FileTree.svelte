@@ -97,8 +97,7 @@
       {:else}
         <span
           class="sb-empty"
-          style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;"
-          >—</span
+          style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;">—</span
         >
       {/each}
     </div>
@@ -133,8 +132,7 @@
       {:else}
         <span
           class="sb-empty"
-          style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;"
-          >—</span
+          style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;">—</span
         >
       {/each}
     </div>

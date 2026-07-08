@@ -19,9 +19,9 @@ import (
 const maxLogSize = 512 * 1024 // 512 KB
 
 var sensitiveYAMLKeys = map[string]bool{
-	"password": true,
-	"secret":   true,
-	"uuid":     true,
+	"password":   true,
+	"secret":     true,
+	"uuid":       true,
 	"public-key": true,
 }
 

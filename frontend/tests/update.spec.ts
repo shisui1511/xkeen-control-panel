@@ -103,22 +103,30 @@ test.describe('Templates updates Settings tab test suite', () => {
     await page.goto('/#/settings');
 
     // Click Updates tab
-    const updatesTab = page.locator('.stab:has-text("Обновления"), .stab:has-text("Updates")').first();
+    const updatesTab = page
+      .locator('.stab:has-text("Обновления"), .stab:has-text("Updates")')
+      .first();
     await expect(updatesTab).toBeVisible({ timeout: 5000 });
     await updatesTab.click();
 
     // Check updates section is visible
-    const updatesTitle = page.locator('.card-label:has-text("Шаблоны"), .card-label:has-text("Templates")').first();
+    const updatesTitle = page
+      .locator('.card-label:has-text("Шаблоны"), .card-label:has-text("Templates")')
+      .first();
     await expect(updatesTitle).toBeVisible();
 
     // Verify initial version is shown
     await expect(page.locator('.card:has-text("Шаблоны")').first()).toContainText('1.0.0');
 
     // Scope to templates card
-    const templatesCard = page.locator('.card:has-text("Шаблоны"), .card:has-text("Templates")').first();
+    const templatesCard = page
+      .locator('.card:has-text("Шаблоны"), .card:has-text("Templates")')
+      .first();
 
     // Trigger update check
-    const checkBtn = templatesCard.locator('button:has-text("Проверить обновления"), button:has-text("Check for updates")').first();
+    const checkBtn = templatesCard
+      .locator('button:has-text("Проверить обновления"), button:has-text("Check for updates")')
+      .first();
     await expect(checkBtn).toBeVisible();
     await checkBtn.click();
 
@@ -127,7 +135,9 @@ test.describe('Templates updates Settings tab test suite', () => {
     await expect(updateAvailable).toBeVisible();
 
     // "Install Updates" button should be visible
-    const installBtn = templatesCard.locator('button:has-text("Установить обновления"), button:has-text("Install updates")').first();
+    const installBtn = templatesCard
+      .locator('button:has-text("Установить обновления"), button:has-text("Install updates")')
+      .first();
     await expect(installBtn).toBeVisible();
     await installBtn.click();
 
@@ -139,17 +149,22 @@ test.describe('Templates updates Settings tab test suite', () => {
     await expect(templatesCard).toContainText('1.0.1');
   });
 
-  test('scenario 2: shows warning alert if remote schema version is incompatible', async ({ page }) => {
+  test('scenario 2: shows warning alert if remote schema version is incompatible', async ({
+    page
+  }) => {
     // Set incompatible status before routing
     mockStatus.has_update = true;
     mockStatus.incompatible = true;
-    mockStatus.warning_message = 'incompatible schema version: remote major version 2 is greater than supported local major version 1';
+    mockStatus.warning_message =
+      'incompatible schema version: remote major version 2 is greater than supported local major version 1';
 
     // Go to settings page
     await page.goto('/#/settings');
 
     // Click Updates tab
-    const updatesTab = page.locator('.stab:has-text("Обновления"), .stab:has-text("Updates")').first();
+    const updatesTab = page
+      .locator('.stab:has-text("Обновления"), .stab:has-text("Updates")')
+      .first();
     await expect(updatesTab).toBeVisible({ timeout: 5000 });
     await updatesTab.click();
 

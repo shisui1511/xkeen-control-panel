@@ -670,5 +670,3 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 
 	return nil
 }
-
-

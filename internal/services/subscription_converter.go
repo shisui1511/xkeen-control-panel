@@ -719,4 +719,3 @@ func extractServer(ob *Outbound) string {
 	}
 	return ""
 }
-

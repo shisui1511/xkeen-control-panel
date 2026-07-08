@@ -62,19 +62,19 @@ test.describe('Editor & Constructor integration test suite', () => {
           body: JSON.stringify(
             isMihomo
               ? [
-                {
-                  name: 'config.yaml',
-                  path: '/opt/etc/mihomo/config.yaml',
-                  size: 1500
-                }
-              ]
+                  {
+                    name: 'config.yaml',
+                    path: '/opt/etc/mihomo/config.yaml',
+                    size: 1500
+                  }
+                ]
               : [
-                {
-                  name: 'xray-config.json',
-                  path: '/opt/etc/xray/configs/xray-config.json',
-                  size: 1200
-                }
-              ]
+                  {
+                    name: 'xray-config.json',
+                    path: '/opt/etc/xray/configs/xray-config.json',
+                    size: 1200
+                  }
+                ]
           )
         });
       } else if (url.includes('/api/config/read')) {
@@ -313,12 +313,12 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
             isMihomo
               ? [{ name: 'config.yaml', path: '/opt/etc/mihomo/config.yaml', size: 100 }]
               : [
-                {
-                  name: 'xray-config.json',
-                  path: '/opt/etc/xray/configs/xray-config.json',
-                  size: 100
-                }
-              ]
+                  {
+                    name: 'xray-config.json',
+                    path: '/opt/etc/xray/configs/xray-config.json',
+                    size: 100
+                  }
+                ]
           )
         });
       } else if (url.includes('/api/config/read') && route.request().method() === 'GET') {

@@ -86,7 +86,9 @@ test.describe('Mihomo Generator fallback hidden rendering', () => {
     // it will fetch definition from the Go backend.
 
     // Find preview container for yaml
-    const yamlPreview = page.locator('.mihomo-yaml-preview, .yaml-preview, .constructor-preview-panel').first();
+    const yamlPreview = page
+      .locator('.mihomo-yaml-preview, .yaml-preview, .constructor-preview-panel')
+      .first();
     await expect(yamlPreview).toBeVisible({ timeout: 8000 });
     const text = await yamlPreview.textContent();
 

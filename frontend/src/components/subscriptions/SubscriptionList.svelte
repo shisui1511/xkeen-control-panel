@@ -388,11 +388,7 @@
             </svg>
           </button>
 
-          <button
-            class="action-icon-btn"
-            onclick={() => onEditSub(sub)}
-            title={$t('app.edit')}
-          >
+          <button class="action-icon-btn" onclick={() => onEditSub(sub)} title={$t('app.edit')}>
             <svg
               width="14"
               height="14"
@@ -450,7 +446,10 @@
       </div>
 
       {#if sub.last_error}
-        <div class="sub-error-details" style="font-size: 12.5px; color: var(--danger); margin: -4px 0 8px 34px; line-height: 1.4; font-family: var(--font-family-sans);">
+        <div
+          class="sub-error-details"
+          style="font-size: 12.5px; color: var(--danger); margin: -4px 0 8px 34px; line-height: 1.4; font-family: var(--font-family-sans);"
+        >
           {sub.last_error}
         </div>
       {/if}
@@ -481,9 +480,8 @@
 
           <span class="meta-divider">|</span>
           {#if sub.mihomo_integrated}
-            <span
-              class="mihomo-integrated-badge active"
-              title="Интегрировано в Mihomo config.yaml">Mihomo ✓</span
+            <span class="mihomo-integrated-badge active" title="Интегрировано в Mihomo config.yaml"
+              >Mihomo ✓</span
             >
           {:else}
             <span class="mihomo-integrated-badge" title="Не интегрировано в Mihomo config.yaml"
@@ -499,8 +497,7 @@
 
         <div class="sub-meta-right">
           <span class="traffic-text">
-            {formatTraffic((sub.upload || 0) + (sub.download || 0))} / {sub.total &&
-            sub.total > 0
+            {formatTraffic((sub.upload || 0) + (sub.download || 0))} / {sub.total && sub.total > 0
               ? formatTraffic(sub.total)
               : '∞'}
             {#if sub.total && sub.total > 0}
@@ -514,8 +511,14 @@
       {#if sub.total && sub.total > 0}
         {@const used = (sub.upload || 0) + (sub.download || 0)}
         {@const pct = Math.min(100, Math.round((used / sub.total) * 100))}
-        <div class="progress-bar traffic-bar" style="height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 4px 0 12px 34px; display: flex;">
-          <div class="traffic-bar-fill" style="width: {pct}%; height: 100%; background: var(--accent); border-radius: 2px;"></div>
+        <div
+          class="progress-bar traffic-bar"
+          style="height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 4px 0 12px 34px; display: flex;"
+        >
+          <div
+            class="traffic-bar-fill"
+            style="width: {pct}%; height: 100%; background: var(--accent); border-radius: 2px;"
+          ></div>
         </div>
       {/if}
 
@@ -557,9 +560,7 @@
                   stroke-width="2"
                   class="announce-icon"
                 >
-                  <path
-                    d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"
-                  />
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
                 </svg>
                 <span>{$currentLang === 'ru' ? 'Объявление' : 'Announcement'}</span>
               </button>
@@ -630,8 +631,8 @@
                 nodes={subNodes[sub.id]}
                 health={subHealth[sub.id] || {}}
                 checkingNodes={checkingNodes[sub.id] || {}}
-                onSetActiveNode={onSetActiveNode}
-                onCheckNodeHealth={onCheckNodeHealth}
+                {onSetActiveNode}
+                {onCheckNodeHealth}
               />
             {/if}
           {/if}

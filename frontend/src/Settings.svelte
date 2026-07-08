@@ -783,8 +783,6 @@
     }
   }
 
-
-
   onMount(async () => {
     fetchVersion();
     fetchCapabilities();
@@ -1099,13 +1097,18 @@
       <div class="card-label">{$t('settings.templates_title')}</div>
       {#if templatesIncompatible}
         <div class="alert alert-warning" style="margin-top: 0; margin-bottom: 12px;">
-          <strong>{$t('settings.templates_incompatible_warning')}</strong> {templatesWarningMessage}
+          <strong>{$t('settings.templates_incompatible_warning')}</strong>
+          {templatesWarningMessage}
         </div>
       {/if}
       <div class="field-group">
         <div class="field-row">
           <span class="field-row-name">{$t('settings.templates_repo_url')}</span>
-          <span class="field-row-val mono" style="font-size: 11px; word-break: break-all; text-align: right; max-width: 70%;">{templatesRepoUrl || '...'}</span>
+          <span
+            class="field-row-val mono"
+            style="font-size: 11px; word-break: break-all; text-align: right; max-width: 70%;"
+            >{templatesRepoUrl || '...'}</span
+          >
         </div>
         <div class="field-row">
           <span class="field-row-name">{$t('settings.current_version')}</span>
@@ -1119,7 +1122,9 @@
         </div>
         {#if templatesHasUpdate}
           <div class="field-row">
-            <span class="field-row-name" style="color: var(--warning)">{$t('editor.update_available')}</span>
+            <span class="field-row-name" style="color: var(--warning)"
+              >{$t('editor.update_available')}</span
+            >
             <span class="field-row-val" style="color: var(--warning)">Yes</span>
           </div>
         {/if}
@@ -1263,18 +1268,30 @@
     <div style="border-top: 1px solid var(--border); margin: 24px 0;"></div>
 
     <!-- Section 2: Snapshots -->
-    <div class="card premium-backup-card" style="margin-top: 0; background: #102a44; border: 1px solid var(--border); transition: all 0.3s ease;">
-      <div class="card-title-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;">
+    <div
+      class="card premium-backup-card"
+      style="margin-top: 0; background: #102a44; border: 1px solid var(--border); transition: all 0.3s ease;"
+    >
+      <div
+        class="card-title-row"
+        style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;"
+      >
         <div style="display: flex; align-items: center; gap: 10px;">
           <Icon name="archive" size={20} color="var(--accent)" />
-          <h2 class="card-title" style="margin: 0; font-size: 1.1rem; color: var(--fg-primary); font-weight: 600;">
+          <h2
+            class="card-title"
+            style="margin: 0; font-size: 1.1rem; color: var(--fg-primary); font-weight: 600;"
+          >
             {$t('settings.section_snapshots')}
           </h2>
         </div>
       </div>
 
       <!-- Control panel to create a backup -->
-      <div class="field-row select-row" style="margin-bottom: 20px; gap: 12px; align-items: center; background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: var(--radius-md);">
+      <div
+        class="field-row select-row"
+        style="margin-bottom: 20px; gap: 12px; align-items: center; background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: var(--radius-md);"
+      >
         <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
           <input
             class="input"
@@ -1285,14 +1302,17 @@
             disabled={creatingSnapshot || uploading || restoringSnapshot !== ''}
           />
         </div>
-        <button 
-          class="btn" 
+        <button
+          class="btn"
           style="background: #29c2f0; color: #fff; border: none; display: flex; align-items: center; gap: 8px; font-weight: 500; min-width: 150px; justify-content: center; transition: all 0.2s;"
-          onclick={createSnapshot} 
+          onclick={createSnapshot}
           disabled={creatingSnapshot || uploading || restoringSnapshot !== ''}
         >
           {#if creatingSnapshot}
-            <span class="spinner" style="border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid #fff; border-radius: 50%; width: 14px; height: 14px; display: inline-block; animation: spin 1s linear infinite;"></span>
+            <span
+              class="spinner"
+              style="border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid #fff; border-radius: 50%; width: 14px; height: 14px; display: inline-block; animation: spin 1s linear infinite;"
+            ></span>
             <span>{$t('app.loading')}</span>
           {:else}
             <Icon name="plus" size={16} />
@@ -1302,9 +1322,14 @@
       </div>
 
       <!-- Interactive backup table -->
-      <div class="table-container" style="margin-bottom: 20px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.15);">
+      <div
+        class="table-container"
+        style="margin-bottom: 20px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.15);"
+      >
         {#if snapshots.length === 0}
-          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; gap: 12px;">
+          <div
+            style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; gap: 12px;"
+          >
             <Icon name="database" size={40} color="var(--fg-dim)" />
             <div style="font-weight: 500; font-size: 15px; color: var(--fg-primary);">
               {$t('settings.snapshots_empty')}
@@ -1317,26 +1342,49 @@
           <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">
             <thead>
               <tr style="background: rgba(0, 0, 0, 0.3); border-bottom: 1px solid var(--border);">
-                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 18%;">ID</th>
-                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500;">Комментарий</th>
-                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 12%;">Размер</th>
-                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 22%;">Дата создания</th>
-                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 25%; text-align: right;">Действия</th>
+                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 18%;"
+                  >ID</th
+                >
+                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500;"
+                  >Комментарий</th
+                >
+                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 12%;"
+                  >Размер</th
+                >
+                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 22%;"
+                  >Дата создания</th
+                >
+                <th
+                  style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 25%; text-align: right;"
+                  >Действия</th
+                >
               </tr>
             </thead>
             <tbody>
               {#each snapshots as snap}
-                <tr class="backup-tr" style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.2s ease;">
-                  <td style="padding: 12px 16px; font-family: var(--font-mono); color: var(--fg-primary);">{snap.id}</td>
-                  <td style="padding: 12px 16px; color: var(--fg-primary); font-weight: 500;">{snap.label || '—'}</td>
-                  <td style="padding: 12px 16px; color: var(--fg-secondary);">{formatSnapshotSize(snap.size_bytes)}</td>
-                  <td style="padding: 12px 16px; color: var(--fg-secondary);">{new Date(snap.created_at * 1000).toLocaleString()}</td>
+                <tr
+                  class="backup-tr"
+                  style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.2s ease;"
+                >
+                  <td
+                    style="padding: 12px 16px; font-family: var(--font-mono); color: var(--fg-primary);"
+                    >{snap.id}</td
+                  >
+                  <td style="padding: 12px 16px; color: var(--fg-primary); font-weight: 500;"
+                    >{snap.label || '—'}</td
+                  >
+                  <td style="padding: 12px 16px; color: var(--fg-secondary);"
+                    >{formatSnapshotSize(snap.size_bytes)}</td
+                  >
+                  <td style="padding: 12px 16px; color: var(--fg-secondary);"
+                    >{new Date(snap.created_at * 1000).toLocaleString()}</td
+                  >
                   <td style="padding: 12px 16px; text-align: right;">
                     <div style="display: flex; gap: 8px; justify-content: flex-end;">
-                      <a 
-                        class="btn btn-secondary btn-sm" 
+                      <a
+                        class="btn btn-secondary btn-sm"
                         style="display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px;"
-                        href="/api/snapshots/{snap.id}/download" 
+                        href="/api/snapshots/{snap.id}/download"
                         download
                         title={$t('settings.snapshot_download_btn')}
                       >
@@ -1350,15 +1398,18 @@
                         disabled={creatingSnapshot || uploading || restoringSnapshot !== ''}
                       >
                         {#if restoringSnapshot === snap.id}
-                          <span class="spinner" style="border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid var(--fg-primary); border-radius: 50%; width: 12px; height: 12px; display: inline-block; animation: spin 1s linear infinite;"></span>
+                          <span
+                            class="spinner"
+                            style="border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid var(--fg-primary); border-radius: 50%; width: 12px; height: 12px; display: inline-block; animation: spin 1s linear infinite;"
+                          ></span>
                           <span>{$t('app.loading')}</span>
                         {:else}
                           <Icon name="refresh" size={14} />
                           <span>{$t('settings.snapshot_restore_btn')}</span>
                         {/if}
                       </button>
-                      <button 
-                        class="btn btn-danger btn-sm" 
+                      <button
+                        class="btn btn-danger btn-sm"
                         style="display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px;"
                         onclick={() => deleteSnapshot(snap.id)}
                         disabled={creatingSnapshot || uploading || restoringSnapshot !== ''}
@@ -1380,12 +1431,23 @@
         role="button"
         tabindex="0"
         class="backup-dropzone {isDragOver ? 'drag-over' : ''} {uploading ? 'uploading' : ''}"
-        style="display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px dashed {isDragOver ? '#29c2f0' : 'var(--border)'}; background: {isDragOver ? 'rgba(41, 194, 240, 0.08)' : 'rgba(0, 0, 0, 0.2)'}; border-radius: var(--radius-md); padding: 30px 20px; text-align: center; cursor: {uploading ? 'not-allowed' : 'pointer'}; gap: 8px; transition: all 0.3s ease; position: relative;"
+        style="display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px dashed {isDragOver
+          ? '#29c2f0'
+          : 'var(--border)'}; background: {isDragOver
+          ? 'rgba(41, 194, 240, 0.08)'
+          : 'rgba(0, 0, 0, 0.2)'}; border-radius: var(--radius-md); padding: 30px 20px; text-align: center; cursor: {uploading
+          ? 'not-allowed'
+          : 'pointer'}; gap: 8px; transition: all 0.3s ease; position: relative;"
         ondragover={handleDragOver}
         ondragleave={handleDragLeave}
         ondrop={handleDrop}
-        onclick={() => { if (!uploading) document.getElementById('backup-upload-input')?.click(); }}
-        onkeydown={(e) => { if (e.key === 'Enter' && !uploading) document.getElementById('backup-upload-input')?.click(); }}
+        onclick={() => {
+          if (!uploading) document.getElementById('backup-upload-input')?.click();
+        }}
+        onkeydown={(e) => {
+          if (e.key === 'Enter' && !uploading)
+            document.getElementById('backup-upload-input')?.click();
+        }}
       >
         <input
           id="backup-upload-input"
@@ -1397,7 +1459,10 @@
         />
 
         {#if uploading}
-          <span class="spinner" style="border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #29c2f0; border-radius: 50%; width: 30px; height: 30px; display: inline-block; animation: spin 1s linear infinite; margin-bottom: 8px;"></span>
+          <span
+            class="spinner"
+            style="border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #29c2f0; border-radius: 50%; width: 30px; height: 30px; display: inline-block; animation: spin 1s linear infinite; margin-bottom: 8px;"
+          ></span>
           <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
             {$t('settings.snapshot_uploading')}
           </div>
@@ -1406,7 +1471,9 @@
             <Icon name="upload" size={32} color={isDragOver ? '#29c2f0' : 'var(--fg-dim)'} />
           </span>
           <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
-            {isDragOver ? 'Отпустите файл для загрузки' : 'Выберите или перетащите файл резервной копии (.tar.gz) сюда'}
+            {isDragOver
+              ? 'Отпустите файл для загрузки'
+              : 'Выберите или перетащите файл резервной копии (.tar.gz) сюда'}
           </div>
           <div style="color: var(--fg-dim); font-size: 11px;">
             Поддерживаются файлы .tar.gz размером до 15 МБ
@@ -1585,7 +1652,9 @@
           disabled={downloadingDiagnostics}
           title={$t('settings.diagnostics_download')}
         >
-          {downloadingDiagnostics ? $t('settings.diagnostics_downloading') : $t('settings.diagnostics_download')}
+          {downloadingDiagnostics
+            ? $t('settings.diagnostics_downloading')
+            : $t('settings.diagnostics_download')}
         </button>
       </div>
     </div>
@@ -2146,7 +2215,11 @@
   }
 
   @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
   }
 </style>

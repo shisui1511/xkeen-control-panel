@@ -46,15 +46,23 @@
   </div>
   {#if hasMihomoProviders}
     <div class="form-row">
-      <label class="form-label">{ru ? 'Провайдеры подписок (use:)' : 'Subscription providers (use:)'}</label>
+      <label class="form-label"
+        >{ru ? 'Провайдеры подписок (use:)' : 'Subscription providers (use:)'}</label
+      >
       <div class="tag-input-wrap">
         {#each ng.useProviders || [] as p}
-          <span class="tag-pill" style="background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.25); color: var(--success);">
+          <span
+            class="tag-pill"
+            style="background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.25); color: var(--success);"
+          >
             {p}
             <button
               class="tag-rm"
-              onclick={() => (ng = { ...ng, useProviders: (ng.useProviders || []).filter((x: string) => x !== p) })}
-              >✕</button
+              onclick={() =>
+                (ng = {
+                  ...ng,
+                  useProviders: (ng.useProviders || []).filter((x: string) => x !== p)
+                })}>✕</button
             >
           </span>
         {/each}
@@ -66,12 +74,17 @@
             if (val && !(ng.useProviders || []).includes(val)) {
               ng = { ...ng, useProviders: [...(ng.useProviders || []), val] };
             }
-            e.currentTarget.value = "";
+            e.currentTarget.value = '';
           }}
         >
           <option value="">+ {ru ? 'добавить провайдер' : 'add provider'}...</option>
           {#each mihomoProviders as sub}
-            {@const slug = slugifyProviderName(sub.profile_title || '', sub.name || '', sub.url || '', sub.id)}
+            {@const slug = slugifyProviderName(
+              sub.profile_title || '',
+              sub.name || '',
+              sub.url || '',
+              sub.id
+            )}
             <option value={slug}>{sub.name} ({slug})</option>
           {/each}
         </select>
@@ -111,11 +124,7 @@
           >
         </span>
       {/each}
-      <select
-        class="form-select-inline"
-        bind:value={ngProxyInput}
-        onchange={addGroupProxy}
-      >
+      <select class="form-select-inline" bind:value={ngProxyInput} onchange={addGroupProxy}>
         <option value="">+ {ru ? 'добавить' : 'add'}...</option>
         {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
       </select>
@@ -134,11 +143,9 @@
     </div>
   {/if}
   <div class="form-actions">
-    <button class="btn btn-secondary" onclick={onCancel}
-      >{ru ? 'Отмена' : 'Cancel'}</button
-    >
+    <button class="btn btn-secondary" onclick={onCancel}>{ru ? 'Отмена' : 'Cancel'}</button>
     <button class="btn btn-primary" onclick={onSave}
-      >{isEdit ? (ru ? 'Сохранить' : 'Save') : (ru ? 'Добавить' : 'Add')}</button
+      >{isEdit ? (ru ? 'Сохранить' : 'Save') : ru ? 'Добавить' : 'Add'}</button
     >
   </div>
 </div>

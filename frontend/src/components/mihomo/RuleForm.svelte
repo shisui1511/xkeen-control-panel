@@ -60,9 +60,7 @@
     </div>
   {/if}
   <div class="form-actions">
-    <button class="btn btn-secondary" onclick={onCancel}
-      >{ru ? 'Отмена' : 'Cancel'}</button
-    >
+    <button class="btn btn-secondary" onclick={onCancel}>{ru ? 'Отмена' : 'Cancel'}</button>
     <button class="btn btn-primary" onclick={onSave}>{ru ? 'Добавить' : 'Add'}</button>
   </div>
 </div>

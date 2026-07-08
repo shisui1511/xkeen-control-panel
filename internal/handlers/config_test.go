@@ -534,15 +534,15 @@ func TestCopyDirConfigs_Symlink(t *testing.T) {
 	}
 
 	// Verify config.json contains new content and is a regular file
-	dstJsonPath := filepath.Join(dstDir, "config.json")
-	jsonFi, err := os.Lstat(dstJsonPath)
+	dstJSONPath := filepath.Join(dstDir, "config.json")
+	jsonFi, err := os.Lstat(dstJSONPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if jsonFi.Mode()&os.ModeSymlink != 0 {
 		t.Error("expected config.json NOT to be a symlink")
 	}
-	content, err := os.ReadFile(dstJsonPath)
+	content, err := os.ReadFile(dstJSONPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -633,5 +633,3 @@ func TestMihomoMergeSave_CleanInstall(t *testing.T) {
 		t.Error("expected new rules to be in merged config")
 	}
 }
-
-

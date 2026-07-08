@@ -37,13 +37,7 @@
     </div>
     <div class="form-col form-col-sm">
       <label class="form-label">{ru ? 'Порт' : 'Port'}</label>
-      <input
-        class="form-input"
-        type="number"
-        bind:value={np.port}
-        min="1"
-        max="65535"
-      />
+      <input class="form-input" type="number" bind:value={np.port} min="1" max="65535" />
     </div>
   </div>
 
@@ -52,10 +46,8 @@
       <label class="form-label">UUID</label>
       <div class="input-with-btn">
         <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
-        <button
-          class="btn-gen"
-          onclick={() => (np.uuid = crypto.randomUUID())}
-          title="Generate">⟳</button
+        <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
+          >⟳</button
         >
       </div>
     </div>
@@ -70,11 +62,7 @@
       </div>
       <div class="form-col">
         <label class="form-label">SNI</label>
-        <input
-          class="form-input"
-          bind:value={np.servername}
-          placeholder="www.apple.com"
-        />
+        <input class="form-input" bind:value={np.servername} placeholder="www.apple.com" />
       </div>
     </div>
   {:else if np.type === 'hysteria2'}
@@ -113,10 +101,8 @@
       <label class="form-label">UUID</label>
       <div class="input-with-btn">
         <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
-        <button
-          class="btn-gen"
-          onclick={() => (np.uuid = crypto.randomUUID())}
-          title="Generate">⟳</button
+        <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
+          >⟳</button
         >
       </div>
     </div>
@@ -144,10 +130,8 @@
       <label class="form-label">UUID</label>
       <div class="input-with-btn">
         <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
-        <button
-          class="btn-gen"
-          onclick={() => (np.uuid = crypto.randomUUID())}
-          title="Generate">⟳</button
+        <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
+          >⟳</button
         >
       </div>
     </div>
@@ -212,7 +196,9 @@
     </div>
   {:else if np.type === 'socks'}
     <div class="form-row">
-      <label class="form-label">{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label>
+      <label class="form-label"
+        >{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label
+      >
       <input class="form-input" bind:value={np.username} placeholder="username" />
     </div>
     <div class="form-row">
@@ -221,7 +207,9 @@
     </div>
   {:else if np.type === 'http'}
     <div class="form-row">
-      <label class="form-label">{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label>
+      <label class="form-label"
+        >{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label
+      >
       <input class="form-input" bind:value={np.username} placeholder="username" />
     </div>
     <div class="form-row">
@@ -251,11 +239,9 @@
   {/if}
 
   <div class="form-actions">
-    <button class="btn btn-secondary" onclick={onCancel}
-      >{ru ? 'Отмена' : 'Cancel'}</button
-    >
+    <button class="btn btn-secondary" onclick={onCancel}>{ru ? 'Отмена' : 'Cancel'}</button>
     <button class="btn btn-primary" onclick={onSave}
-      >{isEdit ? (ru ? 'Сохранить' : 'Save') : (ru ? 'Добавить' : 'Add')}</button
+      >{isEdit ? (ru ? 'Сохранить' : 'Save') : ru ? 'Добавить' : 'Add'}</button
     >
   </div>
 </div>

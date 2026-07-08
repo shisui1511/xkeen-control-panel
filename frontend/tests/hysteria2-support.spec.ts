@@ -75,7 +75,9 @@ test.describe('Mihomo Generator Hysteria 2 Support and Validation', () => {
     await page.waitForSelector('.gen-layout', { timeout: 8000 });
   });
 
-  test('should render hysteria2 fields, trigger validation, and generate correct YAML', async ({ page }) => {
+  test('should render hysteria2 fields, trigger validation, and generate correct YAML', async ({
+    page
+  }) => {
     // 1. Open Add proxy form
     const addProxyBtn = page.locator('button:has-text("Добавить прокси")');
     await expect(addProxyBtn).toBeVisible();
@@ -90,7 +92,11 @@ test.describe('Mihomo Generator Hysteria 2 Support and Validation', () => {
     await expect(page.locator('input[placeholder="example.com"]').first()).toBeVisible(); // Server/SNI
 
     // Obfs Select and Skip Cert Checkbox
-    const obfsSelect = page.locator('div.form-row:has(label:has-text("Тип обфускации")), div.form-row:has(label:has-text("Obfuscation type"))').locator('select');
+    const obfsSelect = page
+      .locator(
+        'div.form-row:has(label:has-text("Тип обфускации")), div.form-row:has(label:has-text("Obfuscation type"))'
+      )
+      .locator('select');
     await expect(obfsSelect).toBeVisible();
 
     const skipCertCheckbox = page.locator('input[type="checkbox"]');
@@ -107,7 +113,11 @@ test.describe('Mihomo Generator Hysteria 2 Support and Validation', () => {
     await obfsSelect.selectOption('simple');
 
     // Obfs password input should now be visible
-    const obfsPasswordInput = page.locator('div.form-row:has(label:has-text("Пароль обфускации")), div.form-row:has(label:has-text("Obfuscation password"))').locator('input');
+    const obfsPasswordInput = page
+      .locator(
+        'div.form-row:has(label:has-text("Пароль обфускации")), div.form-row:has(label:has-text("Obfuscation password"))'
+      )
+      .locator('input');
     await expect(obfsPasswordInput).toBeVisible();
     await obfsPasswordInput.fill(''); // Clear it
 
@@ -136,7 +146,9 @@ test.describe('Mihomo Generator Hysteria 2 Support and Validation', () => {
     await expect(itemRow.locator('.type-hysteria2')).toBeVisible();
 
     // 8. Verify generated YAML contains all details
-    const yamlPreview = page.locator('.mihomo-yaml-preview, .yaml-preview, .constructor-preview-panel').first();
+    const yamlPreview = page
+      .locator('.mihomo-yaml-preview, .yaml-preview, .constructor-preview-panel')
+      .first();
     await expect(yamlPreview).toBeVisible();
     const yamlText = await yamlPreview.textContent();
 

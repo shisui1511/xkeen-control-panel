@@ -183,4 +183,3 @@ func TestSearchTag_MalformedProtobuf(t *testing.T) {
 		t.Logf("SearchTag returned expected error/nil: %v", err)
 	}
 }
-

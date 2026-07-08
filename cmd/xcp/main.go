@@ -202,7 +202,7 @@ func main() {
 	defer trafficQuotaSvc.Stop()
 
 	// Config Snapshots
-	xrayDir := filepath.Dir(cfg.XRayConfigDir) // e.g. /opt/etc/xray
+	xrayDir := filepath.Dir(cfg.XRayConfigDir)                            // e.g. /opt/etc/xray
 	xkeenDir := filepath.Join(filepath.Dir(cfg.MihomoConfigDir), "xkeen") // e.g. /opt/etc/xkeen
 	snapshotSvc := services.NewSnapshotService(cfg.DataDir, []string{
 		xrayDir,
