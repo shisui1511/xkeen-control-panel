@@ -785,7 +785,7 @@ export function generateYAML(state: MihomoConfigState): string {
       `${metaBaseUrl}/${type}/${id}.mrs`;
 
     if (state.activeRuleProvider === 'metacubex' && state.selectedMetaRuleSets.size > 0) {
-      for (const [key, outbound] of state.selectedMetaRuleSets) {
+      for (const key of state.selectedMetaRuleSets.keys()) {
         const [id, type] = key.split('|') as [string, 'geosite' | 'geoip'];
         const behavior = type === 'geoip' ? 'ipcidr' : 'domain';
         lines.push(`  ${type}-${id.replace(/[^a-z0-9-]/g, '-')}:`);
@@ -1152,7 +1152,6 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     let inDNS = false;
     let inTUN = false;
     let inRules = false;
-    let inRuleProviders = false;
     let inNameservers = false;
     let inFallback = false;
     let inDnsHijack = false;
@@ -1183,7 +1182,6 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           inDNS = sec === 'dns';
           inTUN = sec === 'tun';
           inRules = sec === 'rules';
-          inRuleProviders = sec === 'rule-providers';
           inSniffer = sec === 'sniffer';
           inProxyProviders = sec === 'proxy-providers';
 
