@@ -31,6 +31,8 @@ proxies:
     secret: "mysecret"
     uuid: "1234-abcd"
     public-key: "pubkey123"
+    private-key: "privkey123"
+    token: "token123"
 `,
 			expected: `*REDACTED*`,
 		},
@@ -50,7 +52,7 @@ proxies:
 			got := string(gotBytes)
 			if tc.name == "redact sensitive keys" {
 				// verify keys are redacted
-				for _, key := range []string{"secretpassword", "mysecret", "1234-abcd", "pubkey123"} {
+				for _, key := range []string{"secretpassword", "mysecret", "1234-abcd", "pubkey123", "privkey123", "token123"} {
 					if bytes.Contains(gotBytes, []byte(key)) {
 						t.Errorf("expected sensitive key %q to be redacted, got: %s", key, got)
 					}
@@ -88,6 +90,10 @@ func TestSanitizeJSON(t *testing.T) {
                 "secret": "user-secret",
                 "password": "user-password",
                 "publicKey": "user-pubkey",
+                "privateKey": "user-privkey",
+                "private_key": "user-privkey-2",
+                "private-key": "user-privkey-3",
+                "token": "user-token",
                 "password_hash": "my-hash-val",
                 "passwordHash": "my-other-hash-val"
               }
@@ -116,7 +122,7 @@ func TestSanitizeJSON(t *testing.T) {
 			}
 			got := string(gotBytes)
 			if tc.name == "redact sensitive keys" {
-				for _, key := range []string{"user-uuid-123", "user-secret", "user-password", "user-pubkey", "my-hash-val", "my-other-hash-val"} {
+				for _, key := range []string{"user-uuid-123", "user-secret", "user-password", "user-pubkey", "user-privkey", "user-privkey-2", "user-privkey-3", "user-token", "my-hash-val", "my-other-hash-val"} {
 					if bytes.Contains(gotBytes, []byte(key)) {
 						t.Errorf("expected sensitive key %q to be redacted, got: %s", key, got)
 					}
