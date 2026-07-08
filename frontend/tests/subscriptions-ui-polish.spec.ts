@@ -18,7 +18,6 @@ test.describe('Subscriptions UI Polish E2E tests', () => {
     // Mock generic API endpoints
     await page.route('**/api/**', async (route: Route) => {
       const url = route.request().url();
-      const method = route.request().method();
 
       if (url.includes('/api/auth/me')) {
         await route.fulfill({
