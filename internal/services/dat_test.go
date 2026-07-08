@@ -80,7 +80,7 @@ func makeLD(fieldNum int, data []byte) []byte {
 }
 
 func makeVarintField(fieldNum int, val uint64) []byte {
-	tag := (fieldNum << 3) | 0
+	tag := fieldNum << 3
 	var buf []byte
 	buf = append(buf, makeVarint(uint64(tag))...)
 	buf = append(buf, makeVarint(val)...)

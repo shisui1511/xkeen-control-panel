@@ -285,7 +285,7 @@ func (s *SnapshotService) Restore(id string) error {
 		}
 
 		// Only allow regular files and directories
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA && hdr.Typeflag != tar.TypeDir {
+		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeDir {
 			continue // skip symlinks, hardlinks, devices, etc.
 		}
 
