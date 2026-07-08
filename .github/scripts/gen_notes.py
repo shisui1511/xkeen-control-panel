@@ -198,7 +198,8 @@ def main():
     stable_tags = get_stable_tags()
 
     if mode == "prerelease":
-        prev_tag = stable_tags[-1] if stable_tags else ""
+        base_version = version.split("-")[0]
+        prev_tag = next((t for t in reversed(stable_tags) if t != version and t != base_version), "")
         notes = prerelease_notes(version, commit_count, pr_number, prev_tag, short_sha, full_sha)
     else:
         # For stable: prev is the tag before current version
