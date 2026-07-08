@@ -246,6 +246,8 @@ test.describe('Import Proxy Node E2E test suite', () => {
 // RED-тесты: D-15, D-16, D-17 — падают до реализации (Wave 2/3)
 test.describe('Import Node из конструкторов (D-15, D-16, D-17)', () => {
   test.beforeEach(async ({ page }) => {
+    page.on('console', (msg) => console.log('BROWSER CONSOLE:', msg.text()));
+    page.on('pageerror', (err) => console.log('BROWSER ERROR:', err.message));
     await disableServiceWorker(page);
     await setupRestMocks(page);
     // Дополнительный мок для config/read и config/list в конструкторе
