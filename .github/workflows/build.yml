@@ -112,9 +112,9 @@ jobs:
               # Read version from frontend/package.json
               PKG_VERSION=$(grep -o '"version": "[^"]*' frontend/package.json 2>/dev/null | cut -d'"' -f4 || echo "0.0.0")
               if [[ "$PKG_VERSION" == v* ]]; then
-                VERSION="$PKG_VERSION"
+                VERSION="${PKG_VERSION}-dev"
               else
-                VERSION="v$PKG_VERSION"
+                VERSION="v${PKG_VERSION}-dev"
               fi
               IS_STABLE="false"
               
@@ -246,11 +246,7 @@ jobs:
           git tag -f "${VERSION}" "${GITHUB_SHA}"
           git push origin -f "${VERSION}"
 
-          if [ -n "${PR_NUMBER}" ]; then
-            TITLE="${VERSION} · PR #${PR_NUMBER}"
-          else
-            TITLE="${VERSION} · build #${COMMIT_COUNT}"
-          fi
+          TITLE="${VERSION} · build #${COMMIT_COUNT}"
 
           gh release create "${VERSION}" \
             --target "${GITHUB_SHA}" \
