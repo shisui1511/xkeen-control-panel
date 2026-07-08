@@ -47,9 +47,20 @@ export function mergeXrayFile(
           ...(existing.dns ?? {}),
           servers: managed.servers,
           queryStrategy: managed.queryStrategy,
-          hosts: managed.hosts
+          hosts: managed.hosts,
+          tag: managed.tag ?? existing.dns?.tag
         }
       };
+    case '04_outbounds.json': {
+      const existingOutbounds = (existing.outbounds ?? []) as Record<string, any>[];
+      const nonCustom = existingOutbounds.filter(
+        (o) => o && (o.tag === 'direct' || o.tag === 'block' || o.tag === 'dns-out')
+      );
+      return {
+        ...existing,
+        outbounds: [...nonCustom, ...(managed.outbounds ?? [])]
+      };
+    }
     case '03_inbounds.json': {
       const existingInbounds = (existing.inbounds ?? []) as Record<string, any>[];
       const nonDns = existingInbounds.filter((ib) => !String(ib.tag || '').startsWith('dns-in-'));
@@ -67,6 +78,7 @@ export function mergeXrayFile(
         ...existing,
         routing: {
           ...(existing.routing ?? {}),
+          domainStrategy: managed.domainStrategy ?? existing.routing?.domainStrategy,
           rules
         }
       };
@@ -103,7 +115,7 @@ export function syncDnsPipeline(
 ): { dnsInbounds: any[]; routingRules: any[] } {
   const dnsInbounds: any[] = [];
   const routingRules: any[] = [];
-  let portCounter = 1082;
+  let portCounter = 1253;
 
   for (const srv of dnsServers) {
     if (srv && typeof srv === 'object' && srv.tag) {
@@ -134,10 +146,31 @@ export function syncDnsPipeline(
  * @param tag   - реальный тег исходящего соединения
  */
 export function substituteProxyTag(rules: any[], tag: string): any[] {
+  const realTag = tag || 'direct';
   return rules.map((r) => {
     if (r.outboundTag === 'PROXY_TAG') {
-      return { ...r, outboundTag: tag };
+      return { ...r, outboundTag: realTag };
     }
     return r;
   });
+}
+
+/**
+ * generateDnsOverVlessRules — генерирует правила маршрутизации для DNS-over-VLESS.
+ *
+ * @param proxyTag - тег первого прокси-выхода
+ */
+export function generateDnsOverVlessRules(proxyTag: string): any[] {
+  return [
+    {
+      type: 'field',
+      inboundTag: ['dns-in'],
+      outboundTag: proxyTag || 'direct'
+    },
+    {
+      type: 'field',
+      port: 53,
+      outboundTag: 'dns-out'
+    }
+  ];
 }

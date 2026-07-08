@@ -235,19 +235,19 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
   // D-03: Collapse-by-default — группа с >8 прокси свёрнута по умолчанию
   test('D-03: большая группа (>8 прокси) свёрнута по умолчанию', async ({ page }) => {
-    // Группа LargeGroup имеет 12 прокси и должна быть свёрнута
-    // В свёрнутом состоянии видно не более 4 строк прокси (active + top-3 по задержке)
     const largeGroup = page.locator('.group-card').filter({ hasText: 'LargeGroup' }).first();
     await expect(largeGroup).toBeVisible();
 
-    const proxyRows = largeGroup.locator('.proxy-row');
-    const count = await proxyRows.count();
-    // Свёрнутая группа показывает <= 4 прокси (active + top-3)
-    expect(count).toBeLessThanOrEqual(4);
+    // Свёрнутая группа показывает dot-container и не показывает proxy-grid
+    const dotContainer = largeGroup.locator('.dot-container');
+    await expect(dotContainer).toBeVisible();
 
-    // Должен присутствовать элемент .more-hint с подсказкой «...ещё N»
-    const moreHint = largeGroup.locator('.more-hint');
-    await expect(moreHint).toBeVisible();
+    const proxyGrid = largeGroup.locator('.proxy-grid');
+    await expect(proxyGrid).toBeHidden();
+
+    // Количество dot-индикаторов должно быть равно 12
+    const dotsCount = await largeGroup.locator('.dot-indicator').count();
+    expect(dotsCount).toBe(12);
   });
 
   // D-05: Toggle — клик по gc-head разворачивает/сворачивает группу
@@ -255,61 +255,69 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     const largeGroup = page.locator('.group-card').filter({ hasText: 'LargeGroup' }).first();
     const gcHead = largeGroup.locator('.gc-head').first();
 
-    // Изначально свёрнуто — <= 4 строк
-    const initialCount = await largeGroup.locator('.proxy-row').count();
-    expect(initialCount).toBeLessThanOrEqual(4);
+    // Изначально свёрнуто
+    await expect(largeGroup.locator('.proxy-grid')).toBeHidden();
 
     // Кликаем по заголовку — группа должна развернуться
     await gcHead.click();
 
-    // После разворачивания видны все 12 прокси (toHaveCount авто-ретраит)
-    await expect(largeGroup.locator('.proxy-row')).toHaveCount(12);
+    // После разворачивания видны все 12 прокси-карточек
+    await expect(largeGroup.locator('.proxy-card')).toHaveCount(12);
+    await expect(largeGroup.locator('.proxy-grid')).toBeVisible();
 
     // Кликаем снова — группа сворачивается
     await gcHead.click();
-    await expect(largeGroup.locator('.proxy-row').first()).toBeVisible();
-    const collapsedCount = await largeGroup.locator('.proxy-row').count();
-    expect(collapsedCount).toBeLessThanOrEqual(4);
+    await expect(largeGroup.locator('.proxy-grid')).toBeHidden();
   });
 
-  // D-07: Клик по .more-hint разворачивает группу
-  test('D-07: клик по .more-hint разворачивает свёрнутую группу', async ({ page }) => {
+  // D-07: Клик по dot-indicator переключает активный прокси
+  test('D-07: клик по .dot-indicator в Selector-группе переключает активный прокси', async ({
+    page
+  }) => {
     const largeGroup = page.locator('.group-card').filter({ hasText: 'LargeGroup' }).first();
+    const dots = largeGroup.locator('.dot-indicator');
 
-    // Изначально свёрнуто
-    const moreHint = largeGroup.locator('.more-hint');
-    await expect(moreHint).toBeVisible();
+    // Перехватываем PUT-запрос
+    let putRequest: any = null;
+    await page.route('**/api/mihomo/proxy/proxies/LargeGroup', async (route) => {
+      if (route.request().method() === 'PUT') {
+        putRequest = route.request().postDataJSON();
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
+    });
 
-    // Кликаем по .more-hint
-    await moreHint.click();
+    // Кликаем по второй точке (proxy-02)
+    await dots.nth(1).click();
 
-    // После клика группа должна развернуться — все 12 прокси видны (toHaveCount авто-ретраит)
-    await expect(largeGroup.locator('.proxy-row')).toHaveCount(12);
+    expect(putRequest).not.toBeNull();
+    expect(putRequest.name).toBe('proxy-02');
   });
 
-  // D-08: Compact padding — .proxy-row имеет padding-top: 4px
-  test('D-08: .proxy-row имеет компактный padding-top 4px', async ({ page }) => {
+  // D-08: Compact padding — .proxy-card имеет padding-top: 10px
+  test('D-08: .proxy-card имеет padding-top 10px', async ({ page }) => {
     const largeGroup = page.locator('.group-card').filter({ hasText: 'LargeGroup' }).first();
 
-    // Разворачиваем группу, чтобы получить доступ к строкам прокси
+    // Разворачиваем группу
     await largeGroup.locator('.gc-head').first().click();
-    // Ждём появления всех 12 строк прокси перед проверкой computed style
-    await expect(largeGroup.locator('.proxy-row')).toHaveCount(12);
+    await expect(largeGroup.locator('.proxy-card')).toHaveCount(12);
 
-    // Получаем computed style первой строки прокси
+    // Получаем computed style первой карточки прокси
     const paddingTop = await largeGroup
-      .locator('.proxy-row')
+      .locator('.proxy-card')
       .first()
       .evaluate((el: Element) => {
         return window.getComputedStyle(el).paddingTop;
       });
 
-    expect(paddingTop).toBe('4px');
+    expect(paddingTop).toBe('10px');
   });
 
   // D-11/D-12: Поиск по имени группы — фильтрация и скрытие несовпавших
   test('D-11/D-12: поиск по имени группы скрывает несовпадающие группы', async ({ page }) => {
-    // Оба group-card должны быть видны изначально
     const allCards = page.locator('.group-card');
     await expect(allCards).toHaveCount(2);
 
@@ -323,12 +331,9 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     const searchInput = page.locator('input.group-search');
     await searchInput.fill('Large');
 
-    // LargeGroup должна остаться видимой, SmallGroup — скрыться
+    // LargeGroup должна остаться видимой, SmallGroup — скрыться из DOM/стать скрытой
     await expect(largeCard).toBeVisible();
-    const smallDisplay = await smallCard.evaluate(
-      (el: Element) => window.getComputedStyle(el).display
-    );
-    expect(smallDisplay).toBe('none');
+    await expect(smallCard).toBeHidden();
 
     // Очищаем поле поиска — обе группы снова видны
     await searchInput.fill('');

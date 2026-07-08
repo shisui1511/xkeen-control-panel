@@ -411,3 +411,42 @@ proxies:
 		t.Error("ReplaceMihomoTopLevelSection should be idempotent")
 	}
 }
+
+func TestParseClashProxyNode_Hysteria2(t *testing.T) {
+	block := `  - name: Hysteria2-Test
+    type: hysteria2
+    server: hy2.server.com
+    port: 8443
+    password: obfs_password_123
+    sni: custom.sni.com
+    skip-cert-verify: true
+    obfs:
+      type: simple
+      password: simple_obfs_pass`
+
+	node := ParseClashProxyNode(block)
+	if node.Tag != "Hysteria2-Test" {
+		t.Errorf("expected tag Hysteria2-Test, got %q", node.Tag)
+	}
+	if node.Protocol != "hysteria2" {
+		t.Errorf("expected protocol hysteria2, got %q", node.Protocol)
+	}
+	if node.Server != "hy2.server.com:8443" {
+		t.Errorf("expected server hy2.server.com:8443, got %q", node.Server)
+	}
+	if node.Password != "obfs_password_123" {
+		t.Errorf("expected password obfs_password_123, got %q", node.Password)
+	}
+	if node.SNI != "custom.sni.com" {
+		t.Errorf("expected SNI custom.sni.com, got %q", node.SNI)
+	}
+	if !node.Insecure {
+		t.Error("expected Insecure to be true")
+	}
+	if node.ObfsType != "simple" {
+		t.Errorf("expected ObfsType simple, got %q", node.ObfsType)
+	}
+	if node.ObfsPassword != "simple_obfs_pass" {
+		t.Errorf("expected ObfsPassword simple_obfs_pass, got %q", node.ObfsPassword)
+	}
+}

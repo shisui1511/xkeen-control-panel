@@ -227,7 +227,7 @@ func (a *API) TrafficAlertsClear(w http.ResponseWriter, r *http.Request) {
 // который уже держит одно соединение с Mihomo /connections.
 func (a *API) ConnectionsWebSocket(w http.ResponseWriter, r *http.Request) {
 	if a.trafficQuotaSvc == nil {
-		http.Error(w, "Traffic Quota service unavailable", http.StatusServiceUnavailable)
+		a.errorResponse(w, "Traffic Quota service unavailable", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -297,7 +297,7 @@ func (a *API) ConnectionsWebSocket(w http.ResponseWriter, r *http.Request) {
 // через WebSocket к браузеру. Данные берутся из fan-out TrafficQuotaService.
 func (a *API) TrafficWebSocket(w http.ResponseWriter, r *http.Request) {
 	if a.trafficQuotaSvc == nil {
-		http.Error(w, "Traffic Quota service unavailable", http.StatusServiceUnavailable)
+		a.errorResponse(w, "Traffic Quota service unavailable", http.StatusServiceUnavailable)
 		return
 	}
 

@@ -242,7 +242,7 @@ func (a *API) UpdateEventsSSE(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		a.errorResponse(w, "Streaming unsupported", http.StatusInternalServerError)
 		return
 	}
 

@@ -1,7 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { currentLang, t } from './i18n';
-  import { showToast } from './stores';
+  import { capabilities, showToast, fetchCapabilities } from './stores';
+  import { parseValidationError } from './lib/errorParser';
+  import { findPortCollisions, type PortAllocation } from './lib/portChecker';
+  import {
+    slugifyProviderName,
+    yamlSafeString,
+    sanitizeUrl,
+    unquote,
+    extractSection,
+    replaceMihomoTopLevelSection,
+    generateYAML as generateMihomoYAML,
+    populateMihomoFromYAML as populateMihomoFromYAML_raw,
+    ZKEEN_RULE_PROVIDERS,
+    type RuleProvider
+  } from './lib/mihomoYaml';
+  import ProxyForm from './components/mihomo/ProxyForm.svelte';
+  import GroupForm from './components/mihomo/GroupForm.svelte';
+  import RuleForm from './components/mihomo/RuleForm.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
   export let selectedFile: string = '';
@@ -39,6 +56,9 @@
     // hy2
     password?: string;
     sni?: string;
+    skipCertVerify?: boolean;
+    obfsType?: 'none' | 'simple';
+    obfsPassword?: string;
     // tuic
     congestion?: string;
     // ss
@@ -62,6 +82,11 @@
     excludeFilter?: string;
     icon?: string;
     enabled?: boolean;
+    hidden?: boolean; // NEW (D-02): hides group from Mihomo selector UI
+    tolerance?: number; // NEW (D-02): latency tolerance ms for url-test
+    maxFailedTimes?: number; // NEW (D-02): maps to YAML key max-failed-times
+    useProviders?: string[];
+    strategy?: 'round-robin' | 'consistent-hashing' | 'sticky-sessions';
   }
 
   interface Rule {
@@ -95,6 +120,67 @@
   let activePreset: string = '';
   let activeRuleProvider: 'none' | 'zkeen' | 'metacubex' = 'none';
   let subscriptions: any[] = [];
+  let mihomoProviders: any[] = [];
+  let lastParsedProviders: any[] = [];
+
+  function mergeMihomoProviders(dbSubs: any[], parsedProviders: any[]) {
+    const dbMapByUrl = new Map<string, any>();
+    const dbMapByName = new Map<string, any>();
+
+    function cleanUrl(urlStr: string): string {
+      if (!urlStr) return '';
+      try {
+        const match = urlStr.match(/[?&]url=([^&]+)/);
+        if (match) {
+          return decodeURIComponent(match[1]).trim().toLowerCase();
+        }
+        return urlStr.trim().toLowerCase();
+      } catch {
+        return urlStr.trim().toLowerCase();
+      }
+    }
+
+    for (const sub of dbSubs) {
+      const originalUrl = cleanUrl(sub.url || '');
+      if (originalUrl) {
+        dbMapByUrl.set(originalUrl, sub);
+      }
+      const providerName = slugifyProviderName(
+        sub.profile_title || '',
+        sub.name || '',
+        sub.url || '',
+        sub.id
+      );
+      dbMapByName.set(providerName, sub);
+    }
+
+    const merged = [...dbSubs];
+
+    for (const p of parsedProviders) {
+      const originalUrl = cleanUrl(p.url || '');
+      const hasMatch = (originalUrl && dbMapByUrl.has(originalUrl)) || dbMapByName.has(p.name);
+
+      if (!hasMatch) {
+        const rawUrl = originalUrl || p.url;
+        merged.push({
+          id: p.id,
+          name: p.name,
+          url: rawUrl,
+          interval: p.interval,
+          enabled: true,
+          enable_mihomo: true,
+          isVirtual: true,
+          rawLines: p.rawLines
+        });
+      }
+    }
+
+    return merged;
+  }
+
+  $: hasXraySubscriptions = subscriptions.some((s) => s.enable_xray);
+  $: hasMihomoProviders = mihomoProviders.length > 0;
+  let hasZkeenGeodata = false;
   let existingTproxyPort: number | null = null;
   let existingRedirPort: number | null = null;
   let dns: DNSConfig = {
@@ -112,6 +198,36 @@
     dnsHijack: ['any:53']
   };
   let preservedKeys: string[] = [];
+  let dismissMergeWarning = false;
+  let lastPreservedKeysStr = '';
+  $: if (preservedKeys.join(',') !== lastPreservedKeysStr) {
+    lastPreservedKeysStr = preservedKeys.join(',');
+    const dismissed = localStorage.getItem('xcp:dismissed_warning:preserved_keys');
+    dismissMergeWarning = dismissed === lastPreservedKeysStr;
+  }
+
+  let dismissZkeenGeodataWarning = false;
+  let lastActivePreset = '';
+  $: if (activePreset !== lastActivePreset) {
+    if (lastActivePreset && activePreset !== lastActivePreset) {
+      localStorage.removeItem('xcp:dismissed_warning:zkeen_geodata');
+    }
+    lastActivePreset = activePreset;
+    const dismissed = localStorage.getItem('xcp:dismissed_warning:zkeen_geodata');
+    dismissZkeenGeodataWarning = dismissed === activePreset;
+  }
+
+  let sniffer = {
+    enabled: false,
+    sniffHttp: true,
+    sniffTls: true,
+    sniffQuic: true
+  };
+  let canUndo = false;
+  let isDirty = false;
+  function checkUndo() {
+    canUndo = !!localStorage.getItem('xcp_prev_mihomo_yaml');
+  }
 
   // Import Node states
   let showImportModal = false;
@@ -126,6 +242,8 @@
   let showProxyForm = false;
   let showGroupForm = false;
   let showRuleForm = false;
+  let editingProxyId: string | null = null;
+  let editingGroupId: string | null = null;
 
   // New proxy form
   let np: Omit<Proxy, 'id'> = newProxyDefaults('vless');
@@ -142,6 +260,9 @@
       servername: 'www.apple.com',
       password: '',
       sni: '',
+      skipCertVerify: false,
+      obfsType: 'none',
+      obfsPassword: '',
       congestion: 'bbr',
       cipher: 'aes-256-gcm',
       network: 'ws',
@@ -150,8 +271,11 @@
       fingerprint: 'chrome'
     };
   }
-  $: if (np.type)
+  let lastType = 'vless';
+  $: if (np.type && np.type !== lastType) {
+    lastType = np.type;
     np = { ...newProxyDefaults(np.type), name: np.name, server: np.server, port: np.port };
+  }
 
   // New group form
   let ng: Omit<ProxyGroup, 'id'> = {
@@ -160,134 +284,22 @@
     proxies: [],
     includeAll: false,
     url: 'https://www.gstatic.com/generate_204',
-    interval: 300
+    interval: 300,
+    useProviders: [],
+    strategy: undefined
   };
-  let ngProxyInput = '';
 
   // New rule form
   let nr: Omit<Rule, 'id'> = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
 
-  // ── Rule-provider URL constants ─────────────────────────────────────────
-  const META_BASE_URL = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
-  const METACUBEX_BASE = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/release/geo';
-
-  interface RuleProvider {
-    name: string;
-    url: string;
-    behavior: string;
-    outbound: string;
-    format: string;
-    payload?: string[];
-  }
-
-  const ZKEEN_RULE_PROVIDERS: RuleProvider[] = [
-    {
-      name: 'adlist@domain',
-      url: 'https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs',
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'REJECT'
-    },
-    {
-      name: 'category-ai@domain',
-      url: `${METACUBEX_BASE}/geosite/category-ai.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'AI'
-    },
-    {
-      name: 'steam@domain',
-      url: `${METACUBEX_BASE}/geosite/steam.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Steam'
-    },
-    {
-      name: 'spotify@domain',
-      url: `${METACUBEX_BASE}/geosite/spotify.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Spotify'
-    },
-    {
-      name: 'speedtest@domain',
-      url: `${METACUBEX_BASE}/geosite/speedtest.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Speedtest'
-    },
-    {
-      name: 'reddit@domain',
-      url: `${METACUBEX_BASE}/geosite/reddit.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Reddit'
-    },
-    {
-      name: 'twitch@domain',
-      url: `${METACUBEX_BASE}/geosite/twitch.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Twitch'
-    },
-    {
-      name: 'twitter@domain',
-      url: `${METACUBEX_BASE}/geosite/twitter.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Twitter'
-    },
-    {
-      name: 'meta@domain',
-      url: `${METACUBEX_BASE}/geosite/meta.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Meta'
-    },
-    {
-      name: 'discord@classical',
-      url: `${METACUBEX_BASE}/classical/discord.txt`,
-      behavior: 'classical',
-      format: 'text',
-      outbound: 'Discord'
-    },
-    {
-      name: 'refilter@domain',
-      url: 'https://raw.githubusercontent.com/1andrevich/Re-filter-lists/release/refilter_domains.mrs',
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'Заблок. сервисы'
-    },
-    {
-      name: 'telegram@ipcidr',
-      url: `${METACUBEX_BASE}/geoip/telegram.mrs`,
-      behavior: 'ipcidr',
-      format: 'mrs',
-      outbound: 'Telegram'
-    },
-    {
-      name: 'github@domain',
-      url: `${METACUBEX_BASE}/geosite/github.mrs`,
-      behavior: 'domain',
-      format: 'mrs',
-      outbound: 'GitHub'
-    },
-    {
-      name: 'private@ip',
-      url: `${METACUBEX_BASE}/geoip/private.mrs`,
-      behavior: 'ipcidr',
-      format: 'mrs',
-      outbound: 'DIRECT'
-    },
-    {
-      name: 'quic@inline',
-      url: '',
-      behavior: 'classical',
-      format: 'inline',
-      outbound: 'QUIC',
-      payload: ['AND,((DST-PORT,443),(NETWORK,UDP))']
-    }
-  ];
+  // Moved state variables to prevent duplicate declarations and temporal dead zone (TDZ) issues
+  let validationError = '';
+  let schema: any = null;
+  let schemaLoading = true;
+  let schemaError = '';
+  let showApplyConfirm = false;
+  let applyLoading = false;
+  let dnsRedirectLoading = false;
 
   const RULE_PROVIDERS: Record<
     string,
@@ -308,42 +320,64 @@
       name: 'Заблок. сервисы',
       type: 'select',
       includeAll: true,
-      proxies: [] as string[],
+      proxies: ['Fallback', 'Fastest'] as string[],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Reject.png'
+    },
+    {
+      name: 'Fallback',
+      type: 'fallback',
+      includeAll: true,
+      proxies: [] as string[],
+      hidden: true,
+      url: 'https://www.gstatic.com/generate_204',
+      interval: 300,
+      maxFailedTimes: 3,
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Auto.png'
+    },
+    {
+      name: 'Fastest',
+      type: 'url-test',
+      includeAll: true,
+      proxies: [] as string[],
+      hidden: true,
+      url: 'https://www.gstatic.com/generate_204',
+      interval: 300,
+      maxFailedTimes: 3,
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available.png'
     },
     {
       name: 'YouTube',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png'
     },
     {
       name: 'Discord',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png'
     },
     {
       name: 'Twitch',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Заблок. сервисы'],
+      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png'
     },
     {
       name: 'Reddit',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Заблок. сервисы'],
+      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
       icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png'
     },
     {
       name: 'Meta',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png'
     },
     {
@@ -351,49 +385,49 @@
       type: 'select',
       includeAll: true,
       excludeFilter: '🇷🇺',
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png'
     },
     {
       name: 'Speedtest',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png'
     },
     {
       name: 'Telegram',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png'
     },
     {
       name: 'Steam',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Заблок. сервисы'],
+      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png'
     },
     {
       name: 'CDN',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'PASS'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://www.svgrepo.com/show/396567/globe-with-meridians.svg'
     },
     {
       name: 'Google',
       type: 'select',
       includeAll: true,
-      proxies: ['PASS', 'Заблок. сервисы'],
+      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png'
     },
     {
       name: 'GitHub',
       type: 'select',
       includeAll: true,
-      proxies: ['PASS', 'Заблок. сервисы'],
+      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png'
     },
     {
@@ -401,22 +435,22 @@
       type: 'select',
       includeAll: true,
       excludeFilter: '🇷🇺',
-      proxies: ['Заблок. сервисы'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png'
     },
     {
       name: 'Twitter',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'DIRECT'],
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png'
     },
     {
-      name: 'QUIC',
+      name: 'TikTok',
       type: 'select',
-      includeAll: false,
-      proxies: ['REJECT', 'PASS'],
-      icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/quic.png'
+      includeAll: true,
+      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/TikTok.png'
     }
   ];
 
@@ -478,13 +512,58 @@
 
   let selectedMetaRuleSets: Map<string, string> = new Map();
 
+  const META_BASE_URL = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
+
   function buildMetaRuleSetUrl(id: string, type: 'geosite' | 'geoip'): string {
     return `${META_BASE_URL}/${type}/${id}.mrs`;
   }
 
   // ── Presets ──────────────────────────────────────────────────────────────
-  function applyPreset(id: 'rule-based' | 'global-proxy' | 'zkeen-selective', silent = false) {
+  function applyPreset(id: string, silent = false) {
     activePreset = id;
+    validationError = '';
+
+    if (schema && schema.mihomo && schema.mihomo.presets) {
+      const p = schema.mihomo.presets.find((x: any) => x.id === id);
+      if (p) {
+        activeRuleProvider = p.active_rule_provider || 'none';
+        groups = (p.groups || []).map((g: any) => ({
+          id: crypto.randomUUID(),
+          name: g.name,
+          type: g.type || 'select',
+          proxies:
+            g.name === 'Selective' || g.name === 'Proxy'
+              ? ['DIRECT', ...proxies.map((pr) => pr.name)]
+              : [...(g.proxies || [])],
+          includeAll: g.include_all ?? false,
+          excludeFilter: g.exclude_filter || '',
+          url: g.url || 'https://www.gstatic.com/generate_204',
+          interval: g.interval || 300,
+          icon: g.icon || '',
+          enabled: true,
+          hidden: g.hidden ?? false,
+          tolerance: g.tolerance ?? undefined,
+          maxFailedTimes: g.max_failed_times ?? undefined
+        }));
+        rules = (p.rules || []).map((r: any) => ({
+          id: crypto.randomUUID(),
+          type: r.type,
+          value: r.value,
+          outbound: r.outbound
+        }));
+        selectedMetaRuleSets = new Map();
+        if (p.selected_meta_rule_sets) {
+          for (const [k, v] of Object.entries(p.selected_meta_rule_sets)) {
+            selectedMetaRuleSets.set(k, v as string);
+          }
+        }
+        if (!silent) {
+          showToast('success', $t('editor.preset_applied'));
+        }
+        return;
+      }
+    }
+
     if (id === 'rule-based') {
       groups = [
         {
@@ -531,9 +610,53 @@
       rules = [];
       activeRuleProvider = 'zkeen';
       selectedMetaRuleSets = new Map();
+    } else if (id === 'only-blocked') {
+      groups = [
+        {
+          id: crypto.randomUUID(),
+          name: 'Selective',
+          type: 'select',
+          proxies: ['DIRECT', ...proxies.map((p) => p.name)],
+          includeAll: true,
+          url: 'https://www.gstatic.com/generate_204',
+          interval: 300,
+          icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Proxy.png'
+        }
+      ];
+      rules = [
+        {
+          id: crypto.randomUUID(),
+          type: 'RULE-SET',
+          value: 'refilter@domain',
+          outbound: 'Selective'
+        },
+        { id: crypto.randomUUID(), type: 'RULE-SET', value: 'private@ip', outbound: 'DIRECT' },
+        { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'DIRECT' }
+      ];
+      activeRuleProvider = 'zkeen';
+      selectedMetaRuleSets = new Map();
     }
     if (!silent) {
       showToast('success', $t('editor.preset_applied'));
+    }
+  }
+
+  // ── Import proxies from subscriptions ───────────────────────────────────
+  async function loadSubscriptions() {
+    try {
+      const res = await fetch('/api/subscriptions');
+      if (!res.ok) return;
+      const subs = await res.json();
+      if (Array.isArray(subs)) {
+        subscriptions = subs.filter((s) => s.enabled);
+        const dbMihomo = subs.filter((s) => s.enabled && s.enable_mihomo);
+        mihomoProviders = mergeMihomoProviders(dbMihomo, lastParsedProviders);
+      } else {
+        subscriptions = [];
+        mihomoProviders = mergeMihomoProviders([], lastParsedProviders);
+      }
+    } catch (e: any) {
+      console.error(e);
     }
   }
 
@@ -542,9 +665,13 @@
     try {
       const res = await fetch('/api/subscriptions');
       if (!res.ok) return;
-      const subs: any[] = await res.json();
-      subscriptions = subs.filter((s) => s.enabled);
-      if (!subs || subs.length === 0) {
+      const subs = await res.json();
+      if (Array.isArray(subs)) {
+        subscriptions = subs.filter((s) => s.enabled);
+      } else {
+        subscriptions = [];
+      }
+      if (!Array.isArray(subs) || subs.length === 0) {
         showToast('info', $t('editor.import_proxies_empty'));
         return;
       }
@@ -579,11 +706,16 @@
             sni: n.sni || '',
             congestion: n.congestion || '',
             alterID: n.alter_id || 0,
-            tls: n.security === 'tls' || n.security === 'reality'
+            tls: n.security === 'tls' || n.security === 'reality',
+            skipCertVerify: n.insecure || false,
+            obfsType: (n.obfs_type || 'none') as any,
+            obfsPassword: n.obfs_password || ''
           };
         });
-        proxies = [...proxies, ...mapped];
-        imported += mapped.length;
+        const existingNames = new Set(proxies.map((p) => p.name));
+        const uniqueMapped = mapped.filter((n) => !existingNames.has(n.name));
+        proxies = [...proxies, ...uniqueMapped];
+        imported += uniqueMapped.length;
       }
       if (imported > 0) {
         showToast('success', $t('editor.import_proxies_done'));
@@ -772,6 +904,12 @@
         p.port = server.port || 443;
         p.password = server.password || '';
         p.sni = parsed.streamSettings?.tlsSettings?.serverName || '';
+        p.skipCertVerify = parsed.streamSettings?.tlsSettings?.allowInsecure || false;
+        const hy2Settings = parsed.settings?.hysteria2Settings;
+        if (hy2Settings?.obfs) {
+          p.obfsType = hy2Settings.obfs.type || 'none';
+          p.obfsPassword = hy2Settings.obfs.password || '';
+        }
       }
     } else if (proto === 'tuic') {
       p.type = 'tuic';
@@ -821,435 +959,34 @@
   function populateMihomoFromYAML(text: string) {
     if (!text || text.trim() === '') {
       applyPreset('zkeen-selective', true);
+      lastParsedProviders = [];
+      mihomoProviders = mergeMihomoProviders(
+        subscriptions.filter((s) => s.enable_mihomo),
+        []
+      );
       return;
     }
     try {
-      const lines = text.split('\n');
-      let inGroups = false;
-      let inProxies = false;
-      let inDNS = false;
-      let inTUN = false;
-      let inRules = false;
-      let inRuleProviders = false;
-      let inNameservers = false;
-      let inFallback = false;
-      let inDnsHijack = false;
+      const res = populateMihomoFromYAML_raw(text) as any;
+      proxies = res.proxies;
+      groups = res.groups;
+      rules = res.rules;
+      dns = res.dns;
+      tun = res.tun;
+      sniffer = res.sniffer;
+      activeRuleProvider = res.activeRuleProvider as any;
+      selectedMetaRuleSets = res.selectedMetaRuleSets;
+      preservedKeys = res.preservedKeys;
+      existingTproxyPort = res.existingTproxyPort;
+      existingRedirPort = res.existingRedirPort;
 
-      let currentGroup: any = null;
-      let currentProxy: any = null;
-      let inProxiesList = false;
+      lastParsedProviders = res.mihomoProviders || [];
+      mihomoProviders = mergeMihomoProviders(
+        subscriptions.filter((s) => s.enable_mihomo),
+        lastParsedProviders
+      );
 
-      const parsedGroups: ProxyGroup[] = [];
-      const parsedProxies: Proxy[] = [];
-      const parsedRules: Rule[] = [];
-      selectedMetaRuleSets = new Map();
-      activeRuleProvider = 'none';
-      preservedKeys = [];
-      dns = {
-        enabled: false,
-        nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],
-        fallback: ['https://8.8.8.8/dns-query', '1.1.1.1'],
-        enhancedMode: 'fake-ip',
-        fakeIPRange: '198.18.0.1/16'
-      };
-      tun = {
-        enabled: false,
-        stack: 'mixed',
-        autoRoute: true,
-        autoDetectInterface: true,
-        dnsHijack: ['any:53']
-      };
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmed = line.trim();
-
-        // Detect top-level sections
-        if (/^[a-zA-Z0-9_-]+:/.test(line) && !line.startsWith(' ') && !line.startsWith('-')) {
-          const match = line.match(/^([a-zA-Z0-9_-]+):/);
-          if (match) {
-            const sec = match[1];
-            inGroups = sec === 'proxy-groups';
-            inProxies = sec === 'proxies';
-            inDNS = sec === 'dns';
-            inTUN = sec === 'tun';
-            inRules = sec === 'rules';
-            inRuleProviders = sec === 'rule-providers';
-
-            if (
-              sec !== 'proxy-groups' &&
-              sec !== 'proxies' &&
-              sec !== 'dns' &&
-              sec !== 'tun' &&
-              sec !== 'rules' &&
-              sec !== 'rule-providers'
-            ) {
-              if (!preservedKeys.includes(sec)) {
-                preservedKeys = [...preservedKeys, sec];
-              }
-            }
-          }
-          continue;
-        }
-
-        if (inGroups) {
-          if (line.startsWith('  -') || line.startsWith(' -') || trimmed.startsWith('-')) {
-            if (currentGroup) {
-              parsedGroups.push(currentGroup);
-            }
-            currentGroup = {
-              id: crypto.randomUUID(),
-              name: '',
-              type: 'select',
-              proxies: [],
-              includeAll: false
-            };
-            inProxiesList = false;
-
-            const nameMatch = trimmed.match(/^-\s+name:\s*(.+)$/);
-            if (nameMatch) {
-              currentGroup.name = unquote(nameMatch[1]);
-            }
-            continue;
-          }
-
-          if (!currentGroup) continue;
-
-          const nameMatch = trimmed.match(/^name:\s*(.+)$/);
-          if (nameMatch) {
-            currentGroup.name = unquote(nameMatch[1]);
-            continue;
-          }
-          const typeMatch = trimmed.match(/^type:\s*(.+)$/);
-          if (typeMatch) {
-            currentGroup.type = unquote(typeMatch[1]);
-            continue;
-          }
-          const includeAllMatch = trimmed.match(/^include-all:\s*(.+)$/);
-          if (includeAllMatch) {
-            currentGroup.includeAll = unquote(includeAllMatch[1]) === 'true';
-            continue;
-          }
-          const urlMatch = trimmed.match(/^url:\s*(.+)$/);
-          if (urlMatch) {
-            currentGroup.url = unquote(urlMatch[1]);
-            continue;
-          }
-          const intervalMatch = trimmed.match(/^interval:\s*(.+)$/);
-          if (intervalMatch) {
-            currentGroup.interval = parseInt(unquote(intervalMatch[1])) || 300;
-            continue;
-          }
-
-          const proxiesInlineMatch = trimmed.match(/^proxies:\s*\[(.*)\]$/);
-          if (proxiesInlineMatch) {
-            currentGroup.proxies = proxiesInlineMatch[1]
-              .split(',')
-              .map((p) => unquote(p.trim()))
-              .filter((p) => p.length > 0);
-            inProxiesList = false;
-            continue;
-          }
-
-          if (trimmed.startsWith('proxies:')) {
-            inProxiesList = true;
-            continue;
-          }
-
-          if (inProxiesList) {
-            const proxyItemMatch = trimmed.match(/^-\s*(.+)$/);
-            if (proxyItemMatch) {
-              currentGroup.proxies.push(unquote(proxyItemMatch[1]));
-            } else if (trimmed !== '' && !trimmed.startsWith('#') && !line.startsWith('    ')) {
-              inProxiesList = false;
-            }
-          }
-        }
-
-        if (inProxies) {
-          if (line.startsWith('  -') || line.startsWith(' -') || trimmed.startsWith('-')) {
-            if (currentProxy) {
-              parsedProxies.push(currentProxy);
-            }
-            currentProxy = {
-              id: crypto.randomUUID(),
-              name: '',
-              type: 'vless',
-              server: '',
-              port: 443
-            };
-
-            const nameMatch = trimmed.match(/^-\s+name:\s*(.+)$/);
-            if (nameMatch) {
-              currentProxy.name = unquote(nameMatch[1]);
-            }
-            continue;
-          }
-
-          if (!currentProxy) continue;
-
-          const nameMatch = trimmed.match(/^name:\s*(.+)$/);
-          if (nameMatch) {
-            currentProxy.name = unquote(nameMatch[1]);
-            continue;
-          }
-          const typeMatch = trimmed.match(/^type:\s*(.+)$/);
-          if (typeMatch) {
-            currentProxy.type = unquote(typeMatch[1]);
-            continue;
-          }
-          const serverMatch = trimmed.match(/^server:\s*(.+)$/);
-          if (serverMatch) {
-            currentProxy.server = unquote(serverMatch[1]);
-            continue;
-          }
-          const portMatch = trimmed.match(/^port:\s*(.+)$/);
-          if (portMatch) {
-            currentProxy.port = parseInt(unquote(portMatch[1])) || 443;
-            continue;
-          }
-          const uuidMatch = trimmed.match(/^uuid:\s*(.+)$/);
-          if (uuidMatch) {
-            currentProxy.uuid = unquote(uuidMatch[1]);
-            continue;
-          }
-          const passwordMatch = trimmed.match(/^password:\s*(.+)$/);
-          if (passwordMatch) {
-            currentProxy.password = unquote(passwordMatch[1]);
-            continue;
-          }
-          const flowMatch = trimmed.match(/^flow:\s*(.+)$/);
-          if (flowMatch) {
-            currentProxy.flow = unquote(flowMatch[1]);
-            continue;
-          }
-          const publicKeyMatch = trimmed.match(/^public-key:\s*(.+)$/);
-          if (publicKeyMatch) {
-            currentProxy.publicKey = unquote(publicKeyMatch[1]);
-            continue;
-          }
-          const shortIdMatch = trimmed.match(/^short-id:\s*(.+)$/);
-          if (shortIdMatch) {
-            currentProxy.shortId = unquote(shortIdMatch[1]);
-            continue;
-          }
-          const servernameMatch = trimmed.match(/^servername:\s*(.+)$/);
-          if (servernameMatch) {
-            currentProxy.servername = unquote(servernameMatch[1]);
-            continue;
-          }
-          const sniMatch = trimmed.match(/^sni:\s*(.+)$/);
-          if (sniMatch) {
-            currentProxy.sni = unquote(sniMatch[1]);
-            continue;
-          }
-          const congestionMatch = trimmed.match(/^congestion-controller:\s*(.+)$/);
-          if (congestionMatch) {
-            currentProxy.congestion = unquote(congestionMatch[1]);
-            continue;
-          }
-          const cipherMatch = trimmed.match(/^cipher:\s*(.+)$/);
-          if (cipherMatch) {
-            currentProxy.cipher = unquote(cipherMatch[1]);
-            continue;
-          }
-          const networkMatch = trimmed.match(/^network:\s*(.+)$/);
-          if (networkMatch) {
-            currentProxy.network = unquote(networkMatch[1]);
-            continue;
-          }
-          const wsPathMatch = trimmed.match(/^path:\s*(.+)$/);
-          if (wsPathMatch) {
-            currentProxy.wsPath = unquote(wsPathMatch[1]);
-            continue;
-          }
-          const tlsMatch = trimmed.match(/^tls:\s*(.+)$/);
-          if (tlsMatch) {
-            currentProxy.tls = unquote(tlsMatch[1]) === 'true';
-            continue;
-          }
-          const fingerprintMatch = trimmed.match(/^client-fingerprint:\s*(.+)$/);
-          if (fingerprintMatch) {
-            currentProxy.fingerprint = unquote(fingerprintMatch[1]);
-            continue;
-          }
-        }
-
-        if (inDNS) {
-          if (trimmed.startsWith('nameserver:')) {
-            inNameservers = true;
-            inFallback = false;
-            dns.nameservers = [];
-            continue;
-          }
-          if (trimmed.startsWith('fallback:')) {
-            inFallback = true;
-            inNameservers = false;
-            dns.fallback = [];
-            continue;
-          }
-
-          const enableMatch = trimmed.match(/^enable:\s*(.+)$/);
-          if (enableMatch) {
-            dns.enabled = unquote(enableMatch[1]) === 'true';
-            inNameservers = false;
-            inFallback = false;
-            continue;
-          }
-          const enhancedModeMatch = trimmed.match(/^enhanced-mode:\s*(.+)$/);
-          if (enhancedModeMatch) {
-            dns.enhancedMode = unquote(enhancedModeMatch[1]) as any;
-            inNameservers = false;
-            inFallback = false;
-            continue;
-          }
-          const fakeIpRangeMatch = trimmed.match(/^fake-ip-range:\s*(.+)$/);
-          if (fakeIpRangeMatch) {
-            dns.fakeIPRange = unquote(fakeIpRangeMatch[1]);
-            inNameservers = false;
-            inFallback = false;
-            continue;
-          }
-
-          if (inNameservers) {
-            const listMatch = trimmed.match(/^-\s*(.+)$/);
-            if (listMatch) {
-              dns.nameservers = [...dns.nameservers, unquote(listMatch[1])];
-            } else if (trimmed !== '' && !trimmed.startsWith('#') && !line.startsWith('    ')) {
-              inNameservers = false;
-            }
-          }
-          if (inFallback) {
-            const listMatch = trimmed.match(/^-\s*(.+)$/);
-            if (listMatch) {
-              dns.fallback = [...dns.fallback, unquote(listMatch[1])];
-            } else if (trimmed !== '' && !trimmed.startsWith('#') && !line.startsWith('    ')) {
-              inFallback = false;
-            }
-          }
-        }
-
-        if (inTUN) {
-          if (trimmed.startsWith('dns-hijack:')) {
-            inDnsHijack = true;
-            tun.dnsHijack = [];
-            continue;
-          }
-
-          const enableMatch = trimmed.match(/^enable:\s*(.+)$/);
-          if (enableMatch) {
-            tun.enabled = unquote(enableMatch[1]) === 'true';
-            inDnsHijack = false;
-            continue;
-          }
-          const stackMatch = trimmed.match(/^stack:\s*(.+)$/);
-          if (stackMatch) {
-            tun.stack = unquote(stackMatch[1]) as any;
-            inDnsHijack = false;
-            continue;
-          }
-          const autoRouteMatch = trimmed.match(/^auto-route:\s*(.+)$/);
-          if (autoRouteMatch) {
-            tun.autoRoute = unquote(autoRouteMatch[1]) === 'true';
-            inDnsHijack = false;
-            continue;
-          }
-          const autoDetectMatch = trimmed.match(/^auto-detect-interface:\s*(.+)$/);
-          if (autoDetectMatch) {
-            tun.autoDetectInterface = unquote(autoDetectMatch[1]) === 'true';
-            inDnsHijack = false;
-            continue;
-          }
-
-          if (inDnsHijack) {
-            const listMatch = trimmed.match(/^-\s*(.+)$/);
-            if (listMatch) {
-              tun.dnsHijack = [...tun.dnsHijack, unquote(listMatch[1])];
-            } else if (trimmed !== '' && !trimmed.startsWith('#') && !line.startsWith('    ')) {
-              inDnsHijack = false;
-            }
-          }
-        }
-
-        if (inRules) {
-          const ruleMatch = trimmed.match(
-            /^-\s*([A-Z0-9-]+)\s*,\s*([^,]+)\s*,\s*([^,]+?)(?:\s*,\s*([^,]+))?$/
-          );
-          const matchRuleMatch = trimmed.match(/^-\s*MATCH\s*,\s*(.+)$/);
-          const ruleSetMatch = trimmed.match(/^-\s*RULE-SET\s*,\s*([^,]+)\s*,\s*(.+)$/);
-
-          if (ruleMatch) {
-            const rType = ruleMatch[1] as RuleType;
-            const rValue = ruleMatch[2];
-            const rOutbound = ruleMatch[4] ? `${ruleMatch[3]},${ruleMatch[4]}` : ruleMatch[3];
-            parsedRules.push({
-              id: crypto.randomUUID(),
-              type: rType,
-              value: rValue,
-              outbound: rOutbound
-            });
-          } else if (matchRuleMatch) {
-            const matchOutbound = matchRuleMatch[1];
-            parsedRules.push({
-              id: crypto.randomUUID(),
-              type: 'MATCH',
-              value: '',
-              outbound: matchOutbound
-            });
-          } else if (ruleSetMatch) {
-            const rsName = ruleSetMatch[1];
-            const rsOutbound = ruleSetMatch[2];
-            if (rsName.startsWith('geosite-') || rsName.startsWith('geoip-')) {
-              const type = rsName.startsWith('geosite-') ? 'geosite' : 'geoip';
-              const id = rsName.replace(/^geosite-/, '').replace(/^geoip-/, '');
-              selectedMetaRuleSets.set(`${id}|${type}`, rsOutbound);
-              activeRuleProvider = 'metacubex';
-            } else {
-              parsedRules.push({
-                id: crypto.randomUUID(),
-                type: 'RULE-SET',
-                value: rsName,
-                outbound: rsOutbound
-              });
-            }
-          }
-        }
-      }
-
-      if (currentGroup) {
-        parsedGroups.push(currentGroup);
-      }
-      if (currentProxy) {
-        parsedProxies.push(currentProxy);
-      }
-
-      if (parsedGroups.length > 0) {
-        groups = parsedGroups;
-        const hasZkeenGroup = parsedGroups.some((g) => g.name === 'Заблок. сервисы');
-        if (hasZkeenGroup) {
-          activePreset = 'zkeen-selective';
-          activeRuleProvider = 'zkeen';
-          groups = groups.map((g) => {
-            const zG = ZKEEN_16_GROUPS.find((zg) => zg.name === g.name);
-            if (zG) {
-              return {
-                ...g,
-                icon: zG.icon,
-                excludeFilter: zG.excludeFilter,
-                enabled: g.enabled !== false
-              };
-            }
-            return g;
-          });
-        }
-      }
-      if (parsedProxies.length > 0) {
-        proxies = parsedProxies;
-      }
-      if (parsedRules.length > 0) {
-        rules = parsedRules;
-      }
-      if (parsedGroups.length === 0 && parsedProxies.length === 0) {
+      if (res.groups.length === 0 && res.proxies.length === 0) {
         applyPreset('zkeen-selective', true);
       }
     } catch (err: any) {
@@ -1263,24 +1000,6 @@
     }
   }
 
-  function unquote(str: string): string {
-    str = str.trim();
-    if (str.startsWith('"')) {
-      const closingIdx = str.indexOf('"', 1);
-      if (closingIdx !== -1) {
-        return str.slice(1, closingIdx);
-      }
-    } else if (str.startsWith("'")) {
-      const closingIdx = str.indexOf("'", 1);
-      if (closingIdx !== -1) {
-        return str.slice(1, closingIdx);
-      }
-    } else {
-      str = str.split('#')[0].trim();
-    }
-    return str;
-  }
-
   let configLoadedForPath = '';
 
   async function loadConfig(path: string, force = false) {
@@ -1289,6 +1008,10 @@
     configLoadedForPath = path;
     try {
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+      if (res.status === 404) {
+        populateMihomoFromYAML('');
+        return;
+      }
       if (!res.ok) {
         const errText = await res.text();
         throw new Error(errText || `HTTP ${res.status}`);
@@ -1298,11 +1021,32 @@
     } catch (e: any) {
       showToast('error', `Ошибка загрузки конфига: ${e.message}`);
     }
-    await loadSubscriptionProxies();
+    await loadSubscriptions();
+  }
+
+  async function checkZkeenGeodata() {
+    try {
+      const res = await fetch('/api/dat/tags?name=geosite.dat');
+      if (res.ok) {
+        const json = await res.json();
+        const tags = json.tags || [];
+        const tagNames = tags.map((t: any) => t.tag.toLowerCase());
+        hasZkeenGeodata =
+          tagNames.includes('domains') &&
+          tagNames.includes('other') &&
+          tagNames.includes('politic');
+      }
+    } catch (e) {
+      console.error('Failed to load geosite.dat tags:', e);
+      hasZkeenGeodata = false;
+    }
   }
 
   onMount(async () => {
+    await loadSchema();
     await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
+    await checkZkeenGeodata();
+    checkUndo();
   });
 
   $: {
@@ -1320,11 +1064,47 @@
     prevInvalidateCache = false;
   }
 
+  function sanitizeProxyName(name: string): { name: string; sanitized: boolean } {
+    const original = name;
+    const cleaned = name
+      .replace(/[\n\r\t]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return { name: cleaned, sanitized: cleaned !== original };
+  }
+
   function addProxy() {
     if (!np.name.trim() || !np.server.trim()) return;
-    proxies = [...proxies, { ...np, id: crypto.randomUUID() }];
+    if (np.type === 'hysteria2' && np.obfsType === 'simple' && !np.obfsPassword?.trim()) {
+      const isRu = $currentLang === 'ru';
+      showToast(
+        'error',
+        isRu
+          ? 'Пароль обфускации обязателен при типе simple'
+          : 'Obfuscation password is required when type is simple'
+      );
+      return;
+    }
+    const { name: cleanName, sanitized } = sanitizeProxyName(np.name);
+    if (sanitized) {
+      showToast('info', $t('editor.proxy_name_sanitized') || 'Имя прокси очищено от спецсимволов');
+    }
+    if (editingProxyId) {
+      proxies = proxies.map((p) =>
+        p.id === editingProxyId ? { ...np, name: cleanName, id: editingProxyId } : p
+      );
+      editingProxyId = null;
+    } else {
+      proxies = [...proxies, { ...np, name: cleanName, id: crypto.randomUUID() }];
+    }
     showProxyForm = false;
     np = newProxyDefaults('vless');
+  }
+
+  function editProxy(p: Proxy) {
+    np = { ...p };
+    editingProxyId = p.id;
+    showProxyForm = true;
   }
 
   function removeProxy(id: string) {
@@ -1333,16 +1113,55 @@
 
   function addGroup() {
     if (!ng.name.trim()) return;
-    groups = [...groups, { ...ng, id: crypto.randomUUID(), proxies: [...ng.proxies] }];
+    if (editingGroupId) {
+      groups = groups.map((g) =>
+        g.id === editingGroupId
+          ? {
+              ...ng,
+              id: editingGroupId,
+              proxies: [...ng.proxies],
+              useProviders: ng.useProviders ? [...ng.useProviders] : []
+            }
+          : g
+      );
+      editingGroupId = null;
+    } else {
+      groups = [
+        ...groups,
+        {
+          ...ng,
+          id: crypto.randomUUID(),
+          proxies: [...ng.proxies],
+          useProviders: ng.useProviders ? [...ng.useProviders] : []
+        }
+      ];
+    }
     showGroupForm = false;
     ng = {
       name: '',
       type: 'select',
       proxies: [],
+      includeAll: false,
       url: 'https://www.gstatic.com/generate_204',
-      interval: 300
+      interval: 300,
+      useProviders: [],
+      strategy: undefined
     };
-    ngProxyInput = '';
+  }
+
+  function editGroup(g: ProxyGroup) {
+    ng = {
+      name: g.name,
+      type: g.type,
+      proxies: [...g.proxies],
+      includeAll: g.includeAll || false,
+      url: g.url || 'https://www.gstatic.com/generate_204',
+      interval: g.interval || 300,
+      useProviders: g.useProviders ? [...g.useProviders] : [],
+      strategy: g.strategy
+    };
+    editingGroupId = g.id;
+    showGroupForm = true;
   }
 
   function removeGroup(id: string) {
@@ -1370,336 +1189,27 @@
     rules = arr;
   }
 
-  function addGroupProxy() {
-    const v = ngProxyInput.trim();
-    if (v && !ng.proxies.includes(v)) {
-      ng = { ...ng, proxies: [...ng.proxies, v] };
-    }
-    ngProxyInput = '';
-  }
-
   // ── YAML generation ─────────────────────────────────────────────────────
 
-  function q(v: string | number | boolean) {
-    if (typeof v !== 'string') return String(v);
-    const escaped = v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    return v.includes(':') || v.includes('#') || v === '' ? `"${escaped}"` : escaped;
-  }
-
   function generateYAML(): string {
-    const lines: string[] = [];
-
-    // external-controller must be first field (required for Clash API on port 9090)
-    lines.push('external-controller: 0.0.0.0:9090');
-    lines.push('');
-
-    // System ports from XKeen (preserve existing values, fall back to defaults)
-    lines.push(`tproxy-port: ${existingTproxyPort ?? 1181}`);
-    lines.push(`redir-port: ${existingRedirPort ?? 1182}`);
-    lines.push('');
-
-    // Proxy-providers (if we have subscriptions)
-    if (subscriptions.length > 0) {
-      lines.push('proxy-providers:');
-      for (const [i, sub] of subscriptions.entries()) {
-        let path = '';
-        try {
-          if (sub.url) {
-            const parsed = new URL(sub.url);
-            path = parsed.pathname || '';
-          }
-        } catch (e) {}
-        path = path.replace(/\/+$/, '');
-        let urlBase = path ? path.split('/').pop() : '';
-        let providerName = (sub.name || urlBase || `provider-${i}`)
-          .replace(/[^a-zA-Z0-9-]/g, '-')
-          .replace(/-+/g, '-')
-          .replace(/^-|-$/g, '')
-          .toLowerCase();
-        if (!providerName) {
-          providerName = sub.id || `provider-${i}`;
-        }
-        lines.push(`  ${providerName}:`);
-        lines.push(`    type: http`);
-        lines.push(`    path: ./providers/${providerName}.yaml`);
-        lines.push(`    url: ${q(sub.url)}`);
-        lines.push(`    interval: ${sub.interval * 3600 || 86400}`);
-        lines.push(`    health-check:`);
-        lines.push(`      enable: true`);
-        lines.push(`      url: http://www.gstatic.com/generate_204`);
-        lines.push(`      interval: 300`);
-      }
-      lines.push('');
-    }
-
-    // Rule-providers (if selected)
-    if (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0) {
-      lines.push('rule-providers:');
-      for (const [key, outbound] of selectedMetaRuleSets) {
-        const [id, type] = key.split('|') as [string, 'geosite' | 'geoip'];
-        const behavior = type === 'geoip' ? 'ipcidr' : 'domain';
-        lines.push(`  ${type}-${id.replace(/[^a-z0-9-]/g, '-')}:`);
-        lines.push(`    type: http`);
-        lines.push(`    format: mrs`);
-        lines.push(`    behavior: ${behavior}`);
-        lines.push(`    url: "${buildMetaRuleSetUrl(id, type)}"`);
-        lines.push(`    interval: 86400`);
-      }
-      lines.push('');
-    } else if (activeRuleProvider !== 'none' && activeRuleProvider !== 'metacubex') {
-      const providers = RULE_PROVIDERS[activeRuleProvider];
-      if (providers && providers.length > 0) {
-        lines.push('rule-providers:');
-        for (const rp of providers) {
-          lines.push(`  ${rp.name}:`);
-          if (rp.format === 'inline') {
-            lines.push(`    type: inline`);
-            lines.push(`    behavior: ${rp.behavior}`);
-            lines.push(`    payload:`);
-            if (rp.payload) {
-              for (const item of rp.payload) {
-                lines.push(`      - ${q(item)}`);
-              }
-            }
-          } else {
-            lines.push(`    type: http`);
-            if (rp.format) {
-              lines.push(`    format: ${rp.format}`);
-            }
-            lines.push(`    behavior: ${rp.behavior}`);
-            lines.push(`    url: "${rp.url}"`);
-            lines.push(`    interval: 86400`);
-          }
-        }
-        lines.push('');
-      }
-    }
-
-    // Proxies
-    if (proxies.length > 0) {
-      lines.push('proxies:');
-      for (const p of proxies) {
-        lines.push(`  - name: ${q(p.name)}`);
-        lines.push(`    type: ${p.type}`);
-        lines.push(`    server: ${q(p.server)}`);
-        lines.push(`    port: ${p.port}`);
-
-        if (p.type === 'vless') {
-          lines.push(`    uuid: ${p.uuid ?? ''}`);
-          if (p.flow) lines.push(`    flow: ${p.flow}`);
-          lines.push(`    tls: true`);
-          lines.push(`    reality-opts:`);
-          lines.push(`      public-key: ${q(p.publicKey || '')}`);
-          lines.push(`      short-id: ${q(p.shortId || '')}`);
-          lines.push(`    client-fingerprint: ${p.fingerprint || 'chrome'}`);
-          if (p.servername) lines.push(`    servername: ${q(p.servername)}`);
-        } else if (p.type === 'hysteria2') {
-          lines.push(`    password: ${q(p.password || '')}`);
-          if (p.sni) lines.push(`    sni: ${q(p.sni)}`);
-        } else if (p.type === 'tuic') {
-          lines.push(`    uuid: ${p.uuid ?? ''}`);
-          lines.push(`    password: ${q(p.password || '')}`);
-          lines.push(`    congestion-controller: ${p.congestion || 'bbr'}`);
-          if (p.sni) lines.push(`    sni: ${q(p.sni)}`);
-        } else if (p.type === 'ss') {
-          lines.push(`    cipher: ${p.cipher || 'aes-256-gcm'}`);
-          lines.push(`    password: ${q(p.password || '')}`);
-        } else if (p.type === 'vmess') {
-          lines.push(`    uuid: ${p.uuid ?? ''}`);
-          lines.push(`    alterId: 0`);
-          lines.push(`    cipher: auto`);
-          lines.push(`    tls: ${p.tls}`);
-          lines.push(`    network: ${p.network || 'ws'}`);
-          if (p.network === 'ws') {
-            lines.push(`    ws-opts:`);
-            lines.push(`      path: ${q(p.wsPath || '/')}`);
-          }
-          if (p.tls && p.sni) lines.push(`    servername: ${q(p.sni)}`);
-        }
-      }
-      lines.push('');
-    }
-
-    // Helper to check if a target outbound group is enabled
-    const isOutboundEnabled = (outbound: string) => {
-      if (activeRuleProvider === 'zkeen') {
-        const primaryOutbound = outbound.split(',')[0].trim();
-        const g = groups.find((x) => x.name === primaryOutbound);
-        if (g && g.enabled === false) return false;
-      }
-      return true;
-    };
-
-    // Proxy groups
-    if (groups.length > 0) {
-      lines.push('proxy-groups:');
-      for (const g of groups) {
-        if (activeRuleProvider === 'zkeen' && g.enabled === false) {
-          continue;
-        }
-        lines.push(`  - name: ${q(g.name)}`);
-        lines.push(`    type: ${g.type}`);
-        if (g.icon) {
-          lines.push(`    icon: ${q(g.icon)}`);
-        }
-        if (g.excludeFilter) {
-          lines.push(`    exclude-filter: ${q(g.excludeFilter)}`);
-        }
-        if (g.includeAll === true || (g.includeAll !== false && subscriptions.length > 0)) {
-          lines.push(`    include-all: true`);
-        }
-        if (g.proxies.length > 0) {
-          lines.push(`    proxies:`);
-          for (const p of g.proxies) lines.push(`      - ${q(p)}`);
-        }
-        if (g.type !== 'select') {
-          lines.push(`    url: ${g.url || 'https://www.gstatic.com/generate_204'}`);
-          lines.push(`    interval: ${g.interval || 300}`);
-        }
-      }
-      lines.push('');
-    }
-
-    // Rules
-    const hasRules =
-      rules.length > 0 ||
-      activeRuleProvider === 'zkeen' ||
-      (activeRuleProvider === 'metacubex' && selectedMetaRuleSets.size > 0);
-    if (hasRules) {
-      lines.push('rules:');
-      if (activeRuleProvider === 'zkeen') {
-        const zkeenRules = [
-          { type: 'RULE-SET', val: 'adlist@domain', outbound: 'REJECT' },
-          { type: 'RULE-SET', val: 'quic@inline', outbound: 'QUIC' },
-          {
-            type: 'OR',
-            val: '((DOMAIN-SUFFIX,gql.twitch.tv),(DOMAIN-SUFFIX,usher.ttvnw.net)),Заблок. сервисы',
-            outbound: 'Заблок. сервисы'
-          },
-          { type: 'RULE-SET', val: 'category-ai@domain', outbound: 'AI' },
-          { type: 'RULE-SET', val: 'steam@domain', outbound: 'Steam' },
-          { type: 'RULE-SET', val: 'spotify@domain', outbound: 'Spotify' },
-          { type: 'RULE-SET', val: 'reddit@domain', outbound: 'Reddit' },
-          { type: 'RULE-SET', val: 'twitch@domain', outbound: 'Twitch' },
-          { type: 'RULE-SET', val: 'twitter@domain', outbound: 'Twitter' },
-          { type: 'RULE-SET', val: 'discord@classical', outbound: 'Discord' },
-          { type: 'RULE-SET', val: 'speedtest@domain', outbound: 'Speedtest' },
-          { type: 'GEOSITE', val: 'YOUTUBE', outbound: 'YouTube' },
-          { type: 'GEOIP', val: 'YOUTUBE', outbound: 'YouTube' },
-          { type: 'RULE-SET', val: 'meta@domain', outbound: 'Meta' },
-          { type: 'GEOIP', val: 'META', outbound: 'Meta' },
-          { type: 'GEOIP', val: 'AKAMAI', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'AMAZON', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'CDN77', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'CLOUDFLARE', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'COLOCROSSING', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'CONTABO', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'DIGITALOCEAN', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'FASTLY', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'GCORE', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'GOOGLE', outbound: 'Google' },
-          { type: 'GEOIP', val: 'HETZNER', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'LINODE', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'MEGA', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'ORACLE', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'OVH', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'SCALEWAY', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'TELEGRAM', outbound: 'Telegram' },
-          { type: 'GEOIP', val: 'VODAFONE', outbound: 'CDN' },
-          { type: 'GEOIP', val: 'VULTR', outbound: 'CDN' },
-          { type: 'RULE-SET', val: 'refilter@domain', outbound: 'Заблок. сервисы' },
-          { type: 'GEOSITE', val: 'DOMAINS', outbound: 'Заблок. сервисы' },
-          { type: 'GEOSITE', val: 'OTHER', outbound: 'Заблок. сервисы' },
-          { type: 'GEOSITE', val: 'POLITIC', outbound: 'Заблок. сервисы' },
-          { type: 'RULE-SET', val: 'github@domain', outbound: 'GitHub' }
-        ];
-
-        for (const r of zkeenRules) {
-          if (isOutboundEnabled(r.outbound)) {
-            if (r.type === 'OR') {
-              lines.push(`  - OR,${r.val}`);
-            } else {
-              lines.push(`  - ${r.type},${r.val},${r.outbound}`);
-            }
-          }
-        }
-
-        // Custom user rules (except MATCH which goes last)
-        for (const r of rules) {
-          if (isOutboundEnabled(r.outbound)) {
-            if (r.type === 'MATCH') continue;
-            lines.push(`  - ${r.type},${r.value},${r.outbound}`);
-          }
-        }
-
-        if (isOutboundEnabled('DIRECT')) {
-          lines.push('  - RULE-SET,private@ip,DIRECT');
-        }
-        lines.push('  - MATCH,DIRECT');
-      } else {
-        // Rule-set entries from rule-providers (before user rules, before MATCH)
-        if (activeRuleProvider === 'metacubex') {
-          for (const [key, outbound] of selectedMetaRuleSets) {
-            const [id, type] = key.split('|') as [string, 'geosite' | 'geoip'];
-            lines.push(`  - RULE-SET,${type}-${id.replace(/[^a-z0-9-]/g, '-')},${outbound}`);
-          }
-        } else if (activeRuleProvider !== 'none') {
-          const providers = RULE_PROVIDERS[activeRuleProvider];
-          if (providers) {
-            for (const rp of providers) {
-              lines.push(`  - RULE-SET,${rp.name},${rp.outbound}`);
-            }
-          }
-        }
-        for (const r of rules) {
-          if (r.type === 'MATCH') {
-            lines.push(`  - MATCH,${r.outbound}`);
-          } else {
-            lines.push(`  - ${r.type},${r.value},${r.outbound}`);
-          }
-        }
-        // If only rule-providers active but no manual rules, add a default MATCH
-        if (
-          rules.length === 0 &&
-          activeRuleProvider === 'metacubex' &&
-          selectedMetaRuleSets.size > 0
-        ) {
-          lines.push(`  - MATCH,DIRECT`);
-        }
-      }
-      lines.push('');
-    }
-
-    // DNS
-    lines.push('dns:');
-    lines.push(`  enable: ${dns.enabled}`);
-    if (dns.enabled) {
-      lines.push(`  enhanced-mode: ${dns.enhancedMode}`);
-      if (dns.enhancedMode === 'fake-ip') lines.push(`  fake-ip-range: ${dns.fakeIPRange}`);
-      lines.push(`  nameserver:`);
-      for (const ns of dns.nameservers) lines.push(`    - ${q(ns)}`);
-      if (dns.fallback.length > 0) {
-        lines.push(`  fallback:`);
-        for (const fb of dns.fallback) lines.push(`    - ${q(fb)}`);
-      }
-    }
-    lines.push('');
-
-    // TUN
-    lines.push('tun:');
-    lines.push(`  enable: ${tun.enabled}`);
-    if (tun.enabled) {
-      lines.push(`  stack: ${tun.stack}`);
-      lines.push(`  auto-route: ${tun.autoRoute}`);
-      lines.push(`  auto-detect-interface: ${tun.autoDetectInterface}`);
-      if (tun.dnsHijack.length > 0) {
-        lines.push(`  dns-hijack:`);
-        for (const d of tun.dnsHijack) lines.push(`    - ${q(d)}`);
-      }
-    }
-    lines.push('');
-
-    return lines.join('\n').trimEnd();
+    return generateMihomoYAML({
+      proxies,
+      groups,
+      rules,
+      dns,
+      tun,
+      sniffer,
+      activeRuleProvider,
+      selectedMetaRuleSets,
+      preservedKeys,
+      existingTproxyPort,
+      existingRedirPort,
+      subscriptions,
+      mihomoProviders,
+      capabilities: $capabilities,
+      hasZkeenGeodata,
+      ruleProviders
+    });
   }
 
   let yaml = '';
@@ -1711,11 +1221,17 @@
     void activeRuleProvider;
     void selectedMetaRuleSets;
     void subscriptions;
+    void mihomoProviders;
     void dns.enabled;
     void dns.nameservers;
     void dns.fallback;
     void tun.enabled;
     void tun.stack;
+    void hasZkeenGeodata;
+    void sniffer.enabled;
+    void sniffer.sniffHttp;
+    void sniffer.sniffTls;
+    void sniffer.sniffQuic;
     yaml = generateYAML();
   }
 
@@ -1732,7 +1248,39 @@
     }
   }
 
-  const ru = $currentLang === 'ru';
+  $: ru = $currentLang === 'ru';
+
+  async function enableDNSRedirect() {
+    dnsRedirectLoading = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/service/dns-redirect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: JSON.stringify({ enabled: true })
+      });
+      if (res.ok) {
+        showToast(
+          'success',
+          ru ? 'Перехват DNS успешно включен' : 'DNS Interception enabled successfully'
+        );
+        await fetchCapabilities();
+      } else {
+        const text = await res.text();
+        showToast(
+          'error',
+          text || (ru ? 'Не удалось включить перехват DNS' : 'Failed to enable DNS Interception')
+        );
+      }
+    } catch (err: any) {
+      showToast('error', err.message || String(err));
+    } finally {
+      dnsRedirectLoading = false;
+    }
+  }
 
   const PROXY_TYPES: ProxyType[] = ['vless', 'hysteria2', 'tuic', 'ss', 'vmess'];
   const GROUP_TYPES: GroupType[] = ['select', 'url-test', 'fallback', 'load-balance'];
@@ -1779,36 +1327,35 @@
     activeSection = 'rulesets';
   }
 
-  let showApplyConfirm = false;
-  let applyLoading = false;
+  // extractSection is imported from './lib/mihomoYaml'
 
-  function extractSection(yamlText: string, sectionName: string): string {
-    const lines = yamlText.split('\n');
-    let start = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith(sectionName + ':')) {
-        start = i;
-        break;
-      }
+  async function loadSchema() {
+    schemaLoading = true;
+    schemaError = '';
+    try {
+      const res = await fetch('/api/assets/definition');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      schema = await res.json();
+    } catch (e: any) {
+      schemaError = e.message || 'Unknown error';
+    } finally {
+      schemaLoading = false;
     }
-    if (start === -1) return '';
-    const resultLines: string[] = [];
-    for (let i = start + 1; i < lines.length; i++) {
-      const line = lines[i];
-      if (
-        line.trim() !== '' &&
-        !line.startsWith(' ') &&
-        !line.startsWith('\t') &&
-        !line.startsWith('#')
-      ) {
-        break;
-      }
-      resultLines.push(line);
-    }
-    return resultLines.join('\n').trimEnd();
   }
 
+  $: ruleProviders =
+    schema && schema.mihomo && schema.mihomo.rule_providers
+      ? schema.mihomo.rule_providers
+      : ZKEEN_RULE_PROVIDERS;
+
+  // findTopLevelSection and replaceMihomoTopLevelSection are imported from './lib/mihomoYaml'
+
   async function handleApplyMihomo() {
+    if (proxies.length === 0) {
+      if (!confirm($t('editor.empty_proxies_warning') || 'No proxy servers configured.')) {
+        return;
+      }
+    }
     if (!showApplyConfirm) {
       showApplyConfirm = true;
       return;
@@ -1816,11 +1363,68 @@
     showApplyConfirm = false;
     applyLoading = true;
 
+    // Check port collisions
+    const mihomoPorts: PortAllocation[] = [
+      { port: existingTproxyPort ?? 5001, engine: 'mihomo', purpose: 'tproxy-port' },
+      { port: existingRedirPort ?? 5000, engine: 'mihomo', purpose: 'redir-port' },
+      { port: 9090, engine: 'mihomo', purpose: 'external-controller' }
+    ];
+
+    let xrayPorts: PortAllocation[] = [];
+    try {
+      const res = await fetch(
+        '/api/config/read?path=' + encodeURIComponent('/opt/etc/xray/03_inbounds.json')
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.inbounds)) {
+          for (const ib of data.inbounds) {
+            if (ib && ib.port) {
+              xrayPorts.push({
+                port: Number(ib.port),
+                engine: 'xray',
+                purpose: ib.tag || 'inbound'
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load Xray inbounds for port checking:', e);
+    }
+
+    const allPorts = [...mihomoPorts, ...xrayPorts];
+    const collisions = findPortCollisions(allPorts);
+    if (collisions.length > 0) {
+      const details = collisions
+        .map((group) => {
+          const portNum = group[0].port;
+          const descriptions = group.map((p) => `${p.engine} (${p.purpose})`).join(' vs ');
+          return `Port ${portNum}: ${descriptions}`;
+        })
+        .join('\n');
+
+      const msg = ru
+        ? `Обнаружен конфликт портов:\n${details}\n\nПродолжить применение?`
+        : `Port collisions detected:\n${details}\n\nDo you want to proceed?`;
+      if (!confirm(msg)) {
+        applyLoading = false;
+        return;
+      }
+    }
+
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       const path = selectedFile || '/opt/etc/mihomo/config.yaml';
 
-      // Generate YAML and extract managed sections for merge via /api/config/mihomo-merge
+      // Save previous state to localStorage for Undo
+      const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+      if (readRes.ok) {
+        const currentYAML = await readRes.text();
+        localStorage.setItem('xcp_prev_mihomo_yaml', currentYAML);
+        checkUndo();
+      }
+
       const yamlContent = generateYAML();
       const sections: Record<string, string> = {
         'rule-providers': extractSection(yamlContent, 'rule-providers'),
@@ -1832,6 +1436,8 @@
         'proxy-providers': extractSection(yamlContent, 'proxy-providers')
       };
 
+      validationError = '';
+
       const mergeRes = await fetch('/api/config/mihomo-merge', {
         method: 'POST',
         headers: {
@@ -1842,11 +1448,29 @@
       });
 
       if (!mergeRes.ok) {
+        if (mergeRes.status === 422) {
+          const resData = await mergeRes.json();
+          validationError = resData.error || 'Unknown validation error';
+          showToast('error', $t('editor.validation_failed'));
+          applyLoading = false;
+          return;
+        }
         const errorText = await mergeRes.text();
         throw new Error(errorText || 'Failed to merge config');
       }
 
-      const restartRes = await fetch('/api/service/control?action=restart', {
+      const activeKernel = $capabilities?.active_kernel;
+      let restartUrl = '/api/service/control?action=restart';
+      if (activeKernel && activeKernel !== 'mihomo') {
+        const msg = ru
+          ? `Активным ядром сейчас является '${activeKernel}'. Хотите переключить его на 'mihomo'?`
+          : `Active kernel is currently '${activeKernel}'. Do you want to switch to 'mihomo'?`;
+        if (confirm(msg)) {
+          restartUrl = '/api/service/control?action=switch_kernel&kernel=mihomo';
+        }
+      }
+
+      const restartRes = await fetch(restartUrl, {
         method: 'POST',
         headers: {
           'X-CSRF-Token': csrfToken || ''
@@ -1856,6 +1480,8 @@
       if (!restartRes.ok) {
         throw new Error('Failed to restart service');
       }
+
+      await fetchCapabilities();
 
       showToast(
         'success',
@@ -1870,825 +1496,108 @@
       applyLoading = false;
     }
   }
+
+  async function handleUndo() {
+    const prevYAML = localStorage.getItem('xcp_prev_mihomo_yaml');
+    if (!prevYAML) return;
+    try {
+      applyLoading = true;
+      const csrfToken = localStorage.getItem('csrf_token');
+      const path = selectedFile || '/opt/etc/mihomo/config.yaml';
+
+      // Save back to file
+      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: prevYAML
+      });
+
+      if (!saveRes.ok) {
+        throw new Error('Failed to save rolled back config');
+      }
+
+      // Re-populate state
+      populateMihomoFromYAML(prevYAML);
+      isDirty = false;
+
+      // Restart service
+      const activeKernel = $capabilities?.active_kernel;
+      let restartUrl = '/api/service/control?action=restart';
+      if (activeKernel && activeKernel !== 'mihomo') {
+        const msg = ru
+          ? `Активным ядром сейчас является '${activeKernel}'. Хотите переключить его на 'mihomo'?`
+          : `Active kernel is currently '${activeKernel}'. Do you want to switch to 'mihomo'?`;
+        if (confirm(msg)) {
+          restartUrl = '/api/service/control?action=switch_kernel&kernel=mihomo';
+        }
+      }
+
+      const restartRes = await fetch(restartUrl, {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken || ''
+        }
+      });
+      if (!restartRes.ok) {
+        throw new Error('Failed to restart service');
+      }
+
+      await fetchCapabilities();
+
+      showToast('success', $t('editor.undo_success') || 'Last change reverted successfully');
+      checkUndo();
+    } catch (e: any) {
+      showToast('error', `Undo failed: ${e.message}`);
+    } finally {
+      applyLoading = false;
+    }
+  }
 </script>
 
 <div class="container">
-  {#if !embedded}
-    <div class="page-head">
-      <div>
-        <div class="crumbs">
-          {ru ? 'Сервисы' : 'Services'} <span class="crumb-sep">/</span>
-          {ru ? 'Генератор Mihomo' : 'Mihomo Generator'}
-        </div>
-        <h1>{ru ? 'Визуальный генератор Mihomo' : 'Mihomo Visual Generator'}</h1>
-        <p class="sub">
-          {ru
-            ? 'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.'
-            : 'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.'}
-        </p>
-      </div>
-      <div class="ph-actions">
-        <button class="btn btn-secondary" on:click={openInEditor}>
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right:5px"
-            ><path d="M12 20h9" /><path
-              d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
-            /></svg
-          >
-          {#if selectedFile}
-            {ru ? 'Вставить в редактор' : 'Insert into Editor'}
-          {:else}
-            {ru ? 'Открыть в редакторе' : 'Open in Editor'}
-          {/if}
-        </button>
-        <button class="btn btn-primary" on:click={copyYAML} disabled={!yaml}>
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right:5px"
-            ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-              d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-            /></svg
-          >
-          {ru ? 'Копировать YAML' : 'Copy YAML'}
-        </button>
-      </div>
-    </div>
-  {/if}
-
-  {#if preservedKeys.length > 0}
-    <div class="alert alert-warning" style="margin: 0 0 16px 0;" role="status">
-      <span aria-hidden="true">⚠️</span>
-      <div>
-        <strong>{$t('editor.constructor_merge_warning_title')}</strong>
-        <div style="margin-top: 2px;">
-          {$t('editor.constructor_merge_warning_body', { keys: preservedKeys.join(', ') })}
-        </div>
-      </div>
-    </div>
-  {/if}
-
-  <div class="gen-layout">
-    <!-- Left: sections -->
-    <div class="gen-left">
-      <!-- Scenario selection -->
+  {#if schemaLoading}
+    <div
+      class="loading-state-block"
+      style="padding: 48px; text-align: center; color: var(--fg-secondary);"
+    >
       <div
-        class="constructor-scenario-bar"
-        style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;"
-      >
-        <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
-        <select
-          id="preset-select"
-          class="form-select preset-select"
-          style="max-width: 250px;"
-          data-testid="preset-select"
-          value={activePreset}
-          on:change={(e) => {
-            const val = e.currentTarget.value;
-            applyPreset(val as any);
-            if (val === 'rule-based') {
-              activeSection = 'rulesets';
-            } else if (val === 'zkeen-selective') {
-              activeSection = 'groups';
-            }
-          }}
-        >
-          <option value="">-- {$t('editor.constructor_scenario')} --</option>
-          <option value="rule-based">{$t('editor.scenario_rule_based')}</option>
-          <option value="global-proxy">{$t('editor.scenario_global_proxy')}</option>
-          <option value="zkeen-selective">{$t('editor.scenario_zkeen_selective')}</option>
-        </select>
-      </div>
-
-      <!-- Rule providers -->
-      <div class="rule-providers-row">
-        <label class="form-label" for="rp-select">{$t('editor.constructor_rule_providers')}:</label>
-        <select
-          id="rp-select"
-          class="form-select rp-select"
-          bind:value={activeRuleProvider}
-          on:change={(e) => {
-            if (e.currentTarget.value === 'metacubex') {
-              activeSection = 'rulesets';
-            }
-          }}
-        >
-          <option value="none">{$t('editor.rp_none')}</option>
-          <option value="zkeen">{$t('editor.rp_zkeen')}</option>
-          <option value="metacubex">{$t('editor.rp_metacubex')}</option>
-        </select>
-      </div>
-
-      <!-- Section tabs -->
-      <div class="sec-tabs">
-        {#each tabs as [id, label]}
-          <button
-            class="sec-tab"
-            class:active={activeSection === id}
-            on:click={() => {
-              activeSection = id as typeof activeSection;
-              showProxyForm = false;
-              showGroupForm = false;
-              showRuleForm = false;
-            }}
-          >
-            {label}
-            {#if id === 'proxies' && proxies.length > 0}<span class="sec-count"
-                >{proxies.length}</span
-              >{/if}
-            {#if id === 'groups' && groups.length > 0}<span class="sec-count">{groups.length}</span
-              >{/if}
-            {#if id === 'rulesets' && selectedMetaRuleSets.size > 0}<span class="sec-count"
-                >{selectedMetaRuleSets.size}</span
-              >{/if}
-            {#if id === 'rules' && rules.length > 0}<span class="sec-count">{rules.length}</span
-              >{/if}
-            {#if id === 'dns' && dns.enabled}<span class="sec-dot"></span>{/if}
-            {#if id === 'tun' && tun.enabled}<span class="sec-dot"></span>{/if}
-          </button>
-        {/each}
-      </div>
-
-      <!-- PROXIES -->
-      {#if activeSection === 'proxies'}
-        <div class="sec-body">
-          {#each proxies as p (p.id)}
-            <div class="item-row">
-              <span class="item-badge type-{p.type}">{p.type}</span>
-              <span class="item-name">{p.name}</span>
-              <span class="item-meta">{p.server}:{p.port}</span>
-              <button
-                class="item-del"
-                on:click={() => removeProxy(p.id)}
-                title={ru ? 'Удалить' : 'Remove'}>✕</button
-              >
-            </div>
-          {/each}
-
-          {#if showProxyForm}
-            <div class="form-card">
-              <div class="form-row">
-                <label class="form-label">{ru ? 'Тип' : 'Type'}</label>
-                <select class="form-select" bind:value={np.type}>
-                  {#each PROXY_TYPES as t}<option value={t}>{t}</option>{/each}
-                </select>
-              </div>
-              <div class="form-row">
-                <label class="form-label">{ru ? 'Имя' : 'Name'}</label>
-                <input class="form-input" bind:value={np.name} placeholder="my-proxy" />
-              </div>
-              <div class="form-row2">
-                <div class="form-col">
-                  <label class="form-label">{ru ? 'Сервер' : 'Server'}</label>
-                  <input class="form-input" bind:value={np.server} placeholder="example.com" />
-                </div>
-                <div class="form-col form-col-sm">
-                  <label class="form-label">{ru ? 'Порт' : 'Port'}</label>
-                  <input
-                    class="form-input"
-                    type="number"
-                    bind:value={np.port}
-                    min="1"
-                    max="65535"
-                  />
-                </div>
-              </div>
-
-              {#if np.type === 'vless'}
-                <div class="form-row">
-                  <label class="form-label">UUID</label>
-                  <div class="input-with-btn">
-                    <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
-                    <button
-                      class="btn-gen"
-                      on:click={() => (np.uuid = crypto.randomUUID())}
-                      title="Generate">⟳</button
-                    >
-                  </div>
-                </div>
-                <div class="form-row">
-                  <label class="form-label">Reality Public Key</label>
-                  <input class="form-input" bind:value={np.publicKey} placeholder="public-key" />
-                </div>
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label">Short ID</label>
-                    <input class="form-input" bind:value={np.shortId} placeholder="short-id" />
-                  </div>
-                  <div class="form-col">
-                    <label class="form-label">SNI</label>
-                    <input
-                      class="form-input"
-                      bind:value={np.servername}
-                      placeholder="www.apple.com"
-                    />
-                  </div>
-                </div>
-              {:else if np.type === 'hysteria2'}
-                <div class="form-row">
-                  <label class="form-label">{ru ? 'Пароль' : 'Password'}</label>
-                  <input class="form-input" bind:value={np.password} placeholder="password" />
-                </div>
-                <div class="form-row">
-                  <label class="form-label">SNI</label>
-                  <input class="form-input" bind:value={np.sni} placeholder="example.com" />
-                </div>
-              {:else if np.type === 'tuic'}
-                <div class="form-row">
-                  <label class="form-label">UUID</label>
-                  <div class="input-with-btn">
-                    <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
-                    <button
-                      class="btn-gen"
-                      on:click={() => (np.uuid = crypto.randomUUID())}
-                      title="Generate">⟳</button
-                    >
-                  </div>
-                </div>
-                <div class="form-row">
-                  <label class="form-label">{ru ? 'Пароль' : 'Password'}</label>
-                  <input class="form-input" bind:value={np.password} placeholder="password" />
-                </div>
-                <div class="form-row">
-                  <label class="form-label">SNI</label>
-                  <input class="form-input" bind:value={np.sni} placeholder="example.com" />
-                </div>
-              {:else if np.type === 'ss'}
-                <div class="form-row">
-                  <label class="form-label">Cipher</label>
-                  <select class="form-select" bind:value={np.cipher}>
-                    {#each CIPHERS as c}<option value={c}>{c}</option>{/each}
-                  </select>
-                </div>
-                <div class="form-row">
-                  <label class="form-label">{ru ? 'Пароль' : 'Password'}</label>
-                  <input class="form-input" bind:value={np.password} placeholder="password" />
-                </div>
-              {:else if np.type === 'vmess'}
-                <div class="form-row">
-                  <label class="form-label">UUID</label>
-                  <div class="input-with-btn">
-                    <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
-                    <button
-                      class="btn-gen"
-                      on:click={() => (np.uuid = crypto.randomUUID())}
-                      title="Generate">⟳</button
-                    >
-                  </div>
-                </div>
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label">Network</label>
-                    <select class="form-select" bind:value={np.network}>
-                      <option value="ws">WebSocket</option>
-                      <option value="tcp">TCP</option>
-                      <option value="grpc">gRPC</option>
-                    </select>
-                  </div>
-                  <div class="form-col">
-                    <label class="form-label">TLS</label>
-                    <input type="checkbox" bind:checked={np.tls} style="margin-top:8px" />
-                  </div>
-                </div>
-                {#if np.network === 'ws'}
-                  <div class="form-row">
-                    <label class="form-label">WS Path</label>
-                    <input class="form-input" bind:value={np.wsPath} placeholder="/" />
-                  </div>
-                {/if}
-                {#if np.tls}
-                  <div class="form-row">
-                    <label class="form-label">SNI</label>
-                    <input class="form-input" bind:value={np.sni} placeholder="example.com" />
-                  </div>
-                {/if}
-              {/if}
-
-              <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => (showProxyForm = false)}
-                  >{ru ? 'Отмена' : 'Cancel'}</button
-                >
-                <button class="btn btn-primary" on:click={addProxy}
-                  >{ru ? 'Добавить' : 'Add'}</button
-                >
-              </div>
-            </div>
-          {:else}
-            <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
-              <button class="add-btn" style="flex: 1;" on:click={() => (showProxyForm = true)}>
-                + {ru ? 'Добавить прокси' : 'Add proxy'}
-              </button>
-              <button
-                class="add-btn import-btn"
-                style="flex: 1;"
-                on:click={loadSubscriptionProxies}
-              >
-                ↓ {$t('editor.constructor_import_proxies')}
-              </button>
-              <button class="add-btn import-btn" style="flex: 1;" on:click={openImportModal}>
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  style="margin-right: 4px; display: inline-block; vertical-align: middle;"
-                >
-                  <path
-                    d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"
-                  />
-                </svg>
-                {$t('subscr.import_node')}
-              </button>
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-      <!-- GROUPS -->
-      {#if activeSection === 'groups'}
-        <div class="sec-body">
-          {#if activeRuleProvider === 'zkeen'}
-            <!-- Premium zkeen 16 groups UI -->
-            <div class="zkeen-groups-grid">
-              {#each groups as g (g.id)}
-                <div class="zkeen-group-card" class:disabled={g.enabled === false}>
-                  <div class="zkeen-group-header">
-                    <div class="zkeen-group-icon-wrap">
-                      <img
-                        src={g.icon}
-                        alt={g.name}
-                        class="zkeen-group-icon"
-                        on:error={() => {
-                          const fallback =
-                            'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png';
-                          if (g.icon !== fallback) {
-                            g.icon = fallback;
-                          } else {
-                            g.icon =
-                              'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-                          }
-                          groups = [...groups];
-                        }}
-                      />
-                    </div>
-                    <div class="zkeen-group-title">
-                      <span class="zkeen-group-name">{g.name}</span>
-                      <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-                        {#if g.excludeFilter}
-                          <span class="zkeen-exclude-badge">exclude: {g.excludeFilter}</span>
-                        {/if}
-                        {#if g.includeAll}
-                          <span class="zkeen-include-badge">include-all</span>
-                        {/if}
-                      </div>
-                    </div>
-                    <label class="switch">
-                      <input
-                        type="checkbox"
-                        checked={g.enabled !== false}
-                        on:change={(e) => {
-                          g.enabled = e.currentTarget.checked;
-                          groups = [...groups];
-                        }}
-                      />
-                      <span class="slider round"></span>
-                    </label>
-                  </div>
-
-                  {#if g.enabled !== false}
-                    <div class="zkeen-group-body">
-                      <label class="form-label" style="font-size: 11px; margin-bottom: 2px;"
-                        >{ru ? 'Исходящий канал по умолчанию' : 'Default outbound'}</label
-                      >
-                      <select
-                        class="form-select"
-                        value={g.proxies[0] || 'DIRECT'}
-                        on:change={(e) => {
-                          const val = e.currentTarget.value;
-                          g.proxies = [val, ...g.proxies.slice(1).filter((p) => p !== val)];
-                          groups = [...groups];
-                        }}
-                      >
-                        <option value="DIRECT">DIRECT</option>
-                        <option value="REJECT">REJECT</option>
-                        <option value="PASS">PASS</option>
-                        {#each allProxyNames.filter((n) => n !== 'DIRECT' && n !== 'REJECT' && n !== 'PASS' && n !== g.name) as n}
-                          <option value={n}>{n}</option>
-                        {/each}
-                      </select>
-                    </div>
-                  {/if}
-                </div>
-              {/each}
-            </div>
-          {:else}
-            {#each groups as g (g.id)}
-              <div class="item-row">
-                <span class="item-badge type-group">{g.type}</span>
-                <span class="item-name">{g.name}</span>
-                {#if g.includeAll}
-                  <span
-                    class="item-badge"
-                    style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; font-size: 10px; text-transform: none;"
-                    >include-all</span
-                  >
-                {/if}
-                <span class="item-meta">{g.proxies.length} {ru ? 'прокси' : 'proxies'}</span>
-                <button class="item-del" on:click={() => removeGroup(g.id)}>✕</button>
-              </div>
-            {/each}
-
-            {#if showGroupForm}
-              <div class="form-card">
-                <div class="form-row">
-                  <label class="form-label">{ru ? 'Тип' : 'Type'}</label>
-                  <select class="form-select" bind:value={ng.type}>
-                    {#each GROUP_TYPES as t}<option value={t}>{t}</option>{/each}
-                  </select>
-                </div>
-                <div class="form-row">
-                  <label class="form-label">{ru ? 'Имя группы' : 'Group name'}</label>
-                  <input class="form-input" bind:value={ng.name} placeholder="Выбор прокси" />
-                </div>
-                <div class="form-row">
-                  <label
-                    class="toggle-label"
-                    style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;"
-                  >
-                    <input type="checkbox" bind:checked={ng.includeAll} />
-                    <span
-                      >{ru
-                        ? 'Включить все провайдеры (include-all)'
-                        : 'Include all providers'}</span
-                    >
-                  </label>
-                </div>
-                <div class="form-row">
-                  <label class="form-label">{ru ? 'Прокси' : 'Proxies'}</label>
-                  <div class="tag-input-wrap">
-                    {#each ng.proxies as p}
-                      <span class="tag-pill">
-                        {p}
-                        <button
-                          class="tag-rm"
-                          on:click={() =>
-                            (ng = { ...ng, proxies: ng.proxies.filter((x) => x !== p) })}>✕</button
-                        >
-                      </span>
-                    {/each}
-                    <select
-                      class="form-select-inline"
-                      bind:value={ngProxyInput}
-                      on:change={addGroupProxy}
-                    >
-                      <option value="">+ {ru ? 'добавить' : 'add'}...</option>
-                      {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
-                    </select>
-                  </div>
-                </div>
-                {#if ng.type !== 'select'}
-                  <div class="form-row2">
-                    <div class="form-col">
-                      <label class="form-label">URL</label>
-                      <input class="form-input" bind:value={ng.url} />
-                    </div>
-                    <div class="form-col form-col-sm">
-                      <label class="form-label">{ru ? 'Интервал (с)' : 'Interval (s)'}</label>
-                      <input class="form-input" type="number" bind:value={ng.interval} />
-                    </div>
-                  </div>
-                {/if}
-                <div class="form-actions">
-                  <button class="btn btn-secondary" on:click={() => (showGroupForm = false)}
-                    >{ru ? 'Отмена' : 'Cancel'}</button
-                  >
-                  <button class="btn btn-primary" on:click={addGroup}
-                    >{ru ? 'Добавить' : 'Add'}</button
-                  >
-                </div>
-              </div>
-            {:else}
-              <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
-                <button class="add-btn" style="flex: 1;" on:click={() => (showGroupForm = true)}>
-                  + {ru ? 'Добавить группу' : 'Add group'}
-                </button>
-              </div>
-            {/if}
-          {/if}
-        </div>
-      {/if}
-
-      <!-- RULESETS -->
-      {#if activeSection === 'rulesets'}
-        <div class="sec-body" data-testid="rulesets-picker">
-          <div class="card rulesets-card" style="padding:16px;">
-            <div class="rulesets-header">
-              <h3 style="margin-top:0; margin-bottom:4px; font-size:16px;">
-                {$t('editor.rulesets_picker')}
-              </h3>
-              <p
-                class="sub"
-                style="margin-top:0; margin-bottom:16px; font-size:12px; color:var(--fg-dim);"
-              >
-                {ru
-                  ? 'Выберите наборы правил и укажите группу для каждого.'
-                  : 'Select rule sets and assign a group for each.'}
-              </p>
-            </div>
-
-            {#each Object.entries(META_RULE_SETS_BY_CATEGORY) as [category, items]}
-              <div class="rulesets-category-group" style="margin-top:16px;">
-                <h4
-                  class="category-title"
-                  style="font-size:13px; font-weight:600; color:var(--fg-secondary); margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.05);"
-                >
-                  {category}
-                </h4>
-                <div
-                  class="rulesets-grid"
-                  style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:8px;"
-                >
-                  {#each items as item}
-                    {@const key = `${item.id}|${item.type}`}
-                    {@const isChecked = selectedMetaRuleSets.has(key)}
-                    <div
-                      class="ruleset-item-row"
-                      class:selected={isChecked}
-                      style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:var(--radius); transition:background var(--transition-fast), border-color var(--transition-fast);"
-                    >
-                      <label
-                        class="ruleset-label"
-                        for="ruleset-{item.type}-{item.id}"
-                        style="display:flex; align-items:center; gap:8px; cursor:pointer; flex:1; user-select:none;"
-                      >
-                        <input
-                          type="checkbox"
-                          id="ruleset-{item.type}-{item.id}"
-                          value={key}
-                          checked={isChecked}
-                          on:change={(e) => {
-                            if (e.currentTarget.checked) {
-                              let outbound = item.defaultOutbound;
-                              if (
-                                outbound === 'Proxy' &&
-                                groups.some((g) => g.name === 'Selective')
-                              ) {
-                                outbound = 'Selective';
-                              } else if (
-                                outbound === 'Proxy' &&
-                                groups.some((g) => g.name === 'Proxy')
-                              ) {
-                                outbound = 'Proxy';
-                              } else if (!allProxyNames.includes(outbound)) {
-                                outbound = allProxyNames[0] || 'DIRECT';
-                              }
-                              selectedMetaRuleSets.set(key, outbound);
-                            } else {
-                              selectedMetaRuleSets.delete(key);
-                            }
-                            selectedMetaRuleSets = new Map(selectedMetaRuleSets);
-                          }}
-                        />
-                        <span
-                          class="ruleset-name"
-                          style="font-size:13px; font-weight:500; color:var(--fg-primary);"
-                          >{item.label}</span
-                        >
-                        <span
-                          class="ruleset-type-badge"
-                          style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--fg-dim); background:rgba(255,255,255,0.05); padding:1px 4px; border-radius:4px;"
-                          >{item.type}</span
-                        >
-                      </label>
-
-                      {#if isChecked}
-                        <select
-                          class="ruleset-outbound-select"
-                          style="font-size:12px; background:var(--bg-surface); border:1px solid var(--border); color:var(--fg-primary); border-radius:var(--radius-sm); padding:2px 6px; max-width:120px; outline:none;"
-                          value={selectedMetaRuleSets.get(key)}
-                          on:change={(e) => {
-                            selectedMetaRuleSets.set(key, e.currentTarget.value);
-                            selectedMetaRuleSets = selectedMetaRuleSets;
-                          }}
-                        >
-                          {#each allProxyNames as n}
-                            <option value={n}>{n}</option>
-                          {/each}
-                        </select>
-                      {/if}
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            {/each}
-          </div>
-        </div>
-      {/if}
-
-      <!-- RULES -->
-      {#if activeSection === 'rules'}
-        <div class="sec-body">
-          {#each rules as r, i (r.id)}
-            <div class="item-row item-row-rule">
-              <div class="rule-order">
-                <button class="order-btn" on:click={() => moveRule(r.id, -1)} disabled={i === 0}
-                  >▲</button
-                >
-                <button
-                  class="order-btn"
-                  on:click={() => moveRule(r.id, 1)}
-                  disabled={i === rules.length - 1}>▼</button
-                >
-              </div>
-              <span class="item-badge type-rule">{r.type}</span>
-              {#if r.type !== 'MATCH'}
-                <span class="item-name rule-value">{r.value}</span>
-              {/if}
-              <span class="item-meta">→ {r.outbound}</span>
-              <button class="item-del" on:click={() => removeRule(r.id)}>✕</button>
-            </div>
-          {/each}
-
-          {#if showRuleForm}
-            <div class="form-card">
-              <div class="form-row2">
-                <div class="form-col">
-                  <label class="form-label">{ru ? 'Тип правила' : 'Rule type'}</label>
-                  <select class="form-select" bind:value={nr.type}>
-                    {#each RULE_TYPES as t}<option value={t}>{t}</option>{/each}
-                  </select>
-                </div>
-                <div class="form-col">
-                  <label class="form-label">{ru ? 'Исходящий' : 'Outbound'}</label>
-                  <select class="form-select" bind:value={nr.outbound}>
-                    {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
-                  </select>
-                </div>
-              </div>
-              {#if nr.type !== 'MATCH'}
-                <div class="form-row">
-                  <label class="form-label">{ru ? 'Значение' : 'Value'}</label>
-                  <input
-                    class="form-input"
-                    bind:value={nr.value}
-                    placeholder={nr.type === 'GEOIP'
-                      ? 'CN'
-                      : nr.type === 'GEOSITE'
-                        ? 'google'
-                        : nr.type === 'IP-CIDR'
-                          ? '192.168.0.0/16'
-                          : 'example.com'}
-                  />
-                </div>
-              {/if}
-              <div class="form-actions">
-                <button class="btn btn-secondary" on:click={() => (showRuleForm = false)}
-                  >{ru ? 'Отмена' : 'Cancel'}</button
-                >
-                <button class="btn btn-primary" on:click={addRule}>{ru ? 'Добавить' : 'Add'}</button
-                >
-              </div>
-            </div>
-          {:else}
-            <button class="add-btn" on:click={() => (showRuleForm = true)}>
-              + {ru ? 'Добавить правило' : 'Add rule'}
-            </button>
-          {/if}
-        </div>
-      {/if}
-
-      <!-- DNS -->
-      {#if activeSection === 'dns'}
-        <div class="sec-body">
-          <div class="toggle-row">
-            <label class="toggle-label">
-              <input type="checkbox" bind:checked={dns.enabled} />
-              <span>{ru ? 'Включить DNS' : 'Enable DNS'}</span>
-            </label>
-          </div>
-          {#if dns.enabled}
-            <div class="form-row">
-              <label class="form-label">{ru ? 'Режим' : 'Enhanced mode'}</label>
-              <select class="form-select" bind:value={dns.enhancedMode}>
-                <option value="fake-ip">fake-ip</option>
-                <option value="redir-host">redir-host</option>
-              </select>
-            </div>
-            {#if dns.enhancedMode === 'fake-ip'}
-              <div class="form-row">
-                <label class="form-label">Fake-IP Range</label>
-                <input class="form-input" bind:value={dns.fakeIPRange} />
-              </div>
-            {/if}
-            <div class="form-row">
-              <label class="form-label">Nameservers</label>
-              <textarea
-                class="form-textarea"
-                value={dns.nameservers.join('\n')}
-                rows="3"
-                on:change={(e) =>
-                  (dns.nameservers = e.currentTarget.value.split('\n').filter(Boolean))}></textarea>
-            </div>
-            <div class="form-row">
-              <label class="form-label">Fallback</label>
-              <textarea
-                class="form-textarea"
-                value={dns.fallback.join('\n')}
-                rows="2"
-                on:change={(e) =>
-                  (dns.fallback = e.currentTarget.value.split('\n').filter(Boolean))}></textarea>
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-      <!-- TUN -->
-      {#if activeSection === 'tun'}
-        <div class="sec-body">
-          <div class="toggle-row">
-            <label class="toggle-label">
-              <input type="checkbox" bind:checked={tun.enabled} />
-              <span>{ru ? 'Включить TUN' : 'Enable TUN'}</span>
-            </label>
-          </div>
-          {#if tun.enabled}
-            <div class="form-row">
-              <label class="form-label">Stack</label>
-              <select class="form-select" bind:value={tun.stack}>
-                <option value="mixed">mixed</option>
-                <option value="system">system</option>
-                <option value="gvisor">gvisor</option>
-              </select>
-            </div>
-            <div class="toggle-row">
-              <label class="toggle-label">
-                <input type="checkbox" bind:checked={tun.autoRoute} />
-                <span>auto-route</span>
-              </label>
-            </div>
-            <div class="toggle-row">
-              <label class="toggle-label">
-                <input type="checkbox" bind:checked={tun.autoDetectInterface} />
-                <span>auto-detect-interface</span>
-              </label>
-            </div>
-            <div class="form-row">
-              <label class="form-label">DNS hijack</label>
-              <input
-                class="form-input"
-                value={tun.dnsHijack.join(', ')}
-                on:change={(e) =>
-                  (tun.dnsHijack = e.currentTarget.value
-                    .split(',')
-                    .map((s) => s.trim())
-                    .filter(Boolean))}
-              />
-            </div>
-          {/if}
-        </div>
-      {/if}
+        class="spinner"
+        style="width: 24px; height: 24px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 12px;"
+      ></div>
+      <p>{$t('editor.loading_definition')}</p>
     </div>
-
-    <!-- Right: YAML preview -->
-    <div class="gen-right">
-      <div class="preview-header">
-        <span class="preview-title">YAML {ru ? 'превью' : 'preview'}</span>
-        {#if yaml}
-          <button class="btn btn-secondary btn-sm" on:click={copyYAML}>
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-              /></svg
-            >
-          </button>
-        {/if}
+  {:else if schemaError}
+    <div class="error-state-block" style="padding: 48px; text-align: center;">
+      <div class="error-icon" style="color: var(--danger); font-size: 24px; margin-bottom: 12px;">
+        ⚠
       </div>
-      <pre class="yaml-preview">{yaml ||
-          (ru
-            ? '# Добавьте элементы слева\n# чтобы сгенерировать YAML'
-            : '# Add elements on the left\n# to generate YAML')}</pre>
-
-      {#if embedded}
-        <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
-          <button class="btn btn-secondary" style="flex: 1;" on:click={openInEditor}>
+      <p style="color: var(--danger); margin-bottom: 16px;">
+        {$t('editor.definition_load_error', { error: schemaError })}
+      </p>
+      <button class="btn btn-secondary" onclick={loadSchema}
+        >{ru ? 'Повторить попытку' : 'Retry'}</button
+      >
+    </div>
+  {:else}
+    {#if !embedded}
+      <div class="page-head">
+        <div>
+          <div class="crumbs">
+            {ru ? 'Сервисы' : 'Services'} <span class="crumb-sep">/</span>
+            {ru ? 'Генератор Mihomo' : 'Mihomo Generator'}
+          </div>
+          <h1>{ru ? 'Визуальный генератор Mihomo' : 'Mihomo Visual Generator'}</h1>
+          <p class="sub">
+            {ru
+              ? 'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.'
+              : 'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.'}
+          </p>
+        </div>
+        <div class="ph-actions">
+          <button class="btn btn-secondary" onclick={openInEditor}>
             <svg
               width="13"
               height="13"
@@ -2707,25 +1616,850 @@
               {ru ? 'Открыть в редакторе' : 'Open in Editor'}
             {/if}
           </button>
-          <button
-            class="btn btn-primary"
-            data-testid="apply-changes-btn"
-            on:click={handleApplyMihomo}
-            disabled={applyLoading || !yaml}
-            style="flex: 1;"
-          >
-            {applyLoading
-              ? ru
-                ? 'Сохранение...'
-                : 'Saving...'
-              : ru
-                ? 'Применить изменения'
-                : 'Apply Changes'}
+          <button class="btn btn-primary" onclick={copyYAML} disabled={!yaml}>
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right:5px"
+              ><rect x="9" y="9" width="13" height="13" rx="2" /><path
+                d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+              /></svg
+            >
+            {ru ? 'Копировать YAML' : 'Copy YAML'}
           </button>
         </div>
-      {/if}
+      </div>
+    {/if}
+
+    {#if preservedKeys.length > 0 && !dismissMergeWarning}
+      <div class="alert alert-warning alert-dismissible" style="margin: 0 0 16px 0;" role="status">
+        <span aria-hidden="true">⚠️</span>
+        <div>
+          <strong>{$t('editor.constructor_merge_warning_title')}</strong>
+          <div style="margin-top: 2px;">
+            {$t('editor.constructor_merge_warning_body', { keys: preservedKeys.join(', ') })}
+          </div>
+        </div>
+        <button
+          type="button"
+          class="alert-close-btn"
+          onclick={() => {
+            dismissMergeWarning = true;
+            localStorage.setItem('xcp:dismissed_warning:preserved_keys', preservedKeys.join(','));
+          }}
+          aria-label={$t('app.close') || 'Close'}>&times;</button
+        >
+      </div>
+    {/if}
+
+    <div class="gen-layout">
+      <!-- Left: sections -->
+      <div class="gen-left">
+        <!-- Scenario selection -->
+        <div
+          class="constructor-scenario-bar"
+          style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;"
+        >
+          <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
+          <select
+            id="preset-select"
+            class="form-select preset-select"
+            style="max-width: 250px;"
+            data-testid="preset-select"
+            value={activePreset}
+            onchange={(e) => {
+              const val = e.currentTarget.value;
+              applyPreset(val);
+              if (val === 'rule-based') {
+                activeSection = 'rulesets';
+              } else if (val === 'zkeen-selective') {
+                activeSection = 'groups';
+              }
+            }}
+          >
+            <option value="">-- {$t('editor.constructor_scenario')} --</option>
+            {#if schema && schema.mihomo && schema.mihomo.presets}
+              {#each schema.mihomo.presets as p}
+                <option value={p.id}>{$t(p.name)}</option>
+              {/each}
+            {:else}
+              <option value="rule-based">{$t('editor.scenario_rule_based')}</option>
+              <option value="global-proxy">{$t('editor.scenario_global_proxy')}</option>
+              <option value="zkeen-selective">{$t('editor.scenario_zkeen_selective')}</option>
+              <option value="only-blocked">{$t('preset.only-blocked')}</option>
+            {/if}
+          </select>
+        </div>
+
+        {#if activePreset === 'zkeen-selective' && !hasZkeenGeodata && !dismissZkeenGeodataWarning}
+          <div
+            class="alert alert-warning alert-dismissible"
+            style="margin-bottom: 16px; padding: 8px 12px; font-size: 13px; display: flex; align-items: center; gap: 8px; border-radius: var(--radius-sm);"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="flex-shrink: 0;"
+              ><path
+                d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+              /><line x1="12" y1="9" x2="12" y2="13" /><line
+                x1="12"
+                y1="17"
+                x2="12.01"
+                y2="17"
+              /></svg
+            >
+            <span>{$t('editor.requires_zkeen_geodata')}</span>
+            <button
+              type="button"
+              class="alert-close-btn"
+              style="top: 50%; transform: translateY(-50%);"
+              onclick={() => {
+                dismissZkeenGeodataWarning = true;
+                localStorage.setItem('xcp:dismissed_warning:zkeen_geodata', activePreset);
+              }}
+              aria-label={$t('app.close') || 'Close'}>&times;</button
+            >
+          </div>
+        {/if}
+
+        <!-- Rule providers -->
+        <div class="rule-providers-row">
+          <label class="form-label" for="rp-select"
+            >{$t('editor.constructor_rule_providers')}:</label
+          >
+          <select
+            id="rp-select"
+            class="form-select rp-select"
+            bind:value={activeRuleProvider}
+            onchange={(e) => {
+              if (e.currentTarget.value === 'metacubex') {
+                activeSection = 'rulesets';
+              }
+            }}
+          >
+            <option value="none">{$t('editor.rp_none')}</option>
+            <option value="zkeen">{$t('editor.rp_zkeen')}</option>
+            <option value="metacubex">{$t('editor.rp_metacubex')}</option>
+          </select>
+        </div>
+
+        <!-- Section tabs -->
+        <div class="sec-tabs">
+          {#each tabs as [id, label]}
+            <button
+              class="sec-tab"
+              class:active={activeSection === id}
+              onclick={() => {
+                activeSection = id as typeof activeSection;
+                showProxyForm = false;
+                showGroupForm = false;
+                showRuleForm = false;
+              }}
+            >
+              {label}
+              {#if id === 'proxies' && proxies.length > 0}<span class="sec-count"
+                  >{proxies.length}</span
+                >{/if}
+              {#if id === 'groups' && groups.length > 0}<span class="sec-count"
+                  >{groups.length}</span
+                >{/if}
+              {#if id === 'rulesets' && selectedMetaRuleSets.size > 0}<span class="sec-count"
+                  >{selectedMetaRuleSets.size}</span
+                >{/if}
+              {#if id === 'rules' && rules.length > 0}<span class="sec-count">{rules.length}</span
+                >{/if}
+              {#if id === 'dns' && dns.enabled}<span class="sec-dot"></span>{/if}
+              {#if id === 'tun' && tun.enabled}<span class="sec-dot"></span>{/if}
+            </button>
+          {/each}
+        </div>
+
+        <!-- PROXIES -->
+        {#if activeSection === 'proxies'}
+          <div class="sec-body">
+            {#each proxies as p (p.id)}
+              <div class="item-row">
+                <span class="item-badge type-{p.type}">{p.type}</span>
+                <span class="item-name">{p.name}</span>
+                <span class="item-meta">{p.server}:{p.port}</span>
+                <button
+                  class="item-edit"
+                  onclick={() => editProxy(p)}
+                  title={ru ? 'Редактировать' : 'Edit'}>✎</button
+                >
+                <button
+                  class="item-del"
+                  onclick={() => removeProxy(p.id)}
+                  title={ru ? 'Удалить' : 'Remove'}>✕</button
+                >
+              </div>
+            {/each}
+
+            {#if showProxyForm}
+              <ProxyForm
+                bind:np
+                isEdit={!!editingProxyId}
+                onSave={addProxy}
+                onCancel={() => {
+                  showProxyForm = false;
+                  editingProxyId = null;
+                  np = newProxyDefaults('vless');
+                }}
+              />
+            {:else}
+              {#if mihomoProviders && mihomoProviders.length > 0}
+                <div
+                  class="sec-subtitle"
+                  style="margin-top: 16px; margin-bottom: 8px; border-top: 1px solid var(--border); padding-top: 12px; font-weight: 600; font-size: 13px; color: var(--fg-secondary);"
+                >
+                  {ru
+                    ? 'Провайдеры подписок (proxy-providers)'
+                    : 'Subscription providers (proxy-providers)'}
+                </div>
+                {#each mihomoProviders as sub}
+                  <div class="item-row" style="border-left: 3px solid var(--success);">
+                    <span
+                      class="item-badge type-mihomo"
+                      style="background: rgba(16, 185, 129, 0.15); color: var(--success); border-color: rgba(16, 185, 129, 0.3);"
+                      >mihomo</span
+                    >
+                    <span class="item-name">{sub.name}</span>
+                    <span
+                      class="item-meta"
+                      title={sub.url}
+                      style="max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                    >
+                      {sub.url}
+                    </span>
+                  </div>
+                {/each}
+              {/if}
+
+              <div class="constructor-proxy-list" style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button
+                  class="add-btn"
+                  style="flex: 1; min-width: 120px;"
+                  onclick={() => (showProxyForm = true)}
+                >
+                  + {ru ? 'Добавить прокси' : 'Add proxy'}
+                </button>
+                <button
+                  class="add-btn import-btn"
+                  style="flex: 1; min-width: 120px;"
+                  onclick={loadSubscriptionProxies}
+                  disabled={!hasXraySubscriptions}
+                  title={hasXraySubscriptions
+                    ? $currentLang === 'ru'
+                      ? 'Импортировать прокси-серверы из существующих активных Xray-подписок. Mihomo использует нативные proxy-providers для собственных подписок.'
+                      : 'Import proxy servers from existing active Xray subscriptions. Mihomo uses native proxy-providers for its own subscriptions.'
+                    : $currentLang === 'ru'
+                      ? 'Нет доступных активных Xray-подписок для импорта. Создайте или включите Xray-подписку в разделе «Подписки».'
+                      : 'No active Xray subscriptions available for import. Create or enable an Xray subscription in the "Subscriptions" section.'}
+                >
+                  ↓ {$t('editor.constructor_import_proxies')}
+                </button>
+                <button
+                  class="add-btn import-btn"
+                  style="flex: 1; min-width: 120px;"
+                  onclick={openImportModal}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    style="margin-right: 4px; display: inline-block; vertical-align: middle;"
+                  >
+                    <path
+                      d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"
+                    />
+                  </svg>
+                  {$t('subscr.import_node')}
+                </button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- GROUPS -->
+        {#if activeSection === 'groups'}
+          <div class="sec-body">
+            {#if activeRuleProvider === 'zkeen'}
+              <!-- Premium zkeen 16 groups UI -->
+              <div class="zkeen-groups-grid">
+                {#each groups as g (g.id)}
+                  <div class="zkeen-group-card" class:disabled={g.enabled === false}>
+                    <div class="zkeen-group-header">
+                      <div class="zkeen-group-icon-wrap">
+                        <img
+                          src={g.icon}
+                          alt={g.name}
+                          class="zkeen-group-icon"
+                          onerror={() => {
+                            const fallback =
+                              'https://raw.githubusercontent.com/Koolson/Qure/master/IconSet/Color/Global.png';
+                            if (g.icon !== fallback) {
+                              g.icon = fallback;
+                            } else {
+                              g.icon =
+                                'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                            }
+                            groups = [...groups];
+                          }}
+                        />
+                      </div>
+                      <div class="zkeen-group-title">
+                        <span class="zkeen-group-name">{g.name}</span>
+                        <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                          {#if g.excludeFilter}
+                            <span class="zkeen-exclude-badge">exclude: {g.excludeFilter}</span>
+                          {/if}
+                          {#if g.includeAll}
+                            <span class="zkeen-include-badge">include-all</span>
+                          {/if}
+                        </div>
+                      </div>
+                      <label class="switch">
+                        <input
+                          type="checkbox"
+                          checked={g.enabled !== false}
+                          onchange={(e) => {
+                            g.enabled = e.currentTarget.checked;
+                            if (g.enabled === false) {
+                              showToast(
+                                'warning',
+                                $t('editor.group_disable_warning', { group: g.name })
+                              );
+                            }
+                            groups = [...groups];
+                          }}
+                        />
+                        <span class="slider round"></span>
+                      </label>
+                    </div>
+
+                    {#if g.enabled !== false}
+                      <div class="zkeen-group-body">
+                        <label class="form-label" style="font-size: 11px; margin-bottom: 2px;"
+                          >{ru ? 'Исходящий канал по умолчанию' : 'Default outbound'}</label
+                        >
+                        <select
+                          class="form-select"
+                          value={g.proxies[0] || 'DIRECT'}
+                          onchange={(e) => {
+                            const val = e.currentTarget.value;
+                            g.proxies = [val, ...g.proxies.slice(1).filter((p) => p !== val)];
+                            groups = [...groups];
+                          }}
+                        >
+                          <option value="DIRECT">DIRECT</option>
+                          <option value="REJECT">REJECT</option>
+                          {#each allProxyNames.filter((n) => n !== 'DIRECT' && n !== 'REJECT' && n !== g.name) as n}
+                            <option value={n}>{n}</option>
+                          {/each}
+                        </select>
+                      </div>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              {#each groups as g (g.id)}
+                <div class="item-row">
+                  <span class="item-badge type-group">{g.type}</span>
+                  <span class="item-name">{g.name}</span>
+                  {#if g.includeAll}
+                    <span
+                      class="item-badge"
+                      style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; font-size: 10px; text-transform: none;"
+                      >include-all</span
+                    >
+                  {/if}
+                  {#if g.useProviders && g.useProviders.length > 0}
+                    <span
+                      class="item-badge"
+                      style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; text-transform: none;"
+                      title={g.useProviders.join(', ')}>use: {g.useProviders.length}</span
+                    >
+                  {/if}
+                  {#if g.type === 'load-balance' && g.strategy}
+                    <span
+                      class="item-badge"
+                      style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10px; text-transform: none;"
+                      >{g.strategy}</span
+                    >
+                  {/if}
+                  <span class="item-meta">{g.proxies.length} {ru ? 'прокси' : 'proxies'}</span>
+                  <button
+                    class="item-edit"
+                    onclick={() => editGroup(g)}
+                    title={ru ? 'Редактировать' : 'Edit'}>✎</button
+                  >
+                  <button class="item-del" onclick={() => removeGroup(g.id)}>✕</button>
+                </div>
+              {/each}
+
+              {#if showGroupForm}
+                <GroupForm
+                  bind:ng
+                  isEdit={!!editingGroupId}
+                  {allProxyNames}
+                  {mihomoProviders}
+                  onSave={addGroup}
+                  onCancel={() => {
+                    showGroupForm = false;
+                    editingGroupId = null;
+                    ng = {
+                      name: '',
+                      type: 'select',
+                      proxies: [],
+                      includeAll: false,
+                      url: 'https://www.gstatic.com/generate_204',
+                      interval: 300,
+                      useProviders: [],
+                      strategy: 'consistent-hashing'
+                    };
+                  }}
+                />
+              {:else}
+                <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
+                  <button class="add-btn" style="flex: 1;" onclick={() => (showGroupForm = true)}>
+                    + {ru ? 'Добавить группу' : 'Add group'}
+                  </button>
+                </div>
+              {/if}
+            {/if}
+          </div>
+        {/if}
+
+        <!-- RULESETS -->
+        {#if activeSection === 'rulesets'}
+          <div class="sec-body" data-testid="rulesets-picker">
+            <div class="card rulesets-card" style="padding:16px;">
+              <div class="rulesets-header">
+                <h3 style="margin-top:0; margin-bottom:4px; font-size:16px;">
+                  {$t('editor.rulesets_picker')}
+                </h3>
+                <p
+                  class="sub"
+                  style="margin-top:0; margin-bottom:16px; font-size:12px; color:var(--fg-dim);"
+                >
+                  {ru
+                    ? 'Выберите наборы правил и укажите группу для каждого.'
+                    : 'Select rule sets and assign a group for each.'}
+                </p>
+              </div>
+
+              {#each Object.entries(META_RULE_SETS_BY_CATEGORY) as [category, items]}
+                <div class="rulesets-category-group" style="margin-top:16px;">
+                  <h4
+                    class="category-title"
+                    style="font-size:13px; font-weight:600; color:var(--fg-secondary); margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.05);"
+                  >
+                    {category}
+                  </h4>
+                  <div
+                    class="rulesets-grid"
+                    style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:8px;"
+                  >
+                    {#each items as item}
+                      {@const key = `${item.id}|${item.type}`}
+                      {@const isChecked = selectedMetaRuleSets.has(key)}
+                      <div
+                        class="ruleset-item-row"
+                        class:selected={isChecked}
+                        style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:var(--radius); transition:background var(--transition-fast), border-color var(--transition-fast);"
+                      >
+                        <label
+                          class="ruleset-label"
+                          for="ruleset-{item.type}-{item.id}"
+                          style="display:flex; align-items:center; gap:8px; cursor:pointer; flex:1; user-select:none;"
+                        >
+                          <input
+                            type="checkbox"
+                            id="ruleset-{item.type}-{item.id}"
+                            value={key}
+                            checked={isChecked}
+                            onchange={(e) => {
+                              if (e.currentTarget.checked) {
+                                let outbound = item.defaultOutbound;
+                                if (
+                                  outbound === 'Proxy' &&
+                                  groups.some((g) => g.name === 'Selective')
+                                ) {
+                                  outbound = 'Selective';
+                                } else if (
+                                  outbound === 'Proxy' &&
+                                  groups.some((g) => g.name === 'Proxy')
+                                ) {
+                                  outbound = 'Proxy';
+                                } else if (!allProxyNames.includes(outbound)) {
+                                  outbound = allProxyNames[0] || 'DIRECT';
+                                }
+                                selectedMetaRuleSets.set(key, outbound);
+                              } else {
+                                selectedMetaRuleSets.delete(key);
+                              }
+                              selectedMetaRuleSets = new Map(selectedMetaRuleSets);
+                            }}
+                          />
+                          <span
+                            class="ruleset-name"
+                            style="font-size:13px; font-weight:500; color:var(--fg-primary);"
+                            >{item.label}</span
+                          >
+                          <span
+                            class="ruleset-type-badge"
+                            style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--fg-dim); background:rgba(255,255,255,0.05); padding:1px 4px; border-radius:4px;"
+                            >{item.type}</span
+                          >
+                        </label>
+
+                        {#if isChecked}
+                          <select
+                            class="ruleset-outbound-select"
+                            style="font-size:12px; background:var(--bg-surface); border:1px solid var(--border); color:var(--fg-primary); border-radius:var(--radius-sm); padding:2px 6px; max-width:120px; outline:none;"
+                            value={selectedMetaRuleSets.get(key)}
+                            onchange={(e) => {
+                              selectedMetaRuleSets.set(key, e.currentTarget.value);
+                              selectedMetaRuleSets = selectedMetaRuleSets;
+                            }}
+                          >
+                            {#each allProxyNames as n}
+                              <option value={n}>{n}</option>
+                            {/each}
+                          </select>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        <!-- RULES -->
+        {#if activeSection === 'rules'}
+          <div class="sec-body">
+            {#each rules as r, i (r.id)}
+              <div class="item-row item-row-rule">
+                <div class="rule-order">
+                  <button class="order-btn" onclick={() => moveRule(r.id, -1)} disabled={i === 0}
+                    >▲</button
+                  >
+                  <button
+                    class="order-btn"
+                    onclick={() => moveRule(r.id, 1)}
+                    disabled={i === rules.length - 1}>▼</button
+                  >
+                </div>
+                <span class="item-badge type-rule">{r.type}</span>
+                {#if r.type !== 'MATCH'}
+                  <span class="item-name rule-value">{r.value}</span>
+                {/if}
+                <span class="item-meta">→ {r.outbound}</span>
+                <button class="item-del" onclick={() => removeRule(r.id)}>✕</button>
+              </div>
+            {/each}
+
+            {#if showRuleForm}
+              <RuleForm
+                bind:nr
+                {allProxyNames}
+                onSave={addRule}
+                onCancel={() => (showRuleForm = false)}
+              />
+            {:else}
+              <button class="add-btn" onclick={() => (showRuleForm = true)}>
+                + {ru ? 'Добавить правило' : 'Add rule'}
+              </button>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- DNS -->
+        {#if activeSection === 'dns'}
+          <div class="sec-body">
+            <div class="toggle-row">
+              <label class="toggle-label">
+                <input type="checkbox" bind:checked={dns.enabled} />
+                <span>{ru ? 'Включить DNS' : 'Enable DNS'}</span>
+              </label>
+            </div>
+            {#if dns.enabled}
+              {#if $capabilities?.xkeen_dns === false}
+                <div
+                  class="alert alert-warning"
+                  style="margin: 0 0 16px 0; display: flex; flex-direction: column; gap: 8px; align-items: flex-start;"
+                  role="status"
+                >
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <span aria-hidden="true">⚠️</span>
+                    <span>{$t('editor.dns_intercept_warning')}</span>
+                  </div>
+                  <button
+                    class="btn btn-secondary btn-sm"
+                    style="font-size: 12px; padding: 4px 8px; display: flex; align-items: center; gap: 4px;"
+                    onclick={enableDNSRedirect}
+                    disabled={dnsRedirectLoading}
+                  >
+                    {#if dnsRedirectLoading}
+                      <span
+                        class="spinner"
+                        style="display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"
+                      ></span>
+                    {/if}
+                    {$t('editor.dns_intercept_enable')}
+                  </button>
+                </div>
+              {/if}
+              <div class="form-row">
+                <label class="form-label">{ru ? 'Режим' : 'Enhanced mode'}</label>
+                <select class="form-select" bind:value={dns.enhancedMode}>
+                  <option value="fake-ip">fake-ip</option>
+                  <option value="redir-host">redir-host</option>
+                </select>
+              </div>
+              {#if dns.enhancedMode === 'fake-ip'}
+                <div class="form-row">
+                  <label class="form-label">Fake-IP Range</label>
+                  <input class="form-input" bind:value={dns.fakeIPRange} />
+                </div>
+              {/if}
+              <div class="form-row">
+                <label class="form-label">Nameservers</label>
+                <textarea
+                  class="form-textarea"
+                  value={dns.nameservers.join('\n')}
+                  rows="3"
+                  onchange={(e) =>
+                    (dns.nameservers = e.currentTarget.value.split('\n').filter(Boolean))}
+                ></textarea>
+              </div>
+              <div class="form-row">
+                <label class="form-label">Fallback</label>
+                <textarea
+                  class="form-textarea"
+                  value={dns.fallback.join('\n')}
+                  rows="2"
+                  onchange={(e) =>
+                    (dns.fallback = e.currentTarget.value.split('\n').filter(Boolean))}></textarea>
+              </div>
+            {/if}
+          </div>
+        {/if}
+
+        <!-- TUN -->
+        {#if activeSection === 'tun'}
+          <div class="sec-body">
+            <div class="toggle-row">
+              <label class="toggle-label">
+                <input type="checkbox" bind:checked={tun.enabled} />
+                <span>{ru ? 'Включить TUN' : 'Enable TUN'}</span>
+              </label>
+            </div>
+            {#if tun.enabled}
+              <div class="form-row">
+                <label class="form-label">Stack</label>
+                <select class="form-select" bind:value={tun.stack}>
+                  <option value="mixed">mixed</option>
+                  <option value="system">system</option>
+                  <option value="gvisor">gvisor</option>
+                </select>
+              </div>
+              <div class="toggle-row">
+                <label class="toggle-label">
+                  <input type="checkbox" bind:checked={tun.autoRoute} />
+                  <span>auto-route</span>
+                </label>
+              </div>
+              <div class="toggle-row">
+                <label class="toggle-label">
+                  <input type="checkbox" bind:checked={tun.autoDetectInterface} />
+                  <span>auto-detect-interface</span>
+                </label>
+              </div>
+              <div class="form-row">
+                <label class="form-label">DNS hijack</label>
+                <input
+                  class="form-input"
+                  value={tun.dnsHijack.join(', ')}
+                  onchange={(e) =>
+                    (tun.dnsHijack = e.currentTarget.value
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean))}
+                />
+              </div>
+            {/if}
+            <div
+              class="toggle-row"
+              style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px;"
+            >
+              <label class="toggle-label">
+                <input type="checkbox" bind:checked={sniffer.enabled} />
+                <span>{$t('editor.sniffer_enable')}</span>
+              </label>
+            </div>
+            {#if sniffer.enabled}
+              <div
+                style="margin-left: 20px; display: flex; flex-direction: column; gap: 8px; margin-top: 8px;"
+              >
+                <label
+                  class="checkbox-container"
+                  style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;"
+                >
+                  <input
+                    type="checkbox"
+                    bind:checked={sniffer.sniffHttp}
+                    style="width: auto; margin: 0;"
+                  />
+                  <span>Sniff HTTP (ports 80, 8080)</span>
+                </label>
+                <label
+                  class="checkbox-container"
+                  style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;"
+                >
+                  <input
+                    type="checkbox"
+                    bind:checked={sniffer.sniffTls}
+                    style="width: auto; margin: 0;"
+                  />
+                  <span>Sniff TLS (ports 443, 8443)</span>
+                </label>
+                <label
+                  class="checkbox-container"
+                  style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none;"
+                >
+                  <input
+                    type="checkbox"
+                    bind:checked={sniffer.sniffQuic}
+                    style="width: auto; margin: 0;"
+                  />
+                  <span>Sniff QUIC (ports 443, 8443)</span>
+                </label>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+
+      <!-- Right: YAML preview -->
+      <div class="gen-right">
+        <div class="preview-header">
+          <span class="preview-title">YAML {ru ? 'превью' : 'preview'}</span>
+          {#if yaml}
+            <button class="btn btn-secondary btn-sm" onclick={copyYAML}>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                ><rect x="9" y="9" width="13" height="13" rx="2" /><path
+                  d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                /></svg
+              >
+            </button>
+          {/if}
+        </div>
+        <pre class="yaml-preview">{yaml ||
+            (ru
+              ? '# Добавьте элементы слева\n# чтобы сгенерировать YAML'
+              : '# Add elements on the left\n# to generate YAML')}</pre>
+
+        {#if validationError}
+          <div
+            class="validation-error-block"
+            style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
+          >
+            <div style="font-weight: bold; margin-bottom: 6px;">
+              {$t('editor.validation_failed')}
+            </div>
+            <div
+              style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;"
+            >
+              {parseValidationError(validationError, $currentLang)}
+            </div>
+            <details>
+              <summary style="cursor: pointer; font-size: 12px; opacity: 0.8; user-select: none;"
+                >{$t('editor.validation_details')}</summary
+              >
+              <pre
+                style="margin: 6px 0 0 0; white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 12px; opacity: 0.9; max-height: 200px; overflow-y: auto;">{validationError}</pre>
+            </details>
+          </div>
+        {/if}
+
+        {#if embedded}
+          <div
+            class="gen-embedded-actions"
+            style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;"
+          >
+            <div style="display: flex; gap: 8px; width: 100%;">
+              <button class="btn btn-secondary" style="flex: 1;" onclick={openInEditor}>
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  style="margin-right:5px"
+                  ><path d="M12 20h9" /><path
+                    d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
+                  /></svg
+                >
+                {#if selectedFile}
+                  {ru ? 'Вставить в редактор' : 'Insert into Editor'}
+                {:else}
+                  {ru ? 'Открыть в редакторе' : 'Open in Editor'}
+                {/if}
+              </button>
+              <button
+                class="btn btn-primary"
+                data-testid="apply-changes-btn"
+                onclick={handleApplyMihomo}
+                disabled={applyLoading || !yaml}
+                style="flex: 1;"
+              >
+                {applyLoading
+                  ? ru
+                    ? 'Сохранение...'
+                    : 'Saving...'
+                  : ru
+                    ? 'Применить изменения'
+                    : 'Apply Changes'}
+              </button>
+            </div>
+            {#if canUndo}
+              <button
+                class="btn btn-secondary"
+                onclick={handleUndo}
+                disabled={applyLoading}
+                style="width: 100%;"
+              >
+                {$t('editor.undo')}
+              </button>
+            {/if}
+          </div>
+        {/if}
+      </div>
     </div>
-  </div>
+  {/if}
 </div>
 
 {#if showApplyConfirm}
@@ -2734,13 +2468,13 @@
     role="button"
     tabindex="0"
     data-testid="apply-confirm-dialog"
-    on:click={() => (showApplyConfirm = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}
+    onclick={() => (showApplyConfirm = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}
   >
-    <div class="modal-card" role="presentation" on:click|stopPropagation>
+    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
       <div class="modal-card-header">
         <h2>{$t('editor.apply_confirm_title')}</h2>
-        <button class="modal-close-btn" on:click={() => (showApplyConfirm = false)}>&times;</button>
+        <button class="modal-close-btn" onclick={() => (showApplyConfirm = false)}>&times;</button>
       </div>
       <div class="modal-card-body">
         <p>{$t('editor.apply_confirm_body')}</p>
@@ -2764,10 +2498,10 @@
         </div>
       </div>
       <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={() => (showApplyConfirm = false)}>
+        <button class="btn btn-secondary" onclick={() => (showApplyConfirm = false)}>
           {$t('app.cancel')}
         </button>
-        <button class="btn btn-primary" on:click={handleApplyMihomo} disabled={applyLoading}>
+        <button class="btn btn-primary" onclick={handleApplyMihomo} disabled={applyLoading}>
           {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
         </button>
       </div>
@@ -2780,13 +2514,13 @@
     class="modal-overlay"
     role="button"
     tabindex="0"
-    on:click={closeImportModal}
-    on:keydown={(e) => e.key === 'Escape' && closeImportModal()}
+    onclick={closeImportModal}
+    onkeydown={(e) => e.key === 'Escape' && closeImportModal()}
   >
-    <div class="modal-card" role="presentation" on:click|stopPropagation>
+    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
       <div class="modal-card-header">
         <h2>{$t('subscr.import_modal_title')}</h2>
-        <button class="modal-close-btn" on:click={closeImportModal}>&times;</button>
+        <button class="modal-close-btn" onclick={closeImportModal}>&times;</button>
       </div>
       <div class="modal-card-body">
         {#if importErrorMsg}
@@ -2827,7 +2561,7 @@
                   >
                     <button
                       type="button"
-                      on:click={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                      onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
                       style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
                       aria-label="Remove">✕</button
                     >
@@ -2849,7 +2583,7 @@
                   >
                     <button
                       type="button"
-                      on:click={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                      onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
                       style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
                       aria-label="Remove">✕</button
                     >
@@ -2884,13 +2618,13 @@
         {/if}
       </div>
       <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={closeImportModal} disabled={importLoading}>
+        <button class="btn btn-secondary" onclick={closeImportModal} disabled={importLoading}>
           {$t('app.cancel')}
         </button>
         {#if importStep === 1}
           <button
             class="btn btn-primary"
-            on:click={parseImportLink}
+            onclick={parseImportLink}
             disabled={!importLink.trim() || importLoading}
           >
             {#if importLoading}
@@ -2901,7 +2635,7 @@
         {:else}
           <button
             class="btn btn-primary"
-            on:click={confirmImportNode}
+            onclick={confirmImportNode}
             disabled={importLoading ||
               importNodes.length === 0 ||
               importNodes.some((n) => n.rowError)}
@@ -3061,6 +2795,23 @@
     font-size: 11px;
     color: var(--fg-dim);
     flex-shrink: 0;
+  }
+
+  .item-edit {
+    background: none;
+    border: none;
+    color: var(--fg-faint);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    transition: color var(--transition-fast);
+    flex-shrink: 0;
+    line-height: 1;
+  }
+
+  .item-edit:hover {
+    color: var(--primary);
   }
 
   .item-del {
@@ -3309,6 +3060,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 14px;
+    background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -3331,10 +3083,11 @@
     overflow-y: auto;
     margin: 0;
     padding: 14px 16px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 11.5px;
-    line-height: 1.6;
-    color: var(--fg-secondary);
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: var(--font-mono, monospace);
+    font-size: var(--font-size-xs, 0.75rem);
+    line-height: 1.5;
     white-space: pre;
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong) transparent;
@@ -3636,5 +3389,10 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

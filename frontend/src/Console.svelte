@@ -134,7 +134,7 @@
               {#each category.commands as cmd}
                 <button
                   class="cmd-tile"
-                  on:click={() => handleCommandClick(cmd)}
+                  onclick={() => handleCommandClick(cmd)}
                   disabled={executing !== ''}
                   title={cmd.description}
                 >
@@ -209,12 +209,12 @@
         <div class="toolbar-right">
           <button
             class="btn btn-secondary btn-sm"
-            on:click={clearOutput}
+            onclick={clearOutput}
             disabled={!output && !executing}
           >
             {$t('console.clear')}
           </button>
-          <button class="btn btn-secondary btn-sm" on:click={copyOutput} disabled={!output}>
+          <button class="btn btn-secondary btn-sm" onclick={copyOutput} disabled={!output}>
             {$t('console.copy')}
           </button>
         </div>
@@ -244,7 +244,7 @@
             <button
               class="history-item"
               class:error={!entry.success}
-              on:click={() => {
+              onclick={() => {
                 output = entry.output;
               }}
               title={entry.command}
@@ -270,13 +270,13 @@
     class="modal-overlay"
     role="button"
     tabindex="0"
-    on:click={cancelConfirm}
-    on:keydown={(e) => e.key === 'Escape' && cancelConfirm()}
+    onclick={cancelConfirm}
+    onkeydown={(e) => e.key === 'Escape' && cancelConfirm()}
   >
-    <div class="modal-card" role="presentation" on:click|stopPropagation>
+    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
       <div class="modal-card-header">
         <h2>{$t('console.confirm_title')}</h2>
-        <button class="modal-close-btn" on:click={cancelConfirm}>&times;</button>
+        <button class="modal-close-btn" onclick={cancelConfirm}>&times;</button>
       </div>
       <div class="modal-card-body">
         <p style="margin: 0; line-height: 1.5; color: var(--fg-secondary);">
@@ -284,10 +284,10 @@
         </p>
       </div>
       <div class="modal-card-footer">
-        <button class="btn btn-secondary" on:click={cancelConfirm} title={$t('app.cancel')}>
+        <button class="btn btn-secondary" onclick={cancelConfirm} title={$t('app.cancel')}>
           {$t('app.cancel')}
         </button>
-        <button class="btn btn-danger" on:click={confirmExecute} title={$t('app.confirm')}>
+        <button class="btn btn-danger" onclick={confirmExecute} title={$t('app.confirm')}>
           {$t('app.confirm')}
         </button>
       </div>

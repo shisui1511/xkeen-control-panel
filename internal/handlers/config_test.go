@@ -392,6 +392,20 @@ rules:
 	if rr.Code != http.StatusForbidden {
 		t.Errorf("expected 403 for forbidden path, got %d", rr.Code)
 	}
+
+	// Invalid YAML in section
+	invalidYAMLBody := `{
+		"path": "` + strings.ReplaceAll(targetPath, "\\", "\\\\") + `",
+		"sections": {
+			"rules": "  - [MATCH,DIRECT"
+		}
+	}`
+	req = httptest.NewRequest(http.MethodPost, "/api/config/mihomo-merge", strings.NewReader(invalidYAMLBody))
+	rr = httptest.NewRecorder()
+	api.MihomoMergeSave(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid YAML, got %d: %s", rr.Code, rr.Body.String())
+	}
 }
 
 // TestConfigRead_FileNotFound verifies that ConfigRead returns 404 when file does not exist.
@@ -440,5 +454,182 @@ func TestConfigRead_Success(t *testing.T) {
 
 	if rr.Body.String() != string(content) {
 		t.Errorf("expected content %q, got %q", string(content), rr.Body.String())
+	}
+}
+
+func TestConfigSave_ValidationFailureAndRollback(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	// Create mock validation script that fails
+	mockBin := filepath.Join(tmpDir, "mock-mihomo")
+	mockScript := `#!/bin/sh
+echo "mihomo mock validation failed"
+exit 1
+`
+	if err := os.WriteFile(mockBin, []byte(mockScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+	api.cfg.MihomoBinary = mockBin
+
+	// Create initial valid config file
+	targetPath := filepath.Join(tmpDir, "config.yaml")
+	initialContent := []byte("proxies: []")
+	if err := os.WriteFile(targetPath, initialContent, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Try saving invalid configuration (which will fail validation)
+	invalidContent := []byte("proxies: invalid_structure")
+	req := httptest.NewRequest(http.MethodPost, "/api/config/save?path="+targetPath, bytes.NewReader(invalidContent))
+	rr := httptest.NewRecorder()
+
+	api.ConfigSave(rr, req)
+
+	// Verify it returns 422 StatusUnprocessableEntity
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "mihomo mock validation failed") {
+		t.Errorf("expected validation error message, got: %s", rr.Body.String())
+	}
+
+	// Verify that the file content was rolled back to initialContent
+	gotContent, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotContent) != string(initialContent) {
+		t.Errorf("expected content to be rolled back to %q, got %q", string(initialContent), string(gotContent))
+	}
+}
+
+func TestCopyDirConfigs_Symlink(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+
+	// Create a dummy .dat and .metadb file in srcDir
+	datFile := filepath.Join(srcDir, "geoip.dat")
+	if err := os.WriteFile(datFile, []byte("geoip data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	metadbFile := filepath.Join(srcDir, "geosite.metadb")
+	if err := os.WriteFile(metadbFile, []byte("geosite data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a JSON file in srcDir
+	jsonFile := filepath.Join(srcDir, "config.json")
+	if err := os.WriteFile(jsonFile, []byte(`{"foo": "bar"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	allowedRoots := []string{srcDir}
+
+	// Run copyDirConfigs targeting config.json with new content
+	err := copyDirConfigs(srcDir, dstDir, "config.json", `{"foo": "baz"}`, allowedRoots)
+	if err != nil {
+		t.Fatalf("copyDirConfigs failed: %v", err)
+	}
+
+	// Verify config.json contains new content and is a regular file
+	dstJSONPath := filepath.Join(dstDir, "config.json")
+	jsonFi, err := os.Lstat(dstJSONPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jsonFi.Mode()&os.ModeSymlink != 0 {
+		t.Error("expected config.json NOT to be a symlink")
+	}
+	content, err := os.ReadFile(dstJSONPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != `{"foo": "baz"}` {
+		t.Errorf("expected JSON content '{\"foo\": \"baz\"}', got %q", string(content))
+	}
+
+	// Verify geoip.dat is a symlink pointing to srcDir/geoip.dat
+	dstDatPath := filepath.Join(dstDir, "geoip.dat")
+	datFi, err := os.Lstat(dstDatPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if datFi.Mode()&os.ModeSymlink == 0 {
+		t.Error("expected geoip.dat to be a symlink")
+	}
+	target, err := os.Readlink(dstDatPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != datFile {
+		t.Errorf("expected symlink target %q, got %q", datFile, target)
+	}
+
+	// Verify geosite.metadb is a symlink pointing to srcDir/geosite.metadb
+	dstMetadbPath := filepath.Join(dstDir, "geosite.metadb")
+	metadbFi, err := os.Lstat(dstMetadbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadbFi.Mode()&os.ModeSymlink == 0 {
+		t.Error("expected geosite.metadb to be a symlink")
+	}
+	targetDb, err := os.Readlink(dstMetadbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targetDb != metadbFile {
+		t.Errorf("expected symlink target %q, got %q", metadbFile, targetDb)
+	}
+}
+
+func TestMihomoMergeSave_CleanInstall(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	targetPath := filepath.Join(tmpDir, "non-existent-mihomo.yaml")
+
+	body := `{
+		"path": "` + strings.ReplaceAll(targetPath, "\\", "\\\\") + `",
+		"sections": {
+			"proxy-groups": "  - name: \"new-group\"\n    type: select\n    proxies:\n      - DIRECT",
+			"rules": "  - DOMAIN,google.com,new-group\n  - MATCH,DIRECT"
+		}
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/mihomo-merge", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	api.MihomoMergeSave(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	mergedData, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mergedStr := string(mergedData)
+
+	// Check for default system parameters
+	if !strings.Contains(mergedStr, "log-level: silent") {
+		t.Error("expected default 'log-level: silent' in config")
+	}
+	if !strings.Contains(mergedStr, "allow-lan: true") {
+		t.Error("expected default 'allow-lan: true' in config")
+	}
+	if !strings.Contains(mergedStr, "routing-mark: 255") {
+		t.Error("expected default 'routing-mark: 255' in config")
+	}
+
+	// Check for merged sections
+	if !strings.Contains(mergedStr, "new-group") {
+		t.Error("expected new-group to be in merged config")
+	}
+	if !strings.Contains(mergedStr, "DOMAIN,google.com,new-group") {
+		t.Error("expected new rules to be in merged config")
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/handlers"
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 var (
@@ -46,17 +47,14 @@ func main() {
 		}
 	}
 
-	// Setup logging to file if configured
+	// Setup logging to file if configured with size-based rotation (1 MB)
 	if cfg.XCPLogPath != "" {
-		if err := os.MkdirAll(filepath.Dir(cfg.XCPLogPath), 0755); err == nil {
-			logFile, err := os.OpenFile(cfg.XCPLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-			if err == nil {
-				log.SetOutput(logFile)
-			} else {
-				log.Printf("Failed to open log file %s: %v", cfg.XCPLogPath, err)
-			}
+		logWriter, err := utils.NewRotateWriter(cfg.XCPLogPath, 1*1024*1024)
+		if err == nil {
+			log.SetOutput(logWriter)
+			defer logWriter.Close()
 		} else {
-			log.Printf("Failed to create log directory for %s: %v", cfg.XCPLogPath, err)
+			log.Printf("Failed to initialize log rotator for %s: %v", cfg.XCPLogPath, err)
 		}
 	}
 
@@ -107,6 +105,7 @@ func main() {
 	// Public endpoints
 	srv.Handle("/api/version", api.Version)
 	srv.HandleProtected("/api/capabilities", api.Capabilities)
+	srv.Handle("/mihomo/provider.yaml", api.MihomoProviderAdapter)
 
 	// Protected endpoints
 	srv.HandleProtected("/api/config/list", api.ConfigList)
@@ -124,12 +123,14 @@ func main() {
 	srv.HandleProtected("/api/settings/dev-mode", api.SettingsDevMode)
 	srv.HandleProtected("/api/service/status", api.ServiceStatus)
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
+	srv.HandleProtected("/api/service/dns-redirect", api.ServiceDNSRedirect)
 	srv.HandleProtected("/api/service/restart-log", api.ServiceRestartLog)
 	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
 	srv.HandleProtected("/api/logs/download", api.LogsDownload)
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
+	srv.HandleProtected("/api/system/diagnostics", api.DiagnosticsDownload)
 
 	// Update endpoints
 	srv.HandleProtected("/api/update/check", api.UpdateCheck)
@@ -201,10 +202,18 @@ func main() {
 	defer trafficQuotaSvc.Stop()
 
 	// Config Snapshots
-	snapshotSvc := services.NewSnapshotService(cfg.DataDir, []string{cfg.XRayConfigDir, cfg.MihomoConfigDir})
+	xrayDir := filepath.Dir(cfg.XRayConfigDir)                            // e.g. /opt/etc/xray
+	xkeenDir := filepath.Join(filepath.Dir(cfg.MihomoConfigDir), "xkeen") // e.g. /opt/etc/xkeen
+	snapshotSvc := services.NewSnapshotService(cfg.DataDir, []string{
+		xrayDir,
+		cfg.MihomoConfigDir,
+		xkeenDir,
+		cfg.DataDir,
+	})
 	api.SetSnapshotService(snapshotSvc)
 	srv.HandleProtected("/api/snapshots/list", api.SnapshotList)
 	srv.HandleProtected("/api/snapshots/create", api.SnapshotCreate)
+	srv.HandleProtected("/api/snapshots/upload", api.SnapshotUpload)
 	srv.HandleProtected("/api/snapshots/", api.SnapshotRouter)
 
 	// DAT Manager
@@ -215,6 +224,7 @@ func main() {
 	srv.HandleProtected("/api/dat/tags", api.DATListTags)
 	srv.HandleProtected("/api/dat/update", api.DATUpdate)
 	srv.HandleProtected("/api/dat/rollback", api.DATRollback)
+	srv.HandleProtected("/api/dat/search", api.DATSearch)
 
 	// Xkeen Console
 	consoleSvc := services.NewConsoleService(cfg.XKeenBinary)
@@ -222,20 +232,31 @@ func main() {
 	srv.HandleProtected("/api/console/commands", api.ConsoleListCommands)
 	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)
 
+	// Assets Service
+	srv.HandleProtected("/api/assets/definition", api.AssetsDefinition)
+
 	// Templates
 	templatesFS, err := xkeencontrolpanel.GetTemplatesFS()
 	if err != nil {
 		log.Fatalf("failed to load embedded templates: %v", err)
 	}
-	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir)
+	templateSvc := services.NewTemplateService(templatesFS, cfg.DataDir, cfg.TemplatesRepoURL, api.GetAssetsService())
 	api.SetTemplateService(templateSvc)
 	srv.HandleProtected("/api/templates/list", api.TemplateList)
 	srv.HandleProtected("/api/templates/fetch", api.TemplateFetch)
 	srv.HandleProtected("/api/templates/update", api.TemplateUpdate)
+	srv.HandleProtected("/api/templates/status", api.TemplateStatus)
+	srv.HandleProtected("/api/templates/check", api.TemplateCheck)
+
+	// Фоновый чекер обновлений шаблонов
+	templatesCtx, cancelTemplatesChecker := context.WithCancel(context.Background())
+	defer cancelTemplatesChecker()
+	go templateSvc.StartBackgroundChecker(templatesCtx)
 
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
 	subscriptionSvc.SetConsoleService(consoleSvc)
+	subscriptionSvc.SetMihomoAPI(cfg.MihomoAPIURL, cfg.MihomoSecret)
 	api.SetSubscriptionService(subscriptionSvc)
 
 	// Start subscription auto-refresh scheduler. It checks every 15 minutes
@@ -243,6 +264,21 @@ func main() {
 	schedulerCtx, cancelScheduler := context.WithCancel(context.Background())
 	go subscriptionSvc.RunScheduler(schedulerCtx, 15*time.Minute)
 	defer cancelScheduler()
+
+	// Run orphaned subscriptions cleanup at startup and schedule it every 24 hours
+	go subscriptionSvc.CleanOrphanedSubscriptions()
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-schedulerCtx.Done():
+				return
+			case <-ticker.C:
+				subscriptionSvc.CleanOrphanedSubscriptions()
+			}
+		}
+	}()
 
 	// Subscription health checker (TCP-dial каждые 5 минут)
 	healthSvc := services.NewSubscriptionHealthService(cfg.DataDir, subscriptionSvc)
@@ -287,6 +323,7 @@ func main() {
 	case sig := <-sigCh:
 		log.Printf("Received signal %s, shutting down...", sig)
 		cancelScheduler()
+		cancelTemplatesChecker()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {

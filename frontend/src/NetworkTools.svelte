@@ -508,12 +508,12 @@
         <button
           class="btn btn-primary"
           style="flex:1;"
-          on:click={() => runTool('ping')}
+          onclick={() => runTool('ping')}
           disabled={loading || !host}
         >
           {loading && activeTool === 'ping' ? $t('net.running') : $t('net.run')}
         </button>
-        <button class="btn btn-secondary" on:click={() => toggleSettings('ping')} title="Настройки"
+        <button class="btn btn-secondary" onclick={() => toggleSettings('ping')} title="Настройки"
           >⋯</button
         >
       </div>
@@ -552,14 +552,14 @@
         <button
           class="btn btn-primary"
           style="flex:1;"
-          on:click={() => runTool('traceroute')}
+          onclick={() => runTool('traceroute')}
           disabled={loading || !host}
         >
           {loading && activeTool === 'traceroute' ? $t('net.running') : $t('net.run')}
         </button>
         <button
           class="btn btn-secondary"
-          on:click={() => toggleSettings('traceroute')}
+          onclick={() => toggleSettings('traceroute')}
           title="Настройки">⋯</button
         >
       </div>
@@ -595,12 +595,12 @@
         <button
           class="btn btn-primary"
           style="flex:1;"
-          on:click={() => runTool('dns')}
+          onclick={() => runTool('dns')}
           disabled={loading || !host}
         >
           {loading && activeTool === 'dns' ? $t('net.running') : $t('net.run')}
         </button>
-        <button class="btn btn-secondary" on:click={() => toggleSettings('dns')} title="Настройки"
+        <button class="btn btn-secondary" onclick={() => toggleSettings('dns')} title="Настройки"
           >⋯</button
         >
       </div>
@@ -648,12 +648,12 @@
         <button
           class="btn btn-primary"
           style="flex:1;"
-          on:click={() => runTool('http')}
+          onclick={() => runTool('http')}
           disabled={loading || !url}
         >
           {loading && activeTool === 'http' ? $t('net.running') : $t('net.run')}
         </button>
-        <button class="btn btn-secondary" on:click={() => toggleSettings('http')} title="Настройки"
+        <button class="btn btn-secondary" onclick={() => toggleSettings('http')} title="Настройки"
           >⋯</button
         >
       </div>
@@ -747,14 +747,14 @@
         <button
           class="btn btn-primary"
           style="flex:1;"
-          on:click={() => runTool('proxy')}
+          onclick={() => runTool('proxy')}
           disabled={loading || !selectedProxy}
         >
           {loading && activeTool === 'proxy' ? $t('net.running') : $t('net.run')}
         </button>
         <button
           class="btn btn-secondary"
-          on:click={() => (showProxySettings = !showProxySettings)}
+          onclick={() => (showProxySettings = !showProxySettings)}
           title="Настройки"
         >
           ⋯
@@ -821,7 +821,7 @@
             type="button"
             class="chip"
             style="background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:2px 8px; font-size:11px; color:var(--fg-secondary); cursor:pointer; transition:all 0.15s ease;"
-            on:click={() => (portNumber = p)}
+            onclick={() => (portNumber = p)}
             disabled={loading}
           >
             {p === 22
@@ -856,14 +856,14 @@
         <button
           class="btn btn-primary"
           style="flex:1;"
-          on:click={() => runTool('port')}
+          onclick={() => runTool('port')}
           disabled={loading || !portHost || portNumber === null}
         >
           {loading && activeTool === 'port' ? $t('net.running') : $t('net.run')}
         </button>
         <button
           class="btn btn-secondary"
-          on:click={() => (showPortSettings = !showPortSettings)}
+          onclick={() => (showPortSettings = !showPortSettings)}
           title="Настройки"
         >
           ⋯
@@ -923,7 +923,7 @@
         <button
           class="btn btn-secondary btn-sm"
           style="padding: 2px 8px; font-size: 11px;"
-          on:click={clearHistory}
+          onclick={clearHistory}
         >
           {$t('console.clear')}
         </button>
@@ -942,8 +942,8 @@
             tabindex="0"
             class="history-row"
             style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; cursor:pointer; font-size:13px; transition:all 0.2s ease;"
-            on:click={() => selectHistoryItem(item)}
-            on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectHistoryItem(item)}
+            onclick={() => selectHistoryItem(item)}
+            onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectHistoryItem(item)}
           >
             <div style="display:flex; align-items:center; gap:8px;">
               <span

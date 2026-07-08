@@ -1,27 +1,31 @@
 <script lang="ts">
   import { t } from './i18n';
   import { capabilities } from './stores';
-  import { onMount } from 'svelte';
   import XrayRoutingConstructor from './XrayRoutingConstructor.svelte';
   import MihomoGenerator from './MihomoGenerator.svelte';
 
-  export let onSwitchTab: (tab: string) => void = () => {};
-  export let selectedFile: string = '';
-  export let onInsertIntoEditor: (content: string) => void = () => {};
-  export let embedded: boolean = false;
-  export let invalidateCache: boolean = false;
+  let {
+    onSwitchTab = () => {},
+    selectedFile = '',
+    onInsertIntoEditor = () => {},
+    embedded = false,
+    invalidateCache = false
+  }: {
+    onSwitchTab?: (tab: string) => void;
+    selectedFile?: string;
+    onInsertIntoEditor?: (content: string) => void;
+    embedded?: boolean;
+    invalidateCache?: boolean;
+  } = $props();
 
-  let kernel: 'xray' | 'mihomo' = 'xray';
-  let kernelInitialized = false;
+  let kernel = $state<'xray' | 'mihomo'>('xray');
+  let kernelInitialized = $state(false);
 
-  onMount(() => {
-    const unsubscribe = capabilities.subscribe((caps) => {
-      if (!kernelInitialized && caps?.active_kernel) {
-        kernel = caps.active_kernel as 'xray' | 'mihomo';
-        kernelInitialized = true;
-      }
-    });
-    return unsubscribe;
+  $effect(() => {
+    if (!kernelInitialized && $capabilities?.active_kernel) {
+      kernel = $capabilities.active_kernel as 'xray' | 'mihomo';
+      kernelInitialized = true;
+    }
   });
 </script>
 
@@ -31,7 +35,7 @@
       class="tab-btn"
       class:active={kernel === 'xray'}
       aria-pressed={kernel === 'xray'}
-      on:click={() => {
+      onclick={() => {
         kernel = 'xray';
         kernelInitialized = true;
       }}
@@ -42,7 +46,7 @@
       class="tab-btn"
       class:active={kernel === 'mihomo'}
       aria-pressed={kernel === 'mihomo'}
-      on:click={() => {
+      onclick={() => {
         kernel = 'mihomo';
         kernelInitialized = true;
       }}

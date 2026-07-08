@@ -24,7 +24,6 @@
   import Connections from './Connections.svelte';
   import Rules from './Rules.svelte';
   import Traffic from './Traffic.svelte';
-  import Subscriptions from './Subscriptions.svelte';
   import NetworkTools from './NetworkTools.svelte';
   import SmartProxy from './SmartProxy.svelte';
   import TrafficQuotas from './TrafficQuotas.svelte';
@@ -33,10 +32,10 @@
   import Console from './Console.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
 
-  let version = $t('app.loading');
-  let panelVersion = $t('app.loading');
-  let loading = false;
-  let currentTab = 'dashboard';
+  let version = $state($t('app.loading'));
+  let panelVersion = $state($t('app.loading'));
+  let loading = $state(false);
+  let currentTab = $state('dashboard');
   const mihomoDependentTabs = [
     'proxies',
     'connections',
@@ -45,8 +44,8 @@
     'smartproxy',
     'trafficquotas'
   ];
-  let theme = document.documentElement.getAttribute('data-theme') || 'light';
-  let pwaInstallPrompt: any = null;
+  let theme = $state(document.documentElement.getAttribute('data-theme') || 'light');
+  let pwaInstallPrompt = $state<any>(null);
 
   // Dashboard live monitoring state
   interface ServiceStatus {
@@ -58,19 +57,21 @@
     mihomoVersion: string;
   }
 
-  let serviceStatus: ServiceStatus = {
+  let serviceStatus = $state<ServiceStatus>({
     xkeen: 'loading',
     xray: 'loading',
     mihomo: 'loading',
     connections: 0,
     xrayVersion: '',
     mihomoVersion: ''
-  };
-  let statusError = false;
-  let statusLoading = true;
+  });
+  let statusError = $state(false);
+  let statusLoading = $state(true);
 
   interface SystemStats {
     memory: { total: number; used: number; free: number };
+    disk: { total: number; used: number; free: number };
+    ssl_cert_days: number;
     load: [number, number, number];
     uptime: { seconds: number; days: number; hours: number; minutes: number };
     go_runtime: {
@@ -98,16 +99,47 @@
     boot_time: string;
   }
 
-  let systemStats: SystemStats | null = null;
-  let loadHistory: number[] = [];
-  let activeSubscriptionsCount = 0;
-  let totalSubsCount = 0;
-  let hasSubscription = false;
-  let subsLastUpdated = '';
-  let totalProxiesCount = 0;
-  let activeProxiesCount = 0;
-  let subscriptionProxiesCount = 0;
-  let statsLastFetched = '';
+  let systemStats = $state<SystemStats | null>(null);
+  let loadHistory = $state<number[]>([]);
+  let activeSubscriptionsCount = $state(0);
+  let totalSubsCount = $state(0);
+  let hasSubscription = $state(false);
+  let subsLastUpdated = $state('');
+  let totalProxiesCount = $state(0);
+  let activeProxiesCount = $state(0);
+  let subscriptionProxiesCount = $state(0);
+  let statsLastFetched = $state('');
+
+  const isKernelCrashed = $derived(
+    serviceStatus.xkeen === 'running' &&
+      $capabilities?.active_kernel &&
+      $capabilities.active_kernel !== 'none' &&
+      (($capabilities.active_kernel === 'mihomo' && serviceStatus.mihomo === 'stopped') ||
+        ($capabilities.active_kernel === 'xray' && serviceStatus.xray === 'stopped'))
+  );
+
+  const isDiskLow = $derived(
+    systemStats !== null && systemStats.disk && systemStats.disk.free < 10 * 1024 * 1024
+  );
+
+  const isSSLExpiring = $derived(
+    systemStats !== null && systemStats.ssl_cert_days >= 0 && systemStats.ssl_cert_days < 7
+  );
+
+  function getDiskBarColor(stats: SystemStats): string {
+    if (!stats.disk) {
+      return 'var(--color-success, var(--color-primary, #2ecc71))';
+    }
+    const pct = (stats.disk.used / stats.disk.total) * 100;
+    const freeMB = stats.disk.free / 1024 / 1024;
+    if (pct > 90 || freeMB < 10) {
+      return 'var(--color-danger, #e74c3c)';
+    }
+    if (pct > 80) {
+      return 'var(--color-warning, #f39c12)';
+    }
+    return 'var(--color-success, var(--color-primary, #2ecc71))';
+  }
 
   async function fetchSubscriptionSummary() {
     try {
@@ -281,16 +313,20 @@
     return JSON.stringify({ line, fill });
   }
 
-  $: sparklineData = loadHistory.length >= 2 ? JSON.parse(buildSparklinePath(loadHistory)) : null;
+  const sparklineData = $derived(
+    loadHistory.length >= 2 ? JSON.parse(buildSparklinePath(loadHistory)) : null
+  );
 
   // Quickstart checklist reactive state
-  $: quickstartDoneCount = [
-    true, // step 1 always done when card is visible (active_kernel === 'mihomo')
-    hasSubscription,
-    $mihomoApiAvailable,
-    serviceStatus.mihomo === 'running'
-  ].filter(Boolean).length;
-  $: allQuickstartComplete = quickstartDoneCount === 4;
+  const quickstartDoneCount = $derived(
+    [
+      true, // step 1 always done when card is visible (active_kernel === 'mihomo')
+      hasSubscription,
+      $mihomoApiAvailable,
+      serviceStatus.mihomo === 'running'
+    ].filter(Boolean).length
+  );
+  const allQuickstartComplete = $derived(quickstartDoneCount === 4);
 
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
@@ -318,7 +354,7 @@
     }
   }
 
-  let isRefreshing = false;
+  let isRefreshing = $state(false);
 
   async function handleRefresh() {
     if (isRefreshing) return;
@@ -351,18 +387,22 @@
     const hash = window.location.hash;
     if (hash && hash.startsWith('#/')) {
       const path = hash.slice(2);
-      if (path.startsWith('subscriptions/')) {
-        const id = path.slice('subscriptions/'.length);
-        if (id) {
-          sessionStorage.setItem('expand_subscription_id', id);
-        }
-        window.location.hash = '#/subscriptions';
-        return 'subscriptions';
+      const queryIdx = path.indexOf('?');
+      const basePath = queryIdx !== -1 ? path.slice(0, queryIdx) : path;
+
+      if (basePath.startsWith('subscriptions/')) {
+        const id = basePath.slice('subscriptions/'.length);
+        window.location.hash = `#/proxies?tab=providers&expand=${id}`;
+        return 'proxies';
       }
-      if (path === 'mihomo-gen' || path === 'constructor') {
+      if (basePath === 'subscriptions') {
+        window.location.hash = '#/proxies?tab=providers';
+        return 'proxies';
+      }
+      if (basePath === 'mihomo-gen' || basePath === 'constructor') {
         return 'editor';
       }
-      return path;
+      return basePath;
     }
     return 'dashboard';
   }
@@ -371,7 +411,7 @@
     currentTab = getTabFromHash();
   }
 
-  let isSidebarCollapsed = localStorage.getItem('sidebar.collapsed') === 'true';
+  let isSidebarCollapsed = $state(localStorage.getItem('sidebar.collapsed') === 'true');
 
   function toggleSidebarCollapse() {
     isSidebarCollapsed = !isSidebarCollapsed;
@@ -409,7 +449,7 @@
   async function restartXkeen() {
     try {
       const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/service/restart', {
+      const res = await fetch('/api/service/control?action=restart', {
         method: 'POST',
         headers: { 'X-CSRF-Token': csrfToken || '' }
       });
@@ -611,8 +651,8 @@
                   {#if !hasSubscription}
                     <a
                       class="btn btn-secondary qs-cta"
-                      href="#/subscriptions"
-                      onclick={() => switchTab('subscriptions')}
+                      href="#/proxies?tab=providers"
+                      onclick={() => switchTab('proxies')}
                     >
                       {$t('dash.quickstart.step2_cta')}
                     </a>
@@ -696,10 +736,70 @@
         {/if}
 
         <!-- Problems Panel (conditional) -->
-        {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running) || ($capabilities !== null && !$capabilities.kernels.xray.installed && !$capabilities.kernels.mihomo.installed)}
+        {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running) || ($capabilities !== null && !$capabilities.kernels.xray.installed && !$capabilities.kernels.mihomo.installed) || isKernelCrashed || isDiskLow || isSSLExpiring}
           <div style="margin-bottom: 18px;">
             <Card title={$t('dash.problems_panel')}>
               <div class="problems-list">
+                {#if isKernelCrashed}
+                  <div class="problem-item alert-error">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <strong class="problem-title"
+                          >{$t('dash.problems.kernel_crash_title')}</strong
+                        >
+                        <div class="problem-desc">
+                          {$t('dash.problems.kernel_crash_desc').replace(
+                            '{kernel}',
+                            $capabilities?.active_kernel || ''
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <Button variant="secondary" onclick={restartXkeen}>
+                      {$t('dash.problems.kernel_crash_cta')}
+                    </Button>
+                  </div>
+                {/if}
+
+                {#if isDiskLow && systemStats && systemStats.disk}
+                  <div class="problem-item alert-error">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <strong class="problem-title">{$t('dash.problems.disk_low_title')}</strong>
+                        <div class="problem-desc">
+                          {$t('dash.problems.disk_low_desc').replace(
+                            '{free}',
+                            formatBytes(systemStats.disk.free)
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <Button variant="secondary" onclick={() => switchTab('settings')}>
+                      {$t('dash.problems.disk_low_cta')}
+                    </Button>
+                  </div>
+                {/if}
+
+                {#if isSSLExpiring && systemStats}
+                  <div class="problem-item alert-warning">
+                    <div class="problem-content">
+                      <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                      <div>
+                        <strong class="problem-title">{$t('dash.problems.ssl_expire_title')}</strong
+                        >
+                        <div class="problem-desc">
+                          {$t('dash.problems.ssl_expire_desc').replace(
+                            '{days}',
+                            String(systemStats.ssl_cert_days)
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                {/if}
+
                 {#if systemStats && systemStats.invalid_config}
                   <div class="problem-item alert-error">
                     <div class="problem-content">
@@ -855,6 +955,30 @@
           <div style="margin-bottom: 18px;">
             <Card title={$t('dash.system_stats')}>
               <div class="stats-grid">
+                {#if systemStats.disk}
+                  <div class="stat-box">
+                    <div class="stat-label">{$t('dash.disk')}</div>
+                    <div class="stat-value">
+                      {formatBytes(systemStats.disk.free)}
+                    </div>
+                    <div class="res-sub">
+                      {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })} из {formatBytes(
+                        systemStats.disk.total
+                      )} · {((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)}%
+                    </div>
+                    <div class="stat-bar">
+                      <div
+                        class="stat-bar-fill"
+                        style="width: {(
+                          (systemStats.disk.used / systemStats.disk.total) *
+                          100
+                        ).toFixed(1)}%; background: {getDiskBarColor(
+                          systemStats
+                        )}; box-shadow: 0 0 8px {getDiskBarColor(systemStats)};"
+                      ></div>
+                    </div>
+                  </div>
+                {/if}
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.ram')}</div>
                   <div class="stat-value">
@@ -1031,10 +1155,15 @@
               <!-- svelte-ignore a11y-no-static-element-interactions -->
               <div
                 class="qa-mini"
-                onclick={() => switchTab('subscriptions')}
+                onclick={() => {
+                  switchTab('proxies');
+                  window.location.hash = '#/proxies?tab=providers';
+                }}
                 role="button"
                 tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('subscriptions')}
+                onkeydown={(e) =>
+                  e.key === 'Enter' &&
+                  (switchTab('proxies'), (window.location.hash = '#/proxies?tab=providers'))}
               >
                 <span class="qa-mini-ico"><Icon name="subscriptions" size={18} /></span>
                 <span
@@ -1070,8 +1199,7 @@
                 onkeydown={(e) => e.key === 'Enter' && switchTab('logs')}
               >
                 <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
-                <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 1000 строк</span></span
-                >
+                <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 500 строк</span></span>
               </div>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -1125,10 +1253,6 @@
     {:else if currentTab === 'traffic'}
       <div transition:fade={{ duration: 150 }}>
         <Traffic />
-      </div>
-    {:else if currentTab === 'subscriptions'}
-      <div transition:fade={{ duration: 150 }}>
-        <Subscriptions onSwitchTab={switchTab} />
       </div>
     {:else if currentTab === 'services'}
       <div transition:fade={{ duration: 150 }}>

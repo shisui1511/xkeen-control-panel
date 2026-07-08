@@ -10,6 +10,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/i18n"
 	"github.com/shisui1511/xkeen-control-panel/internal/server"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/services/assets"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -29,6 +30,7 @@ type API struct {
 	snapshotSvc           *services.SnapshotService
 	consoleSvc            *services.ConsoleService
 	templateSvc           *services.TemplateService
+	assetsSvc             *assets.AssetsService
 	pathVal               *utils.PathValidator
 	configValCache        bool
 	configValCacheTime    time.Time
@@ -36,15 +38,20 @@ type API struct {
 	capsCache             interface{}
 	capsCacheTime         time.Time
 	capsCacheMutex        sync.Mutex
+	sslDaysCache          int
+	sslDaysCacheTime      time.Time
+	sslDaysCacheMutex     sync.Mutex
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
+	assetsSvc := assets.NewService(cfg.DataDir)
 	return &API{
 		cfg:       cfg,
 		srv:       srv,
 		xkeenSvc:  services.NewXKeenService(cfg.XKeenBinary, cfg.DataDir),
 		mihomoSvc: services.NewMihomoService(cfg.MihomoBinary, cfg.XKeenBinary, cfg.MihomoConfigDir),
 		configSvc: services.NewConfigService(cfg.XRayConfigDir, cfg.AllowedRoots),
+		assetsSvc: assetsSvc,
 		pathVal:   utils.NewPathValidator(cfg.AllowedRoots),
 	}
 }
@@ -71,6 +78,14 @@ func (a *API) SetConsoleService(svc *services.ConsoleService) {
 
 func (a *API) SetTemplateService(svc *services.TemplateService) {
 	a.templateSvc = svc
+}
+
+func (a *API) SetAssetsService(svc *assets.AssetsService) {
+	a.assetsSvc = svc
+}
+
+func (a *API) GetAssetsService() *assets.AssetsService {
+	return a.assetsSvc
 }
 
 func (a *API) SetKernelService(svc *services.KernelService) {

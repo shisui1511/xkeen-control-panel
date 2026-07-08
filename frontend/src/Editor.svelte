@@ -2,68 +2,23 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { fade, slide } from 'svelte/transition';
   import { t, currentLang } from './i18n';
-  $: ru = $currentLang === 'ru';
   import { showToast, capabilities } from './stores';
+  import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import EditorIcon from './lib/components/icons/Editor.svelte';
-  import {
-    EditorView,
-    keymap,
-    lineNumbers,
-    highlightActiveLineGutter,
-    highlightSpecialChars,
-    drawSelection,
-    dropCursor,
-    rectangularSelection,
-    crosshairCursor,
-    highlightActiveLine
-  } from '@codemirror/view';
-  import { EditorState, Compartment } from '@codemirror/state';
-  import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
-  import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
-  import {
-    autocompletion,
-    completionKeymap,
-    closeBrackets,
-    closeBracketsKeymap
-  } from '@codemirror/autocomplete';
-  import {
-    foldGutter,
-    indentOnInput,
-    syntaxHighlighting,
-    defaultHighlightStyle,
-    bracketMatching,
-    foldKeymap
-  } from '@codemirror/language';
-  import { lintKeymap, linter } from '@codemirror/lint';
-  import { json, jsonParseLinter, jsonLanguage } from '@codemirror/lang-json';
-  import { yaml, yamlLanguage } from '@codemirror/lang-yaml';
-  import { hoverTooltip } from '@codemirror/view';
+  import { EditorState } from '@codemirror/state';
+  import { EditorView } from '@codemirror/view';
 
-  // Schema support
-  import {
-    jsonSchemaLinter,
-    jsonSchemaHover,
-    jsonCompletion,
-    stateExtensions,
-    handleRefresh
-  } from 'codemirror-json-schema';
-  import { yamlSchemaLinter, yamlSchemaHover, yamlCompletion } from 'codemirror-json-schema/yaml';
-
-  // Schema definitions
-  import { xraySchema } from './schemas/xray';
-  import { mihomoSchema } from './schemas/mihomo';
-
-  import { xraySnippetSource, mihomoSnippetSource } from './lib/snippets';
   import Constructor from './Constructor.svelte';
   import { buildPathAtCursor, type PathSegment } from './lib/editor-utils';
 
-  export let onSwitchTab: (tab: string) => void = () => {};
+  // Subcomponents
+  import FileTree from './components/editor/FileTree.svelte';
+  import EditorTabs from './components/editor/EditorTabs.svelte';
+  import CodeMirrorEditor from './components/editor/CodeMirrorEditor.svelte';
+  import BackupSidebar from './components/editor/BackupSidebar.svelte';
 
-  let editorContainer: HTMLDivElement;
-  let editorView: EditorView | null = null;
-  const schemaCompartment = new Compartment();
   interface Template {
     name: string;
     description: string;
@@ -88,25 +43,105 @@
     currentContent: string;
   }
 
-  let files: ConfigFileInfo[] = [];
-  let selectedFile = '';
-  let loading = false;
-  let loadingPath: string | null = null;
-  let templateLoading = false;
+  let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
+
+  let ru = $derived($currentLang === 'ru');
+
+  let editorView = $state<EditorView | null>(null);
+
+  // States using runes
+  let files = $state<ConfigFileInfo[]>([]);
+  let selectedFile = $state('');
+  let loading = $state(false);
+  let loadingPath = $state<string | null>(null);
+  let templateLoading = $state(false);
   const pendingPins = new Set<string>();
-  let saving = false;
-  let backups: string[] = [];
-  let tabs: EditorTab[] = [];
-  let activeTabPath = '';
-  let breadcrumbs: PathSegment[] = [];
-  let applyLoading = false;
-  let backgroundStatusText = '';
+  let saving = $state(false);
+  let backups = $state<string[]>([]);
+  let tabs = $state<EditorTab[]>([]);
+  let activeTabPath = $state('');
+  let breadcrumbs = $state<PathSegment[]>([]);
+  let applyLoading = $state(false);
+  let backgroundStatusText = $state('');
 
   // Drawer states
-  let drawerOpen = false;
-  let selectedBackup = '';
-  let diffGroups: any[] = [];
-  let backupLoading = false;
+  let drawerOpen = $state(false);
+  let selectedBackup = $state('');
+  let diffGroups = $state<any[]>([]);
+  let backupLoading = $state(false);
+
+  // Directory management
+  const xrayDir = '/opt/etc/xray/configs';
+  const mihomoDir = '/opt/etc/mihomo';
+  let currentDir = $state(xrayDir);
+
+  // Dual-panel sidebar file lists
+  let xrayFiles = $state<ConfigFileInfo[]>([]);
+  let mihomoFiles = $state<ConfigFileInfo[]>([]);
+  let showSidebar = $state(true);
+
+  // Status bar cursor position
+  let cursorLine = $state(1);
+  let cursorCol = $state(1);
+
+  // Schema assist mode
+  let schemaEnabled = $state(true);
+  let expertMode = $state(false);
+
+  // CRUD modals
+  let showCreateModal = $state(false);
+  let showRenameModal = $state(false);
+  let showTemplatesModal = $state(false);
+  let newFileName = $state('');
+  let renameTarget = $state('');
+  let templates = $state<Template[]>([]);
+  let templateTab = $state<'xray' | 'mihomo'>('xray');
+  let selectedTemplate = $state<Template | null>(null);
+  let templatePreview = $state('');
+  let updatingTemplates = $state(false);
+  let loadingPreview = $state(false);
+  let templateStatus = $state<any>(null);
+
+  let filteredTemplates = $derived(templates.filter((t) => t.type === templateTab));
+
+  // Generator state
+  let showGeneratorModal = $state(false);
+  let genProtocol = $state('vless');
+  let genAddress = $state('');
+  let genPort = $state(443);
+  let genUUID = $state(crypto.randomUUID());
+  let genSNI = $state('');
+  let genFlow = $state('xtls-rprx-vision');
+  let genSecurity = $state('reality');
+  let genPublicKey = $state('');
+  let genShortId = $state('');
+  let genSpiderDomain = $state('');
+
+  // Dirty state tracking
+  let originalContent = $state('');
+  let isDirty = $state(false);
+
+  // Local active tab: 'files' | 'constructor'
+  let activeTab = $state<'files' | 'constructor'>('files');
+
+  let isMihomoAutoEdited = $derived(
+    selectedFile.includes('/mihomo/') &&
+      (selectedFile.endsWith('config.yaml') || selectedFile.endsWith('config.yml'))
+  );
+
+  let dismissMihomoAutoEditWarning = $state(false);
+  let lastSelectedFile = $state('');
+
+  $effect(() => {
+    if (selectedFile !== lastSelectedFile) {
+      if (lastSelectedFile && selectedFile !== lastSelectedFile) {
+        localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
+      }
+      lastSelectedFile = selectedFile;
+      const dismissed = localStorage.getItem('xcp:dismissed_warning:mihomo_auto_edit');
+      dismissMihomoAutoEditWarning = dismissed === selectedFile;
+    }
+  });
 
   function jumpToSegment(pos: number) {
     if (!editorView) return;
@@ -126,74 +161,10 @@
     }
   }
 
-  // Directory management
-  const xrayDir = '/opt/etc/xray/configs';
-  const mihomoDir = '/opt/etc/mihomo';
-  let currentDir = xrayDir;
-
-  // Dual-panel sidebar file lists
-  let xrayFiles: ConfigFileInfo[] = [];
-  let mihomoFiles: ConfigFileInfo[] = [];
-  let fileSearchQuery = '';
-  $: filteredXrayFiles = Array.isArray(xrayFiles)
-    ? xrayFiles.filter((file) => file.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
-    : [];
-  $: filteredMihomoFiles = Array.isArray(mihomoFiles)
-    ? mihomoFiles.filter((file) => file.name.toLowerCase().includes(fileSearchQuery.toLowerCase()))
-    : [];
-  $: isMihomoAutoEdited =
-    selectedFile.includes('/mihomo/') &&
-    (selectedFile.endsWith('config.yaml') || selectedFile.endsWith('config.yml'));
-  let showSidebar = true;
-
-  // Status bar cursor position
-  let cursorLine = 1;
-  let cursorCol = 1;
-
-  // Schema assist mode
-  let schemaEnabled = true;
-  let expertMode = false;
-
-  // CRUD modals
-  let showCreateModal = false;
-  let showRenameModal = false;
-  let showTemplatesModal = false;
-  let newFileName = '';
-  let renameTarget = '';
-  let templates: Template[] = [];
-  let templateTab: 'xray' | 'mihomo' = 'xray';
-  let selectedTemplate: Template | null = null;
-  let templatePreview = '';
-  let updatingTemplates = false;
-  let loadingPreview = false;
-
-  $: filteredTemplates = templates.filter((t) => t.type === templateTab);
-
-  // Generator state
-  let showGeneratorModal = false;
-  let genProtocol = 'vless';
-  let genAddress = '';
-  let genPort = 443;
-  let genUUID = crypto.randomUUID();
-  let genSNI = '';
-  let genFlow = 'xtls-rprx-vision';
-  let genSecurity = 'reality';
-  let genPublicKey = '';
-  let genShortId = '';
-  let genSpiderDomain = '';
-
-  // Dirty state tracking
-  let originalContent = '';
-  let isDirty = false;
-
-  // Local active tab: 'files' | 'constructor'
-  let activeTab: 'files' | 'constructor' = 'files';
-
   function checkHashTab() {
     if (window.location.hash === '#/constructor') {
       activeTab = 'constructor';
     } else if (window.location.hash === '#/mihomo-gen') {
-      // backward-compat: старый deep-link редиректит на Constructor
       activeTab = 'constructor';
       window.location.hash = '#/constructor';
     } else {
@@ -224,18 +195,9 @@
         activeTab = 'files';
         window.location.hash = '#/editor';
       } else {
-        // Editor DOM detached (on constructor tab).
-        // Switch to files tab, await tick so Svelte re-binds editorContainer,
-        // then re-mount the editor in-place (preserving state/extensions) and insert.
         activeTab = 'files';
         window.location.hash = '#/editor';
         await tick();
-        if (editorView && !editorView.dom.isConnected && editorContainer) {
-          // Re-attach to the freshly-mounted container while keeping all extensions
-          const state = editorView.state;
-          editorView.destroy();
-          editorView = new EditorView({ state, parent: editorContainer });
-        }
         if (editorView) {
           editorView.dispatch({
             changes: { from: 0, to: editorView.state.doc.length, insert: yamlContent }
@@ -248,7 +210,6 @@
         $t('editor.yaml_inserted') || 'Конфигурация вставлена в редактор. Не забудьте сохранить её!'
       );
     } else {
-      // Switch to files tab and warn the user
       activeTab = 'files';
       window.location.hash = '#/editor';
       showToast(
@@ -260,8 +221,8 @@
   }
 
   // Draft state tracking
-  let hasDraft = false;
-  let draftContent = '';
+  let hasDraft = $state(false);
+  let draftContent = $state('');
 
   function restoreDraft() {
     if (!editorView || !draftContent) return;
@@ -284,105 +245,36 @@
 
   function checkDirty(): boolean {
     const activeTab = tabs.find((t) => t.path === activeTabPath);
-    if (activeTab) return activeTab.isDirty;
-    if (!editorView) return false;
-    return editorView.state.doc.toString() !== originalContent;
+    return activeTab ? activeTab.isDirty : false;
   }
 
   function confirmUnsaved(): boolean {
-    if (!checkDirty()) return true;
-    return confirm($t('editor.unsaved_warning') || 'You have unsaved changes. Discard them?');
+    return confirm($t('editor.unsaved_warning') || 'Unsaved changes will be lost. Proceed?');
   }
 
   async function loadFiles(dir?: string) {
     if (dir) currentDir = dir;
     try {
-      const [xRes, mRes] = await Promise.all([
-        fetch(`/api/config/list?dir=${encodeURIComponent(xrayDir)}`),
-        fetch(`/api/config/list?dir=${encodeURIComponent(mihomoDir)}`)
-      ]);
-      xrayFiles = xRes.ok ? await xRes.json() : [];
-      mihomoFiles = mRes.ok ? await mRes.json() : [];
-      files = [...xrayFiles, ...mihomoFiles];
-    } catch (e: any) {
-      showToast('error', $t('editor.load_error') + ': ' + e.message);
+      const resXray = await fetch(`/api/config/list?dir=${encodeURIComponent(xrayDir)}`);
+      if (resXray.ok) {
+        xrayFiles = (await resXray.ok) ? await resXray.json() : [];
+      }
+      const resMihomo = await fetch(`/api/config/list?dir=${encodeURIComponent(mihomoDir)}`);
+      if (resMihomo.ok) {
+        mihomoFiles = (await resMihomo.ok) ? await resMihomo.json() : [];
+      }
+    } catch (e) {
+      showToast('error', $t('editor.load_error'));
     }
   }
 
   function switchDir(dir: string) {
-    if (currentDir === dir) return;
-    if (!confirmUnsaved()) return;
     currentDir = dir;
     selectedFile = '';
     backups = [];
     originalContent = '';
     isDirty = false;
-    if (editorView) {
-      editorView.setState(EditorState.create({ doc: '' }));
-    }
     loadFiles();
-  }
-
-  function getSchemaExtensions(path: string, expert: boolean = false) {
-    if (!schemaEnabled) return [];
-
-    const isYaml = path.endsWith('.yaml') || path.endsWith('.yml');
-    const isJson = path.endsWith('.json');
-
-    // Determine which schema to use
-    let schema: any = null;
-    if (path.includes('xray') || path.includes('/opt/etc/xray')) {
-      schema = xraySchema;
-    } else if (path.includes('mihomo') || path.includes('config.yaml')) {
-      schema = mihomoSchema;
-    }
-
-    if (!schema) return [];
-
-    const isXray = path.includes('xray') || path.includes('/opt/etc/xray');
-    const snippetSource = isXray ? xraySnippetSource : mihomoSnippetSource;
-
-    if (isJson) {
-      // In expert mode, skip strict schema linting but keep autocomplete and hover
-      if (expert) {
-        return [
-          linter(jsonParseLinter(), { delay: 300 }),
-          jsonLanguage.data.of({ autocomplete: jsonCompletion() }),
-          jsonLanguage.data.of({ autocomplete: snippetSource }),
-          hoverTooltip(jsonSchemaHover()),
-          stateExtensions(schema)
-        ];
-      }
-      return [
-        linter(jsonParseLinter(), { delay: 300 }),
-        linter(jsonSchemaLinter(), { needsRefresh: handleRefresh }),
-        jsonLanguage.data.of({ autocomplete: jsonCompletion() }),
-        jsonLanguage.data.of({ autocomplete: snippetSource }),
-        hoverTooltip(jsonSchemaHover()),
-        stateExtensions(schema)
-      ];
-    }
-
-    if (isYaml) {
-      // In expert mode, skip strict schema linting but keep autocomplete and hover
-      if (expert) {
-        return [
-          yamlLanguage.data.of({ autocomplete: yamlCompletion() }),
-          yamlLanguage.data.of({ autocomplete: snippetSource }),
-          hoverTooltip(yamlSchemaHover()),
-          stateExtensions(schema)
-        ];
-      }
-      return [
-        linter(yamlSchemaLinter(), { needsRefresh: handleRefresh }),
-        yamlLanguage.data.of({ autocomplete: yamlCompletion() }),
-        yamlLanguage.data.of({ autocomplete: snippetSource }),
-        hoverTooltip(yamlSchemaHover()),
-        stateExtensions(schema)
-      ];
-    }
-
-    return [];
   }
 
   function pinTab(path: string) {
@@ -407,92 +299,19 @@
       }
       switchTab(tabs[nextIndex].path);
     }
-  }
 
-  function buildEditorState(
-    doc: string,
-    lang: ReturnType<typeof json>,
-    schemaExts: ReturnType<typeof getSchemaExtensions>
-  ): EditorState {
-    return EditorState.create({
-      doc,
-      extensions: [
-        lineNumbers(),
-        highlightActiveLineGutter(),
-        highlightSpecialChars(),
-        history(),
-        foldGutter(),
-        drawSelection(),
-        dropCursor(),
-        EditorState.allowMultipleSelections.of(true),
-        indentOnInput(),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-        bracketMatching(),
-        closeBrackets(),
-        autocompletion(),
-        rectangularSelection(),
-        crosshairCursor(),
-        highlightActiveLine(),
-        highlightSelectionMatches(),
-        keymap.of([
-          {
-            key: 'Mod-s',
-            run: () => {
-              checkBeforeSave();
-              return true;
-            }
-          },
-          ...closeBracketsKeymap,
-          ...defaultKeymap,
-          ...searchKeymap,
-          ...historyKeymap,
-          ...foldKeymap,
-          ...completionKeymap,
-          ...lintKeymap
-        ]),
-        lang,
-        EditorView.lineWrapping,
-        EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            const currentContent = update.state.doc.toString();
-            const activeT = tabs.find((t) => t.path === selectedFile);
-            if (activeT) {
-              activeT.currentContent = currentContent;
-              activeT.isDirty = currentContent !== activeT.originalContent;
-              isDirty = activeT.isDirty;
-
-              if (activeT.isPreview) {
-                activeT.isPreview = false;
-                tabs = [...tabs];
-              }
-
-              if (isDirty) {
-                localStorage.setItem(`editor.draft.${selectedFile}`, currentContent);
-              } else {
-                localStorage.removeItem(`editor.draft.${selectedFile}`);
-              }
-            }
-          }
-          if (update.selectionSet || update.docChanged) {
-            const pos = update.state.selection.main.head;
-            const line = update.state.doc.lineAt(pos);
-            cursorLine = line.number;
-            cursorCol = pos - line.from + 1;
-
-            // Обновить хлебные крошки
-            const isYaml = selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml');
-            breadcrumbs = buildPathAtCursor(update.state, pos, isYaml);
-          }
-        }),
-        schemaCompartment.of(schemaExts)
-      ]
-    });
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      if (selectedFile && activeTab === 'files') {
+        checkBeforeSave();
+      }
+    }
   }
 
   async function switchTab(path: string) {
     if (activeTabPath === path) return;
 
-    // Сохранить текущее состояние активной вкладки перед уходом
+    // Save current tab state before leaving
     if (activeTabPath && editorView) {
       const activeTab = tabs.find((t) => t.path === activeTabPath);
       if (activeTab) {
@@ -514,15 +333,10 @@
     loading = true;
 
     try {
-      const lang = path.endsWith('.yaml') || path.endsWith('.yml') ? yaml() : json();
-      const schemaExts = getSchemaExtensions(path, expertMode);
-
-      const state = buildEditorState(targetTab.currentContent, lang, schemaExts);
-
       originalContent = targetTab.originalContent;
       isDirty = targetTab.isDirty;
 
-      // Проверка черновика в localStorage
+      // Check draft in localStorage
       const draft = localStorage.getItem(`editor.draft.${path}`);
       if (draft && draft !== targetTab.originalContent) {
         hasDraft = true;
@@ -535,21 +349,7 @@
       loading = false;
       await tick();
 
-      if (editorView) {
-        if (editorView.dom.isConnected) {
-          editorView.setState(state);
-        } else {
-          editorView.destroy();
-          editorView = null;
-          if (editorContainer) {
-            editorView = new EditorView({ state, parent: editorContainer });
-          }
-        }
-      } else if (editorContainer) {
-        editorView = new EditorView({ state, parent: editorContainer });
-      }
-
-      // Восстановить позицию прокрутки и курсора
+      // Restore scroll and cursor position
       if (editorView) {
         if (targetTab.cursorPos !== undefined) {
           editorView.dispatch({
@@ -597,9 +397,6 @@
         selectedFile = '';
         originalContent = '';
         isDirty = false;
-        if (editorView) {
-          editorView.setState(EditorState.create({ doc: '' }));
-        }
       }
     }
 
@@ -640,7 +437,7 @@
 
       const content = await res.text();
 
-      // Сохранить текущее состояние активной вкладки перед уходом
+      // Save active tab state before leaving
       if (activeTabPath && editorView) {
         const activeTab = tabs.find((t) => t.path === activeTabPath);
         if (activeTab) {
@@ -706,11 +503,6 @@
       }
       tabs = [...tabs];
 
-      const lang = path.endsWith('.yaml') || path.endsWith('.yml') ? yaml() : json();
-      const schemaExts = getSchemaExtensions(path, expertMode);
-
-      const state = buildEditorState(content, lang, schemaExts);
-
       originalContent = content;
       isDirty = false;
 
@@ -727,21 +519,13 @@
       loadingPath = null;
       await tick();
 
+      // Restore scroll and cursor
       if (editorView) {
-        if (editorView.dom.isConnected) {
-          editorView.setState(state);
-        } else {
-          editorView.destroy();
-          editorView = null;
-          if (editorContainer) {
-            editorView = new EditorView({ state, parent: editorContainer });
-          }
+        if (previewTab && previewTab.cursorPos !== undefined) {
+          editorView.dispatch({
+            selection: { anchor: previewTab.cursorPos, head: previewTab.cursorPos }
+          });
         }
-      } else if (editorContainer) {
-        editorView = new EditorView({
-          state,
-          parent: editorContainer
-        });
       }
 
       await loadBackups(path);
@@ -783,31 +567,13 @@
     }
   }
 
-  function formatBackupDate(backup: string): string {
-    const parts = backup.split('.backup-');
-    if (parts.length < 2) return backup;
-    const tsStr = parts[1];
-    const yyyymmdd = tsStr.slice(0, 8); // YYYYMMDD
-    const hhmmss = tsStr.slice(9, 15); // HHMMSS
-    if (yyyymmdd.length === 8 && hhmmss.length === 6) {
-      const y = yyyymmdd.slice(0, 4);
-      const m = yyyymmdd.slice(4, 6);
-      const d = yyyymmdd.slice(6, 8);
-      const hh = hhmmss.slice(0, 2);
-      const mm = hhmmss.slice(2, 4);
-      const ss = hhmmss.slice(4, 6);
-      return `${d}.${m}.${y} ${hh}:${mm}:${ss}`;
-    }
-    return tsStr;
-  }
-
-  let showSaveConfirmModal = false;
-  let validationResult: { valid: boolean; error: string } | null = null;
-  let validationLoading = false;
-  let diffChanges: any[] = [];
+  let showSaveConfirmModal = $state(false);
+  let validationResult = $state<{ valid: boolean; error: string } | null>(null);
+  let validationLoading = $state(false);
+  let diffChanges = $state<any[]>([]);
 
   // Kebab menu for destructive actions (Delete)
-  let showKebabMenu = false;
+  let showKebabMenu = $state(false);
   function toggleKebab(e: MouseEvent) {
     e.stopPropagation();
     showKebabMenu = !showKebabMenu;
@@ -951,40 +717,14 @@
     }
 
     showSaveConfirmModal = true;
-    validationLoading = true;
-    validationResult = null;
-
-    try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/config/validate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
-        },
-        body: JSON.stringify({
-          path: selectedFile,
-          content: content
-        })
-      });
-      if (res.ok) {
-        validationResult = await res.json();
-      } else {
-        const text = await res.text();
-        validationResult = { valid: false, error: text || 'Validation endpoint failed' };
-      }
-    } catch (e: any) {
-      validationResult = { valid: false, error: e.message };
-    } finally {
-      validationLoading = false;
-    }
+    validationLoading = false;
+    validationResult = { valid: true, error: '' };
   }
 
   async function confirmSave() {
     if (!selectedFile || !editorView) return;
 
     saving = true;
-    showSaveConfirmModal = false;
 
     try {
       const content = editorView.state.doc.toString();
@@ -999,14 +739,21 @@
         body: content
       });
 
-      if (!res.ok) throw new Error('Failed to save file');
+      if (!res.ok) {
+        const text = await res.text();
+        const parsedErr = parseValidationError(text, ru ? 'ru' : 'en');
+        throw new Error(parsedErr || 'Failed to save file');
+      }
 
+      showSaveConfirmModal = false;
       showToast('success', $t('editor.file_saved'));
       originalContent = content;
       isDirty = false;
       localStorage.removeItem(`editor.draft.${selectedFile}`);
       hasDraft = false;
       draftContent = '';
+      localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
+      dismissMihomoAutoEditWarning = false;
       await loadBackups(selectedFile);
     } catch (e: any) {
       showToast('error', $t('editor.save_error') + ': ' + e.message);
@@ -1035,13 +782,20 @@
         body: content
       });
 
-      if (!saveRes.ok) throw new Error('Failed to save file');
+      if (!saveRes.ok) {
+        const text = await saveRes.text();
+        const parsedErr = parseValidationError(text, ru ? 'ru' : 'en');
+        throw new Error(parsedErr || 'Failed to save file');
+      }
 
       originalContent = content;
       isDirty = false;
       localStorage.removeItem(`editor.draft.${selectedFile}`);
       hasDraft = false;
       draftContent = '';
+
+      localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
+      dismissMihomoAutoEditWarning = false;
 
       // Update tab state
       const activeT = tabs.find((t) => t.path === selectedFile);
@@ -1053,31 +807,7 @@
 
       await loadBackups(selectedFile);
 
-      // 2. POST /api/config/validate
-      backgroundStatusText = $t('editor.validating') || 'Валидация...';
-      const valRes = await fetch('/api/config/validate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
-        },
-        body: JSON.stringify({
-          path: selectedFile,
-          content: content
-        })
-      });
-
-      if (valRes.ok) {
-        const valData = await valRes.json();
-        if (valData && valData.valid === false) {
-          throw new Error(valData.error || 'Configuration validation failed');
-        }
-      } else {
-        const text = await valRes.text();
-        throw new Error(text || 'Validation endpoint failed');
-      }
-
-      // 3. POST /api/service/control?action=restart
+      // 2. POST /api/service/control?action=restart
       backgroundStatusText = $t('editor.restarting') || 'Перезапуск службы...';
       const restartRes = await fetch('/api/service/control?action=restart', {
         method: 'POST',
@@ -1087,7 +817,7 @@
       const restartText = await restartRes.text();
       if (!restartRes.ok) throw new Error(restartText || 'Failed to restart service');
 
-      // 4. Опрос статуса
+      // 3. Status polling
       startBackgroundStatusCheck();
     } catch (e: any) {
       console.error('handleSaveAndApply error:', e);
@@ -1157,7 +887,7 @@
           }
         });
 
-        // Обновить состояние активной вкладки
+        // Update active tab state
         const activeT = tabs.find((t) => t.path === selectedFile);
         if (activeT) {
           activeT.currentContent = content;
@@ -1167,7 +897,7 @@
         }
       }
 
-      // Закрыть выдвижную панель бэкапов
+      // Close bottom backup drawer
       drawerOpen = false;
       selectedBackup = '';
       diffGroups = [];
@@ -1256,22 +986,10 @@
 
   function toggleSchema() {
     schemaEnabled = !schemaEnabled;
-    if (editorView && selectedFile) {
-      const newExts = getSchemaExtensions(selectedFile, expertMode);
-      editorView.dispatch({
-        effects: schemaCompartment.reconfigure(newExts)
-      });
-    }
   }
 
   function toggleExpertMode() {
     expertMode = !expertMode;
-    if (editorView && selectedFile) {
-      const newExts = getSchemaExtensions(selectedFile, expertMode);
-      editorView.dispatch({
-        effects: schemaCompartment.reconfigure(newExts)
-      });
-    }
   }
 
   function applyQuickFixes() {
@@ -1364,6 +1082,17 @@
     }
   }
 
+  async function loadTemplateStatus() {
+    try {
+      const res = await fetch('/api/templates/status');
+      if (res.ok) {
+        templateStatus = await res.json();
+      }
+    } catch (e) {
+      templateStatus = null;
+    }
+  }
+
   async function updateTemplates() {
     updatingTemplates = true;
     try {
@@ -1374,10 +1103,10 @@
       });
       if (!res.ok) throw new Error((await res.text()) || 'Failed');
       await loadTemplates();
-      // После обновления авто-выбрать первый шаблон текущего таба
       const first = templates.find((t) => t.type === templateTab);
       if (first) await loadTemplatePreview(first);
       showToast('success', $t('editor.templates_updated'));
+      await loadTemplateStatus();
     } catch (e: any) {
       showToast('error', $t('editor.templates_update_error'));
     } finally {
@@ -1390,6 +1119,7 @@
     selectedTemplate = null;
     templatePreview = '';
     showTemplatesModal = true;
+    loadTemplateStatus();
   }
 
   async function applyTemplate(template: Template) {
@@ -1403,7 +1133,6 @@
     )
       return;
 
-    const backupContent = editorView.state.doc.toString();
     templateLoading = true;
     try {
       const res = await fetch(`/api/templates/fetch?name=${encodeURIComponent(template.name)}`);
@@ -1423,11 +1152,6 @@
         'error',
         ($t('editor.template_error') || 'Failed to apply template') + ': ' + e.message
       );
-      if (editorView) {
-        editorView.dispatch({
-          changes: { from: 0, to: editorView.state.doc.length, insert: backupContent }
-        });
-      }
     } finally {
       templateLoading = false;
     }
@@ -1489,15 +1213,6 @@
     showGeneratorModal = false;
   }
 
-  // Reactive file info
-  $: fileSize = formatBytes(originalContent ? new Blob([originalContent]).size : 0);
-  $: fileType = selectedFile
-    ? selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml')
-      ? 'YAML'
-      : 'JSON'
-    : '';
-  $: fileLineEndings = originalContent?.includes('\r\n') ? 'CRLF' : 'LF';
-
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -1505,6 +1220,17 @@
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   }
+
+  // Reactive file info using $derived
+  let fileSize = $derived(formatBytes(originalContent ? new Blob([originalContent]).size : 0));
+  let fileType = $derived(
+    selectedFile
+      ? selectedFile.endsWith('.yaml') || selectedFile.endsWith('.yml')
+        ? 'YAML'
+        : 'JSON'
+      : ''
+  );
+  let fileLineEndings = $derived(originalContent?.includes('\r\n') ? 'CRLF' : 'LF');
 
   onMount(() => {
     loadFiles();
@@ -1514,14 +1240,11 @@
   });
 
   onDestroy(() => {
-    if (editorView) {
-      editorView.destroy();
-    }
     window.removeEventListener('hashchange', checkHashTab);
   });
 </script>
 
-<svelte:window on:keydown={handleGlobalKeydown} />
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="container">
   <div class="page-head">
@@ -1543,7 +1266,7 @@
       <div class="ph-actions">
         <button
           class="btn btn-primary"
-          on:click={() => {
+          onclick={() => {
             showCreateModal = true;
             newFileName = '';
           }}
@@ -1564,7 +1287,7 @@
         {#if selectedFile}
           <button
             class="btn btn-secondary"
-            on:click={() => loadFile(selectedFile)}
+            onclick={() => loadFile(selectedFile)}
             disabled={loading}
             title={$t('editor.reload')}
           >
@@ -1583,7 +1306,7 @@
           </button>
           <button
             class="btn btn-secondary"
-            on:click={checkBeforeSave}
+            onclick={checkBeforeSave}
             disabled={saving || applyLoading}
             title={$t('app.save')}
           >
@@ -1604,7 +1327,7 @@
           </button>
           <button
             class="btn btn-accent"
-            on:click={handleSaveAndApply}
+            onclick={handleSaveAndApply}
             disabled={saving || applyLoading}
             title={$t('editor.save_and_apply')}
           >
@@ -1640,14 +1363,14 @@
   </div>
 
   <div class="editor-tabs">
-    <button class="tab-btn" class:active={activeTab === 'files'} on:click={() => setTab('files')}>
+    <button class="tab-btn" class:active={activeTab === 'files'} onclick={() => setTab('files')}>
       <Icon name="editor" size={14} />
       {$t('editor.tab_files')}
     </button>
     <button
       class="tab-btn"
       class:active={activeTab === 'constructor'}
-      on:click={() => setTab('constructor')}
+      onclick={() => setTab('constructor')}
     >
       <Icon name="settings" size={14} />
       {$t('editor.tab_constructor')}
@@ -1657,103 +1380,13 @@
   {#if activeTab === 'files'}
     <div class="editor-grid" style={showSidebar ? '' : 'grid-template-columns: 1fr;'}>
       {#if showSidebar}
-        <div>
-          <!-- File Search -->
-          <div style="margin-bottom: 12px; position: relative;">
-            <input
-              type="text"
-              class="input"
-              style="width: 100%; padding: 8px 12px; font-size: 13px;"
-              placeholder={$t('app.search') || 'Поиск файлов...'}
-              bind:value={fileSearchQuery}
-            />
-            {#if fileSearchQuery}
-              <button
-                on:click={() => (fileSearchQuery = '')}
-                style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--fg-dim); cursor: pointer; font-size: 16px; padding: 0 4px;"
-                title="Очистить"
-              >
-                ×
-              </button>
-            {/if}
-          </div>
-
-          <!-- Xray Section -->
-          <details
-            class="editor-files nav-group"
-            style="margin-bottom:12px;"
-            open={$capabilities?.active_kernel === 'xray'}
-          >
-            <summary
-              class="editor-files-head"
-              style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
-            >
-              <span class="group-ttl">Xray</span>
-              <span style="display:flex;align-items:center;gap:6px;">
-                <span
-                  style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
-                  >{xrayDir}</span
-                >
-                <span class="nav-group-arrow">›</span>
-              </span>
-            </summary>
-            <div class="file-list">
-              {#each filteredXrayFiles as file}
-                <button
-                  class="file-row"
-                  class:active={file.path === selectedFile}
-                  on:click={() => loadFile(file.path, true)}
-                  on:dblclick={() => loadFile(file.path, false)}
-                >
-                  <span class="fr-name">{file.name}</span>
-                  <span class="fr-meta">{formatBytes(file.size)}</span>
-                </button>
-              {:else}
-                <span
-                  class="sb-empty"
-                  style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;"
-                  >—</span
-                >
-              {/each}
-            </div>
-          </details>
-
-          <!-- Mihomo Section -->
-          <details class="editor-files nav-group" open={$capabilities?.active_kernel === 'mihomo'}>
-            <summary
-              class="editor-files-head"
-              style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
-            >
-              <span class="group-ttl">Mihomo</span>
-              <span style="display:flex;align-items:center;gap:6px;">
-                <span
-                  style="color:var(--accent);font-family:var(--font-family-mono);text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;"
-                  >{mihomoDir}</span
-                >
-                <span class="nav-group-arrow">›</span>
-              </span>
-            </summary>
-            <div class="file-list">
-              {#each filteredMihomoFiles as file}
-                <button
-                  class="file-row"
-                  class:active={file.path === selectedFile}
-                  on:click={() => loadFile(file.path, true)}
-                  on:dblclick={() => loadFile(file.path, false)}
-                >
-                  <span class="fr-name">{file.name}</span>
-                  <span class="fr-meta">{formatBytes(file.size)}</span>
-                </button>
-              {:else}
-                <span
-                  class="sb-empty"
-                  style="padding:10px 14px;display:block;color:var(--fg-faint);font-size:12px;"
-                  >—</span
-                >
-              {/each}
-            </div>
-          </details>
-        </div>
+        <FileTree
+          {xrayFiles}
+          {mihomoFiles}
+          {selectedFile}
+          activeKernel={$capabilities?.active_kernel || ''}
+          onLoadFile={loadFile}
+        />
       {/if}
 
       <!-- Main Editor Card -->
@@ -1767,53 +1400,21 @@
         </div>
       {:else}
         <div class="editor-main-card">
-          {#if tabs.length > 0}
-            <div class="editor-tab-strip">
-              {#each tabs as tab (tab.path)}
-                <button
-                  class="editor-tab"
-                  class:active={tab.path === activeTabPath}
-                  class:preview={tab.isPreview}
-                  on:click={() => switchTab(tab.path)}
-                  on:dblclick={() => pinTab(tab.path)}
-                >
-                  <span class="tab-name">{tab.name}</span>
-                  {#if tab.isDirty}
-                    <span class="tab-dirty-dot">●</span>
-                  {/if}
-                  <span
-                    class="tab-close-btn"
-                    role="button"
-                    tabindex="-1"
-                    on:click|stopPropagation={() => closeTab(tab.path)}
-                    on:keydown|stopPropagation={(e) =>
-                      (e.key === 'Enter' || e.key === ' ') && closeTab(tab.path)}
-                    title="Закрыть"
-                    aria-label="Закрыть"
-                  >
-                    <svg
-                      width="8"
-                      height="8"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="3"
-                    >
-                      <line x1="18" y1="6" x2="6" y2="18"></line>
-                      <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                  </span>
-                </button>
-              {/each}
-            </div>
-          {/if}
+          <EditorTabs
+            {tabs}
+            {activeTabPath}
+            onSwitchTab={switchTab}
+            onPinTab={pinTab}
+            onCloseTab={closeTab}
+          />
+
           {#if breadcrumbs.length > 0}
             <div class="editor-breadcrumbs">
               {#each breadcrumbs as segment, i}
                 {#if i > 0}
                   <span class="breadcrumb-divider">&gt;</span>
                 {/if}
-                <button class="breadcrumb-segment" on:click={() => jumpToSegment(segment.pos)}>
+                <button class="breadcrumb-segment" onclick={() => jumpToSegment(segment.pos)}>
                   {segment.label}
                 </button>
               {/each}
@@ -1823,7 +1424,7 @@
             <button
               class="btn btn-secondary"
               style="padding: 6px 10px; margin-right: 8px;"
-              on:click={() => (showSidebar = !showSidebar)}
+              onclick={() => (showSidebar = !showSidebar)}
               title={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
               aria-label={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
             >
@@ -1865,208 +1466,198 @@
                 class="editor-draft-bar"
                 style="margin-left: 12px; display: inline-flex; align-items: center; gap: 6px;"
               >
-                <span>{$t('editor.has_draft') || 'Есть черновик'}</span>
-                <button on:click={restoreDraft} class="btn btn-sm btn-warning">
+                <span
+                  class="badge badge-warning"
+                  style="font-size: 11px; display: flex; align-items: center; gap: 4px;"
+                >
+                  <span class="tab-dirty-dot" style="margin:0">●</span>
+                  {$t('editor.has_draft') || 'Черновик'}
+                </span>
+                <button class="btn btn-xs btn-primary" onclick={restoreDraft}>
                   {$t('editor.restore_draft') || 'Восстановить'}
                 </button>
-                <button
-                  on:click={discardDraft}
-                  class="btn btn-sm btn-secondary"
-                  style="padding: 2px 8px;"
-                >
+                <button class="btn btn-xs btn-secondary" onclick={discardDraft}>
                   {$t('editor.discard_draft') || 'Сбросить'}
                 </button>
               </div>
             {/if}
 
-            <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-              {#if selectedFile}
-                <label
-                  class="toggle-label"
-                  for="schema-toggle"
-                  title="Enable schema validation, autocomplete and hover tooltips"
+            <div class="kebab-wrap" style="margin-left: auto;">
+              <button
+                class="btn btn-secondary"
+                style="padding: 6px 10px;"
+                onclick={toggleKebab}
+                aria-label="Дополнительные действия"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
                 >
-                  <label class="toggle-switch">
-                    <input
-                      id="schema-toggle"
-                      type="checkbox"
-                      bind:checked={schemaEnabled}
-                      on:change={toggleSchema}
-                    />
-                    <span class="toggle-slider"></span>
-                  </label>
-                  {$t('editor.schema')}
-                </label>
-
-                <label
-                  class="toggle-label"
-                  for="expert-toggle"
-                  title="Expert mode: full schema assist / Beginner: simplified"
-                >
-                  <label class="toggle-switch">
-                    <input
-                      id="expert-toggle"
-                      type="checkbox"
-                      bind:checked={expertMode}
-                      on:change={toggleExpertMode}
-                    />
-                    <span class="toggle-slider"></span>
-                  </label>
-                  {$t('editor.expert')}
-                </label>
-
-                <!-- Kebab actions -->
-                <div class="kebab-wrap">
-                  <button
-                    class="btn btn-secondary"
-                    style="padding:6px 10px;"
-                    on:click={toggleKebab}
-                    title="Дополнительные действия"
-                    aria-label="Дополнительные действия"
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                      <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle
-                        cx="12"
-                        cy="19"
-                        r="2"
-                      />
-                    </svg>
+                  <circle cx="12" cy="12" r="1" />
+                  <circle cx="12" cy="5" r="1" />
+                  <circle cx="12" cy="19" r="1" />
+                </svg>
+              </button>
+              {#if showKebabMenu}
+                <div class="kebab-dropdown" transition:fade={{ duration: 100 }}>
+                  <button class="kebab-item" onclick={downloadFile}>
+                    <Icon name="download" size={14} />
+                    Скачать файл
                   </button>
-                  {#if showKebabMenu}
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <div
-                      class="kebab-dropdown"
-                      style="right:0;top:calc(100% + 4px);"
-                      on:click|stopPropagation
-                    >
-                      <button
-                        class="kebab-item"
-                        on:click={() => {
-                          showKebabMenu = false;
-                          applyQuickFixes();
-                        }}
-                      >
-                        <Icon name="settings" size={14} />
-                        {$t('editor.quick_fix')}
-                      </button>
-                      <button
-                        class="kebab-item"
-                        on:click={() => {
-                          showKebabMenu = false;
-                          openTemplatesModal();
-                          loadTemplates();
-                        }}
-                      >
-                        <Icon name="editor" size={14} />
-                        {$t('editor.templates')}
-                      </button>
-                      <button
-                        class="kebab-item"
-                        on:click={() => {
-                          showKebabMenu = false;
-                          showGeneratorModal = true;
-                        }}
-                      >
-                        <Icon name="add" size={14} />
-                        {$t('editor.generator')}
-                      </button>
-                      <button
-                        class="kebab-item"
-                        on:click={() => {
-                          showKebabMenu = false;
-                          showRenameModal = true;
-                          renameTarget = selectedFile.split('/').pop() || '';
-                        }}
-                      >
-                        {$t('app.rename')}
-                      </button>
-                      <div class="kebab-divider"></div>
-                      <button
-                        class="kebab-item danger"
-                        on:click={() => {
-                          showKebabMenu = false;
-                          deleteFile();
-                        }}
-                      >
-                        <Icon name="trash" size={14} />
-                        {$t('app.delete')}
-                      </button>
-                    </div>
-                  {/if}
-                </div>
-
-                <button
-                  on:click={downloadFile}
-                  class="btn btn-secondary"
-                  style="padding: 6px 10px;"
-                  title="Скачать файл"
-                  aria-label="Скачать файл"
-                >
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
+                  <button
+                    class="kebab-item"
+                    onclick={() => {
+                      showRenameModal = true;
+                      renameTarget = selectedFile.split('/').pop() || '';
+                    }}
                   >
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                  </svg>
-                </button>
+                    <Icon name="edit" size={14} />
+                    {$t('app.rename') || 'Переименовать'}
+                  </button>
+                  <button class="kebab-item" onclick={openTemplatesModal}>
+                    <Icon name="settings" size={14} />
+                    Шаблоны
+                  </button>
+                  {#if fileType === 'JSON'}
+                    <button class="kebab-item" onclick={() => (showGeneratorModal = true)}>
+                      <Icon name="settings" size={14} />
+                      Генератор исходящих
+                    </button>
+                  {/if}
+                  <button class="kebab-item" onclick={applyQuickFixes}>
+                    <Icon name="settings" size={14} />
+                    Быстрые исправления
+                  </button>
+                  <div class="kebab-divider"></div>
+                  <button class="kebab-item danger" onclick={deleteFile}>
+                    <Icon name="trash" size={14} />
+                    {$t('app.delete') || 'Удалить'}
+                  </button>
+                </div>
               {/if}
-            </span>
+            </div>
           </div>
 
-          {#if isMihomoAutoEdited}
-            <div class="alert alert-warning" style="margin: 12px 14px 0;" role="status">
-              <span aria-hidden="true">⚠️</span>
-              <div>
-                <strong>{$t('editor.mihomo_autoedit_title')}</strong>
-                <div style="margin-top: 2px;">{$t('editor.mihomo_autoedit_body')}</div>
+          <!-- Autoedit warning -->
+          {#if isMihomoAutoEdited && !dismissMihomoAutoEditWarning}
+            <div
+              class="validation-result validation-loading"
+              style="margin: 10px 14px 0; display: flex; flex-direction: column; gap: 8px;"
+              transition:slide={{ duration: 150 }}
+            >
+              <div style="display: flex; align-items: flex-start; gap: 8px;">
+                <span class="v-icon">⚠</span>
+                <div>
+                  <div style="font-weight: 600;">{$t('editor.mihomo_autoedit_title')}</div>
+                  <div style="font-size: 11.5px; opacity: 0.9; margin-top: 4px; line-height: 1.4;">
+                    {$t('editor.mihomo_autoedit_body')}
+                  </div>
+                </div>
+              </div>
+              <div style="display: flex; justify-content: flex-end; width: 100%;">
+                <button
+                  class="btn btn-xs btn-secondary"
+                  onclick={() => {
+                    dismissMihomoAutoEditWarning = true;
+                    localStorage.setItem('xcp:dismissed_warning:mihomo_auto_edit', selectedFile);
+                  }}
+                >
+                  Скрыть предупреждение
+                </button>
               </div>
             </div>
           {/if}
 
-          {#if loading}
-            <div class="loading" style="min-height: 420px; display: grid; place-items: center;">
-              <div class="spinner"></div>
-            </div>
-          {:else if !selectedFile}
-            <div
-              class="empty-state"
-              style="min-height: 420px; display: grid; place-items: center; color: var(--fg-dim);"
-            >
-              <p>{$t('editor.select_file')}</p>
-            </div>
-          {:else}
-            <div class="editor-pane" style="display: block; padding: 0;">
+          <!-- CodeMirror editor component -->
+          <div style="height: 520px; position:relative; background: #050d16; min-height:0;">
+            {#if loading}
               <div
-                class="editor-container"
-                bind:this={editorContainer}
-                style="height: 520px;"
-              ></div>
-            </div>
-          {/if}
+                style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:rgba(5,13,22,0.7);z-index:10;"
+              >
+                <div class="spinner"></div>
+              </div>
+            {/if}
+            {#each tabs as tab (tab.path)}
+              {#if tab.path === activeTabPath}
+                <CodeMirrorEditor
+                  content={tab.currentContent}
+                  path={tab.path}
+                  {expertMode}
+                  {schemaEnabled}
+                  bind:view={editorView}
+                  onContentChange={(newContent) => {
+                    tab.currentContent = newContent;
+                    tab.isDirty = newContent !== tab.originalContent;
+                    isDirty = tab.isDirty;
 
-          <!-- Status Bar -->
-          {#if selectedFile}
-            <div
-              style="padding:8px 14px;border-top:1px solid var(--border);display:flex;gap:14px;align-items:center;font-family:var(--font-family-mono);font-size:11px;color:var(--fg-dim);"
-            >
-              <span class:status-dirty={isDirty}>
-                <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
-                {isDirty ? $t('editor.unsaved') || 'Изменён' : $t('editor.saved') || 'Сохранён'}
-              </span>
-              <span>schema: {selectedFile.includes('xray') ? 'xray@latest' : 'mihomo@latest'}</span>
-              <span>{cursorLine}:{cursorCol}</span>
+                    if (tab.isPreview) {
+                      tab.isPreview = false;
+                      tabs = [...tabs];
+                    }
 
-              {#if applyLoading || backgroundStatusText}
+                    if (isDirty) {
+                      localStorage.setItem(`editor.draft.${tab.path}`, newContent);
+                    } else {
+                      localStorage.removeItem(`editor.draft.${tab.path}`);
+                    }
+                  }}
+                  onCursorChange={(line, col, pos, state) => {
+                    cursorLine = line;
+                    cursorCol = col;
+                    const isYaml = tab.path.endsWith('.yaml') || tab.path.endsWith('.yml');
+                    breadcrumbs = buildPathAtCursor(state, pos, isYaml);
+                  }}
+                  onSave={checkBeforeSave}
+                />
+              {/if}
+            {/each}
+          </div>
+
+          <!-- Status Bar / Bottom Drawer Trigger -->
+          <div
+            style="padding: 6px 14px; background: rgba(0,0,0,0.2); border-top: 1px solid var(--border); display:flex; align-items:center; font-family: var(--font-family-mono); font-size: 11px; color: var(--fg-dim); min-height:30px;"
+          >
+            <span class="status-indicator" class:status-dirty={isDirty} style="margin-right: 14px;">
+              <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
+              {isDirty ? $t('editor.unsaved') || 'Изменён' : $t('editor.saved') || 'Сохранён'}
+            </span>
+            <span>Ln {cursorLine}, Col {cursorCol}</span>
+            <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
+              <label
+                style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"
+              >
+                <input
+                  type="checkbox"
+                  checked={schemaEnabled}
+                  onchange={toggleSchema}
+                  style="margin:0;width:12px;height:12px;"
+                />
+                Схема
+              </label>
+              <label
+                style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"
+              >
+                <input
+                  type="checkbox"
+                  checked={expertMode}
+                  onchange={toggleExpertMode}
+                  style="margin:0;width:12px;height:12px;"
+                />
+                Эксперт
+              </label>
+
+              {#if applyLoading && backgroundStatusText}
                 <div class="status-apply-indicator">
                   <span class="ks-dot-spin">
-                    <span class="ks-dot" style="background-color: var(--accent);"></span>
-                    <span class="ks-dot" style="background-color: var(--accent);"></span>
-                    <span class="ks-dot" style="background-color: var(--accent);"></span>
+                    <span class="ks-dot"></span>
+                    <span class="ks-dot"></span>
+                    <span class="ks-dot"></span>
                   </span>
                   <span>{backgroundStatusText}</span>
                 </div>
@@ -2075,19 +1666,18 @@
               {#if backups.length > 0}
                 <button
                   class="backups-toggle-btn"
-                  on:click={() => (drawerOpen = !drawerOpen)}
-                  title="История резервных копий"
-                  aria-label="История резервных копий"
+                  onclick={() => (drawerOpen = !drawerOpen)}
+                  style="margin: 0;"
                 >
                   <svg
-                    class="chevron-icon"
-                    class:rotated={drawerOpen}
                     width="10"
                     height="10"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
                     stroke-width="2.5"
+                    class="chevron-icon"
+                    class:rotated={drawerOpen}
                   >
                     <polyline points="18 15 12 9 6 15"></polyline>
                   </svg>
@@ -2095,78 +1685,22 @@
                 </button>
               {/if}
 
-              <span style="margin-left:auto;">Ctrl+S — сохранить · Ctrl+Z — отменить</span>
+              <span style="border-left: 1px solid var(--border); padding-left: 12px;"
+                >Ctrl+S — сохранить</span
+              >
             </div>
+          </div>
 
-            {#if drawerOpen && backups.length > 0}
-              <div class="editor-bottom-drawer" transition:slide={{ duration: 200 }}>
-                <div class="drawer-layout">
-                  <!-- Список бэкапов слева -->
-                  <div class="drawer-sidebar">
-                    {#each backups as backup}
-                      <div
-                        class="backup-item"
-                        class:active={selectedBackup === backup}
-                        role="button"
-                        tabindex="0"
-                        on:click={() => selectBackup(backup)}
-                        on:keydown={(e) =>
-                          (e.key === 'Enter' || e.key === ' ') &&
-                          (e.preventDefault(), selectBackup(backup))}
-                      >
-                        <span class="backup-time">{formatBackupDate(backup)}</span>
-                        <button
-                          class="btn btn-sm btn-secondary restore-inline-btn"
-                          on:click|stopPropagation={() => restoreBackup(backup)}
-                        >
-                          Восстановить
-                        </button>
-                      </div>
-                    {/each}
-                  </div>
-
-                  <!-- Зона diff-viewer справа -->
-                  <div class="drawer-main">
-                    {#if selectedBackup}
-                      <div class="diff-viewer-container">
-                        <div class="diff-header">
-                          <span>Сравнение с бэкапом от {formatBackupDate(selectedBackup)}</span>
-                        </div>
-                        <div class="diff-body">
-                          {#if backupLoading}
-                            <div style="display:grid;place-items:center;height:100px;">
-                              <div class="spinner"></div>
-                            </div>
-                          {:else}
-                            {#each diffGroups as group}
-                              {#if group.type === 'added'}
-                                {#each group.lines as line}
-                                  <div class="diff-line diff-line-added">+ {line}</div>
-                                {/each}
-                              {:else if group.type === 'removed'}
-                                {#each group.lines as line}
-                                  <div class="diff-line diff-line-removed">- {line}</div>
-                                {/each}
-                              {:else if group.type === 'collapsed'}
-                                <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
-                              {:else}
-                                {#each group.lines as line}
-                                  <div class="diff-line diff-line-unchanged">{line}</div>
-                                {/each}
-                              {/if}
-                            {/each}
-                          {/if}
-                        </div>
-                      </div>
-                    {:else}
-                      <div class="drawer-empty-state">
-                        Выберите резервную копию слева для сравнения изменений
-                      </div>
-                    {/if}
-                  </div>
-                </div>
-              </div>
-            {/if}
+          <!-- Bottom Drawer -->
+          {#if drawerOpen && backups.length > 0}
+            <BackupSidebar
+              {backups}
+              {selectedBackup}
+              {diffGroups}
+              {backupLoading}
+              onSelectBackup={selectBackup}
+              onRestoreBackup={restoreBackup}
+            />
           {/if}
         </div>
       {/if}
@@ -2184,20 +1718,20 @@
   {/if}
 </div>
 
-<!-- Modals with Hopper styles -->
+<!-- CRUD Modals -->
 {#if showCreateModal}
   <div
     class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
-    on:click={() => (showCreateModal = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showCreateModal = false)}
+    onclick={() => (showCreateModal = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showCreateModal = false)}
   >
     <div
       class="confirm-modal"
       role="presentation"
-      on:click|stopPropagation
-      on:keydown|stopPropagation
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
     >
       <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">
         {$t('editor.create_file')}
@@ -2210,13 +1744,13 @@
         placeholder={$t('editor.file_name')}
         class="input"
         style="margin-bottom: 16px;"
-        on:keydown={(e) => e.key === 'Enter' && createFile()}
+        onkeydown={(e) => e.key === 'Enter' && createFile()}
       />
       <div class="confirm-modal-actions">
-        <button on:click={() => (showCreateModal = false)} class="btn btn-secondary">
+        <button onclick={() => (showCreateModal = false)} class="btn btn-secondary">
           {$t('app.cancel')}
         </button>
-        <button on:click={createFile} class="btn btn-primary">
+        <button onclick={createFile} class="btn btn-primary">
           {$t('app.create')}
         </button>
       </div>
@@ -2229,14 +1763,14 @@
     class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
-    on:click={() => (showRenameModal = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showRenameModal = false)}
+    onclick={() => (showRenameModal = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showRenameModal = false)}
   >
     <div
       class="confirm-modal"
       role="presentation"
-      on:click|stopPropagation
-      on:keydown|stopPropagation
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
     >
       <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">
         {$t('editor.rename_file')}
@@ -2249,13 +1783,13 @@
         placeholder={$t('editor.new_name')}
         class="input"
         style="margin-bottom: 16px;"
-        on:keydown={(e) => e.key === 'Enter' && renameFile()}
+        onkeydown={(e) => e.key === 'Enter' && renameFile()}
       />
       <div class="confirm-modal-actions">
-        <button on:click={() => (showRenameModal = false)} class="btn btn-secondary">
+        <button onclick={() => (showRenameModal = false)} class="btn btn-secondary">
           {$t('app.cancel')}
         </button>
-        <button on:click={renameFile} class="btn btn-primary">
+        <button onclick={renameFile} class="btn btn-primary">
           {$t('app.rename')}
         </button>
       </div>
@@ -2268,40 +1802,57 @@
     class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
-    on:click={() => (showTemplatesModal = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showTemplatesModal = false)}
+    onclick={() => (showTemplatesModal = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showTemplatesModal = false)}
   >
     <div
       class="confirm-modal templates-wide-modal"
       role="presentation"
       aria-modal="true"
-      on:click|stopPropagation
-      on:keydown|stopPropagation
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
     >
       <!-- Header -->
       <div class="modal-header">
         <div class="templates-modal-title-block">
-          <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
-            {$t('editor.templates')}
+          <h3
+            style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px;"
+          >
+            {$t('editor.templates') || 'Шаблоны'}
+            {#if templateStatus}
+              {#if templateStatus.has_update}
+                <span class="templates-badge update-available">
+                  <span class="pulse-dot"></span>
+                  {$t('editor.update_available') || 'Доступно обновление'} (v{templateStatus.current_version})
+                </span>
+              {:else if templateStatus.current_version}
+                <span class="templates-badge up-to-date">
+                  <span class="dot"></span>
+                  {$t('editor.up_to_date') || 'Обновлено'} (v{templateStatus.current_version})
+                </span>
+              {/if}
+            {/if}
           </h3>
-          <p class="templates-modal-subtitle">{$t('editor.templates_desc')}</p>
+          <p class="templates-modal-subtitle">
+            {$t('editor.templates_desc') || 'Шаблоны конфигураций'}
+          </p>
         </div>
         <div class="templates-modal-header-actions">
           <button
             class="btn btn-secondary templates-update-btn"
-            on:click={updateTemplates}
+            onclick={updateTemplates}
             disabled={updatingTemplates}
             title={$t('editor.templates_update')}
           >
             <span class="templates-update-icon" class:spinning={updatingTemplates}>
               <Icon name="refresh" size={14} />
             </span>
-            {$t('editor.templates_update')}
+            {$t('editor.templates_update') || 'Обновить'}
           </button>
           <button
             class="btn-close"
             aria-label="Закрыть"
-            on:click={() => (showTemplatesModal = false)}
+            onclick={() => (showTemplatesModal = false)}
           >
             <Icon name="cross" size={14} />
           </button>
@@ -2317,7 +1868,7 @@
               class="tab-btn"
               class:active={templateTab === 'xray'}
               aria-pressed={templateTab === 'xray'}
-              on:click={async () => {
+              onclick={async () => {
                 templateTab = 'xray';
                 selectedTemplate = null;
                 templatePreview = '';
@@ -2325,13 +1876,13 @@
                 if (first) await loadTemplatePreview(first);
               }}
             >
-              {$t('editor.templates_tab_xray')}
+              {$t('editor.templates_tab_xray') || 'Xray'}
             </button>
             <button
               class="tab-btn"
               class:active={templateTab === 'mihomo'}
               aria-pressed={templateTab === 'mihomo'}
-              on:click={async () => {
+              onclick={async () => {
                 templateTab = 'mihomo';
                 selectedTemplate = null;
                 templatePreview = '';
@@ -2339,7 +1890,7 @@
                 if (first) await loadTemplatePreview(first);
               }}
             >
-              {$t('editor.templates_tab_mihomo')}
+              {$t('editor.templates_tab_mihomo') || 'Mihomo'}
             </button>
           </div>
 
@@ -2348,7 +1899,7 @@
               <button
                 class="template-item"
                 class:selected={selectedTemplate?.name === template.name}
-                on:click={() => loadTemplatePreview(template)}
+                onclick={() => loadTemplatePreview(template)}
                 disabled={templateLoading}
               >
                 <div class="template-info">
@@ -2390,7 +1941,7 @@
           class="btn btn-primary"
           disabled={!selectedTemplate || !editorView || templateLoading}
           title={!editorView ? $t('editor.no_file_for_template') : undefined}
-          on:click={() => selectedTemplate && applyTemplate(selectedTemplate)}
+          onclick={() => selectedTemplate && applyTemplate(selectedTemplate)}
         >
           {$t('editor.apply_template')}
         </button>
@@ -2404,21 +1955,21 @@
     class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
-    on:click={() => (showGeneratorModal = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showGeneratorModal = false)}
+    onclick={() => (showGeneratorModal = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showGeneratorModal = false)}
   >
     <div
       class="confirm-modal"
       style="max-width: 500px;"
       role="presentation"
-      on:click|stopPropagation
-      on:keydown|stopPropagation
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
     >
       <div class="modal-header">
         <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
-          {$t('editor.generator')}
+          {$t('editor.generator') || 'Генератор исходящих'}
         </h3>
-        <button class="btn-close" on:click={() => (showGeneratorModal = false)}>
+        <button class="btn-close" onclick={() => (showGeneratorModal = false)}>
           <Icon name="cross" size={14} />
         </button>
       </div>
@@ -2427,7 +1978,7 @@
         <label
           for="gen-protocol"
           style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-          >{$t('editor.protocol')}</label
+          >{$t('editor.protocol') || 'Протокол'}</label
         >
         <select id="gen-protocol" bind:value={genProtocol} class="input" style="width: 100%;">
           <option value="vless">VLESS</option>
@@ -2443,7 +1994,7 @@
           <label
             for="gen-address"
             style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-            >{$t('editor.address')}</label
+            >{$t('editor.address') || 'Адрес'}</label
           >
           <input
             id="gen-address"
@@ -2457,7 +2008,7 @@
           <label
             for="gen-port"
             style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-            >{$t('editor.port')}</label
+            >{$t('editor.port') || 'Порт'}</label
           >
           <input id="gen-port" type="number" bind:value={genPort} class="input" />
         </div>
@@ -2474,7 +2025,7 @@
           <button
             class="btn btn-secondary"
             style="padding: 0 12px;"
-            on:click={() => (genUUID = crypto.randomUUID())}
+            onclick={() => (genUUID = crypto.randomUUID())}
             title={$t('editor.generate_uuid')}
           >
             <Icon name="refresh" size={14} />
@@ -2534,11 +2085,11 @@
       {/if}
 
       <div class="confirm-modal-actions">
-        <button on:click={() => (showGeneratorModal = false)} class="btn btn-secondary">
+        <button onclick={() => (showGeneratorModal = false)} class="btn btn-secondary">
           {$t('app.cancel')}
         </button>
-        <button on:click={generateOutbound} class="btn btn-primary">
-          {$t('app.generate')}
+        <button onclick={generateOutbound} class="btn btn-primary">
+          {$t('app.generate') || 'Сгенерировать'}
         </button>
       </div>
     </div>
@@ -2550,15 +2101,15 @@
     class="confirm-modal-backdrop"
     role="button"
     tabindex="0"
-    on:click={() => (showSaveConfirmModal = false)}
-    on:keydown={(e) => e.key === 'Escape' && (showSaveConfirmModal = false)}
+    onclick={() => (showSaveConfirmModal = false)}
+    onkeydown={(e) => e.key === 'Escape' && (showSaveConfirmModal = false)}
   >
     <div
       class="confirm-modal"
       style="max-width: 700px; width: 90%; display: flex; flex-direction: column; max-height: 85vh;"
       role="presentation"
-      on:click|stopPropagation
-      on:keydown|stopPropagation
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
     >
       <div class="modal-header">
         <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
@@ -2566,7 +2117,7 @@
         </h3>
         <button
           class="btn-close"
-          on:click={() => (showSaveConfirmModal = false)}
+          onclick={() => (showSaveConfirmModal = false)}
           aria-label="Close modal"
         >
           <Icon name="cross" size={14} />
@@ -2645,11 +2196,11 @@
       </div>
 
       <div class="confirm-modal-actions" style="margin-top: 16px;">
-        <button on:click={() => (showSaveConfirmModal = false)} class="btn btn-secondary">
+        <button onclick={() => (showSaveConfirmModal = false)} class="btn btn-secondary">
           {$t('app.cancel')}
         </button>
         <button
-          on:click={confirmSave}
+          onclick={confirmSave}
           class="btn btn-primary"
           disabled={saving || (validationResult && !validationResult.valid && !expertMode)}
         >
@@ -2661,6 +2212,10 @@
 {/if}
 
 <style>
+  .status-dirty {
+    color: var(--warning) !important;
+  }
+
   .editor-tabs {
     display: inline-flex;
     gap: 4px;
@@ -2698,28 +2253,13 @@
     color: var(--fg-primary);
   }
 
-  /* hot-fix layout, требует визуального ревью Claude Design */
   .editor-grid {
     display: grid;
     grid-template-columns: 260px 1fr;
     gap: 14px;
     align-items: start;
   }
-  .editor-files {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-  }
-  .editor-files-head {
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--border);
-    font-size: 11px;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--fg-dim);
-    font-weight: 700;
-  }
+
   .editor-main-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -2728,6 +2268,7 @@
     display: flex;
     flex-direction: column;
   }
+
   .editor-toolbar {
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);
@@ -2735,33 +2276,18 @@
     align-items: center;
     gap: 10px;
   }
+
   .editor-toolbar .file-name {
     font-family: var(--font-family-mono);
     font-size: 13px;
     color: var(--fg-primary);
     font-weight: 600;
   }
+
   .editor-toolbar .file-meta {
     font-family: var(--font-family-mono);
     font-size: 11px;
     color: var(--fg-dim);
-  }
-
-  :global(.cm-editor) {
-    height: 100% !important;
-    font-size: 13.5px;
-    background: #050d16 !important;
-  }
-  :global(.cm-scroller) {
-    overflow: auto !important;
-  }
-  :global(.cm-gutter) {
-    background: #050d16 !important;
-    border-right: 1px solid #0e2034 !important;
-    color: var(--fg-faint) !important;
-  }
-  :global(.cm-content) {
-    font-family: var(--font-family-mono) !important;
   }
 
   .template-list {
@@ -2836,7 +2362,6 @@
     background: var(--hover);
   }
 
-  /* Templates wide modal — 2-column layout */
   .templates-wide-modal {
     max-width: 900px !important;
     width: 90vw !important;
@@ -2865,6 +2390,58 @@
     margin: 0;
     color: var(--fg-dim);
     font-size: 11.5px;
+  }
+
+  .templates-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 8px;
+    border-radius: 12px;
+  }
+  .templates-badge.update-available {
+    background-color: rgba(240, 180, 80, 0.15);
+    color: var(--warning);
+  }
+  .templates-badge.up-to-date {
+    background-color: rgba(70, 209, 138, 0.15);
+    color: var(--success);
+  }
+  .templates-badge .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--success);
+  }
+  .templates-badge .pulse-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--warning);
+    position: relative;
+  }
+  .templates-badge .pulse-dot::after {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    background-color: inherit;
+    border-radius: 50%;
+    animation: badge-pulse 1.5s infinite ease-out;
+  }
+  @keyframes badge-pulse {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(2.5);
+      opacity: 0;
+    }
   }
 
   .templates-modal-header-actions {
@@ -3025,12 +2602,6 @@
     color: var(--fg-primary);
   }
 
-  /* status bar */
-  .status-dirty {
-    color: var(--warning) !important;
-  }
-
-  /* kebab menu */
   .kebab-wrap {
     position: relative;
     display: inline-block;
@@ -3080,7 +2651,6 @@
     margin: 4px 0;
   }
 
-  /* validation / diff */
   .validation-result {
     display: flex;
     align-items: flex-start;
@@ -3194,319 +2764,10 @@
     }
   }
 
-  .editor-tab-strip {
-    display: flex;
-    gap: 2px;
-    background: var(--bg-card);
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-  }
-
-  .editor-tab-strip::-webkit-scrollbar {
-    height: 3px;
-  }
-
-  .editor-tab-strip::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: var(--radius);
-  }
-
-  .editor-tab {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    background: rgba(255, 255, 255, 0.01);
-    color: var(--fg-dim);
-    border: 0;
-    border-right: 1px solid var(--border);
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 500;
-    transition: all 0.15s ease;
-    position: relative;
-  }
-
-  .editor-tab:hover {
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--fg-primary);
-  }
-
-  .editor-tab.active {
-    background: var(--bg-page);
-    color: var(--fg-primary);
-    font-weight: 600;
-  }
-
-  .editor-tab.active::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: var(--accent);
-  }
-
-  .editor-tab.preview .tab-name {
-    font-style: italic;
-    opacity: 0.8;
-  }
-
-  .tab-dirty-dot {
-    color: var(--warning);
-    font-size: 10px;
-    margin-left: 2px;
-    line-height: 1;
-  }
-
-  .tab-close-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: transparent;
-    color: var(--fg-dim);
-    border: 0;
-    cursor: pointer;
-    padding: 0;
-    margin-left: 4px;
-    transition: all 0.1s ease;
-  }
-
-  .tab-close-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--fg-primary);
-  }
-
-  .editor-breadcrumbs {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    background: rgba(255, 255, 255, 0.015);
-    border-bottom: 1px solid var(--border);
-    font-family: var(--font-family-mono);
-    font-size: 11px;
-    color: var(--fg-dim);
-    overflow-x: auto;
-    white-space: nowrap;
-    scrollbar-width: none;
-  }
-
-  .editor-breadcrumbs::-webkit-scrollbar {
-    display: none;
-  }
-
-  .breadcrumb-segment {
-    background: transparent;
-    border: 0;
-    padding: 0;
-    color: var(--fg-dim);
-    cursor: pointer;
-    transition: color 0.12s ease;
-  }
-
-  .breadcrumb-segment:hover {
-    color: var(--accent);
-    text-decoration: underline;
-  }
-
-  .breadcrumb-divider {
-    color: var(--fg-faint);
-    user-select: none;
-  }
-
-  @keyframes line-flash {
-    0% {
-      background: var(--accent-dim);
-    }
-    100% {
-      background: transparent;
-    }
-  }
-
-  :global(.line-highlight-flash) {
-    animation: line-flash 1s ease-out;
-  }
-
-  .backups-toggle-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--fg-dim);
-    font-size: 11px;
-    padding: 4px 10px;
-    cursor: pointer;
-    font-family: var(--font-family-mono);
-    transition: all 0.15s ease;
-    margin-left: 10px;
-  }
-
-  .backups-toggle-btn:hover {
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--fg-primary);
-  }
-
-  .chevron-icon {
-    transition: transform 0.2s ease;
-  }
-  .chevron-icon.rotated {
-    transform: rotate(180deg);
-  }
-
-  .editor-bottom-drawer {
-    height: 250px;
-    background: var(--bg-card);
-    border-top: 1px solid var(--border);
-    overflow: hidden;
-  }
-
-  .drawer-layout {
-    display: flex;
-    height: 100%;
-  }
-
-  .drawer-sidebar {
-    width: 240px;
-    border-right: 1px solid var(--border);
-    overflow-y: auto;
-    padding: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    scrollbar-width: thin;
-  }
-
-  .backup-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 10px;
-    background: transparent;
-    color: var(--fg-dim);
-    border: 0;
-    border-radius: var(--radius);
-    cursor: pointer;
-    font-size: 12px;
-    text-align: left;
-    transition: all 0.15s ease;
-  }
-
-  .backup-item:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-  }
-
-  .backup-item:hover {
-    background: rgba(255, 255, 255, 0.02);
-    color: var(--fg-primary);
-  }
-
-  .backup-item.active {
-    background: var(--accent-dim);
-    color: var(--fg-primary);
-  }
-
-  .restore-inline-btn {
-    padding: 2px 6px;
-    font-size: 10px;
-    opacity: 0;
-    transition: opacity 0.15s ease;
-  }
-
-  .backup-item:hover .restore-inline-btn,
-  .backup-item.active .restore-inline-btn {
-    opacity: 1;
-  }
-
-  .drawer-main {
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .diff-viewer-container {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-  }
-
-  .diff-header {
-    padding: 8px 14px;
-    background: rgba(255, 255, 255, 0.01);
-    border-bottom: 1px solid var(--border);
-    font-size: 11px;
-    color: var(--fg-dim);
-  }
-
-  .diff-body {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px 14px;
-    background: var(--bg-page);
-    font-family: var(--font-family-mono);
-    font-size: 11px;
-    line-height: 1.5;
-    scrollbar-width: thin;
-  }
-
-  /* Стилизация строк Visual Diff */
-  .diff-line {
-    white-space: pre-wrap;
-    word-break: break-all;
-  }
-
-  .diff-line-added {
-    background: rgba(46, 160, 67, 0.12);
-    color: #3fb950;
-    border-left: 3px solid #2ea043;
-    padding-left: 6px;
-  }
-
-  .diff-line-removed {
-    background: rgba(248, 81, 73, 0.12);
-    color: #f85149;
-    border-left: 3px solid #f85149;
-    padding-left: 6px;
-  }
-
-  .diff-line-collapsed {
-    background: rgba(255, 255, 255, 0.02);
-    color: var(--fg-faint);
-    text-align: center;
-    font-style: italic;
-    padding: 4px 0;
-    border-top: 1px dashed var(--border);
-    border-bottom: 1px dashed var(--border);
-    margin: 4px 0;
-  }
-
-  .diff-line-unchanged {
-    color: var(--fg-dim);
-    padding-left: 9px;
-  }
-
-  .drawer-empty-state {
-    display: grid;
-    place-items: center;
-    height: 100%;
-    color: var(--fg-faint);
-    font-size: 12px;
-  }
-
   .btn-accent {
     background: linear-gradient(180deg, var(--accent), var(--accent-2));
     border: 1px solid var(--accent);
-    color: #111; /* Тёмный цвет для контраста с ярким cyan/teal */
+    color: #111;
     font-weight: 600;
   }
   .btn-accent:hover:not(:disabled) {
@@ -3518,7 +2779,6 @@
     cursor: not-allowed;
   }
 
-  /* Loading dots spinner style */
   .ks-dot-spin {
     display: inline-flex;
     align-items: center;
@@ -3550,7 +2810,6 @@
     }
   }
 
-  /* Status bar apply loader styles */
   .status-apply-indicator {
     display: flex;
     align-items: center;
@@ -3561,60 +2820,32 @@
     border-left: 1px solid var(--border);
   }
 
-  /* Стилизация скроллбаров (scrollbar-thin) */
-  .file-list {
-    max-height: 250px;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-  }
-  .file-list::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
-  .file-list::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .file-list::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: var(--radius-sm);
-  }
-  .file-list::-webkit-scrollbar-thumb:hover {
-    background: var(--fg-dim);
+  .backups-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--fg-dim);
+    font-size: 11px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-family: var(--font-family-mono);
+    transition: all 0.15s ease;
+    margin-left: 10px;
   }
 
-  :global(.cm-scroller) {
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-  }
-  :global(.cm-scroller::-webkit-scrollbar) {
-    width: 6px;
-    height: 6px;
-  }
-  :global(.cm-scroller::-webkit-scrollbar-track) {
-    background: transparent;
-  }
-  :global(.cm-scroller::-webkit-scrollbar-thumb) {
-    background: var(--border);
-    border-radius: var(--radius-sm);
-  }
-  :global(.cm-scroller::-webkit-scrollbar-thumb:hover) {
-    background: var(--fg-dim);
+  .backups-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--fg-primary);
   }
 
-  .drawer-sidebar::-webkit-scrollbar,
-  .diff-body::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
+  .chevron-icon {
+    transition: transform 0.2s ease;
   }
-  .drawer-sidebar::-webkit-scrollbar-track,
-  .diff-body::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .drawer-sidebar::-webkit-scrollbar-thumb,
-  .diff-body::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: var(--radius-sm);
+  .chevron-icon.rotated {
+    transform: rotate(180deg);
   }
 
   .editor-empty-card :global(.empty-state) {
@@ -3622,7 +2853,6 @@
     justify-content: center;
   }
 
-  /* Мобильная адаптивность */
   @media (max-width: 767px) {
     .editor-grid {
       grid-template-columns: 1fr !important;

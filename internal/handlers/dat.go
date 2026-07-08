@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 )
 
 func (a *API) DATList(w http.ResponseWriter, r *http.Request) {
@@ -99,4 +100,44 @@ func (a *API) DATRollback(w http.ResponseWriter, r *http.Request) {
 	a.jsonResponse(w, map[string]interface{}{
 		"success": true,
 	})
+}
+
+func (a *API) DATSearch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	if a.datSvc == nil {
+		a.errorResponse(w, "DAT Manager service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	name := r.URL.Query().Get("name")
+	tag := r.URL.Query().Get("tag")
+	query := r.URL.Query().Get("query")
+	pageStr := r.URL.Query().Get("page")
+
+	if name == "" {
+		JSONError(w, http.StatusBadRequest, "name parameter is required")
+		return
+	}
+	if tag == "" {
+		JSONError(w, http.StatusBadRequest, "tag parameter is required")
+		return
+	}
+
+	page := 0
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil {
+			page = p
+		}
+	}
+
+	res, err := a.datSvc.SearchTag(name, tag, query, page, 50)
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	JSONSuccess(w, res)
 }

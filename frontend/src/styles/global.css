@@ -399,6 +399,34 @@ input[type='number'] {
 .alert-error strong {
   color: var(--danger);
 }
+.alert-dismissible {
+  position: relative;
+  padding-right: 40px; /* отступ для кнопки закрытия */
+}
+.alert-close-btn {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: transparent;
+  border: 0;
+  color: currentColor;
+  opacity: 0.65;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 16px;
+  line-height: 1;
+  transition:
+    opacity var(--transition-fast),
+    background-color var(--transition-fast);
+}
+.alert-close-btn:hover {
+  opacity: 1;
+  background-color: rgba(255, 255, 255, 0.08);
+}
 
 /* ------------ Layout ------------- */
 .dashboard-layout {
@@ -1779,4 +1807,17 @@ a.chip:hover {
   width: 12px;
   height: 12px;
   color: currentColor;
+}
+
+/* Accessibility screen-reader only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

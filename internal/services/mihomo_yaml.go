@@ -485,6 +485,9 @@ func ParseClashProxyNode(blockStr string) SubscriptionNode {
 	node.Cipher = p.get("cipher")
 	node.SNI = p.get("sni")
 	node.Congestion = p.get("congestion")
+	node.Insecure = p.get("skip-cert-verify") == "true"
+	node.ObfsType = p.get("obfs.type")
+	node.ObfsPassword = p.get("obfs.password")
 
 	node.PublicKey = p.get("reality-opts.public-key")
 	node.ShortID = p.get("reality-opts.short-id")
@@ -502,6 +505,9 @@ func ParseClashProxyNode(blockStr string) SubscriptionNode {
 	}
 	if wspath == "" {
 		wspath = p.get("xhttp-opts.path")
+	}
+	if wspath == "" {
+		wspath = p.get("grpc-opts.grpc-service-name")
 	}
 	node.WSPath = wspath
 

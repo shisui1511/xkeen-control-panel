@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,8 +11,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
+	"gopkg.in/yaml.v3"
 )
 
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
@@ -129,6 +133,15 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mihomoConfigPath := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yaml"))
+	mihomoConfigPathYml := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yml"))
+	isMihomoConfig := (cleanPath == mihomoConfigPath || cleanPath == mihomoConfigPathYml)
+
+	if isMihomoConfig && a.subscriptionSvc != nil {
+		a.subscriptionSvc.LockMihomo()
+		defer a.subscriptionSvc.UnlockMihomo()
+	}
+
 	// T032: extension whitelist — only .json, .yaml, .yml allowed
 	ext := filepath.Ext(cleanPath)
 	if ext != ".json" && ext != ".yaml" && ext != ".yml" {
@@ -148,9 +161,23 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var backupData []byte
+	var backupExists bool
+	if _, statErr := os.Stat(cleanPath); statErr == nil {
+		if d, readErr := os.ReadFile(cleanPath); readErr == nil {
+			backupData = d
+			backupExists = true
+		}
+	}
+
 	err = a.configSvc.Save(cleanPath, data)
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if errStr := a.validateConfigAndRollback(r, cleanPath, data, backupExists, backupData); errStr != "" {
+		a.errorResponse(w, errStr, http.StatusUnprocessableEntity)
 		return
 	}
 
@@ -385,6 +412,37 @@ func (a *API) getBinaryPath(name string) string {
 	return ""
 }
 
+func copyDirRecursive(src, dst string) error {
+	err := os.MkdirAll(dst, 0755)
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+		if entry.IsDir() {
+			err = copyDirRecursive(srcPath, dstPath)
+			if err != nil {
+				return err
+			}
+		} else {
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return err
+			}
+			err = os.WriteFile(dstPath, data, 0644)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func copyDirConfigs(srcDir, dstDir string, targetFilename string, newContent string, allowedRoots []string) error {
 	// Sanitize and validate targetFilename
 	targetFilename = filepath.Base(targetFilename)
@@ -421,10 +479,15 @@ func copyDirConfigs(srcDir, dstDir string, targetFilename string, newContent str
 
 	for _, entry := range entries {
 		if entry.IsDir() {
+			if entry.Name() == "rules" || entry.Name() == "providers" {
+				if err := copyDirRecursive(filepath.Join(srcDir, entry.Name()), filepath.Join(dstDir, entry.Name())); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		ext := filepath.Ext(entry.Name())
-		if ext != ".json" && ext != ".yaml" && ext != ".yml" {
+		if ext != ".json" && ext != ".yaml" && ext != ".yml" && ext != ".dat" && ext != ".metadb" {
 			continue
 		}
 
@@ -436,12 +499,25 @@ func copyDirConfigs(srcDir, dstDir string, targetFilename string, newContent str
 				return err
 			}
 		} else {
-			data, err := os.ReadFile(srcFile)
-			if err != nil {
-				return err
-			}
-			if err := os.WriteFile(dstFile, data, 0644); err != nil {
-				return err
+			if ext == ".dat" || ext == ".metadb" {
+				if err := os.Symlink(srcFile, dstFile); err != nil {
+					// Fallback to copy if symlink fails
+					data, err := os.ReadFile(srcFile)
+					if err != nil {
+						return err
+					}
+					if err := os.WriteFile(dstFile, data, 0644); err != nil {
+						return err
+					}
+				}
+			} else {
+				data, err := os.ReadFile(srcFile)
+				if err != nil {
+					return err
+				}
+				if err := os.WriteFile(dstFile, data, 0644); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -589,13 +665,39 @@ func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mihomoConfigPath := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yaml"))
+	mihomoConfigPathYml := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yml"))
+	isMihomoConfig := (cleanPath == mihomoConfigPath || cleanPath == mihomoConfigPathYml)
+
+	if isMihomoConfig && a.subscriptionSvc != nil {
+		a.subscriptionSvc.LockMihomo()
+		defer a.subscriptionSvc.UnlockMihomo()
+	}
+
 	data, err := a.configSvc.Read(cleanPath)
 	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
-		return
+		if os.IsNotExist(err) {
+			data = []byte{}
+		} else {
+			a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	content := string(data)
+	if strings.TrimSpace(content) == "" {
+		content = `log-level: silent
+allow-lan: true
+routing-mark: 255
+find-process-mode: off
+unified-delay: true
+tproxy-port: 5001
+redir-port: 5000
+external-controller: 0.0.0.0:9090
+profile:
+  store-selected: true
+`
+	}
 
 	for sectionName, newSecContent := range req.Sections {
 		if sectionName != "proxy-groups" && sectionName != "rule-providers" && sectionName != "rules" &&
@@ -604,7 +706,29 @@ func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
 			a.errorResponse(w, "invalid section name: "+sectionName, http.StatusBadRequest)
 			return
 		}
+		if strings.TrimSpace(newSecContent) != "" {
+			var temp interface{}
+			if err := yaml.Unmarshal([]byte(newSecContent), &temp); err != nil {
+				a.errorResponse(w, "invalid YAML syntax in section "+sectionName+": "+err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
 		content = services.ReplaceMihomoTopLevelSection(content, sectionName, newSecContent)
+	}
+
+	var resultTemp interface{}
+	if err := yaml.Unmarshal([]byte(content), &resultTemp); err != nil {
+		a.errorResponse(w, "invalid resulting YAML config: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var backupData []byte
+	var backupExists bool
+	if _, statErr := os.Stat(cleanPath); statErr == nil {
+		if d, readErr := os.ReadFile(cleanPath); readErr == nil {
+			backupData = d
+			backupExists = true
+		}
 	}
 
 	err = a.configSvc.Save(cleanPath, []byte(content))
@@ -613,5 +737,62 @@ func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if errStr := a.validateConfigAndRollback(r, cleanPath, []byte(content), backupExists, backupData); errStr != "" {
+		a.errorResponse(w, errStr, http.StatusUnprocessableEntity)
+		return
+	}
+
 	JSONSuccess(w, nil)
+}
+
+func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data []byte, backupExists bool, backupData []byte) string {
+	ext := filepath.Ext(cleanPath)
+	var kernelType string
+	if strings.Contains(cleanPath, "xray") || ext == ".json" {
+		kernelType = "xray"
+	} else if strings.Contains(cleanPath, "mihomo") || ext == ".yaml" || ext == ".yml" {
+		kernelType = "mihomo"
+	} else {
+		kernelType = "xray"
+	}
+
+	binaryPath := a.getBinaryPath(kernelType)
+	if binaryPath == "" {
+		return ""
+	}
+
+	tempDir, err := os.MkdirTemp("", "xcp-save-val-*")
+	if err != nil {
+		return ""
+	}
+	defer os.RemoveAll(tempDir)
+
+	origDir := filepath.Dir(cleanPath)
+	filename := filepath.Base(cleanPath)
+	if err := copyDirConfigs(origDir, tempDir, filename, string(data), a.cfg.AllowedRoots); err != nil {
+		return ""
+	}
+
+	var cmd *exec.Cmd
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if kernelType == "xray" {
+		cmd = exec.CommandContext(ctx, binaryPath, "-test", "-confdir", tempDir)
+	} else {
+		cmd = exec.CommandContext(ctx, binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, filename))
+	}
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// Rollback!
+		if backupExists {
+			_ = utils.AtomicWriteFile(cleanPath, backupData, 0644)
+		} else {
+			_ = os.Remove(cleanPath)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	return ""
 }

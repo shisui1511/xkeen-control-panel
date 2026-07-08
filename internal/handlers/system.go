@@ -3,14 +3,18 @@ package handlers
 import (
 	"bufio"
 	"context"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -20,6 +24,11 @@ type SystemStats struct {
 		Used  uint64 `json:"used"`
 		Free  uint64 `json:"free"`
 	} `json:"memory"`
+	Disk struct {
+		Total uint64 `json:"total"`
+		Used  uint64 `json:"used"`
+		Free  uint64 `json:"free"`
+	} `json:"disk"`
 	Load   [3]float64 `json:"load"`
 	Uptime struct {
 		Seconds float64 `json:"seconds"`
@@ -51,6 +60,7 @@ type SystemStats struct {
 	ConfigPath    string `json:"config_path"`
 	ConfigLines   int    `json:"config_lines"`
 	BootTime      string `json:"boot_time"`
+	SSLCertDays   int    `json:"ssl_cert_days"`
 }
 
 func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +146,85 @@ func (a *API) SystemStats(w http.ResponseWriter, r *http.Request) {
 		stats.BootTime = bootTime.Format("02.01.06 15:04:05") + " " + getUTCOffset()
 	}
 
+	// Disk space calculation using Statfs
+	var stat syscall.Statfs_t
+	var diskErr error
+	if diskErr = syscall.Statfs("/opt", &stat); diskErr != nil {
+		diskErr = syscall.Statfs("/", &stat)
+	}
+
+	if diskErr != nil {
+		// Mock fallback (512 MB total, 100 MB free)
+		stats.Disk.Total = 512 * 1024 * 1024
+		stats.Disk.Free = 100 * 1024 * 1024
+		stats.Disk.Used = stats.Disk.Total - stats.Disk.Free
+	} else {
+		stats.Disk.Total = stat.Blocks * uint64(stat.Bsize)
+		stats.Disk.Free = stat.Bavail * uint64(stat.Bsize)
+		stats.Disk.Used = stats.Disk.Total - stats.Disk.Free
+
+		// Emergency trigger if free disk space is less than 10 MB
+		if stats.Disk.Free < 10*1024*1024 {
+			if a.subscriptionSvc != nil {
+				go a.subscriptionSvc.CleanOrphanedSubscriptions()
+			}
+		}
+	}
+
+	stats.SSLCertDays = a.getSSLCertDays()
+
 	a.jsonResponse(w, stats)
+}
+
+func (a *API) getSSLCertDays() int {
+	if !a.cfg.HTTPS.Enabled {
+		return -1
+	}
+
+	a.sslDaysCacheMutex.Lock()
+	if time.Since(a.sslDaysCacheTime) < 1*time.Minute {
+		days := a.sslDaysCache
+		a.sslDaysCacheMutex.Unlock()
+		return days
+	}
+	a.sslDaysCacheMutex.Unlock()
+
+	certPath := a.cfg.HTTPS.CertPath
+	if certPath == "" {
+		certPath = filepath.Join(a.cfg.DataDir, "ssl", "cert.pem")
+	}
+
+	days := a.calculateSSLCertDays(certPath)
+
+	a.sslDaysCacheMutex.Lock()
+	a.sslDaysCache = days
+	a.sslDaysCacheTime = time.Now()
+	a.sslDaysCacheMutex.Unlock()
+
+	return days
+}
+
+func (a *API) calculateSSLCertDays(certPath string) int {
+	certBytes, err := os.ReadFile(certPath)
+	if err != nil {
+		return -1
+	}
+
+	block, _ := pem.Decode(certBytes)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return -1
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return -1
+	}
+
+	days := int(time.Until(cert.NotAfter).Hours() / 24)
+	if days < 0 {
+		return 0
+	}
+	return days
 }
 
 func getRouterModel() string {

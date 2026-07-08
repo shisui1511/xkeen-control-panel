@@ -11,6 +11,7 @@ export interface KernelCapability {
 export interface CapabilitiesData {
   kernels: Record<string, KernelCapability>;
   active_kernel: string;
+  xkeen_dns?: boolean;
   mihomo: {
     reachable: boolean;
     process_running: boolean;
@@ -23,6 +24,7 @@ export interface CapabilitiesData {
     conf_dir: string;
     conf_dir_exists: boolean;
   };
+  global_hwid?: string;
 }
 
 export const capabilities = writable<CapabilitiesData | null>(null);

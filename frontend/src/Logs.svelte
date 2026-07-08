@@ -10,9 +10,20 @@
     raw: string;
   }
 
+  const MAX_LOG_BUFFER = 500;
+  const ROW_HEIGHT = 24;
+  const BUFFER_ROWS = 10;
+
   let destroyed = false;
   let logs = $state<LogEntry[]>([]);
   let ws = $state<WebSocket | null>(null);
+  let containerHeight = $state(0);
+  let scrollTop = $state(0);
+
+  function handleScroll(e: Event) {
+    const target = e.currentTarget as HTMLElement;
+    scrollTop = target.scrollTop;
+  }
   let connected = $state(false);
   let paused = $state(false);
   let filter = $state('');
@@ -38,6 +49,18 @@
       result = result.filter((log) => log.level === levelFilter);
     }
     return result;
+  });
+
+  const totalItems = $derived(filteredLogs.length);
+  const visibleCount = $derived(Math.ceil(containerHeight / ROW_HEIGHT));
+  const startIndex = $derived(Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - BUFFER_ROWS));
+  const endIndex = $derived(Math.min(totalItems, startIndex + visibleCount + 2 * BUFFER_ROWS));
+
+  const visibleLogs = $derived.by(() => {
+    return filteredLogs.slice(startIndex, endIndex).map((log, idx) => ({
+      log,
+      y: (startIndex + idx) * ROW_HEIGHT
+    }));
   });
 
   function parseLogLine(raw: string): LogEntry {
@@ -161,7 +184,7 @@
     ws.onmessage = (event) => {
       if (!paused) {
         const entry = parseLogLine(event.data);
-        logs = [...logs, entry].slice(-1000);
+        logs = [...logs, entry].slice(-MAX_LOG_BUFFER);
         updateSources();
 
         if (autoScroll && logContainer) {
@@ -265,7 +288,7 @@
         {connected ? $t('logs.status_connected') : $t('logs.status_disconnected')}
       </span>
       {#if !connected}
-        <button on:click={connect} class="btn btn-primary" title={$t('logs.connect')}
+        <button onclick={connect} class="btn btn-primary" title={$t('logs.connect')}
           >{$t('logs.connect')}</button
         >
       {/if}
@@ -278,7 +301,7 @@
       <div class="toolbar-left">
         <button
           class="btn btn-secondary"
-          on:click={togglePause}
+          onclick={togglePause}
           title={paused ? $t('logs.resume') : $t('logs.pause')}
         >
           {#if paused}
@@ -311,7 +334,7 @@
           {/if}
         </button>
 
-        <button class="btn btn-secondary" on:click={clearLogs} title={$t('logs.clear')}>
+        <button class="btn btn-secondary" onclick={clearLogs} title={$t('logs.clear')}>
           <svg
             width="13"
             height="13"
@@ -326,7 +349,7 @@
           >{$t('logs.clear')}
         </button>
 
-        <button class="btn btn-secondary" on:click={exportLogs} title={$t('logs.export')}>
+        <button class="btn btn-secondary" onclick={exportLogs} title={$t('logs.export')}>
           <svg
             width="13"
             height="13"
@@ -355,13 +378,13 @@
           <button
             class="stab"
             class:stab-active={sourceFilter === ''}
-            on:click={() => (sourceFilter = '')}>{$t('logs.all_sources')}</button
+            onclick={() => (sourceFilter = '')}>{$t('logs.all_sources')}</button
           >
           {#each KNOWN_SOURCES as src}
             <button
               class="stab"
               class:stab-active={sourceFilter === src}
-              on:click={() => (sourceFilter = sourceFilter === src ? '' : src)}>{src}</button
+              onclick={() => (sourceFilter = sourceFilter === src ? '' : src)}>{src}</button
             >
           {/each}
         </div>
@@ -393,7 +416,7 @@
           ><strong>{$t('logs.disconnected_title')}</strong> — {$t('logs.disconnected_desc')}</span
         >
         <button
-          on:click={connect}
+          onclick={connect}
           class="btn btn-secondary btn-small"
           style="padding: 4px 8px; font-size: 12px;"
         >
@@ -402,18 +425,37 @@
       </div>
     {/if}
 
-    <div class="logs-pane" bind:this={logContainer}>
-      {#each getFilteredLogs() as log}
-        <div class="line">
-          <span class="ts">{log.timestamp}</span>
-          {#if log.source}
-            <span class="src" style="color: {getSourceColor(log.source)};">[{log.source}]</span>
-          {/if}
-          <span class="lv-{log.level || 'info'}">{log.text}</span>
-        </div>
-      {/each}
+    <div
+      class="logs-pane"
+      bind:this={logContainer}
+      bind:clientHeight={containerHeight}
+      onscroll={handleScroll}
+      style="position: relative;"
+    >
+      {#if totalItems > 0}
+        <div
+          class="logs-spacer"
+          style="height: {totalItems *
+            ROW_HEIGHT}px; width: 100%; pointer-events: none; position: absolute; top: 0; left: 0;"
+        ></div>
 
-      {#if getFilteredLogs().length === 0}
+        {#each visibleLogs as item}
+          <div
+            class="line"
+            style="position: absolute; top: 0; left: 16px; right: 16px; height: {ROW_HEIGHT}px; transform: translateY({item.y}px); display: flex; align-items: center; box-sizing: border-box;"
+          >
+            <span class="ts">{item.log.timestamp}</span>
+            {#if item.log.source}
+              <span class="src" style="color: {getSourceColor(item.log.source)};"
+                >[{item.log.source}]</span
+              >
+            {/if}
+            <span class="lv-{item.log.level || 'info'}">{item.log.text}</span>
+          </div>
+        {/each}
+      {/if}
+
+      {#if totalItems === 0}
         <div class="logs-empty-placeholder">
           <svg
             width="24"
@@ -450,7 +492,7 @@
           </div>
           {#if !connected}
             <button
-              on:click={connect}
+              onclick={connect}
               class="btn btn-secondary btn-small"
               style="margin-top: 14px; padding: 4px 8px; font-size: 12px;"
             >
@@ -515,6 +557,7 @@
     font-size: 12.5px;
     line-height: 1.5;
     overflow-y: auto;
+    overflow-x: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
   }
@@ -522,8 +565,10 @@
   .logs-pane .line {
     display: flex;
     gap: 10px;
-    padding: 2px 0;
-    align-items: flex-start;
+    align-items: center;
+    white-space: nowrap;
+    overflow-x: visible;
+    text-overflow: clip;
   }
 
   .logs-pane .ts {
@@ -542,22 +587,25 @@
 
   .logs-pane .lv-info {
     color: var(--fg-primary);
-    word-break: break-all;
-    white-space: pre-wrap;
+    white-space: nowrap;
+    overflow-x: visible;
+    text-overflow: clip;
     flex: 1;
   }
 
   .logs-pane .lv-warning {
     color: var(--warning);
-    word-break: break-all;
-    white-space: pre-wrap;
+    white-space: nowrap;
+    overflow-x: visible;
+    text-overflow: clip;
     flex: 1;
   }
 
   .logs-pane .lv-error {
     color: var(--danger);
-    word-break: break-all;
-    white-space: pre-wrap;
+    white-space: nowrap;
+    overflow-x: visible;
+    text-overflow: clip;
     flex: 1;
   }
 

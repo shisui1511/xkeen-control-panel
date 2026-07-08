@@ -246,6 +246,8 @@ test.describe('Import Proxy Node E2E test suite', () => {
 // RED-тесты: D-15, D-16, D-17 — падают до реализации (Wave 2/3)
 test.describe('Import Node из конструкторов (D-15, D-16, D-17)', () => {
   test.beforeEach(async ({ page }) => {
+    page.on('console', (msg) => console.log('BROWSER CONSOLE:', msg.text()));
+    page.on('pageerror', (err) => console.log('BROWSER ERROR:', err.message));
     await disableServiceWorker(page);
     await setupRestMocks(page);
     // Дополнительный мок для config/read и config/list в конструкторе
@@ -269,12 +271,6 @@ test.describe('Import Node из конструкторов (D-15, D-16, D-17)', 
     await page.locator('.constructor-kernel-toggle button:has-text("Mihomo")').click();
     await expect(page.locator('button:has-text("Импорт узла")')).toBeVisible();
   });
-
-  test('кнопка «Импорт узла» отсутствует в Subscriptions (D-16)', async ({ page }) => {
-    await page.goto('/#/subscriptions');
-    await expect(page.locator('button:has-text("Импорт узла")')).not.toBeVisible();
-  });
-
   test('импорт в Xray-конструкторе вызывает POST /api/outbound/import-bulk (D-17)', async ({
     page
   }) => {
@@ -295,5 +291,17 @@ test.describe('Import Node из конструкторов (D-15, D-16, D-17)', 
     await expect(modal.locator('.preview-section')).toBeVisible();
     await modal.locator('button:has-text("Импортировать")').click();
     expect(importCalled).toBe(true);
+  });
+});
+
+test.describe('Import Node в Subscriptions (D-16)', () => {
+  test.beforeEach(async ({ page }) => {
+    await disableServiceWorker(page);
+    await setupRestMocks(page);
+  });
+
+  test('кнопка «Импорт узла» отсутствует в Subscriptions (D-16)', async ({ page }) => {
+    await page.goto('/#/proxies?tab=providers');
+    await expect(page.locator('button:has-text("Импорт узла")')).not.toBeVisible();
   });
 });

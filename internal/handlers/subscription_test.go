@@ -54,7 +54,7 @@ func TestSubscriptionList(t *testing.T) {
 	}
 
 	// 2. Non-empty List
-	sub := &services.Subscription{Name: "Sub 1", URL: "http://example.com/sub"}
+	sub := &services.Subscription{Name: "Sub 1", URL: "http://example.com/sub", EnableXray: true}
 	subSvc.Add(sub)
 
 	req = httptest.NewRequest(http.MethodGet, "/api/subscriptions", nil)
@@ -120,7 +120,7 @@ func TestSubscriptionAdd(t *testing.T) {
 func TestSubscriptionUpdate(t *testing.T) {
 	api, subSvc := newSubTestAPI(t)
 
-	sub := &services.Subscription{Name: "Old Name", URL: "http://example.com/sub"}
+	sub := &services.Subscription{Name: "Old Name", URL: "http://example.com/sub", EnableXray: true}
 	subSvc.Add(sub)
 	id := subSvc.List()[0].ID
 
@@ -152,7 +152,7 @@ func TestSubscriptionUpdate(t *testing.T) {
 func TestSubscriptionDelete(t *testing.T) {
 	api, subSvc := newSubTestAPI(t)
 
-	sub := &services.Subscription{Name: "To Delete", URL: "http://example.com/sub"}
+	sub := &services.Subscription{Name: "To Delete", URL: "http://example.com/sub", EnableXray: true}
 	subSvc.Add(sub)
 	id := subSvc.List()[0].ID
 
@@ -179,7 +179,7 @@ func TestSubscriptionRefresh(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sub := &services.Subscription{Name: "Refresh Sub", URL: ts.URL, Enabled: true}
+	sub := &services.Subscription{Name: "Refresh Sub", URL: ts.URL, Enabled: true, EnableXray: true}
 	subSvc.Add(sub)
 	id := subSvc.List()[0].ID
 
@@ -209,8 +209,8 @@ func TestSubscriptionRefreshAll(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sub1 := &services.Subscription{Name: "Sub 1", URL: ts.URL, Enabled: true}
-	sub2 := &services.Subscription{Name: "Sub 2", URL: ts.URL, Enabled: false}
+	sub1 := &services.Subscription{Name: "Sub 1", URL: ts.URL, Enabled: true, EnableXray: true}
+	sub2 := &services.Subscription{Name: "Sub 2", URL: ts.URL, Enabled: false, EnableXray: true}
 	subSvc.Add(sub1)
 	subSvc.Add(sub2)
 
@@ -246,7 +246,7 @@ func TestSubscriptionRawAndReport(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	sub := &services.Subscription{Name: "Raw Sub", URL: ts.URL, Enabled: true}
+	sub := &services.Subscription{Name: "Raw Sub", URL: ts.URL, Enabled: true, EnableXray: true}
 	subSvc.Add(sub)
 	id := subSvc.List()[0].ID
 
@@ -289,9 +289,10 @@ func TestSubscriptionSetActive(t *testing.T) {
 
 	// Set up subscription with nodes
 	sub := &services.Subscription{
-		Name:    "Routing Sub",
-		URL:     "http://example.com/sub",
-		Enabled: true,
+		Name:       "Routing Sub",
+		URL:        "http://example.com/sub",
+		Enabled:    true,
+		EnableXray: true,
 		Nodes: []services.SubscriptionNode{
 			{Tag: "node-1", Name: "Node 1", Protocol: "vless"},
 			{Tag: "node-2", Name: "Node 2", Protocol: "vless"},
@@ -319,11 +320,89 @@ func TestSubscriptionSetActive(t *testing.T) {
 	// 2. Balancer Auto Conflict
 	subSvc.Update(id, &services.Subscription{
 		RoutingMode: "auto",
+		EnableXray:  true,
 	})
 	reqConf := httptest.NewRequest(http.MethodPost, "/api/subscriptions/active?id="+id, strings.NewReader(body))
 	rrConf := httptest.NewRecorder()
 	api.SubscriptionSetActive(rrConf, reqConf)
 	if rrConf.Code != http.StatusConflict {
 		t.Errorf("expected 409 Conflict, got %d", rrConf.Code)
+	}
+}
+
+func TestMihomoProviderAdapter(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+	api.cfg.MihomoConfigDir = api.cfg.DataDir
+
+	sub := &services.Subscription{
+		Name:         "Adapter Sub",
+		URL:          "https://example.com/mihomo-provider",
+		Enabled:      true,
+		EnableMihomo: true,
+	}
+	subSvc.Add(sub)
+	id := subSvc.List()[0].ID
+
+	providerName := services.GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, id)
+
+	proxyProvidersDir := filepath.Join(api.cfg.MihomoConfigDir, "proxy_providers")
+	if err := os.MkdirAll(proxyProvidersDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cacheFile := filepath.Join(proxyProvidersDir, providerName+".yaml")
+	mockYAML := "proxies:\n  - name: test\n    type: ss\n"
+	if err := os.WriteFile(cacheFile, []byte(mockYAML), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Метод не GET
+	req := httptest.NewRequest(http.MethodPost, "/mihomo/provider.yaml", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr := httptest.NewRecorder()
+	api.MihomoProviderAdapter(rr, req)
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", rr.Code)
+	}
+
+	// 2. Внешний IP (не loopback)
+	req = httptest.NewRequest(http.MethodGet, "/mihomo/provider.yaml?url="+sub.URL, nil)
+	req.RemoteAddr = "192.168.1.1:12345"
+	rr = httptest.NewRecorder()
+	api.MihomoProviderAdapter(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403, got %d", rr.Code)
+	}
+
+	// 3. Отсутствие параметра url
+	req = httptest.NewRequest(http.MethodGet, "/mihomo/provider.yaml", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr = httptest.NewRecorder()
+	api.MihomoProviderAdapter(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rr.Code)
+	}
+
+	// 4. Неизвестный URL
+	req = httptest.NewRequest(http.MethodGet, "/mihomo/provider.yaml?url=https://unknown.com", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr = httptest.NewRecorder()
+	api.MihomoProviderAdapter(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", rr.Code)
+	}
+
+	// 5. Успешный запрос с loopback IP
+	req = httptest.NewRequest(http.MethodGet, "/mihomo/provider.yaml?url="+sub.URL, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr = httptest.NewRecorder()
+	api.MihomoProviderAdapter(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if rr.Body.String() != mockYAML {
+		t.Errorf("expected %q, got %q", mockYAML, rr.Body.String())
+	}
+	if rr.Header().Get("Content-Type") != "text/yaml; charset=utf-8" {
+		t.Errorf("expected text/yaml content type, got %q", rr.Header().Get("Content-Type"))
 	}
 }

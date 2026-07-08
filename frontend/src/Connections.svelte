@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t } from './i18n';
-  import { capabilities, fetchCapabilities, showToast } from './stores';
+  import { capabilities, fetchCapabilities, showToast, showConfirm } from './stores';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
@@ -28,12 +28,21 @@
     rulePayload: string;
   }
 
-  let connections: Connection[] = [];
-  let loading = false;
-  let error = '';
-  let wsConnected = false;
-  let wsReconnecting = false;
-  let destroyed = false;
+  let connections = $state<Connection[]>([]);
+
+  interface TrafficHistory {
+    upload: number;
+    download: number;
+    timestamp: number;
+  }
+  let trafficHistory = $state(new Map<string, TrafficHistory>());
+  let connectionSpeeds = $state(new Map<string, { uploadSpeed: number; downloadSpeed: number }>());
+
+  let loading = $state(false);
+  let error = $state('');
+  let wsConnected = $state(false);
+  let wsReconnecting = $state(false);
+  let destroyed = $state(false);
 
   // WebSocket
   let ws: WebSocket | null = null;
@@ -42,18 +51,20 @@
   const MAX_RECONNECT_DELAY = 30000;
 
   // Filters
-  let filterSource = '';
-  let filterDest = '';
-  let filterRule = '';
-  let filterProxy = '';
+  let filterSource = $state('');
+  let filterDest = $state('');
+  let filterRule = $state('');
+  let filterProxy = $state('');
 
   // Source-name toggle
-  let showProcessName = false;
-  let processModePatchPending = false;
+  let showProcessName = $state(false);
+  let processModePatchPending = $state(false);
 
-  $: uniqueRules = [...new Set(connections.map((c) => c.rule).filter(Boolean))].sort();
-  $: uniqueChains = [...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort();
-  $: isMihomoActive = $capabilities === null || $capabilities.mihomo.reachable;
+  let uniqueRules = $derived([...new Set(connections.map((c) => c.rule).filter(Boolean))].sort());
+  let uniqueChains = $derived(
+    [...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort()
+  );
+  let isMihomoActive = $derived($capabilities === null || $capabilities.mihomo.reachable);
 
   async function loadProcessMode() {
     try {
@@ -107,7 +118,50 @@
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        connections = data.connections || [];
+        const now = Date.now();
+        const nextSpeeds = new Map<string, { uploadSpeed: number; downloadSpeed: number }>();
+        const nextHistory = new Map<string, TrafficHistory>();
+
+        const rawConnections = data.connections || [];
+        for (const conn of rawConnections) {
+          const prev = trafficHistory.get(conn.id);
+          let uploadSpeed = 0;
+          let downloadSpeed = 0;
+
+          if (prev) {
+            const durationSec = (now - prev.timestamp) / 1000;
+            if (durationSec > 0.2) {
+              uploadSpeed = Math.max(0, (conn.upload - prev.upload) / durationSec);
+              downloadSpeed = Math.max(0, (conn.download - prev.download) / durationSec);
+              nextHistory.set(conn.id, {
+                upload: conn.upload,
+                download: conn.download,
+                timestamp: now
+              });
+            } else {
+              // Carry forward the previous speed if interval is too small
+              const prevSpeed = connectionSpeeds.get(conn.id);
+              if (prevSpeed) {
+                uploadSpeed = prevSpeed.uploadSpeed;
+                downloadSpeed = prevSpeed.downloadSpeed;
+              }
+              // Carry forward the previous history entry without updating timestamp to accumulate delta
+              nextHistory.set(conn.id, prev);
+            }
+          } else {
+            nextHistory.set(conn.id, {
+              upload: conn.upload,
+              download: conn.download,
+              timestamp: now
+            });
+          }
+
+          nextSpeeds.set(conn.id, { uploadSpeed, downloadSpeed });
+        }
+
+        connectionSpeeds = nextSpeeds;
+        trafficHistory = nextHistory;
+        connections = rawConnections;
         loading = false;
       } catch (_) {}
     };
@@ -158,7 +212,13 @@
   }
 
   async function closeAllConnections() {
-    if (!confirm($t('conn.close_all_confirm'))) return;
+    const confirmed = await showConfirm(
+      $t('conn.close_all'),
+      $t('conn.close_all_confirm'),
+      $t('app.yes') || 'Да',
+      $t('app.no') || 'Нет'
+    );
+    if (!confirmed) return;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch('/api/mihomo/proxy/connections', {
@@ -222,7 +282,7 @@
     }
   }
 
-  let mihomoLaunching = false;
+  let mihomoLaunching = $state(false);
 
   async function launchMihomo() {
     mihomoLaunching = true;
@@ -251,28 +311,25 @@
     }
   }
 
-  $: totalUpload = connections.reduce((acc, c) => acc + c.upload, 0);
-  $: totalDownload = connections.reduce((acc, c) => acc + c.download, 0);
-  // Явное реактивное выражение — Svelte отслеживает connections, filterSource, filterDest, filterRule, filterProxy
-  $: filteredConnections = connections.filter((conn) => {
-    if (filterSource) {
-      // Match against the value shown in the source column (process name or IP:port)
-      const sourceName =
-        showProcessName && conn.metadata.process
-          ? conn.metadata.process
-          : conn.metadata.sourceIP || '';
-      if (!sourceName.includes(filterSource)) return false;
-    }
-    if (
-      filterDest &&
-      !(conn.metadata.host || '').includes(filterDest) &&
-      !(conn.metadata.destinationIP || '').includes(filterDest)
-    )
-      return false;
-    if (filterRule && conn.rule !== filterRule) return false;
-    if (filterProxy && getChainPath(conn) !== filterProxy) return false;
-    return true;
-  });
+  let totalUpload = $derived(connections.reduce((acc, c) => acc + c.upload, 0));
+  let totalDownload = $derived(connections.reduce((acc, c) => acc + c.download, 0));
+  let filteredConnections = $derived(
+    connections.filter((conn) => {
+      if (filterSource) {
+        const sourceName = getSourceName(conn);
+        if (!sourceName.toLowerCase().includes(filterSource.toLowerCase())) return false;
+      }
+      if (
+        filterDest &&
+        !(conn.metadata.host || '').toLowerCase().includes(filterDest.toLowerCase()) &&
+        !(conn.metadata.destinationIP || '').toLowerCase().includes(filterDest.toLowerCase())
+      )
+        return false;
+      if (filterRule && conn.rule !== filterRule) return false;
+      if (filterProxy && getChainPath(conn) !== filterProxy) return false;
+      return true;
+    })
+  );
 
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {
@@ -310,12 +367,14 @@
         class="toggle-label"
         class:disabled={!isMihomoActive}
         title={!isMihomoActive ? $t('conn.process_mode_disabled_hint') : ''}
+        for="show-process-name-toggle"
       >
         <label class="toggle-switch">
           <input
+            id="show-process-name-toggle"
             type="checkbox"
             bind:checked={showProcessName}
-            on:change={onToggleProcessName}
+            onchange={onToggleProcessName}
             disabled={!isMihomoActive || processModePatchPending}
           />
           <span class="toggle-slider"></span>
@@ -325,8 +384,9 @@
       <button
         class="btn btn-secondary"
         style="color:var(--danger);"
-        on:click={closeAllConnections}
+        onclick={closeAllConnections}
         disabled={connections.length === 0}
+        title={$t('conn.close_all')}
       >
         {$t('conn.close_all')}
       </button>
@@ -356,35 +416,43 @@
     />
   {:else}
     <div class="toolbar mb-2">
-      <div class="filters" style="display: flex; gap: 8px; flex-wrap: wrap; width: 100%;">
+      <div class="filters">
+        <label for="filter-source" class="sr-only">{$t('conn.source')}</label>
         <input
+          id="filter-source"
           type="text"
           placeholder={$t('conn.source') + ' (IP)...'}
           bind:value={filterSource}
-          class="filter-input"
-          style="flex: 1; min-width: 140px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary);"
+          class="filter-input filter-src"
+          title={$t('conn.source')}
         />
+        <label for="filter-dest" class="sr-only">{$t('conn.destination')}</label>
         <input
+          id="filter-dest"
           type="text"
           placeholder={$t('conn.destination') + ' (host / IP)...'}
           bind:value={filterDest}
-          class="filter-input"
-          style="flex: 1; min-width: 180px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary);"
+          class="filter-input filter-dest"
+          title={$t('conn.destination')}
         />
+        <label for="filter-rule" class="sr-only">{$t('conn.rule')}</label>
         <select
+          id="filter-rule"
           bind:value={filterRule}
-          class="filter-input"
-          style="flex: 1; min-width: 140px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary); font-family: inherit; font-size: 13px;"
+          class="filter-select filter-rule"
+          title={$t('conn.rule')}
         >
           <option value="">{$t('conn.all_rules')}</option>
           {#each uniqueRules as rule}
             <option value={rule}>{rule}</option>
           {/each}
         </select>
+        <label for="filter-proxy" class="sr-only">{$t('conn.chain')}</label>
         <select
+          id="filter-proxy"
           bind:value={filterProxy}
-          class="filter-input"
-          style="flex: 1; min-width: 140px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-card); color: var(--fg-primary); font-family: inherit; font-size: 13px;"
+          class="filter-select filter-proxy"
+          title={$t('conn.chain')}
         >
           <option value="">{$t('conn.all_chains')}</option>
           {#each uniqueChains as chain}
@@ -442,6 +510,7 @@
             {/each}
           {:else}
             {#each filteredConnections as conn (conn.id)}
+              {@const speed = connectionSpeeds.get(conn.id)}
               <tr class="conn-row">
                 <td class="mono col-src">{getSourceName(conn)}</td>
                 <td class="mono col-host">
@@ -470,20 +539,30 @@
                 </td>
                 <td
                   class="mono col-traffic col-upload"
-                  style="text-align:right;color:var(--accent);">{formatBytes(conn.upload)}</td
+                  style="text-align:right;color:var(--accent);"
                 >
+                  <div>{formatBytes(conn.upload)}</div>
+                  {#if speed}
+                    <div class="speed-sub">{formatBytes(speed.uploadSpeed)}/s</div>
+                  {/if}
+                </td>
                 <td
                   class="mono col-traffic col-download"
-                  style="text-align:right;color:var(--accent);">{formatBytes(conn.download)}</td
+                  style="text-align:right;color:var(--accent);"
                 >
-                <td class="mono col-duration" style="text-align:right;color:var(--fg-dim);"
-                  >{getDuration(conn.start)}</td
-                >
+                  <div>{formatBytes(conn.download)}</div>
+                  {#if speed}
+                    <div class="speed-sub">{formatBytes(speed.downloadSpeed)}/s</div>
+                  {/if}
+                </td>
+                <td class="mono col-duration" style="text-align:right;color:var(--fg-dim);">
+                  {getDuration(conn.start)}
+                </td>
                 <td style="text-align:center;">
                   <button
                     class="btn btn-secondary btn-close-conn"
                     style="padding: 4px 8px; color: var(--danger); border-color: transparent;"
-                    on:click={() => closeConnection(conn.id)}
+                    onclick={() => closeConnection(conn.id)}
                     title={$t('app.close')}
                   >
                     ×
@@ -505,6 +584,51 @@
 </div>
 
 <style>
+  /* Filters toolbar layout and controls */
+  .filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .filters .filter-input,
+  .filters .filter-select {
+    flex: 1;
+    min-width: 140px;
+    height: 34px;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 6px);
+    background: var(--bg-card);
+    color: var(--fg-primary);
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+    cursor: pointer;
+    transition:
+      border-color 0.2s,
+      box-shadow var(--transition-fast);
+  }
+  .filters .filter-input {
+    cursor: text;
+  }
+  .filters .filter-input:focus,
+  .filters .filter-select:focus {
+    border-color: var(--color-accent, var(--accent, #29c2f0));
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .filters .filter-dest {
+    min-width: 180px;
+  }
+
+  /* Speed and latency displays in connections table */
+  .speed-sub {
+    font-size: 11px;
+    color: var(--fg-dim);
+    margin-top: 2px;
+  }
+
   /* Toggle disabled state */
   .toggle-label.disabled {
     opacity: 0.45;

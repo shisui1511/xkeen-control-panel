@@ -383,10 +383,10 @@
       <p class="sub">{$t('smartproxy.subtitle')}</p>
     </div>
     <div class="ph-actions" style="display:flex; gap:10px;">
-      <button class="btn btn-secondary" on:click={() => createFromTemplate('always')}>
+      <button class="btn btn-secondary" onclick={() => createFromTemplate('always')}>
         {$t('smartproxy.from_template')}
       </button>
-      <button class="btn btn-primary" on:click={startCreate}>
+      <button class="btn btn-primary" onclick={startCreate}>
         <svg
           width="14"
           height="14"
@@ -444,7 +444,7 @@
         <!-- Card 1: Night VPN -->
         <div
           class="card template-card"
-          on:click={() => createFromTemplate('night')}
+          onclick={() => createFromTemplate('night')}
           role="button"
           tabindex="0"
         >
@@ -470,7 +470,7 @@
         <!-- Card 2: Workdays -->
         <div
           class="card template-card"
-          on:click={() => createFromTemplate('workday')}
+          onclick={() => createFromTemplate('workday')}
           role="button"
           tabindex="0"
         >
@@ -499,7 +499,7 @@
         <!-- Card 3: 24/7 -->
         <div
           class="card template-card"
-          on:click={() => createFromTemplate('always')}
+          onclick={() => createFromTemplate('always')}
           role="button"
           tabindex="0"
         >
@@ -525,7 +525,7 @@
       </div>
 
       <div style="margin-top:24px; text-align:center;">
-        <button class="btn btn-primary" on:click={startCreate}>
+        <button class="btn btn-primary" onclick={startCreate}>
           {$t('smartproxy.create_manually')}
         </button>
       </div>
@@ -550,25 +550,25 @@
 
             <div style="margin-left:auto; display:flex; align-items:center; gap:12px;">
               <label class="toggle-switch">
-                <input type="checkbox" checked={p.enabled} on:change={() => toggleEnabled(p)} />
+                <input type="checkbox" checked={p.enabled} onchange={() => toggleEnabled(p)} />
                 <span class="toggle-slider"></span>
               </label>
 
               <div class="dropdown-container">
                 <button
                   class="btn btn-secondary action-btn-dots"
-                  on:click={() => toggleDropdown(p.id)}>⋯</button
+                  onclick={() => toggleDropdown(p.id)}>⋯</button
                 >
                 {#if activeDropdownId === p.id}
                   <div class="dropdown-menu">
                     <button
-                      on:click={() => {
+                      onclick={() => {
                         startEdit(p);
                         activeDropdownId = null;
                       }}>{$t('app.edit')}</button
                     >
                     <button
-                      on:click={() => {
+                      onclick={() => {
                         deleteProfile(p.id);
                         activeDropdownId = null;
                       }}
@@ -627,13 +627,13 @@
     class="modal-overlay"
     role="button"
     tabindex="0"
-    on:click={cancelEdit}
-    on:keydown={handleKeydown}
+    onclick={cancelEdit}
+    onkeydown={handleKeydown}
   >
-    <div class="modal-card" role="presentation" on:click|stopPropagation>
+    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
       <div class="modal-card-header">
         <h2>{editingProfile ? $t('smartproxy.edit_profile') : $t('smartproxy.new_profile')}</h2>
-        <button class="modal-close-btn" on:click={cancelEdit}>&times;</button>
+        <button class="modal-close-btn" onclick={cancelEdit}>&times;</button>
       </div>
 
       <!-- Step Indicators -->
@@ -739,13 +739,13 @@
         <!-- STEP 3: Grid Scheduler -->
         {#if currentStep === 3}
           <div class="grid-presets-toolbar">
-            <button type="button" class="btn btn-secondary btn-sm" on:click={presetFillAll}>
+            <button type="button" class="btn btn-secondary btn-sm" onclick={presetFillAll}>
               {$t('smartproxy.preset_fill')}
             </button>
-            <button type="button" class="btn btn-secondary btn-sm" on:click={presetClearAll}>
+            <button type="button" class="btn btn-secondary btn-sm" onclick={presetClearAll}>
               {$t('smartproxy.preset_clear')}
             </button>
-            <button type="button" class="btn btn-secondary btn-sm" on:click={presetWorkdays}>
+            <button type="button" class="btn btn-secondary btn-sm" onclick={presetWorkdays}>
               {$t('smartproxy.preset_workdays')}
             </button>
           </div>
@@ -774,8 +774,11 @@
                     <div
                       class="grid-cell"
                       class:active={isCellActive}
-                      on:mousedown|preventDefault={() => handleCellMouseDown(d, h)}
-                      on:mouseenter={() => handleCellMouseEnter(d, h)}
+                      onmousedown={(e) => {
+                        e.preventDefault();
+                        handleCellMouseDown(d, h);
+                      }}
+                      onmouseenter={() => handleCellMouseEnter(d, h)}
                       role="presentation"
                     ></div>
                   {/each}
@@ -788,21 +791,21 @@
 
       <div class="modal-card-footer">
         {#if currentStep > 1}
-          <button class="btn btn-secondary" on:click={prevStep} style="margin-right:auto;">
+          <button class="btn btn-secondary" onclick={prevStep} style="margin-right:auto;">
             {$t('app.back')}
           </button>
         {/if}
-        <button class="btn btn-secondary" on:click={cancelEdit}>{$t('app.cancel')}</button>
+        <button class="btn btn-secondary" onclick={cancelEdit}>{$t('app.cancel')}</button>
         {#if currentStep < 3}
           <button
             class="btn btn-primary"
-            on:click={nextStep}
+            onclick={nextStep}
             disabled={currentStep === 2 && (!formGroupName || !formProxyName)}
           >
             {$t('app.continue')}
           </button>
         {:else}
-          <button class="btn btn-primary" on:click={saveProfile}>
+          <button class="btn btn-primary" onclick={saveProfile}>
             {$t('app.save')}
           </button>
         {/if}

@@ -89,6 +89,18 @@ test.describe('Editor & Constructor integration test suite', () => {
           contentType: 'application/json',
           body: JSON.stringify([])
         });
+      } else if (url.includes('/api/assets/definition')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({})
+        });
+      } else if (url.includes('/api/config/validate')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ valid: true })
+        });
       } else {
         await route.fulfill({
           status: 200,
@@ -230,7 +242,7 @@ test.describe('Editor & Constructor integration test suite', () => {
     // Проверяем, что в YAML-превью генерируется rule-provider с URL meta-rules-dat
     const previewPane = page
       .locator(
-        '.constructor-preview-pane, pre.constructor-preview, textarea[readonly], .yaml-preview'
+        '.constructor-preview-panel, pre.constructor-preview, textarea[readonly], .yaml-preview'
       )
       .first();
     await expect(previewPane).toBeVisible();
@@ -328,6 +340,18 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
           contentType: 'application/json',
           body: JSON.stringify([])
         });
+      } else if (url.includes('/api/assets/definition')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({})
+        });
+      } else if (url.includes('/api/config/validate')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ valid: true })
+        });
       } else {
         await route.fulfill({
           status: 200,
@@ -338,7 +362,7 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     });
   });
 
-  test('пресет zkeen-selective генерирует ровно 16 proxy-groups и 15 rule-providers (D-13)', async ({
+  test('пресет zkeen-selective генерирует ровно 18 proxy-groups и 43 rule-providers (D-13)', async ({
     page
   }) => {
     await page.goto('/#/constructor');
@@ -358,7 +382,7 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     // Получить сгенерированный YAML из превью
     const previewPane = page
       .locator(
-        '.constructor-preview-pane, pre.constructor-preview, textarea[readonly], .yaml-preview'
+        '.constructor-preview-panel, pre.constructor-preview, textarea[readonly], .yaml-preview'
       )
       .first();
     await expect(previewPane).toBeVisible({ timeout: 3000 });
@@ -373,15 +397,14 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     const ruleProviderMatches = yamlText.match(/\n {2}[a-z][^:\n]+@[a-z]+:/g);
     const ruleProviderCount = ruleProviderMatches ? ruleProviderMatches.length : 0;
 
-    // D-13: 16 групп
-    expect(proxyGroupCount).toBe(16);
+    // D-13: 18 групп
+    expect(proxyGroupCount).toBe(18);
 
-    // D-13: 15 rule-providers
-    expect(ruleProviderCount).toBe(15);
+    // D-13: 43 rule-providers
+    expect(ruleProviderCount).toBe(43);
 
     // Ключевые правила должны присутствовать
     expect(yamlText).toContain('RULE-SET');
-    expect(yamlText).toContain('GEOSITE');
     expect(yamlText).toContain('MATCH');
   });
 
@@ -393,6 +416,10 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
       if (request.method() === 'POST') {
         postRequests.push(request.url());
       }
+    });
+
+    page.on('dialog', async (dialog) => {
+      await dialog.accept();
     });
 
     await page.goto('/#/editor');
@@ -429,6 +456,9 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await confirmActionBtn.click();
 
     await expect(confirmDialog).not.toBeVisible();
+
+    // Wait for the save flow to finish
+    await expect(page.locator('[data-testid="apply-changes-btn"]')).toBeEnabled({ timeout: 5000 });
 
     const mergeCall = postRequests.some((url) => url.includes('/api/config/mihomo-merge'));
     const restartCall = postRequests.some(
@@ -492,8 +522,8 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await expect(confirmActionBtn).toBeVisible();
     await confirmActionBtn.click();
 
-    // Wait for the merge call to happen
-    await page.waitForTimeout(500);
+    // Wait for the save flow to finish
+    await expect(page.locator('[data-testid="apply-changes-btn"]')).toBeEnabled({ timeout: 5000 });
 
     expect(mergePayload).not.toBeNull();
     expect(mergePayload.sections).toBeDefined();

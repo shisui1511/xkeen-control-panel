@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { t, setLang, currentLang, getAvailableLangs, type Lang } from './i18n';
   import Icon from './lib/components/Icon.svelte';
+  import StorageCard from './lib/components/StorageCard.svelte';
   import {
     capabilities,
     fetchCapabilities,
@@ -48,6 +49,90 @@
   let snapshotLabel = '';
   let creatingSnapshot = false;
   let restoringSnapshot = '';
+  let uploading = false;
+  let isDragOver = false;
+
+  async function uploadBackup(file: File) {
+    if (!file) return;
+    if (!file.name.endsWith('.tar.gz')) {
+      showToast('error', 'Invalid file format, only .tar.gz is allowed');
+      return;
+    }
+    uploading = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const formData = new FormData();
+      formData.append('backup', file);
+
+      const res = await fetch('/api/snapshots/upload', {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken || ''
+        },
+        body: formData
+      });
+
+      if (res.ok) {
+        showToast('success', $t('settings.snapshot_uploaded'));
+        fetchSnapshots();
+      } else {
+        const errMsg = await res.text();
+        showToast('error', $t('settings.snapshot_restore_error', { error: errMsg }));
+      }
+    } catch (e: any) {
+      showToast('error', $t('settings.snapshot_restore_error', { error: e.message }));
+    } finally {
+      uploading = false;
+    }
+  }
+
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault();
+    isDragOver = true;
+  }
+
+  function handleDragLeave() {
+    isDragOver = false;
+  }
+
+  function handleDrop(e: DragEvent) {
+    e.preventDefault();
+    isDragOver = false;
+    if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+      uploadBackup(e.dataTransfer.files[0]);
+    }
+  }
+
+  function handleFileSelect(e: Event) {
+    const target = e.target as HTMLInputElement;
+    if (target.files && target.files.length > 0) {
+      uploadBackup(target.files[0]);
+    }
+  }
+
+  let downloadingDiagnostics = false;
+
+  async function downloadDiagnostics() {
+    downloadingDiagnostics = true;
+    try {
+      const res = await fetch('/api/system/diagnostics');
+      if (!res.ok) {
+        showToast('error', await res.text());
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `xcp-diagnostics-${new Date().toISOString().slice(0, 10)}.tar.gz`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      showToast('error', e instanceof Error ? e.message : String(e));
+    } finally {
+      downloadingDiagnostics = false;
+    }
+  }
 
   async function fetchSnapshots() {
     try {
@@ -616,12 +701,95 @@
     }
   }
 
+  let templatesVersion = '';
+  let templatesRepoUrl = '';
+  let templatesLastCheck = '';
+  let templatesHasUpdate = false;
+  let checkingTemplates = false;
+  let updatingTemplates = false;
+  let templatesIncompatible = false;
+  let templatesWarningMessage = '';
+
+  async function fetchTemplatesStatus() {
+    try {
+      const res = await fetch('/api/templates/status');
+      if (res.ok) {
+        const data = await res.json();
+        templatesVersion = data.current_version || '';
+        templatesRepoUrl = data.templates_repo_url || '';
+        templatesHasUpdate = data.has_update || false;
+        templatesIncompatible = data.incompatible || false;
+        templatesWarningMessage = data.warning_message || '';
+        if (data.last_check && data.last_check !== '0001-01-01T00:00:00Z') {
+          const date = new Date(data.last_check);
+          templatesLastCheck = date.toLocaleString();
+        } else {
+          templatesLastCheck = '';
+        }
+      }
+    } catch (_) {}
+  }
+
+  async function checkTemplatesUpdates() {
+    checkingTemplates = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/templates/check', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        templatesHasUpdate = data.has_update || false;
+        await fetchTemplatesStatus();
+        if (templatesHasUpdate) {
+          showToast('info', $t('editor.update_available') || 'Update available');
+        } else {
+          showToast('success', $t('editor.up_to_date') || 'Up to date');
+        }
+      } else {
+        showToast('error', await res.text());
+        await fetchTemplatesStatus();
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+      await fetchTemplatesStatus();
+    } finally {
+      checkingTemplates = false;
+    }
+  }
+
+  async function installTemplatesUpdates() {
+    updatingTemplates = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token');
+      const res = await fetch('/api/templates/update', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken || '' }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast('success', $t('editor.templates_updated') || 'Templates updated');
+        await fetchTemplatesStatus();
+      } else {
+        showToast('error', await res.text());
+        await fetchTemplatesStatus();
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+      await fetchTemplatesStatus();
+    } finally {
+      updatingTemplates = false;
+    }
+  }
+
   onMount(async () => {
     fetchVersion();
     fetchCapabilities();
     fetchDevMode();
     loadAppearanceSettings();
     fetchUpdateChannel();
+    fetchTemplatesStatus();
 
     await fetchStatus();
     if (updateStatus && !['idle', 'done', 'failed'].includes(updateStatus.status)) {
@@ -656,29 +824,29 @@
     <button
       class="stab"
       class:active={activeTab === 'general'}
-      on:click={() => (activeTab = 'general')}>{$t('settings.tab_general')}</button
+      onclick={() => (activeTab = 'general')}>{$t('settings.tab_general')}</button
     >
     <button
       class="stab"
       class:active={activeTab === 'updates'}
-      on:click={() => (activeTab = 'updates')}>{$t('settings.tab_updates')}</button
+      onclick={() => (activeTab = 'updates')}>{$t('settings.tab_updates')}</button
     >
     <button
       class="stab"
       class:active={activeTab === 'security'}
-      on:click={() => (activeTab = 'security')}>{$t('settings.tab_security')}</button
+      onclick={() => (activeTab = 'security')}>{$t('settings.tab_security')}</button
     >
     <button
       class="stab"
       class:active={activeTab === 'connection'}
-      on:click={() => (activeTab = 'connection')}>{$t('settings.tab_connection')}</button
+      onclick={() => (activeTab = 'connection')}>{$t('settings.tab_connection')}</button
     >
     <button
       class="stab"
       class:active={activeTab === 'backups'}
-      on:click={() => (activeTab = 'backups')}>{$t('settings.tab_backups')}</button
+      onclick={() => (activeTab = 'backups')}>{$t('settings.tab_backups')}</button
     >
-    <button class="stab" class:active={activeTab === 'about'} on:click={() => (activeTab = 'about')}
+    <button class="stab" class:active={activeTab === 'about'} onclick={() => (activeTab = 'about')}
       >{$t('settings.tab_about')}</button
     >
   </div>
@@ -693,7 +861,7 @@
           <select
             class="field-select"
             value={$currentLang}
-            on:change={handleLangChange}
+            onchange={handleLangChange}
             title={$t('settings.language')}
           >
             {#each langs as lang}
@@ -709,7 +877,7 @@
           <select
             class="field-select"
             bind:value={timezone}
-            on:change={() => saveSetting('timezone', timezone)}
+            onchange={() => saveSetting('timezone', timezone)}
             title={$t('settings.timezone')}
           >
             <option value="UTC">UTC</option>
@@ -725,6 +893,8 @@
       </div>
     </div>
 
+    <StorageCard />
+
     <div class="card mb-2">
       <div class="card-label">{$t('settings.section_appearance')}</div>
       <div class="field-group">
@@ -737,17 +907,17 @@
             <button
               class="seg-opt"
               class:seg-active={selectedTheme === 'light'}
-              on:click={() => setTheme('light')}>{$t('settings.theme_light_btn')}</button
+              onclick={() => setTheme('light')}>{$t('settings.theme_light_btn')}</button
             >
             <button
               class="seg-opt"
               class:seg-active={selectedTheme === 'dark'}
-              on:click={() => setTheme('dark')}>{$t('settings.theme_dark_btn')}</button
+              onclick={() => setTheme('dark')}>{$t('settings.theme_dark_btn')}</button
             >
             <button
               class="seg-opt"
               class:seg-active={selectedTheme === 'auto'}
-              on:click={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button
+              onclick={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button
             >
           </div>
         </div>
@@ -760,7 +930,7 @@
             <input
               type="checkbox"
               bind:checked={animationsEnabled}
-              on:change={() => saveSetting('animations', String(animationsEnabled))}
+              onchange={() => saveSetting('animations', String(animationsEnabled))}
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -780,7 +950,7 @@
             <input
               type="checkbox"
               bind:checked={autoRefresh}
-              on:change={() => saveSetting('autoRefresh', String(autoRefresh))}
+              onchange={() => saveSetting('autoRefresh', String(autoRefresh))}
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -794,7 +964,7 @@
             <input
               type="checkbox"
               bind:checked={confirmDangerous}
-              on:change={() => saveSetting('confirmDangerous', String(confirmDangerous))}
+              onchange={() => saveSetting('confirmDangerous', String(confirmDangerous))}
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -808,7 +978,7 @@
             <input
               type="checkbox"
               bind:checked={notificationSound}
-              on:change={() => saveSetting('notificationSound', String(notificationSound))}
+              onchange={() => saveSetting('notificationSound', String(notificationSound))}
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -822,7 +992,7 @@
             <input
               type="checkbox"
               checked={$devMode}
-              on:change={(e) => setDevMode((e.target as HTMLInputElement).checked)}
+              onchange={(e) => setDevMode((e.target as HTMLInputElement).checked)}
             />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
@@ -856,7 +1026,7 @@
                 <button
                   class="channel-btn"
                   class:active={updateChannel === ch}
-                  on:click={() => saveUpdateChannel(ch)}
+                  onclick={() => saveUpdateChannel(ch)}
                   disabled={updateInstalling}>{$t(`settings.channel_${ch}`)}</button
                 >
               {/each}
@@ -898,7 +1068,7 @@
       <div class="card-actions">
         <button
           class="btn btn-secondary"
-          on:click={() => checkUpdate()}
+          onclick={() => checkUpdate()}
           disabled={updateChecking || updateInstalling}
           title={$t('settings.check_update')}
         >
@@ -907,7 +1077,7 @@
         {#if updateInfo?.has_update}
           <button
             class="btn btn-primary"
-            on:click={() => (showConfirmUpdateModal = true)}
+            onclick={() => (showConfirmUpdateModal = true)}
             disabled={updateInstalling}
             title={$t('settings.install_update')}
           >
@@ -915,8 +1085,68 @@
           </button>
         {/if}
         {#if updateStatus?.status === 'failed'}
-          <button class="btn btn-danger" on:click={rollbackUpdate} title={$t('settings.rollback')}>
+          <button class="btn btn-danger" onclick={rollbackUpdate} title={$t('settings.rollback')}>
             {$t('settings.rollback')}
+          </button>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Templates updates card -->
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.templates_title')}</div>
+      {#if templatesIncompatible}
+        <div class="alert alert-warning" style="margin-top: 0; margin-bottom: 12px;">
+          <strong>{$t('settings.templates_incompatible_warning')}</strong>
+          {templatesWarningMessage}
+        </div>
+      {/if}
+      <div class="field-group">
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.templates_repo_url')}</span>
+          <span
+            class="field-row-val mono"
+            style="font-size: 11px; word-break: break-all; text-align: right; max-width: 70%;"
+            >{templatesRepoUrl || '...'}</span
+          >
+        </div>
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.current_version')}</span>
+          <span class="field-row-val mono">{templatesVersion || '...'}</span>
+        </div>
+        <div class="field-row">
+          <span class="field-row-name">{$t('settings.templates_last_check')}</span>
+          <span class="field-row-val mono">
+            {templatesLastCheck ? templatesLastCheck : $t('settings.templates_never_checked')}
+          </span>
+        </div>
+        {#if templatesHasUpdate}
+          <div class="field-row">
+            <span class="field-row-name" style="color: var(--warning)"
+              >{$t('editor.update_available')}</span
+            >
+            <span class="field-row-val" style="color: var(--warning)">Yes</span>
+          </div>
+        {/if}
+      </div>
+
+      <div class="card-actions">
+        <button
+          class="btn btn-secondary"
+          onclick={checkTemplatesUpdates}
+          disabled={checkingTemplates || updatingTemplates}
+          title={$t('settings.check_updates')}
+        >
+          {checkingTemplates ? $t('settings.checking') : $t('settings.check_updates')}
+        </button>
+        {#if templatesHasUpdate}
+          <button
+            class="btn btn-primary"
+            onclick={installTemplatesUpdates}
+            disabled={updatingTemplates}
+            title={$t('settings.install_updates')}
+          >
+            {updatingTemplates ? $t('settings.installing') : $t('settings.install_updates')}
           </button>
         {/if}
       </div>
@@ -928,13 +1158,13 @@
       class="modal-overlay"
       role="button"
       tabindex="0"
-      on:click={() => (showConfirmUpdateModal = false)}
-      on:keydown={(e) => e.key === 'Escape' && (showConfirmUpdateModal = false)}
+      onclick={() => (showConfirmUpdateModal = false)}
+      onkeydown={(e) => e.key === 'Escape' && (showConfirmUpdateModal = false)}
     >
-      <div class="modal-card" role="presentation" on:click|stopPropagation>
+      <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
         <div class="modal-card-header">
           <h2>{$t('settings.update_confirm_title')}</h2>
-          <button class="modal-close-btn" on:click={() => (showConfirmUpdateModal = false)}
+          <button class="modal-close-btn" onclick={() => (showConfirmUpdateModal = false)}
             >&times;</button
           >
         </div>
@@ -947,12 +1177,12 @@
           {/if}
         </div>
         <div class="modal-card-footer">
-          <button class="btn btn-secondary" on:click={() => (showConfirmUpdateModal = false)}
+          <button class="btn btn-secondary" onclick={() => (showConfirmUpdateModal = false)}
             >{$t('app.cancel')}</button
           >
           <button
             class="btn btn-primary"
-            on:click={() => {
+            onclick={() => {
               showConfirmUpdateModal = false;
               installUpdate();
             }}>{$t('settings.update_install_btn')}</button
@@ -977,7 +1207,7 @@
               class="input"
               style="min-width: 250px;"
               bind:value={selectedFile}
-              on:change={fetchBackups}
+              onchange={fetchBackups}
               title={$t('settings.backup_file')}
             >
               {#each configFiles as file}
@@ -986,7 +1216,7 @@
                 <option value="">{$t('settings.no_files')}</option>
               {/each}
             </select>
-            <button class="btn btn-primary btn-sm" on:click={createBackup} disabled={!selectedFile}>
+            <button class="btn btn-primary btn-sm" onclick={createBackup} disabled={!selectedFile}>
               {$t('settings.backup_create_btn')}
             </button>
           </div>
@@ -1015,14 +1245,14 @@
               <div class="ctrl">
                 <button
                   class="btn btn-secondary btn-sm"
-                  on:click={() => restoreBackup(backup)}
+                  onclick={() => restoreBackup(backup)}
                   title={$t('settings.backup_restore_btn')}
                 >
                   {$t('settings.backup_restore_btn')}
                 </button>
                 <button
                   class="btn btn-danger btn-sm"
-                  on:click={() => deleteBackup(backup)}
+                  onclick={() => deleteBackup(backup)}
                   title={$t('app.delete')}
                 >
                   {$t('app.delete')}
@@ -1038,63 +1268,218 @@
     <div style="border-top: 1px solid var(--border); margin: 24px 0;"></div>
 
     <!-- Section 2: Snapshots -->
-    <div class="card" style="margin-top:0;">
+    <div
+      class="card premium-backup-card"
+      style="margin-top: 0; background: #102a44; border: 1px solid var(--border); transition: all 0.3s ease;"
+    >
       <div
         class="card-title-row"
-        style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;"
+        style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;"
       >
-        <h2 class="card-title" style="margin:0;">{$t('settings.section_snapshots')}</h2>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <Icon name="archive" size={20} color="var(--accent)" />
+          <h2
+            class="card-title"
+            style="margin: 0; font-size: 1.1rem; color: var(--fg-primary); font-weight: 600;"
+          >
+            {$t('settings.section_snapshots')}
+          </h2>
+        </div>
       </div>
+
+      <!-- Control panel to create a backup -->
       <div
-        class="field-row"
-        style="border-bottom:1px solid var(--border-light);padding-bottom:12px;margin-bottom:12px;"
+        class="field-row select-row"
+        style="margin-bottom: 20px; gap: 12px; align-items: center; background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: var(--radius-md);"
       >
-        <input
-          class="input"
-          style="flex:1;margin-right:8px;"
-          type="text"
-          placeholder={$t('settings.snapshot_label_placeholder')}
-          bind:value={snapshotLabel}
-        />
-        <button class="btn btn-primary" on:click={createSnapshot} disabled={creatingSnapshot}>
-          {creatingSnapshot ? $t('app.loading') : $t('settings.snapshot_create_btn')}
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+          <input
+            class="input"
+            style="width: 100%; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.2); color: var(--fg-primary);"
+            type="text"
+            placeholder={$t('settings.snapshot_label_placeholder')}
+            bind:value={snapshotLabel}
+            disabled={creatingSnapshot || uploading || restoringSnapshot !== ''}
+          />
+        </div>
+        <button
+          class="btn"
+          style="background: #29c2f0; color: #fff; border: none; display: flex; align-items: center; gap: 8px; font-weight: 500; min-width: 150px; justify-content: center; transition: all 0.2s;"
+          onclick={createSnapshot}
+          disabled={creatingSnapshot || uploading || restoringSnapshot !== ''}
+        >
+          {#if creatingSnapshot}
+            <span
+              class="spinner"
+              style="border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid #fff; border-radius: 50%; width: 14px; height: 14px; display: inline-block; animation: spin 1s linear infinite;"
+            ></span>
+            <span>{$t('app.loading')}</span>
+          {:else}
+            <Icon name="plus" size={16} />
+            <span>{$t('settings.snapshot_create_btn')}</span>
+          {/if}
         </button>
       </div>
-      {#if snapshots.length === 0}
-        <div style="color:var(--fg-secondary);font-size:13px;text-align:center;padding:12px 0;">
-          {$t('settings.snapshots_empty')}
-        </div>
-      {:else}
-        {#each snapshots as snap}
-          <div class="field-row snapshot-row">
-            <div>
-              <div class="lbl mono">{snap.label || snap.id}</div>
-              <div class="desc" style="font-size:11px;">
-                {new Date(snap.created_at * 1000).toLocaleString()} · {formatSnapshotSize(
-                  snap.size_bytes
-                )}
-              </div>
+
+      <!-- Interactive backup table -->
+      <div
+        class="table-container"
+        style="margin-bottom: 20px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.15);"
+      >
+        {#if snapshots.length === 0}
+          <div
+            style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; gap: 12px;"
+          >
+            <Icon name="database" size={40} color="var(--fg-dim)" />
+            <div style="font-weight: 500; font-size: 15px; color: var(--fg-primary);">
+              {$t('settings.snapshots_empty')}
             </div>
-            <div class="ctrl" style="gap:6px;">
-              <a class="btn btn-secondary" href="/api/snapshots/{snap.id}/download" download>
-                {$t('settings.snapshot_download_btn')}
-              </a>
-              <button
-                class="btn btn-secondary"
-                on:click={() => restoreSnapshot(snap.id)}
-                disabled={restoringSnapshot === snap.id}
-              >
-                {restoringSnapshot === snap.id
-                  ? $t('app.loading')
-                  : $t('settings.snapshot_restore_btn')}
-              </button>
-              <button class="btn btn-danger" on:click={() => deleteSnapshot(snap.id)}>
-                {$t('settings.snapshot_delete_btn')}
-              </button>
+            <div style="color: var(--fg-dim); font-size: 12px; max-width: 380px;">
+              {$t('settings.snapshots_empty_desc')}
             </div>
           </div>
-        {/each}
-      {/if}
+        {:else}
+          <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">
+            <thead>
+              <tr style="background: rgba(0, 0, 0, 0.3); border-bottom: 1px solid var(--border);">
+                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 18%;"
+                  >ID</th
+                >
+                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500;"
+                  >Комментарий</th
+                >
+                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 12%;"
+                  >Размер</th
+                >
+                <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 22%;"
+                  >Дата создания</th
+                >
+                <th
+                  style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 25%; text-align: right;"
+                  >Действия</th
+                >
+              </tr>
+            </thead>
+            <tbody>
+              {#each snapshots as snap}
+                <tr
+                  class="backup-tr"
+                  style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.2s ease;"
+                >
+                  <td
+                    style="padding: 12px 16px; font-family: var(--font-mono); color: var(--fg-primary);"
+                    >{snap.id}</td
+                  >
+                  <td style="padding: 12px 16px; color: var(--fg-primary); font-weight: 500;"
+                    >{snap.label || '—'}</td
+                  >
+                  <td style="padding: 12px 16px; color: var(--fg-secondary);"
+                    >{formatSnapshotSize(snap.size_bytes)}</td
+                  >
+                  <td style="padding: 12px 16px; color: var(--fg-secondary);"
+                    >{new Date(snap.created_at * 1000).toLocaleString()}</td
+                  >
+                  <td style="padding: 12px 16px; text-align: right;">
+                    <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                      <a
+                        class="btn btn-secondary btn-sm"
+                        style="display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px;"
+                        href="/api/snapshots/{snap.id}/download"
+                        download
+                        title={$t('settings.snapshot_download_btn')}
+                      >
+                        <Icon name="download" size={14} />
+                        <span>{$t('settings.snapshot_download_btn')}</span>
+                      </a>
+                      <button
+                        class="btn btn-secondary btn-sm"
+                        style="display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px;"
+                        onclick={() => restoreSnapshot(snap.id)}
+                        disabled={creatingSnapshot || uploading || restoringSnapshot !== ''}
+                      >
+                        {#if restoringSnapshot === snap.id}
+                          <span
+                            class="spinner"
+                            style="border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid var(--fg-primary); border-radius: 50%; width: 12px; height: 12px; display: inline-block; animation: spin 1s linear infinite;"
+                          ></span>
+                          <span>{$t('app.loading')}</span>
+                        {:else}
+                          <Icon name="refresh" size={14} />
+                          <span>{$t('settings.snapshot_restore_btn')}</span>
+                        {/if}
+                      </button>
+                      <button
+                        class="btn btn-danger btn-sm"
+                        style="display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px;"
+                        onclick={() => deleteSnapshot(snap.id)}
+                        disabled={creatingSnapshot || uploading || restoringSnapshot !== ''}
+                      >
+                        <Icon name="trash" size={14} />
+                        <span>{$t('settings.snapshot_delete_btn')}</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </div>
+
+      <!-- Drag-and-Drop Dropzone -->
+      <div
+        role="button"
+        tabindex="0"
+        class="backup-dropzone {isDragOver ? 'drag-over' : ''} {uploading ? 'uploading' : ''}"
+        style="display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px dashed {isDragOver
+          ? '#29c2f0'
+          : 'var(--border)'}; background: {isDragOver
+          ? 'rgba(41, 194, 240, 0.08)'
+          : 'rgba(0, 0, 0, 0.2)'}; border-radius: var(--radius-md); padding: 30px 20px; text-align: center; cursor: {uploading
+          ? 'not-allowed'
+          : 'pointer'}; gap: 8px; transition: all 0.3s ease; position: relative;"
+        ondragover={handleDragOver}
+        ondragleave={handleDragLeave}
+        ondrop={handleDrop}
+        onclick={() => {
+          if (!uploading) document.getElementById('backup-upload-input')?.click();
+        }}
+        onkeydown={(e) => {
+          if (e.key === 'Enter' && !uploading)
+            document.getElementById('backup-upload-input')?.click();
+        }}
+      >
+        <input
+          id="backup-upload-input"
+          type="file"
+          accept=".tar.gz"
+          style="display: none;"
+          onchange={handleFileSelect}
+          disabled={uploading || creatingSnapshot || restoringSnapshot !== ''}
+        />
+
+        {#if uploading}
+          <span
+            class="spinner"
+            style="border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #29c2f0; border-radius: 50%; width: 30px; height: 30px; display: inline-block; animation: spin 1s linear infinite; margin-bottom: 8px;"
+          ></span>
+          <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
+            {$t('settings.snapshot_uploading')}
+          </div>
+        {:else}
+          <span style="transition: color 0.3s; margin-bottom: 4px; display: inline-flex;">
+            <Icon name="upload" size={32} color={isDragOver ? '#29c2f0' : 'var(--fg-dim)'} />
+          </span>
+          <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
+            {isDragOver
+              ? 'Отпустите файл для загрузки'
+              : 'Выберите или перетащите файл резервной копии (.tar.gz) сюда'}
+          </div>
+          <div style="color: var(--fg-dim); font-size: 11px;">
+            Поддерживаются файлы .tar.gz размером до 15 МБ
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 
@@ -1148,7 +1533,7 @@
               {secretVisible ? $capabilities.mihomo.discovered_secret : '••••••••'}
               <button
                 class="btn btn-secondary btn-sm"
-                on:click={() => (secretVisible = !secretVisible)}
+                onclick={() => (secretVisible = !secretVisible)}
               >
                 {secretVisible ? $t('app.hide') : $t('app.show')}
               </button>
@@ -1159,7 +1544,7 @@
       <div class="card-actions">
         <button
           class="btn btn-secondary"
-          on:click={recheckConnection}
+          onclick={recheckConnection}
           disabled={checkingConnection}
           title={$t('settings.recheck_title')}
         >
@@ -1214,7 +1599,7 @@
       <div class="card-actions">
         <button
           class="btn btn-primary"
-          on:click={changePassword}
+          onclick={changePassword}
           disabled={passwordChanging || !currentPassword || !newPassword || !confirmPassword}
           title={$t('settings.save_password')}
         >
@@ -1259,6 +1644,18 @@
           <span class="field-row-name">{$t('settings.backend')}</span>
           <span class="field-row-val mono">Go + net/http</span>
         </div>
+      </div>
+      <div class="card-actions">
+        <button
+          class="btn btn-secondary"
+          onclick={downloadDiagnostics}
+          disabled={downloadingDiagnostics}
+          title={$t('settings.diagnostics_download')}
+        >
+          {downloadingDiagnostics
+            ? $t('settings.diagnostics_downloading')
+            : $t('settings.diagnostics_download')}
+        </button>
       </div>
     </div>
   {/if}
@@ -1806,5 +2203,23 @@
   .btn-sm {
     padding: 6px 12px;
     font-size: 12px;
+  }
+
+  .backup-tr:hover {
+    background: rgba(255, 255, 255, 0.03) !important;
+  }
+
+  .backup-dropzone:hover {
+    border-color: #29c2f0 !important;
+    background: rgba(41, 194, 240, 0.04) !important;
+  }
+
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
   }
 </style>

@@ -10,7 +10,7 @@
  */
 
 import { test, describe, expect } from 'vitest';
-import { mergeXrayFile } from '../src/lib/xrayMerge';
+import { mergeXrayFile, generateDnsOverVlessRules } from '../src/lib/xrayMerge';
 
 // ---------------------------------------------------------------------------
 // D-04: merge сохраняет неуправляемый ключ proxies / кастомный outbound
@@ -254,5 +254,67 @@ describe('mergeXrayFile — идемпотентность', () => {
     const third = mergeXrayFile('02_dns.json', second, managed);
 
     expect(JSON.stringify(third)).toBe(JSON.stringify(second));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DNS-over-VLESS & tag preservation tests
+// ---------------------------------------------------------------------------
+describe('mergeXrayFile (DNS-over-VLESS) — DNS-over-VLESS & tag preservation', () => {
+  test('merge 02_dns.json сохраняет поле tag', () => {
+    const existing = {
+      dns: {
+        tag: 'dns-in-old',
+        servers: ['8.8.8.8']
+      }
+    };
+    const managed = {
+      tag: 'dns-in',
+      servers: ['1.1.1.1']
+    };
+
+    const result = mergeXrayFile('02_dns.json', existing, managed);
+    expect((result.dns as Record<string, any>)?.tag).toBe('dns-in');
+  });
+
+  test('generateDnsOverVlessRules генерирует правильные правила', () => {
+    const rules = generateDnsOverVlessRules('vless-proxy');
+    expect(rules).toHaveLength(2);
+    expect(rules[0]).toEqual({
+      type: 'field',
+      inboundTag: ['dns-in'],
+      outboundTag: 'vless-proxy'
+    });
+    expect(rules[1]).toEqual({
+      type: 'field',
+      port: 53,
+      outboundTag: 'dns-out'
+    });
+  });
+
+  test('merge 04_outbounds.json сохраняет системные и перезаписывает кастомные outbounds', () => {
+    const existing = {
+      outbounds: [
+        { tag: 'direct', protocol: 'freedom' },
+        { tag: 'block', protocol: 'blackhole' },
+        { tag: 'dns-out', protocol: 'dns' },
+        { tag: 'old-custom', protocol: 'vless', settings: { vnext: [{ address: '1.1.1.1' }] } }
+      ]
+    };
+    const managed = {
+      outbounds: [
+        { tag: 'new-custom', protocol: 'vless', settings: { vnext: [{ address: '2.2.2.2' }] } }
+      ]
+    };
+
+    const result = mergeXrayFile('04_outbounds.json', existing, managed);
+    const outbounds = result.outbounds as any[];
+
+    expect(outbounds).toHaveLength(4);
+    expect(outbounds.find((o) => o.tag === 'direct')).toBeDefined();
+    expect(outbounds.find((o) => o.tag === 'block')).toBeDefined();
+    expect(outbounds.find((o) => o.tag === 'dns-out')).toBeDefined();
+    expect(outbounds.find((o) => o.tag === 'old-custom')).toBeUndefined();
+    expect(outbounds.find((o) => o.tag === 'new-custom')).toBeDefined();
   });
 });

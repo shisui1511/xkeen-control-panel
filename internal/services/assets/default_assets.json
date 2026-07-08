@@ -1,0 +1,671 @@
+{
+  "schema_version": "1.0.0",
+  "xray": {
+    "presets": [
+      {
+        "id": "selective-routing",
+        "name": "preset.selective-routing",
+        "description": "preset.selective-routing.desc",
+        "default": true,
+        "dns_over_vless": true,
+        "dns_servers": [
+          "1.1.1.1",
+          {
+            "address": "8.8.8.8",
+            "port": 53,
+            "tag": "dns-in-ytb",
+            "domains": ["geosite:youtube", "geosite:google"],
+            "skipFallback": true
+          },
+          {
+            "address": "77.88.8.8",
+            "port": 53,
+            "tag": "dns-in-direct",
+            "domains": ["geosite:tld-ru"],
+            "skipFallback": false
+          }
+        ],
+        "routing_rules": [
+          {
+            "outboundTag": "direct",
+            "ip": ["geoip:private"]
+          },
+          {
+            "outboundTag": "block",
+            "domain": ["geosite:category-ads-all"]
+          },
+          {
+            "outboundTag": "PROXY_TAG",
+            "network": "tcp,udp"
+          }
+        ]
+      },
+      {
+        "id": "all-proxy-routing",
+        "name": "preset.all-proxy-routing",
+        "description": "preset.all-proxy-routing.desc",
+        "dns_over_vless": true,
+        "dns_servers": ["1.1.1.1", "8.8.8.8"],
+        "routing_rules": [
+          {
+            "outboundTag": "direct",
+            "ip": ["geoip:private"]
+          },
+          {
+            "outboundTag": "PROXY_TAG",
+            "network": "tcp,udp"
+          }
+        ]
+      },
+      {
+        "id": "selective-no-quic",
+        "name": "preset.selective-no-quic",
+        "description": "preset.selective-no-quic.desc",
+        "dns_over_vless": true,
+        "dns_servers": [
+          "1.1.1.1",
+          {
+            "address": "8.8.8.8",
+            "port": 53,
+            "tag": "dns-in-ytb",
+            "domains": ["geosite:youtube", "geosite:google"],
+            "skipFallback": true
+          }
+        ],
+        "routing_rules": [
+          {
+            "outboundTag": "block",
+            "network": "udp",
+            "port": "443"
+          },
+          {
+            "outboundTag": "direct",
+            "ip": ["geoip:private"]
+          },
+          {
+            "outboundTag": "block",
+            "domain": ["geosite:category-ads-all"]
+          },
+          {
+            "outboundTag": "PROXY_TAG",
+            "network": "tcp,udp"
+          }
+        ]
+      },
+      {
+        "id": "minimal-routing",
+        "name": "preset.minimal-routing",
+        "description": "preset.minimal-routing.desc",
+        "dns_over_vless": true,
+        "dns_servers": ["1.1.1.1", "8.8.8.8"],
+        "routing_rules": [
+          {
+            "outboundTag": "direct",
+            "ip": ["geoip:private"]
+          },
+          {
+            "outboundTag": "direct",
+            "port": "0-65535"
+          }
+        ]
+      },
+      {
+        "id": "only-blocked-routing",
+        "name": "preset.only-blocked-routing",
+        "description": "preset.only-blocked-routing.desc",
+        "dns_over_vless": true,
+        "dns_servers": [
+          "1.1.1.1",
+          {
+            "address": "8.8.8.8",
+            "port": 53,
+            "tag": "dns-in-ytb",
+            "domains": ["geosite:category-anticensorship", "geosite:refilter"],
+            "skipFallback": true
+          }
+        ],
+        "routing_rules": [
+          {
+            "outboundTag": "direct",
+            "ip": ["geoip:private"]
+          },
+          {
+            "outboundTag": "PROXY_TAG",
+            "domain": ["geosite:category-anticensorship", "geosite:refilter"]
+          },
+          {
+            "outboundTag": "direct",
+            "port": "0-65535"
+          }
+        ]
+      }
+    ]
+  },
+  "mihomo": {
+    "presets": [
+      {
+        "id": "rule-based",
+        "name": "preset.rule-based",
+        "description": "preset.rule-based.desc",
+        "active_rule_provider": "metacubex",
+        "groups": [
+          {
+            "name": "Selective",
+            "type": "select",
+            "proxies": ["DIRECT"],
+            "include_all": true,
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 300
+          }
+        ],
+        "rules": [],
+        "selected_meta_rule_sets": {
+          "category-ads-all|geosite": "REJECT",
+          "telegram|geoip": "Selective",
+          "private|geoip": "DIRECT"
+        }
+      },
+      {
+        "id": "global-proxy",
+        "name": "preset.global-proxy",
+        "description": "preset.global-proxy.desc",
+        "active_rule_provider": "none",
+        "groups": [
+          {
+            "name": "Proxy",
+            "type": "select",
+            "proxies": ["DIRECT"],
+            "include_all": true,
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 300
+          }
+        ],
+        "rules": [
+          { "type": "GEOIP", "value": "private", "outbound": "DIRECT" },
+          { "type": "MATCH", "value": "", "outbound": "Proxy" }
+        ],
+        "selected_meta_rule_sets": {}
+      },
+      {
+        "id": "zkeen-selective",
+        "name": "preset.zkeen-selective",
+        "description": "preset.zkeen-selective.desc",
+        "default": true,
+        "active_rule_provider": "zkeen",
+        "groups": [
+          {
+            "name": "Заблок. сервисы",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Fallback", "Fastest"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Reject.png"
+          },
+          {
+            "name": "Fallback",
+            "type": "fallback",
+            "include_all": true,
+            "proxies": [],
+            "hidden": true,
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 300,
+            "max_failed_times": 3,
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Auto.png"
+          },
+          {
+            "name": "Fastest",
+            "type": "url-test",
+            "include_all": true,
+            "proxies": [],
+            "hidden": true,
+            "url": "https://www.gstatic.com/generate_204",
+            "interval": 300,
+            "max_failed_times": 3,
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Available.png"
+          },
+          {
+            "name": "YouTube",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png"
+          },
+          {
+            "name": "Discord",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png"
+          },
+          {
+            "name": "Twitch",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png"
+          },
+          {
+            "name": "Reddit",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
+            "icon": "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png"
+          },
+          {
+            "name": "Meta",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
+            "icon": "https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png"
+          },
+          {
+            "name": "Spotify",
+            "type": "select",
+            "include_all": true,
+            "exclude_filter": "🇷🇺",
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png"
+          },
+          {
+            "name": "Speedtest",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png"
+          },
+          {
+            "name": "Telegram",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png"
+          },
+          {
+            "name": "Steam",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png"
+          },
+          {
+            "name": "CDN",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
+            "icon": "https://www.svgrepo.com/show/396567/globe-with-meridians.svg"
+          },
+          {
+            "name": "Google",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png"
+          },
+          {
+            "name": "GitHub",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT", "Заблок. сервисы", "Fallback", "Fastest"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png"
+          },
+          {
+            "name": "AI",
+            "type": "select",
+            "include_all": true,
+            "exclude_filter": "🇷🇺",
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png"
+          },
+          {
+            "name": "Twitter",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png"
+          },
+          {
+            "name": "TikTok",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["Заблок. сервисы", "Fallback", "Fastest", "DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/TikTok.png"
+          }
+        ],
+        "rules": [],
+        "selected_meta_rule_sets": {}
+      },
+      {
+        "id": "only-blocked",
+        "name": "preset.only-blocked",
+        "description": "preset.only-blocked.desc",
+        "active_rule_provider": "zkeen",
+        "groups": [
+          {
+            "name": "Selective",
+            "type": "select",
+            "include_all": true,
+            "proxies": ["DIRECT"],
+            "icon": "https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Proxy.png"
+          }
+        ],
+        "rules": [
+          { "type": "RULE-SET", "value": "refilter@domain", "outbound": "Selective" },
+          { "type": "RULE-SET", "value": "private@ip", "outbound": "DIRECT" },
+          { "type": "MATCH", "value": "", "outbound": "DIRECT" }
+        ],
+        "selected_meta_rule_sets": {}
+      }
+    ],
+    "rule_providers": [
+      {
+        "name": "adlist@domain",
+        "url": "https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "REJECT"
+      },
+      {
+        "name": "category-ai@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "AI"
+      },
+      {
+        "name": "steam@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Steam"
+      },
+      {
+        "name": "spotify@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/spotify.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Spotify"
+      },
+      {
+        "name": "reddit@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/reddit.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Reddit"
+      },
+      {
+        "name": "youtube@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "YouTube"
+      },
+      {
+        "name": "twitch@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitch.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Twitch"
+      },
+      {
+        "name": "twitter@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitter.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Twitter"
+      },
+      {
+        "name": "tiktok@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tiktok.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "TikTok"
+      },
+      {
+        "name": "discord@classical",
+        "url": "https://github.com/zxc-rv/assets/raw/main/rules/discord.list",
+        "behavior": "classical",
+        "format": "text",
+        "outbound": "Discord"
+      },
+      {
+        "name": "speedtest@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/speedtest.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Speedtest"
+      },
+      {
+        "name": "meta@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/meta.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Meta"
+      },
+      {
+        "name": "meta@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/meta@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "Meta"
+      },
+      {
+        "name": "telegram@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/telegram.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Telegram"
+      },
+      {
+        "name": "telegram@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/telegram@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "Telegram"
+      },
+      {
+        "name": "refilter@domain",
+        "url": "https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Заблок. сервисы"
+      },
+      {
+        "name": "roblox@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/roblox.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Заблок. сервисы"
+      },
+      {
+        "name": "github@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/github.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "GitHub"
+      },
+      {
+        "name": "google@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "Google"
+      },
+      {
+        "name": "google@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/google@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "Google"
+      },
+      {
+        "name": "amazon@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/amazon.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "amazon@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/amazon@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "akamai@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/akamai.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "akamai@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/akamai@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "cloudflare@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cloudflare.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "cloudflare@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cloudflare@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "digitalocean@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/digitalocean.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "digitalocean@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/digitalocean@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "fastly@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/fastly.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "fastly@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/fastly@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "oracle@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/oracle.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "oracle@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/oracle@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "hetzner@domain",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hetzner.mrs",
+        "behavior": "domain",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "hetzner@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/hetzner@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "scaleway@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/scaleway@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "ovh@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/ovh@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "vultr@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "vodafone@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vodafone@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "gcore@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/gcore@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "cdn77@ipcidr",
+        "url": "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cdn77@ipcidr.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "CDN"
+      },
+      {
+        "name": "private@ip",
+        "url": "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/private.mrs",
+        "behavior": "ipcidr",
+        "format": "mrs",
+        "outbound": "DIRECT"
+      },
+      {
+        "name": "quic@inline",
+        "url": "",
+        "behavior": "classical",
+        "format": "inline",
+        "outbound": "REJECT",
+        "payload": [
+          "AND,((DST-PORT,443),(NETWORK,UDP))"
+        ]
+      },
+      {
+        "name": "netbios@inline",
+        "url": "",
+        "behavior": "classical",
+        "format": "inline",
+        "outbound": "REJECT",
+        "payload": [
+          "AND,((DST-PORT,135),(NETWORK,UDP))",
+          "AND,((DST-PORT,137),(NETWORK,UDP))",
+          "AND,((DST-PORT,138),(NETWORK,UDP))",
+          "AND,((DST-PORT,139),(NETWORK,UDP))"
+        ]
+      }
+    ]
+  }
+}

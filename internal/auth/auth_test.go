@@ -94,7 +94,7 @@ func TestSessionEviction(t *testing.T) {
 // TestSetupRateLimit verifies that HandleSetup blocks after maxAttempts (3) are exhausted.
 // CheckLimit with maxAttempts=3: attempts 1,2 pass; attempt 3 triggers lock; attempt 4+ returns 429.
 func TestSetupRateLimit(t *testing.T) {
-	svc := newTestAuthService()
+	svc := NewAuthService("", false, 3, 5*time.Minute, nil)
 
 	// First 2 attempts should not be 429 (short password rejected by validation, not rate limit)
 	for i := 0; i < 2; i++ {
@@ -127,6 +127,52 @@ func TestSetupRateLimit(t *testing.T) {
 
 	if rr.Code != http.StatusTooManyRequests {
 		t.Errorf("expected 429 on 4th setup attempt, got %d", rr.Code)
+	}
+}
+
+// TestRateLimitResponseDetails verifies that exceeding the attempts limit returns 429,
+// Retry-After header, and detailed JSON message.
+func TestRateLimitResponseDetails(t *testing.T) {
+	svc := NewAuthService("hash", false, 2, 10*time.Second, nil)
+
+	// 1st login attempt (wrong password) -> 401
+	body, _ := json.Marshal(map[string]string{"password": "wrong"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+	req.RemoteAddr = "1.2.3.4:12345"
+	rr := httptest.NewRecorder()
+	svc.HandleLogin(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", rr.Code)
+	}
+
+	// 2nd login attempt (wrong password) -> triggers lockout and returns 429
+	body, _ = json.Marshal(map[string]string{"password": "wrong"})
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(body))
+	req.RemoteAddr = "1.2.3.4:12345"
+	rr = httptest.NewRecorder()
+	svc.HandleLogin(rr, req)
+	if rr.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", rr.Code)
+	}
+
+	retryAfter := rr.Header().Get("Retry-After")
+	if retryAfter == "" {
+		t.Error("expected Retry-After header, got empty")
+	}
+
+	var resp struct {
+		Error      string `json:"error"`
+		RetryAfter int    `json:"retry_after"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode error json: %v", err)
+	}
+
+	if resp.Error != "too many attempts, account locked" {
+		t.Errorf("expected error message 'too many attempts, account locked', got '%s'", resp.Error)
+	}
+	if resp.RetryAfter <= 0 || resp.RetryAfter > 10 {
+		t.Errorf("expected retry_after between 1 and 10, got %d", resp.RetryAfter)
 	}
 }
 

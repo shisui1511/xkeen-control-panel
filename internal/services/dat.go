@@ -337,6 +337,284 @@ func (s *DATManagerService) ListTags(name string) ([]DATTagResult, error) {
 	return tags, nil
 }
 
+type DATSearchResult struct {
+	Tag     string   `json:"tag"`
+	Entries []string `json:"entries"`
+	Total   int      `json:"total"`
+	Page    int      `json:"page"`
+	HasMore bool     `json:"has_more"`
+}
+
+func (s *DATManagerService) SearchTag(filename, tag, query string, page, pageSize int) (*DATSearchResult, error) {
+	safeName := filepath.Base(filepath.Clean(filename))
+	if !safePathComponentRe.MatchString(safeName) {
+		return nil, fmt.Errorf("invalid file name")
+	}
+
+	var path string
+	for _, dir := range []string{s.xrayDir, s.mihomoDir} {
+		candidate := filepath.Join(dir, safeName)
+		if _, err := os.Stat(candidate); err == nil {
+			path = candidate
+			break
+		}
+	}
+	if path == "" {
+		return nil, fmt.Errorf("file not found: %s", safeName)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	isGeoIP := strings.Contains(strings.ToLower(safeName), "geoip") || strings.Contains(strings.ToLower(tag), "geoip")
+
+	var entries []string
+	pos := 0
+	for pos < len(data) {
+		outerTag, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+		wireType := outerTag & 0x7
+		fieldNum := outerTag >> 3
+
+		if wireType != 2 {
+			pos, _ = pbSkipField(data, pos, wireType)
+			continue
+		}
+
+		length, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		if length > uint64(len(data)-pos-n) {
+			break
+		}
+		pos += n
+		end := pos + int(length)
+
+		if fieldNum == 1 {
+			entryData := data[pos:end]
+			entryTag, _ := parseDATEntry(entryData)
+			if entryTag == tag {
+				if isGeoIP {
+					entries = parseDATEntryCIDRs(entryData)
+				} else {
+					entries = parseDATEntryDomains(entryData)
+				}
+				break
+			}
+		}
+		pos = end
+	}
+
+	var filtered []string
+	if query != "" {
+		lowerQuery := strings.ToLower(query)
+		for _, e := range entries {
+			if strings.Contains(strings.ToLower(e), lowerQuery) {
+				filtered = append(filtered, e)
+			}
+		}
+	} else {
+		filtered = entries
+	}
+
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	total := len(filtered)
+	start := page * pageSize
+	if start < 0 {
+		start = 0
+	}
+	if start > total {
+		start = total
+	}
+
+	endIdx := start + pageSize
+	if endIdx > total {
+		endIdx = total
+	}
+
+	pagedEntries := filtered[start:endIdx]
+	hasMore := endIdx < total
+
+	return &DATSearchResult{
+		Tag:     tag,
+		Entries: pagedEntries,
+		Total:   total,
+		Page:    page,
+		HasMore: hasMore,
+	}, nil
+}
+
+func parseDATEntryDomains(data []byte) []string {
+	var domains []string
+	pos := 0
+	for pos < len(data) {
+		ft, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+		wireType := ft & 0x7
+		fieldNum := ft >> 3
+
+		if wireType != 2 {
+			pos, _ = pbSkipField(data, pos, wireType)
+			continue
+		}
+
+		length, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		if length > uint64(len(data)-pos-n) {
+			break
+		}
+		pos += n
+		end := pos + int(length)
+
+		if fieldNum == 2 {
+			dom := parseSingleDomain(data[pos:end])
+			if dom != "" {
+				domains = append(domains, dom)
+			}
+		}
+		pos = end
+	}
+	return domains
+}
+
+func parseSingleDomain(data []byte) string {
+	var domainVal string
+	pos := 0
+	for pos < len(data) {
+		ft, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+		wireType := ft & 0x7
+		fieldNum := ft >> 3
+
+		if fieldNum == 2 && wireType == 2 {
+			length, n2 := pbReadVarint(data, pos)
+			if n2 == 0 {
+				break
+			}
+			if length > uint64(len(data)-pos-n2) {
+				break
+			}
+			pos += n2
+			end := pos + int(length)
+			domainVal = string(data[pos:end])
+			pos = end
+		} else {
+			var err error
+			pos, err = pbSkipField(data, pos, wireType)
+			if err != nil {
+				break
+			}
+		}
+	}
+	return domainVal
+}
+
+func parseDATEntryCIDRs(data []byte) []string {
+	var cidrs []string
+	pos := 0
+	for pos < len(data) {
+		ft, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+		wireType := ft & 0x7
+		fieldNum := ft >> 3
+
+		if wireType != 2 {
+			pos, _ = pbSkipField(data, pos, wireType)
+			continue
+		}
+
+		length, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		if length > uint64(len(data)-pos-n) {
+			break
+		}
+		pos += n
+		end := pos + int(length)
+
+		if fieldNum == 2 {
+			cidrStr := parseSingleCIDR(data[pos:end])
+			if cidrStr != "" {
+				cidrs = append(cidrs, cidrStr)
+			}
+		}
+		pos = end
+	}
+	return cidrs
+}
+
+func parseSingleCIDR(data []byte) string {
+	var ip []byte
+	var prefix uint32 = 0
+	pos := 0
+	for pos < len(data) {
+		ft, n := pbReadVarint(data, pos)
+		if n == 0 {
+			break
+		}
+		pos += n
+		wireType := ft & 0x7
+		fieldNum := ft >> 3
+
+		if fieldNum == 1 && wireType == 2 {
+			length, n2 := pbReadVarint(data, pos)
+			if n2 == 0 {
+				break
+			}
+			if length > uint64(len(data)-pos-n2) {
+				break
+			}
+			pos += n2
+			end := pos + int(length)
+			ip = data[pos:end]
+			pos = end
+		} else if fieldNum == 2 && wireType == 0 {
+			val, n2 := pbReadVarint(data, pos)
+			if n2 == 0 {
+				break
+			}
+			prefix = uint32(val)
+			pos += n2
+		} else {
+			var err error
+			pos, err = pbSkipField(data, pos, wireType)
+			if err != nil {
+				break
+			}
+		}
+	}
+
+	if len(ip) == 4 || len(ip) == 16 {
+		netIP := net.IP(ip)
+		return fmt.Sprintf("%s/%d", netIP.String(), prefix)
+	}
+	return ""
+}
+
 // parseDATTags extracts country_code tags from a serialised GeoIPList or GeoSiteList.
 //
 // Protobuf encoding used here:
@@ -373,11 +651,11 @@ func parseDATTags(data []byte) ([]DATTagResult, error) {
 		if n == 0 {
 			break
 		}
-		pos += n
-		end := pos + int(length)
-		if end > len(data) {
+		if length > uint64(len(data)-pos-n) {
 			break
 		}
+		pos += n
+		end := pos + int(length)
 
 		if fieldNum == 1 {
 			// Parse entry sub-message to find country_code (field 1) and count entries (field 2)
@@ -418,12 +696,12 @@ func parseDATEntry(data []byte) (string, int) {
 		if n == 0 {
 			break
 		}
+		if length > uint64(len(data)-pos-n) {
+			break
+		}
 		pos += n
 
 		end := pos + int(length)
-		if end > len(data) {
-			break
-		}
 
 		switch fieldNum {
 		case 1: // country_code
@@ -467,6 +745,9 @@ func pbSkipField(data []byte, pos int, wireType uint64) (int, error) {
 		length, n := pbReadVarint(data, pos)
 		if n == 0 {
 			return pos, fmt.Errorf("truncated length")
+		}
+		if length > uint64(len(data)-pos-n) {
+			return len(data), fmt.Errorf("length exceeds data bounds")
 		}
 		return pos + n + int(length), nil
 	case 5: // 32-bit

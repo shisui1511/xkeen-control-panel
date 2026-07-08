@@ -11,24 +11,25 @@ import (
 
 // Config represents the main application configuration structure.
 type Config struct {
-	Port            int         `json:"port"`
-	XRayConfigDir   string      `json:"xray_config_dir"`
-	XKeenBinary     string      `json:"xkeen_binary"`
-	MihomoConfigDir string      `json:"mihomo_config_dir"`
-	MihomoBinary    string      `json:"mihomo_binary"`
-	MihomoAPIURL    string      `json:"mihomo_api_url"`
-	AllowedRoots    []string    `json:"allowed_roots"`
-	LogLevel        string      `json:"log_level"`
-	LogPath         string      `json:"log_path"`
-	XCPLogPath      string      `json:"xcp_log_path"`
-	LogSources      []string    `json:"log_sources"`
-	DataDir         string      `json:"data_dir"`
-	Auth            AuthConfig  `json:"auth"`
-	HTTPS           HTTPSConfig `json:"https"`
-	MihomoSecret    string      `json:"mihomo_secret"`
-	UpdateChannel   string      `json:"update_channel"` // stable, beta, dev
-	DevMode         bool        `json:"dev_mode"`
-	ConfigPath      string      `json:"-"`
+	Port             int         `json:"port"`
+	XRayConfigDir    string      `json:"xray_config_dir"`
+	XKeenBinary      string      `json:"xkeen_binary"`
+	MihomoConfigDir  string      `json:"mihomo_config_dir"`
+	MihomoBinary     string      `json:"mihomo_binary"`
+	MihomoAPIURL     string      `json:"mihomo_api_url"`
+	AllowedRoots     []string    `json:"allowed_roots"`
+	LogLevel         string      `json:"log_level"`
+	LogPath          string      `json:"log_path"`
+	XCPLogPath       string      `json:"xcp_log_path"`
+	LogSources       []string    `json:"log_sources"`
+	DataDir          string      `json:"data_dir"`
+	Auth             AuthConfig  `json:"auth"`
+	HTTPS            HTTPSConfig `json:"https"`
+	MihomoSecret     string      `json:"mihomo_secret"`
+	UpdateChannel    string      `json:"update_channel"` // stable, beta, dev
+	TemplatesRepoURL string      `json:"templates_repo_url"`
+	DevMode          bool        `json:"dev_mode"`
+	ConfigPath       string      `json:"-"`
 }
 
 // AuthConfig represents the configuration settings for authentication and session management.
@@ -74,7 +75,7 @@ func Default() *Config {
 		XKeenBinary:     findXKeen(),
 		MihomoConfigDir: "/opt/etc/mihomo",
 		MihomoBinary:    "/opt/sbin/mihomo",
-		MihomoAPIURL:    "http://localhost:9090",
+		MihomoAPIURL:    "http://127.0.0.1:9090",
 		DataDir:         "/opt/etc/xcp",
 		LogLevel:        "info",
 		LogPath:         "/opt/var/log/xkeen.log",
@@ -101,7 +102,8 @@ func Default() *Config {
 			CertPath: "",
 			KeyPath:  "",
 		},
-		UpdateChannel: "stable",
+		UpdateChannel:    "stable",
+		TemplatesRepoURL: "https://raw.githubusercontent.com/shisui1511/xkeen-control-panel-templates/main",
 	}
 }
 

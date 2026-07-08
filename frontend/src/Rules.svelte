@@ -285,7 +285,7 @@
   });
 </script>
 
-<svelte:window on:click={closeDropdowns} on:keydown={handleKeydown} />
+<svelte:window onclick={closeDropdowns} onkeydown={handleKeydown} />
 
 <div class="container">
   <div class="page-head">
@@ -301,7 +301,7 @@
     </div>
     <div class="ph-actions">
       {#if activeTab === 'providers' && ruleProviders.length > 0}
-        <button class="btn btn-primary" on:click={updateAllProviders} disabled={updatingAll}>
+        <button class="btn btn-primary" onclick={updateAllProviders} disabled={updatingAll}>
           {#if updatingAll}
             <span class="spinner-sm"></span>
             {$t('rules.updating')}
@@ -326,12 +326,12 @@
     <button
       class="tab-btn"
       class:active={activeTab === 'rules'}
-      on:click={() => (activeTab = 'rules')}>{$t('rules.tab_rules')}</button
+      onclick={() => (activeTab = 'rules')}>{$t('rules.tab_rules')}</button
     >
     <button
       class="tab-btn"
       class:active={activeTab === 'providers'}
-      on:click={() => (activeTab = 'providers')}>{$t('rules.tab_providers')}</button
+      onclick={() => (activeTab = 'providers')}>{$t('rules.tab_providers')}</button
     >
   </div>
 
@@ -418,13 +418,13 @@
                   </span>
                 </td>
                 <td style="position: relative; text-align: right;">
-                  <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
+                  <button class="action-btn" onclick={(e) => toggleDropdown(e, rule)}>⋯</button>
                   {#if activeDropdownRule === rule}
                     <div class="dropdown-menu">
-                      <button on:click={() => copyPayload(rule)}>
+                      <button onclick={() => copyPayload(rule)}>
                         {$t('rules.copy_payload')}
                       </button>
-                      <button on:click={() => copyFullRule(rule)}>
+                      <button onclick={() => copyFullRule(rule)}>
                         {$t('rules.copy_rule')}
                       </button>
                     </div>
@@ -450,13 +450,13 @@
                   <td class="mono" style="color:var(--fg-dim);">{$t('rules.match_fallback')}</td>
                   <td><span class={getTargetBadgeClass(rule.proxy)}>{rule.proxy}</span></td>
                   <td style="position: relative; text-align: right;">
-                    <button class="action-btn" on:click={(e) => toggleDropdown(e, rule)}>⋯</button>
+                    <button class="action-btn" onclick={(e) => toggleDropdown(e, rule)}>⋯</button>
                     {#if activeDropdownRule === rule}
                       <div class="dropdown-menu">
-                        <button on:click={() => copyPayload(rule)}>
+                        <button onclick={() => copyPayload(rule)}>
                           {$t('rules.copy_payload')}
                         </button>
-                        <button on:click={() => copyFullRule(rule)}>
+                        <button onclick={() => copyFullRule(rule)}>
                           {$t('rules.copy_rule')}
                         </button>
                       </div>
@@ -519,7 +519,7 @@
               </span>
               <button
                 class="btn btn-secondary btn-sm"
-                on:click={() => updateProvider(provider.name)}
+                onclick={() => updateProvider(provider.name)}
                 disabled={updatingProvider === provider.name || updatingAll}
               >
                 {#if updatingProvider === provider.name}

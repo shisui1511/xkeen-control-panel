@@ -92,11 +92,15 @@ rules:
 			svc := NewSubscriptionService(subTmp, subTmp, subTmp)
 			svc.httpClient = ts.Client()
 
+			enableXray := tt.subType == "xray"
+			enableMihomo := tt.subType == "mihomo"
+
 			sub := Subscription{
-				Name:    tt.name,
-				URL:     ts.URL + tt.path,
-				Type:    tt.subType,
-				Enabled: true,
+				Name:         tt.name,
+				URL:          ts.URL + tt.path,
+				EnableXray:   enableXray,
+				EnableMihomo: enableMihomo,
+				Enabled:      true,
 			}
 			err := svc.Add(&sub)
 			if err != nil {
