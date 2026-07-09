@@ -355,7 +355,7 @@ func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 	// fallback на кэш при сетевой ошибке).
 	payload, err := a.subscriptionSvc.ProviderFetchWithFallback(r.Context(), urlStr, sub)
 	if err != nil {
-		log.Printf("[Subscriptions] provider fetch failed for %s: %v", urlStr, err)
+		log.Printf("[Subscriptions] provider fetch failed for sub=%s: %v", sub.ID, err)
 		http.Error(w, "Failed to fetch provider", http.StatusBadGateway)
 		return
 	}
