@@ -198,6 +198,7 @@ type SubscriptionService struct {
 	consoleSvc      *ConsoleService
 	kernelSvc       *KernelService // для получения реальных версий ядер
 	hwid            string         // постоянный UUID устройства, передаётся как x-hwid
+	deviceInfo      *DeviceInfo    // модель/ОС роутера для x-device-* заголовков (см. task 60-01-05)
 	mihomoAPIURL    string
 	mihomoSecret    string
 	lastCleanup     time.Time

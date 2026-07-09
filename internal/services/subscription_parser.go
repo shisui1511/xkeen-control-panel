@@ -14,8 +14,9 @@ import (
 
 // subscriptionUserAgent возвращает User-Agent для подписки на основе реальных
 // версий установленных ядер:
-//   - mihomo-подписки → "mihomo/<версия>" (mihomo нативно качает подписки,
-//     провайдеры знают этот UA и отдают clash-meta YAML)
+//   - mihomo-подписки → "ClashMeta/<версия>; mihomo/<версия>" (формат точно
+//     соответствует UA официального клиента ClashMeta/mihomo — провайдеры
+//     с HWID-лимитом ориентируются именно на него)
 //   - xray-подписки → "v2rayN/<версия xray>" (v2rayN — официальный GUI для
 //     Xray-core, оба от 2dust; большинство провайдеров отдают xray-json по этому UA)
 func (s *SubscriptionService) subscriptionUserAgent(subType string) string {
@@ -26,7 +27,7 @@ func (s *SubscriptionService) subscriptionUserAgent(subType string) string {
 				ver = k.CurrentVersion
 			}
 		}
-		return "mihomo/" + ver
+		return "ClashMeta/" + ver + "; mihomo/" + ver
 	}
 	ver := "1.8.24" // fallback если ядро не найдено
 	if s.kernelSvc != nil {
@@ -72,10 +73,31 @@ func (s *SubscriptionService) fetchWithUserAgent(subURL string, sub *Subscriptio
 	}
 	if hwid != "" {
 		req.Header.Set("x-hwid", hwid)
-		req.Header.Set("x-device-os", "Linux")
-		req.Header.Set("x-device-model", "XKeen Control Panel")
+
+		deviceOS, deviceModel, osVersion := "Linux", "XKeen Control Panel", ""
+		if s.deviceInfo != nil {
+			deviceModel, deviceOS, osVersion = s.deviceInfo.Get()
+		}
+		req.Header.Set("x-device-os", deviceOS)
+		req.Header.Set("x-device-model", deviceModel)
+		if osVersion != "" {
+			req.Header.Set("x-ver-os", osVersion)
+		}
 	}
 	return s.httpClient.Do(req)
+}
+
+// DownloadRaw скачивает подписку с User-Agent, выбранным по типу интеграции
+// подписки (см. selectUserAgent). Экспортируется для использования из
+// ProviderFetch (loopback provider endpoint).
+func (s *SubscriptionService) DownloadRaw(subURL string, sub *Subscription) ([]byte, http.Header, error) {
+	return s.downloadRaw(subURL, sub)
+}
+
+// DownloadWithExplicitUA скачивает подписку с явно заданным User-Agent —
+// используется для Happ fallback и ClashMeta upstream proxy-запросов.
+func (s *SubscriptionService) DownloadWithExplicitUA(subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
+	return s.downloadWithUA(subURL, sub, ua)
 }
 
 func (s *SubscriptionService) downloadWithUA(subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
