@@ -342,6 +342,10 @@ func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	if sub != nil && !sub.Enabled {
+		a.errorResponse(w, "subscription is disabled", http.StatusForbidden)
+		return
+	}
 	if sub == nil {
 		sub = &services.Subscription{URL: urlStr, ID: adhocSubscriptionID(urlStr)}
 	}
