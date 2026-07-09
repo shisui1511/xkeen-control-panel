@@ -1,8 +1,11 @@
 package services
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -202,6 +205,8 @@ type SubscriptionService struct {
 	mihomoAPIURL    string
 	mihomoSecret    string
 	lastCleanup     time.Time
+	panelPort       int
+	panelHTTPS      bool
 }
 
 func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *SubscriptionService {
@@ -216,3 +221,52 @@ func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *Subscri
 	svc.load()
 	return svc
 }
+
+func (s *SubscriptionService) SetPanelAddress(port int, https bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.panelPort = port
+	s.panelHTTPS = https
+}
+
+func (s *SubscriptionService) generateMihomoProxyProviderBlock(sub *Subscription) string {
+	s.mu.RLock()
+	port := s.panelPort
+	https := s.panelHTTPS
+	s.mu.RUnlock()
+
+	if port == 0 {
+		port = 8090
+	}
+
+	scheme := "http"
+	if https {
+		scheme = "https"
+	}
+
+	providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
+	escapedURL := url.QueryEscape(sub.URL)
+	loopbackURL := fmt.Sprintf("%s://127.0.0.1:%d/api/provider.yaml?url=%s", scheme, port, escapedURL)
+
+	intervalSec := sub.Interval * 3600
+	if intervalSec <= 0 {
+		intervalSec = 24 * 3600 // дефолт 24 часа
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("  %s:\n", providerName))
+	sb.WriteString("    type: http\n")
+	sb.WriteString(fmt.Sprintf("    url: %q\n", loopbackURL))
+	sb.WriteString(fmt.Sprintf("    interval: %d\n", intervalSec))
+	sb.WriteString(fmt.Sprintf("    path: ./proxy_providers/%s.yaml\n", providerName))
+	if https {
+		sb.WriteString("    skip-cert-verify: true\n")
+	}
+	sb.WriteString("    health-check:\n")
+	sb.WriteString("      enable: true\n")
+	sb.WriteString("      url: http://www.gstatic.com/generate_204\n")
+	sb.WriteString("      interval: 300")
+
+	return sb.String()
+}
+

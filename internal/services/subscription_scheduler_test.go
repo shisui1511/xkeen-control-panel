@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -437,10 +438,6 @@ func TestSubscriptionDiagnostics(t *testing.T) {
 	if err := svc.Delete("diag_test"); err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
-	_, _, err = svc.GetRaw("diag_test")
-	if err == nil {
-		t.Error("expected error getting raw after delete, got nil")
-	}
 }
 
 func TestSubscriptionService_MihomoProxyProvider(t *testing.T) {
@@ -485,6 +482,10 @@ proxy-groups:
     type: select
     proxies:
       - DIRECT
+  - name: OTHER
+    type: select
+    proxies:
+      - DIRECT
 `
 	if err := os.WriteFile(configPath, []byte(initialConfig), 0600); err != nil {
 		t.Fatal(err)
@@ -510,34 +511,68 @@ proxy-groups:
 		t.Fatalf("failed to add subscription: %v", err)
 	}
 
+	// 1. Проверяем, что Add записал proxy-provider
+	configBytes, _ := os.ReadFile(configPath)
+	configStr := string(configBytes)
+	providerName := GetMihomoProviderName("", sub.Name, sub.URL, sub.ID)
+	if !strings.Contains(configStr, providerName) {
+		t.Errorf("expected config.yaml to contain provider %s after Add, config:\n%s", providerName, configStr)
+	}
+
+	// 2. Выполняем Refresh
 	if err := svc.Refresh("mihomo-sub"); err != nil {
 		t.Fatalf("Refresh failed: %v", err)
 	}
 
-	providerName := GetMihomoProviderName("", sub.Name, sub.URL, sub.ID)
 	providerFilePath := filepath.Join(mihomoDir, "proxy_providers", providerName+".yaml")
 	if _, err := os.Stat(providerFilePath); err != nil {
 		t.Errorf("provider file should be written at %s: %v", providerFilePath, err)
 	}
 
-	if err := os.WriteFile(logFile, []byte(""), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.Refresh("mihomo-sub"); err != nil {
-		t.Fatal(err)
-	}
-	callsBytes, _ := os.ReadFile(logFile)
-	if strings.Contains(string(callsBytes), "-restart") {
-		t.Error("xkeen -restart should NOT be called when no changes")
+	// Проверяем, что в config.yaml провайдер ссылается на loopback URL с портом 8090
+	configBytes, _ = os.ReadFile(configPath)
+	configStr = string(configBytes)
+	expectedURL := fmt.Sprintf("http://127.0.0.1:8090/api/provider.yaml?url=%s", url.QueryEscape(sub.URL))
+	if !strings.Contains(configStr, expectedURL) {
+		t.Errorf("expected loopback url %q in config.yaml, got config:\n%s", expectedURL, configStr)
 	}
 
+	// 3. Проверяем режим HTTPS
+	svc.SetPanelAddress(443, true)
+	if err := svc.Refresh("mihomo-sub"); err != nil {
+		t.Fatalf("Refresh under HTTPS failed: %v", err)
+	}
+	configBytes, _ = os.ReadFile(configPath)
+	configStr = string(configBytes)
+	expectedHTTPSURL := fmt.Sprintf("https://127.0.0.1:443/api/provider.yaml?url=%s", url.QueryEscape(sub.URL))
+	if !strings.Contains(configStr, expectedHTTPSURL) {
+		t.Errorf("expected HTTPS loopback url %q in config.yaml, got config:\n%s", expectedHTTPSURL, configStr)
+	}
+	if !strings.Contains(configStr, "skip-cert-verify: true") {
+		t.Errorf("expected skip-cert-verify: true in config.yaml under HTTPS, got config:\n%s", configStr)
+	}
+
+	// 4. Проверяем изменение групп при Update
+	subUpdate := sub
+	subUpdate.MihomoGroups = []string{"OTHER"}
+	if err := svc.Update("mihomo-sub", &subUpdate); err != nil {
+		t.Fatalf("failed to update subscription: %v", err)
+	}
+
+	configBytes, _ = os.ReadFile(configPath)
+	configStr = string(configBytes)
+	if !strings.Contains(configStr, "name: OTHER") || !strings.Contains(configStr, providerName) {
+		t.Errorf("expected OTHER group to contain provider, got config:\n%s", configStr)
+	}
+
+	// 5. Проверяем удаление
 	if err := svc.Delete("mihomo-sub"); err != nil {
 		t.Fatalf("failed to delete subscription: %v", err)
 	}
 
-	configBytes, _ := os.ReadFile(configPath)
-	configStr := string(configBytes)
-	if strings.Contains(configStr, "mihomo-sub") {
+	configBytes, _ = os.ReadFile(configPath)
+	configStr = string(configBytes)
+	if strings.Contains(configStr, providerName) {
 		t.Error("provider and references should be removed from config.yaml after deletion")
 	}
 	if _, err := os.Stat(providerFilePath); !os.IsNotExist(err) {

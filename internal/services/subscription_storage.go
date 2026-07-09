@@ -207,6 +207,27 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 		sub.ID = strings.ToLower(sub.ID)
 		sub.ID = invalidIDCharsRe.ReplaceAllString(sub.ID, "_")
 	}
+
+	if sub.EnableMihomo {
+		configDir := s.mihomoConfigDir
+		if configDir == "" {
+			configDir = "/opt/etc/mihomo"
+		}
+		configPath := filepath.Join(configDir, "config.yaml")
+
+		s.mihomoMu.Lock()
+		if rawConfig, err := os.ReadFile(configPath); err == nil {
+			providerBlock := s.generateMihomoProxyProviderBlock(sub)
+			providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
+			newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, providerBlock)
+			for _, group := range sub.MihomoGroups {
+				newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, false)
+			}
+			_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
+		}
+		s.mihomoMu.Unlock()
+	}
+
 	s.subscriptions = append(s.subscriptions, *sub)
 	return s.save()
 }
@@ -223,6 +244,8 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			// Only overwrite user-editable config fields from the form.
 			existing := &s.subscriptions[i]
 
+			oldGroups := existing.MihomoGroups
+
 			// Clean up old Mihomo provider if the name or URL is changing
 			configDir := s.mihomoConfigDir
 			if configDir == "" {
@@ -231,7 +254,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			configPath := filepath.Join(configDir, "config.yaml")
 
 			oldProviderName := GetMihomoProviderName(existing.ProfileTitle, existing.Name, existing.URL, existing.ID)
-			newProviderName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, existing.ID)
+			newProviderName := GetMihomoProviderName(existing.ProfileTitle, sub.Name, sub.URL, existing.ID)
 
 			if oldProviderName != newProviderName && existing.EnableMihomo {
 				s.mihomoMu.Lock()
@@ -275,20 +298,14 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 
 			// Clean up Mihomo if it was enabled and is now disabled
 			if existing.EnableMihomo && !sub.EnableMihomo {
-				configDir := s.mihomoConfigDir
-				if configDir == "" {
-					configDir = "/opt/etc/mihomo"
-				}
-				configPath := filepath.Join(configDir, "config.yaml")
-
-				providerName := GetMihomoProviderName(existing.ProfileTitle, existing.Name, existing.URL, existing.ID)
-
 				s.mihomoMu.Lock()
 				rawConfig, err := os.ReadFile(configPath)
 				if err == nil {
-					newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, "")
+					newConfig := ReplaceMihomoProxyProvider(string(rawConfig), oldProviderName, "")
+					newConfig = ReplaceMihomoProxyProvider(newConfig, newProviderName, "")
 					for _, group := range existing.MihomoGroups {
-						newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, true)
+						newConfig = UpdateMihomoGroupProviders(newConfig, group, oldProviderName, true)
+						newConfig = UpdateMihomoGroupProviders(newConfig, group, newProviderName, true)
 					}
 					newConfig = ReplaceMihomoProxies(newConfig, existing.ProxyNames, nil)
 					for _, group := range existing.MihomoGroups {
@@ -300,10 +317,13 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 
 				// Delete provider file; sanitize id to prevent path traversal (CWE-22).
 				providersDir := filepath.Join(configDir, "proxy_providers")
-				providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", providerName))
-				// Explicit guard: path must be within providersDir (CWE-22).
+				providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", oldProviderName))
 				if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
 					os.Remove(providerFilePath)
+				}
+				providerFilePathNew := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", newProviderName))
+				if strings.HasPrefix(providerFilePathNew, providersDir+string(filepath.Separator)) {
+					os.Remove(providerFilePathNew)
 				}
 
 				// Reset Mihomo specific fields in existing subscription
@@ -322,6 +342,23 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			}
 			if sub.MihomoGroups != nil {
 				existing.MihomoGroups = sub.MihomoGroups
+			}
+
+			// Если интеграция Mihomo включена (или была только что включена), обновляем/добавляем провайдер и привязываем его к группам
+			if existing.EnableMihomo {
+				s.mihomoMu.Lock()
+				if rawConfig, err := os.ReadFile(configPath); err == nil {
+					providerBlock := s.generateMihomoProxyProviderBlock(existing)
+					newConfig := ReplaceMihomoProxyProvider(string(rawConfig), newProviderName, providerBlock)
+					for _, group := range oldGroups {
+						newConfig = UpdateMihomoGroupProviders(newConfig, group, oldProviderName, true)
+					}
+					for _, group := range existing.MihomoGroups {
+						newConfig = UpdateMihomoGroupProviders(newConfig, group, newProviderName, false)
+					}
+					_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
+				}
+				s.mihomoMu.Unlock()
 			}
 
 			if err := s.save(); err != nil {

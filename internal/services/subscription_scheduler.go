@@ -328,6 +328,17 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 		return fmt.Errorf("write provider file: %w", err)
 	}
 
+	// Обновление config.yaml для нативного proxy-provider
+	configPath := filepath.Join(configDir, "config.yaml")
+	if rawConfig, err := os.ReadFile(configPath); err == nil {
+		providerBlock := s.generateMihomoProxyProviderBlock(sub)
+		newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, providerBlock)
+		for _, group := range sub.MihomoGroups {
+			newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, false)
+		}
+		_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
+	}
+
 	// Сравниваем хэши скачанного кэша подписки с помощью FNV-1a 64-bit (некриптографический хэш)
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(yamlContent))

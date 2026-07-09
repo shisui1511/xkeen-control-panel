@@ -256,6 +256,7 @@ func main() {
 
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
+	subscriptionSvc.SetPanelAddress(cfg.Port, cfg.HTTPS.Enabled)
 	subscriptionSvc.SetConsoleService(consoleSvc)
 	subscriptionSvc.SetMihomoAPI(cfg.MihomoAPIURL, cfg.MihomoSecret)
 	api.SetSubscriptionService(subscriptionSvc)
