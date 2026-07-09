@@ -68,8 +68,12 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 		}
 	}
 
-	if err := s.cacheProviderPayload(sub, payload); err != nil {
-		log.Printf("[Subscriptions] Failed to cache provider payload for %s: %v", upstreamURL, err)
+	if countProviderNodes(string(payload)) > 0 {
+		if err := s.cacheProviderPayload(sub, payload); err != nil {
+			log.Printf("[Subscriptions] Failed to cache provider payload for %s: %v", upstreamURL, err)
+		}
+	} else {
+		log.Printf("[Subscriptions] Upstream %s returned empty/unparseable payload, keeping previous cache", upstreamURL)
 	}
 
 	return payload, nil
