@@ -46,11 +46,10 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 	clashMetaUA := s.subscriptionUserAgent("mihomo")
 
 	body, _, err := s.DownloadWithExplicitUA(ctx, upstreamURL, sub, clashMetaUA)
-	if err != nil {
-		return nil, err
+	var payload []byte
+	if err == nil {
+		payload, _ = providerPayload(body)
 	}
-
-	payload, _ := providerPayload(body)
 
 	// Happ fallback: если у подписки задан x-hwid и текущий UA не Happ,
 	// пробуем повторный запрос с UA Happ/1.0 — некоторые провайдеры отдают
@@ -60,14 +59,23 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 		hwid = s.hwid
 	}
 	if hwid != "" && !strings.Contains(strings.ToLower(clashMetaUA), "happ") && time.Until(deadline) > 0 {
-		if happBody, _, happErr := s.DownloadWithExplicitUA(ctx, upstreamURL, sub, happUserAgent); happErr != nil {
+		happSub := sub.Clone()
+		if happBody, _, happErr := s.DownloadWithExplicitUA(ctx, upstreamURL, &happSub, happUserAgent); happErr != nil {
 			log.Printf("[Subscriptions] Happ fallback fetch failed for %s: %v", upstreamURL, happErr)
+			if err != nil && payload == nil {
+				return nil, err
+			}
 		} else {
 			happPayload, _ := providerPayload(happBody)
 			if countProviderNodes(string(happPayload)) > countProviderNodes(string(payload)) {
 				payload = happPayload
+				*sub = happSub
 			}
 		}
+	}
+
+	if payload == nil {
+		return nil, err
 	}
 
 	if countProviderNodes(string(payload)) > 0 {
