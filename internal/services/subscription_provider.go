@@ -60,7 +60,9 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 		hwid = s.hwid
 	}
 	if hwid != "" && !strings.Contains(strings.ToLower(clashMetaUA), "happ") && time.Until(deadline) > 0 {
-		if happBody, _, happErr := s.DownloadWithExplicitUA(ctx, upstreamURL, sub, happUserAgent); happErr == nil {
+		if happBody, _, happErr := s.DownloadWithExplicitUA(ctx, upstreamURL, sub, happUserAgent); happErr != nil {
+			log.Printf("[Subscriptions] Happ fallback fetch failed for %s: %v", upstreamURL, happErr)
+		} else {
 			happPayload, _ := providerPayload(happBody)
 			if countProviderNodes(string(happPayload)) > countProviderNodes(string(payload)) {
 				payload = happPayload
