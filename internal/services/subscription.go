@@ -231,9 +231,13 @@ func (s *SubscriptionService) SetPanelAddress(port int, https bool) {
 
 func (s *SubscriptionService) generateMihomoProxyProviderBlock(sub *Subscription) string {
 	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.generateMihomoProxyProviderBlockLocked(sub)
+}
+
+func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscription) string {
 	port := s.panelPort
 	https := s.panelHTTPS
-	s.mu.RUnlock()
 
 	if port == 0 {
 		port = 8090

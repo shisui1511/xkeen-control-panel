@@ -217,7 +217,7 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 
 		s.mihomoMu.Lock()
 		if rawConfig, err := os.ReadFile(configPath); err == nil {
-			providerBlock := s.generateMihomoProxyProviderBlock(sub)
+			providerBlock := s.generateMihomoProxyProviderBlockLocked(sub)
 			providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
 			newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, providerBlock)
 			for _, group := range sub.MihomoGroups {
@@ -348,7 +348,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			if existing.EnableMihomo {
 				s.mihomoMu.Lock()
 				if rawConfig, err := os.ReadFile(configPath); err == nil {
-					providerBlock := s.generateMihomoProxyProviderBlock(existing)
+					providerBlock := s.generateMihomoProxyProviderBlockLocked(existing)
 					newConfig := ReplaceMihomoProxyProvider(string(rawConfig), newProviderName, providerBlock)
 					for _, group := range oldGroups {
 						newConfig = UpdateMihomoGroupProviders(newConfig, group, oldProviderName, true)

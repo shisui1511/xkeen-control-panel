@@ -497,6 +497,8 @@ proxy-groups:
 	consoleSvc := NewConsoleService(mockXkeenPath)
 	svc.SetConsoleService(consoleSvc)
 
+	svc.SetPanelAddress(8090, false)
+
 	sub := Subscription{
 		ID:           "mihomo-sub",
 		Name:         "Mihomo Sub Test",
