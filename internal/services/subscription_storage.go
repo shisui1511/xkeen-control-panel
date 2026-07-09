@@ -217,13 +217,17 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 
 		s.mihomoMu.Lock()
 		if rawConfig, err := os.ReadFile(configPath); err == nil {
-			providerBlock := s.generateMihomoProxyProviderBlockLocked(sub)
+			providerBlock := s.generateMihomoProxyProviderBlockLocked(sub, s.panelPort, s.panelHTTPS)
 			providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
 			newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, providerBlock)
 			for _, group := range sub.MihomoGroups {
 				newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, false)
 			}
-			_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
+			if string(rawConfig) != newConfig {
+				if err := utils.AtomicWriteFile(configPath, []byte(newConfig), 0600); err != nil {
+					log.Printf("[Subscriptions] failed to update config.yaml for provider %s: %v", providerName, err)
+				}
+			}
 		}
 		s.mihomoMu.Unlock()
 	}
@@ -348,7 +352,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			if existing.EnableMihomo {
 				s.mihomoMu.Lock()
 				if rawConfig, err := os.ReadFile(configPath); err == nil {
-					providerBlock := s.generateMihomoProxyProviderBlockLocked(existing)
+					providerBlock := s.generateMihomoProxyProviderBlockLocked(existing, s.panelPort, s.panelHTTPS)
 					newConfig := ReplaceMihomoProxyProvider(string(rawConfig), newProviderName, providerBlock)
 					for _, group := range oldGroups {
 						newConfig = UpdateMihomoGroupProviders(newConfig, group, oldProviderName, true)
@@ -356,7 +360,11 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 					for _, group := range existing.MihomoGroups {
 						newConfig = UpdateMihomoGroupProviders(newConfig, group, newProviderName, false)
 					}
-					_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
+					if string(rawConfig) != newConfig {
+						if err := utils.AtomicWriteFile(configPath, []byte(newConfig), 0600); err != nil {
+							log.Printf("[Subscriptions] failed to update config.yaml for provider %s: %v", newProviderName, err)
+						}
+					}
 				}
 				s.mihomoMu.Unlock()
 			}

@@ -231,14 +231,13 @@ func (s *SubscriptionService) SetPanelAddress(port int, https bool) {
 
 func (s *SubscriptionService) generateMihomoProxyProviderBlock(sub *Subscription) string {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.generateMihomoProxyProviderBlockLocked(sub)
-}
-
-func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscription) string {
 	port := s.panelPort
 	https := s.panelHTTPS
+	s.mu.RUnlock()
+	return s.generateMihomoProxyProviderBlockLocked(sub, port, https)
+}
 
+func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscription, port int, https bool) string {
 	if port == 0 {
 		port = 8090
 	}
@@ -260,7 +259,7 @@ func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscr
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("  %s:\n", providerName))
 	sb.WriteString("    type: http\n")
-	sb.WriteString(fmt.Sprintf("    url: %q\n", loopbackURL))
+	sb.WriteString(fmt.Sprintf("    url: '%s'\n", loopbackURL))
 	sb.WriteString(fmt.Sprintf("    interval: %d\n", intervalSec))
 	sb.WriteString(fmt.Sprintf("    path: ./proxy_providers/%s.yaml\n", providerName))
 	if https {

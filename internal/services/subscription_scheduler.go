@@ -310,6 +310,11 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 		newBlocks, _ = ParseMihomoSubscriptionBlocks(yamlContent)
 	}
 
+	s.mu.RLock()
+	port := s.panelPort
+	https := s.panelHTTPS
+	s.mu.RUnlock()
+
 	s.mihomoMu.Lock()
 	defer s.mihomoMu.Unlock()
 
@@ -331,12 +336,16 @@ func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, head
 	// Обновление config.yaml для нативного proxy-provider
 	configPath := filepath.Join(configDir, "config.yaml")
 	if rawConfig, err := os.ReadFile(configPath); err == nil {
-		providerBlock := s.generateMihomoProxyProviderBlock(sub)
+		providerBlock := s.generateMihomoProxyProviderBlockLocked(sub, port, https)
 		newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, providerBlock)
 		for _, group := range sub.MihomoGroups {
 			newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, false)
 		}
-		_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
+		if string(rawConfig) != newConfig {
+			if err := utils.AtomicWriteFile(configPath, []byte(newConfig), 0600); err != nil {
+				log.Printf("[Subscriptions] failed to update config.yaml for provider %s: %v", providerName, err)
+			}
+		}
 	}
 
 	// Сравниваем хэши скачанного кэша подписки с помощью FNV-1a 64-bit (некриптографический хэш)
