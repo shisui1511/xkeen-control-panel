@@ -105,7 +105,8 @@ func main() {
 	// Public endpoints
 	srv.Handle("/api/version", api.Version)
 	srv.HandleProtected("/api/capabilities", api.Capabilities)
-	srv.Handle("/mihomo/provider.yaml", api.MihomoProviderAdapter)
+	srv.Handle("/api/provider.yaml", api.MihomoProviderAdapter)
+	srv.Handle("/mihomo/provider.yaml", api.MihomoProviderRedirect)
 
 	// Protected endpoints
 	srv.HandleProtected("/api/config/list", api.ConfigList)

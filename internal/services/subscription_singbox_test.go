@@ -200,8 +200,8 @@ func TestApplySubscriptionHeaders_Base64Prefix(t *testing.T) {
 
 func TestSubscriptionUserAgent(t *testing.T) {
 	svc := &SubscriptionService{} // без kernelSvc — используется fallback-версии
-	if ua := svc.subscriptionUserAgent("mihomo"); !strings.HasPrefix(ua, "mihomo/") {
-		t.Errorf("mihomo subscription should get mihomo/* UA, got %q", ua)
+	if ua := svc.subscriptionUserAgent("mihomo"); !strings.HasPrefix(ua, "ClashMeta/") || !strings.Contains(ua, "; mihomo/") {
+		t.Errorf("mihomo subscription should get 'ClashMeta/<ver>; mihomo/<ver>' UA, got %q", ua)
 	}
 	if ua := svc.subscriptionUserAgent("xray"); !strings.HasPrefix(ua, "v2rayN/") {
 		t.Errorf("xray subscription should get v2rayN/* UA, got %q", ua)
