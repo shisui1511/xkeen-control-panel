@@ -216,14 +216,22 @@ func parseSubscriptionBody(body []byte, contentTypeHeader string, sub *Subscript
 	return parseShareLinks(content, sub)
 }
 
+// looksLikeClashYAML определяет, является ли content Clash/Mihomo YAML,
+// разыскивая top-level ключ "proxies:" или "proxy-providers:" по всему
+// документу (не ограничиваясь первыми N строками — большие конфиги с
+// длинной секцией rules:/rule-providers: перед proxies: не должны
+// пропускаться на этапе детекции формата).
 func looksLikeClashYAML(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		return false
 	}
-	for _, line := range strings.SplitN(trimmed, "\n", 300) {
-		l := strings.TrimSpace(line)
-		if l == "proxies:" || strings.HasPrefix(l, "proxies:") || l == "proxy-providers:" || strings.HasPrefix(l, "proxy-providers:") {
+	if section, _ := extractProxiesSection(trimmed); section != "" {
+		return true
+	}
+	normalized := strings.ReplaceAll(trimmed, "\r\n", "\n")
+	for _, line := range strings.Split(normalized, "\n") {
+		if key, ok := yamlTopLevelKeyLine(line); ok && key == "proxy-providers" {
 			return true
 		}
 	}
