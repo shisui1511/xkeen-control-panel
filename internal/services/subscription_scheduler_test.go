@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -652,7 +653,7 @@ func TestRefreshMihomo_ConcurrentRace(t *testing.T) {
 			defer wg.Done()
 			subCopy := svc.Get("race-sub")
 			if subCopy != nil {
-				body, headers, err := svc.downloadRaw(subCopy.URL, subCopy)
+				body, headers, err := svc.downloadRaw(context.Background(), subCopy.URL, subCopy)
 				if err == nil {
 					_ = svc.refreshMihomo(subCopy, body, headers)
 				}

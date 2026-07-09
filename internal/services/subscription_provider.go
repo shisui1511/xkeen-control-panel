@@ -45,7 +45,7 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 
 	clashMetaUA := s.subscriptionUserAgent("mihomo")
 
-	body, _, err := s.DownloadWithExplicitUA(upstreamURL, sub, clashMetaUA)
+	body, _, err := s.DownloadWithExplicitUA(ctx, upstreamURL, sub, clashMetaUA)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL str
 		hwid = s.hwid
 	}
 	if hwid != "" && !strings.Contains(strings.ToLower(clashMetaUA), "happ") && time.Until(deadline) > 0 {
-		if happBody, _, happErr := s.DownloadWithExplicitUA(upstreamURL, sub, happUserAgent); happErr == nil {
+		if happBody, _, happErr := s.DownloadWithExplicitUA(ctx, upstreamURL, sub, happUserAgent); happErr == nil {
 			happPayload, _ := providerPayload(happBody)
 			if countProviderNodes(string(happPayload)) > countProviderNodes(string(payload)) {
 				payload = happPayload

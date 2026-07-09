@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -88,7 +89,7 @@ func TestPortIsInteger(t *testing.T) {
 func TestDownloadAndParseSchemeValidation(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")
-	_, _, _, _, err := svc.downloadAndParse("file:///etc/passwd", &Subscription{})
+	_, _, _, _, err := svc.downloadAndParse(context.Background(), "file:///etc/passwd", &Subscription{})
 	if err == nil {
 		t.Fatal("expected error for file:// URL, got nil")
 	}
@@ -451,7 +452,7 @@ func TestSubscriptionEntryLimit(t *testing.T) {
 	}))
 	defer ts5001.Close()
 
-	_, _, _, _, err := svc.downloadAndParse(ts5001.URL, &Subscription{})
+	_, _, _, _, err := svc.downloadAndParse(context.Background(), ts5001.URL, &Subscription{})
 	if err == nil {
 		t.Error("expected error for 5001 entries, got nil")
 	}
@@ -468,7 +469,7 @@ func TestSubscriptionEntryLimit(t *testing.T) {
 	}))
 	defer ts5000.Close()
 
-	_, _, _, _, err = svc.downloadAndParse(ts5000.URL, &Subscription{})
+	_, _, _, _, err = svc.downloadAndParse(context.Background(), ts5000.URL, &Subscription{})
 	if err != nil {
 		t.Errorf("expected no error for 5000 entries, got: %v", err)
 	}
@@ -490,7 +491,7 @@ func TestDownloadAndParse_NetworkError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, _, _, _, err := svc.downloadAndParse(ts.URL, &Subscription{})
+	_, _, _, _, err := svc.downloadAndParse(context.Background(), ts.URL, &Subscription{})
 	if err == nil {
 		t.Error("expected error for connection reset, got nil")
 	}

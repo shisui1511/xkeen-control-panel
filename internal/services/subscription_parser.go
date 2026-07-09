@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -59,8 +60,8 @@ func (s *SubscriptionService) selectUserAgent(sub *Subscription) string {
 }
 
 // fetchWithUserAgent выполняет GET с правильным User-Agent и HWID-заголовками.
-func (s *SubscriptionService) fetchWithUserAgent(subURL string, sub *Subscription, ua string) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodGet, subURL, nil)
+func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL string, sub *Subscription, ua string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, subURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -90,22 +91,22 @@ func (s *SubscriptionService) fetchWithUserAgent(subURL string, sub *Subscriptio
 // DownloadRaw скачивает подписку с User-Agent, выбранным по типу интеграции
 // подписки (см. selectUserAgent). Экспортируется для использования из
 // ProviderFetch (loopback provider endpoint).
-func (s *SubscriptionService) DownloadRaw(subURL string, sub *Subscription) ([]byte, http.Header, error) {
-	return s.downloadRaw(subURL, sub)
+func (s *SubscriptionService) DownloadRaw(ctx context.Context, subURL string, sub *Subscription) ([]byte, http.Header, error) {
+	return s.downloadRaw(ctx, subURL, sub)
 }
 
 // DownloadWithExplicitUA скачивает подписку с явно заданным User-Agent —
 // используется для Happ fallback и ClashMeta upstream proxy-запросов.
-func (s *SubscriptionService) DownloadWithExplicitUA(subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
-	return s.downloadWithUA(subURL, sub, ua)
+func (s *SubscriptionService) DownloadWithExplicitUA(ctx context.Context, subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
+	return s.downloadWithUA(ctx, subURL, sub, ua)
 }
 
-func (s *SubscriptionService) downloadWithUA(subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
+func (s *SubscriptionService) downloadWithUA(ctx context.Context, subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
 	parsed, err := url.Parse(subURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, nil, fmt.Errorf("only http and https URLs are allowed for subscriptions")
 	}
-	resp, err := s.fetchWithUserAgent(subURL, sub, ua)
+	resp, err := s.fetchWithUserAgent(ctx, subURL, sub, ua)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -123,12 +124,12 @@ func (s *SubscriptionService) downloadWithUA(subURL string, sub *Subscription, u
 	return body, resp.Header, nil
 }
 
-func (s *SubscriptionService) downloadRaw(subURL string, sub *Subscription) ([]byte, http.Header, error) {
+func (s *SubscriptionService) downloadRaw(ctx context.Context, subURL string, sub *Subscription) ([]byte, http.Header, error) {
 	ua := s.selectUserAgent(sub)
-	return s.downloadWithUA(subURL, sub, ua)
+	return s.downloadWithUA(ctx, subURL, sub, ua)
 }
 
-func (s *SubscriptionService) downloadAndParse(subURL string, sub *Subscription) (outbounds []Outbound, skips []SkipReason, bodyBytes []byte, headers http.Header, err error) {
+func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL string, sub *Subscription) (outbounds []Outbound, skips []SkipReason, bodyBytes []byte, headers http.Header, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic in parser: %v", r)
@@ -137,7 +138,7 @@ func (s *SubscriptionService) downloadAndParse(subURL string, sub *Subscription)
 	}()
 
 	ua := s.selectUserAgent(sub)
-	body, headers, err := s.downloadWithUA(subURL, sub, ua)
+	body, headers, err := s.downloadWithUA(ctx, subURL, sub, ua)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
