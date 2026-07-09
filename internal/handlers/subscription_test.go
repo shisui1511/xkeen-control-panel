@@ -442,6 +442,22 @@ func TestMihomoProviderAdapter(t *testing.T) {
 	if rr.Code != http.StatusBadGateway {
 		t.Errorf("expected 502, got %d: %s", rr.Code, rr.Body.String())
 	}
+
+	// 8. Отключенная подписка -> 403.
+	disabledSub := &services.Subscription{
+		Name:         "Disabled Sub",
+		URL:          ts.URL + "/disabled",
+		Enabled:      false,
+		EnableMihomo: true,
+	}
+	subSvc.Add(disabledSub)
+	req = httptest.NewRequest(http.MethodGet, "/api/provider.yaml?url="+disabledSub.URL, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr = httptest.NewRecorder()
+	api.MihomoProviderAdapter(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for disabled subscription, got %d", rr.Code)
+	}
 }
 
 func TestMihomoProviderRedirect(t *testing.T) {
