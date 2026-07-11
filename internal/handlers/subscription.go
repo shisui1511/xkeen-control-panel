@@ -81,10 +81,35 @@ func (a *API) SubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var sub services.Subscription
-	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+	existing := a.subscriptionSvc.Get(id)
+	if existing == nil {
+		a.errorResponse(w, "subscription not found", http.StatusNotFound)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	var sub services.Subscription
+	if err := json.Unmarshal(body, &sub); err != nil {
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var presence struct {
+		EnableXray   *bool `json:"enable_xray"`
+		EnableMihomo *bool `json:"enable_mihomo"`
+	}
+	if err := json.Unmarshal(body, &presence); err == nil {
+		if presence.EnableXray == nil {
+			sub.EnableXray = existing.EnableXray
+		}
+		if presence.EnableMihomo == nil {
+			sub.EnableMihomo = existing.EnableMihomo
+		}
 	}
 
 	if err := a.subscriptionSvc.Update(id, &sub); err != nil {

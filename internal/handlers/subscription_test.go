@@ -187,6 +187,9 @@ func TestSubscriptionUpdate(t *testing.T) {
 	if updated.Name != "New Name" || updated.URL != "http://example.com/new" {
 		t.Errorf("unexpected updated sub: %+v", updated)
 	}
+	if !updated.EnableXray {
+		t.Errorf("expected EnableXray to remain true after update without explicit flags")
+	}
 }
 
 func TestSubscriptionDelete(t *testing.T) {
