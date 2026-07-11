@@ -93,7 +93,12 @@ func (s *SubscriptionService) Refresh(id string) error {
 			activeKernel = s.kernelSvc.GetActiveKernel()
 		}
 		log.Printf("[Subscriptions] Mihomo reload triggered for provider %s (active kernel: %s)", providerName, activeKernel)
-		s.TriggerMihomoProviderReload(providerName)
+		if err := s.TriggerMihomoProviderReload(providerName); err != nil {
+			log.Printf("[Subscriptions] Mihomo reload failed: %v", err)
+			if !subCopy.EnableXray || refreshErr == nil {
+				refreshErr = err
+			}
+		}
 	}
 
 	subCopy.LastChanged = xrayChanged
@@ -405,28 +410,27 @@ func (s *SubscriptionService) UnlockMihomo() {
 	s.mihomoMu.Unlock()
 }
 
-func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) {
+func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) error {
 	if s.mihomoAPIURL == "" {
-		return
+		return fmt.Errorf("Mihomo API URL is not configured")
 	}
 	url := fmt.Sprintf("%s/providers/proxies/%s", s.mihomoAPIURL, providerName)
 	req, err := http.NewRequest(http.MethodPut, url, nil)
 	if err != nil {
-		log.Printf("mihomo provider reload Request init failed: %v", err)
-		return
+		return fmt.Errorf("request init failed: %w", err)
 	}
 	if s.mihomoSecret != "" {
 		req.Header.Set("Authorization", "Bearer "+s.mihomoSecret)
 	}
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		log.Printf("mihomo provider reload API PUT failed: %v", err)
-		return
+		return fmt.Errorf("API PUT failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		log.Printf("mihomo provider reload API returned status %d", resp.StatusCode)
+		return fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
+	return nil
 }
 
 // SetActiveNode перемещает ноду с указанным тегом на первую позицию в
