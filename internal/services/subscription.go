@@ -129,7 +129,19 @@ type Subscription struct {
 
 	// MihomoIntegrated — интегрирована ли подписка в config.yaml Mihomo
 	MihomoIntegrated bool `json:"mihomo_integrated"`
+
+	// ProviderName — зафиксированное имя провайдера в Mihomo
+	ProviderName string `json:"provider_name,omitempty"`
 }
+
+// GetProviderName возвращает стабильное имя провайдера для Mihomo.
+func (s *Subscription) GetProviderName() string {
+	if s.ProviderName != "" {
+		return s.ProviderName
+	}
+	return GetMihomoProviderName(s.ProfileTitle, s.Name, s.URL, s.ID)
+}
+
 
 // Clone возвращает глубокую копию Subscription.
 func (s *Subscription) Clone() Subscription {
@@ -253,7 +265,7 @@ func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscr
 		scheme = "https"
 	}
 
-	providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
+	providerName := sub.GetProviderName()
 	escapedURL := url.QueryEscape(sub.URL)
 	loopbackURL := fmt.Sprintf("%s://127.0.0.1:%d/api/provider.yaml?url=%s", scheme, port, escapedURL)
 

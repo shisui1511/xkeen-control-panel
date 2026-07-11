@@ -80,6 +80,10 @@ func (s *SubscriptionService) load() {
 			s.subscriptions[i].ID = fmt.Sprintf("sub_%d_%d", time.Now().Unix(), i)
 			needSave = true
 		}
+		if s.subscriptions[i].ProviderName == "" {
+			s.subscriptions[i].ProviderName = s.subscriptions[i].GetProviderName()
+			needSave = true
+		}
 	}
 	if needSave {
 		indentData, err := json.MarshalIndent(s.subscriptions, "", "  ")
@@ -125,7 +129,7 @@ func (s *SubscriptionService) populateMihomoIntegrated(subs []Subscription) {
 	}
 
 	for i := range subs {
-		providerName := GetMihomoProviderName(subs[i].ProfileTitle, subs[i].Name, subs[i].URL, subs[i].ID)
+		providerName := subs[i].GetProviderName()
 		if activeProviders[providerName] {
 			subs[i].MihomoIntegrated = true
 		} else {
@@ -208,6 +212,8 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 		sub.ID = invalidIDCharsRe.ReplaceAllString(sub.ID, "_")
 	}
 
+	sub.ProviderName = sub.GetProviderName()
+
 	if sub.EnableMihomo {
 		configDir := s.mihomoConfigDir
 		if configDir == "" {
@@ -218,7 +224,7 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 		s.mihomoMu.Lock()
 		if rawConfig, err := os.ReadFile(configPath); err == nil {
 			providerBlock := s.generateMihomoProxyProviderBlockLocked(sub, s.panelPort, s.panelHTTPS)
-			providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
+			providerName := sub.ProviderName
 			newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, providerBlock)
 			for _, group := range sub.MihomoGroups {
 				newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, false)
@@ -257,7 +263,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			}
 			configPath := filepath.Join(configDir, "config.yaml")
 
-			oldProviderName := GetMihomoProviderName(existing.ProfileTitle, existing.Name, existing.URL, existing.ID)
+			oldProviderName := existing.GetProviderName()
 			newProviderName := GetMihomoProviderName(existing.ProfileTitle, sub.Name, sub.URL, existing.ID)
 
 			if oldProviderName != newProviderName && existing.EnableMihomo {
@@ -290,6 +296,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				existing.FilterTransport = sub.FilterTransport
 			}
 			existing.UseProviderInterval = sub.UseProviderInterval
+			existing.ProviderName = newProviderName
 
 			needRestart := false
 			// Clean up Xray if it was enabled and is now disabled

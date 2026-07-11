@@ -85,7 +85,7 @@ func (s *SubscriptionService) Refresh(id string) error {
 		}
 	}
 	if subCopy.EnableMihomo {
-		providerName := GetMihomoProviderName(subCopy.ProfileTitle, subCopy.Name, subCopy.URL, subCopy.ID)
+		providerName := subCopy.GetProviderName()
 		activeKernel := ""
 		if s.kernelSvc != nil {
 			activeKernel = s.kernelSvc.GetActiveKernel()

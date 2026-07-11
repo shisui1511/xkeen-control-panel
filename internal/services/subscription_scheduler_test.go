@@ -697,6 +697,7 @@ proxy-groups:
 `
 	subServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/yaml")
+		w.Header().Set("profile-title", "base64:VGVzdCBTdWJzY3JpcHRpb24=") // "Test Subscription"
 		_, _ = w.Write([]byte(yamlContent))
 	}))
 	defer subServer.Close()

@@ -111,7 +111,7 @@ func (s *SubscriptionService) providerCachePath(sub *Subscription) string {
 	if configDir == "" {
 		configDir = "/opt/etc/mihomo"
 	}
-	providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
+	providerName := sub.GetProviderName()
 	return filepath.Join(configDir, "proxy_providers", providerName+".yaml")
 }
 
