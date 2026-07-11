@@ -157,6 +157,8 @@ func main() {
 	srv.HandleProtected("/api/subscriptions/nodes", api.SubscriptionNodes)
 	srv.HandleProtected("/api/subscriptions/health", api.SubscriptionHealth)
 	srv.HandleProtected("/api/subscriptions/active", api.SubscriptionSetActive)
+	srv.HandleProtected("/api/proxy-providers", api.ProxyProvidersRouter)
+	srv.HandleProtected("/api/proxy-providers/", api.ProxyProvidersRouter)
 
 	// Network Tools endpoints
 	srv.HandleProtected("/api/network/ping", api.NetworkPing)

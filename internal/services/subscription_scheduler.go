@@ -250,8 +250,6 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	return nil
 }
 
-
-
 func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {
 	safeID := filepath.Base(sub.ID)
 	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")

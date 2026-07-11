@@ -142,7 +142,6 @@ func (s *Subscription) GetProviderName() string {
 	return GetMihomoProviderName(s.ProfileTitle, s.Name, s.URL, s.ID)
 }
 
-
 // Clone возвращает глубокую копию Subscription.
 func (s *Subscription) Clone() Subscription {
 	if s == nil {
@@ -218,8 +217,8 @@ type SubscriptionService struct {
 	httpClient      *http.Client
 	consoleSvc      *ConsoleService
 	kernelSvc       KernelStatusProvider // для получения реальных версий ядер
-	hwid            string         // постоянный UUID устройства, передаётся как x-hwid
-	deviceInfo      *DeviceInfo    // модель/ОС роутера для x-device-* заголовков (см. task 60-01-05)
+	hwid            string               // постоянный UUID устройства, передаётся как x-hwid
+	deviceInfo      *DeviceInfo          // модель/ОС роутера для x-device-* заголовков (см. task 60-01-05)
 	mihomoAPIURL    string
 	mihomoSecret    string
 	lastCleanup     time.Time
@@ -290,4 +289,3 @@ func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscr
 
 	return sb.String()
 }
-
