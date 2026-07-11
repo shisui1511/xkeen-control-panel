@@ -20,6 +20,17 @@ import (
 
 var ErrMihomoAPINotConfigured = errors.New("Mihomo API URL is not configured")
 
+// MihomoAPIStatusError описывает неуспешный HTTP-статус ответа Clash API,
+// позволяя обработчикам различать 404 (неизвестный провайдер), 401 и прочие
+// ошибки вместо неразличимого текста.
+type MihomoAPIStatusError struct {
+	StatusCode int
+}
+
+func (e *MihomoAPIStatusError) Error() string {
+	return fmt.Sprintf("API returned status %d", e.StatusCode)
+}
+
 // SetConsoleService подключает ConsoleService для триггера xkeen -restart
 // после изменения Mihomo config.yaml.
 func (s *SubscriptionService) SetConsoleService(svc *ConsoleService) {
@@ -454,7 +465,7 @@ func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) e
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("API returned status %d", resp.StatusCode)
+		return &MihomoAPIStatusError{StatusCode: resp.StatusCode}
 	}
 	return nil
 }

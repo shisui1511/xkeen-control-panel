@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"regexp"
@@ -143,8 +144,22 @@ func (a *API) ProxyProviderRefresh(w http.ResponseWriter, r *http.Request, name 
 
 	err := a.subscriptionSvc.TriggerMihomoProviderReload(name)
 	if err != nil {
+		// Полный текст ошибки — только в лог сервера; клиенту отдаются
+		// локализованные сообщения без внутренних деталей (URL контроллера и т.п.).
 		log.Printf("[ProxyProviders] Error reloading provider %s: %v", name, err)
-		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		var statusErr *services.MihomoAPIStatusError
+		switch {
+		case errors.Is(err, services.ErrMihomoAPINotConfigured):
+			a.errorResponse(w, a.t(r, "mihomo.api_not_configured"), http.StatusServiceUnavailable)
+		case errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusNotFound:
+			// Clash API не знает такого провайдера.
+			a.errorResponse(w, a.t(r, "error.not_found"), http.StatusNotFound)
+		case errors.As(err, &statusErr):
+			a.errorResponse(w, a.t(r, "mihomo.api_error"), http.StatusBadGateway)
+		default:
+			// Сетевые ошибки: Mihomo не запущен / API недоступен.
+			a.errorResponse(w, a.t(r, "mihomo.not_running"), http.StatusBadGateway)
+		}
 		return
 	}
 

@@ -31,6 +31,7 @@
 
   "mihomo.not_running": "Mihomo не запущен",
   "mihomo.api_error": "Ошибка API Mihomo",
+  "mihomo.api_not_configured": "Mihomo API не настроен",
 
   "update.check_failed": "Ошибка проверки обновлений",
   "update.download_failed": "Ошибка загрузки",

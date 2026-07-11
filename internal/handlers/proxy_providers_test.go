@@ -314,3 +314,66 @@ func TestProxyProviders_Refresh_InvalidName(t *testing.T) {
 		t.Error("Clash API must not be called for invalid provider names")
 	}
 }
+
+// TestProxyProviders_Refresh_ErrorMapping проверяет маппинг ошибок обновления
+// в HTTP-статусы: API не настроен → 503, неизвестный провайдер → 404,
+// прочие ошибки Clash API → 502, Mihomo недоступен → 502.
+func TestProxyProviders_Refresh_ErrorMapping(t *testing.T) {
+	doRefresh := func(t *testing.T, api *API) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "/api/proxy-providers/test-provider/refresh", nil)
+		rr := httptest.NewRecorder()
+		api.ProxyProvidersRouter(rr, req)
+		return rr
+	}
+
+	t.Run("api not configured", func(t *testing.T) {
+		api, _ := newProxyProvidersTestAPI(t)
+		api.subscriptionSvc.SetMihomoAPI("", "")
+		if rr := doRefresh(t, api); rr.Code != http.StatusServiceUnavailable {
+			t.Errorf("expected 503, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("unknown provider maps to 404", func(t *testing.T) {
+		api, _ := newProxyProvidersTestAPI(t)
+		mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer mock.Close()
+		api.subscriptionSvc.SetMihomoAPI(mock.URL, "")
+		if rr := doRefresh(t, api); rr.Code != http.StatusNotFound {
+			t.Errorf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("clash api error maps to 502", func(t *testing.T) {
+		api, _ := newProxyProvidersTestAPI(t)
+		mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		}))
+		defer mock.Close()
+		api.subscriptionSvc.SetMihomoAPI(mock.URL, "")
+		rr := doRefresh(t, api)
+		if rr.Code != http.StatusBadGateway {
+			t.Errorf("expected 502, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("mihomo unreachable maps to 502", func(t *testing.T) {
+		api, _ := newProxyProvidersTestAPI(t)
+		// Только что закрытый порт гарантирует мгновенный connection refused
+		// (фиксированный порт вроде 127.0.0.1:1 может зависать на 30s в WSL2).
+		closed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		closedURL := closed.URL
+		closed.Close()
+		api.subscriptionSvc.SetMihomoAPI(closedURL, "")
+		rr := doRefresh(t, api)
+		if rr.Code != http.StatusBadGateway {
+			t.Errorf("expected 502, got %d: %s", rr.Code, rr.Body.String())
+		}
+		if strings.Contains(rr.Body.String(), closedURL) {
+			t.Errorf("internal controller URL leaked to client: %s", rr.Body.String())
+		}
+	})
+}

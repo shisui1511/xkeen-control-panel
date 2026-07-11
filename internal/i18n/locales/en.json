@@ -31,6 +31,7 @@
 
   "mihomo.not_running": "Mihomo is not running",
   "mihomo.api_error": "Mihomo API error",
+  "mihomo.api_not_configured": "Mihomo API is not configured",
 
   "update.check_failed": "Failed to check for updates",
   "update.download_failed": "Download failed",
