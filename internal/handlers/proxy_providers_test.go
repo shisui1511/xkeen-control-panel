@@ -2,14 +2,61 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
+
+// startFakeMihomo запускает подконтрольный долгоживущий процесс с уникальным
+// именем и возвращает путь к его бинарнику. MihomoService.Status() (pidof)
+// стабильно видит его как "running" без зависимости от посторонних процессов
+// на хосте (например, наличия живого sh).
+func startFakeMihomo(t *testing.T) string {
+	t.Helper()
+
+	src, err := os.ReadFile("/bin/sleep")
+	if err != nil {
+		t.Skipf("cannot read /bin/sleep to build fake mihomo binary: %v", err)
+	}
+
+	// Имя короче 15 символов, чтобы гарантированно попасть в comm для pidof.
+	name := fmt.Sprintf("xcpmhm%d", os.Getpid()%1000000)
+	binPath := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(binPath, src, 0o755); err != nil {
+		t.Fatalf("write fake mihomo binary: %v", err)
+	}
+
+	cmd := exec.Command(binPath, "300")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start fake mihomo: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+
+	// Дождаться, пока pidof увидит процесс (устраняет гонку старта).
+	svc := services.NewMihomoService(binPath, "", t.TempDir())
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if status, err := svc.Status(); err == nil && strings.HasPrefix(status, "running") {
+			return binPath
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("fake mihomo process %s did not become visible to pidof", name)
+	return ""
+}
 
 func newProxyProvidersTestAPI(t *testing.T) (*API, *services.SubscriptionService) {
 	t.Helper()
@@ -114,8 +161,9 @@ func TestProxyProviders_List_MihomoOnline(t *testing.T) {
 
 	api.cfg.MihomoAPIURL = mockClashAPI.URL
 
-	// Mihomo is running (using /bin/sh binary to trigger 'running' status)
-	api.mihomoSvc = services.NewMihomoService("/bin/sh", "", api.cfg.DataDir)
+	// Mihomo is running — запускаем подконтрольный процесс вместо зависимости
+	// от посторонних процессов хоста.
+	api.mihomoSvc = services.NewMihomoService(startFakeMihomo(t), "", api.cfg.DataDir)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/proxy-providers", nil)
 	rr := httptest.NewRecorder()
