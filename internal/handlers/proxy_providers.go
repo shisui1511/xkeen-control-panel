@@ -69,12 +69,7 @@ func (a *API) ProxyProvidersList(w http.ResponseWriter, r *http.Request) {
 	clashProviders := make(map[string]ClashProvider)
 	if running {
 		// 2. Fetch providers from Clash API
-		secret := a.cfg.MihomoSecret
-		if secret == "" && a.mihomoSvc != nil {
-			if _, parsedSecret, err := a.mihomoSvc.ParseConfig(); err == nil && parsedSecret != "" {
-				secret = parsedSecret
-			}
-		}
+		secret := a.ResolveMihomoSecret()
 
 		req, err := http.NewRequest(http.MethodGet, a.cfg.MihomoAPIURL+"/providers/proxies", nil)
 		if err != nil {

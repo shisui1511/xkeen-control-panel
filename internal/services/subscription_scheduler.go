@@ -34,6 +34,14 @@ func (s *SubscriptionService) SetMihomoAPI(apiURL, secret string) {
 	s.mihomoSecret = secret
 }
 
+// SetMihomoSecretResolver задаёт fallback-резолвер секрета Clash API,
+// который вызывается, когда секрет не задан в конфиге панели (типовой
+// сценарий: секрет живёт только в config.yaml Mihomo). Вызывается один раз
+// при старте, до запуска фоновых горутин.
+func (s *SubscriptionService) SetMihomoSecretResolver(fn func() string) {
+	s.mihomoSecretResolver = fn
+}
+
 func (s *SubscriptionService) Refresh(id string) error {
 	safeID := filepath.Base(id)
 	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
@@ -429,8 +437,12 @@ func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) e
 	if err != nil {
 		return fmt.Errorf("request init failed: %w", err)
 	}
-	if s.mihomoSecret != "" {
-		req.Header.Set("Authorization", "Bearer "+s.mihomoSecret)
+	secret := s.mihomoSecret
+	if secret == "" && s.mihomoSecretResolver != nil {
+		secret = s.mihomoSecretResolver()
+	}
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 	resp, err := s.httpClient.Do(req)
 	if err != nil {

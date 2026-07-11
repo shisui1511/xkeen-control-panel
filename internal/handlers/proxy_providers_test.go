@@ -159,9 +159,11 @@ func TestProxyProviders_Refresh(t *testing.T) {
 
 	// Mock Clash API server for PUT reload
 	calledRefresh := false
+	gotAuth := ""
 	mockClashAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPut && r.URL.Path == "/providers/proxies/test_provider" {
 			calledRefresh = true
+			gotAuth = r.Header.Get("Authorization")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -182,5 +184,40 @@ func TestProxyProviders_Refresh(t *testing.T) {
 
 	if !calledRefresh {
 		t.Error("expected Clash API refresh to be called, but it was not")
+	}
+	if gotAuth != "Bearer test_secret" {
+		t.Errorf("expected Authorization 'Bearer test_secret', got '%s'", gotAuth)
+	}
+}
+
+// TestProxyProviders_Refresh_SecretFallback проверяет, что при пустом секрете
+// в конфиге панели используется fallback-резолвер (секрет из config.yaml Mihomo).
+func TestProxyProviders_Refresh_SecretFallback(t *testing.T) {
+	api, _ := newProxyProvidersTestAPI(t)
+
+	gotAuth := ""
+	mockClashAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/providers/proxies/test_provider" {
+			gotAuth = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockClashAPI.Close()
+
+	// Секрет панели пуст — резолвер эмулирует чтение из config.yaml Mihomo.
+	api.subscriptionSvc.SetMihomoAPI(mockClashAPI.URL, "")
+	api.subscriptionSvc.SetMihomoSecretResolver(func() string { return "yaml_secret" })
+
+	req := httptest.NewRequest(http.MethodPut, "/api/proxy-providers/test_provider/refresh", nil)
+	rr := httptest.NewRecorder()
+	api.ProxyProvidersRouter(rr, req)
+
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if gotAuth != "Bearer yaml_secret" {
+		t.Errorf("expected Authorization 'Bearer yaml_secret', got '%s'", gotAuth)
 	}
 }

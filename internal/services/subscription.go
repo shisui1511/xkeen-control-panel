@@ -221,9 +221,12 @@ type SubscriptionService struct {
 	deviceInfo      *DeviceInfo          // модель/ОС роутера для x-device-* заголовков (см. task 60-01-05)
 	mihomoAPIURL    string
 	mihomoSecret    string
-	lastCleanup     time.Time
-	panelPort       int
-	panelHTTPS      bool
+	// mihomoSecretResolver — fallback-резолвер секрета Clash API (например,
+	// чтение secret из config.yaml Mihomo), используется когда mihomoSecret пуст.
+	mihomoSecretResolver func() string
+	lastCleanup          time.Time
+	panelPort            int
+	panelHTTPS           bool
 }
 
 func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *SubscriptionService {

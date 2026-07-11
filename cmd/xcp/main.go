@@ -261,6 +261,11 @@ func main() {
 	subscriptionSvc.SetPanelAddress(cfg.Port, cfg.HTTPS.Enabled)
 	subscriptionSvc.SetConsoleService(consoleSvc)
 	subscriptionSvc.SetMihomoAPI(cfg.MihomoAPIURL, cfg.MihomoSecret)
+	// Fallback-резолвер секрета Clash API: при пустом MihomoSecret в конфиге
+	// панели секрет читается из config.yaml Mihomo (как у остальных
+	// потребителей Clash API). Без него ручное и автоматическое обновление
+	// proxy-providers получает 401 на типовых развертываниях.
+	subscriptionSvc.SetMihomoSecretResolver(api.ResolveMihomoSecret)
 	api.SetSubscriptionService(subscriptionSvc)
 
 	// Start subscription auto-refresh scheduler. It checks every 15 minutes

@@ -110,6 +110,20 @@ func (a *API) ClearCapabilitiesCache() {
 	a.capsCache = nil
 }
 
+// ResolveMihomoSecret возвращает секрет Clash API: сначала из конфига панели,
+// при его отсутствии — fallback на secret из config.yaml Mihomo (ParseConfig).
+// Используется всеми потребителями Clash API, включая SubscriptionService
+// (через SetMihomoSecretResolver в main.go).
+func (a *API) ResolveMihomoSecret() string {
+	secret := a.cfg.MihomoSecret
+	if secret == "" && a.mihomoSvc != nil {
+		if _, parsedSecret, err := a.mihomoSvc.ParseConfig(); err == nil && parsedSecret != "" {
+			secret = parsedSecret
+		}
+	}
+	return secret
+}
+
 func (a *API) t(r *http.Request, key string) string {
 	return i18n.T(i18n.LangFromContext(r.Context()), key)
 }
