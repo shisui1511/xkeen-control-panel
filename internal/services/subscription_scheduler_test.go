@@ -1,7 +1,6 @@
 package services
 
 import (
-	"context"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -10,11 +9,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type fakeKernelService struct {
+	active string
+}
+
+func (f *fakeKernelService) GetActiveKernel() string {
+	return f.active
+}
+
+func (f *fakeKernelService) Get(name string) *KernelInfo {
+	return nil
+}
 
 func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 	tmp := t.TempDir()
@@ -170,12 +180,29 @@ func TestSubscriptionScheduler_FrozenClock(t *testing.T) {
 		t.Fatalf("Add sub2: %v", err)
 	}
 
+	sub3 := &Subscription{
+		Name:         "mihomo-only",
+		URL:          ts.URL,
+		TagPrefix:    "s3-",
+		Enabled:      true,
+		EnableMihomo: true,
+		EnableXray:   false,
+		Interval:     1,
+		LastUpdate:   pastTime,
+	}
+	if err := svc.Add(sub3); err != nil {
+		t.Fatalf("Add sub3: %v", err)
+	}
+
 	now := time.Now()
 	if !svc.isRefreshDue(sub1, now) {
 		t.Error("expected sub1 (overdue) to be due")
 	}
 	if svc.isRefreshDue(sub2, now) {
 		t.Error("expected sub2 (recent) to NOT be due")
+	}
+	if svc.isRefreshDue(sub3, now) {
+		t.Error("expected sub3 (mihomo-only) to NOT be due for refresh in scheduler")
 	}
 
 	svc.checkAndRefreshDue(now)
@@ -256,6 +283,19 @@ func TestMihomoSubscriptionType(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewSubscriptionService(tmp, tmp, tmp)
 	svc.httpClient = http.DefaultClient
+	svc.SetKernelService(&fakeKernelService{active: "mihomo"})
+
+	var putCalled bool
+	var putPath string
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			putCalled = true
+			putPath = r.URL.Path
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer apiServer.Close()
+	svc.SetMihomoAPI(apiServer.URL, "")
 
 	yamlContent := `proxies:
   - name: TestProxy
@@ -266,6 +306,7 @@ func TestMihomoSubscriptionType(t *testing.T) {
     password: testpass
 `
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-Userinfo", "upload=100; download=200; total=1000")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(yamlContent))
 	}))
@@ -290,20 +331,17 @@ func TestMihomoSubscriptionType(t *testing.T) {
 	got := svc.List()[0]
 
 	providerName := GetMihomoProviderName("", sub.Name, sub.URL, id)
-	providerPath := filepath.Join(tmp, "proxy_providers", providerName+".yaml")
-	providerData, err := os.ReadFile(providerPath)
-	if err != nil {
-		t.Fatalf("expected provider file at %s: %v", providerPath, err)
+	expectedPutPath := "/providers/proxies/" + providerName
+
+	if !putCalled {
+		t.Error("expected Clash API reload PUT to be called, but it was not")
 	}
-	if !strings.Contains(string(providerData), "TestProxy") {
-		t.Error("expected 'TestProxy' in provider file after refresh")
+	if putPath != expectedPutPath {
+		t.Errorf("expected Clash API PUT path %q, got %q", expectedPutPath, putPath)
 	}
 
-	if got.ProxyCount != 1 {
-		t.Errorf("expected ProxyCount=1, got %d", got.ProxyCount)
-	}
-	if len(got.ProxyNames) != 1 || got.ProxyNames[0] != "TestProxy" {
-		t.Errorf("expected ProxyNames=[TestProxy], got %v", got.ProxyNames)
+	if got.Upload != 100 || got.Download != 200 || got.Total != 1000 {
+		t.Errorf("expected traffic values 100, 200, 1000; got %d, %d, %d", got.Upload, got.Download, got.Total)
 	}
 }
 
@@ -313,35 +351,10 @@ func TestSubscriptionTrafficAndRules(t *testing.T) {
 		t.Errorf("parseSubscriptionUserinfo failed: upload=%d, download=%d, total=%d, expire=%d", upload, download, total, expire)
 	}
 
-	yaml := `
-port: 7890
-socks-port: 7891
-rules:
-  - DOMAIN-SUFFIX,google.com,PROXY
-  - DOMAIN-KEYWORD,google,PROXY
-  - GEOIP,CN,DIRECT
-  - MATCH,PROXY
-`
-	rulesCount := countMihomoRules(yaml)
-	if rulesCount != 4 {
-		t.Errorf("expected 4 rules, got %d", rulesCount)
-	}
-
-	yaml2 := `
-rules:
-  - DOMAIN,example.com,DIRECT
-proxies:
-  - name: proxy
-    type: socks5
-`
-	rulesCount2 := countMihomoRules(yaml2)
-	if rulesCount2 != 1 {
-		t.Errorf("expected 1 rule in yaml2, got %d", rulesCount2)
-	}
-
 	tmp := t.TempDir()
 	svc := NewSubscriptionService(tmp, tmp, tmp)
 	svc.httpClient = http.DefaultClient
+	svc.SetKernelService(&fakeKernelService{active: "mihomo"})
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Subscription-Userinfo", "upload=100; download=200; total=1000")
@@ -369,9 +382,6 @@ proxies:
 	got := svc.Get(id)
 	if got.Upload != 100 || got.Download != 200 || got.Total != 1000 {
 		t.Errorf("expected traffic values 100, 200, 1000; got %d, %d, %d", got.Upload, got.Download, got.Total)
-	}
-	if got.RuleCount != 1 {
-		t.Errorf("expected RuleCount=1, got %d", got.RuleCount)
 	}
 }
 
@@ -493,6 +503,7 @@ proxy-groups:
 
 	svc := NewSubscriptionService(tmp, tmp, mihomoDir)
 	svc.httpClient = srv.Client()
+	svc.SetKernelService(&fakeKernelService{active: "mihomo"})
 
 	consoleSvc := NewConsoleService(mockXkeenPath)
 	svc.SetConsoleService(consoleSvc)
@@ -521,14 +532,9 @@ proxy-groups:
 		t.Errorf("expected config.yaml to contain provider %s after Add, config:\n%s", providerName, configStr)
 	}
 
-	// 2. Выполняем Refresh
+	// 2. Выполняем Refresh (теперь он триггерит Clash API без перезаписи локального файла провайдера)
 	if err := svc.Refresh("mihomo-sub"); err != nil {
 		t.Fatalf("Refresh failed: %v", err)
-	}
-
-	providerFilePath := filepath.Join(mihomoDir, "proxy_providers", providerName+".yaml")
-	if _, err := os.Stat(providerFilePath); err != nil {
-		t.Errorf("provider file should be written at %s: %v", providerFilePath, err)
 	}
 
 	// Проверяем, что в config.yaml провайдер ссылается на loopback URL с портом 8090
@@ -539,10 +545,10 @@ proxy-groups:
 		t.Errorf("expected loopback url %q in config.yaml, got config:\n%s", expectedURL, configStr)
 	}
 
-	// 3. Проверяем режим HTTPS
+	// 3. Проверяем режим HTTPS (через Update, т.к. Refresh больше не обновляет config.yaml)
 	svc.SetPanelAddress(443, true)
-	if err := svc.Refresh("mihomo-sub"); err != nil {
-		t.Fatalf("Refresh under HTTPS failed: %v", err)
+	if err := svc.Update("mihomo-sub", &sub); err != nil {
+		t.Fatalf("Update under HTTPS failed: %v", err)
 	}
 	configBytes, _ = os.ReadFile(configPath)
 	configStr = string(configBytes)
@@ -576,9 +582,6 @@ proxy-groups:
 	configStr = string(configBytes)
 	if strings.Contains(configStr, providerName) {
 		t.Error("provider and references should be removed from config.yaml after deletion")
-	}
-	if _, err := os.Stat(providerFilePath); !os.IsNotExist(err) {
-		t.Error("provider file should be deleted")
 	}
 }
 
@@ -657,49 +660,6 @@ func TestRefreshXray_DoesNotRestartXray(t *testing.T) {
 	}
 }
 
-func TestRefreshMihomo_ConcurrentRace(t *testing.T) {
-	yamlContent := `proxies:
-  - {name: node1, type: ss, server: 1.2.3.4, port: 443, cipher: chacha20-ietf-poly1305, password: test}
-`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/yaml")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(yamlContent))
-	}))
-	defer srv.Close()
-
-	tmp := t.TempDir()
-	svc := NewSubscriptionService(tmp, tmp, tmp)
-	svc.httpClient = srv.Client()
-
-	sub := Subscription{
-		ID:           "race-sub",
-		URL:          srv.URL,
-		EnableMihomo: true,
-		EnableXray:   false,
-		Enabled:      true,
-	}
-	if err := svc.Add(&sub); err != nil {
-		t.Fatalf("Add subscription failed: %v", err)
-	}
-
-	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			subCopy := svc.Get("race-sub")
-			if subCopy != nil {
-				body, headers, err := svc.downloadRaw(context.Background(), subCopy.URL, subCopy)
-				if err == nil {
-					_ = svc.refreshMihomo(subCopy, body, headers)
-				}
-			}
-		}()
-	}
-	wg.Wait()
-}
-
 func TestSubscriptionService_MihomoAPIProviderReload(t *testing.T) {
 	var calledPath string
 	var calledMethod string
@@ -744,6 +704,7 @@ proxy-groups:
 	svc := NewSubscriptionService(tmp, tmp, mihomoDir)
 	svc.httpClient = subServer.Client()
 	svc.SetMihomoAPI(apiServer.URL, "test-secret-token")
+	svc.SetKernelService(&fakeKernelService{active: "mihomo"})
 
 	sub := Subscription{
 		ID:           "mihomo-reload-test",
@@ -779,75 +740,5 @@ proxy-groups:
 	}
 	if authHeader != "Bearer test-secret-token" {
 		t.Errorf("expected Authorization header 'Bearer test-secret-token', got %q", authHeader)
-	}
-}
-
-func TestUniversalRefreshMihomo(t *testing.T) {
-	rawOutboundLink := "vless://uuid-vless@vless.example.com:443?security=reality&pbk=pubkey&sid=shortid&sni=dest.com&type=grpc&serviceName=service-name#vless-node\n"
-	base64Body := base64.StdEncoding.EncodeToString([]byte(rawOutboundLink))
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(base64Body))
-	}))
-	defer srv.Close()
-
-	tmp := t.TempDir()
-	mihomoDir := filepath.Join(tmp, "mihomo")
-	_ = os.MkdirAll(mihomoDir, 0755)
-	configPath := filepath.Join(mihomoDir, "config.yaml")
-
-	initialConfig := `port: 9090
-proxy-groups:
-  - name: PROXY
-    type: select
-    proxies:
-      - DIRECT
-`
-	_ = os.WriteFile(configPath, []byte(initialConfig), 0600)
-
-	svc := NewSubscriptionService(tmp, tmp, mihomoDir)
-	svc.httpClient = srv.Client()
-
-	sub := Subscription{
-		ID:           "universal-sub",
-		Name:         "Universal Sub Test",
-		URL:          srv.URL,
-		EnableMihomo: true,
-		EnableXray:   false,
-		Enabled:      true,
-		Interval:     1,
-		MihomoGroups: []string{"PROXY"},
-	}
-	_ = svc.Add(&sub)
-
-	t.Logf("Base64 body: %s", base64Body)
-	decodedBytes, _ := base64.StdEncoding.DecodeString(base64Body)
-	t.Logf("Decoded body: %q", string(decodedBytes))
-	parsedOb := parseShareLink(strings.TrimSpace(string(decodedBytes)))
-	t.Logf("parseShareLink result: %+v", parsedOb)
-
-	err := svc.Refresh("universal-sub")
-	if err != nil {
-		t.Fatalf("Refresh failed: %v", err)
-	}
-
-	providerName := GetMihomoProviderName("", sub.Name, sub.URL, sub.ID)
-	providerFilePath := filepath.Join(mihomoDir, "proxy_providers", providerName+".yaml")
-	providerBytes, err := os.ReadFile(providerFilePath)
-	if err != nil {
-		t.Fatalf("provider file not found at %s: %v", providerFilePath, err)
-	}
-	providerStr := string(providerBytes)
-
-	blocks, names := ParseMihomoSubscriptionBlocks(providerStr)
-	if len(blocks) != 1 || names[0] != "vless-node" {
-		t.Errorf("provider file has invalid content, got:\n%s", providerStr)
-	}
-
-	node := ParseClashProxyNode(blocks[0])
-	if node.Tag != "vless-node" || node.Protocol != "vless" || node.Server != "vless.example.com:443" || node.Security != "reality" {
-		t.Errorf("converted node parsed incorrectly: %+v", node)
 	}
 }
