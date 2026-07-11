@@ -187,6 +187,12 @@ type retryState struct {
 	nextRetry time.Time
 }
 
+// KernelStatusProvider defines active kernel detection seam.
+type KernelStatusProvider interface {
+	GetActiveKernel() string
+	Get(name string) *KernelInfo
+}
+
 // SubscriptionService manages subscriptions
 type SubscriptionService struct {
 	dataDir         string
@@ -199,7 +205,7 @@ type SubscriptionService struct {
 	retries         sync.Map   // ID -> *retryState for exponential backoff
 	httpClient      *http.Client
 	consoleSvc      *ConsoleService
-	kernelSvc       *KernelService // для получения реальных версий ядер
+	kernelSvc       KernelStatusProvider // для получения реальных версий ядер
 	hwid            string         // постоянный UUID устройства, передаётся как x-hwid
 	deviceInfo      *DeviceInfo    // модель/ОС роутера для x-device-* заголовков (см. task 60-01-05)
 	mihomoAPIURL    string

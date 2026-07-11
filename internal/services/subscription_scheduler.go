@@ -23,7 +23,7 @@ func (s *SubscriptionService) SetConsoleService(svc *ConsoleService) {
 	s.consoleSvc = svc
 }
 
-func (s *SubscriptionService) SetKernelService(svc *KernelService) {
+func (s *SubscriptionService) SetKernelService(svc KernelStatusProvider) {
 	s.kernelSvc = svc
 }
 
