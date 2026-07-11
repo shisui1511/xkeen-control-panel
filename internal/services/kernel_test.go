@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -349,11 +350,10 @@ func TestKernelInstall_Concurrent(t *testing.T) {
 // and re-run the binary only after the TTL expires.
 func TestKernelVersionCache_TTL(t *testing.T) {
 	tmpDir := t.TempDir()
-	callCount := 0
+	logPath := filepath.Join(tmpDir, "calls.log")
 	scriptPath := filepath.Join(tmpDir, "xray")
-	// Script that increments a side-effect file each time it's called.
-	// We count calls via our own counter instead.
-	script := "#!/bin/sh\necho \"Xray 1.9.0 (Xray, Penetrates Everything.)\"\n"
+
+	script := fmt.Sprintf("#!/bin/sh\necho x >> %s\necho \"Xray 1.9.0 (Xray, Penetrates Everything.)\"\n", logPath)
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -362,33 +362,44 @@ func TestKernelVersionCache_TTL(t *testing.T) {
 	k := svc.kernels["xray"]
 	k.BinaryPath = scriptPath
 
-	// Wrap detectVersion in a counting helper
-	countingDetect := func() string {
-		callCount++
-		return svc.detectVersion(k)
+	readCalls := func() int {
+		data, err := os.ReadFile(logPath)
+		if err != nil {
+			return 0
+		}
+		return strings.Count(string(data), "\n")
 	}
 
-	v1 := countingDetect()
+	// First call — runs binary, caches result
+	v1 := svc.detectVersion(k)
 	if v1 != "1.9.0" {
 		t.Fatalf("first call: expected 1.9.0, got %s", v1)
 	}
+	if calls := readCalls(); calls != 1 {
+		t.Fatalf("expected 1 binary execution, got %d", calls)
+	}
 
-	// Second call within TTL — should return cached value without re-running binary.
-	// Force cache to look fresh.
-	k.verCache.value = "1.9.0"
-	k.verCache.expires = time.Now().Add(versionCacheTTL)
+	// Second call within TTL — should return cached value without executing binary
 	v2 := svc.detectVersion(k)
 	if v2 != "1.9.0" {
 		t.Fatalf("cached call: expected 1.9.0, got %s", v2)
 	}
+	if calls := readCalls(); calls != 1 {
+		t.Fatalf("expected still 1 binary execution (cached), got %d", calls)
+	}
 
-	// Expire the cache and re-run — should call binary again.
+	// Force expire the cache and call again — should execute binary again
+	k.verCache.mu.Lock()
 	k.verCache.expires = time.Now().Add(-1 * time.Second)
-	v3 := countingDetect()
+	k.verCache.mu.Unlock()
+
+	v3 := svc.detectVersion(k)
 	if v3 != "1.9.0" {
 		t.Fatalf("after expiry: expected 1.9.0, got %s", v3)
 	}
-	_ = callCount // suppress unused warning
+	if calls := readCalls(); calls != 2 {
+		t.Fatalf("expected 2 binary executions after cache expiry, got %d", calls)
+	}
 }
 
 // TestKernelVersionRegex_VPrefix: parseVersion must strip leading 'v'/'V' prefix.
