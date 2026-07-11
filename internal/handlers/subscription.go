@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -28,10 +29,27 @@ func (a *API) SubscriptionAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var sub services.Subscription
-	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	var sub services.Subscription
+	if err := json.Unmarshal(body, &sub); err != nil {
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var presence struct {
+		EnableXray   *bool `json:"enable_xray"`
+		EnableMihomo *bool `json:"enable_mihomo"`
+	}
+	if err := json.Unmarshal(body, &presence); err == nil {
+		if presence.EnableXray == nil && presence.EnableMihomo == nil {
+			sub.EnableXray = true
+			sub.EnableMihomo = true
+		}
 	}
 
 	if sub.URL == "" {

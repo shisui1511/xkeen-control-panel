@@ -117,6 +117,46 @@ func TestSubscriptionAdd(t *testing.T) {
 	}
 }
 
+func TestSubscriptionAdd_DefaultKernels(t *testing.T) {
+	// Case A: omitted (defaulting to true)
+	{
+		api, _ := newSubTestAPI(t)
+		payload := `{"name": "testA", "url": "http://example.com/subA"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/add", strings.NewReader(payload))
+		rr := httptest.NewRecorder()
+		api.SubscriptionAdd(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var created services.Subscription
+		if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+			t.Fatal(err)
+		}
+		if !created.EnableXray || !created.EnableMihomo {
+			t.Errorf("expected enable_xray and enable_mihomo to default to true, got: xray=%t, mihomo=%t", created.EnableXray, created.EnableMihomo)
+		}
+	}
+
+	// Case B: explicit false (preservation of false)
+	{
+		api, _ := newSubTestAPI(t)
+		payload := `{"name": "testB", "url": "http://example.com/subB", "enable_xray": false, "enable_mihomo": false}`
+		req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/add", strings.NewReader(payload))
+		rr := httptest.NewRecorder()
+		api.SubscriptionAdd(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var created services.Subscription
+		if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+			t.Fatal(err)
+		}
+		if created.EnableXray || created.EnableMihomo {
+			t.Errorf("expected explicit false to be preserved, got: xray=%t, mihomo=%t", created.EnableXray, created.EnableMihomo)
+		}
+	}
+}
+
 func TestSubscriptionUpdate(t *testing.T) {
 	api, subSvc := newSubTestAPI(t)
 
