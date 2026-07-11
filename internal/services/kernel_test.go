@@ -206,6 +206,8 @@ func TestValidateKernelPath(t *testing.T) {
 	}{
 		{"/opt/bin/xray", false},
 		{"/opt/bin/.backup/kernel.bak.123", false},
+		{"/opt/bin/.backup/xray.bak.123", false},
+		{"/opt/bin/.backup/mihomo.bak.123", false},
 		{"/opt/etc/mihomo/config.yaml", false},
 		{"/opt/bin/../etc/passwd", true}, // traversal
 		{"/home/user/evil", true},        // outside allowed roots

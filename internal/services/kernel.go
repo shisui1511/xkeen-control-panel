@@ -873,8 +873,8 @@ func (s *KernelService) Install(name string) error {
 		setStatus("failed", "Backup dir failed: "+err.Error())
 		return err
 	}
-	// Use only timestamp in backup name to avoid tainted data in path
-	backupName := fmt.Sprintf("kernel.bak.%d", time.Now().Unix())
+	// Use name and timestamp in backup name to prevent cross-kernel backup collisions
+	backupName := fmt.Sprintf("%s.bak.%d", name, time.Now().Unix())
 	backupPath := filepath.Join(backupDir, backupName)
 	if err := validateKernelPath(backupPath); err != nil {
 		setStatus("failed", "Invalid backup path: "+err.Error())
@@ -954,8 +954,8 @@ func (s *KernelService) Install(name string) error {
 		return err
 	}
 
-	// Prune old backups — keep at most 3 most recent
-	_ = pruneBackups(backupDir, 3)
+	// Prune old backups — keep at most 3 most recent for this kernel
+	_ = pruneBackups(backupDir, name+".bak.", 3)
 
 	// Verify new version and update metadata under lock
 	s.mu.Lock()
@@ -998,8 +998,18 @@ func (s *KernelService) Rollback(name string) error {
 
 	var backups []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), "kernel.bak.") {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), name+".bak.") {
 			backups = append(backups, filepath.Join(backupDir, e.Name()))
+		}
+	}
+
+	// Fallback to legacy format "kernel.bak." only if no new backups exist
+	if len(backups) == 0 {
+		log.Printf("[Kernel] No backups found with prefix %s.bak., trying legacy format kernel.bak.", name)
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasPrefix(e.Name(), "kernel.bak.") {
+				backups = append(backups, filepath.Join(backupDir, e.Name()))
+			}
 		}
 	}
 
@@ -1062,10 +1072,10 @@ func (s *KernelService) Rollback(name string) error {
 	return nil
 }
 
-// pruneBackups removes oldest backup files in dir, keeping only the `keep` most recent.
+// pruneBackups removes oldest backup files in dir with the given prefix, keeping only the `keep` most recent.
 // Files are sorted by name (timestamp suffix ensures lexicographic order = chronological order).
 // Errors are logged but do not fail the caller.
-func pruneBackups(dir string, keep int) error {
+func pruneBackups(dir string, prefix string, keep int) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
@@ -1074,7 +1084,7 @@ func pruneBackups(dir string, keep int) error {
 	// Filter to backup files only
 	var backups []string
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), prefix) {
 			backups = append(backups, filepath.Join(dir, e.Name()))
 		}
 	}
