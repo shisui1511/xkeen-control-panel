@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -432,8 +433,11 @@ func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) e
 	if s.mihomoAPIURL == "" {
 		return ErrMihomoAPINotConfigured
 	}
-	url := fmt.Sprintf("%s/providers/proxies/%s", s.mihomoAPIURL, providerName)
-	req, err := http.NewRequest(http.MethodPut, url, nil)
+	// PathEscape — защита в глубину: имя валидируется на уровне handler,
+	// но экранирование гарантирует, что спецсимволы не изменят путь/query
+	// исходящего запроса.
+	reqURL := fmt.Sprintf("%s/providers/proxies/%s", s.mihomoAPIURL, url.PathEscape(providerName))
+	req, err := http.NewRequest(http.MethodPut, reqURL, nil)
 	if err != nil {
 		return fmt.Errorf("request init failed: %w", err)
 	}

@@ -4,11 +4,18 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
+
+// providerNameRe — допустимый формат имени Mihomo-провайдера. Совпадает с
+// инвариантом GetMihomoProviderName (subscription_converter.go): только
+// строчные латинские буквы, цифры и дефис. Всё остальное — мусорный ввод,
+// который не должен уходить в исходящий запрос к Clash API.
+var providerNameRe = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 type ProxyProviderResponse struct {
 	services.Subscription
@@ -41,7 +48,10 @@ func (a *API) ProxyProvidersRouter(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/proxy-providers/") && strings.HasSuffix(r.URL.Path, "/refresh") {
 		trimmed := strings.TrimPrefix(r.URL.Path, "/api/proxy-providers/")
 		name := strings.TrimSuffix(trimmed, "/refresh")
-		if name != "" {
+		// name != trimmed гарантирует, что суффикс "/refresh" действительно
+		// был отрезан: путь /api/proxy-providers/refresh (без имени) не должен
+		// трактоваться как обновление провайдера с именем "refresh".
+		if name != "" && name != trimmed {
 			a.ProxyProviderRefresh(w, r, name)
 			return
 		}
@@ -123,6 +133,11 @@ func (a *API) ProxyProvidersList(w http.ResponseWriter, r *http.Request) {
 func (a *API) ProxyProviderRefresh(w http.ResponseWriter, r *http.Request, name string) {
 	if r.Method != http.MethodPut {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !providerNameRe.MatchString(name) {
+		a.errorResponse(w, a.t(r, "error.bad_request"), http.StatusBadRequest)
 		return
 	}
 

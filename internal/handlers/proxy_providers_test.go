@@ -161,7 +161,7 @@ func TestProxyProviders_Refresh(t *testing.T) {
 	calledRefresh := false
 	gotAuth := ""
 	mockClashAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPut && r.URL.Path == "/providers/proxies/test_provider" {
+		if r.Method == http.MethodPut && r.URL.Path == "/providers/proxies/test-provider" {
 			calledRefresh = true
 			gotAuth = r.Header.Get("Authorization")
 			w.WriteHeader(http.StatusNoContent)
@@ -174,7 +174,7 @@ func TestProxyProviders_Refresh(t *testing.T) {
 	// Initialize subscription service with Mihomo API details
 	api.subscriptionSvc.SetMihomoAPI(mockClashAPI.URL, "test_secret")
 
-	req := httptest.NewRequest(http.MethodPut, "/api/proxy-providers/test_provider/refresh", nil)
+	req := httptest.NewRequest(http.MethodPut, "/api/proxy-providers/test-provider/refresh", nil)
 	rr := httptest.NewRecorder()
 	api.ProxyProvidersRouter(rr, req)
 
@@ -197,7 +197,7 @@ func TestProxyProviders_Refresh_SecretFallback(t *testing.T) {
 
 	gotAuth := ""
 	mockClashAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPut && r.URL.Path == "/providers/proxies/test_provider" {
+		if r.Method == http.MethodPut && r.URL.Path == "/providers/proxies/test-provider" {
 			gotAuth = r.Header.Get("Authorization")
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -210,7 +210,7 @@ func TestProxyProviders_Refresh_SecretFallback(t *testing.T) {
 	api.subscriptionSvc.SetMihomoAPI(mockClashAPI.URL, "")
 	api.subscriptionSvc.SetMihomoSecretResolver(func() string { return "yaml_secret" })
 
-	req := httptest.NewRequest(http.MethodPut, "/api/proxy-providers/test_provider/refresh", nil)
+	req := httptest.NewRequest(http.MethodPut, "/api/proxy-providers/test-provider/refresh", nil)
 	rr := httptest.NewRecorder()
 	api.ProxyProvidersRouter(rr, req)
 
@@ -219,5 +219,50 @@ func TestProxyProviders_Refresh_SecretFallback(t *testing.T) {
 	}
 	if gotAuth != "Bearer yaml_secret" {
 		t.Errorf("expected Authorization 'Bearer yaml_secret', got '%s'", gotAuth)
+	}
+}
+
+// TestProxyProviders_Refresh_InvalidName проверяет, что некорректные имена
+// провайдеров отклоняются до исходящего запроса к Clash API, а негативные
+// маршруты не доходят до handler'а обновления.
+func TestProxyProviders_Refresh_InvalidName(t *testing.T) {
+	api, _ := newProxyProvidersTestAPI(t)
+
+	outboundCalled := false
+	mockClashAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		outboundCalled = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer mockClashAPI.Close()
+
+	api.subscriptionSvc.SetMihomoAPI(mockClashAPI.URL, "test_secret")
+
+	cases := []struct {
+		name     string
+		method   string
+		path     string
+		wantCode int
+	}{
+		{"underscore", http.MethodPut, "/api/proxy-providers/bad_name/refresh", http.StatusBadRequest},
+		{"multi-segment", http.MethodPut, "/api/proxy-providers/a/b/refresh", http.StatusBadRequest},
+		{"query-like chars", http.MethodPut, "/api/proxy-providers/x%3Fy/refresh", http.StatusBadRequest},
+		{"uppercase", http.MethodPut, "/api/proxy-providers/BadName/refresh", http.StatusBadRequest},
+		{"no name in path", http.MethodPut, "/api/proxy-providers/refresh", http.StatusNotFound},
+		{"wrong method", http.MethodPost, "/api/proxy-providers/test-provider/refresh", http.StatusNotFound},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			rr := httptest.NewRecorder()
+			api.ProxyProvidersRouter(rr, req)
+			if rr.Code != tc.wantCode {
+				t.Errorf("expected %d, got %d: %s", tc.wantCode, rr.Code, rr.Body.String())
+			}
+		})
+	}
+
+	if outboundCalled {
+		t.Error("Clash API must not be called for invalid provider names")
 	}
 }
