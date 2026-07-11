@@ -332,12 +332,15 @@ func kernelProcessStatus(binaryPath string) string {
 	matches, _ := filepath.Glob(filepath.Join(procDir, "*/exe"))
 	for _, link := range matches {
 		target, err := os.Readlink(link)
-		if err == nil && filepath.Base(target) == base {
-			pidStr := filepath.Base(filepath.Dir(link))
-			if isShortLivedOrHelperProcess(pidStr) {
-				continue
+		if err == nil {
+			target = strings.TrimSuffix(target, " (deleted)")
+			if filepath.Base(target) == base {
+				pidStr := filepath.Base(filepath.Dir(link))
+				if isShortLivedOrHelperProcess(pidStr) {
+					continue
+				}
+				return "running"
 			}
-			return "running"
 		}
 	}
 
@@ -383,16 +386,19 @@ func kernelProcessStatusDetailed(binaryPath string) (status string, pid int, upt
 	matches, _ := filepath.Glob(filepath.Join(procDir, "*/exe"))
 	for _, link := range matches {
 		target, err := os.Readlink(link)
-		if err == nil && filepath.Base(target) == base {
-			pidStr := filepath.Base(filepath.Dir(link))
-			if isShortLivedOrHelperProcess(pidStr) {
-				continue
+		if err == nil {
+			target = strings.TrimSuffix(target, " (deleted)")
+			if filepath.Base(target) == base {
+				pidStr := filepath.Base(filepath.Dir(link))
+				if isShortLivedOrHelperProcess(pidStr) {
+					continue
+				}
+				if p, err := strconv.Atoi(pidStr); err == nil {
+					uptimeStr := getProcUptime(pidStr)
+					return "running", p, uptimeStr
+				}
+				return "running", 0, ""
 			}
-			if p, err := strconv.Atoi(pidStr); err == nil {
-				uptimeStr := getProcUptime(pidStr)
-				return "running", p, uptimeStr
-			}
-			return "running", 0, ""
 		}
 	}
 
