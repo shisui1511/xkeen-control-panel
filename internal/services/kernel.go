@@ -591,6 +591,15 @@ func (s *KernelService) Get(name string) *KernelInfo {
 	return &snap
 }
 
+func (s *KernelService) GetActiveKernel() string {
+	for _, info := range s.List() {
+		if info.ProcessStatus == "running" {
+			return info.Name
+		}
+	}
+	return ""
+}
+
 func (s *KernelService) SetChannel(name, channel string) bool {
 	if channel != "stable" && channel != "preview" {
 		return false

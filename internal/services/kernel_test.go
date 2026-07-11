@@ -119,6 +119,20 @@ func TestKernelService_Get(t *testing.T) {
 	}
 }
 
+func TestKernelService_GetActiveKernel(t *testing.T) {
+	svc := NewKernelService()
+	active := svc.GetActiveKernel()
+	
+	valid := map[string]bool{
+		"":       true,
+		"xray":   true,
+		"mihomo": true,
+	}
+	if !valid[active] {
+		t.Fatalf("unexpected active kernel value: %q", active)
+	}
+}
+
 func TestKernelService_Get_Unknown(t *testing.T) {
 	svc := NewKernelService()
 	kernel := svc.Get("unknown")
