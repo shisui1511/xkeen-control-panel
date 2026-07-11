@@ -120,16 +120,65 @@ func TestKernelService_Get(t *testing.T) {
 }
 
 func TestKernelService_GetActiveKernel(t *testing.T) {
-	svc := NewKernelService()
-	active := svc.GetActiveKernel()
-	
-	valid := map[string]bool{
-		"":       true,
-		"xray":   true,
-		"mihomo": true,
+	tmpDir := t.TempDir()
+	origProcDir := procDir
+	procDir = tmpDir
+	defer func() { procDir = origProcDir }()
+
+	mihomoBin := filepath.Join(tmpDir, "mihomo")
+	xrayBin := filepath.Join(tmpDir, "xray")
+
+	if err := os.WriteFile(mihomoBin, []byte("fake binary"), 0755); err != nil {
+		t.Fatal(err)
 	}
-	if !valid[active] {
-		t.Fatalf("unexpected active kernel value: %q", active)
+	if err := os.WriteFile(xrayBin, []byte("fake binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewKernelService()
+	svc.kernels["mihomo"].BinaryPath = mihomoBin
+	svc.kernels["xray"].BinaryPath = xrayBin
+
+	// Case 1: No running kernels
+	active := svc.GetActiveKernel()
+	if active != "" {
+		t.Errorf("expected no active kernel, got %q", active)
+	}
+
+	// Case 2: Only mihomo is running
+	pid1 := "1000"
+	pidDir1 := filepath.Join(tmpDir, pid1)
+	if err := os.MkdirAll(pidDir1, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir1, "cmdline"), []byte(mihomoBin+"\x00-d\x00/opt/etc/mihomo\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(mihomoBin, filepath.Join(pidDir1, "exe")); err != nil {
+		t.Fatal(err)
+	}
+
+	active = svc.GetActiveKernel()
+	if active != "mihomo" {
+		t.Errorf("expected active kernel 'mihomo', got %q", active)
+	}
+
+	// Case 3: Both running (order is xray first in List() / GetActiveKernel)
+	pid2 := "1001"
+	pidDir2 := filepath.Join(tmpDir, pid2)
+	if err := os.MkdirAll(pidDir2, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir2, "cmdline"), []byte(xrayBin+"\x00-config\x00/opt/etc/xray.json\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(xrayBin, filepath.Join(pidDir2, "exe")); err != nil {
+		t.Fatal(err)
+	}
+
+	active = svc.GetActiveKernel()
+	if active != "xray" {
+		t.Errorf("expected active kernel 'xray', got %q", active)
 	}
 }
 
