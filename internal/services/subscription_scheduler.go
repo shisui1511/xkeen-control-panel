@@ -71,6 +71,8 @@ func (s *SubscriptionService) Refresh(id string) error {
 		return err
 	}
 
+	subCopy.LastUpdate = time.Now()
+
 	var refreshErr error
 	xrayChanged := false
 	xraySuccess := false
@@ -342,9 +344,12 @@ func (s *SubscriptionService) recordFailure(id string) {
 		rs = val.(*retryState)
 		rs.failCount++
 	}
-	delay := backoffBase * (1 << uint(rs.failCount-1))
-	if delay > backoffMax {
-		delay = backoffMax
+	delay := backoffMax
+	if rs.failCount <= 6 { // 5m * 2^5 = 160m < 4h (backoffMax)
+		delay = backoffBase * (1 << uint(rs.failCount-1))
+		if delay > backoffMax {
+			delay = backoffMax
+		}
 	}
 	rs.nextRetry = time.Now().Add(delay)
 	s.retries.Store(id, rs)

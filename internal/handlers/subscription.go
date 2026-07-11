@@ -365,8 +365,10 @@ func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, "subscription is disabled", http.StatusForbidden)
 		return
 	}
+	isAdhoc := false
 	if sub == nil {
 		sub = &services.Subscription{URL: urlStr, ID: adhocSubscriptionID(urlStr)}
+		isAdhoc = true
 	}
 
 	// 4. Upstream fetch + конвертация + Happ fallback + кэш на диск (graceful
@@ -376,6 +378,12 @@ func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[Subscriptions] provider fetch failed for sub=%s: %v", sub.ID, err)
 		http.Error(w, "Failed to fetch provider", http.StatusBadGateway)
 		return
+	}
+
+	if !isAdhoc {
+		if err := a.subscriptionSvc.PersistHeaderMetadata(sub.ID, sub); err != nil {
+			log.Printf("[Subscriptions] failed to persist header metadata for %s: %v", sub.ID, err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")

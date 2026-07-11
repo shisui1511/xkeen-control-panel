@@ -799,3 +799,27 @@ func (s *SubscriptionService) migrateFromMihomoConfig() bool {
 
 	return migrated
 }
+
+// PersistHeaderMetadata сохраняет метаданные подписки, полученные из HTTP-заголовков.
+func (s *SubscriptionService) PersistHeaderMetadata(id string, subCopy *Subscription) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	live := s.GetLocked(id)
+	if live == nil {
+		return fmt.Errorf("subscription not found")
+	}
+
+	live.Upload = subCopy.Upload
+	live.Download = subCopy.Download
+	live.Total = subCopy.Total
+	live.Expire = subCopy.Expire
+	live.ProfileTitle = subCopy.ProfileTitle
+	live.ProfileUpdateHours = subCopy.ProfileUpdateHours
+	live.SupportURL = subCopy.SupportURL
+	live.ProfileWebPageURL = subCopy.ProfileWebPageURL
+	live.ProviderType = subCopy.ProviderType
+	live.HwidLocked = subCopy.HwidLocked
+	live.LastUpdate = time.Now()
+
+	return s.save()
+}
