@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
+
+var ErrMihomoAPINotConfigured = errors.New("Mihomo API URL is not configured")
 
 // SetConsoleService подключает ConsoleService для триггера xkeen -restart
 // после изменения Mihomo config.yaml.
@@ -144,6 +147,9 @@ func (s *SubscriptionService) Refresh(id string) error {
 		_ = s.save()
 	}
 
+	if refreshErr == ErrMihomoAPINotConfigured {
+		return nil
+	}
 	return refreshErr
 }
 
@@ -161,11 +167,11 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Re-get sub in case it was modified
 	live := s.GetLocked(sub.ID)
 	if live == nil {
+		s.mu.Unlock()
 		return fmt.Errorf("subscription not found")
 	}
 
@@ -176,6 +182,7 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	fragmentPath := s.getFragmentPath(live)
 	nodes, err := s.writeFragment(fragmentPath, outbounds, live)
 	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
 
@@ -211,13 +218,10 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	oldHash := live.LastHash
 	sub.LastHash = newHash
 
+	needRestart := false
 	if newHash != oldHash {
 		sub.LastChanged = true
-		if s.consoleSvc != nil {
-			if _, err := s.consoleSvc.Execute("-restart"); err != nil {
-				log.Printf("subscription %s: xkeen -restart after xray fragment update: %v", sub.ID, err)
-			}
-		}
+		needRestart = true
 	} else {
 		sub.LastChanged = false
 	}
@@ -234,6 +238,14 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 		Timestamp:    sub.LastUpdate,
 	}
 	s.saveDebugFiles(sub.ID, body, headers, report)
+
+	s.mu.Unlock()
+
+	if needRestart && s.consoleSvc != nil {
+		if _, err := s.consoleSvc.Execute("-restart"); err != nil {
+			log.Printf("subscription %s: xkeen -restart after xray fragment update: %v", sub.ID, err)
+		}
+	}
 
 	return nil
 }
@@ -412,7 +424,7 @@ func (s *SubscriptionService) UnlockMihomo() {
 
 func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) error {
 	if s.mihomoAPIURL == "" {
-		return fmt.Errorf("Mihomo API URL is not configured")
+		return ErrMihomoAPINotConfigured
 	}
 	url := fmt.Sprintf("%s/providers/proxies/%s", s.mihomoAPIURL, providerName)
 	req, err := http.NewRequest(http.MethodPut, url, nil)
@@ -438,22 +450,25 @@ func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) e
 // в качестве активного. Доступно только при routing_mode = "manual".
 func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	sub := s.GetLocked(subscriptionID)
 	if sub == nil {
+		s.mu.Unlock()
 		return fmt.Errorf("subscription not found")
 	}
 	if !sub.EnableXray {
+		s.mu.Unlock()
 		return fmt.Errorf("active node selection is only supported for Xray subscriptions")
 	}
 	if sub.RoutingMode == "auto" {
+		s.mu.Unlock()
 		return fmt.Errorf("cannot set active node in auto routing mode (balancer is managing selection)")
 	}
 
 	fragmentPath := s.getFragmentPath(sub)
 	data, err := os.ReadFile(fragmentPath)
 	if err != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("outbounds file not found: %w", err)
 	}
 
@@ -461,6 +476,7 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 		Outbounds []Outbound `json:"outbounds"`
 	}
 	if err := json.Unmarshal(data, &wrapper); err != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("parse outbounds: %w", err)
 	}
 
@@ -473,6 +489,7 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 		}
 	}
 	if idx < 0 {
+		s.mu.Unlock()
 		return fmt.Errorf("node %q not found in subscription outbounds", nodeTag)
 	}
 
@@ -493,12 +510,15 @@ func (s *SubscriptionService) SetActiveNode(subscriptionID, nodeTag string) erro
 
 	newData, err := json.MarshalIndent(wrapper, "", "  ")
 	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
 	if err := utils.AtomicWriteFile(fragmentPath, newData, 0600); err != nil {
+		s.mu.Unlock()
 		return err
 	}
 	_ = s.save()
+	s.mu.Unlock()
 
 	// Триггер рестарта через ConsoleService.
 	if s.consoleSvc != nil {
