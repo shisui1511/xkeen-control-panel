@@ -219,6 +219,7 @@ func TestSubscriptionScheduler_FrozenClock(t *testing.T) {
 	if got != 1 {
 		t.Errorf("expected 1 refresh call, got %d", got)
 	}
+	time.Sleep(100 * time.Millisecond) // wait for goroutine to finish writing to disk
 }
 
 func TestExponentialBackoff(t *testing.T) {
