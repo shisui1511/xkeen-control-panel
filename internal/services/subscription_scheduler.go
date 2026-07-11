@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"log"
 	"net/http"
 	"os"
@@ -74,9 +73,7 @@ func (s *SubscriptionService) Refresh(id string) error {
 
 	var refreshErr error
 	xrayChanged := false
-	mihomoChanged := false
 	xraySuccess := false
-	mihomoSuccess := false
 
 	if subCopy.EnableXray {
 		err := s.refreshXray(&subCopy, body, headers)
@@ -88,18 +85,16 @@ func (s *SubscriptionService) Refresh(id string) error {
 		}
 	}
 	if subCopy.EnableMihomo {
-		err := s.refreshMihomo(&subCopy, body, headers)
-		if err != nil {
-			if refreshErr == nil {
-				refreshErr = err
-			}
-		} else {
-			mihomoChanged = subCopy.LastChanged
-			mihomoSuccess = true
+		providerName := GetMihomoProviderName(subCopy.ProfileTitle, subCopy.Name, subCopy.URL, subCopy.ID)
+		activeKernel := ""
+		if s.kernelSvc != nil {
+			activeKernel = s.kernelSvc.GetActiveKernel()
 		}
+		log.Printf("[Subscriptions] Mihomo reload triggered for provider %s (active kernel: %s)", providerName, activeKernel)
+		s.TriggerMihomoProviderReload(providerName)
 	}
 
-	subCopy.LastChanged = xrayChanged || mihomoChanged
+	subCopy.LastChanged = xrayChanged
 
 	// Persist last_error and successfully parsed fields so frontend can show error state
 	s.mu.Lock()
@@ -130,27 +125,14 @@ func (s *SubscriptionService) Refresh(id string) error {
 			live.DetectedFormat = subCopy.DetectedFormat
 		}
 
-		// Update Mihomo state if its step succeeded
-		if mihomoSuccess {
-			live.LastHashMihomo = subCopy.LastHashMihomo
-			live.ProxyNames = subCopy.ProxyNames
-			live.RuleCount = subCopy.RuleCount
-			live.DetectedFormat = subCopy.DetectedFormat
-		}
-
 		// Update shared/derived fields based on which kernel succeeded.
-		// Mihomo has priority for Nodes, Announcement and LastCount if both are enabled and succeeded.
-		if mihomoSuccess {
-			live.Nodes = subCopy.Nodes
-			live.Announcement = subCopy.Announcement
-			live.LastCount = subCopy.LastCount
-		} else if xraySuccess {
+		if xraySuccess {
 			live.Nodes = subCopy.Nodes
 			live.Announcement = subCopy.Announcement
 			live.LastCount = subCopy.LastCount
 		}
 
-		live.LastChanged = (xraySuccess && xrayChanged) || (mihomoSuccess && mihomoChanged)
+		live.LastChanged = xraySuccess && xrayChanged
 
 		_ = s.save()
 	}
@@ -249,152 +231,7 @@ func (s *SubscriptionService) refreshXray(sub *Subscription, body []byte, header
 	return nil
 }
 
-func (s *SubscriptionService) refreshMihomo(sub *Subscription, body []byte, headers http.Header) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("panic in parser: %v", r)
-			log.Printf("[Subscriptions] PANIC recovered: %v", r)
-		}
-	}()
 
-	var yamlContent string
-	var newBlocks []string
-	var newNames []string
-	var skipReasons []SkipReason
-
-	s.mu.RLock()
-	exists := s.GetLocked(sub.ID) != nil
-	s.mu.RUnlock()
-	if !exists {
-		return fmt.Errorf("subscription not found")
-	}
-
-	if looksLikeClashYAML(string(body)) {
-		var allBlocks []string
-		var allNames []string
-		allBlocks, allNames = ParseMihomoSubscriptionBlocks(string(body))
-		if len(allBlocks) == 0 {
-			return fmt.Errorf("no proxy blocks found in subscription YAML")
-		}
-
-		// Apply Clash filters
-		newBlocks, newNames = s.applyClashFilters(allBlocks, allNames, sub)
-
-		hasFilters := sub.FilterName != "" || sub.FilterType != "" || sub.FilterTransport != ""
-		if hasFilters {
-			var sb strings.Builder
-			sb.WriteString("proxies:\n")
-			for _, block := range newBlocks {
-				sb.WriteString(block)
-				sb.WriteString("\n")
-			}
-			yamlContent = sb.String()
-		} else {
-			yamlContent = string(body)
-		}
-		sub.DetectedFormat = "clash-meta"
-	} else {
-		// Non-clash format (Base64, Share links, Sing-box JSON, etc.)
-		var outbounds []Outbound
-		outbounds, skipReasons, err = parseSubscriptionBody(body, headers.Get("Content-Type"), sub)
-		if err != nil {
-			return err
-		}
-
-		// Apply Xray filters to outbounds
-		outbounds = s.applyFilters(outbounds, sub)
-
-		// Convert nodes to Clash YAML
-		yamlContent, newNames = s.convertSubscriptionNodesToClashYAML(s.outboundsToNodes(outbounds, sub))
-
-		newBlocks, _ = ParseMihomoSubscriptionBlocks(yamlContent)
-	}
-
-	s.mu.RLock()
-	port := s.panelPort
-	https := s.panelHTTPS
-	s.mu.RUnlock()
-
-	s.mihomoMu.Lock()
-	defer s.mihomoMu.Unlock()
-
-	configDir := s.mihomoConfigDir
-	if configDir == "" {
-		configDir = "/opt/etc/mihomo"
-	}
-
-	providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
-
-	// Записать скачанный контент в файл провайдера в proxy_providers
-	proxyProvidersDir := filepath.Join(configDir, "proxy_providers")
-	_ = os.MkdirAll(proxyProvidersDir, 0755)
-	providerFilePath := filepath.Join(proxyProvidersDir, fmt.Sprintf("%s.yaml", providerName))
-	if err := utils.AtomicWriteFile(providerFilePath, []byte(yamlContent), 0600); err != nil {
-		return fmt.Errorf("write provider file: %w", err)
-	}
-
-	// Обновление config.yaml для нативного proxy-provider
-	configPath := filepath.Join(configDir, "config.yaml")
-	if rawConfig, err := os.ReadFile(configPath); err == nil {
-		providerBlock := s.generateMihomoProxyProviderBlockLocked(sub, port, https)
-		newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, providerBlock)
-		for _, group := range sub.MihomoGroups {
-			newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, false)
-		}
-		if string(rawConfig) != newConfig {
-			if err := utils.AtomicWriteFile(configPath, []byte(newConfig), 0600); err != nil {
-				log.Printf("[Subscriptions] failed to update config.yaml for provider %s: %v", providerName, err)
-			}
-		}
-	}
-
-	// Сравниваем хэши скачанного кэша подписки с помощью FNV-1a 64-bit (некриптографический хэш)
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(yamlContent))
-	newHash := fmt.Sprintf("%x", h.Sum(nil))
-	oldHash := sub.LastHashMihomo
-
-	sub.ProxyNames = newNames
-	sub.LastCount = len(newNames)
-	sub.RuleCount = countMihomoRules(yamlContent)
-	sub.LastHashMihomo = newHash
-	sub.LastUpdate = time.Now()
-
-	// Генерация списка нод для Mihomo подписки
-	nodes := make([]SubscriptionNode, 0, len(newBlocks))
-	for _, block := range newBlocks {
-		node := ParseClashProxyNode(block)
-		if node.Tag == "" {
-			continue
-		}
-		nodes = append(nodes, node)
-	}
-	sub.Nodes = nodes
-	sub.Announcement = parseAnnouncement(body, headers)
-
-	// Логирование UA-ответа
-	log.Printf("[Subscriptions] Refresh Mihomo ID: %s, Format: %s, Size: %d bytes, Proxies: %d, Skipped: 0",
-		sub.ID, sub.DetectedFormat, len(body), sub.LastCount)
-
-	// Сохранение файлов отладки
-	report := &ParseReport{
-		ParsedCount:  sub.LastCount,
-		SkippedCount: len(skipReasons),
-		Skipped:      skipReasons,
-		Timestamp:    sub.LastUpdate,
-	}
-	s.saveDebugFiles(sub.ID, body, headers, report)
-
-	if newHash == oldHash {
-		sub.LastChanged = false
-		s.triggerMihomoProviderReload(providerName)
-		return nil
-	}
-
-	sub.LastChanged = true
-	s.triggerMihomoProviderReload(providerName)
-	return nil
-}
 
 func (s *SubscriptionService) getFragmentPath(sub *Subscription) string {
 	safeID := filepath.Base(sub.ID)
@@ -479,6 +316,9 @@ func (s *SubscriptionService) writeRoutingFragment(path string, sub *Subscriptio
 
 // isRefreshDue returns true if a subscription needs to be refreshed.
 func (s *SubscriptionService) isRefreshDue(sub *Subscription, now time.Time) bool {
+	if !sub.EnableXray {
+		return false // Mihomo-only subs are refreshed natively by Mihomo itself (D-07)
+	}
 	interval := sub.Interval
 	if sub.UseProviderInterval && sub.ProfileUpdateHours > 0 {
 		interval = sub.ProfileUpdateHours
@@ -560,7 +400,7 @@ func (s *SubscriptionService) UnlockMihomo() {
 	s.mihomoMu.Unlock()
 }
 
-func (s *SubscriptionService) triggerMihomoProviderReload(providerName string) {
+func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) {
 	if s.mihomoAPIURL == "" {
 		return
 	}
@@ -582,38 +422,6 @@ func (s *SubscriptionService) triggerMihomoProviderReload(providerName string) {
 	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
 		log.Printf("mihomo provider reload API returned status %d", resp.StatusCode)
 	}
-}
-
-// countMihomoRules counts the number of rules in a Mihomo config.
-func countMihomoRules(content string) int {
-	lines := strings.Split(content, "\n")
-	inRulesSection := false
-	count := 0
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if inRulesSection {
-			if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && !strings.HasPrefix(line, "-") && strings.Contains(line, ":") {
-				if !strings.HasPrefix(trimmed, "rules:") {
-					inRulesSection = false
-				}
-			}
-		}
-
-		if strings.HasPrefix(trimmed, "rules:") {
-			inRulesSection = true
-			continue
-		}
-
-		if inRulesSection {
-			if strings.HasPrefix(trimmed, "-") {
-				count++
-			}
-		}
-	}
-	return count
 }
 
 // SetActiveNode перемещает ноду с указанным тегом на первую позицию в
