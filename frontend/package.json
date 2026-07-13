@@ -16,7 +16,7 @@
     "@playwright/test": "^1.61.1",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tsconfig/svelte": "^5.0.0",
-    "@types/node": "^25.9.2",
+    "@types/node": "^26.1.1",
     "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^10.6.0",
     "eslint-plugin-svelte": "^3.20.0",
