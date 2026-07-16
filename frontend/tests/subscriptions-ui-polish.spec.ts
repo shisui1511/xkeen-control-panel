@@ -430,4 +430,137 @@ proxy-groups:
     await expect(successToast).toBeVisible();
     await expect(errorToast).toBeVisible();
   });
+
+  test('displays error message and retry button when nodes load fails for Mihomo provider', async ({ page }) => {
+    await page.route('**/api/proxy-providers', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'sub_fail',
+            name: 'Failed Sub',
+            url: 'https://example.com/fail.yaml',
+            enable_mihomo: true,
+            enable_xray: false,
+            enabled: true,
+            mihomo_provider: {
+              name: 'fail-provider',
+              vehicle_type: 'HTTP',
+              updated_at: new Date().toISOString(),
+              node_count: 5
+            }
+          }
+        ])
+      });
+    });
+
+    let loadAttempts = 0;
+    await page.route('**/api/proxy-providers/fail-provider/nodes', async (route: Route) => {
+      loadAttempts++;
+      if (loadAttempts === 1) {
+        await route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Internal Server Error' })
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              tag: 'node-ok',
+              name: 'node-ok',
+              alive: true,
+              tested: true,
+              delay_ms: 90
+            }
+          ])
+        });
+      }
+    });
+
+    await page.goto('/#/subscriptions');
+    const card = page.locator('#sub-card-sub_fail');
+    await expect(card).toBeVisible();
+
+    // Toggle expand to trigger load
+    const countBadge = card.locator('.nodes-count-badge');
+    await countBadge.click();
+
+    // Verify error and retry button are visible
+    const errorDetails = card.locator('.sub-error-details');
+    await expect(errorDetails).toBeVisible();
+    await expect(errorDetails).toContainText('Не удалось загрузить узлы Mihomo');
+
+    const retryBtn = errorDetails.locator('button');
+    await expect(retryBtn).toBeVisible();
+    await expect(retryBtn).toContainText('Повторить');
+
+    // Click retry
+    await retryBtn.click();
+
+    // Verify nodes are loaded now
+    await expect(card.locator('.sub-node-row')).toBeVisible();
+    await expect(card.locator('.sub-node-name')).toContainText('node-ok');
+    expect(loadAttempts).toBe(2);
+  });
+
+  test('renders neutral dash for untested Mihomo node instead of default-ok checkmark', async ({ page }) => {
+    await page.route('**/api/proxy-providers', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'sub_untested',
+            name: 'Untested Sub',
+            url: 'https://example.com/untested.yaml',
+            enable_mihomo: true,
+            enable_xray: false,
+            enabled: true,
+            mihomo_provider: {
+              name: 'untested-provider',
+              vehicle_type: 'HTTP',
+              updated_at: new Date().toISOString(),
+              node_count: 1
+            }
+          }
+        ])
+      });
+    });
+
+    await page.route('**/api/proxy-providers/untested-provider/nodes', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            tag: 'node-untested',
+            name: 'node-untested',
+            alive: true,
+            tested: false,
+            delay_ms: 0
+          }
+        ])
+      });
+    });
+
+    await page.goto('/#/subscriptions');
+    const card = page.locator('#sub-card-sub_untested');
+    await expect(card).toBeVisible();
+
+    const countBadge = card.locator('.nodes-count-badge');
+    await countBadge.click();
+
+    // Verify untested node renders neutral dash instead of green checkmark
+    const nodeRow = card.locator('.sub-node-row');
+    await expect(nodeRow).toBeVisible();
+
+    const pingVal = nodeRow.locator('.sub-node-ping-btn');
+    await expect(pingVal).toBeVisible();
+    await expect(pingVal).toContainText('—');
+    await expect(nodeRow.locator('.sub-node-status-icon.default-ok')).not.toBeVisible();
+  });
 });

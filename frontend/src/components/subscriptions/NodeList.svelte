@@ -20,12 +20,14 @@
     alive: boolean;
     delay?: number;
     http_code?: number;
+    tested?: boolean;
   }
 
   let {
     subId = '',
     enableXray = false,
     enableMihomo = false,
+    source = 'xray',
     nodes = [],
     health = {},
     checkingNodes = {},
@@ -35,6 +37,7 @@
     subId: string;
     enableXray: boolean;
     enableMihomo: boolean;
+    source: 'mihomo' | 'xray';
     nodes: Node[];
     health: Record<string, NodeHealth>;
     checkingNodes: Record<string, boolean>;
@@ -173,10 +176,71 @@
         >
           {#if checkingNodes[node.tag]}
             <span class="spinner-xs"></span>
-          {:else if h}
-            <span class="sub-node-ping-val {latencyClass(h)}">{latencyLabel(h)}</span>
-            {#if h.alive}
-              <div class="sub-node-status-icon success">
+          {:else if source === 'mihomo'}
+            {#if h && h.tested}
+              <span class="sub-node-ping-val {latencyClass(h)}">{latencyLabel(h)}</span>
+              {#if h.alive}
+                <div class="sub-node-status-icon success">
+                  <svg
+                    width="8"
+                    height="8"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="4"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </div>
+              {:else}
+                <div class="sub-node-status-icon danger">
+                  <svg
+                    width="8"
+                    height="8"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="4"
+                  >
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </div>
+              {/if}
+            {:else}
+              <span style="color: var(--fg-faint);">—</span>
+            {/if}
+          {:else}
+            {#if h}
+              <span class="sub-node-ping-val {latencyClass(h)}">{latencyLabel(h)}</span>
+              {#if h.alive}
+                <div class="sub-node-status-icon success">
+                  <svg
+                    width="8"
+                    height="8"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="4"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </div>
+              {:else}
+                <div class="sub-node-status-icon danger">
+                  <svg
+                    width="8"
+                    height="8"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="4"
+                  >
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </div>
+              {/if}
+            {:else}
+              <div class="sub-node-status-icon default-ok">
                 <svg
                   width="8"
                   height="8"
@@ -188,33 +252,7 @@
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </div>
-            {:else}
-              <div class="sub-node-status-icon danger">
-                <svg
-                  width="8"
-                  height="8"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="4"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </div>
             {/if}
-          {:else}
-            <div class="sub-node-status-icon default-ok">
-              <svg
-                width="8"
-                height="8"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="4"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
           {/if}
         </button>
       </div>

@@ -111,6 +111,7 @@
     alive: boolean;
     delay?: number;
     http_code?: number;
+    tested?: boolean;
   }
 
   // Active tab state: 'groups' | 'providers'
@@ -144,6 +145,7 @@
   let subHealth = $state<Record<string, Record<string, NodeHealth>>>({});
   let checkingNodes = $state<Record<string, Record<string, boolean>>>({});
   let refreshLoading = $state<Record<string, boolean>>({});
+  let subNodesError = $state<Record<string, boolean>>({});
   let activeDropdownId = $state<string | null>(null);
 
   // Form modal states for subscriptions
@@ -1052,6 +1054,20 @@
     }
   }
 
+  function getNodeSource(sub: Subscription): 'mihomo' | 'xray' {
+    if (sub.enable_mihomo && !sub.enable_xray) {
+      return 'mihomo';
+    }
+    if (sub.enable_xray && !sub.enable_mihomo) {
+      return 'xray';
+    }
+    if (sub.enable_mihomo && sub.enable_xray) {
+      const active = $capabilities?.active_kernel;
+      return active === 'mihomo' ? 'mihomo' : 'xray';
+    }
+    return 'xray';
+  }
+
   async function loadNodes(subId: string) {
     subNodesLoading[subId] = true;
     try {
@@ -1066,14 +1082,106 @@
     }
   }
 
+  async function loadMihomoNodes(subId: string) {
+    const sub = subscriptions.find(s => s.id === subId);
+    if (!sub || !sub.mihomo_provider?.name) {
+      subNodesError[subId] = true;
+      return;
+    }
+
+    subNodesLoading[subId] = true;
+    subNodesError[subId] = false;
+    try {
+      const res = await fetch(`/api/proxy-providers/${sub.mihomo_provider.name}/nodes`);
+      if (res.ok) {
+        const data: { tag: string; name: string; alive: boolean; tested: boolean; delay_ms: number }[] = await res.json();
+        subNodes[subId] = data.map(n => ({
+          tag: n.tag,
+          name: n.name,
+          active: false,
+          is_new: false,
+        }));
+        if (!subHealth[subId]) subHealth[subId] = {};
+        data.forEach(n => {
+          subHealth[subId][n.tag] = {
+            alive: n.alive,
+            delay: n.tested ? n.delay_ms : undefined,
+            tested: n.tested
+          };
+        });
+      } else {
+        subNodesError[subId] = true;
+      }
+    } catch (e) {
+      subNodesError[subId] = true;
+    } finally {
+      subNodesLoading[subId] = false;
+    }
+  }
+
   async function toggleExpand(subId: string) {
     expandedSubs[subId] = !expandedSubs[subId];
     if (expandedSubs[subId]) {
-      await loadNodes(subId);
+      const sub = subscriptions.find(s => s.id === subId);
+      if (sub) {
+        const source = getNodeSource(sub);
+        if (source === 'mihomo') {
+          await loadMihomoNodes(subId);
+        } else {
+          await loadNodes(subId);
+        }
+      }
+    }
+  }
+
+  async function checkMihomoNodeHealth(subId: string, providerName: string, nodeTag: string) {
+    if (!checkingNodes[subId]) checkingNodes[subId] = {};
+    checkingNodes[subId][nodeTag] = true;
+    try {
+      const csrfToken = localStorage.getItem('csrf_token') || '';
+      const targetURL = `/api/mihomo/proxy/providers/proxies/${encodeURIComponent(providerName)}/${encodeURIComponent(nodeTag)}/healthcheck?url=http://www.gstatic.com/generate_204&timeout=5000`;
+      const res = await fetch(targetURL, {
+        method: 'GET',
+        headers: { 'X-CSRF-Token': csrfToken }
+      });
+      if (res.ok) {
+        const health = await res.json();
+        if (!subHealth[subId]) subHealth[subId] = {};
+        subHealth[subId][nodeTag] = {
+          alive: health.delay > 0,
+          delay: health.delay,
+          tested: true
+        };
+      } else {
+        if (!subHealth[subId]) subHealth[subId] = {};
+        subHealth[subId][nodeTag] = {
+          alive: false,
+          delay: 0,
+          tested: true
+        };
+      }
+    } catch (e) {
+      if (!subHealth[subId]) subHealth[subId] = {};
+      subHealth[subId][nodeTag] = {
+        alive: false,
+        delay: 0,
+        tested: true
+      };
+    } finally {
+      checkingNodes[subId][nodeTag] = false;
     }
   }
 
   async function checkNodeHealth(subId: string, nodeTag: string) {
+    const sub = subscriptions.find(s => s.id === subId);
+    if (!sub) return;
+
+    const source = getNodeSource(sub);
+    if (source === 'mihomo' && sub.mihomo_provider?.name) {
+      await checkMihomoNodeHealth(subId, sub.mihomo_provider.name, nodeTag);
+      return;
+    }
+
     if (!checkingNodes[subId]) checkingNodes[subId] = {};
     checkingNodes[subId][nodeTag] = true;
     try {
@@ -1653,6 +1761,8 @@
           {subNodes}
           {subHealth}
           {checkingNodes}
+          {subNodesError}
+          {getNodeSource}
           devMode={$devMode}
           {stats}
           onToggleExpand={toggleExpand}
@@ -1663,6 +1773,7 @@
           onSetActiveNode={setActiveNode}
           onCheckNodeHealth={checkNodeHealth}
           onToggleDropdown={toggleDropdown}
+          onRetryNodes={loadMihomoNodes}
         />
       {/if}
     </div>

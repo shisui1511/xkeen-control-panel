@@ -50,6 +50,7 @@
     alive: boolean;
     delay?: number;
     http_code?: number;
+    tested?: boolean;
   }
 
   interface AnnouncementLine {
@@ -79,6 +80,8 @@
     subNodes = {},
     subHealth = {},
     checkingNodes = {},
+    subNodesError = {},
+    getNodeSource,
     devMode = false,
     stats,
     onToggleExpand,
@@ -88,7 +91,8 @@
     onOpenDiagnostic,
     onSetActiveNode,
     onCheckNodeHealth,
-    onToggleDropdown
+    onToggleDropdown,
+    onRetryNodes
   }: {
     subscriptions: Subscription[];
     expandedSubs: Record<string, boolean>;
@@ -98,6 +102,8 @@
     subNodes: Record<string, Node[]>;
     subHealth: Record<string, Record<string, NodeHealth>>;
     checkingNodes: Record<string, Record<string, boolean>>;
+    subNodesError: Record<string, boolean>;
+    getNodeSource: (sub: Subscription) => 'mihomo' | 'xray';
     devMode: boolean;
     stats: { total: number; nodes: number; next: string };
     onToggleExpand: (subId: string) => void;
@@ -108,6 +114,7 @@
     onSetActiveNode: (subId: string, tag: string) => void;
     onCheckNodeHealth: (subId: string, tag: string) => void;
     onToggleDropdown: (subId: string) => void;
+    onRetryNodes: (subId: string) => Promise<void>;
   } = $props();
 
   function isFormatError(err?: string): boolean {
@@ -624,6 +631,20 @@
               <span class="spinner-xs"></span>
               <span style="margin-left: 8px;">{$t('app.loading')}</span>
             </div>
+          {:else if subNodesError[sub.id]}
+            <div
+              class="sub-error-details"
+              style="font-size: 12.5px; color: var(--danger); margin: 8px 0; display: flex; align-items: center; gap: 8px; font-family: var(--font-family-sans);"
+            >
+              <span>{$t('subscr.nodes_load_error_mihomo')}</span>
+              <button
+                class="btn btn-xs"
+                onclick={() => onRetryNodes(sub.id)}
+                style="padding: 2px 8px; font-size: 11px; height: auto;"
+              >
+                {$t('subscr.retry')}
+              </button>
+            </div>
           {:else}
             {#if !subNodes[sub.id] || subNodes[sub.id].length === 0}
               <div class="empty-nodes">
@@ -634,6 +655,7 @@
                 subId={sub.id}
                 enableXray={sub.enable_xray}
                 enableMihomo={sub.enable_mihomo}
+                source={getNodeSource(sub)}
                 nodes={subNodes[sub.id]}
                 health={subHealth[sub.id] || {}}
                 checkingNodes={checkingNodes[sub.id] || {}}
