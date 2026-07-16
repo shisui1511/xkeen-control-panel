@@ -85,6 +85,12 @@
     filter_transport?: string;
     mihomo_groups?: string[];
     routing_mode?: 'manual' | 'auto';
+    mihomo_provider?: {
+      name: string;
+      vehicle_type: string;
+      updated_at: string;
+      node_count: number;
+    } | null;
   }
 
   interface Node {
@@ -785,7 +791,7 @@
   async function loadSubscriptions() {
     loading = true;
     try {
-      const res = await fetch('/api/subscriptions');
+      const res = await fetch('/api/proxy-providers');
       if (res.ok) {
         subscriptions = await res.json();
       }
@@ -797,24 +803,79 @@
   }
 
   async function refreshSubscription(id: string) {
+    const sub = subscriptions.find(s => s.id === id);
+    if (!sub) return;
+
     refreshLoading[id] = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/subscriptions/refresh?id=${id}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
-      });
-      if (res.ok) {
-        showToast('success', $t('app.success'));
-        await loadSubscriptions();
-        if (expandedSubs[id]) {
-          await loadNodes(id);
+      const csrfToken = localStorage.getItem('csrf_token') || '';
+      const tasks: Promise<{ kernel: 'xray' | 'mihomo'; status: 'fulfilled'; value?: any } | { kernel: 'xray' | 'mihomo'; status: 'rejected'; reason: any }>[] = [];
+
+      if (sub.enable_xray) {
+        tasks.push((async () => {
+          const res = await fetch(`/api/subscriptions/refresh?id=${id}`, {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken }
+          });
+          if (res.ok) {
+            return { kernel: 'xray' as const, status: 'fulfilled' as const };
+          } else {
+            const text = await res.text();
+            const parsedErr = parseValidationError(text, $currentLang === 'ru' ? 'ru' : 'en');
+            throw { kernel: 'xray', reason: parsedErr || $t('app.error') };
+          }
+        })());
+      }
+
+      if (sub.enable_mihomo && sub.mihomo_provider?.name) {
+        tasks.push((async () => {
+          const res = await fetch(`/api/proxy-providers/${sub.mihomo_provider.name}/refresh`, {
+            method: 'PUT',
+            headers: { 'X-CSRF-Token': csrfToken }
+          });
+          if (res.ok) {
+            return { kernel: 'mihomo' as const, status: 'fulfilled' as const };
+          } else {
+            const text = await res.text();
+            const parsedErr = parseValidationError(text, $currentLang === 'ru' ? 'ru' : 'en');
+            throw { kernel: 'mihomo', reason: parsedErr || $t('app.error') };
+          }
+        })());
+      }
+
+      if (tasks.length === 0) {
+        if (sub.enable_mihomo && !sub.mihomo_provider?.name) {
+          showToast('error', $t('subscr.refresh.mihomo_failed').replace('{message}', $t('app.unavailable')));
         }
-      } else {
-        const text = await res.text();
-        const parsedErr = parseValidationError(text, $currentLang === 'ru' ? 'ru' : 'en');
-        showToast('error', parsedErr || $t('app.error'));
-        await loadSubscriptions();
+        refreshLoading[id] = false;
+        return;
+      }
+
+      const results = await Promise.allSettled(tasks);
+
+      for (const res of results) {
+        if (res.status === 'fulfilled') {
+          const val = res.value;
+          if (val.kernel === 'xray') {
+            showToast('success', $t('subscr.refresh.xray_started'));
+          } else {
+            showToast('success', $t('subscr.refresh.mihomo_started'));
+          }
+        } else {
+          const err = res.reason;
+          if (err && err.kernel === 'xray') {
+            showToast('error', $t('subscr.refresh.xray_failed').replace('{message}', err.reason));
+          } else if (err && err.kernel === 'mihomo') {
+            showToast('error', $t('subscr.refresh.mihomo_failed').replace('{message}', err.reason));
+          } else {
+            showToast('error', $t('app.error'));
+          }
+        }
+      }
+
+      await loadSubscriptions();
+      if (expandedSubs[id]) {
+        await loadNodes(id);
       }
     } catch (e) {
       showToast('error', $t('app.error'));

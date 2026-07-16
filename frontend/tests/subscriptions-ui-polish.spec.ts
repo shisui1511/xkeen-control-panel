@@ -163,7 +163,7 @@ proxy-groups:
     page
   }) => {
     // Mock subscriptions with one format error subscription
-    await page.route('**/api/subscriptions', async (route: Route) => {
+    await page.route('**/api/proxy-providers', async (route: Route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -263,5 +263,171 @@ proxy-groups:
       'title',
       /Импортировать прокси-серверы из существующих/
     );
+  });
+
+  test('displays provider chip and node count badge correctly', async ({ page }) => {
+    await page.route('**/api/proxy-providers', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'sub_mihomo_pp',
+            name: 'Mihomo Provider Sub',
+            url: 'https://example.com/mihomo.yaml',
+            enable_mihomo: true,
+            enable_xray: false,
+            enabled: true,
+            mihomo_provider: {
+              name: 'mihomo-provider-sub',
+              vehicle_type: 'HTTP',
+              updated_at: new Date().toISOString(),
+              node_count: 7
+            }
+          }
+        ])
+      });
+    });
+
+    await page.goto('/#/subscriptions');
+    const card = page.locator('#sub-card-sub_mihomo_pp');
+    await expect(card).toBeVisible();
+
+    const providerChip = card.locator('.mihomo-provider-chip');
+    await expect(providerChip).toBeVisible();
+    await expect(providerChip).toContainText('HTTP');
+
+    const nodesCount = card.locator('.nodes-count-badge');
+    await expect(nodesCount).toBeVisible();
+    await expect(nodesCount).toContainText('7');
+  });
+
+  test('displays fallback Mihomo label when mihomo_provider is null', async ({ page }) => {
+    await page.route('**/api/proxy-providers', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'sub_mihomo_null',
+            name: 'Mihomo Null Sub',
+            url: 'https://example.com/mihomo2.yaml',
+            enable_mihomo: true,
+            enable_xray: false,
+            enabled: true,
+            mihomo_provider: null
+          }
+        ])
+      });
+    });
+
+    await page.goto('/#/subscriptions');
+    const card = page.locator('#sub-card-sub_mihomo_null');
+    await expect(card).toBeVisible();
+
+    const integratedBadge = card.locator('.mihomo-integrated-badge');
+    await expect(integratedBadge).toBeVisible();
+    await expect(integratedBadge).toContainText('Mihomo —');
+  });
+
+  test('applies ellipsis and max-width on long vehicle_type in provider chip', async ({ page }) => {
+    const longVehicleType = 'VERY_LONG_VEHICLE_TYPE_'.repeat(10);
+    await page.route('**/api/proxy-providers', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'sub_mihomo_long',
+            name: 'Mihomo Long Sub',
+            url: 'https://example.com/mihomo3.yaml',
+            enable_mihomo: true,
+            enable_xray: false,
+            enabled: true,
+            mihomo_provider: {
+              name: 'mihomo-provider-long',
+              vehicle_type: longVehicleType,
+              updated_at: new Date().toISOString(),
+              node_count: 5
+            }
+          }
+        ])
+      });
+    });
+
+    await page.goto('/#/subscriptions');
+    const card = page.locator('#sub-card-sub_mihomo_long');
+    await expect(card).toBeVisible();
+
+    const providerChip = card.locator('.mihomo-provider-chip');
+    await expect(providerChip).toBeVisible();
+
+    const textOverflow = await providerChip.evaluate((el) => window.getComputedStyle(el).textOverflow);
+    expect(textOverflow).toBe('ellipsis');
+
+    const maxWidth = await providerChip.evaluate((el) => window.getComputedStyle(el).maxWidth);
+    expect(maxWidth).toBe('220px');
+  });
+
+  test('dual-kernel refresh triggers both endpoints and shows separate toasts', async ({ page }) => {
+    await page.route('**/api/proxy-providers', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'sub_dual',
+            name: 'Dual Sub',
+            url: 'https://example.com/dual',
+            enable_mihomo: true,
+            enable_xray: true,
+            enabled: true,
+            mihomo_provider: {
+              name: 'dual-provider',
+              vehicle_type: 'HTTP',
+              updated_at: new Date().toISOString(),
+              node_count: 10
+            }
+          }
+        ])
+      });
+    });
+
+    let xrayRefreshed = false;
+    let mihomoRefreshed = false;
+
+    await page.route('**/api/subscriptions/refresh*', async (route: Route) => {
+      xrayRefreshed = true;
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Xray update error details' })
+      });
+    });
+
+    await page.route('**/api/proxy-providers/*/refresh', async (route: Route) => {
+      mihomoRefreshed = true;
+      await route.fulfill({
+        status: 204
+      });
+    });
+
+    await page.goto('/#/subscriptions');
+    const card = page.locator('#sub-card-sub_dual');
+    await expect(card).toBeVisible();
+
+    const refreshBtn = card.locator('button.action-icon-btn').first();
+    await expect(refreshBtn).toBeVisible();
+    await refreshBtn.click();
+
+    // Verify both requests were triggered
+    await expect.poll(() => xrayRefreshed).toBe(true);
+    await expect.poll(() => mihomoRefreshed).toBe(true);
+
+    // Verify both toasts are displayed
+    const successToast = page.locator('.toast.success, .toast:has-text("Mihomo:")');
+    const errorToast = page.locator('.toast.error, .toast:has-text("Xray: ошибка")');
+    await expect(successToast).toBeVisible();
+    await expect(errorToast).toBeVisible();
   });
 });

@@ -24,6 +24,12 @@
     expire?: number;
     support_url?: string;
     announcement?: string;
+    mihomo_provider?: {
+      name: string;
+      vehicle_type: string;
+      updated_at: string;
+      node_count: number;
+    } | null;
   }
 
   interface Node {
@@ -364,9 +370,9 @@
           <span
             class="nodes-count-badge"
             onclick={() => onToggleExpand(sub.id)}
-            title={$t('subscr.nodes_count').replace('{count}', String(sub.proxy_count || 0))}
+            title={$t('subscr.nodes_count').replace('{count}', String(sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0))}
           >
-            {sub.proxy_count || 0}
+            {sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0}
           </span>
 
           <button
@@ -479,10 +485,10 @@
           </span>
 
           <span class="meta-divider">|</span>
-          {#if sub.mihomo_integrated}
-            <span class="mihomo-integrated-badge active" title="Интегрировано в Mihomo config.yaml"
-              >Mihomo ✓</span
-            >
+          {#if sub.mihomo_provider}
+            <span class="mihomo-provider-chip" title={sub.mihomo_provider.vehicle_type}>
+              {sub.mihomo_provider.vehicle_type} · {formatUpdateDate(sub.mihomo_provider.updated_at)}
+            </span>
           {:else}
             <span class="mihomo-integrated-badge" title="Не интегрировано в Mihomo config.yaml"
               >Mihomo —</span
@@ -882,6 +888,22 @@
 
   .mihomo-integrated-badge.active {
     color: var(--success);
+  }
+
+  .mihomo-provider-chip {
+    background: rgba(139, 92, 246, 0.08);
+    color: #8b5cf6;
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+    display: inline-block;
+    vertical-align: middle;
   }
 
   .sub-meta-right {
