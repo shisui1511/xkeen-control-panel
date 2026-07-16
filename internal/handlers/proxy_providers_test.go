@@ -377,3 +377,231 @@ func TestProxyProviders_Refresh_ErrorMapping(t *testing.T) {
 		}
 	})
 }
+
+// TestProxyProviderNodes_Sanitize проверяет санитизацию данных нод:
+// все чувствительные поля (uuid, password, obfs, server) отрезаются,
+// остаются только tag, name, alive, tested, delay_ms.
+func TestProxyProviderNodes_Sanitize(t *testing.T) {
+	api, _ := newProxyProvidersTestAPI(t)
+	api.mihomoSvc = services.NewMihomoService(startFakeMihomo(t), "", api.cfg.DataDir)
+
+	mockClashAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/providers/proxies/test-provider" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			response := map[string]interface{}{
+				"name": "test-provider",
+				"type": "proxy",
+				"proxies": []interface{}{
+					map[string]interface{}{
+						"name":          "node1",
+						"type":          "ss",
+						"server":        "127.0.0.1",
+						"password":      "secretpassword",
+						"uuid":          "someuuid-123",
+						"obfs-password": "obfs-secret",
+						"alive":         true,
+						"history": []interface{}{
+							map[string]interface{}{
+								"time":  "2026-07-16T12:00:00Z",
+								"delay": 120,
+							},
+						},
+					},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(response)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer mockClashAPI.Close()
+	api.cfg.MihomoAPIURL = mockClashAPI.URL
+
+	req := httptest.NewRequest(http.MethodGet, "/api/proxy-providers/test-provider/nodes", nil)
+	rr := httptest.NewRecorder()
+	api.ProxyProvidersRouter(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	bodyStr := rr.Body.String()
+	for _, forbidden := range []string{"password", "uuid", "server", "obfs"} {
+		if strings.Contains(strings.ToLower(bodyStr), forbidden) {
+			t.Errorf("sensitive field %q leaked in response: %s", forbidden, bodyStr)
+		}
+	}
+
+	var list []map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(list) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(list))
+	}
+
+	node := list[0]
+	expectedKeys := map[string]bool{
+		"tag":      true,
+		"name":     true,
+		"alive":    true,
+		"tested":   true,
+		"delay_ms": true,
+	}
+
+	for k := range node {
+		if !expectedKeys[k] {
+			t.Errorf("unexpected key %q in response", k)
+		}
+	}
+
+	if node["tag"] != "node1" || node["name"] != "node1" || node["alive"] != true || node["tested"] != true || node["delay_ms"] != float64(120) {
+		t.Errorf("unexpected node values: %+v", node)
+	}
+}
+
+// TestProxyProviderNodes_UntestedNode проверяет логику для непроверенных нод:
+// пустая история -> tested=false, delay_ms=0, alive=false.
+// непустая история -> tested=true, delay_ms=последний delay, alive=alive && delay>0.
+func TestProxyProviderNodes_UntestedNode(t *testing.T) {
+	api, _ := newProxyProvidersTestAPI(t)
+	api.mihomoSvc = services.NewMihomoService(startFakeMihomo(t), "", api.cfg.DataDir)
+
+	mockClashAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		response := map[string]interface{}{
+			"name": "test-provider",
+			"type": "proxy",
+			"proxies": []interface{}{
+				map[string]interface{}{
+					"name":    "untested-node",
+					"alive":   true,
+					"history": []interface{}{},
+				},
+				map[string]interface{}{
+					"name":  "tested-node",
+					"alive": true,
+					"history": []interface{}{
+						map[string]interface{}{"delay": 80},
+					},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(response)
+	}))
+	defer mockClashAPI.Close()
+	api.cfg.MihomoAPIURL = mockClashAPI.URL
+
+	req := httptest.NewRequest(http.MethodGet, "/api/proxy-providers/test-provider/nodes", nil)
+	rr := httptest.NewRecorder()
+	api.ProxyProvidersRouter(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var list []map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &list)
+
+	if len(list) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(list))
+	}
+
+	// untested-node
+	if list[0]["name"] != "untested-node" || list[0]["tested"] != false || list[0]["delay_ms"] != float64(0) || list[0]["alive"] != false {
+		t.Errorf("unexpected untested-node state: %+v", list[0])
+	}
+
+	// tested-node
+	if list[1]["name"] != "tested-node" || list[1]["tested"] != true || list[1]["delay_ms"] != float64(80) || list[1]["alive"] != true {
+		t.Errorf("unexpected tested-node state: %+v", list[1])
+	}
+}
+
+// TestProxyProviderNodes_InvalidName проверяет валидацию имени провайдера:
+// недопустимое имя -> 400 bad request, исходящий запрос к Clash API не совершается.
+func TestProxyProviderNodes_InvalidName(t *testing.T) {
+	api, _ := newProxyProvidersTestAPI(t)
+	api.mihomoSvc = services.NewMihomoService(startFakeMihomo(t), "", api.cfg.DataDir)
+
+	apiCalls := 0
+	mockClashAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer mockClashAPI.Close()
+	api.cfg.MihomoAPIURL = mockClashAPI.URL
+
+	req := httptest.NewRequest(http.MethodGet, "/api/proxy-providers/Bad_Name!/nodes", nil)
+	rr := httptest.NewRecorder()
+	api.ProxyProvidersRouter(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if apiCalls != 0 {
+		t.Errorf("Clash API was called %d times, expected 0", apiCalls)
+	}
+}
+
+// TestProxyProviderNodes_ErrorMapping проверяет обработку ошибок Clash API.
+func TestProxyProviderNodes_ErrorMapping(t *testing.T) {
+	t.Run("clash api 404 maps to 404", func(t *testing.T) {
+		api, _ := newProxyProvidersTestAPI(t)
+		api.mihomoSvc = services.NewMihomoService(startFakeMihomo(t), "", api.cfg.DataDir)
+
+		mockClashAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer mockClashAPI.Close()
+		api.cfg.MihomoAPIURL = mockClashAPI.URL
+
+		req := httptest.NewRequest(http.MethodGet, "/api/proxy-providers/test-provider/nodes", nil)
+		rr := httptest.NewRecorder()
+		api.ProxyProvidersRouter(rr, req)
+
+		if rr.Code != http.StatusNotFound {
+			t.Errorf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("mihomo unreachable maps to 502", func(t *testing.T) {
+		api, _ := newProxyProvidersTestAPI(t)
+		api.mihomoSvc = services.NewMihomoService(startFakeMihomo(t), "", api.cfg.DataDir)
+
+		closed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		closedURL := closed.URL
+		closed.Close()
+		api.cfg.MihomoAPIURL = closedURL
+
+		req := httptest.NewRequest(http.MethodGet, "/api/proxy-providers/test-provider/nodes", nil)
+		rr := httptest.NewRecorder()
+		api.ProxyProvidersRouter(rr, req)
+
+		if rr.Code != http.StatusBadGateway {
+			t.Errorf("expected 502, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("clash api 500 maps to 502", func(t *testing.T) {
+		api, _ := newProxyProvidersTestAPI(t)
+		api.mihomoSvc = services.NewMihomoService(startFakeMihomo(t), "", api.cfg.DataDir)
+
+		mockClashAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer mockClashAPI.Close()
+		api.cfg.MihomoAPIURL = mockClashAPI.URL
+
+		req := httptest.NewRequest(http.MethodGet, "/api/proxy-providers/test-provider/nodes", nil)
+		rr := httptest.NewRecorder()
+		api.ProxyProvidersRouter(rr, req)
+
+		if rr.Code != http.StatusBadGateway {
+			t.Errorf("expected 502, got %d: %s", rr.Code, rr.Body.String())
+		}
+	})
+}

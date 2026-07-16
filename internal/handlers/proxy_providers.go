@@ -3,8 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -54,6 +56,14 @@ func (a *API) ProxyProvidersRouter(w http.ResponseWriter, r *http.Request) {
 		// трактоваться как обновление провайдера с именем "refresh".
 		if name != "" && name != trimmed {
 			a.ProxyProviderRefresh(w, r, name)
+			return
+		}
+	}
+	if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/proxy-providers/") && strings.HasSuffix(r.URL.Path, "/nodes") {
+		trimmed := strings.TrimPrefix(r.URL.Path, "/api/proxy-providers/")
+		name := strings.TrimSuffix(trimmed, "/nodes")
+		if name != "" && name != trimmed {
+			a.ProxyProviderNodes(w, r, name)
 			return
 		}
 	}
@@ -164,4 +174,98 @@ func (a *API) ProxyProviderRefresh(w http.ResponseWriter, r *http.Request, name 
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type MihomoNodeInfo struct {
+	Tag     string `json:"tag"`
+	Name    string `json:"name"`
+	Alive   bool   `json:"alive"`
+	Tested  bool   `json:"tested"`
+	DelayMs int    `json:"delay_ms"`
+}
+
+type clashProxyEntry struct {
+	Name    string `json:"name"`
+	Alive   bool   `json:"alive"`
+	History []struct {
+		Delay int `json:"delay"`
+	} `json:"history"`
+}
+
+func (a *API) ProxyProviderNodes(w http.ResponseWriter, r *http.Request, name string) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !providerNameRe.MatchString(name) {
+		a.errorResponse(w, a.t(r, "error.bad_request"), http.StatusBadRequest)
+		return
+	}
+
+	secret := a.ResolveMihomoSecret()
+	targetURL := fmt.Sprintf("%s/providers/proxies/%s", a.cfg.MihomoAPIURL, url.PathEscape(name))
+
+	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	if err != nil {
+		log.Printf("[ProxyProviders] Error creating request for nodes: %v", err)
+		a.errorResponse(w, a.t(r, "mihomo.not_running"), http.StatusBadGateway)
+		return
+	}
+
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[ProxyProviders] Error fetching nodes from Clash API: %v", err)
+		a.errorResponse(w, a.t(r, "mihomo.not_running"), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		a.errorResponse(w, a.t(r, "error.not_found"), http.StatusNotFound)
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[ProxyProviders] Clash API nodes request returned status %d", resp.StatusCode)
+		a.errorResponse(w, a.t(r, "mihomo.api_error"), http.StatusBadGateway)
+		return
+	}
+
+	var clashResp struct {
+		Proxies []clashProxyEntry `json:"proxies"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&clashResp); err != nil {
+		log.Printf("[ProxyProviders] Error decoding Clash API nodes response: %v", err)
+		a.errorResponse(w, a.t(r, "mihomo.api_error"), http.StatusBadGateway)
+		return
+	}
+
+	nodes := make([]MihomoNodeInfo, len(clashResp.Proxies))
+	for i, p := range clashResp.Proxies {
+		tested := len(p.History) > 0
+		var delay int
+		if tested {
+			delay = p.History[len(p.History)-1].Delay
+		}
+		alive := false
+		if tested {
+			alive = p.Alive && delay > 0
+		}
+
+		nodes[i] = MihomoNodeInfo{
+			Tag:     p.Name,
+			Name:    p.Name,
+			Alive:   alive,
+			Tested:  tested,
+			DelayMs: delay,
+		}
+	}
+
+	a.jsonResponse(w, nodes)
 }
