@@ -418,7 +418,7 @@
 
           <div class="dropdown-container">
             <button
-              class="action-icon-btn dots-btn"
+              class="action-icon-btn action-btn-dots"
               onclick={() => onToggleDropdown(sub.id)}
               aria-label="More actions"
             >
