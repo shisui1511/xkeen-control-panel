@@ -476,16 +476,16 @@
     color: #22c55e;
   }
 
-  .latency-good {
+  .latency-fast {
     color: #22c55e;
   }
-  .latency-ok {
+  .latency-medium {
     color: #f59e0b;
   }
-  .latency-bad {
+  .latency-slow {
     color: var(--danger);
   }
-  .latency-unknown {
+  .latency-timeout {
     color: var(--fg-faint);
   }
 </style>
