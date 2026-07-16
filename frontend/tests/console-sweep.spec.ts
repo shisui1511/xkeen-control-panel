@@ -193,7 +193,7 @@ async function setupMocks(
           boot_time: '2024-01-01T00:00:00Z'
         })
       });
-    } else if (url.includes('/api/subscriptions')) {
+    } else if (url.includes('/api/subscriptions') || url.includes('/api/proxy-providers')) {
       // SubscriptionList возвращает сырой JSON-массив (не обёрнутый в {success,data})
       await route.fulfill({
         status: 200,
