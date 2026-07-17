@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // providerNameRe — допустимый формат имени Mihomo-провайдера: латинские
@@ -158,7 +159,7 @@ func (a *API) ProxyProviderRefresh(w http.ResponseWriter, r *http.Request, name 
 	if err != nil {
 		// Полный текст ошибки — только в лог сервера; клиенту отдаются
 		// локализованные сообщения без внутренних деталей (URL контроллера и т.п.).
-		log.Printf("[ProxyProviders] Error reloading provider %s: %v", name, err)
+		log.Printf("[ProxyProviders] Error reloading provider %s: %v", utils.SanitizeLogInput(name), err)
 		var statusErr *services.MihomoAPIStatusError
 		switch {
 		case errors.Is(err, services.ErrMihomoAPINotConfigured):

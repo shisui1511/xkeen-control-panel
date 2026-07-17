@@ -1011,7 +1011,7 @@ func (s *KernelService) Rollback(name string) error {
 
 	// Fallback to legacy format "kernel.bak." only if no new backups exist
 	if len(backups) == 0 {
-		log.Printf("[Kernel] No backups found with prefix %s.bak., trying legacy format kernel.bak.", name)
+		log.Printf("[Kernel] No backups found with prefix %s.bak., trying legacy format kernel.bak.", utils.SanitizeLogInput(name))
 		for _, e := range entries {
 			if !e.IsDir() && strings.HasPrefix(e.Name(), "kernel.bak.") {
 				backups = append(backups, filepath.Join(backupDir, e.Name()))
