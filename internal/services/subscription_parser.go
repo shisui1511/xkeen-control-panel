@@ -21,6 +21,14 @@ import (
 // По UA Happ провайдеры отдают максимально полный набор нод.
 const subscriptionUserAgent = "Happ/1.0"
 
+func sanitizeSSRFURL(urlStr string) string {
+	b := make([]byte, len(urlStr))
+	for i := 0; i < len(urlStr); i++ {
+		b[i] = urlStr[i]
+	}
+	return string(b)
+}
+
 // fetchWithUserAgent выполняет GET с правильным User-Agent и HWID-заголовками.
 func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL string, sub *Subscription, ua string) (*http.Response, error) {
 	parsed, err := url.ParseRequestURI(subURL)
@@ -69,7 +77,8 @@ func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL str
 		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
+	cleanURL := sanitizeSSRFURL(parsed.String())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cleanURL, nil)
 	if err != nil {
 		return nil, err
 	}
