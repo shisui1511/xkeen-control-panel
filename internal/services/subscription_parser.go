@@ -24,12 +24,21 @@ const subscriptionUserAgent = "Happ/1.0"
 
 // fetchWithUserAgent выполняет GET с правильным User-Agent и HWID-заголовками.
 func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL string, sub *Subscription, ua string) (*http.Response, error) {
+	parsed, err := url.Parse(subURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL: %w", err)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return nil, fmt.Errorf("unsupported scheme: %s", parsed.Scheme)
+	}
+
 	isTest := flag.Lookup("test.v") != nil
 	if err := utils.ValidateURL(ctx, subURL, isTest); err != nil {
 		return nil, fmt.Errorf("SSRF validation failed: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, subURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		return nil, err
 	}
