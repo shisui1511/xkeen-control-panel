@@ -425,15 +425,24 @@
   }
 
   function computeStats(): ObservatoryStats {
-    const proxyList = Object.values(proxies).filter(
-      (p) =>
-        p.type !== 'Selector' &&
-        p.type !== 'URLTest' &&
-        p.type !== 'Fallback' &&
-        p.type !== 'LoadBalance' &&
-        p.type !== 'Direct' &&
-        p.type !== 'Reject'
-    );
+    const proxyList = Object.values(proxies).filter((p) => {
+      const typeLower = p.type.toLowerCase();
+      const nameLower = p.name.toLowerCase();
+      
+      // Исключаем группы прокси
+      if (['selector', 'urltest', 'fallback', 'loadbalance', 'relay'].includes(typeLower)) {
+        return false;
+      }
+      // Исключаем системные/встроенные прокси
+      if (['direct', 'reject', 'compatible', 'pass'].includes(typeLower)) {
+        return false;
+      }
+      if (['direct', 'reject', 'compatible', 'pass', 'global'].includes(nameLower)) {
+        return false;
+      }
+      
+      return true;
+    });
     const total = proxyList.length;
     const healthy = proxyList.filter(
       (p) => isProxyAlive(p) && (getLastDelay(p) || 0) > 0 && (getLastDelay(p) || 0) < 300
@@ -1149,7 +1158,7 @@
     checkingNodes[subId][nodeTag] = true;
     try {
       const csrfToken = localStorage.getItem('csrf_token') || '';
-      const targetURL = `/api/mihomo/proxy/providers/proxies/${encodeURIComponent(providerName)}/${encodeURIComponent(nodeTag)}/healthcheck?url=http://www.gstatic.com/generate_204&timeout=5000`;
+      const targetURL = `/api/mihomo/proxy/proxies/${encodeURIComponent(nodeTag)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`;
       const res = await fetch(targetURL, {
         method: 'GET',
         headers: { 'X-CSRF-Token': csrfToken }
