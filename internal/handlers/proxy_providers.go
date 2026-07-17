@@ -15,10 +15,11 @@ import (
 )
 
 // providerNameRe — допустимый формат имени Mihomo-провайдера. Совпадает с
-// инвариантом GetMihomoProviderName (subscription_converter.go): только
-// строчные латинские буквы, цифры и дефис. Всё остальное — мусорный ввод,
-// который не должен уходить в исходящий запрос к Clash API.
-var providerNameRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+// инвариантом GetMihomoProviderName (subscription_converter.go): латинские
+// буквы (регистр сохраняется, например «TEST_PROVIDER»), цифры и дефис. Всё
+// остальное — мусорный ввод, который не должен уходить в исходящий запрос
+// к Clash API.
+var providerNameRe = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 
 type ProxyProviderResponse struct {
 	services.Subscription

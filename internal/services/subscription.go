@@ -139,7 +139,7 @@ func (s *Subscription) GetProviderName() string {
 	if s.ProviderName != "" {
 		return s.ProviderName
 	}
-	return GetMihomoProviderName(s.ProfileTitle, s.Name, s.URL, s.ID)
+	return GetMihomoProviderName(s.ProfileTitle, s.Name, s.ID)
 }
 
 // Clone возвращает глубокую копию Subscription.

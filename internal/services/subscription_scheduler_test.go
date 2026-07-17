@@ -62,7 +62,7 @@ func TestSubscriptionService_UpdateTypeTransition(t *testing.T) {
 	}
 
 	configPath := filepath.Join(mihomoDir, "config.yaml")
-	providerName := GetMihomoProviderName("", sub.Name, sub.URL, id)
+	providerName := GetMihomoProviderName("", sub.Name, id)
 	_ = os.WriteFile(configPath, []byte("proxy-providers:\n  "+providerName+":\n    type: http\n"), 0600)
 	providerPath := filepath.Join(mihomoDir, "proxy_providers", fmt.Sprintf("%s.yaml", providerName))
 	_ = os.MkdirAll(filepath.Join(mihomoDir, "proxy_providers"), 0755)
@@ -108,7 +108,7 @@ func TestSubscriptionService_UpdateMihomoProviderNameChange(t *testing.T) {
 	id := svc.List()[0].ID
 
 	configPath := filepath.Join(mihomoDir, "config.yaml")
-	oldProviderName := GetMihomoProviderName("", "Old Name", "https://example.com/old-sub", id)
+	oldProviderName := GetMihomoProviderName("", "Old Name", id)
 	_ = os.WriteFile(configPath, []byte("proxy-groups:\n  - name: Proxy\n    use:\n      - "+oldProviderName+"\nproxy-providers:\n  "+oldProviderName+":\n    type: http\n"), 0600)
 
 	providerDir := filepath.Join(mihomoDir, "proxy_providers")
@@ -331,7 +331,7 @@ func TestMihomoSubscriptionType(t *testing.T) {
 
 	got := svc.List()[0]
 
-	providerName := GetMihomoProviderName("", sub.Name, sub.URL, id)
+	providerName := GetMihomoProviderName("", sub.Name, id)
 	expectedPutPath := "/providers/proxies/" + providerName
 
 	if !putCalled {
@@ -528,7 +528,7 @@ proxy-groups:
 	// 1. Проверяем, что Add записал proxy-provider
 	configBytes, _ := os.ReadFile(configPath)
 	configStr := string(configBytes)
-	providerName := GetMihomoProviderName("", sub.Name, sub.URL, sub.ID)
+	providerName := GetMihomoProviderName("", sub.Name, sub.ID)
 	if !strings.Contains(configStr, providerName) {
 		t.Errorf("expected config.yaml to contain provider %s after Add, config:\n%s", providerName, configStr)
 	}
@@ -731,7 +731,7 @@ proxy-groups:
 		t.Fatalf("Refresh failed: %v", err)
 	}
 
-	providerName := GetMihomoProviderName("", sub.Name, sub.URL, sub.ID)
+	providerName := GetMihomoProviderName("", sub.Name, sub.ID)
 	expectedPath := "/providers/proxies/" + providerName
 
 	if calledMethod != http.MethodPut {

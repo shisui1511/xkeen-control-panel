@@ -56,6 +56,19 @@ func (s *SubscriptionService) subPath(filename string) string {
 	return filepath.Join(dir, clean)
 }
 
+// cacheSuffixes — суффиксы кэш-файлов подписки в каталоге subscriptions.
+var cacheSuffixes = []string{"_raw.txt", "_headers.json", "_parse_report.json"}
+
+// cacheBaseLocked возвращает базовое имя кэш-файлов подписки — имя её
+// Mihomo-провайдера (например «TEST_PROVIDER»). Для неизвестного ID возвращается
+// legacy-база "sub_<id>". mu должен быть захвачен вызывающим.
+func (s *SubscriptionService) cacheBaseLocked(safeID string) string {
+	if sub := s.GetLocked(safeID); sub != nil {
+		return sub.GetProviderName()
+	}
+	return "sub_" + safeID
+}
+
 func (s *SubscriptionService) SetHTTPClient(client *http.Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -89,6 +102,25 @@ func (s *SubscriptionService) load() {
 		indentData, err := json.MarshalIndent(s.subscriptions, "", "  ")
 		if err == nil {
 			utils.AtomicWriteFile(path, indentData, 0600)
+		}
+	}
+
+	// Миграция кэш-файлов со старой схемы "sub_<id>_*" на схему по имени провайдера.
+	for i := range s.subscriptions {
+		safeID := invalidIDCharsRe.ReplaceAllString(strings.ToLower(filepath.Base(s.subscriptions[i].ID)), "_")
+		oldBase := "sub_" + safeID
+		newBase := s.subscriptions[i].GetProviderName()
+		if newBase == oldBase {
+			continue
+		}
+		for _, suffix := range cacheSuffixes {
+			oldPath := s.subPath(oldBase + suffix)
+			newPath := s.subPath(newBase + suffix)
+			if _, err := os.Stat(oldPath); err == nil {
+				if _, err := os.Stat(newPath); os.IsNotExist(err) {
+					_ = os.Rename(oldPath, newPath)
+				}
+			}
 		}
 	}
 }
@@ -129,7 +161,7 @@ func (s *SubscriptionService) populateMihomoIntegrated(subs []Subscription) {
 	}
 
 	for i := range subs {
-		providerName := subs[i].GetProviderName()
+		providerName := strings.ToLower(subs[i].GetProviderName())
 		if activeProviders[providerName] {
 			subs[i].MihomoIntegrated = true
 		} else {
@@ -267,7 +299,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			configPath := filepath.Join(configDir, "config.yaml")
 
 			oldProviderName := existing.GetProviderName()
-			newProviderName := GetMihomoProviderName(existing.ProfileTitle, sub.Name, sub.URL, existing.ID)
+			newProviderName := GetMihomoProviderName(existing.ProfileTitle, sub.Name, existing.ID)
 
 			if oldProviderName != newProviderName && existing.EnableMihomo {
 				s.mihomoMu.Lock()
@@ -440,7 +472,7 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 		configPath := filepath.Join(configDir, "config.yaml")
 
-		providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
+		providerName := sub.GetProviderName()
 
 		s.mihomoMu.Lock()
 		rawConfig, err := os.ReadFile(configPath)
@@ -466,10 +498,12 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 	}
 
-	// Delete diagnostic files
-	os.Remove(s.subPath("sub_" + safeID + "_raw.txt"))
-	os.Remove(s.subPath("sub_" + safeID + "_headers.json"))
-	os.Remove(s.subPath("sub_" + safeID + "_parse_report.json"))
+	// Delete diagnostic files (схема по имени провайдера + legacy-схема по ID)
+	for _, base := range []string{sub.GetProviderName(), "sub_" + safeID} {
+		for _, suffix := range cacheSuffixes {
+			os.Remove(s.subPath(base + suffix))
+		}
+	}
 
 	if err := s.save(); err != nil {
 		return err
@@ -504,11 +538,14 @@ func (s *SubscriptionService) GetLocked(id string) *Subscription {
 	return nil
 }
 
+// saveDebugFiles сохраняет кэш-файлы подписки (сырой ответ, заголовки,
+// отчёт парсинга) под именем её провайдера. mu должен быть захвачен вызывающим.
 func (s *SubscriptionService) saveDebugFiles(id string, body []byte, headers http.Header, report *ParseReport) {
 	safeID := filepath.Base(id)
 	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+	base := s.cacheBaseLocked(safeID)
 
-	rawPath := s.subPath("sub_" + safeID + "_raw.txt")
+	rawPath := s.subPath(base + "_raw.txt")
 	_ = utils.AtomicWriteFile(rawPath, body, 0600)
 
 	hdrMap := make(map[string][]string)
@@ -517,14 +554,14 @@ func (s *SubscriptionService) saveDebugFiles(id string, body []byte, headers htt
 	}
 	hdrData, err := json.MarshalIndent(hdrMap, "", "  ")
 	if err == nil {
-		hdrPath := s.subPath("sub_" + safeID + "_headers.json")
+		hdrPath := s.subPath(base + "_headers.json")
 		_ = utils.AtomicWriteFile(hdrPath, hdrData, 0600)
 	}
 
 	if report != nil {
 		repData, err := json.MarshalIndent(report, "", "  ")
 		if err == nil {
-			repPath := s.subPath("sub_" + safeID + "_parse_report.json")
+			repPath := s.subPath(base + "_parse_report.json")
 			_ = utils.AtomicWriteFile(repPath, repData, 0600)
 		}
 	}
@@ -541,24 +578,18 @@ func (s *SubscriptionService) GetRaw(id string) (string, map[string][]string, er
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	exists := false
-	for _, sub := range s.subscriptions {
-		if sub.ID == safeID {
-			exists = true
-			break
-		}
-	}
-	if !exists {
+	if s.GetLocked(safeID) == nil {
 		return "", nil, fmt.Errorf("subscription not found")
 	}
+	base := s.cacheBaseLocked(safeID)
 
-	rawPath := s.subPath("sub_" + safeID + "_raw.txt")
+	rawPath := s.subPath(base + "_raw.txt")
 	bodyBytes, err := os.ReadFile(rawPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("raw response not found: %w", err)
 	}
 
-	hdrPath := s.subPath("sub_" + safeID + "_headers.json")
+	hdrPath := s.subPath(base + "_headers.json")
 	hdrBytes, err := os.ReadFile(hdrPath)
 	if err != nil {
 		return string(bodyBytes), nil, nil
@@ -583,18 +614,11 @@ func (s *SubscriptionService) GetParseReport(id string) (*ParseReport, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	exists := false
-	for _, sub := range s.subscriptions {
-		if sub.ID == safeID {
-			exists = true
-			break
-		}
-	}
-	if !exists {
+	if s.GetLocked(safeID) == nil {
 		return nil, fmt.Errorf("subscription not found")
 	}
 
-	repPath := s.subPath("sub_" + safeID + "_parse_report.json")
+	repPath := s.subPath(s.cacheBaseLocked(safeID) + "_parse_report.json")
 	repBytes, err := os.ReadFile(repPath)
 	if err != nil {
 		return nil, fmt.Errorf("parse report not found: %w", err)
@@ -625,12 +649,15 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 	s.lastCleanup = time.Now()
 	s.mu.Unlock()
 
+	// Активные базы имён кэш-файлов: имя провайдера (текущая схема)
+	// и "sub_<id>" (legacy-схема до миграции).
 	s.mu.RLock()
-	activeIDs := make(map[string]bool)
+	activeBases := make(map[string]bool)
 	for _, sub := range s.subscriptions {
 		safeID := filepath.Base(sub.ID)
 		safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
-		activeIDs[safeID] = true
+		activeBases["sub_"+safeID] = true
+		activeBases[sub.GetProviderName()] = true
 	}
 	s.mu.RUnlock()
 
@@ -644,8 +671,7 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 		return
 	}
 
-	re := regexp.MustCompile(`^sub_([a-z0-9_-]+)_(raw\.txt|headers\.json|parse_report\.json)$`)
-	cleanedIDs := make(map[string]bool)
+	cleanedBases := make(map[string]bool)
 
 	for _, file := range files {
 		if file.IsDir() {
@@ -653,17 +679,14 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 		}
 
 		name := file.Name()
-		matches := re.FindStringSubmatch(name)
-		if len(matches) < 2 {
-			continue
+		var base string
+		for _, suffix := range cacheSuffixes {
+			if b, ok := strings.CutSuffix(name, suffix); ok {
+				base = b
+				break
+			}
 		}
-
-		safeID := matches[1]
-		if activeIDs[safeID] {
-			continue
-		}
-
-		if cleanedIDs[safeID] {
+		if base == "" || activeBases[base] || cleanedBases[base] {
 			continue
 		}
 
@@ -674,15 +697,11 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 		}
 
 		if time.Since(info.ModTime()) > 7*24*time.Hour {
-			cleanedIDs[safeID] = true
-			log.Printf("[Cleanup] Removing orphaned files for subscription safeID: %s", safeID)
+			cleanedBases[base] = true
+			log.Printf("[Cleanup] Removing orphaned subscription cache files: %s", base)
 
-			pathsToDelete := []string{
-				s.subPath("sub_" + safeID + "_raw.txt"),
-				s.subPath("sub_" + safeID + "_headers.json"),
-				s.subPath("sub_" + safeID + "_parse_report.json"),
-			}
-			for _, p := range pathsToDelete {
+			for _, suffix := range cacheSuffixes {
+				p := s.subPath(base + suffix)
 				if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 					log.Printf("[Cleanup] Failed to remove orphaned subscription file %s: %v", p, err)
 				}

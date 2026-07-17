@@ -654,29 +654,39 @@ const CYRILLIC_MAP: Record<string, string> = {
   ъ: ''
 };
 
+// Служебные слова, отбрасываемые при выводе бренда провайдера из profile-title.
+// Зеркалит providerGenericWords бэкенда (subscription_converter.go).
+const PROVIDER_GENERIC_WORDS = new Set(['подписка', 'профиль', 'subscription', 'profile']);
+
+// Выводит бренд из profile-title: убирает эмодзи и символы, отбрасывает
+// служебные слова. убирает эмодзи и служебные слова.
+function extractProviderBrand(title: string): string {
+  const cleaned = title
+    .split('')
+    .filter((c) => /[\p{L}\p{N} \-_.+&]/u.test(c))
+    .join('');
+  return cleaned
+    .split(/\s+/)
+    .filter((w) => w && !PROVIDER_GENERIC_WORDS.has(w.toLowerCase()))
+    .join(' ');
+}
+
+// Зеркалит GetMihomoProviderName бэкенда: имя пользователя → бренд из
+// profile-title → fallback (ID). Сегмент URL не используется — он содержит
+// секретный токен подписки. Регистр сохраняется (регистр сохраняется).
 export function slugifyProviderName(
   profileTitle: string,
   name: string,
-  urlStr: string,
+  _urlStr: string,
   fallback: string
 ): string {
-  let source = profileTitle || name;
-  if (!source) {
-    try {
-      const parsed = new URL(urlStr);
-      const base = parsed.pathname.split('/').filter(Boolean).pop() || '';
-      if (base) source = base;
-    } catch {
-      // ignore invalid URL
-    }
-  }
-  if (!source) source = fallback;
+  const source = name || extractProviderBrand(profileTitle || '') || fallback;
   const slug = source
-    .toLowerCase()
     .split('')
-    .map((c) => CYRILLIC_MAP[c] ?? c)
+    .map((c) => (/[а-яёА-ЯЁ]/.test(c) ? (CYRILLIC_MAP[c.toLowerCase()] ?? c) : c))
     .join('')
-    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/[^A-Za-z0-9-]+/g, '-')
+    .replace(/-{2,}/g, '-')
     .replace(/^-+|-+$/g, '');
   return slug || fallback;
 }

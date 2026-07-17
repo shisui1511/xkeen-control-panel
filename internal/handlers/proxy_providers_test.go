@@ -286,32 +286,34 @@ func TestProxyProviders_Refresh_InvalidName(t *testing.T) {
 	api.subscriptionSvc.SetMihomoAPI(mockClashAPI.URL, "test_secret")
 
 	cases := []struct {
-		name     string
-		method   string
-		path     string
-		wantCode int
+		name         string
+		method       string
+		path         string
+		wantCode     int
+		wantOutbound bool
 	}{
-		{"underscore", http.MethodPut, "/api/proxy-providers/bad_name/refresh", http.StatusBadRequest},
-		{"multi-segment", http.MethodPut, "/api/proxy-providers/a/b/refresh", http.StatusBadRequest},
-		{"query-like chars", http.MethodPut, "/api/proxy-providers/x%3Fy/refresh", http.StatusBadRequest},
-		{"uppercase", http.MethodPut, "/api/proxy-providers/BadName/refresh", http.StatusBadRequest},
-		{"no name in path", http.MethodPut, "/api/proxy-providers/refresh", http.StatusNotFound},
-		{"wrong method", http.MethodPost, "/api/proxy-providers/test-provider/refresh", http.StatusNotFound},
+		{"underscore", http.MethodPut, "/api/proxy-providers/bad_name/refresh", http.StatusBadRequest, false},
+		{"multi-segment", http.MethodPut, "/api/proxy-providers/a/b/refresh", http.StatusBadRequest, false},
+		{"query-like chars", http.MethodPut, "/api/proxy-providers/x%3Fy/refresh", http.StatusBadRequest, false},
+		// Верхний регистр допустим: имена провайдеров сохраняют регистр («TEST_PROVIDER»).
+		{"uppercase", http.MethodPut, "/api/proxy-providers/TEST_PROVIDER/refresh", http.StatusNoContent, true},
+		{"no name in path", http.MethodPut, "/api/proxy-providers/refresh", http.StatusNotFound, false},
+		{"wrong method", http.MethodPost, "/api/proxy-providers/test-provider/refresh", http.StatusNotFound, false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			outboundCalled = false
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			rr := httptest.NewRecorder()
 			api.ProxyProvidersRouter(rr, req)
 			if rr.Code != tc.wantCode {
 				t.Errorf("expected %d, got %d: %s", tc.wantCode, rr.Code, rr.Body.String())
 			}
+			if outboundCalled != tc.wantOutbound {
+				t.Errorf("Clash API called=%v, want %v", outboundCalled, tc.wantOutbound)
+			}
 		})
-	}
-
-	if outboundCalled {
-		t.Error("Clash API must not be called for invalid provider names")
 	}
 }
 

@@ -454,7 +454,7 @@ func TestMihomoProviderAdapter(t *testing.T) {
 	// 6. Сетевая ошибка + наличие кэша на диске -> отдаётся кэш (200).
 	badURL := "http://127.0.0.1:1/unreachable"
 	adhocID := adhocSubscriptionID(badURL)
-	providerName := services.GetMihomoProviderName("", "", badURL, adhocID)
+	providerName := services.GetMihomoProviderName("", "", adhocID)
 	proxyProvidersDir := filepath.Join(api.cfg.MihomoConfigDir, "proxy_providers")
 	if err := os.MkdirAll(proxyProvidersDir, 0755); err != nil {
 		t.Fatal(err)
