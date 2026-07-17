@@ -3,6 +3,7 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -270,4 +271,113 @@ proxy-providers:
 	if !sub.MihomoIntegrated {
 		t.Errorf("expected subscription to be MihomoIntegrated")
 	}
+}
+
+func TestGetMihomoProviderName_Brand(t *testing.T) {
+	cases := []struct {
+		title, name, fallback, want string
+	}{
+		// Бренд из profile-title: эмодзи и служебные слова отбрасываются.
+		{"Acme 🌏 Подписка", "", "sub_1", "Acme"},
+		{"My VPN Subscription", "", "sub_1", "My-VPN"},
+		// Имя пользователя приоритетнее profile-title; кириллица
+		// транслитерируется в нижний регистр (зеркально фронтенду).
+		{"Acme 🌏 Подписка", "Личный VPN", "sub_1", "lichnyj-VPN"},
+		// Пустые title/name → fallback (ID), без сегмента URL.
+		{"", "", "sub_42", "sub-42"},
+		// Только служебные слова → fallback.
+		{"Подписка", "", "sub_7", "sub-7"},
+	}
+	for _, tc := range cases {
+		if got := GetMihomoProviderName(tc.title, tc.name, tc.fallback); got != tc.want {
+			t.Errorf("GetMihomoProviderName(%q, %q, %q) = %q, want %q", tc.title, tc.name, tc.fallback, got, tc.want)
+		}
+	}
+}
+
+func TestUniqueProviderName(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, filepath.Join(tmp, "xray"), filepath.Join(tmp, "mihomo"))
+
+	a := Subscription{Name: "Acme", URL: "https://example.com/a"}
+	b := Subscription{Name: "Acme", URL: "https://example.com/b"}
+	c := Subscription{Name: "acme", URL: "https://example.com/c"}
+	for _, sub := range []*Subscription{&a, &b, &c} {
+		if err := svc.Add(sub); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if a.ProviderName != "Acme" {
+		t.Errorf("expected first provider Acme, got %s", a.ProviderName)
+	}
+	if b.ProviderName != "Acme-2" {
+		t.Errorf("expected collision suffix Acme-2, got %s", b.ProviderName)
+	}
+	// Сравнение имён — без учёта регистра.
+	if c.ProviderName != "acme-3" {
+		t.Errorf("expected case-insensitive collision suffix acme-3, got %s", c.ProviderName)
+	}
+}
+
+func TestMaybeRenameProviderAfterProfileTitle(t *testing.T) {
+	tmp := t.TempDir()
+	mihomoDir := filepath.Join(tmp, "mihomo")
+	if err := os.MkdirAll(filepath.Join(mihomoDir, "proxy_providers"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mihomoDir, "config.yaml"), []byte("proxy-providers:\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewSubscriptionService(filepath.Join(tmp, "xcp"), filepath.Join(tmp, "xray"), mihomoDir)
+	sub := Subscription{URL: "https://example.com/secret-token", EnableMihomo: true, Enabled: true}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatal(err)
+	}
+
+	oldName := sub.GetProviderName()
+	if strings.Contains(oldName, "secret") {
+		t.Fatalf("provider name must not leak URL token: %s", oldName)
+	}
+
+	// Файлы кэша и провайдера под временным именем.
+	if err := os.WriteFile(svc.subPath(oldName+"_raw.txt"), []byte("raw"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mihomoDir, "proxy_providers", oldName+".yaml"), []byte("proxies: []\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.mu.Lock()
+	live := svc.GetLocked(sub.ID)
+	live.ProfileTitle = "Acme 🌏 Подписка"
+	svc.maybeRenameProviderLocked(live)
+	newName := live.ProviderName
+	svc.mu.Unlock()
+
+	if newName != "Acme" {
+		t.Fatalf("expected provider renamed to Acme, got %s", newName)
+	}
+	if _, err := os.Stat(svc.subPath("Acme_raw.txt")); err != nil {
+		t.Errorf("cache file was not renamed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(mihomoDir, "proxy_providers", "Acme.yaml")); err != nil {
+		t.Errorf("provider file was not renamed: %v", err)
+	}
+	cfg, err := os.ReadFile(filepath.Join(mihomoDir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(cfg), "Acme:") || strings.Contains(string(cfg), oldName+":") {
+		t.Errorf("config.yaml was not renamed:\n%s", cfg)
+	}
+
+	// Повторный вызов — no-op: имя уже совпадает с брендом.
+	svc.mu.Lock()
+	svc.maybeRenameProviderLocked(live)
+	if live.ProviderName != "Acme" {
+		t.Errorf("rename must be idempotent, got %s", live.ProviderName)
+	}
+	svc.mu.Unlock()
 }

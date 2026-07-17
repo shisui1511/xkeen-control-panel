@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -88,7 +89,7 @@ func TestPortIsInteger(t *testing.T) {
 func TestDownloadAndParseSchemeValidation(t *testing.T) {
 	tmp := t.TempDir()
 	svc := NewSubscriptionService(tmp, "/opt/etc/xray", "/opt/etc/mihomo")
-	_, _, _, _, err := svc.downloadAndParse("file:///etc/passwd", &Subscription{})
+	_, _, _, _, err := svc.downloadAndParse(context.Background(), "file:///etc/passwd", &Subscription{})
 	if err == nil {
 		t.Fatal("expected error for file:// URL, got nil")
 	}
@@ -451,7 +452,7 @@ func TestSubscriptionEntryLimit(t *testing.T) {
 	}))
 	defer ts5001.Close()
 
-	_, _, _, _, err := svc.downloadAndParse(ts5001.URL, &Subscription{})
+	_, _, _, _, err := svc.downloadAndParse(context.Background(), ts5001.URL, &Subscription{})
 	if err == nil {
 		t.Error("expected error for 5001 entries, got nil")
 	}
@@ -468,7 +469,7 @@ func TestSubscriptionEntryLimit(t *testing.T) {
 	}))
 	defer ts5000.Close()
 
-	_, _, _, _, err = svc.downloadAndParse(ts5000.URL, &Subscription{})
+	_, _, _, _, err = svc.downloadAndParse(context.Background(), ts5000.URL, &Subscription{})
 	if err != nil {
 		t.Errorf("expected no error for 5000 entries, got: %v", err)
 	}
@@ -490,7 +491,7 @@ func TestDownloadAndParse_NetworkError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	_, _, _, _, err := svc.downloadAndParse(ts.URL, &Subscription{})
+	_, _, _, _, err := svc.downloadAndParse(context.Background(), ts.URL, &Subscription{})
 	if err == nil {
 		t.Error("expected error for connection reset, got nil")
 	}
@@ -651,6 +652,125 @@ func TestParseShareLink_EdgeCases(t *testing.T) {
 				t.Errorf("expected non-nil for %q", tc.input)
 			}
 		})
+	}
+}
+
+func TestParseXrayConfigArray_HysteriaProtocolPreserved(t *testing.T) {
+	// Воспроизводит реальный формат провайдера (xray full-config array), где
+	// единственный proxy-outbound имеет protocol "hysteria" (Hysteria 2 под
+	// именем "hysteria" в схеме xray-array), а адрес/порт лежат прямо в
+	// settings (не под "servers"), пароль — в streamSettings.hysteriaSettings.auth.
+	body := []byte(`[
+		{
+			"remarks": "🇩🇪 Германия [HYSTERIA]",
+			"outbounds": [
+				{
+					"tag": "proxy",
+					"protocol": "hysteria",
+					"settings": {"address": "de.example.com", "port": 9443, "version": 2},
+					"streamSettings": {
+						"network": "hysteria",
+						"hysteriaSettings": {"version": 2, "auth": "secret-auth"},
+						"security": "tls",
+						"tlsSettings": {"serverName": "de.example.com", "fingerprint": "chrome", "alpn": ["h3"]},
+						"finalmask": {"quicParams": {"congestion": "bbr"}}
+					}
+				},
+				{"tag": "direct", "protocol": "freedom", "settings": {}},
+				{"tag": "block", "protocol": "blackhole", "settings": {}}
+			]
+		}
+	]`)
+
+	outs := parseXrayConfigArray(body)
+	if len(outs) != 1 {
+		t.Fatalf("expected 1 outbound (hysteria node must not be dropped), got %d", len(outs))
+	}
+
+	ob := outs[0]
+	if ob.Tag != "🇩🇪 Германия [HYSTERIA]" {
+		t.Errorf("expected tag from remarks, got %q", ob.Tag)
+	}
+	if ob.Protocol != "hysteria2" {
+		t.Errorf("expected normalized protocol=hysteria2, got %q", ob.Protocol)
+	}
+
+	servers, ok := ob.Settings["servers"].([]map[string]interface{})
+	if !ok || len(servers) == 0 {
+		t.Fatal("expected servers in normalized settings")
+	}
+	if servers[0]["address"] != "de.example.com" {
+		t.Errorf("expected address=de.example.com, got %v", servers[0]["address"])
+	}
+	if servers[0]["port"] != 9443 {
+		t.Errorf("expected port=9443, got %v", servers[0]["port"])
+	}
+	if servers[0]["password"] != "secret-auth" {
+		t.Errorf("expected password=secret-auth (from hysteriaSettings.auth), got %v", servers[0]["password"])
+	}
+
+	ss := ob.StreamSettings
+	if ss == nil {
+		t.Fatal("expected StreamSettings")
+	}
+	if ss["security"] != "tls" {
+		t.Errorf("expected security=tls, got %v", ss["security"])
+	}
+	tlsSettings, ok := ss["tlsSettings"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected tlsSettings preserved")
+	}
+	if tlsSettings["serverName"] != "de.example.com" {
+		t.Errorf("expected serverName=de.example.com, got %v", tlsSettings["serverName"])
+	}
+
+	// End-to-end: узел должен корректно превращаться в SubscriptionNode с
+	// непустым Server и паролем (иначе он "теряется" в панели визуально,
+	// даже если формально не был отброшен).
+	scratchSvc := &SubscriptionService{}
+	nodes := scratchSvc.outboundsToNodes(outs, &Subscription{})
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	if nodes[0].Server != "de.example.com:9443" {
+		t.Errorf("expected server=de.example.com:9443, got %q", nodes[0].Server)
+	}
+	if nodes[0].Password != "secret-auth" {
+		t.Errorf("expected password=secret-auth, got %q", nodes[0].Password)
+	}
+	if nodes[0].Protocol != "hysteria2" {
+		t.Errorf("expected node protocol=hysteria2, got %q", nodes[0].Protocol)
+	}
+}
+
+func TestParseHysteriaV1Link(t *testing.T) {
+	link := "hysteria://mypassword@hy.example.com:443?sni=hy.example.com#hyserver"
+	ob := parseShareLink(link)
+	if ob == nil {
+		t.Fatal("expected non-nil Outbound for hysteria:// (Hysteria v1) share link")
+	}
+	if ob.Protocol != "hysteria2" {
+		t.Errorf("expected protocol normalized to hysteria2, got %q", ob.Protocol)
+	}
+	servers, ok := ob.Settings["servers"].([]map[string]interface{})
+	if !ok || len(servers) == 0 {
+		t.Fatal("expected servers in settings")
+	}
+	if servers[0]["address"] != "hy.example.com" {
+		t.Errorf("expected address=hy.example.com, got %v", servers[0]["address"])
+	}
+	if servers[0]["password"] != "mypassword" {
+		t.Errorf("expected password=mypassword, got %v", servers[0]["password"])
+	}
+}
+
+func TestSkipReasonForScheme_HysteriaV1(t *testing.T) {
+	reason := skipReasonForScheme("hysteria://garbage")
+	if reason == "неподдерживаемый протокол или невалидный URL" {
+		t.Errorf("expected specific hysteria:// skip reason, got generic fallback: %q", reason)
+	}
+	if !strings.Contains(reason, "hysteria://") {
+		t.Errorf("expected skip reason to mention hysteria:// scheme, got %q", reason)
 	}
 }
 

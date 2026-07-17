@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -119,6 +120,69 @@ func TestKernelService_Get(t *testing.T) {
 	}
 }
 
+func TestKernelService_GetActiveKernel(t *testing.T) {
+	tmpDir := t.TempDir()
+	origProcDir := procDir
+	procDir = tmpDir
+	defer func() { procDir = origProcDir }()
+
+	mihomoBin := filepath.Join(tmpDir, "mihomo")
+	xrayBin := filepath.Join(tmpDir, "xray")
+
+	if err := os.WriteFile(mihomoBin, []byte("fake binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(xrayBin, []byte("fake binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewKernelService()
+	svc.kernels["mihomo"].BinaryPath = mihomoBin
+	svc.kernels["xray"].BinaryPath = xrayBin
+
+	// Case 1: No running kernels
+	active := svc.GetActiveKernel()
+	if active != "" {
+		t.Errorf("expected no active kernel, got %q", active)
+	}
+
+	// Case 2: Only mihomo is running
+	pid1 := "1000"
+	pidDir1 := filepath.Join(tmpDir, pid1)
+	if err := os.MkdirAll(pidDir1, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir1, "cmdline"), []byte(mihomoBin+"\x00-d\x00/opt/etc/mihomo\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(mihomoBin, filepath.Join(pidDir1, "exe")); err != nil {
+		t.Fatal(err)
+	}
+
+	active = svc.GetActiveKernel()
+	if active != "mihomo" {
+		t.Errorf("expected active kernel 'mihomo', got %q", active)
+	}
+
+	// Case 3: Both running (order is xray first in List() / GetActiveKernel)
+	pid2 := "1001"
+	pidDir2 := filepath.Join(tmpDir, pid2)
+	if err := os.MkdirAll(pidDir2, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir2, "cmdline"), []byte(xrayBin+"\x00-config\x00/opt/etc/xray.json\x00"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(xrayBin, filepath.Join(pidDir2, "exe")); err != nil {
+		t.Fatal(err)
+	}
+
+	active = svc.GetActiveKernel()
+	if active != "xray" {
+		t.Errorf("expected active kernel 'xray', got %q", active)
+	}
+}
+
 func TestKernelService_Get_Unknown(t *testing.T) {
 	svc := NewKernelService()
 	kernel := svc.Get("unknown")
@@ -192,6 +256,8 @@ func TestValidateKernelPath(t *testing.T) {
 	}{
 		{"/opt/bin/xray", false},
 		{"/opt/bin/.backup/kernel.bak.123", false},
+		{"/opt/bin/.backup/xray.bak.123", false},
+		{"/opt/bin/.backup/mihomo.bak.123", false},
 		{"/opt/etc/mihomo/config.yaml", false},
 		{"/opt/bin/../etc/passwd", true}, // traversal
 		{"/home/user/evil", true},        // outside allowed roots
@@ -284,11 +350,10 @@ func TestKernelInstall_Concurrent(t *testing.T) {
 // and re-run the binary only after the TTL expires.
 func TestKernelVersionCache_TTL(t *testing.T) {
 	tmpDir := t.TempDir()
-	callCount := 0
+	logPath := filepath.Join(tmpDir, "calls.log")
 	scriptPath := filepath.Join(tmpDir, "xray")
-	// Script that increments a side-effect file each time it's called.
-	// We count calls via our own counter instead.
-	script := "#!/bin/sh\necho \"Xray 1.9.0 (Xray, Penetrates Everything.)\"\n"
+
+	script := fmt.Sprintf("#!/bin/sh\necho x >> %s\necho \"Xray 1.9.0 (Xray, Penetrates Everything.)\"\n", logPath)
 	if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -297,33 +362,44 @@ func TestKernelVersionCache_TTL(t *testing.T) {
 	k := svc.kernels["xray"]
 	k.BinaryPath = scriptPath
 
-	// Wrap detectVersion in a counting helper
-	countingDetect := func() string {
-		callCount++
-		return svc.detectVersion(k)
+	readCalls := func() int {
+		data, err := os.ReadFile(logPath)
+		if err != nil {
+			return 0
+		}
+		return strings.Count(string(data), "\n")
 	}
 
-	v1 := countingDetect()
+	// First call — runs binary, caches result
+	v1 := svc.detectVersion(k)
 	if v1 != "1.9.0" {
 		t.Fatalf("first call: expected 1.9.0, got %s", v1)
 	}
+	if calls := readCalls(); calls != 1 {
+		t.Fatalf("expected 1 binary execution, got %d", calls)
+	}
 
-	// Second call within TTL — should return cached value without re-running binary.
-	// Force cache to look fresh.
-	k.verCache.value = "1.9.0"
-	k.verCache.expires = time.Now().Add(versionCacheTTL)
+	// Second call within TTL — should return cached value without executing binary
 	v2 := svc.detectVersion(k)
 	if v2 != "1.9.0" {
 		t.Fatalf("cached call: expected 1.9.0, got %s", v2)
 	}
+	if calls := readCalls(); calls != 1 {
+		t.Fatalf("expected still 1 binary execution (cached), got %d", calls)
+	}
 
-	// Expire the cache and re-run — should call binary again.
+	// Force expire the cache and call again — should execute binary again
+	k.verCache.mu.Lock()
 	k.verCache.expires = time.Now().Add(-1 * time.Second)
-	v3 := countingDetect()
+	k.verCache.mu.Unlock()
+
+	v3 := svc.detectVersion(k)
 	if v3 != "1.9.0" {
 		t.Fatalf("after expiry: expected 1.9.0, got %s", v3)
 	}
-	_ = callCount // suppress unused warning
+	if calls := readCalls(); calls != 2 {
+		t.Fatalf("expected 2 binary executions after cache expiry, got %d", calls)
+	}
 }
 
 // TestKernelVersionRegex_VPrefix: parseVersion must strip leading 'v'/'V' prefix.

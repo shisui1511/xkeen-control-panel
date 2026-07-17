@@ -1,8 +1,11 @@
 package services
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -126,6 +129,17 @@ type Subscription struct {
 
 	// MihomoIntegrated — интегрирована ли подписка в config.yaml Mihomo
 	MihomoIntegrated bool `json:"mihomo_integrated"`
+
+	// ProviderName — зафиксированное имя провайдера в Mihomo
+	ProviderName string `json:"provider_name,omitempty"`
+}
+
+// GetProviderName возвращает стабильное имя провайдера для Mihomo.
+func (s *Subscription) GetProviderName() string {
+	if s.ProviderName != "" {
+		return s.ProviderName
+	}
+	return GetMihomoProviderName(s.ProfileTitle, s.Name, s.ID)
 }
 
 // Clone возвращает глубокую копию Subscription.
@@ -184,6 +198,12 @@ type retryState struct {
 	nextRetry time.Time
 }
 
+// KernelStatusProvider defines active kernel detection seam.
+type KernelStatusProvider interface {
+	GetActiveKernel() string
+	Get(name string) *KernelInfo
+}
+
 // SubscriptionService manages subscriptions
 type SubscriptionService struct {
 	dataDir         string
@@ -196,11 +216,19 @@ type SubscriptionService struct {
 	retries         sync.Map   // ID -> *retryState for exponential backoff
 	httpClient      *http.Client
 	consoleSvc      *ConsoleService
-	kernelSvc       *KernelService // для получения реальных версий ядер
-	hwid            string         // постоянный UUID устройства, передаётся как x-hwid
+	kernelSvc       KernelStatusProvider // для получения реальных версий ядер
+	hwid            string               // постоянный UUID устройства, передаётся как x-hwid
+	deviceInfo      *DeviceInfo          // модель/ОС роутера для x-device-* заголовков (см. task 60-01-05)
 	mihomoAPIURL    string
 	mihomoSecret    string
-	lastCleanup     time.Time
+	// mihomoSecretResolver — fallback-резолвер секрета Clash API (например,
+	// чтение secret из config.yaml Mihomo), используется когда mihomoSecret пуст.
+	mihomoSecretResolver func() string
+	lastCleanup          time.Time
+	panelPort            int
+	panelHTTPS           bool
+	loopbackPort         int
+	localHTTPClient      *http.Client
 }
 
 func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *SubscriptionService {
@@ -209,8 +237,58 @@ func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *Subscri
 		configDir:       configDir,
 		mihomoConfigDir: mihomoConfigDir,
 		httpClient:      utils.SafeHTTPClient(30 * time.Second),
+		localHTTPClient: &http.Client{Timeout: 10 * time.Second},
 		hwid:            loadOrGenerateHWID(dataDir),
+		deviceInfo:      NewDeviceInfo(),
 	}
 	svc.load()
 	return svc
+}
+
+func (s *SubscriptionService) SetPanelAddress(port int, https bool, loopbackPort int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.panelPort = port
+	s.panelHTTPS = https
+	s.loopbackPort = loopbackPort
+}
+
+func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscription, port int, https bool, loopbackPort int) string {
+	if port == 0 {
+		port = 8090
+	}
+	if loopbackPort == 0 {
+		loopbackPort = 8091
+	}
+
+	scheme := "http"
+	usePort := port
+	if https {
+		usePort = loopbackPort
+	}
+
+	providerName := sub.GetProviderName()
+	escapedURL := url.QueryEscape(sub.URL)
+	loopbackURL := fmt.Sprintf("%s://127.0.0.1:%d/api/provider.yaml?url=%s", scheme, usePort, escapedURL)
+
+	intervalSec := sub.Interval * 3600
+	if intervalSec <= 0 {
+		intervalSec = 24 * 3600 // дефолт 24 часа
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("  %s:\n", providerName))
+	sb.WriteString("    type: http\n")
+	sb.WriteString(fmt.Sprintf("    url: '%s'\n", loopbackURL))
+	sb.WriteString(fmt.Sprintf("    interval: %d\n", intervalSec))
+	sb.WriteString(fmt.Sprintf("    path: ./proxy_providers/%s.yaml\n", providerName))
+	if https {
+		sb.WriteString("    skip-cert-verify: true\n")
+	}
+	sb.WriteString("    health-check:\n")
+	sb.WriteString("      enable: true\n")
+	sb.WriteString("      url: http://www.gstatic.com/generate_204\n")
+	sb.WriteString("      interval: 300")
+
+	return sb.String()
 }

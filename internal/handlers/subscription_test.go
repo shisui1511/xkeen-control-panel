@@ -117,6 +117,46 @@ func TestSubscriptionAdd(t *testing.T) {
 	}
 }
 
+func TestSubscriptionAdd_DefaultKernels(t *testing.T) {
+	// Case A: omitted (defaulting to true)
+	{
+		api, _ := newSubTestAPI(t)
+		payload := `{"name": "testA", "url": "http://example.com/subA"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/add", strings.NewReader(payload))
+		rr := httptest.NewRecorder()
+		api.SubscriptionAdd(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var created services.Subscription
+		if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+			t.Fatal(err)
+		}
+		if !created.EnableXray || !created.EnableMihomo {
+			t.Errorf("expected enable_xray and enable_mihomo to default to true, got: xray=%t, mihomo=%t", created.EnableXray, created.EnableMihomo)
+		}
+	}
+
+	// Case B: explicit false (preservation of false)
+	{
+		api, _ := newSubTestAPI(t)
+		payload := `{"name": "testB", "url": "http://example.com/subB", "enable_xray": false, "enable_mihomo": false}`
+		req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/add", strings.NewReader(payload))
+		rr := httptest.NewRecorder()
+		api.SubscriptionAdd(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		}
+		var created services.Subscription
+		if err := json.Unmarshal(rr.Body.Bytes(), &created); err != nil {
+			t.Fatal(err)
+		}
+		if created.EnableXray || created.EnableMihomo {
+			t.Errorf("expected explicit false to be preserved, got: xray=%t, mihomo=%t", created.EnableXray, created.EnableMihomo)
+		}
+	}
+}
+
 func TestSubscriptionUpdate(t *testing.T) {
 	api, subSvc := newSubTestAPI(t)
 
@@ -146,6 +186,9 @@ func TestSubscriptionUpdate(t *testing.T) {
 	}
 	if updated.Name != "New Name" || updated.URL != "http://example.com/new" {
 		t.Errorf("unexpected updated sub: %+v", updated)
+	}
+	if !updated.EnableXray {
+		t.Errorf("expected EnableXray to remain true after update without explicit flags")
 	}
 }
 
@@ -333,30 +376,27 @@ func TestSubscriptionSetActive(t *testing.T) {
 func TestMihomoProviderAdapter(t *testing.T) {
 	api, subSvc := newSubTestAPI(t)
 	api.cfg.MihomoConfigDir = api.cfg.DataDir
+	subSvc.SetHTTPClient(http.DefaultClient) // разрешить httptest на 127.0.0.1
+
+	// Mock upstream отдаёт полный Clash config (proxies + dns) — адаптер
+	// должен вернуть только секцию proxies:.
+	upstreamYAML := "proxies:\n  - name: test-node\n    type: ss\n    server: 1.2.3.4\n    port: 8388\n    cipher: aes-256-gcm\n    password: pass\ndns:\n  nameserver:\n    - 8.8.8.8\n"
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(upstreamYAML))
+	}))
+	defer ts.Close()
 
 	sub := &services.Subscription{
 		Name:         "Adapter Sub",
-		URL:          "https://example.com/mihomo-provider",
+		URL:          ts.URL,
 		Enabled:      true,
 		EnableMihomo: true,
 	}
 	subSvc.Add(sub)
-	id := subSvc.List()[0].ID
-
-	providerName := services.GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, id)
-
-	proxyProvidersDir := filepath.Join(api.cfg.MihomoConfigDir, "proxy_providers")
-	if err := os.MkdirAll(proxyProvidersDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	cacheFile := filepath.Join(proxyProvidersDir, providerName+".yaml")
-	mockYAML := "proxies:\n  - name: test\n    type: ss\n"
-	if err := os.WriteFile(cacheFile, []byte(mockYAML), 0600); err != nil {
-		t.Fatal(err)
-	}
 
 	// 1. Метод не GET
-	req := httptest.NewRequest(http.MethodPost, "/mihomo/provider.yaml", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/provider.yaml", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr := httptest.NewRecorder()
 	api.MihomoProviderAdapter(rr, req)
@@ -364,8 +404,8 @@ func TestMihomoProviderAdapter(t *testing.T) {
 		t.Errorf("expected 405, got %d", rr.Code)
 	}
 
-	// 2. Внешний IP (не loopback)
-	req = httptest.NewRequest(http.MethodGet, "/mihomo/provider.yaml?url="+sub.URL, nil)
+	// 2. Внешний IP (не loopback) -> 403
+	req = httptest.NewRequest(http.MethodGet, "/api/provider.yaml?url="+sub.URL, nil)
 	req.RemoteAddr = "192.168.1.1:12345"
 	rr = httptest.NewRecorder()
 	api.MihomoProviderAdapter(rr, req)
@@ -373,8 +413,8 @@ func TestMihomoProviderAdapter(t *testing.T) {
 		t.Errorf("expected 403, got %d", rr.Code)
 	}
 
-	// 3. Отсутствие параметра url
-	req = httptest.NewRequest(http.MethodGet, "/mihomo/provider.yaml", nil)
+	// 3. Отсутствие параметра url -> 400
+	req = httptest.NewRequest(http.MethodGet, "/api/provider.yaml", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr = httptest.NewRecorder()
 	api.MihomoProviderAdapter(rr, req)
@@ -382,27 +422,105 @@ func TestMihomoProviderAdapter(t *testing.T) {
 		t.Errorf("expected 400, got %d", rr.Code)
 	}
 
-	// 4. Неизвестный URL
-	req = httptest.NewRequest(http.MethodGet, "/mihomo/provider.yaml?url=https://unknown.com", nil)
-	req.RemoteAddr = "127.0.0.1:12345"
-	rr = httptest.NewRecorder()
-	api.MihomoProviderAdapter(rr, req)
-	if rr.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", rr.Code)
-	}
-
-	// 5. Успешный запрос с loopback IP
-	req = httptest.NewRequest(http.MethodGet, "/mihomo/provider.yaml?url="+sub.URL, nil)
+	// 4. Успешный запрос с loopback IP: upstream проксируется, полный config
+	// сокращается до только proxies: секции.
+	req = httptest.NewRequest(http.MethodGet, "/api/provider.yaml?url="+sub.URL, nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	rr = httptest.NewRecorder()
 	api.MihomoProviderAdapter(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if rr.Body.String() != mockYAML {
-		t.Errorf("expected %q, got %q", mockYAML, rr.Body.String())
-	}
 	if rr.Header().Get("Content-Type") != "text/yaml; charset=utf-8" {
 		t.Errorf("expected text/yaml content type, got %q", rr.Header().Get("Content-Type"))
+	}
+	if !strings.HasPrefix(rr.Body.String(), "proxies:") {
+		t.Errorf("expected body to start with 'proxies:', got %q", rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "dns:") {
+		t.Errorf("expected full config to be reduced to proxies: section only, got %q", rr.Body.String())
+	}
+
+	// 5. Неизвестный (незарегистрированный) URL всё равно проксируется upstream
+	// (адаптер создаёт временную подписку вместо возврата 404).
+	req = httptest.NewRequest(http.MethodGet, "/api/provider.yaml?url="+ts.URL+"/unknown-but-same-host", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr = httptest.NewRecorder()
+	api.MihomoProviderAdapter(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for ad-hoc url, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// 6. Сетевая ошибка + наличие кэша на диске -> отдаётся кэш (200).
+	badURL := "http://127.0.0.1:1/unreachable"
+	adhocID := adhocSubscriptionID(badURL)
+	providerName := services.GetMihomoProviderName("", "", adhocID)
+	proxyProvidersDir := filepath.Join(api.cfg.MihomoConfigDir, "proxy_providers")
+	if err := os.MkdirAll(proxyProvidersDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cachedYAML := "proxies:\n  - name: cached-node\n"
+	cacheFile := filepath.Join(proxyProvidersDir, providerName+".yaml")
+	if err := os.WriteFile(cacheFile, []byte(cachedYAML), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/provider.yaml?url="+badURL, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr = httptest.NewRecorder()
+	api.MihomoProviderAdapter(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 (cache fallback), got %d: %s", rr.Code, rr.Body.String())
+	}
+	if rr.Body.String() != cachedYAML {
+		t.Errorf("expected cached payload %q, got %q", cachedYAML, rr.Body.String())
+	}
+
+	// 7. Сетевая ошибка без кэша -> 502.
+	badURL2 := "http://127.0.0.1:2/unreachable-no-cache"
+	req = httptest.NewRequest(http.MethodGet, "/api/provider.yaml?url="+badURL2, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr = httptest.NewRecorder()
+	api.MihomoProviderAdapter(rr, req)
+	if rr.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// 8. Отключенная подписка -> 403.
+	disabledSub := &services.Subscription{
+		Name:         "Disabled Sub",
+		URL:          ts.URL + "/disabled",
+		Enabled:      false,
+		EnableMihomo: true,
+	}
+	subSvc.Add(disabledSub)
+	req = httptest.NewRequest(http.MethodGet, "/api/provider.yaml?url="+disabledSub.URL, nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rr = httptest.NewRecorder()
+	api.MihomoProviderAdapter(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for disabled subscription, got %d", rr.Code)
+	}
+}
+
+func TestMihomoProviderRedirect(t *testing.T) {
+	api, _ := newSubTestAPI(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/mihomo/provider.yaml?url=https://example.com/sub&insecure=true", nil)
+	rr := httptest.NewRecorder()
+	api.MihomoProviderRedirect(rr, req)
+
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d", rr.Code)
+	}
+	loc := rr.Header().Get("Location")
+	if !strings.HasPrefix(loc, "/api/provider.yaml?") {
+		t.Errorf("expected redirect location to start with /api/provider.yaml?, got %q", loc)
+	}
+	if !strings.Contains(loc, "url=https%3A%2F%2Fexample.com%2Fsub") && !strings.Contains(loc, "url=https://example.com/sub") {
+		t.Errorf("expected original url query param preserved, got %q", loc)
+	}
+	if !strings.Contains(loc, "insecure=true") {
+		t.Errorf("expected all original query params preserved, got %q", loc)
 	}
 }

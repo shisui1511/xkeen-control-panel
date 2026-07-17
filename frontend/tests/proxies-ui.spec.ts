@@ -215,7 +215,10 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
           contentType: 'application/json',
           body: JSON.stringify({ success: true })
         });
-      } else if (url.includes('/api/subscriptions') && method === 'GET') {
+      } else if (
+        (url.includes('/api/subscriptions') || url.includes('/api/proxy-providers')) &&
+        method === 'GET'
+      ) {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',

@@ -1,65 +1,84 @@
 package services
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 )
 
-// subscriptionUserAgent возвращает User-Agent для подписки на основе реальных
-// версий установленных ядер:
-//   - mihomo-подписки → "mihomo/<версия>" (mihomo нативно качает подписки,
-//     провайдеры знают этот UA и отдают clash-meta YAML)
-//   - xray-подписки → "v2rayN/<версия xray>" (v2rayN — официальный GUI для
-//     Xray-core, оба от 2dust; большинство провайдеров отдают xray-json по этому UA)
-func (s *SubscriptionService) subscriptionUserAgent(subType string) string {
-	if subType == "mihomo" {
-		ver := "1.18.10" // fallback если ядро не найдено
-		if s.kernelSvc != nil {
-			if k := s.kernelSvc.Get("mihomo"); k != nil && k.CurrentVersion != "" {
-				ver = k.CurrentVersion
-			}
-		}
-		return "mihomo/" + ver
-	}
-	ver := "1.8.24" // fallback если ядро не найдено
-	if s.kernelSvc != nil {
-		if k := s.kernelSvc.Get("xray"); k != nil && k.CurrentVersion != "" {
-			ver = k.CurrentVersion
-		}
-	}
-	return "v2rayN/" + ver
-}
+// subscriptionUserAgent — единый User-Agent для всех запросов подписок.
+// Провайдеры отдают разные наборы нод в зависимости от UA клиента; разные UA
+// для Xray- и Mihomo-путей приводили к рассинхрону списков нод одной подписки.
+// По UA Happ провайдеры отдают максимально полный набор нод.
+const subscriptionUserAgent = "Happ/1.0"
 
-// selectUserAgent выбирает User-Agent на основе флагов интеграции и состояния ядер.
-func (s *SubscriptionService) selectUserAgent(sub *Subscription) string {
-	if sub.EnableXray && !sub.EnableMihomo {
-		return s.subscriptionUserAgent("xray")
+func sanitizeSSRFURL(urlStr string) string {
+	b := make([]byte, len(urlStr))
+	for i := 0; i < len(urlStr); i++ {
+		b[i] = urlStr[i]
 	}
-	if sub.EnableMihomo && !sub.EnableXray {
-		return s.subscriptionUserAgent("mihomo")
-	}
-	if sub.EnableXray && sub.EnableMihomo {
-		if s.kernelSvc != nil {
-			info := s.kernelSvc.Get("mihomo")
-			if info != nil && info.ProcessStatus == "running" {
-				return s.subscriptionUserAgent("mihomo")
-			}
-		}
-		return s.subscriptionUserAgent("xray")
-	}
-	return s.subscriptionUserAgent("xray")
+	return string(b)
 }
 
 // fetchWithUserAgent выполняет GET с правильным User-Agent и HWID-заголовками.
-func (s *SubscriptionService) fetchWithUserAgent(subURL string, sub *Subscription, ua string) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodGet, subURL, nil)
+func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL string, sub *Subscription, ua string) (*http.Response, error) {
+	parsed, err := url.ParseRequestURI(subURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL: %w", err)
+	}
+	scheme := strings.ToLower(parsed.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return nil, fmt.Errorf("unsupported scheme: %s", parsed.Scheme)
+	}
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return nil, fmt.Errorf("empty host")
+	}
+
+	// Разрешаем loopback/private IP в тестовом окружении
+	isTest := flag.Lookup("test.v") != nil
+	if !isTest {
+		if ip := net.ParseIP(hostname); ip != nil {
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+				return nil, fmt.Errorf("SSRF: target is a private/loopback IP address")
+			}
+			if ip4 := ip.To4(); ip4 != nil {
+				if ip4[0] == 100 && (ip4[1] >= 64 && ip4[1] <= 127) {
+					return nil, fmt.Errorf("SSRF: target is CGNAT IP address")
+				}
+			}
+		} else {
+			ips, err := net.LookupHost(hostname)
+			if err == nil {
+				for _, ipStr := range ips {
+					ip := net.ParseIP(ipStr)
+					if ip == nil {
+						continue
+					}
+					if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+						return nil, fmt.Errorf("SSRF: target resolves to a private/loopback IP address")
+					}
+					if ip4 := ip.To4(); ip4 != nil {
+						if ip4[0] == 100 && (ip4[1] >= 64 && ip4[1] <= 127) {
+							return nil, fmt.Errorf("SSRF: target resolves to CGNAT IP address")
+						}
+					}
+				}
+			}
+		}
+	}
+
+	cleanURL := sanitizeSSRFURL(parsed.String())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cleanURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -72,18 +91,33 @@ func (s *SubscriptionService) fetchWithUserAgent(subURL string, sub *Subscriptio
 	}
 	if hwid != "" {
 		req.Header.Set("x-hwid", hwid)
-		req.Header.Set("x-device-os", "Linux")
-		req.Header.Set("x-device-model", "XKeen Control Panel")
+
+		deviceOS, deviceModel, osVersion := "Linux", "XKeen Control Panel", ""
+		if s.deviceInfo != nil {
+			deviceModel, deviceOS, osVersion = s.deviceInfo.Get()
+		}
+		req.Header.Set("x-device-os", deviceOS)
+		req.Header.Set("x-device-model", deviceModel)
+		if osVersion != "" {
+			req.Header.Set("x-ver-os", osVersion)
+		}
 	}
 	return s.httpClient.Do(req)
 }
 
-func (s *SubscriptionService) downloadWithUA(subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
+// DownloadRaw скачивает подписку с единым User-Agent панели
+// (subscriptionUserAgent). Экспортируется для использования из
+// ProviderFetch (loopback provider endpoint).
+func (s *SubscriptionService) DownloadRaw(ctx context.Context, subURL string, sub *Subscription) ([]byte, http.Header, error) {
+	return s.downloadRaw(ctx, subURL, sub)
+}
+
+func (s *SubscriptionService) downloadWithUA(ctx context.Context, subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
 	parsed, err := url.Parse(subURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, nil, fmt.Errorf("only http and https URLs are allowed for subscriptions")
 	}
-	resp, err := s.fetchWithUserAgent(subURL, sub, ua)
+	resp, err := s.fetchWithUserAgent(ctx, subURL, sub, ua)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -101,12 +135,11 @@ func (s *SubscriptionService) downloadWithUA(subURL string, sub *Subscription, u
 	return body, resp.Header, nil
 }
 
-func (s *SubscriptionService) downloadRaw(subURL string, sub *Subscription) ([]byte, http.Header, error) {
-	ua := s.selectUserAgent(sub)
-	return s.downloadWithUA(subURL, sub, ua)
+func (s *SubscriptionService) downloadRaw(ctx context.Context, subURL string, sub *Subscription) ([]byte, http.Header, error) {
+	return s.downloadWithUA(ctx, subURL, sub, subscriptionUserAgent)
 }
 
-func (s *SubscriptionService) downloadAndParse(subURL string, sub *Subscription) (outbounds []Outbound, skips []SkipReason, bodyBytes []byte, headers http.Header, err error) {
+func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL string, sub *Subscription) (outbounds []Outbound, skips []SkipReason, bodyBytes []byte, headers http.Header, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("panic in parser: %v", r)
@@ -114,8 +147,7 @@ func (s *SubscriptionService) downloadAndParse(subURL string, sub *Subscription)
 		}
 	}()
 
-	ua := s.selectUserAgent(sub)
-	body, headers, err := s.downloadWithUA(subURL, sub, ua)
+	body, headers, err := s.downloadWithUA(ctx, subURL, sub, subscriptionUserAgent)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -193,14 +225,22 @@ func parseSubscriptionBody(body []byte, contentTypeHeader string, sub *Subscript
 	return parseShareLinks(content, sub)
 }
 
+// looksLikeClashYAML определяет, является ли content Clash/Mihomo YAML,
+// разыскивая top-level ключ "proxies:" или "proxy-providers:" по всему
+// документу (не ограничиваясь первыми N строками — большие конфиги с
+// длинной секцией rules:/rule-providers: перед proxies: не должны
+// пропускаться на этапе детекции формата).
 func looksLikeClashYAML(content string) bool {
 	trimmed := strings.TrimSpace(content)
 	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
 		return false
 	}
-	for _, line := range strings.SplitN(trimmed, "\n", 300) {
-		l := strings.TrimSpace(line)
-		if l == "proxies:" || strings.HasPrefix(l, "proxies:") || l == "proxy-providers:" || strings.HasPrefix(l, "proxy-providers:") {
+	if section, _ := extractProxiesSection(trimmed); section != "" {
+		return true
+	}
+	normalized := strings.ReplaceAll(trimmed, "\r\n", "\n")
+	for _, line := range strings.Split(normalized, "\n") {
+		if key, ok := yamlTopLevelKeyLine(line); ok && key == "proxy-providers" {
 			return true
 		}
 	}
@@ -458,6 +498,7 @@ func parseXrayConfigArray(body []byte) []Outbound {
 	proxyProtocols := map[string]bool{
 		"vless": true, "vmess": true, "trojan": true, "shadowsocks": true,
 		"socks": true, "http": true, "wireguard": true,
+		"hysteria": true, "hysteria2": true,
 	}
 
 	var result []Outbound
@@ -468,6 +509,9 @@ func parseXrayConfigArray(body []byte) []Outbound {
 				continue
 			}
 			out := ob
+			if out.Protocol == "hysteria" || out.Protocol == "hysteria2" {
+				out = normalizeXrayHysteriaOutbound(out)
+			}
 			// Use "remarks" as the tag for this server
 			if cfg.Remarks != "" {
 				out.Tag = cfg.Remarks
@@ -477,6 +521,62 @@ func parseXrayConfigArray(body []byte) []Outbound {
 		}
 	}
 	return result
+}
+
+// normalizeXrayHysteriaOutbound приводит outbound с protocol "hysteria"/
+// "hysteria2" из формата xray full-config array (адрес/порт лежат прямо в
+// settings, пароль — в streamSettings.hysteriaSettings.auth) к каноническому
+// виду settings.servers[0]={address,port,password}, который умеют читать
+// extractServer/getServerField/outboundsToNodes (as для hy2:// share-link'ов
+// и Clash YAML type: hysteria). Без этой нормализации адрес/порт/пароль
+// ноды остаются нераспознанными даже после того, как она не отброшена
+// фильтром proxyProtocols.
+func normalizeXrayHysteriaOutbound(ob Outbound) Outbound {
+	address, _ := ob.Settings["address"].(string)
+
+	var port int
+	switch p := ob.Settings["port"].(type) {
+	case float64:
+		port = int(p)
+	case int:
+		port = p
+	case string:
+		if v, err := strconv.Atoi(p); err == nil {
+			port = v
+		}
+	}
+
+	password := ""
+	if ss := ob.StreamSettings; ss != nil {
+		if hySettings, ok := ss["hysteriaSettings"].(map[string]interface{}); ok {
+			if auth, ok := hySettings["auth"].(string); ok {
+				password = auth
+			}
+		}
+	}
+
+	normalized := ob
+	normalized.Protocol = "hysteria2"
+	normalized.Settings = map[string]interface{}{
+		"servers": []map[string]interface{}{{
+			"address":  address,
+			"port":     port,
+			"password": password,
+		}},
+	}
+
+	newStream := map[string]interface{}{"network": "tcp"}
+	if ss := ob.StreamSettings; ss != nil {
+		if sec, ok := ss["security"].(string); ok && sec != "" {
+			newStream["security"] = sec
+		}
+		if tls, ok := ss["tlsSettings"]; ok {
+			newStream["tlsSettings"] = tls
+		}
+	}
+	normalized.StreamSettings = newStream
+
+	return normalized
 }
 
 // parseShareLinks parses a subscription body that is either a base64-encoded or
@@ -554,6 +654,8 @@ func skipReasonForScheme(line string) string {
 		return "невалидный URL или порт в ss://"
 	case strings.HasPrefix(line, "hy2://"), strings.HasPrefix(line, "hysteria2://"):
 		return "невалидный URL или порт в hy2://"
+	case strings.HasPrefix(line, "hysteria://"):
+		return "невалидный URL или порт в hysteria://"
 	case strings.HasPrefix(line, "tuic://"):
 		return "невалидный URL или порт в tuic://"
 	case strings.HasPrefix(line, "socks://"), strings.HasPrefix(line, "socks5://"):
@@ -601,6 +703,13 @@ func parseShareLink(link string) (out *Outbound) {
 
 	// hy2:// (Hysteria2)
 	if strings.HasPrefix(link, "hy2://") || strings.HasPrefix(link, "hysteria2://") {
+		return parseHysteria2Link(link)
+	}
+
+	// hysteria:// (Hysteria v1) — та же грамматика URI password@host:port?params#tag,
+	// что и у hysteria2; консистентно с YAML type: hysteria -> Protocol hysteria2
+	// в convertSubscriptionNodeToOutbound.
+	if strings.HasPrefix(link, "hysteria://") {
 		return parseHysteria2Link(link)
 	}
 

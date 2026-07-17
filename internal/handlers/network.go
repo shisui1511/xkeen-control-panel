@@ -1,37 +1,16 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
-	"fmt"
-	"net"
 	"net/http"
-	"net/url"
 	"regexp"
-	"strings"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-var (
-	hostRegex = regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9]$`)
-
-	privateRanges = []string{
-		"10.0.0.0/8",     // RFC 1918
-		"172.16.0.0/12",  // RFC 1918
-		"192.168.0.0/16", // RFC 1918
-		"100.64.0.0/10",  // Carrier-Grade NAT (RFC 6598)
-		"fc00::/7",       // IPv6 Unique Local Address (RFC 4193)
-	}
-	privateNets []*net.IPNet
-)
-
-func init() {
-	for _, cidr := range privateRanges {
-		_, ipNet, err := net.ParseCIDR(cidr)
-		if err == nil {
-			privateNets = append(privateNets, ipNet)
-		}
-	}
-}
+var hostRegex = regexp.MustCompile(`^[a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9]$`)
 
 // validateURL rejects URLs that could be used for SSRF attacks:
 // - non-HTTP(S) schemes (file://, ftp://, etc.)
@@ -39,36 +18,7 @@ func init() {
 // - link-local addresses (169.254.x.x, fe80::)
 // - private and reserved ranges (RFC-1918, CGNAT, IPv6 ULA)
 func validateURL(rawURL string) error {
-	u, err := url.ParseRequestURI(rawURL)
-	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
-	}
-	scheme := strings.ToLower(u.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return fmt.Errorf("unsupported scheme: %s", u.Scheme)
-	}
-	hostname := u.Hostname()
-	ips, err := net.LookupHost(hostname)
-	if err != nil {
-		// Allow DNS failure — the real request will fail; don't block on lookup error.
-		return nil
-	}
-	for _, ipStr := range ips {
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
-			continue
-		}
-		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return fmt.Errorf("SSRF: target resolves to restricted address")
-		}
-		// Private and local ranges (IPv4 private, CGNAT, IPv6 ULA)
-		for _, network := range privateNets {
-			if network.Contains(ip) {
-				return fmt.Errorf("SSRF: target resolves to private or local address")
-			}
-		}
-	}
-	return nil
+	return utils.ValidateURL(context.Background(), rawURL, false)
 }
 
 func (a *API) NetworkPing(w http.ResponseWriter, r *http.Request) {

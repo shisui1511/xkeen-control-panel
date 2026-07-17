@@ -24,6 +24,12 @@
     expire?: number;
     support_url?: string;
     announcement?: string;
+    mihomo_provider?: {
+      name: string;
+      vehicle_type: string;
+      updated_at: string;
+      node_count: number;
+    } | null;
   }
 
   interface Node {
@@ -44,6 +50,7 @@
     alive: boolean;
     delay?: number;
     http_code?: number;
+    tested?: boolean;
   }
 
   interface AnnouncementLine {
@@ -73,6 +80,8 @@
     subNodes = {},
     subHealth = {},
     checkingNodes = {},
+    subNodesError = {},
+    getNodeSource,
     devMode = false,
     stats,
     onToggleExpand,
@@ -82,7 +91,8 @@
     onOpenDiagnostic,
     onSetActiveNode,
     onCheckNodeHealth,
-    onToggleDropdown
+    onToggleDropdown,
+    onRetryNodes
   }: {
     subscriptions: Subscription[];
     expandedSubs: Record<string, boolean>;
@@ -92,6 +102,8 @@
     subNodes: Record<string, Node[]>;
     subHealth: Record<string, Record<string, NodeHealth>>;
     checkingNodes: Record<string, Record<string, boolean>>;
+    subNodesError: Record<string, boolean>;
+    getNodeSource: (sub: Subscription) => 'mihomo' | 'xray';
     devMode: boolean;
     stats: { total: number; nodes: number; next: string };
     onToggleExpand: (subId: string) => void;
@@ -102,6 +114,7 @@
     onSetActiveNode: (subId: string, tag: string) => void;
     onCheckNodeHealth: (subId: string, tag: string) => void;
     onToggleDropdown: (subId: string) => void;
+    onRetryNodes: (subId: string) => Promise<void>;
   } = $props();
 
   function isFormatError(err?: string): boolean {
@@ -364,9 +377,12 @@
           <span
             class="nodes-count-badge"
             onclick={() => onToggleExpand(sub.id)}
-            title={$t('subscr.nodes_count').replace('{count}', String(sub.proxy_count || 0))}
+            title={$t('subscr.nodes_count').replace(
+              '{count}',
+              String(sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0)
+            )}
           >
-            {sub.proxy_count || 0}
+            {sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0}
           </span>
 
           <button
@@ -405,7 +421,7 @@
 
           <div class="dropdown-container">
             <button
-              class="action-icon-btn dots-btn"
+              class="action-icon-btn action-btn-dots"
               onclick={() => onToggleDropdown(sub.id)}
               aria-label="More actions"
             >
@@ -479,10 +495,12 @@
           </span>
 
           <span class="meta-divider">|</span>
-          {#if sub.mihomo_integrated}
-            <span class="mihomo-integrated-badge active" title="Интегрировано в Mihomo config.yaml"
-              >Mihomo ✓</span
-            >
+          {#if sub.mihomo_provider}
+            <span class="mihomo-provider-chip" title={sub.mihomo_provider.vehicle_type}>
+              {sub.mihomo_provider.vehicle_type} · {formatUpdateDate(
+                sub.mihomo_provider.updated_at
+              )}
+            </span>
           {:else}
             <span class="mihomo-integrated-badge" title="Не интегрировано в Mihomo config.yaml"
               >Mihomo —</span
@@ -618,6 +636,20 @@
               <span class="spinner-xs"></span>
               <span style="margin-left: 8px;">{$t('app.loading')}</span>
             </div>
+          {:else if subNodesError[sub.id]}
+            <div
+              class="sub-error-details"
+              style="font-size: 12.5px; color: var(--danger); margin: 8px 0; display: flex; align-items: center; gap: 8px; font-family: var(--font-family-sans);"
+            >
+              <span>{$t('subscr.nodes_load_error_mihomo')}</span>
+              <button
+                class="btn btn-xs"
+                onclick={() => onRetryNodes(sub.id)}
+                style="padding: 2px 8px; font-size: 11px; height: auto;"
+              >
+                {$t('subscr.retry')}
+              </button>
+            </div>
           {:else}
             {#if !subNodes[sub.id] || subNodes[sub.id].length === 0}
               <div class="empty-nodes">
@@ -628,6 +660,7 @@
                 subId={sub.id}
                 enableXray={sub.enable_xray}
                 enableMihomo={sub.enable_mihomo}
+                source={getNodeSource(sub)}
                 nodes={subNodes[sub.id]}
                 health={subHealth[sub.id] || {}}
                 checkingNodes={checkingNodes[sub.id] || {}}
@@ -882,6 +915,22 @@
 
   .mihomo-integrated-badge.active {
     color: var(--success);
+  }
+
+  .mihomo-provider-chip {
+    background: rgba(139, 92, 246, 0.08);
+    color: #8b5cf6;
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 220px;
+    display: inline-block;
+    vertical-align: middle;
   }
 
   .sub-meta-right {

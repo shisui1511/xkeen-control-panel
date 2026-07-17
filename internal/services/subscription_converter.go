@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
@@ -259,6 +258,7 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 
 			// reality / tls
 			if n.Security == "reality" {
+				sb.WriteString("    tls: true\n")
 				sb.WriteString("    reality-opts:\n")
 				sb.WriteString(fmt.Sprintf("      public-key: %s\n", yamlSafeScalar(n.PublicKey)))
 				if n.ShortID != "" {
@@ -380,6 +380,17 @@ func writeTransportOpts(sb *strings.Builder, n SubscriptionNode) {
 		sb.WriteString(fmt.Sprintf("      grpc-service-name: %s\n", yamlSafeScalar(serviceName)))
 	case "httpupgrade":
 		sb.WriteString("    httpupgrade-opts:\n")
+		path := n.WSPath
+		if path == "" {
+			path = "/"
+		}
+		sb.WriteString(fmt.Sprintf("      path: %s\n", yamlSafeScalar(path)))
+		if n.ServerName != "" {
+			sb.WriteString("      headers:\n")
+			sb.WriteString(fmt.Sprintf("        Host: %s\n", yamlSafeScalar(n.ServerName)))
+		}
+	case "xhttp":
+		sb.WriteString("    xhttp-opts:\n")
 		path := n.WSPath
 		if path == "" {
 			path = "/"
@@ -593,36 +604,64 @@ func transliterateCyrillic(s string) string {
 	return b.String()
 }
 
-func GetMihomoProviderName(profileTitle, name, urlStr, fallback string) string {
-	providerName := profileTitle
-	if providerName == "" {
-		providerName = name
-	}
-	if providerName == "" {
-		if parsed, err := url.Parse(urlStr); err == nil && parsed.Path != "" {
-			providerName = path.Base(parsed.Path)
+// providerGenericWords — служебные слова, отбрасываемые при выводе бренда
+// провайдера из profile-title подписки.
+var providerGenericWords = map[string]bool{
+	"подписка":     true,
+	"профиль":      true,
+	"subscription": true,
+	"profile":      true,
+}
+
+// extractProviderBrand выводит человекочитаемый бренд провайдера из
+// profile-title подписки: убирает эмодзи и прочие символы, отбрасывает служебные слова.
+func extractProviderBrand(title string) string {
+	var b strings.Builder
+	for _, r := range title {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune(" -_.+&", r) {
+			b.WriteRune(r)
 		}
 	}
-	if providerName == "" || providerName == "." || providerName == "/" {
+	words := strings.Fields(b.String())
+	kept := words[:0]
+	for _, w := range words {
+		if !providerGenericWords[strings.ToLower(w)] {
+			kept = append(kept, w)
+		}
+	}
+	return strings.Join(kept, " ")
+}
+
+// GetMihomoProviderName возвращает имя провайдера для Mihomo: имя, заданное
+// пользователем → бренд из profile-title → fallback (ID подписки). Сегмент
+// URL не используется: у большинства провайдеров он содержит секретный токен
+// подписки, которому не место в config.yaml, именах файлов и UI.
+func GetMihomoProviderName(profileTitle, name, fallback string) string {
+	providerName := name
+	if providerName == "" {
+		providerName = extractProviderBrand(profileTitle)
+	}
+	if providerName == "" {
 		providerName = fallback
 	}
 
 	// Transliterate Cyrillic before sanitizing, matching frontend slugifyProviderName.
-	providerName = transliterateCyrillic(providerName)
-	providerName = strings.ToLower(providerName)
-	providerName = nonAlphanumericDashRe.ReplaceAllString(providerName, "-")
-	providerName = multiDashRe.ReplaceAllString(providerName, "-")
-	providerName = strings.Trim(providerName, "-")
+	if sanitized := sanitizeProviderName(providerName); sanitized != "" {
+		return sanitized
+	}
+	if sanitized := sanitizeProviderName(fallback); sanitized != "" {
+		return sanitized
+	}
+	return "provider"
+}
 
-	if providerName == "" {
-		providerName = fallback
-	}
-	if matched, _ := regexp.MatchString(`^[a-z0-9\-]+$`, providerName); !matched {
-		providerName = "safe-provider-" + fallback
-		providerName = nonAlphanumericDashRe.ReplaceAllString(providerName, "-")
-		providerName = strings.ToLower(providerName)
-	}
-	return providerName
+// sanitizeProviderName приводит имя к безопасному для YAML-ключа и имени
+// файла виду: [A-Za-z0-9-], регистр сохраняется.
+func sanitizeProviderName(s string) string {
+	s = transliterateCyrillic(s)
+	s = nonAlphanumericDashRe.ReplaceAllString(s, "-")
+	s = multiDashRe.ReplaceAllString(s, "-")
+	return strings.Trim(s, "-")
 }
 
 func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, sub *Subscription) ([]SubscriptionNode, error) {

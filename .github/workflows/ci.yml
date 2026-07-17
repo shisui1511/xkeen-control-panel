@@ -291,4 +291,4 @@ jobs:
 
       - name: Check commit messages
         run: |
-          node scripts/check-commits.js ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }}
+          node scripts/check-commits.js "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"

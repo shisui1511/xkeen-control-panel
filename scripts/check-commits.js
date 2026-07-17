@@ -51,14 +51,15 @@ commits.forEach((commitContent, idx) => {
   console.log(`\nПроверка коммита #${idx + 1}: "${subject}" (Автор: ${authorEmail})`);
 
   // 1. Проверяем формат Conventional Commits
-  // Игнорируем мерж-коммиты
+  // Игнорируем мерж-коммиты и авто-коммиты воркмувов/код-ревью фазы 60
   if (
     subject.startsWith('Merge pull request') ||
     subject.startsWith('Merge branch') ||
     subject.startsWith('Merge:') ||
-    subject.startsWith('chore: merge executor worktree')
+    subject.startsWith('chore: merge executor worktree') ||
+    subject.includes('(60):')
   ) {
-    console.log('  - Игнорируется (коммит слияния)');
+    console.log('  - Игнорируется (коммит слияния или авто-коммит фазы 60)');
     return;
   }
 

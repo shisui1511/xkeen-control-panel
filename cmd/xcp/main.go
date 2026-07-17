@@ -60,6 +60,7 @@ func main() {
 
 	srvCfg := &server.Config{
 		Port:             cfg.Port,
+		LoopbackPort:     cfg.LoopbackPort,
 		XRayConfigDir:    cfg.XRayConfigDir,
 		XKeenBinary:      cfg.XKeenBinary,
 		MihomoConfigDir:  cfg.MihomoConfigDir,
@@ -105,7 +106,9 @@ func main() {
 	// Public endpoints
 	srv.Handle("/api/version", api.Version)
 	srv.HandleProtected("/api/capabilities", api.Capabilities)
-	srv.Handle("/mihomo/provider.yaml", api.MihomoProviderAdapter)
+	srv.Handle("/api/provider.yaml", api.MihomoProviderAdapter)
+	srv.Handle("/mihomo/provider.yaml", api.MihomoProviderRedirect)
+	srv.Handle("/mihomo/hwid/provider.yaml", api.MihomoProviderRedirect)
 
 	// Protected endpoints
 	srv.HandleProtected("/api/config/list", api.ConfigList)
@@ -156,6 +159,8 @@ func main() {
 	srv.HandleProtected("/api/subscriptions/nodes", api.SubscriptionNodes)
 	srv.HandleProtected("/api/subscriptions/health", api.SubscriptionHealth)
 	srv.HandleProtected("/api/subscriptions/active", api.SubscriptionSetActive)
+	srv.HandleProtected("/api/proxy-providers", api.ProxyProvidersRouter)
+	srv.HandleProtected("/api/proxy-providers/", api.ProxyProvidersRouter)
 
 	// Network Tools endpoints
 	srv.HandleProtected("/api/network/ping", api.NetworkPing)
@@ -255,8 +260,14 @@ func main() {
 
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
+	subscriptionSvc.SetPanelAddress(cfg.Port, cfg.HTTPS.Enabled, cfg.LoopbackPort)
 	subscriptionSvc.SetConsoleService(consoleSvc)
 	subscriptionSvc.SetMihomoAPI(cfg.MihomoAPIURL, cfg.MihomoSecret)
+	// Fallback-резолвер секрета Clash API: при пустом MihomoSecret в конфиге
+	// панели секрет читается из config.yaml Mihomo (как у остальных
+	// потребителей Clash API). Без него ручное и автоматическое обновление
+	// proxy-providers получает 401 на типовых развертываниях.
+	subscriptionSvc.SetMihomoSecretResolver(api.ResolveMihomoSecret)
 	api.SetSubscriptionService(subscriptionSvc)
 
 	// Start subscription auto-refresh scheduler. It checks every 15 minutes

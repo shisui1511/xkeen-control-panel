@@ -56,6 +56,19 @@ func (s *SubscriptionService) subPath(filename string) string {
 	return filepath.Join(dir, clean)
 }
 
+// cacheSuffixes — суффиксы кэш-файлов подписки в каталоге subscriptions.
+var cacheSuffixes = []string{"_raw.txt", "_headers.json", "_parse_report.json"}
+
+// cacheBaseLocked возвращает базовое имя кэш-файлов подписки — имя её
+// Mihomo-провайдера. Для неизвестного ID возвращается legacy-база "sub_<id>".
+// mu должен быть захвачен вызывающим.
+func (s *SubscriptionService) cacheBaseLocked(safeID string) string {
+	if sub := s.GetLocked(safeID); sub != nil {
+		return sub.GetProviderName()
+	}
+	return "sub_" + safeID
+}
+
 func (s *SubscriptionService) SetHTTPClient(client *http.Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -80,11 +93,34 @@ func (s *SubscriptionService) load() {
 			s.subscriptions[i].ID = fmt.Sprintf("sub_%d_%d", time.Now().Unix(), i)
 			needSave = true
 		}
+		if s.subscriptions[i].ProviderName == "" {
+			s.subscriptions[i].ProviderName = s.subscriptions[i].GetProviderName()
+			needSave = true
+		}
 	}
 	if needSave {
 		indentData, err := json.MarshalIndent(s.subscriptions, "", "  ")
 		if err == nil {
 			utils.AtomicWriteFile(path, indentData, 0600)
+		}
+	}
+
+	// Миграция кэш-файлов со старой схемы "sub_<id>_*" на схему по имени провайдера.
+	for i := range s.subscriptions {
+		safeID := invalidIDCharsRe.ReplaceAllString(strings.ToLower(filepath.Base(s.subscriptions[i].ID)), "_")
+		oldBase := "sub_" + safeID
+		newBase := s.subscriptions[i].GetProviderName()
+		if newBase == oldBase {
+			continue
+		}
+		for _, suffix := range cacheSuffixes {
+			oldPath := s.subPath(oldBase + suffix)
+			newPath := s.subPath(newBase + suffix)
+			if _, err := os.Stat(oldPath); err == nil {
+				if _, err := os.Stat(newPath); os.IsNotExist(err) {
+					_ = os.Rename(oldPath, newPath)
+				}
+			}
 		}
 	}
 }
@@ -125,7 +161,7 @@ func (s *SubscriptionService) populateMihomoIntegrated(subs []Subscription) {
 	}
 
 	for i := range subs {
-		providerName := GetMihomoProviderName(subs[i].ProfileTitle, subs[i].Name, subs[i].URL, subs[i].ID)
+		providerName := strings.ToLower(subs[i].GetProviderName())
 		if activeProviders[providerName] {
 			subs[i].MihomoIntegrated = true
 		} else {
@@ -201,12 +237,42 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sub.ID == "" {
-		sub.ID = fmt.Sprintf("sub_%d", time.Now().Unix())
+		sub.ID = s.generateIDLocked()
 	} else {
 		// Санитизируем ID — только [a-z0-9_-] допустимы в имени файла.
 		sub.ID = strings.ToLower(sub.ID)
 		sub.ID = invalidIDCharsRe.ReplaceAllString(sub.ID, "_")
+		if s.GetLocked(sub.ID) != nil {
+			return fmt.Errorf("subscription with ID %s already exists", sub.ID)
+		}
 	}
+
+	sub.ProviderName = s.uniqueProviderNameLocked(sub.GetProviderName(), sub.ID)
+
+	if sub.EnableMihomo {
+		configDir := s.mihomoConfigDir
+		if configDir == "" {
+			configDir = "/opt/etc/mihomo"
+		}
+		configPath := filepath.Join(configDir, "config.yaml")
+
+		s.mihomoMu.Lock()
+		if rawConfig, err := os.ReadFile(configPath); err == nil {
+			providerBlock := s.generateMihomoProxyProviderBlockLocked(sub, s.panelPort, s.panelHTTPS, s.loopbackPort)
+			providerName := sub.ProviderName
+			newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, providerBlock)
+			for _, group := range sub.MihomoGroups {
+				newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, false)
+			}
+			if string(rawConfig) != newConfig {
+				if err := utils.AtomicWriteFile(configPath, []byte(newConfig), 0600); err != nil {
+					log.Printf("[Subscriptions] failed to update config.yaml for provider %s: %v", utils.SanitizeLogInput(providerName), err)
+				}
+			}
+		}
+		s.mihomoMu.Unlock()
+	}
+
 	s.subscriptions = append(s.subscriptions, *sub)
 	return s.save()
 }
@@ -223,6 +289,8 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			// Only overwrite user-editable config fields from the form.
 			existing := &s.subscriptions[i]
 
+			oldGroups := existing.MihomoGroups
+
 			// Clean up old Mihomo provider if the name or URL is changing
 			configDir := s.mihomoConfigDir
 			if configDir == "" {
@@ -230,8 +298,24 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			}
 			configPath := filepath.Join(configDir, "config.yaml")
 
-			oldProviderName := GetMihomoProviderName(existing.ProfileTitle, existing.Name, existing.URL, existing.ID)
-			newProviderName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, existing.ID)
+			// Имя провайдера зафиксировано; пересчёт — только при явном
+			// переименовании подписки пользователем.
+			oldProviderName := existing.GetProviderName()
+			newProviderName := oldProviderName
+			if sub.Name != existing.Name {
+				newProviderName = s.uniqueProviderNameLocked(
+					GetMihomoProviderName(existing.ProfileTitle, sub.Name, existing.ID), existing.ID)
+			}
+
+			if oldProviderName != newProviderName {
+				// Кэш-файлы панели следуют за именем провайдера.
+				for _, suffix := range cacheSuffixes {
+					oldPath := s.subPath(oldProviderName + suffix)
+					if _, err := os.Stat(oldPath); err == nil {
+						_ = os.Rename(oldPath, s.subPath(newProviderName+suffix))
+					}
+				}
+			}
 
 			if oldProviderName != newProviderName && existing.EnableMihomo {
 				s.mihomoMu.Lock()
@@ -263,6 +347,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 				existing.FilterTransport = sub.FilterTransport
 			}
 			existing.UseProviderInterval = sub.UseProviderInterval
+			existing.ProviderName = newProviderName
 
 			needRestart := false
 			// Clean up Xray if it was enabled and is now disabled
@@ -275,20 +360,14 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 
 			// Clean up Mihomo if it was enabled and is now disabled
 			if existing.EnableMihomo && !sub.EnableMihomo {
-				configDir := s.mihomoConfigDir
-				if configDir == "" {
-					configDir = "/opt/etc/mihomo"
-				}
-				configPath := filepath.Join(configDir, "config.yaml")
-
-				providerName := GetMihomoProviderName(existing.ProfileTitle, existing.Name, existing.URL, existing.ID)
-
 				s.mihomoMu.Lock()
 				rawConfig, err := os.ReadFile(configPath)
 				if err == nil {
-					newConfig := ReplaceMihomoProxyProvider(string(rawConfig), providerName, "")
+					newConfig := ReplaceMihomoProxyProvider(string(rawConfig), oldProviderName, "")
+					newConfig = ReplaceMihomoProxyProvider(newConfig, newProviderName, "")
 					for _, group := range existing.MihomoGroups {
-						newConfig = UpdateMihomoGroupProviders(newConfig, group, providerName, true)
+						newConfig = UpdateMihomoGroupProviders(newConfig, group, oldProviderName, true)
+						newConfig = UpdateMihomoGroupProviders(newConfig, group, newProviderName, true)
 					}
 					newConfig = ReplaceMihomoProxies(newConfig, existing.ProxyNames, nil)
 					for _, group := range existing.MihomoGroups {
@@ -300,10 +379,13 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 
 				// Delete provider file; sanitize id to prevent path traversal (CWE-22).
 				providersDir := filepath.Join(configDir, "proxy_providers")
-				providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", providerName))
-				// Explicit guard: path must be within providersDir (CWE-22).
+				providerFilePath := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", oldProviderName))
 				if strings.HasPrefix(providerFilePath, providersDir+string(filepath.Separator)) {
 					os.Remove(providerFilePath)
+				}
+				providerFilePathNew := filepath.Join(providersDir, fmt.Sprintf("%s.yaml", newProviderName))
+				if strings.HasPrefix(providerFilePathNew, providersDir+string(filepath.Separator)) {
+					os.Remove(providerFilePathNew)
 				}
 
 				// Reset Mihomo specific fields in existing subscription
@@ -322,6 +404,27 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			}
 			if sub.MihomoGroups != nil {
 				existing.MihomoGroups = sub.MihomoGroups
+			}
+
+			// Если интеграция Mihomo включена (или была только что включена), обновляем/добавляем провайдер и привязываем его к группам
+			if existing.EnableMihomo {
+				s.mihomoMu.Lock()
+				if rawConfig, err := os.ReadFile(configPath); err == nil {
+					providerBlock := s.generateMihomoProxyProviderBlockLocked(existing, s.panelPort, s.panelHTTPS, s.loopbackPort)
+					newConfig := ReplaceMihomoProxyProvider(string(rawConfig), newProviderName, providerBlock)
+					for _, group := range oldGroups {
+						newConfig = UpdateMihomoGroupProviders(newConfig, group, oldProviderName, true)
+					}
+					for _, group := range existing.MihomoGroups {
+						newConfig = UpdateMihomoGroupProviders(newConfig, group, newProviderName, false)
+					}
+					if string(rawConfig) != newConfig {
+						if err := utils.AtomicWriteFile(configPath, []byte(newConfig), 0600); err != nil {
+							log.Printf("[Subscriptions] failed to update config.yaml for provider %s: %v", utils.SanitizeLogInput(newProviderName), err)
+						}
+					}
+				}
+				s.mihomoMu.Unlock()
 			}
 
 			if err := s.save(); err != nil {
@@ -385,7 +488,7 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 		configPath := filepath.Join(configDir, "config.yaml")
 
-		providerName := GetMihomoProviderName(sub.ProfileTitle, sub.Name, sub.URL, sub.ID)
+		providerName := sub.GetProviderName()
 
 		s.mihomoMu.Lock()
 		rawConfig, err := os.ReadFile(configPath)
@@ -411,10 +514,12 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 	}
 
-	// Delete diagnostic files
-	os.Remove(s.subPath("sub_" + safeID + "_raw.txt"))
-	os.Remove(s.subPath("sub_" + safeID + "_headers.json"))
-	os.Remove(s.subPath("sub_" + safeID + "_parse_report.json"))
+	// Delete diagnostic files (схема по имени провайдера + legacy-схема по ID)
+	for _, base := range []string{sub.GetProviderName(), "sub_" + safeID} {
+		for _, suffix := range cacheSuffixes {
+			os.Remove(s.subPath(base + suffix))
+		}
+	}
 
 	if err := s.save(); err != nil {
 		return err
@@ -429,6 +534,103 @@ func (s *SubscriptionService) Delete(id string) error {
 	return nil
 }
 
+// uniqueProviderNameLocked возвращает имя провайдера, не конфликтующее с
+// провайдерами других подписок: при коллизии (например, два аккаунта одного
+// провайдера с одинаковым profile-title) добавляется суффикс -2, -3, …
+// Сравнение без учёта регистра. mu должен быть захвачен вызывающим.
+func (s *SubscriptionService) uniqueProviderNameLocked(base, excludeID string) string {
+	taken := func(name string) bool {
+		for i := range s.subscriptions {
+			if s.subscriptions[i].ID == excludeID {
+				continue
+			}
+			if strings.EqualFold(s.subscriptions[i].GetProviderName(), name) {
+				return true
+			}
+		}
+		return false
+	}
+	if !taken(base) {
+		return base
+	}
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s-%d", base, n)
+		if !taken(candidate) {
+			return candidate
+		}
+	}
+}
+
+// maybeRenameProviderLocked выполняет однократное переименование провайдера
+// после первого получения profile-title от сервера подписки: временное имя
+// (выведенное из ID) заменяется на бренд провайдера. Не срабатывает, если
+// пользователь задал имя подписки вручную. mu должен быть захвачен вызывающим.
+func (s *SubscriptionService) maybeRenameProviderLocked(live *Subscription) {
+	if live.Name != "" || live.ProfileTitle == "" {
+		return
+	}
+	oldName := live.GetProviderName()
+	newName := s.uniqueProviderNameLocked(GetMihomoProviderName(live.ProfileTitle, "", live.ID), live.ID)
+	if newName == oldName {
+		return
+	}
+
+	// Кэш-файлы панели следуют за именем провайдера.
+	for _, suffix := range cacheSuffixes {
+		oldPath := s.subPath(oldName + suffix)
+		if _, err := os.Stat(oldPath); err == nil {
+			_ = os.Rename(oldPath, s.subPath(newName+suffix))
+		}
+	}
+
+	live.ProviderName = newName
+
+	if live.EnableMihomo {
+		configDir := s.mihomoConfigDir
+		if configDir == "" {
+			configDir = "/opt/etc/mihomo"
+		}
+		configPath := filepath.Join(configDir, "config.yaml")
+
+		s.mihomoMu.Lock()
+		if rawConfig, err := os.ReadFile(configPath); err == nil {
+			newConfig := ReplaceMihomoProxyProvider(string(rawConfig), oldName, "")
+			providerBlock := s.generateMihomoProxyProviderBlockLocked(live, s.panelPort, s.panelHTTPS, s.loopbackPort)
+			newConfig = ReplaceMihomoProxyProvider(newConfig, newName, providerBlock)
+			for _, group := range live.MihomoGroups {
+				newConfig = UpdateMihomoGroupProviders(newConfig, group, oldName, true)
+				newConfig = UpdateMihomoGroupProviders(newConfig, group, newName, false)
+			}
+			if string(rawConfig) != newConfig {
+				_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
+			}
+		}
+		s.mihomoMu.Unlock()
+
+		// Файл провайдера mihomo следует за именем (санитизация путей — CWE-22).
+		providersDir := filepath.Join(configDir, "proxy_providers")
+		oldFile := filepath.Join(providersDir, oldName+".yaml")
+		newFile := filepath.Join(providersDir, newName+".yaml")
+		if strings.HasPrefix(oldFile, providersDir+string(filepath.Separator)) &&
+			strings.HasPrefix(newFile, providersDir+string(filepath.Separator)) {
+			_ = os.Rename(oldFile, newFile)
+		}
+	}
+
+	log.Printf("[Subscriptions] Provider renamed after profile-title: %s -> %s", utils.SanitizeLogInput(oldName), utils.SanitizeLogInput(newName))
+}
+
+// generateIDLocked возвращает новый уникальный ID подписки. Unix-секунды
+// давали коллизии при добавлении двух подписок в одну секунду.
+func (s *SubscriptionService) generateIDLocked() string {
+	for {
+		id := fmt.Sprintf("sub_%d", time.Now().UnixNano())
+		if s.GetLocked(id) == nil {
+			return id
+		}
+	}
+}
+
 func (s *SubscriptionService) GetLocked(id string) *Subscription {
 	for i := range s.subscriptions {
 		if s.subscriptions[i].ID == id {
@@ -438,11 +640,14 @@ func (s *SubscriptionService) GetLocked(id string) *Subscription {
 	return nil
 }
 
+// saveDebugFiles сохраняет кэш-файлы подписки (сырой ответ, заголовки,
+// отчёт парсинга) под именем её провайдера. mu должен быть захвачен вызывающим.
 func (s *SubscriptionService) saveDebugFiles(id string, body []byte, headers http.Header, report *ParseReport) {
 	safeID := filepath.Base(id)
 	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+	base := s.cacheBaseLocked(safeID)
 
-	rawPath := s.subPath("sub_" + safeID + "_raw.txt")
+	rawPath := s.subPath(base + "_raw.txt")
 	_ = utils.AtomicWriteFile(rawPath, body, 0600)
 
 	hdrMap := make(map[string][]string)
@@ -451,14 +656,14 @@ func (s *SubscriptionService) saveDebugFiles(id string, body []byte, headers htt
 	}
 	hdrData, err := json.MarshalIndent(hdrMap, "", "  ")
 	if err == nil {
-		hdrPath := s.subPath("sub_" + safeID + "_headers.json")
+		hdrPath := s.subPath(base + "_headers.json")
 		_ = utils.AtomicWriteFile(hdrPath, hdrData, 0600)
 	}
 
 	if report != nil {
 		repData, err := json.MarshalIndent(report, "", "  ")
 		if err == nil {
-			repPath := s.subPath("sub_" + safeID + "_parse_report.json")
+			repPath := s.subPath(base + "_parse_report.json")
 			_ = utils.AtomicWriteFile(repPath, repData, 0600)
 		}
 	}
@@ -475,24 +680,18 @@ func (s *SubscriptionService) GetRaw(id string) (string, map[string][]string, er
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	exists := false
-	for _, sub := range s.subscriptions {
-		if sub.ID == safeID {
-			exists = true
-			break
-		}
-	}
-	if !exists {
+	if s.GetLocked(safeID) == nil {
 		return "", nil, fmt.Errorf("subscription not found")
 	}
+	base := s.cacheBaseLocked(safeID)
 
-	rawPath := s.subPath("sub_" + safeID + "_raw.txt")
+	rawPath := s.subPath(base + "_raw.txt")
 	bodyBytes, err := os.ReadFile(rawPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("raw response not found: %w", err)
 	}
 
-	hdrPath := s.subPath("sub_" + safeID + "_headers.json")
+	hdrPath := s.subPath(base + "_headers.json")
 	hdrBytes, err := os.ReadFile(hdrPath)
 	if err != nil {
 		return string(bodyBytes), nil, nil
@@ -517,18 +716,11 @@ func (s *SubscriptionService) GetParseReport(id string) (*ParseReport, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	exists := false
-	for _, sub := range s.subscriptions {
-		if sub.ID == safeID {
-			exists = true
-			break
-		}
-	}
-	if !exists {
+	if s.GetLocked(safeID) == nil {
 		return nil, fmt.Errorf("subscription not found")
 	}
 
-	repPath := s.subPath("sub_" + safeID + "_parse_report.json")
+	repPath := s.subPath(s.cacheBaseLocked(safeID) + "_parse_report.json")
 	repBytes, err := os.ReadFile(repPath)
 	if err != nil {
 		return nil, fmt.Errorf("parse report not found: %w", err)
@@ -559,12 +751,15 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 	s.lastCleanup = time.Now()
 	s.mu.Unlock()
 
+	// Активные базы имён кэш-файлов: имя провайдера (текущая схема)
+	// и "sub_<id>" (legacy-схема до миграции).
 	s.mu.RLock()
-	activeIDs := make(map[string]bool)
+	activeBases := make(map[string]bool)
 	for _, sub := range s.subscriptions {
 		safeID := filepath.Base(sub.ID)
 		safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
-		activeIDs[safeID] = true
+		activeBases["sub_"+safeID] = true
+		activeBases[sub.GetProviderName()] = true
 	}
 	s.mu.RUnlock()
 
@@ -578,8 +773,7 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 		return
 	}
 
-	re := regexp.MustCompile(`^sub_([a-z0-9_-]+)_(raw\.txt|headers\.json|parse_report\.json)$`)
-	cleanedIDs := make(map[string]bool)
+	cleanedBases := make(map[string]bool)
 
 	for _, file := range files {
 		if file.IsDir() {
@@ -587,17 +781,14 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 		}
 
 		name := file.Name()
-		matches := re.FindStringSubmatch(name)
-		if len(matches) < 2 {
-			continue
+		var base string
+		for _, suffix := range cacheSuffixes {
+			if b, ok := strings.CutSuffix(name, suffix); ok {
+				base = b
+				break
+			}
 		}
-
-		safeID := matches[1]
-		if activeIDs[safeID] {
-			continue
-		}
-
-		if cleanedIDs[safeID] {
+		if base == "" || activeBases[base] || cleanedBases[base] {
 			continue
 		}
 
@@ -608,15 +799,11 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 		}
 
 		if time.Since(info.ModTime()) > 7*24*time.Hour {
-			cleanedIDs[safeID] = true
-			log.Printf("[Cleanup] Removing orphaned files for subscription safeID: %s", safeID)
+			cleanedBases[base] = true
+			log.Printf("[Cleanup] Removing orphaned subscription cache files: %s", base)
 
-			pathsToDelete := []string{
-				s.subPath("sub_" + safeID + "_raw.txt"),
-				s.subPath("sub_" + safeID + "_headers.json"),
-				s.subPath("sub_" + safeID + "_parse_report.json"),
-			}
-			for _, p := range pathsToDelete {
+			for _, suffix := range cacheSuffixes {
+				p := s.subPath(base + suffix)
 				if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 					log.Printf("[Cleanup] Failed to remove orphaned subscription file %s: %v", p, err)
 				}
@@ -746,4 +933,28 @@ func (s *SubscriptionService) migrateFromMihomoConfig() bool {
 	}
 
 	return migrated
+}
+
+// PersistHeaderMetadata сохраняет метаданные подписки, полученные из HTTP-заголовков.
+func (s *SubscriptionService) PersistHeaderMetadata(id string, subCopy *Subscription) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	live := s.GetLocked(id)
+	if live == nil {
+		return fmt.Errorf("subscription not found")
+	}
+
+	live.Upload = subCopy.Upload
+	live.Download = subCopy.Download
+	live.Total = subCopy.Total
+	live.Expire = subCopy.Expire
+	live.ProfileTitle = subCopy.ProfileTitle
+	live.ProfileUpdateHours = subCopy.ProfileUpdateHours
+	live.SupportURL = subCopy.SupportURL
+	live.ProfileWebPageURL = subCopy.ProfileWebPageURL
+	live.ProviderType = subCopy.ProviderType
+	live.HwidLocked = subCopy.HwidLocked
+	live.LastUpdate = time.Now()
+
+	return s.save()
 }

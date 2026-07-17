@@ -85,6 +85,12 @@
     filter_transport?: string;
     mihomo_groups?: string[];
     routing_mode?: 'manual' | 'auto';
+    mihomo_provider?: {
+      name: string;
+      vehicle_type: string;
+      updated_at: string;
+      node_count: number;
+    } | null;
   }
 
   interface Node {
@@ -105,6 +111,7 @@
     alive: boolean;
     delay?: number;
     http_code?: number;
+    tested?: boolean;
   }
 
   // Active tab state: 'groups' | 'providers'
@@ -138,6 +145,7 @@
   let subHealth = $state<Record<string, Record<string, NodeHealth>>>({});
   let checkingNodes = $state<Record<string, Record<string, boolean>>>({});
   let refreshLoading = $state<Record<string, boolean>>({});
+  let subNodesError = $state<Record<string, boolean>>({});
   let activeDropdownId = $state<string | null>(null);
 
   // Form modal states for subscriptions
@@ -417,15 +425,24 @@
   }
 
   function computeStats(): ObservatoryStats {
-    const proxyList = Object.values(proxies).filter(
-      (p) =>
-        p.type !== 'Selector' &&
-        p.type !== 'URLTest' &&
-        p.type !== 'Fallback' &&
-        p.type !== 'LoadBalance' &&
-        p.type !== 'Direct' &&
-        p.type !== 'Reject'
-    );
+    const proxyList = Object.values(proxies).filter((p) => {
+      const typeLower = (p.type || '').toLowerCase();
+      const nameLower = (p.name || '').toLowerCase();
+
+      // Исключаем группы прокси
+      if (['selector', 'urltest', 'fallback', 'loadbalance', 'relay'].includes(typeLower)) {
+        return false;
+      }
+      // Исключаем системные/встроенные прокси
+      if (['direct', 'reject', 'compatible', 'pass'].includes(typeLower)) {
+        return false;
+      }
+      if (['direct', 'reject', 'compatible', 'pass', 'global'].includes(nameLower)) {
+        return false;
+      }
+
+      return true;
+    });
     const total = proxyList.length;
     const healthy = proxyList.filter(
       (p) => isProxyAlive(p) && (getLastDelay(p) || 0) > 0 && (getLastDelay(p) || 0) < 300
@@ -693,7 +710,13 @@
   // Stats derived for subscriptions
   let stats = $derived(
     (() => {
-      const totalNodes = subscriptions.reduce((sum, s) => sum + (s.proxy_count || 0), 0);
+      const totalNodes = subscriptions.reduce((sum, s) => {
+        const count =
+          getNodeSource(s) === 'mihomo'
+            ? (s.mihomo_provider?.node_count ?? s.proxy_count ?? 0)
+            : s.proxy_count || 0;
+        return sum + count;
+      }, 0);
       let minNext = Infinity;
       subscriptions.forEach((s) => {
         if (s.enabled && s.last_update && !s.last_update.startsWith('0001')) {
@@ -785,7 +808,7 @@
   async function loadSubscriptions() {
     loading = true;
     try {
-      const res = await fetch('/api/subscriptions');
+      const res = await fetch('/api/proxy-providers');
       if (res.ok) {
         subscriptions = await res.json();
       }
@@ -797,24 +820,90 @@
   }
 
   async function refreshSubscription(id: string) {
+    const sub = subscriptions.find((s) => s.id === id);
+    if (!sub) return;
+
     refreshLoading[id] = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/subscriptions/refresh?id=${id}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
-      });
-      if (res.ok) {
-        showToast('success', $t('app.success'));
-        await loadSubscriptions();
-        if (expandedSubs[id]) {
-          await loadNodes(id);
+      const csrfToken = localStorage.getItem('csrf_token') || '';
+      const tasks: Promise<
+        | { kernel: 'xray' | 'mihomo'; status: 'fulfilled'; value?: any }
+        | { kernel: 'xray' | 'mihomo'; status: 'rejected'; reason: any }
+      >[] = [];
+
+      if (sub.enable_xray) {
+        tasks.push(
+          (async () => {
+            const res = await fetch(`/api/subscriptions/refresh?id=${id}`, {
+              method: 'POST',
+              headers: { 'X-CSRF-Token': csrfToken }
+            });
+            if (res.ok) {
+              return { kernel: 'xray' as const, status: 'fulfilled' as const };
+            } else {
+              const text = await res.text();
+              const parsedErr = parseValidationError(text, $currentLang === 'ru' ? 'ru' : 'en');
+              throw { kernel: 'xray', reason: parsedErr || $t('app.error') };
+            }
+          })()
+        );
+      }
+
+      const providerName = sub.mihomo_provider?.name;
+      if (sub.enable_mihomo && providerName) {
+        tasks.push(
+          (async () => {
+            const res = await fetch(`/api/proxy-providers/${providerName}/refresh`, {
+              method: 'PUT',
+              headers: { 'X-CSRF-Token': csrfToken }
+            });
+            if (res.ok) {
+              return { kernel: 'mihomo' as const, status: 'fulfilled' as const };
+            } else {
+              const text = await res.text();
+              const parsedErr = parseValidationError(text, $currentLang === 'ru' ? 'ru' : 'en');
+              throw { kernel: 'mihomo', reason: parsedErr || $t('app.error') };
+            }
+          })()
+        );
+      }
+
+      if (tasks.length === 0) {
+        if (sub.enable_mihomo && !sub.mihomo_provider?.name) {
+          showToast(
+            'error',
+            $t('subscr.refresh.mihomo_failed').replace('{message}', $t('app.unavailable'))
+          );
         }
-      } else {
-        const text = await res.text();
-        const parsedErr = parseValidationError(text, $currentLang === 'ru' ? 'ru' : 'en');
-        showToast('error', parsedErr || $t('app.error'));
-        await loadSubscriptions();
+        refreshLoading[id] = false;
+        return;
+      }
+
+      const results = await Promise.allSettled(tasks);
+
+      for (const res of results) {
+        if (res.status === 'fulfilled') {
+          const val = res.value;
+          if (val.kernel === 'xray') {
+            showToast('success', $t('subscr.refresh.xray_started'));
+          } else {
+            showToast('success', $t('subscr.refresh.mihomo_started'));
+          }
+        } else {
+          const err = res.reason;
+          if (err && err.kernel === 'xray') {
+            showToast('error', $t('subscr.refresh.xray_failed').replace('{message}', err.reason));
+          } else if (err && err.kernel === 'mihomo') {
+            showToast('error', $t('subscr.refresh.mihomo_failed').replace('{message}', err.reason));
+          } else {
+            showToast('error', $t('app.error'));
+          }
+        }
+      }
+
+      await loadSubscriptions();
+      if (expandedSubs[id]) {
+        await loadNodesBySource(id);
       }
     } catch (e) {
       showToast('error', $t('app.error'));
@@ -836,7 +925,7 @@
         await loadSubscriptions();
         for (const id of Object.keys(expandedSubs)) {
           if (expandedSubs[id]) {
-            await loadNodes(id);
+            await loadNodesBySource(id);
           }
         }
       } else {
@@ -874,7 +963,9 @@
     };
 
     try {
-      const url = editingSub ? '/api/subscriptions/update' : '/api/subscriptions/add';
+      const url = editingSub
+        ? `/api/subscriptions/update?id=${encodeURIComponent(editingSub.id)}`
+        : '/api/subscriptions/add';
       const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -991,6 +1082,20 @@
     }
   }
 
+  function getNodeSource(sub: Subscription): 'mihomo' | 'xray' {
+    if (sub.enable_mihomo && !sub.enable_xray) {
+      return 'mihomo';
+    }
+    if (sub.enable_xray && !sub.enable_mihomo) {
+      return 'xray';
+    }
+    if (sub.enable_mihomo && sub.enable_xray) {
+      const active = $capabilities?.active_kernel;
+      return active === 'mihomo' ? 'mihomo' : 'xray';
+    }
+    return 'xray';
+  }
+
   async function loadNodes(subId: string) {
     subNodesLoading[subId] = true;
     try {
@@ -1005,14 +1110,154 @@
     }
   }
 
-  async function toggleExpand(subId: string) {
-    expandedSubs[subId] = !expandedSubs[subId];
-    if (expandedSubs[subId]) {
+  async function loadMihomoNodes(subId: string) {
+    const sub = subscriptions.find((s) => s.id === subId);
+    if (!sub || !sub.mihomo_provider?.name) {
+      subNodesError[subId] = true;
+      return;
+    }
+
+    subNodesLoading[subId] = true;
+    subNodesError[subId] = false;
+    try {
+      const res = await fetch(`/api/proxy-providers/${sub.mihomo_provider.name}/nodes`);
+      if (res.ok) {
+        const data: {
+          tag: string;
+          name: string;
+          alive: boolean;
+          tested: boolean;
+          delay_ms: number;
+        }[] = await res.json();
+        subNodes[subId] = data.map((n) => ({
+          tag: n.tag,
+          name: n.name,
+          active: false,
+          is_new: false
+        }));
+        if (!subHealth[subId]) subHealth[subId] = {};
+        data.forEach((n) => {
+          subHealth[subId][n.tag] = {
+            alive: n.alive,
+            delay: n.tested ? n.delay_ms : undefined,
+            tested: n.tested
+          };
+        });
+      } else {
+        subNodesError[subId] = true;
+      }
+    } catch (e) {
+      subNodesError[subId] = true;
+    } finally {
+      subNodesLoading[subId] = false;
+    }
+  }
+
+  // Загружает список нод из источника, соответствующего активному ядру
+  // подписки (Clash API для mihomo, распарсенная подписка для xray).
+  async function loadNodesBySource(subId: string) {
+    const sub = subscriptions.find((s) => s.id === subId);
+    if (!sub) return;
+    if (getNodeSource(sub) === 'mihomo') {
+      await loadMihomoNodes(subId);
+    } else {
       await loadNodes(subId);
     }
   }
 
+  async function toggleExpand(subId: string) {
+    expandedSubs[subId] = !expandedSubs[subId];
+    if (expandedSubs[subId]) {
+      await loadNodesBySource(subId);
+    }
+  }
+
+  async function checkMihomoNodeHealth(subId: string, providerName: string, nodeTag: string) {
+    if (!checkingNodes[subId]) checkingNodes[subId] = {};
+    checkingNodes[subId][nodeTag] = true;
+
+    function setNodeHealthFailed() {
+      if (!subHealth[subId]) subHealth[subId] = {};
+      subHealth[subId][nodeTag] = {
+        alive: false,
+        delay: 0,
+        tested: true
+      };
+    }
+
+    try {
+      const csrfToken = localStorage.getItem('csrf_token') || '';
+      const targetURL = `/api/mihomo/proxy/proxies/${encodeURIComponent(nodeTag)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`;
+      const res = await fetch(targetURL, {
+        method: 'GET',
+        headers: { 'X-CSRF-Token': csrfToken }
+      });
+      if (res.ok) {
+        const health = await res.json();
+        if (!subHealth[subId]) subHealth[subId] = {};
+        subHealth[subId][nodeTag] = {
+          alive: health.delay > 0,
+          delay: health.delay,
+          tested: true
+        };
+      } else {
+        if (res.status === 404) {
+          // Fallback: если прокси не подключен к группе, запускаем проверку здоровья всего провайдера
+          const hcRes = await fetch(
+            `/api/mihomo/proxy/providers/proxies/${encodeURIComponent(providerName)}/healthcheck`,
+            {
+              method: 'GET',
+              headers: { 'X-CSRF-Token': csrfToken }
+            }
+          );
+          if (hcRes.ok || hcRes.status === 204) {
+            // Даем Mihomo время на выполнение пинга
+            await new Promise((resolve) => setTimeout(resolve, 800));
+            // Загружаем ноды заново, чтобы получить обновленные задержки
+            const nodesRes = await fetch(
+              `/api/proxy-providers/${encodeURIComponent(providerName)}/nodes`
+            );
+            if (nodesRes.ok) {
+              const nodesData = await nodesRes.json();
+              if (Array.isArray(nodesData)) {
+                if (!subHealth[subId]) subHealth[subId] = {};
+                nodesData.forEach((n: any) => {
+                  subHealth[subId][n.tag] = {
+                    alive: n.alive,
+                    delay: n.tested ? n.delay_ms : undefined,
+                    tested: n.tested
+                  };
+                });
+              } else {
+                setNodeHealthFailed();
+              }
+            } else {
+              setNodeHealthFailed();
+            }
+          } else {
+            setNodeHealthFailed();
+          }
+        } else {
+          setNodeHealthFailed();
+        }
+      }
+    } catch (e) {
+      setNodeHealthFailed();
+    } finally {
+      checkingNodes[subId][nodeTag] = false;
+    }
+  }
+
   async function checkNodeHealth(subId: string, nodeTag: string) {
+    const sub = subscriptions.find((s) => s.id === subId);
+    if (!sub) return;
+
+    const source = getNodeSource(sub);
+    if (source === 'mihomo' && sub.mihomo_provider?.name) {
+      await checkMihomoNodeHealth(subId, sub.mihomo_provider.name, nodeTag);
+      return;
+    }
+
     if (!checkingNodes[subId]) checkingNodes[subId] = {};
     checkingNodes[subId][nodeTag] = true;
     try {
@@ -1043,7 +1288,7 @@
       );
       if (res.ok) {
         showToast('success', $t('app.success'));
-        await loadNodes(subId);
+        await loadNodesBySource(subId);
       } else {
         const text = await res.text();
         showToast('error', text || $t('app.error'));
@@ -1060,7 +1305,7 @@
     if (match && match[1]) {
       const subId = match[1];
       expandedSubs[subId] = true;
-      loadNodes(subId).then(() => {
+      loadNodesBySource(subId).then(() => {
         setTimeout(() => {
           const el = document.getElementById(`sub-card-${subId}`);
           if (el) {
@@ -1592,6 +1837,8 @@
           {subNodes}
           {subHealth}
           {checkingNodes}
+          {subNodesError}
+          {getNodeSource}
           devMode={$devMode}
           {stats}
           onToggleExpand={toggleExpand}
@@ -1602,6 +1849,7 @@
           onSetActiveNode={setActiveNode}
           onCheckNodeHealth={checkNodeHealth}
           onToggleDropdown={toggleDropdown}
+          onRetryNodes={loadMihomoNodes}
         />
       {/if}
     </div>

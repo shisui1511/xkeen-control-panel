@@ -1,14 +1,17 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
+	"log"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 func (a *API) SubscriptionList(w http.ResponseWriter, r *http.Request) {
@@ -27,10 +30,27 @@ func (a *API) SubscriptionAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var sub services.Subscription
-	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	var sub services.Subscription
+	if err := json.Unmarshal(body, &sub); err != nil {
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var presence struct {
+		EnableXray   *bool `json:"enable_xray"`
+		EnableMihomo *bool `json:"enable_mihomo"`
+	}
+	if err := json.Unmarshal(body, &presence); err == nil {
+		if presence.EnableXray == nil && presence.EnableMihomo == nil {
+			sub.EnableXray = true
+			sub.EnableMihomo = true
+		}
 	}
 
 	if sub.URL == "" {
@@ -62,10 +82,35 @@ func (a *API) SubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var sub services.Subscription
-	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil {
+	existing := a.subscriptionSvc.Get(id)
+	if existing == nil {
+		a.errorResponse(w, "subscription not found", http.StatusNotFound)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	var sub services.Subscription
+	if err := json.Unmarshal(body, &sub); err != nil {
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var presence struct {
+		EnableXray   *bool `json:"enable_xray"`
+		EnableMihomo *bool `json:"enable_mihomo"`
+	}
+	if err := json.Unmarshal(body, &presence); err == nil {
+		if presence.EnableXray == nil {
+			sub.EnableXray = existing.EnableXray
+		}
+		if presence.EnableMihomo == nil {
+			sub.EnableMihomo = existing.EnableMihomo
+		}
 	}
 
 	if err := a.subscriptionSvc.Update(id, &sub); err != nil {
@@ -295,6 +340,19 @@ func (a *API) SubscriptionSetActive(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, map[string]string{"active_node": body.NodeTag})
 }
 
+// adhocSubscriptionID возвращает стабильный ID для подписки, не
+// зарегистрированной в панели — используется как fallback для имени файла
+// кэша провайдера, чтобы повторные запросы того же url попадали в один файл.
+func adhocSubscriptionID(urlStr string) string {
+	sum := sha256.Sum256([]byte(urlStr))
+	return "adhoc-" + hex.EncodeToString(sum[:])[:16]
+}
+
+// MihomoProviderAdapter — loopback-only endpoint /api/provider.yaml. Проксирует
+// запрос подписки к upstream-провайдеру (с HWID/device заголовками и
+// единым User-Agent панели), конвертирует ответ в Mihomo proxy-provider payload
+// (только секция proxies:) и отдаёт его Mihomo. При сетевой ошибке отдаёт
+// последний закэшированный на диске payload.
 func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -318,46 +376,53 @@ func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Поиск подписки по URL
-	var foundSub *services.Subscription
+	// 3. Поиск подписки по URL; если не найдена — создаём временный объект
+	// (панель всё равно проксирует upstream, HWID/device заголовки берутся
+	// из глобального состояния сервиса).
+	var sub *services.Subscription
 	subs := a.subscriptionSvc.List()
 	for i := range subs {
 		if subs[i].URL == urlStr {
-			foundSub = &subs[i]
+			sub = &subs[i]
 			break
 		}
 	}
-
-	if foundSub == nil {
-		a.errorResponse(w, "Subscription not found", http.StatusNotFound)
+	if sub != nil && !sub.Enabled {
+		a.errorResponse(w, "subscription is disabled", http.StatusForbidden)
 		return
 	}
-
-	// 4. Генерация имени файла провайдера
-	providerName := services.GetMihomoProviderName(foundSub.ProfileTitle, foundSub.Name, foundSub.URL, foundSub.ID)
-
-	// 5. Определение путей
-	configDir := a.cfg.MihomoConfigDir
-	if configDir == "" {
-		configDir = "/opt/etc/mihomo"
+	isAdhoc := false
+	if sub == nil {
+		sub = &services.Subscription{URL: urlStr, ID: adhocSubscriptionID(urlStr)}
+		isAdhoc = true
 	}
-	filePath := filepath.Join(configDir, "proxy_providers", providerName+".yaml")
 
-	// 6. Валидация пути
-	cleanPath, err := a.pathVal.Validate(filePath)
+	// 4. Upstream fetch + конвертация + Happ fallback + кэш на диск (graceful
+	// fallback на кэш при сетевой ошибке).
+	payload, err := a.subscriptionSvc.ProviderFetchWithFallback(r.Context(), urlStr, sub)
 	if err != nil {
-		a.errorResponse(w, "Invalid path: "+err.Error(), http.StatusForbidden)
+		log.Printf("[Subscriptions] provider fetch failed for sub=%s: %s", sub.ID, utils.SanitizeLogInput(err.Error()))
+		http.Error(w, "Failed to fetch provider", http.StatusBadGateway)
 		return
 	}
 
-	// 7. Чтение и отдача файла кэша
-	yamlContent, err := os.ReadFile(cleanPath)
-	if err != nil {
-		a.errorResponse(w, "Failed to read provider cache: "+err.Error(), http.StatusInternalServerError)
-		return
+	if !isAdhoc {
+		if err := a.subscriptionSvc.PersistHeaderMetadata(sub.ID, sub); err != nil {
+			log.Printf("[Subscriptions] failed to persist header metadata for %s: %v", sub.ID, err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(yamlContent)
+	_, _ = w.Write(payload)
+}
+
+// MihomoProviderRedirect редиректит устаревший путь /mihomo/provider.yaml на
+// новый /api/provider.yaml, сохраняя все query-параметры.
+func (a *API) MihomoProviderRedirect(w http.ResponseWriter, r *http.Request) {
+	target := "/api/provider.yaml"
+	if r.URL.RawQuery != "" {
+		target += "?" + r.URL.RawQuery
+	}
+	http.Redirect(w, r, target, http.StatusFound)
 }

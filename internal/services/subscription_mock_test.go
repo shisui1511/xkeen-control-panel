@@ -82,7 +82,6 @@ rules:
 		{"3X-UI base64", "/3xui", "xray", "base64", 4},
 		{"X-UI plain", "/xui", "xray", "share-links", 4},
 		{"Sing-box JSON", "/singbox", "xray", "sing-box", 2},
-		{"Clash YAML", "/clash", "mihomo", "clash-meta", 1},
 		{"Plain share-links", "/share-links", "xray", "share-links", 2},
 	}
 
