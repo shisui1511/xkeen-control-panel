@@ -710,11 +710,11 @@ export function generateYAML(state: MihomoConfigState): string {
       const providerName = sub.isVirtual
         ? sub.id
         : slugifyProviderName(
-          sub.profile_title || '',
-          sub.name || '',
-          sub.url || '',
-          sub.id || `provider-${i}`
-        );
+            sub.profile_title || '',
+            sub.name || '',
+            sub.url || '',
+            sub.id || `provider-${i}`
+          );
       lines.push(`  ${providerName}:`);
       if (sub.rawLines && sub.rawLines.length > 0) {
         let currentParent = '';

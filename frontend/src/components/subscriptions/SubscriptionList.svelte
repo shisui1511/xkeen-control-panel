@@ -377,7 +377,10 @@
           <span
             class="nodes-count-badge"
             onclick={() => onToggleExpand(sub.id)}
-            title={$t('subscr.nodes_count').replace('{count}', String(sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0))}
+            title={$t('subscr.nodes_count').replace(
+              '{count}',
+              String(sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0)
+            )}
           >
             {sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0}
           </span>
@@ -494,7 +497,9 @@
           <span class="meta-divider">|</span>
           {#if sub.mihomo_provider}
             <span class="mihomo-provider-chip" title={sub.mihomo_provider.vehicle_type}>
-              {sub.mihomo_provider.vehicle_type} · {formatUpdateDate(sub.mihomo_provider.updated_at)}
+              {sub.mihomo_provider.vehicle_type} · {formatUpdateDate(
+                sub.mihomo_provider.updated_at
+              )}
             </span>
           {:else}
             <span class="mihomo-integrated-badge" title="Не интегрировано в Mihomo config.yaml"

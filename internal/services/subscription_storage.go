@@ -266,7 +266,7 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 			}
 			if string(rawConfig) != newConfig {
 				if err := utils.AtomicWriteFile(configPath, []byte(newConfig), 0600); err != nil {
-					log.Printf("[Subscriptions] failed to update config.yaml for provider %s: %v", providerName, err)
+					log.Printf("[Subscriptions] failed to update config.yaml for provider %s: %v", utils.SanitizeLogInput(providerName), err)
 				}
 			}
 		}
@@ -420,7 +420,7 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 					}
 					if string(rawConfig) != newConfig {
 						if err := utils.AtomicWriteFile(configPath, []byte(newConfig), 0600); err != nil {
-							log.Printf("[Subscriptions] failed to update config.yaml for provider %s: %v", newProviderName, err)
+							log.Printf("[Subscriptions] failed to update config.yaml for provider %s: %v", utils.SanitizeLogInput(newProviderName), err)
 						}
 					}
 				}
@@ -617,7 +617,7 @@ func (s *SubscriptionService) maybeRenameProviderLocked(live *Subscription) {
 		}
 	}
 
-	log.Printf("[Subscriptions] Provider renamed after profile-title: %s -> %s", oldName, newName)
+	log.Printf("[Subscriptions] Provider renamed after profile-title: %s -> %s", utils.SanitizeLogInput(oldName), utils.SanitizeLogInput(newName))
 }
 
 // generateIDLocked возвращает новый уникальный ID подписки. Unix-секунды

@@ -428,7 +428,7 @@
     const proxyList = Object.values(proxies).filter((p) => {
       const typeLower = (p.type || '').toLowerCase();
       const nameLower = (p.name || '').toLowerCase();
-      
+
       // Исключаем группы прокси
       if (['selector', 'urltest', 'fallback', 'loadbalance', 'relay'].includes(typeLower)) {
         return false;
@@ -440,7 +440,7 @@
       if (['direct', 'reject', 'compatible', 'pass', 'global'].includes(nameLower)) {
         return false;
       }
-      
+
       return true;
     });
     const total = proxyList.length;
@@ -711,9 +711,10 @@
   let stats = $derived(
     (() => {
       const totalNodes = subscriptions.reduce((sum, s) => {
-        const count = getNodeSource(s) === 'mihomo'
-          ? (s.mihomo_provider?.node_count ?? s.proxy_count ?? 0)
-          : (s.proxy_count || 0);
+        const count =
+          getNodeSource(s) === 'mihomo'
+            ? (s.mihomo_provider?.node_count ?? s.proxy_count ?? 0)
+            : s.proxy_count || 0;
         return sum + count;
       }, 0);
       let minNext = Infinity;
@@ -819,50 +820,60 @@
   }
 
   async function refreshSubscription(id: string) {
-    const sub = subscriptions.find(s => s.id === id);
+    const sub = subscriptions.find((s) => s.id === id);
     if (!sub) return;
 
     refreshLoading[id] = true;
     try {
       const csrfToken = localStorage.getItem('csrf_token') || '';
-      const tasks: Promise<{ kernel: 'xray' | 'mihomo'; status: 'fulfilled'; value?: any } | { kernel: 'xray' | 'mihomo'; status: 'rejected'; reason: any }>[] = [];
+      const tasks: Promise<
+        | { kernel: 'xray' | 'mihomo'; status: 'fulfilled'; value?: any }
+        | { kernel: 'xray' | 'mihomo'; status: 'rejected'; reason: any }
+      >[] = [];
 
       if (sub.enable_xray) {
-        tasks.push((async () => {
-          const res = await fetch(`/api/subscriptions/refresh?id=${id}`, {
-            method: 'POST',
-            headers: { 'X-CSRF-Token': csrfToken }
-          });
-          if (res.ok) {
-            return { kernel: 'xray' as const, status: 'fulfilled' as const };
-          } else {
-            const text = await res.text();
-            const parsedErr = parseValidationError(text, $currentLang === 'ru' ? 'ru' : 'en');
-            throw { kernel: 'xray', reason: parsedErr || $t('app.error') };
-          }
-        })());
+        tasks.push(
+          (async () => {
+            const res = await fetch(`/api/subscriptions/refresh?id=${id}`, {
+              method: 'POST',
+              headers: { 'X-CSRF-Token': csrfToken }
+            });
+            if (res.ok) {
+              return { kernel: 'xray' as const, status: 'fulfilled' as const };
+            } else {
+              const text = await res.text();
+              const parsedErr = parseValidationError(text, $currentLang === 'ru' ? 'ru' : 'en');
+              throw { kernel: 'xray', reason: parsedErr || $t('app.error') };
+            }
+          })()
+        );
       }
 
       const providerName = sub.mihomo_provider?.name;
       if (sub.enable_mihomo && providerName) {
-        tasks.push((async () => {
-          const res = await fetch(`/api/proxy-providers/${providerName}/refresh`, {
-            method: 'PUT',
-            headers: { 'X-CSRF-Token': csrfToken }
-          });
-          if (res.ok) {
-            return { kernel: 'mihomo' as const, status: 'fulfilled' as const };
-          } else {
-            const text = await res.text();
-            const parsedErr = parseValidationError(text, $currentLang === 'ru' ? 'ru' : 'en');
-            throw { kernel: 'mihomo', reason: parsedErr || $t('app.error') };
-          }
-        })());
+        tasks.push(
+          (async () => {
+            const res = await fetch(`/api/proxy-providers/${providerName}/refresh`, {
+              method: 'PUT',
+              headers: { 'X-CSRF-Token': csrfToken }
+            });
+            if (res.ok) {
+              return { kernel: 'mihomo' as const, status: 'fulfilled' as const };
+            } else {
+              const text = await res.text();
+              const parsedErr = parseValidationError(text, $currentLang === 'ru' ? 'ru' : 'en');
+              throw { kernel: 'mihomo', reason: parsedErr || $t('app.error') };
+            }
+          })()
+        );
       }
 
       if (tasks.length === 0) {
         if (sub.enable_mihomo && !sub.mihomo_provider?.name) {
-          showToast('error', $t('subscr.refresh.mihomo_failed').replace('{message}', $t('app.unavailable')));
+          showToast(
+            'error',
+            $t('subscr.refresh.mihomo_failed').replace('{message}', $t('app.unavailable'))
+          );
         }
         refreshLoading[id] = false;
         return;
@@ -952,7 +963,9 @@
     };
 
     try {
-      const url = editingSub ? `/api/subscriptions/update?id=${encodeURIComponent(editingSub.id)}` : '/api/subscriptions/add';
+      const url = editingSub
+        ? `/api/subscriptions/update?id=${encodeURIComponent(editingSub.id)}`
+        : '/api/subscriptions/add';
       const res = await fetch(url, {
         method: 'POST',
         headers: {
@@ -1098,7 +1111,7 @@
   }
 
   async function loadMihomoNodes(subId: string) {
-    const sub = subscriptions.find(s => s.id === subId);
+    const sub = subscriptions.find((s) => s.id === subId);
     if (!sub || !sub.mihomo_provider?.name) {
       subNodesError[subId] = true;
       return;
@@ -1109,15 +1122,21 @@
     try {
       const res = await fetch(`/api/proxy-providers/${sub.mihomo_provider.name}/nodes`);
       if (res.ok) {
-        const data: { tag: string; name: string; alive: boolean; tested: boolean; delay_ms: number }[] = await res.json();
-        subNodes[subId] = data.map(n => ({
+        const data: {
+          tag: string;
+          name: string;
+          alive: boolean;
+          tested: boolean;
+          delay_ms: number;
+        }[] = await res.json();
+        subNodes[subId] = data.map((n) => ({
           tag: n.tag,
           name: n.name,
           active: false,
-          is_new: false,
+          is_new: false
         }));
         if (!subHealth[subId]) subHealth[subId] = {};
-        data.forEach(n => {
+        data.forEach((n) => {
           subHealth[subId][n.tag] = {
             alive: n.alive,
             delay: n.tested ? n.delay_ms : undefined,
@@ -1137,7 +1156,7 @@
   // Загружает список нод из источника, соответствующего активному ядру
   // подписки (Clash API для mihomo, распарсенная подписка для xray).
   async function loadNodesBySource(subId: string) {
-    const sub = subscriptions.find(s => s.id === subId);
+    const sub = subscriptions.find((s) => s.id === subId);
     if (!sub) return;
     if (getNodeSource(sub) === 'mihomo') {
       await loadMihomoNodes(subId);
@@ -1184,15 +1203,20 @@
       } else {
         if (res.status === 404) {
           // Fallback: если прокси не подключен к группе, запускаем проверку здоровья всего провайдера
-          const hcRes = await fetch(`/api/mihomo/proxy/providers/proxies/${encodeURIComponent(providerName)}/healthcheck`, {
-            method: 'GET',
-            headers: { 'X-CSRF-Token': csrfToken }
-          });
+          const hcRes = await fetch(
+            `/api/mihomo/proxy/providers/proxies/${encodeURIComponent(providerName)}/healthcheck`,
+            {
+              method: 'GET',
+              headers: { 'X-CSRF-Token': csrfToken }
+            }
+          );
           if (hcRes.ok || hcRes.status === 204) {
             // Даем Mihomo время на выполнение пинга
             await new Promise((resolve) => setTimeout(resolve, 800));
             // Загружаем ноды заново, чтобы получить обновленные задержки
-            const nodesRes = await fetch(`/api/proxy-providers/${encodeURIComponent(providerName)}/nodes`);
+            const nodesRes = await fetch(
+              `/api/proxy-providers/${encodeURIComponent(providerName)}/nodes`
+            );
             if (nodesRes.ok) {
               const nodesData = await nodesRes.json();
               if (Array.isArray(nodesData)) {
@@ -1225,7 +1249,7 @@
   }
 
   async function checkNodeHealth(subId: string, nodeTag: string) {
-    const sub = subscriptions.find(s => s.id === subId);
+    const sub = subscriptions.find((s) => s.id === subId);
     if (!sub) return;
 
     const source = getNodeSource(sub);

@@ -253,14 +253,6 @@ func (s *SubscriptionService) SetPanelAddress(port int, https bool, loopbackPort
 	s.loopbackPort = loopbackPort
 }
 
-func (s *SubscriptionService) generateMihomoProxyProviderBlock(sub *Subscription) string {
-	s.mu.RLock()
-	port := s.panelPort
-	https := s.panelHTTPS
-	loopbackPort := s.loopbackPort
-	s.mu.RUnlock()
-	return s.generateMihomoProxyProviderBlockLocked(sub, port, https, loopbackPort)
-}
 
 func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscription, port int, https bool, loopbackPort int) string {
 	if port == 0 {

@@ -362,14 +362,18 @@ proxy-groups:
     const providerChip = card.locator('.mihomo-provider-chip');
     await expect(providerChip).toBeVisible();
 
-    const textOverflow = await providerChip.evaluate((el) => window.getComputedStyle(el).textOverflow);
+    const textOverflow = await providerChip.evaluate(
+      (el) => window.getComputedStyle(el).textOverflow
+    );
     expect(textOverflow).toBe('ellipsis');
 
     const maxWidth = await providerChip.evaluate((el) => window.getComputedStyle(el).maxWidth);
     expect(maxWidth).toBe('220px');
   });
 
-  test('dual-kernel refresh triggers both endpoints and shows separate toasts', async ({ page }) => {
+  test('dual-kernel refresh triggers both endpoints and shows separate toasts', async ({
+    page
+  }) => {
     await page.route('**/api/proxy-providers', async (route: Route) => {
       await route.fulfill({
         status: 200,
@@ -431,7 +435,9 @@ proxy-groups:
     await expect(errorToast).toBeVisible();
   });
 
-  test('displays error message and retry button when nodes load fails for Mihomo provider', async ({ page }) => {
+  test('displays error message and retry button when nodes load fails for Mihomo provider', async ({
+    page
+  }) => {
     await page.route('**/api/proxy-providers', async (route: Route) => {
       await route.fulfill({
         status: 200,
@@ -507,7 +513,9 @@ proxy-groups:
     expect(loadAttempts).toBe(2);
   });
 
-  test('renders neutral dash for untested Mihomo node instead of default-ok checkmark', async ({ page }) => {
+  test('renders neutral dash for untested Mihomo node instead of default-ok checkmark', async ({
+    page
+  }) => {
     await page.route('**/api/proxy-providers', async (route: Route) => {
       await route.fulfill({
         status: 200,
