@@ -426,8 +426,8 @@
 
   function computeStats(): ObservatoryStats {
     const proxyList = Object.values(proxies).filter((p) => {
-      const typeLower = p.type.toLowerCase();
-      const nameLower = p.name.toLowerCase();
+      const typeLower = (p.type || '').toLowerCase();
+      const nameLower = (p.name || '').toLowerCase();
       
       // Исключаем группы прокси
       if (['selector', 'urltest', 'fallback', 'loadbalance', 'relay'].includes(typeLower)) {
@@ -1156,6 +1156,16 @@
   async function checkMihomoNodeHealth(subId: string, providerName: string, nodeTag: string) {
     if (!checkingNodes[subId]) checkingNodes[subId] = {};
     checkingNodes[subId][nodeTag] = true;
+
+    function setNodeHealthFailed() {
+      if (!subHealth[subId]) subHealth[subId] = {};
+      subHealth[subId][nodeTag] = {
+        alive: false,
+        delay: 0,
+        tested: true
+      };
+    }
+
     try {
       const csrfToken = localStorage.getItem('csrf_token') || '';
       const targetURL = `/api/mihomo/proxy/proxies/${encodeURIComponent(nodeTag)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`;
@@ -1179,36 +1189,36 @@
             headers: { 'X-CSRF-Token': csrfToken }
           });
           if (hcRes.ok || hcRes.status === 204) {
+            // Даем Mihomo время на выполнение пинга
+            await new Promise((resolve) => setTimeout(resolve, 800));
             // Загружаем ноды заново, чтобы получить обновленные задержки
             const nodesRes = await fetch(`/api/proxy-providers/${encodeURIComponent(providerName)}/nodes`);
             if (nodesRes.ok) {
               const nodesData = await nodesRes.json();
-              if (!subHealth[subId]) subHealth[subId] = {};
-              nodesData.forEach((n: any) => {
-                subHealth[subId][n.tag] = {
-                  alive: n.alive,
-                  delay: n.tested ? n.delay_ms : undefined,
-                  tested: n.tested
-                };
-              });
+              if (Array.isArray(nodesData)) {
+                if (!subHealth[subId]) subHealth[subId] = {};
+                nodesData.forEach((n: any) => {
+                  subHealth[subId][n.tag] = {
+                    alive: n.alive,
+                    delay: n.tested ? n.delay_ms : undefined,
+                    tested: n.tested
+                  };
+                });
+              } else {
+                setNodeHealthFailed();
+              }
+            } else {
+              setNodeHealthFailed();
             }
+          } else {
+            setNodeHealthFailed();
           }
         } else {
-          if (!subHealth[subId]) subHealth[subId] = {};
-          subHealth[subId][nodeTag] = {
-            alive: false,
-            delay: 0,
-            tested: true
-          };
+          setNodeHealthFailed();
         }
       }
     } catch (e) {
-      if (!subHealth[subId]) subHealth[subId] = {};
-      subHealth[subId][nodeTag] = {
-        alive: false,
-        delay: 0,
-        tested: true
-      };
+      setNodeHealthFailed();
     } finally {
       checkingNodes[subId][nodeTag] = false;
     }
