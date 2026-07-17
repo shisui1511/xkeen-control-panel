@@ -14,11 +14,13 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
-// providerNameRe — допустимый формат имени Mihomo-провайдера. Совпадает с
-// инвариантом GetMihomoProviderName (subscription_converter.go): латинские
-// буквы (регистр сохраняется, например «TEST_PROVIDER»), цифры и дефис. Всё
-// остальное — мусорный ввод, который не должен уходить в исходящий запрос к Clash API.
-var providerNameRe = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+// providerNameRe — допустимый формат имени Mihomo-провайдера: латинские
+// буквы (регистр сохраняется, например «TEST_PROVIDER»), цифры, дефис и
+// подчёркивание (встречается в ключах рукописных config.yaml, импортируемых
+// панелью). Панель сама генерирует имена по инвариванту GetMihomoProviderName
+// (subscription_converter.go): [A-Za-z0-9-]. Всё остальное — мусорный ввод,
+// который не должен уходить в исходящий запрос к Clash API.
+var providerNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 type ProxyProviderResponse struct {
 	services.Subscription

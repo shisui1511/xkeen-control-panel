@@ -292,7 +292,9 @@ func TestProxyProviders_Refresh_InvalidName(t *testing.T) {
 		wantCode     int
 		wantOutbound bool
 	}{
-		{"underscore", http.MethodPut, "/api/proxy-providers/bad_name/refresh", http.StatusBadRequest, false},
+		// Подчёркивание допустимо: встречается в ключах рукописных config.yaml.
+		{"underscore", http.MethodPut, "/api/proxy-providers/ok_name/refresh", http.StatusNoContent, true},
+		{"dot", http.MethodPut, "/api/proxy-providers/bad.name/refresh", http.StatusBadRequest, false},
 		{"multi-segment", http.MethodPut, "/api/proxy-providers/a/b/refresh", http.StatusBadRequest, false},
 		{"query-like chars", http.MethodPut, "/api/proxy-providers/x%3Fy/refresh", http.StatusBadRequest, false},
 		// Верхний регистр допустим: имена провайдеров сохраняют регистр.

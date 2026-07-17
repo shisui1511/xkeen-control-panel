@@ -247,7 +247,7 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 		}
 	}
 
-	sub.ProviderName = sub.GetProviderName()
+	sub.ProviderName = s.uniqueProviderNameLocked(sub.GetProviderName(), sub.ID)
 
 	if sub.EnableMihomo {
 		configDir := s.mihomoConfigDir
@@ -303,7 +303,8 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			oldProviderName := existing.GetProviderName()
 			newProviderName := oldProviderName
 			if sub.Name != existing.Name {
-				newProviderName = GetMihomoProviderName(existing.ProfileTitle, sub.Name, existing.ID)
+				newProviderName = s.uniqueProviderNameLocked(
+					GetMihomoProviderName(existing.ProfileTitle, sub.Name, existing.ID), existing.ID)
 			}
 
 			if oldProviderName != newProviderName {
@@ -533,6 +534,33 @@ func (s *SubscriptionService) Delete(id string) error {
 	return nil
 }
 
+// uniqueProviderNameLocked возвращает имя провайдера, не конфликтующее с
+// провайдерами других подписок: при коллизии (например, два аккаунта одного
+// провайдера с одинаковым profile-title) добавляется суффикс -2, -3, …
+// Сравнение без учёта регистра. mu должен быть захвачен вызывающим.
+func (s *SubscriptionService) uniqueProviderNameLocked(base, excludeID string) string {
+	taken := func(name string) bool {
+		for i := range s.subscriptions {
+			if s.subscriptions[i].ID == excludeID {
+				continue
+			}
+			if strings.EqualFold(s.subscriptions[i].GetProviderName(), name) {
+				return true
+			}
+		}
+		return false
+	}
+	if !taken(base) {
+		return base
+	}
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s-%d", base, n)
+		if !taken(candidate) {
+			return candidate
+		}
+	}
+}
+
 // maybeRenameProviderLocked выполняет однократное переименование провайдера
 // после первого получения profile-title от сервера подписки: временное имя
 // (выведенное из ID) заменяется на бренд провайдера. Не срабатывает, если
@@ -542,7 +570,7 @@ func (s *SubscriptionService) maybeRenameProviderLocked(live *Subscription) {
 		return
 	}
 	oldName := live.GetProviderName()
-	newName := GetMihomoProviderName(live.ProfileTitle, "", live.ID)
+	newName := s.uniqueProviderNameLocked(GetMihomoProviderName(live.ProfileTitle, "", live.ID), live.ID)
 	if newName == oldName {
 		return
 	}

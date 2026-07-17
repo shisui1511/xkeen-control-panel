@@ -295,6 +295,31 @@ func TestGetMihomoProviderName_Brand(t *testing.T) {
 	}
 }
 
+func TestUniqueProviderName(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, filepath.Join(tmp, "xray"), filepath.Join(tmp, "mihomo"))
+
+	a := Subscription{Name: "Acme", URL: "https://example.com/a"}
+	b := Subscription{Name: "Acme", URL: "https://example.com/b"}
+	c := Subscription{Name: "acme", URL: "https://example.com/c"}
+	for _, sub := range []*Subscription{&a, &b, &c} {
+		if err := svc.Add(sub); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if a.ProviderName != "Acme" {
+		t.Errorf("expected first provider Acme, got %s", a.ProviderName)
+	}
+	if b.ProviderName != "Acme-2" {
+		t.Errorf("expected collision suffix Acme-2, got %s", b.ProviderName)
+	}
+	// Сравнение имён — без учёта регистра.
+	if c.ProviderName != "acme-3" {
+		t.Errorf("expected case-insensitive collision suffix acme-3, got %s", c.ProviderName)
+	}
+}
+
 func TestMaybeRenameProviderAfterProfileTitle(t *testing.T) {
 	tmp := t.TempDir()
 	mihomoDir := filepath.Join(tmp, "mihomo")
