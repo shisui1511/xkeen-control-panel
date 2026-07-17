@@ -258,6 +258,7 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 
 			// reality / tls
 			if n.Security == "reality" {
+				sb.WriteString("    tls: true\n")
 				sb.WriteString("    reality-opts:\n")
 				sb.WriteString(fmt.Sprintf("      public-key: %s\n", yamlSafeScalar(n.PublicKey)))
 				if n.ShortID != "" {
@@ -379,6 +380,17 @@ func writeTransportOpts(sb *strings.Builder, n SubscriptionNode) {
 		sb.WriteString(fmt.Sprintf("      grpc-service-name: %s\n", yamlSafeScalar(serviceName)))
 	case "httpupgrade":
 		sb.WriteString("    httpupgrade-opts:\n")
+		path := n.WSPath
+		if path == "" {
+			path = "/"
+		}
+		sb.WriteString(fmt.Sprintf("      path: %s\n", yamlSafeScalar(path)))
+		if n.ServerName != "" {
+			sb.WriteString("      headers:\n")
+			sb.WriteString(fmt.Sprintf("        Host: %s\n", yamlSafeScalar(n.ServerName)))
+		}
+	case "xhttp":
+		sb.WriteString("    xhttp-opts:\n")
 		path := n.WSPath
 		if path == "" {
 			path = "/"

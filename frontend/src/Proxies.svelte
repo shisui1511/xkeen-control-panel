@@ -1172,12 +1172,35 @@
           tested: true
         };
       } else {
-        if (!subHealth[subId]) subHealth[subId] = {};
-        subHealth[subId][nodeTag] = {
-          alive: false,
-          delay: 0,
-          tested: true
-        };
+        if (res.status === 404) {
+          // Fallback: если прокси не подключен к группе, запускаем проверку здоровья всего провайдера
+          const hcRes = await fetch(`/api/mihomo/proxy/providers/proxies/${encodeURIComponent(providerName)}/healthcheck`, {
+            method: 'GET',
+            headers: { 'X-CSRF-Token': csrfToken }
+          });
+          if (hcRes.ok || hcRes.status === 204) {
+            // Загружаем ноды заново, чтобы получить обновленные задержки
+            const nodesRes = await fetch(`/api/proxy-providers/${encodeURIComponent(providerName)}/nodes`);
+            if (nodesRes.ok) {
+              const nodesData = await nodesRes.json();
+              if (!subHealth[subId]) subHealth[subId] = {};
+              nodesData.forEach((n: any) => {
+                subHealth[subId][n.tag] = {
+                  alive: n.alive,
+                  delay: n.tested ? n.delay_ms : undefined,
+                  tested: n.tested
+                };
+              });
+            }
+          }
+        } else {
+          if (!subHealth[subId]) subHealth[subId] = {};
+          subHealth[subId][nodeTag] = {
+            alive: false,
+            delay: 0,
+            tested: true
+          };
+        }
       }
     } catch (e) {
       if (!subHealth[subId]) subHealth[subId] = {};
