@@ -441,6 +441,7 @@ func parseXrayConfigArray(body []byte) []Outbound {
 	proxyProtocols := map[string]bool{
 		"vless": true, "vmess": true, "trojan": true, "shadowsocks": true,
 		"socks": true, "http": true, "wireguard": true,
+		"hysteria": true, "hysteria2": true,
 	}
 
 	var result []Outbound
@@ -451,6 +452,9 @@ func parseXrayConfigArray(body []byte) []Outbound {
 				continue
 			}
 			out := ob
+			if out.Protocol == "hysteria" || out.Protocol == "hysteria2" {
+				out = normalizeXrayHysteriaOutbound(out)
+			}
 			// Use "remarks" as the tag for this server
 			if cfg.Remarks != "" {
 				out.Tag = cfg.Remarks
@@ -460,6 +464,62 @@ func parseXrayConfigArray(body []byte) []Outbound {
 		}
 	}
 	return result
+}
+
+// normalizeXrayHysteriaOutbound приводит outbound с protocol "hysteria"/
+// "hysteria2" из формата xray full-config array (адрес/порт лежат прямо в
+// settings, пароль — в streamSettings.hysteriaSettings.auth) к каноническому
+// виду settings.servers[0]={address,port,password}, который умеют читать
+// extractServer/getServerField/outboundsToNodes (as для hy2:// share-link'ов
+// и Clash YAML type: hysteria). Без этой нормализации адрес/порт/пароль
+// ноды остаются нераспознанными даже после того, как она не отброшена
+// фильтром proxyProtocols.
+func normalizeXrayHysteriaOutbound(ob Outbound) Outbound {
+	address, _ := ob.Settings["address"].(string)
+
+	var port int
+	switch p := ob.Settings["port"].(type) {
+	case float64:
+		port = int(p)
+	case int:
+		port = p
+	case string:
+		if v, err := strconv.Atoi(p); err == nil {
+			port = v
+		}
+	}
+
+	password := ""
+	if ss := ob.StreamSettings; ss != nil {
+		if hySettings, ok := ss["hysteriaSettings"].(map[string]interface{}); ok {
+			if auth, ok := hySettings["auth"].(string); ok {
+				password = auth
+			}
+		}
+	}
+
+	normalized := ob
+	normalized.Protocol = "hysteria2"
+	normalized.Settings = map[string]interface{}{
+		"servers": []map[string]interface{}{{
+			"address":  address,
+			"port":     port,
+			"password": password,
+		}},
+	}
+
+	newStream := map[string]interface{}{"network": "tcp"}
+	if ss := ob.StreamSettings; ss != nil {
+		if sec, ok := ss["security"].(string); ok && sec != "" {
+			newStream["security"] = sec
+		}
+		if tls, ok := ss["tlsSettings"]; ok {
+			newStream["tlsSettings"] = tls
+		}
+	}
+	normalized.StreamSettings = newStream
+
+	return normalized
 }
 
 // parseShareLinks parses a subscription body that is either a base64-encoded or
@@ -537,6 +597,8 @@ func skipReasonForScheme(line string) string {
 		return "невалидный URL или порт в ss://"
 	case strings.HasPrefix(line, "hy2://"), strings.HasPrefix(line, "hysteria2://"):
 		return "невалидный URL или порт в hy2://"
+	case strings.HasPrefix(line, "hysteria://"):
+		return "невалидный URL или порт в hysteria://"
 	case strings.HasPrefix(line, "tuic://"):
 		return "невалидный URL или порт в tuic://"
 	case strings.HasPrefix(line, "socks://"), strings.HasPrefix(line, "socks5://"):
@@ -584,6 +646,13 @@ func parseShareLink(link string) (out *Outbound) {
 
 	// hy2:// (Hysteria2)
 	if strings.HasPrefix(link, "hy2://") || strings.HasPrefix(link, "hysteria2://") {
+		return parseHysteria2Link(link)
+	}
+
+	// hysteria:// (Hysteria v1) — та же грамматика URI password@host:port?params#tag,
+	// что и у hysteria2; консистентно с YAML type: hysteria -> Protocol hysteria2
+	// в convertSubscriptionNodeToOutbound.
+	if strings.HasPrefix(link, "hysteria://") {
 		return parseHysteria2Link(link)
 	}
 

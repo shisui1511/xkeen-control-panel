@@ -26,8 +26,12 @@ var (
 	// providerNodeNameLineRe считает записи "- name:" в Clash/Mihomo YAML.
 	providerNodeNameLineRe = regexp.MustCompile(`(?m)^\s*-\s*name\s*:\s*`)
 
-	// providerURISchemeRe считает share-link записи (vless://, vmess:// и т.д.)
-	providerURISchemeRe = regexp.MustCompile(`(?i)\b(?:vless|vmess|trojan|ss|hy2|hysteria2|tuic|socks5?|http-proxy)://`)
+	// providerURISchemeRe считает share-link записи (vless://, vmess:// и т.д.).
+	// hysteria2 указан раньше hysteria, т.к. является более специфичной
+	// альтернативой схемы (не влияет на корректность: "://" сразу после
+	// альтернативы всё равно требует полного совпадения схемы, но порядок
+	// сохраняет читаемость и намерение).
+	providerURISchemeRe = regexp.MustCompile(`(?i)\b(?:vless|vmess|trojan|ss|hy2|hysteria2|hysteria|tuic|socks5?|http-proxy)://`)
 )
 
 // ProviderFetch скачивает подписку с upstream-провайдера, используя единый
