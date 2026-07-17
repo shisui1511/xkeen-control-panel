@@ -8,12 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-
-	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // subscriptionUserAgent — единый User-Agent для всех запросов подписок.
@@ -21,6 +20,56 @@ import (
 // для Xray- и Mihomo-путей приводили к рассинхрону списков нод одной подписки.
 // По UA Happ провайдеры отдают максимально полный набор нод.
 const subscriptionUserAgent = "Happ/1.0"
+
+// fetchWithUserAgent выполняет GET с правильным User-Agent и HWID-заголовками.
+func validateSubscriptionURL(ctx context.Context, rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("unsupported scheme: %s", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("empty host")
+	}
+
+	// Разрешаем loopback/private IP в тестовом окружении
+	if flag.Lookup("test.v") != nil {
+		return nil
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+			return fmt.Errorf("SSRF: target is a private/loopback IP address")
+		}
+		// CGNAT (100.64.0.0/10)
+		if ip4 := ip.To4(); ip4 != nil {
+			if ip4[0] == 100 && (ip4[1] >= 64 && ip4[1] <= 127) {
+				return fmt.Errorf("SSRF: target is CGNAT IP address")
+			}
+		}
+		return nil
+	}
+
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+	if err != nil {
+		return nil
+	}
+	for _, ip := range ips {
+		if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+			return fmt.Errorf("SSRF: target resolves to a private/loopback IP address")
+		}
+		if ip4 := ip.To4(); ip4 != nil {
+			if ip4[0] == 100 && (ip4[1] >= 64 && ip4[1] <= 127) {
+				return fmt.Errorf("SSRF: target resolves to CGNAT IP address")
+			}
+		}
+	}
+	return nil
+}
 
 // fetchWithUserAgent выполняет GET с правильным User-Agent и HWID-заголовками.
 func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL string, sub *Subscription, ua string) (*http.Response, error) {
@@ -33,8 +82,7 @@ func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL str
 		return nil, fmt.Errorf("unsupported scheme: %s", parsed.Scheme)
 	}
 
-	isTest := flag.Lookup("test.v") != nil
-	if err := utils.ValidateURL(ctx, subURL, isTest); err != nil {
+	if err := validateSubscriptionURL(ctx, subURL); err != nil {
 		return nil, fmt.Errorf("SSRF validation failed: %w", err)
 	}
 
