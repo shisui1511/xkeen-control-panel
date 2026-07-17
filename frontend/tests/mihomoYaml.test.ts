@@ -11,20 +11,22 @@ describe('slugifyProviderName', () => {
     expect(slugifyProviderName('', 'Сервис #1!', '', 'p0')).toBe('servis-1');
     expect(slugifyProviderName('', '---', '', 'sub-0')).toBe('sub-0');
     expect(slugifyProviderName('', '', '', 'provider-0')).toBe('provider-0');
-    expect(slugifyProviderName('', 'Google-dns_123', '', 'p0')).toBe('google-dns-123');
+    expect(slugifyProviderName('', 'Google-dns_123', '', 'p0')).toBe('Google-dns-123');
   });
 
-  test('URL fallback when name is empty', () => {
-    expect(
-      slugifyProviderName('', '', 'https://example.com/subscriptions/my-sub.yaml', 'fallback')
-    ).toBe('my-sub-yaml');
-    expect(slugifyProviderName('', '', 'https://example.com/api/v1/sub', 'fallback')).toBe('sub');
-    expect(slugifyProviderName('', '', 'invalid-url', 'fallback')).toBe('fallback');
+  test('fallback to ID when name/title are empty', () => {
+    expect(slugifyProviderName('', '', '', 'sub_42')).toBe('sub-42');
     expect(slugifyProviderName('', '', '', 'fallback')).toBe('fallback');
   });
 
-  test('приоритет profileTitle над остальными полями', () => {
-    expect(slugifyProviderName('Профиль 1', 'Имя 1', '', 'p0')).toBe('profil-1');
+  test('приоритет name над profileTitle', () => {
+    expect(slugifyProviderName('Acme 🌏 Подписка', 'Личный VPN', '', 'sub_1')).toBe('lichnyj-VPN');
+    expect(slugifyProviderName('Профиль 1', 'Имя 1', '', 'p0')).toBe('imya-1');
+  });
+
+  test('извлечение бренда из profileTitle', () => {
+    expect(slugifyProviderName('My VPN Subscription', '', '', 'sub_1')).toBe('My-VPN');
+    expect(slugifyProviderName('Acme 🌏 Подписка', '', '', 'sub_1')).toBe('Acme');
   });
 });
 
