@@ -701,7 +701,12 @@
   // Stats derived for subscriptions
   let stats = $derived(
     (() => {
-      const totalNodes = subscriptions.reduce((sum, s) => sum + (s.proxy_count || 0), 0);
+      const totalNodes = subscriptions.reduce((sum, s) => {
+        const count = getNodeSource(s) === 'mihomo'
+          ? (s.mihomo_provider?.node_count ?? s.proxy_count ?? 0)
+          : (s.proxy_count || 0);
+        return sum + count;
+      }, 0);
       let minNext = Infinity;
       subscriptions.forEach((s) => {
         if (s.enabled && s.last_update && !s.last_update.startsWith('0001')) {
@@ -829,9 +834,10 @@
         })());
       }
 
-      if (sub.enable_mihomo && sub.mihomo_provider?.name) {
+      const providerName = sub.mihomo_provider?.name;
+      if (sub.enable_mihomo && providerName) {
         tasks.push((async () => {
-          const res = await fetch(`/api/proxy-providers/${sub.mihomo_provider.name}/refresh`, {
+          const res = await fetch(`/api/proxy-providers/${providerName}/refresh`, {
             method: 'PUT',
             headers: { 'X-CSRF-Token': csrfToken }
           });
@@ -877,7 +883,7 @@
 
       await loadSubscriptions();
       if (expandedSubs[id]) {
-        await loadNodes(id);
+        await loadNodesBySource(id);
       }
     } catch (e) {
       showToast('error', $t('app.error'));
@@ -899,7 +905,7 @@
         await loadSubscriptions();
         for (const id of Object.keys(expandedSubs)) {
           if (expandedSubs[id]) {
-            await loadNodes(id);
+            await loadNodesBySource(id);
           }
         }
       } else {
@@ -1119,18 +1125,22 @@
     }
   }
 
+  // Загружает список нод из источника, соответствующего активному ядру
+  // подписки (Clash API для mihomo, распарсенная подписка для xray).
+  async function loadNodesBySource(subId: string) {
+    const sub = subscriptions.find(s => s.id === subId);
+    if (!sub) return;
+    if (getNodeSource(sub) === 'mihomo') {
+      await loadMihomoNodes(subId);
+    } else {
+      await loadNodes(subId);
+    }
+  }
+
   async function toggleExpand(subId: string) {
     expandedSubs[subId] = !expandedSubs[subId];
     if (expandedSubs[subId]) {
-      const sub = subscriptions.find(s => s.id === subId);
-      if (sub) {
-        const source = getNodeSource(sub);
-        if (source === 'mihomo') {
-          await loadMihomoNodes(subId);
-        } else {
-          await loadNodes(subId);
-        }
-      }
+      await loadNodesBySource(subId);
     }
   }
 
@@ -1212,7 +1222,7 @@
       );
       if (res.ok) {
         showToast('success', $t('app.success'));
-        await loadNodes(subId);
+        await loadNodesBySource(subId);
       } else {
         const text = await res.text();
         showToast('error', text || $t('app.error'));
@@ -1229,7 +1239,7 @@
     if (match && match[1]) {
       const subId = match[1];
       expandedSubs[subId] = true;
-      loadNodes(subId).then(() => {
+      loadNodesBySource(subId).then(() => {
         setTimeout(() => {
           const el = document.getElementById(`sub-card-${subId}`);
           if (el) {
