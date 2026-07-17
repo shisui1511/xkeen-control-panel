@@ -205,11 +205,14 @@ func (s *SubscriptionService) Add(sub *Subscription) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sub.ID == "" {
-		sub.ID = fmt.Sprintf("sub_%d", time.Now().Unix())
+		sub.ID = s.generateIDLocked()
 	} else {
 		// Санитизируем ID — только [a-z0-9_-] допустимы в имени файла.
 		sub.ID = strings.ToLower(sub.ID)
 		sub.ID = invalidIDCharsRe.ReplaceAllString(sub.ID, "_")
+		if s.GetLocked(sub.ID) != nil {
+			return fmt.Errorf("subscription with ID %s already exists", sub.ID)
+		}
 	}
 
 	sub.ProviderName = sub.GetProviderName()
@@ -479,6 +482,17 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 	}
 	return nil
+}
+
+// generateIDLocked возвращает новый уникальный ID подписки. Unix-секунды
+// давали коллизии при добавлении двух подписок в одну секунду.
+func (s *SubscriptionService) generateIDLocked() string {
+	for {
+		id := fmt.Sprintf("sub_%d", time.Now().UnixNano())
+		if s.GetLocked(id) == nil {
+			return id
+		}
+	}
 }
 
 func (s *SubscriptionService) GetLocked(id string) *Subscription {
