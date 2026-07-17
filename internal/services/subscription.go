@@ -227,6 +227,8 @@ type SubscriptionService struct {
 	lastCleanup          time.Time
 	panelPort            int
 	panelHTTPS           bool
+	loopbackPort         int
+	localHTTPClient      *http.Client
 }
 
 func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *SubscriptionService {
@@ -235,6 +237,7 @@ func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *Subscri
 		configDir:       configDir,
 		mihomoConfigDir: mihomoConfigDir,
 		httpClient:      utils.SafeHTTPClient(30 * time.Second),
+		localHTTPClient: &http.Client{Timeout: 10 * time.Second},
 		hwid:            loadOrGenerateHWID(dataDir),
 		deviceInfo:      NewDeviceInfo(),
 	}
@@ -242,34 +245,40 @@ func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *Subscri
 	return svc
 }
 
-func (s *SubscriptionService) SetPanelAddress(port int, https bool) {
+func (s *SubscriptionService) SetPanelAddress(port int, https bool, loopbackPort int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.panelPort = port
 	s.panelHTTPS = https
+	s.loopbackPort = loopbackPort
 }
 
 func (s *SubscriptionService) generateMihomoProxyProviderBlock(sub *Subscription) string {
 	s.mu.RLock()
 	port := s.panelPort
 	https := s.panelHTTPS
+	loopbackPort := s.loopbackPort
 	s.mu.RUnlock()
-	return s.generateMihomoProxyProviderBlockLocked(sub, port, https)
+	return s.generateMihomoProxyProviderBlockLocked(sub, port, https, loopbackPort)
 }
 
-func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscription, port int, https bool) string {
+func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscription, port int, https bool, loopbackPort int) string {
 	if port == 0 {
 		port = 8090
 	}
+	if loopbackPort == 0 {
+		loopbackPort = 8091
+	}
 
 	scheme := "http"
+	usePort := port
 	if https {
-		scheme = "https"
+		usePort = loopbackPort
 	}
 
 	providerName := sub.GetProviderName()
 	escapedURL := url.QueryEscape(sub.URL)
-	loopbackURL := fmt.Sprintf("%s://127.0.0.1:%d/api/provider.yaml?url=%s", scheme, port, escapedURL)
+	loopbackURL := fmt.Sprintf("%s://127.0.0.1:%d/api/provider.yaml?url=%s", scheme, usePort, escapedURL)
 
 	intervalSec := sub.Interval * 3600
 	if intervalSec <= 0 {

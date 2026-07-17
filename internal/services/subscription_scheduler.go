@@ -459,7 +459,7 @@ func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) e
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
 	}
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.localHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("API PUT failed: %w", err)
 	}

@@ -12,6 +12,7 @@ import (
 // Config represents the main application configuration structure.
 type Config struct {
 	Port             int         `json:"port"`
+	LoopbackPort     int         `json:"loopback_port"`
 	XRayConfigDir    string      `json:"xray_config_dir"`
 	XKeenBinary      string      `json:"xkeen_binary"`
 	MihomoConfigDir  string      `json:"mihomo_config_dir"`
@@ -71,6 +72,7 @@ func findXKeen() string {
 func Default() *Config {
 	return &Config{
 		Port:            8090,
+		LoopbackPort:    8091,
 		XRayConfigDir:   "/opt/etc/xray/configs",
 		XKeenBinary:     findXKeen(),
 		MihomoConfigDir: "/opt/etc/mihomo",

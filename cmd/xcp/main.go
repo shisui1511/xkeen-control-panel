@@ -60,6 +60,7 @@ func main() {
 
 	srvCfg := &server.Config{
 		Port:             cfg.Port,
+		LoopbackPort:     cfg.LoopbackPort,
 		XRayConfigDir:    cfg.XRayConfigDir,
 		XKeenBinary:      cfg.XKeenBinary,
 		MihomoConfigDir:  cfg.MihomoConfigDir,
@@ -107,6 +108,7 @@ func main() {
 	srv.HandleProtected("/api/capabilities", api.Capabilities)
 	srv.Handle("/api/provider.yaml", api.MihomoProviderAdapter)
 	srv.Handle("/mihomo/provider.yaml", api.MihomoProviderRedirect)
+	srv.Handle("/mihomo/hwid/provider.yaml", api.MihomoProviderRedirect)
 
 	// Protected endpoints
 	srv.HandleProtected("/api/config/list", api.ConfigList)
@@ -258,7 +260,7 @@ func main() {
 
 	// Subscriptions + auto-refresh scheduler
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
-	subscriptionSvc.SetPanelAddress(cfg.Port, cfg.HTTPS.Enabled)
+	subscriptionSvc.SetPanelAddress(cfg.Port, cfg.HTTPS.Enabled, cfg.LoopbackPort)
 	subscriptionSvc.SetConsoleService(consoleSvc)
 	subscriptionSvc.SetMihomoAPI(cfg.MihomoAPIURL, cfg.MihomoSecret)
 	// Fallback-резолвер секрета Clash API: при пустом MihomoSecret в конфиге

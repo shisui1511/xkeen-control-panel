@@ -509,7 +509,7 @@ proxy-groups:
 	consoleSvc := NewConsoleService(mockXkeenPath)
 	svc.SetConsoleService(consoleSvc)
 
-	svc.SetPanelAddress(8090, false)
+	svc.SetPanelAddress(8090, false, 8091)
 
 	sub := Subscription{
 		ID:           "mihomo-sub",
@@ -547,13 +547,13 @@ proxy-groups:
 	}
 
 	// 3. Проверяем режим HTTPS (через Update, т.к. Refresh больше не обновляет config.yaml)
-	svc.SetPanelAddress(443, true)
+	svc.SetPanelAddress(443, true, 8091)
 	if err := svc.Update("mihomo-sub", &sub); err != nil {
 		t.Fatalf("Update under HTTPS failed: %v", err)
 	}
 	configBytes, _ = os.ReadFile(configPath)
 	configStr = string(configBytes)
-	expectedHTTPSURL := fmt.Sprintf("https://127.0.0.1:443/api/provider.yaml?url=%s", url.QueryEscape(sub.URL))
+	expectedHTTPSURL := fmt.Sprintf("http://127.0.0.1:8091/api/provider.yaml?url=%s", url.QueryEscape(sub.URL))
 	if !strings.Contains(configStr, expectedHTTPSURL) {
 		t.Errorf("expected HTTPS loopback url %q in config.yaml, got config:\n%s", expectedHTTPSURL, configStr)
 	}

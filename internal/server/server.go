@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -23,10 +24,12 @@ type Server struct {
 	mux         *http.ServeMux
 	authService *auth.AuthService
 	httpSrv     *http.Server
+	loopbackSrv *http.Server
 }
 
 type Config struct {
 	Port             int
+	LoopbackPort     int
 	XRayConfigDir    string
 	XKeenBinary      string
 	MihomoConfigDir  string
@@ -126,6 +129,22 @@ func (s *Server) Start() error {
 		}
 		defer listener.Close()
 
+		// Start HTTP loopback server on localhost (127.0.0.1) only
+		loopbackAddr := fmt.Sprintf("127.0.0.1:%d", s.cfg.LoopbackPort)
+		s.loopbackSrv = &http.Server{
+			Addr:              loopbackAddr,
+			Handler:           handler,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       30 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
+		go func() {
+			log.Printf("Listening HTTP loopback on %s", loopbackAddr)
+			if err := s.loopbackSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("HTTP loopback server error: %v", err)
+			}
+		}()
+
 		log.Printf("Listening HTTPS on port %d", s.cfg.Port)
 		return s.httpSrv.Serve(listener)
 	}
@@ -137,8 +156,19 @@ func (s *Server) Start() error {
 // Shutdown gracefully stops the HTTP server, waiting up to ctx deadline for
 // active connections to finish.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.httpSrv == nil {
-		return nil
+	var errs []error
+	if s.httpSrv != nil {
+		if err := s.httpSrv.Shutdown(ctx); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	return s.httpSrv.Shutdown(ctx)
+	if s.loopbackSrv != nil {
+		if err := s.loopbackSrv.Shutdown(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("shutdown errors: %v", errs)
+	}
+	return nil
 }
