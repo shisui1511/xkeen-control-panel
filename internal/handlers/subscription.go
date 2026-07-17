@@ -349,7 +349,7 @@ func adhocSubscriptionID(urlStr string) string {
 
 // MihomoProviderAdapter — loopback-only endpoint /api/provider.yaml. Проксирует
 // запрос подписки к upstream-провайдеру (с HWID/device заголовками и
-// ClashMeta User-Agent), конвертирует ответ в Mihomo proxy-provider payload
+// единым User-Agent панели), конвертирует ответ в Mihomo proxy-provider payload
 // (только секция proxies:) и отдаёт его Mihomo. При сетевой ошибке отдаёт
 // последний закэшированный на диске payload.
 func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {

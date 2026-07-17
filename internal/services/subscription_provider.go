@@ -15,11 +15,7 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-// happUserAgent — User-Agent, используемый для Happ fallback запроса.
-const happUserAgent = "Happ/1.0"
-
-// providerFetchBudget — общий тайм-аут на весь цикл ProviderFetch (upstream
-// запрос + опциональный Happ fallback запрос).
+// providerFetchBudget — общий тайм-аут на весь цикл ProviderFetch.
 const providerFetchBudget = 20 * time.Second
 
 var (
@@ -34,48 +30,21 @@ var (
 	providerURISchemeRe = regexp.MustCompile(`(?i)\b(?:vless|vmess|trojan|ss|hy2|hysteria2|tuic|socks5?|http-proxy)://`)
 )
 
-// ProviderFetch скачивает подписку с upstream-провайдера, используя ClashMeta
-// User-Agent, конвертирует ответ в Mihomo-совместимый provider payload
-// (только секция proxies:), опционально пытается Happ/1.0 fallback для
-// максимизации количества нод, кэширует результат на диск и возвращает payload.
+// ProviderFetch скачивает подписку с upstream-провайдера, используя единый
+// User-Agent панели (subscriptionUserAgent), конвертирует ответ в
+// Mihomo-совместимый provider payload (только секция proxies:), кэширует
+// результат на диск и возвращает payload.
 func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL string, sub *Subscription) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, providerFetchBudget)
 	defer cancel()
-	deadline, _ := ctx.Deadline()
 
-	clashMetaUA := s.subscriptionUserAgent("mihomo")
-
-	body, _, err := s.DownloadWithExplicitUA(ctx, upstreamURL, sub, clashMetaUA)
-	var payload []byte
-	if err == nil {
-		payload, _ = providerPayload(body)
-	}
-
-	// Happ fallback: если у подписки задан x-hwid и текущий UA не Happ,
-	// пробуем повторный запрос с UA Happ/1.0 — некоторые провайдеры отдают
-	// больше нод именно по этому UA.
-	hwid := sub.HwidToken
-	if hwid == "" {
-		hwid = s.hwid
-	}
-	if hwid != "" && !strings.Contains(strings.ToLower(clashMetaUA), "happ") && time.Until(deadline) > 0 {
-		happSub := sub.Clone()
-		if happBody, _, happErr := s.DownloadWithExplicitUA(ctx, upstreamURL, &happSub, happUserAgent); happErr != nil {
-			log.Printf("[Subscriptions] Happ fallback fetch failed for %s: %v", upstreamURL, happErr)
-			if err != nil && payload == nil {
-				return nil, err
-			}
-		} else {
-			happPayload, _ := providerPayload(happBody)
-			if countProviderNodes(string(happPayload)) > countProviderNodes(string(payload)) {
-				payload = happPayload
-				*sub = happSub
-			}
-		}
-	}
-
-	if payload == nil {
+	body, _, err := s.downloadWithUA(ctx, upstreamURL, sub, subscriptionUserAgent)
+	if err != nil {
 		return nil, err
+	}
+	payload, _ := providerPayload(body)
+	if payload == nil {
+		return nil, fmt.Errorf("upstream returned empty/unparseable payload")
 	}
 
 	if countProviderNodes(string(payload)) > 0 {

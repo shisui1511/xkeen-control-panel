@@ -82,8 +82,7 @@ func (s *SubscriptionService) Refresh(id string) error {
 	}
 
 	// Download subscription once (outside of lock to avoid blocking other operations)
-	ua := s.selectUserAgent(&subCopy)
-	body, headers, err := s.downloadWithUA(context.Background(), subCopy.URL, &subCopy, ua)
+	body, headers, err := s.downloadWithUA(context.Background(), subCopy.URL, &subCopy, subscriptionUserAgent)
 	if err != nil {
 		s.mu.Lock()
 		if live := s.GetLocked(safeID); live != nil {

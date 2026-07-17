@@ -2,7 +2,6 @@ package services
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 )
 
@@ -199,14 +198,9 @@ func TestApplySubscriptionHeaders_Base64Prefix(t *testing.T) {
 }
 
 func TestSubscriptionUserAgent(t *testing.T) {
-	svc := &SubscriptionService{} // без kernelSvc — используется fallback-версии
-	if ua := svc.subscriptionUserAgent("mihomo"); !strings.HasPrefix(ua, "ClashMeta/") || !strings.Contains(ua, "; mihomo/") {
-		t.Errorf("mihomo subscription should get 'ClashMeta/<ver>; mihomo/<ver>' UA, got %q", ua)
-	}
-	if ua := svc.subscriptionUserAgent("xray"); !strings.HasPrefix(ua, "v2rayN/") {
-		t.Errorf("xray subscription should get v2rayN/* UA, got %q", ua)
-	}
-	if ua := svc.subscriptionUserAgent(""); !strings.HasPrefix(ua, "v2rayN/") {
-		t.Errorf("default subscription should get v2rayN/* UA, got %q", ua)
+	// Единый UA для всех запросов подписок: разные UA приводили к тому, что
+	// провайдеры отдавали разные наборы нод для Xray- и Mihomo-путей.
+	if subscriptionUserAgent != "Happ/1.0" {
+		t.Errorf("subscription User-Agent must be Happ/1.0, got %q", subscriptionUserAgent)
 	}
 }

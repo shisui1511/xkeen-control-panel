@@ -13,51 +13,11 @@ import (
 	"strings"
 )
 
-// subscriptionUserAgent возвращает User-Agent для подписки на основе реальных
-// версий установленных ядер:
-//   - mihomo-подписки → "ClashMeta/<версия>; mihomo/<версия>" (формат точно
-//     соответствует UA официального клиента ClashMeta/mihomo — провайдеры
-//     с HWID-лимитом ориентируются именно на него)
-//   - xray-подписки → "v2rayN/<версия xray>" (v2rayN — официальный GUI для
-//     Xray-core, оба от 2dust; большинство провайдеров отдают xray-json по этому UA)
-func (s *SubscriptionService) subscriptionUserAgent(subType string) string {
-	if subType == "mihomo" {
-		ver := "1.18.10" // fallback если ядро не найдено
-		if s.kernelSvc != nil {
-			if k := s.kernelSvc.Get("mihomo"); k != nil && k.CurrentVersion != "" {
-				ver = k.CurrentVersion
-			}
-		}
-		return "ClashMeta/" + ver + "; mihomo/" + ver
-	}
-	ver := "1.8.24" // fallback если ядро не найдено
-	if s.kernelSvc != nil {
-		if k := s.kernelSvc.Get("xray"); k != nil && k.CurrentVersion != "" {
-			ver = k.CurrentVersion
-		}
-	}
-	return "v2rayN/" + ver
-}
-
-// selectUserAgent выбирает User-Agent на основе флагов интеграции и состояния ядер.
-func (s *SubscriptionService) selectUserAgent(sub *Subscription) string {
-	if sub.EnableXray && !sub.EnableMihomo {
-		return s.subscriptionUserAgent("xray")
-	}
-	if sub.EnableMihomo && !sub.EnableXray {
-		return s.subscriptionUserAgent("mihomo")
-	}
-	if sub.EnableXray && sub.EnableMihomo {
-		if s.kernelSvc != nil {
-			info := s.kernelSvc.Get("mihomo")
-			if info != nil && info.ProcessStatus == "running" {
-				return s.subscriptionUserAgent("mihomo")
-			}
-		}
-		return s.subscriptionUserAgent("xray")
-	}
-	return s.subscriptionUserAgent("xray")
-}
+// subscriptionUserAgent — единый User-Agent для всех запросов подписок.
+// Провайдеры отдают разные наборы нод в зависимости от UA клиента; разные UA
+// для Xray- и Mihomo-путей приводили к рассинхрону списков нод одной подписки.
+// По UA Happ провайдеры отдают максимально полный набор нод.
+const subscriptionUserAgent = "Happ/1.0"
 
 // fetchWithUserAgent выполняет GET с правильным User-Agent и HWID-заголовками.
 func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL string, sub *Subscription, ua string) (*http.Response, error) {
@@ -88,17 +48,11 @@ func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL str
 	return s.httpClient.Do(req)
 }
 
-// DownloadRaw скачивает подписку с User-Agent, выбранным по типу интеграции
-// подписки (см. selectUserAgent). Экспортируется для использования из
+// DownloadRaw скачивает подписку с единым User-Agent панели
+// (subscriptionUserAgent). Экспортируется для использования из
 // ProviderFetch (loopback provider endpoint).
 func (s *SubscriptionService) DownloadRaw(ctx context.Context, subURL string, sub *Subscription) ([]byte, http.Header, error) {
 	return s.downloadRaw(ctx, subURL, sub)
-}
-
-// DownloadWithExplicitUA скачивает подписку с явно заданным User-Agent —
-// используется для Happ fallback и ClashMeta upstream proxy-запросов.
-func (s *SubscriptionService) DownloadWithExplicitUA(ctx context.Context, subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
-	return s.downloadWithUA(ctx, subURL, sub, ua)
 }
 
 func (s *SubscriptionService) downloadWithUA(ctx context.Context, subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
@@ -125,8 +79,7 @@ func (s *SubscriptionService) downloadWithUA(ctx context.Context, subURL string,
 }
 
 func (s *SubscriptionService) downloadRaw(ctx context.Context, subURL string, sub *Subscription) ([]byte, http.Header, error) {
-	ua := s.selectUserAgent(sub)
-	return s.downloadWithUA(ctx, subURL, sub, ua)
+	return s.downloadWithUA(ctx, subURL, sub, subscriptionUserAgent)
 }
 
 func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL string, sub *Subscription) (outbounds []Outbound, skips []SkipReason, bodyBytes []byte, headers http.Header, err error) {
@@ -137,8 +90,7 @@ func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL strin
 		}
 	}()
 
-	ua := s.selectUserAgent(sub)
-	body, headers, err := s.downloadWithUA(ctx, subURL, sub, ua)
+	body, headers, err := s.downloadWithUA(ctx, subURL, sub, subscriptionUserAgent)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
