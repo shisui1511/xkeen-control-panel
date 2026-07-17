@@ -943,7 +943,7 @@
     };
 
     try {
-      const url = editingSub ? '/api/subscriptions/update' : '/api/subscriptions/add';
+      const url = editingSub ? `/api/subscriptions/update?id=${encodeURIComponent(editingSub.id)}` : '/api/subscriptions/add';
       const res = await fetch(url, {
         method: 'POST',
         headers: {
