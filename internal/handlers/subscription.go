@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 func (a *API) SubscriptionList(w http.ResponseWriter, r *http.Request) {
@@ -400,7 +401,7 @@ func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 	// fallback на кэш при сетевой ошибке).
 	payload, err := a.subscriptionSvc.ProviderFetchWithFallback(r.Context(), urlStr, sub)
 	if err != nil {
-		log.Printf("[Subscriptions] provider fetch failed for sub=%s: %v", sub.ID, err)
+		log.Printf("[Subscriptions] provider fetch failed for sub=%s: %s", sub.ID, utils.SanitizeLogInput(err.Error()))
 		http.Error(w, "Failed to fetch provider", http.StatusBadGateway)
 		return
 	}
