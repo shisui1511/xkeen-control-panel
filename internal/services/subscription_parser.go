@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +12,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
 // subscriptionUserAgent — единый User-Agent для всех запросов подписок.
@@ -21,6 +24,11 @@ const subscriptionUserAgent = "Happ/1.0"
 
 // fetchWithUserAgent выполняет GET с правильным User-Agent и HWID-заголовками.
 func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL string, sub *Subscription, ua string) (*http.Response, error) {
+	isTest := flag.Lookup("test.v") != nil
+	if err := utils.ValidateURL(ctx, subURL, isTest); err != nil {
+		return nil, fmt.Errorf("SSRF validation failed: %w", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, subURL, nil)
 	if err != nil {
 		return nil, err
