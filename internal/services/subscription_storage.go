@@ -60,8 +60,8 @@ func (s *SubscriptionService) subPath(filename string) string {
 var cacheSuffixes = []string{"_raw.txt", "_headers.json", "_parse_report.json"}
 
 // cacheBaseLocked возвращает базовое имя кэш-файлов подписки — имя её
-// Mihomo-провайдера (например «TEST_PROVIDER»). Для неизвестного ID возвращается
-// legacy-база "sub_<id>". mu должен быть захвачен вызывающим.
+// Mihomo-провайдера. Для неизвестного ID возвращается legacy-база "sub_<id>".
+// mu должен быть захвачен вызывающим.
 func (s *SubscriptionService) cacheBaseLocked(safeID string) string {
 	if sub := s.GetLocked(safeID); sub != nil {
 		return sub.GetProviderName()
@@ -298,8 +298,23 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			}
 			configPath := filepath.Join(configDir, "config.yaml")
 
+			// Имя провайдера зафиксировано; пересчёт — только при явном
+			// переименовании подписки пользователем.
 			oldProviderName := existing.GetProviderName()
-			newProviderName := GetMihomoProviderName(existing.ProfileTitle, sub.Name, existing.ID)
+			newProviderName := oldProviderName
+			if sub.Name != existing.Name {
+				newProviderName = GetMihomoProviderName(existing.ProfileTitle, sub.Name, existing.ID)
+			}
+
+			if oldProviderName != newProviderName {
+				// Кэш-файлы панели следуют за именем провайдера.
+				for _, suffix := range cacheSuffixes {
+					oldPath := s.subPath(oldProviderName + suffix)
+					if _, err := os.Stat(oldPath); err == nil {
+						_ = os.Rename(oldPath, s.subPath(newProviderName+suffix))
+					}
+				}
+			}
 
 			if oldProviderName != newProviderName && existing.EnableMihomo {
 				s.mihomoMu.Lock()
@@ -516,6 +531,65 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 	}
 	return nil
+}
+
+// maybeRenameProviderLocked выполняет однократное переименование провайдера
+// после первого получения profile-title от сервера подписки: временное имя
+// (выведенное из ID) заменяется на бренд провайдера. Не срабатывает, если
+// пользователь задал имя подписки вручную. mu должен быть захвачен вызывающим.
+func (s *SubscriptionService) maybeRenameProviderLocked(live *Subscription) {
+	if live.Name != "" || live.ProfileTitle == "" {
+		return
+	}
+	oldName := live.GetProviderName()
+	newName := GetMihomoProviderName(live.ProfileTitle, "", live.ID)
+	if newName == oldName {
+		return
+	}
+
+	// Кэш-файлы панели следуют за именем провайдера.
+	for _, suffix := range cacheSuffixes {
+		oldPath := s.subPath(oldName + suffix)
+		if _, err := os.Stat(oldPath); err == nil {
+			_ = os.Rename(oldPath, s.subPath(newName+suffix))
+		}
+	}
+
+	live.ProviderName = newName
+
+	if live.EnableMihomo {
+		configDir := s.mihomoConfigDir
+		if configDir == "" {
+			configDir = "/opt/etc/mihomo"
+		}
+		configPath := filepath.Join(configDir, "config.yaml")
+
+		s.mihomoMu.Lock()
+		if rawConfig, err := os.ReadFile(configPath); err == nil {
+			newConfig := ReplaceMihomoProxyProvider(string(rawConfig), oldName, "")
+			providerBlock := s.generateMihomoProxyProviderBlockLocked(live, s.panelPort, s.panelHTTPS, s.loopbackPort)
+			newConfig = ReplaceMihomoProxyProvider(newConfig, newName, providerBlock)
+			for _, group := range live.MihomoGroups {
+				newConfig = UpdateMihomoGroupProviders(newConfig, group, oldName, true)
+				newConfig = UpdateMihomoGroupProviders(newConfig, group, newName, false)
+			}
+			if string(rawConfig) != newConfig {
+				_ = utils.AtomicWriteFile(configPath, []byte(newConfig), 0600)
+			}
+		}
+		s.mihomoMu.Unlock()
+
+		// Файл провайдера mihomo следует за именем (санитизация путей — CWE-22).
+		providersDir := filepath.Join(configDir, "proxy_providers")
+		oldFile := filepath.Join(providersDir, oldName+".yaml")
+		newFile := filepath.Join(providersDir, newName+".yaml")
+		if strings.HasPrefix(oldFile, providersDir+string(filepath.Separator)) &&
+			strings.HasPrefix(newFile, providersDir+string(filepath.Separator)) {
+			_ = os.Rename(oldFile, newFile)
+		}
+	}
+
+	log.Printf("[Subscriptions] Provider renamed after profile-title: %s -> %s", oldName, newName)
 }
 
 // generateIDLocked возвращает новый уникальный ID подписки. Unix-секунды

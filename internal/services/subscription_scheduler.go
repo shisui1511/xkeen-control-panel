@@ -147,6 +147,9 @@ func (s *SubscriptionService) Refresh(id string) error {
 		live.ProfileWebPageURL = subCopy.ProfileWebPageURL
 		live.ProviderType = subCopy.ProviderType
 
+		// Временное имя провайдера (из ID) заменяется на бренд из profile-title.
+		s.maybeRenameProviderLocked(live)
+
 		// Update Xray state if its step succeeded
 		if xraySuccess {
 			live.LastHash = subCopy.LastHash

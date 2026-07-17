@@ -295,7 +295,7 @@ func TestProxyProviders_Refresh_InvalidName(t *testing.T) {
 		{"underscore", http.MethodPut, "/api/proxy-providers/bad_name/refresh", http.StatusBadRequest, false},
 		{"multi-segment", http.MethodPut, "/api/proxy-providers/a/b/refresh", http.StatusBadRequest, false},
 		{"query-like chars", http.MethodPut, "/api/proxy-providers/x%3Fy/refresh", http.StatusBadRequest, false},
-		// Верхний регистр допустим: имена провайдеров сохраняют регистр («TEST_PROVIDER»).
+		// Верхний регистр допустим: имена провайдеров сохраняют регистр.
 		{"uppercase", http.MethodPut, "/api/proxy-providers/TEST_PROVIDER/refresh", http.StatusNoContent, true},
 		{"no name in path", http.MethodPut, "/api/proxy-providers/refresh", http.StatusNotFound, false},
 		{"wrong method", http.MethodPost, "/api/proxy-providers/test-provider/refresh", http.StatusNotFound, false},

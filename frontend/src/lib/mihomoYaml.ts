@@ -658,8 +658,7 @@ const CYRILLIC_MAP: Record<string, string> = {
 // Зеркалит providerGenericWords бэкенда (subscription_converter.go).
 const PROVIDER_GENERIC_WORDS = new Set(['подписка', 'профиль', 'subscription', 'profile']);
 
-// Выводит бренд из profile-title: убирает эмодзи и символы, отбрасывает
-// служебные слова. убирает эмодзи и служебные слова.
+// Выводит бренд из profile-title: убирает эмодзи и символы, отбрасывает служебные слова.
 function extractProviderBrand(title: string): string {
   const cleaned = title
     .split('')
@@ -673,7 +672,7 @@ function extractProviderBrand(title: string): string {
 
 // Зеркалит GetMihomoProviderName бэкенда: имя пользователя → бренд из
 // profile-title → fallback (ID). Сегмент URL не используется — он содержит
-// секретный токен подписки. Регистр сохраняется (регистр сохраняется).
+// секретный токен подписки. Регистр сохраняется.
 export function slugifyProviderName(
   profileTitle: string,
   name: string,
@@ -711,11 +710,11 @@ export function generateYAML(state: MihomoConfigState): string {
       const providerName = sub.isVirtual
         ? sub.id
         : slugifyProviderName(
-            sub.profile_title || '',
-            sub.name || '',
-            sub.url || '',
-            sub.id || `provider-${i}`
-          );
+          sub.profile_title || '',
+          sub.name || '',
+          sub.url || '',
+          sub.id || `provider-${i}`
+        );
       lines.push(`  ${providerName}:`);
       if (sub.rawLines && sub.rawLines.length > 0) {
         let currentParent = '';

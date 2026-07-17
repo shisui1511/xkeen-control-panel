@@ -602,8 +602,7 @@ var providerGenericWords = map[string]bool{
 }
 
 // extractProviderBrand выводит человекочитаемый бренд провайдера из
-// profile-title подписки: убирает эмодзи и прочие символы, отбрасывает
-// служебные слова. убирает эмодзи и служебные слова.
+// profile-title подписки: убирает эмодзи и прочие символы, отбрасывает служебные слова.
 func extractProviderBrand(title string) string {
 	var b strings.Builder
 	for _, r := range title {
@@ -645,7 +644,7 @@ func GetMihomoProviderName(profileTitle, name, fallback string) string {
 }
 
 // sanitizeProviderName приводит имя к безопасному для YAML-ключа и имени
-// файла виду: [A-Za-z0-9-], регистр сохраняется (регистр сохраняется).
+// файла виду: [A-Za-z0-9-], регистр сохраняется.
 func sanitizeProviderName(s string) string {
 	s = transliterateCyrillic(s)
 	s = nonAlphanumericDashRe.ReplaceAllString(s, "-")
