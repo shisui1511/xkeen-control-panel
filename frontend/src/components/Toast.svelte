@@ -48,7 +48,7 @@
     gap: 10px;
     padding: 10px 14px;
     border-radius: var(--radius-md);
-    background: linear-gradient(180deg, #0d2438, #08182a);
+    background: linear-gradient(180deg, var(--surface-overlay-from), var(--surface-overlay-to));
     color: var(--fg-primary);
     border: 1px solid var(--border);
     box-shadow: 0 20px 36px -16px rgba(0, 0, 0, 0.6);

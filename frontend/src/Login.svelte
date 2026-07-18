@@ -142,7 +142,7 @@
   .login-card {
     width: 100%;
     max-width: 420px;
-    background: linear-gradient(180deg, #0d2438 0%, #09192b 100%);
+    background: linear-gradient(180deg, var(--surface-overlay-from), var(--surface-overlay-to));
     border: 1px solid rgba(41, 194, 240, 0.14);
     border-radius: var(--radius-lg);
     padding: 38px 36px 32px;
