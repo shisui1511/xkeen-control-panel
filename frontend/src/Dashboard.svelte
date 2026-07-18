@@ -438,7 +438,9 @@
   function getDrawerFocusables(): HTMLElement[] {
     if (!sidebarEl) return [];
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-    return Array.from(sidebarEl.querySelectorAll(selectors)) as HTMLElement[];
+    return Array.from(sidebarEl.querySelectorAll(selectors)).filter(
+      (el) => !(el as HTMLElement).closest('details:not([open])')
+    ) as HTMLElement[];
   }
 
   function handleDrawerKeydown(e: KeyboardEvent) {
@@ -477,13 +479,14 @@
   $effect(() => {
     if (drawerIsModal) {
       previouslyFocusedElement = document.activeElement as HTMLElement;
-      setTimeout(() => {
+      const timerId = setTimeout(() => {
         if (sidebarEl) {
           const focusables = getDrawerFocusables();
           if (focusables.length > 0) focusables[0].focus();
           else sidebarEl.focus();
         }
       }, 0);
+      return () => clearTimeout(timerId);
     } else if (previouslyFocusedElement) {
       previouslyFocusedElement.focus();
       previouslyFocusedElement = null;
@@ -502,6 +505,10 @@
       document.body.style.top = '';
       window.scrollTo(0, lockedScrollY);
     }
+    return () => {
+      document.body.classList.remove('drawer-locked');
+      document.body.style.top = '';
+    };
   });
 
   function switchTab(tab: string) {
@@ -595,7 +602,7 @@
 
 <div class="dashboard-layout" class:sb-collapsed={isSidebarCollapsed}>
   <!-- Mobile header bar -->
-  <header class="mobile-header">
+  <header class="mobile-header" inert={drawerIsModal}>
     <button
       class="burger-btn"
       onclick={toggleSidebar}
@@ -613,12 +620,16 @@
   </header>
 
   <!-- Off-canvas overlay (mobile only) -->
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
   <div
     class="sidebar-overlay"
     class:hidden={!$isSidebarOpen}
     onclick={closeSidebar}
+    onkeydown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        closeSidebar();
+      }
+    }}
     role="button"
     tabindex="0"
     aria-label={$t('nav.close_menu')}
@@ -632,10 +643,11 @@
     style="display: flex; flex-direction: column;"
     bind:this={sidebarEl}
     onkeydown={handleDrawerKeydown}
-    role="dialog"
+    role={drawerIsModal ? 'dialog' : undefined}
     aria-modal={drawerIsModal ? 'true' : undefined}
-    aria-labelledby="mobile-header-title"
+    aria-labelledby={drawerIsModal ? 'mobile-header-title' : undefined}
     tabindex="-1"
+    inert={isMobile && !$isSidebarOpen}
   >
     <Sidebar
       {currentTab}
