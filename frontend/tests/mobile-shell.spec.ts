@@ -26,6 +26,63 @@ test.describe('Mobile shell (Pixel 5)', () => {
             csrf_token: 'mock-csrf-token'
           })
         });
+      } else if (url.includes('/api/capabilities')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              mihomo: { installed: true, reachable: true, api_reachable: true, process_running: true },
+              kernels: { xray: { installed: false }, mihomo: { installed: true } }
+            }
+          })
+        });
+      } else if (url.includes('/api/system/stats')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            memory: { total: 524288000, used: 131072000, free: 393216000 },
+            disk: { total: 536870912, used: 209715200, free: 327155712 },
+            ssl_cert_days: 10,
+            load: [0.5, 0.4, 0.3],
+            uptime: { seconds: 3600, days: 0, hours: 1, minutes: 0 },
+            go_runtime: {
+              goroutines: 10,
+              heap_alloc: 4194304,
+              heap_sys: 8388608,
+              num_gc: 5,
+              go_version: 'go1.21.0',
+              gomaxprocs: 4,
+              goarch: 'arm64'
+            },
+            router_model: 'Keenetic',
+            hostname: 'keenetic',
+            wan_status: 'connected',
+            default_gateway: '192.168.1.1',
+            dns_servers: ['8.8.8.8'],
+            dns_resolving: true
+          })
+        });
+      } else if (url.includes('/api/mihomo/proxy/rules')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            rules: [
+              { type: 'Domain', payload: 'google.com', proxy: 'PROXY' }
+            ]
+          })
+        });
+      } else if (url.includes('/api/mihomo/proxy/providers/rules')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            providers: {}
+          })
+        });
       } else {
         await route.fulfill({
           status: 200,
@@ -107,5 +164,25 @@ test.describe('Mobile shell (Pixel 5)', () => {
       .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
 
     expect(fontSize).toBeGreaterThanOrEqual(16);
+  });
+
+  test('anti-zoom: filter-input and select.input computed font-size >= 16px', async ({ page }) => {
+    await page.goto('/#/rules');
+    // Дожидаемся рендеринга страницы и полей ввода/выбора
+    await expect(page.locator('.filter-input')).toBeVisible();
+    await expect(page.locator('select.source-select').first()).toBeVisible();
+
+    const filterFontSize = await page
+      .locator('.filter-input')
+      .first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+
+    const selectFontSize = await page
+      .locator('select.source-select')
+      .first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+
+    expect(filterFontSize).toBeGreaterThanOrEqual(16);
+    expect(selectFontSize).toBeGreaterThanOrEqual(16);
   });
 });
