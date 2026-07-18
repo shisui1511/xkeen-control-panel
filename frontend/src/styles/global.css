@@ -920,12 +920,6 @@ body.drawer-locked {
   .dashboard-layout {
     flex-direction: column;
   }
-  .input,
-  select.input,
-  input,
-  textarea {
-    font-size: 16px;
-  }
   .sidebar {
     transform: translateX(-100%);
   }
@@ -957,6 +951,14 @@ body.drawer-locked {
   }
   .qa-grid-mini {
     grid-template-columns: 1fr 1fr;
+  }
+  .input,
+  .filter-input,
+  .source-select,
+  select.input,
+  input,
+  textarea {
+    font-size: 16px;
   }
 }
 
