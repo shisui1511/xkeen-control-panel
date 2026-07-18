@@ -410,7 +410,11 @@ input[type='number'] {
   color: var(--danger);
 }
 .alert-warning {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--warning) 12%, transparent), color-mix(in srgb, var(--warning) 4%, transparent));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--warning) 12%, transparent),
+    color-mix(in srgb, var(--warning) 4%, transparent)
+  );
   border-color: color-mix(in srgb, var(--warning) 40%, transparent);
   color: var(--warning);
 }
@@ -1591,7 +1595,11 @@ pre.code-output {
   gap: 16px;
   padding: 12px 18px;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--danger) 10%, transparent), color-mix(in srgb, var(--danger) 0%, transparent) 40%),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--danger) 10%, transparent),
+      color-mix(in srgb, var(--danger) 0%, transparent) 40%
+    ),
     linear-gradient(180deg, var(--surface-overlay-from), var(--surface-overlay-to));
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   border-left: 0;

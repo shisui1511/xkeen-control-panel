@@ -49,10 +49,16 @@ function hexToRgb(hex) {
   if (!hex) return null;
   let clean = hex.trim().replace(/^#/, '');
   if (clean.length === 3) {
-    clean = clean.split('').map(c => c + c).join('');
+    clean = clean
+      .split('')
+      .map((c) => c + c)
+      .join('');
   }
   if (clean.length === 4) {
-    clean = clean.split('').map(c => c + c).join('');
+    clean = clean
+      .split('')
+      .map((c) => c + c)
+      .join('');
   }
   if (clean.length === 6) {
     const r = parseInt(clean.slice(0, 2), 16);
@@ -66,19 +72,25 @@ function hexToRgb(hex) {
     const b = parseInt(clean.slice(4, 6), 16);
     const a = parseInt(clean.slice(6, 8), 16) / 255;
     if (a < 1) {
-      console.warn(`⚠️ Предупреждение: Получен цвет с прозрачностью (alpha = ${a.toFixed(2)}): #${clean}. Альфа-канал будет проигнорирован при расчете контраста.`);
+      console.warn(
+        `⚠️ Предупреждение: Получен цвет с прозрачностью (alpha = ${a.toFixed(2)}): #${clean}. Альфа-канал будет проигнорирован при расчете контраста.`
+      );
     }
     return [r, g, b];
   }
   // Поддержка rgb/rgba в resolved значении
-  const rgbMatch = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(clean);
+  const rgbMatch = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(
+    clean
+  );
   if (rgbMatch) {
     const r = parseInt(rgbMatch[1], 10);
     const g = parseInt(rgbMatch[2], 10);
     const b = parseInt(rgbMatch[3], 10);
     const a = rgbMatch[4] !== undefined ? parseFloat(rgbMatch[4]) : 1;
     if (a < 1) {
-      console.warn(`⚠️ Предупреждение: Получен цвет с прозрачностью (alpha = ${a}): ${clean}. Альфа-канал будет проигнорирован при расчете контраста.`);
+      console.warn(
+        `⚠️ Предупреждение: Получен цвет с прозрачностью (alpha = ${a}): ${clean}. Альфа-канал будет проигнорирован при расчете контраста.`
+      );
     }
     return [r, g, b];
   }
@@ -108,13 +120,16 @@ function contrastRatio(rgbA, rgbB) {
 
 function checkRawColors(blockText, contextName) {
   let hasRaw = false;
-  const propRegex = /^\s*(color|background|background-color|border-color|scrollbar-color)\s*:\s*([^;]+);/gmi;
+  const propRegex =
+    /^\s*(color|background|background-color|border-color|scrollbar-color)\s*:\s*([^;]+);/gim;
   let match;
   while ((match = propRegex.exec(blockText)) !== null) {
     const prop = match[1].toLowerCase();
     const val = match[2].trim();
     if (/(#[0-9a-fA-F]{3,8}\b|rgba?\(\s*\d)/.test(val)) {
-      console.error(`❌ Ошибка [D-06]: Селектор ${contextName} содержит сырой цвет в свойстве ${prop}: ${val}`);
+      console.error(
+        `❌ Ошибка [D-06]: Селектор ${contextName} содержит сырой цвет в свойстве ${prop}: ${val}`
+      );
       hasRaw = true;
     }
   }
@@ -161,7 +176,9 @@ function main() {
         const overVal = tokens[pair.bg.over];
         const mixVal = tokens[pair.bg.mixToken];
         if (!overVal || !mixVal) {
-          console.error(`❌ Ошибка: Токены ${pair.bg.over} или ${pair.bg.mixToken} не найдены для темы ${pair.theme}`);
+          console.error(
+            `❌ Ошибка: Токены ${pair.bg.over} или ${pair.bg.mixToken} не найдены для темы ${pair.theme}`
+          );
           failed = true;
           continue;
         }
@@ -170,7 +187,9 @@ function main() {
         const overRgb = hexToRgb(overHex);
         const mixRgb = hexToRgb(mixHex);
         if (!overRgb || !mixRgb) {
-          console.error(`❌ Ошибка: Не удалось распарсить составляющие цвета для смешивания: ${pair.bg.over} (${overHex}) или ${pair.bg.mixToken} (${mixHex})`);
+          console.error(
+            `❌ Ошибка: Не удалось распарсить составляющие цвета для смешивания: ${pair.bg.over} (${overHex}) или ${pair.bg.mixToken} (${mixHex})`
+          );
           failed = true;
           continue;
         }
@@ -180,7 +199,9 @@ function main() {
       }
 
       if (!fgRgb || !bgRgb) {
-        console.error(`❌ Ошибка: Не удалось распарсить цвета для пары ${pair.id} (${pair.fg} vs ${bgDesc})`);
+        console.error(
+          `❌ Ошибка: Не удалось распарсить цвета для пары ${pair.id} (${pair.fg} vs ${bgDesc})`
+        );
         failed = true;
         continue;
       }
@@ -188,7 +209,9 @@ function main() {
       const ratio = contrastRatio(fgRgb, bgRgb);
       if (ratio < pair.minRatio) {
         failed = true;
-        console.error(`❌ FAIL [${pair.theme}] ${pair.id} (${pair.fg} vs ${bgDesc}): ${ratio.toFixed(2)}:1 < ${pair.minRatio}:1`);
+        console.error(
+          `❌ FAIL [${pair.theme}] ${pair.id} (${pair.fg} vs ${bgDesc}): ${ratio.toFixed(2)}:1 < ${pair.minRatio}:1`
+        );
       } else {
         console.log(`✅ PASS [${pair.theme}] ${pair.id}: ${ratio.toFixed(2)}:1`);
       }
@@ -197,12 +220,28 @@ function main() {
     // Проверка D-06
     console.log('🔄 Запуск проверки отсутствия сырых hex/rgba в D-05 селекторах...');
     const scopedSelectors = [
-      '.alert-success', '.alert-error', '.alert-warning', '.alert-close-btn',
-      '.chip-success', '.chip-warning', '.chip-danger', '.chip-info', '.chip-default',
-      '.badge', '.badge-success', '.badge-warning', '.badge-error', '.badge-danger',
-      '.badge-info', '.badge-primary', '.badge-type',
-      '.status-badge', '.status-dot',
-      '.status-badge-value', '.version-badge', '.api-offline'
+      '.alert-success',
+      '.alert-error',
+      '.alert-warning',
+      '.alert-close-btn',
+      '.chip-success',
+      '.chip-warning',
+      '.chip-danger',
+      '.chip-info',
+      '.chip-default',
+      '.badge',
+      '.badge-success',
+      '.badge-warning',
+      '.badge-error',
+      '.badge-danger',
+      '.badge-info',
+      '.badge-primary',
+      '.badge-type',
+      '.status-badge',
+      '.status-dot',
+      '.status-badge-value',
+      '.version-badge',
+      '.api-offline'
     ];
 
     for (const sel of scopedSelectors) {

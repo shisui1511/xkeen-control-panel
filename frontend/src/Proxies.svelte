@@ -1961,7 +1961,11 @@
     background: transparent;
   }
   .group-card .gc-head {
-    background: linear-gradient(135deg, var(--bg-group-head-from, rgba(20, 51, 79, 0.9)), var(--bg-group-head-to, rgba(16, 42, 68, 0.95)));
+    background: linear-gradient(
+      135deg,
+      var(--bg-group-head-from, rgba(20, 51, 79, 0.9)),
+      var(--bg-group-head-to, rgba(16, 42, 68, 0.95))
+    );
     padding: 14px 18px;
     display: flex;
     flex-direction: column;

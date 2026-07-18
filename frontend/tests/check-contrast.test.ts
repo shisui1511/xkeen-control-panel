@@ -1,13 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import checkContrast from '../scripts/check-contrast.cjs';
 
-const {
-  hexToRgb,
-  compositeOver,
-  srgbChannel,
-  relativeLuminance,
-  contrastRatio
-} = checkContrast;
+const { hexToRgb, compositeOver, srgbChannel, relativeLuminance, contrastRatio } = checkContrast;
 
 describe('WCAG 2.1 Contrast Math Verification', () => {
   it('should parse hex to RGB correctly', () => {
