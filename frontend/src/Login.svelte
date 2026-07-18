@@ -2,10 +2,10 @@
   import { onMount } from 'svelte';
   import { t } from './i18n';
 
-  let password = '';
-  let error = '';
-  let loading = false;
-  let version = '';
+  let password = $state('');
+  let error = $state('');
+  let loading = $state(false);
+  let version = $state('');
 
   async function fetchVersion() {
     try {
