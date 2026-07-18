@@ -51,16 +51,36 @@ function hexToRgb(hex) {
   if (clean.length === 3) {
     clean = clean.split('').map(c => c + c).join('');
   }
+  if (clean.length === 4) {
+    clean = clean.split('').map(c => c + c).join('');
+  }
   if (clean.length === 6) {
     const r = parseInt(clean.slice(0, 2), 16);
     const g = parseInt(clean.slice(2, 4), 16);
     const b = parseInt(clean.slice(4, 6), 16);
     return [r, g, b];
   }
+  if (clean.length === 8) {
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    const a = parseInt(clean.slice(6, 8), 16) / 255;
+    if (a < 1) {
+      console.warn(`⚠️ Предупреждение: Получен цвет с прозрачностью (alpha = ${a.toFixed(2)}): #${clean}. Альфа-канал будет проигнорирован при расчете контраста.`);
+    }
+    return [r, g, b];
+  }
   // Поддержка rgb/rgba в resolved значении
   const rgbMatch = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)$/i.exec(clean);
   if (rgbMatch) {
-    return [parseInt(rgbMatch[1], 10), parseInt(rgbMatch[2], 10), parseInt(rgbMatch[3], 10)];
+    const r = parseInt(rgbMatch[1], 10);
+    const g = parseInt(rgbMatch[2], 10);
+    const b = parseInt(rgbMatch[3], 10);
+    const a = rgbMatch[4] !== undefined ? parseFloat(rgbMatch[4]) : 1;
+    if (a < 1) {
+      console.warn(`⚠️ Предупреждение: Получен цвет с прозрачностью (alpha = ${a}): ${clean}. Альфа-канал будет проигнорирован при расчете контраста.`);
+    }
+    return [r, g, b];
   }
   return null;
 }
@@ -149,6 +169,11 @@ function main() {
         const mixHex = resolve(mixVal, tokens);
         const overRgb = hexToRgb(overHex);
         const mixRgb = hexToRgb(mixHex);
+        if (!overRgb || !mixRgb) {
+          console.error(`❌ Ошибка: Не удалось распарсить составляющие цвета для смешивания: ${pair.bg.over} (${overHex}) или ${pair.bg.mixToken} (${mixHex})`);
+          failed = true;
+          continue;
+        }
         const alpha = (pair.bg.mixPercent ?? 0) / 100;
         bgRgb = compositeOver(mixRgb, alpha, overRgb);
         bgDesc = `${pair.bg.mixPercent}% var(${pair.bg.mixToken}) over var(${pair.bg.over})`;
