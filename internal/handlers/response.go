@@ -25,4 +25,3 @@ func JSONError(w http.ResponseWriter, code int, msg string) {
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: html.EscapeString(msg)})
 }
-
