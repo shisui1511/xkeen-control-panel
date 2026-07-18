@@ -442,6 +442,10 @@
   }
 
   function handleDrawerKeydown(e: KeyboardEvent) {
+    // Gate on drawerIsModal (single gate, D-10 prohibition #2): on desktop the
+    // sidebar is a persistent, non-modal panel — Escape-close and Tab-trap must
+    // stay inert there so desktop keyboard navigation never regresses.
+    if (!drawerIsModal) return;
     if (e.key === 'Escape') {
       closeSidebar();
       return;
