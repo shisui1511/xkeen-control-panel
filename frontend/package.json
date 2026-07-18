@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:unit": "vitest run",
+    "check:contrast": "node scripts/check-contrast.cjs",
     "lint": "svelte-check --tsconfig ./tsconfig.json && eslint .",
     "format:check": "prettier --check ."
   },

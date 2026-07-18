@@ -1,0 +1,38 @@
+[
+  { "id": "success-text-on-card-light", "theme": "light", "fg": "--success", "bg": "--bg-card", "minRatio": 4.5 },
+  { "id": "warning-text-on-card-light", "theme": "light", "fg": "--warning", "bg": "--bg-card", "minRatio": 4.5 },
+  { "id": "danger-text-on-card-light", "theme": "light", "fg": "--danger", "bg": "--bg-card", "minRatio": 4.5 },
+  { "id": "accent-text-on-card-light", "theme": "light", "fg": "--accent-text", "bg": "--bg-card", "minRatio": 4.5 },
+  { "id": "fg-dim-on-card-dark", "theme": "dark", "fg": "--fg-dim", "bg": "--bg-card", "minRatio": 4.5 },
+  { "id": "fg-dim-on-elevated-dark", "theme": "dark", "fg": "--fg-dim", "bg": "--bg-elevated", "minRatio": 4.5 },
+  { "id": "danger-on-card-dark", "theme": "dark", "fg": "--danger", "bg": "--bg-card", "minRatio": 4.5 },
+  { "id": "danger-on-elevated-dark", "theme": "dark", "fg": "--danger", "bg": "--bg-elevated", "minRatio": 4.5 },
+  {
+    "id": "chip-success-text-on-tinted-bg-light",
+    "theme": "light",
+    "fg": "--success",
+    "bg": { "over": "--bg-card", "mixToken": "--success", "mixPercent": 8 },
+    "minRatio": 4.5
+  },
+  {
+    "id": "chip-warning-text-on-tinted-bg-light",
+    "theme": "light",
+    "fg": "--warning",
+    "bg": { "over": "--bg-card", "mixToken": "--warning", "mixPercent": 8 },
+    "minRatio": 4.5
+  },
+  {
+    "id": "chip-danger-text-on-tinted-bg-light",
+    "theme": "light",
+    "fg": "--danger",
+    "bg": { "over": "--bg-card", "mixToken": "--danger", "mixPercent": 8 },
+    "minRatio": 4.5
+  },
+  {
+    "id": "chip-accent-text-on-tinted-bg-light",
+    "theme": "light",
+    "fg": "--accent-text",
+    "bg": { "over": "--bg-card", "mixToken": "--accent-text", "mixPercent": 8 },
+    "minRatio": 4.5
+  }
+]
