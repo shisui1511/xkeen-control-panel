@@ -35,7 +35,7 @@ func (a *API) OutboundParse(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1 MB)")
 			return
 		}
-		JSONError(w, http.StatusBadRequest, err.Error())
+		a.errorResponse(w, a.t(r, "error.invalid_request"), http.StatusBadRequest)
 		return
 	}
 
@@ -87,7 +87,7 @@ func (a *API) OutboundImport(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1 MB)")
 			return
 		}
-		JSONError(w, http.StatusBadRequest, err.Error())
+		a.errorResponse(w, a.t(r, "error.invalid_request"), http.StatusBadRequest)
 		return
 	}
 
@@ -205,7 +205,7 @@ func (a *API) OutboundImportBulk(w http.ResponseWriter, r *http.Request) {
 			JSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 1 MB)")
 			return
 		}
-		JSONError(w, http.StatusBadRequest, err.Error())
+		a.errorResponse(w, a.t(r, "error.invalid_request"), http.StatusBadRequest)
 		return
 	}
 
