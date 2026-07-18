@@ -577,6 +577,9 @@
     const mobileMql = window.matchMedia('(max-width: 768px)');
     const handleMobileMqlChange = (e: MediaQueryListEvent) => {
       isMobile = e.matches;
+      if (!isMobile) {
+        isSidebarOpen.set(false);
+      }
     };
     mobileMql.addEventListener('change', handleMobileMqlChange);
 
@@ -1422,6 +1425,19 @@
   }
   .status-badge-item:nth-last-child(-n + 4) {
     border-bottom: 0;
+  }
+
+  @media (max-width: 768px) {
+    .status-badge-item {
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+    }
+    .status-badge-item:nth-child(2n) {
+      border-right: 0;
+    }
+    .status-badge-item:nth-last-child(-n + 2) {
+      border-bottom: 0;
+    }
   }
 
   .svc-cell-stack {
