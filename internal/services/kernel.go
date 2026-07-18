@@ -801,6 +801,15 @@ func (s *KernelService) CheckLatest(ctx context.Context, name string) error {
 
 // Install downloads and installs the kernel
 func (s *KernelService) Install(name string) error {
+	// Sanitize kernel name to prevent path injection
+	if name == "xray" {
+		name = "xray"
+	} else if name == "mihomo" {
+		name = "mihomo"
+	} else {
+		return fmt.Errorf("invalid kernel name: %s", name)
+	}
+
 	// Verify kernel exists first
 	s.mu.RLock()
 	_, kernelExists := s.kernels[name]
@@ -986,6 +995,15 @@ func (s *KernelService) Install(name string) error {
 
 // Rollback restores the kernel binary from the latest backup.
 func (s *KernelService) Rollback(name string) error {
+	// Sanitize kernel name to prevent path injection
+	if name == "xray" {
+		name = "xray"
+	} else if name == "mihomo" {
+		name = "mihomo"
+	} else {
+		return fmt.Errorf("invalid kernel name: %s", name)
+	}
+
 	s.mu.Lock()
 	k, ok := s.kernels[name]
 	if !ok {

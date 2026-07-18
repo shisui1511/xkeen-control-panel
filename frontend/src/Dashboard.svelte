@@ -47,6 +47,16 @@
   let theme = $state(document.documentElement.getAttribute('data-theme') || 'light');
   let pwaInstallPrompt = $state<any>(null);
 
+  // Mobile drawer modal gate (D-10): drawer behaves as an accessible modal dialog
+  // only when isMobile (≤768px) AND the drawer is open. Desktop keeps the sidebar
+  // as a plain, non-modal neighbor of the content.
+  let isMobile = $state(window.matchMedia('(max-width: 768px)').matches);
+  const drawerIsModal = $derived(isMobile && $isSidebarOpen);
+
+  let sidebarEl: HTMLElement | null = $state(null);
+  let previouslyFocusedElement: HTMLElement | null = null;
+  let lockedScrollY = 0;
+
   // Dashboard live monitoring state
   interface ServiceStatus {
     xkeen: string;
@@ -425,6 +435,82 @@
     }
   }
 
+  function getDrawerFocusables(): HTMLElement[] {
+    if (!sidebarEl) return [];
+    const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    return Array.from(sidebarEl.querySelectorAll(selectors)).filter(
+      (el) => !(el as HTMLElement).closest('details:not([open])')
+    ) as HTMLElement[];
+  }
+
+  function handleDrawerKeydown(e: KeyboardEvent) {
+    // Gate on drawerIsModal (single gate, D-10 prohibition #2): on desktop the
+    // sidebar is a persistent, non-modal panel — Escape-close and Tab-trap must
+    // stay inert there so desktop keyboard navigation never regresses.
+    if (!drawerIsModal) return;
+    if (e.key === 'Escape') {
+      closeSidebar();
+      return;
+    }
+    if (e.key === 'Tab') {
+      const focusables = getDrawerFocusables();
+      if (focusables.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey) {
+        if (active === first) {
+          last.focus();
+          e.preventDefault();
+        }
+      } else {
+        if (active === last) {
+          first.focus();
+          e.preventDefault();
+        }
+      }
+    }
+  }
+
+  // Focus save/restore for the mobile drawer-as-modal (mirrors Modal.svelte).
+  $effect(() => {
+    if (drawerIsModal) {
+      previouslyFocusedElement = document.activeElement as HTMLElement;
+      const timerId = setTimeout(() => {
+        if (sidebarEl) {
+          const focusables = getDrawerFocusables();
+          if (focusables.length > 0) focusables[0].focus();
+          else sidebarEl.focus();
+        }
+      }, 0);
+      return () => clearTimeout(timerId);
+    } else if (previouslyFocusedElement) {
+      previouslyFocusedElement.focus();
+      previouslyFocusedElement = null;
+    }
+  });
+
+  // scrollY-preserving body scroll-lock (RESEARCH §2), reactive on drawerIsModal so
+  // it auto-releases on close and on nav-item auto-close (pitfall 6 — no stuck state).
+  $effect(() => {
+    if (drawerIsModal) {
+      lockedScrollY = window.scrollY;
+      document.body.style.top = `-${lockedScrollY}px`;
+      document.body.classList.add('drawer-locked');
+    } else {
+      document.body.classList.remove('drawer-locked');
+      document.body.style.top = '';
+      window.scrollTo(0, lockedScrollY);
+    }
+    return () => {
+      document.body.classList.remove('drawer-locked');
+      document.body.style.top = '';
+    };
+  });
+
   function switchTab(tab: string) {
     window.location.hash = '#/' + tab;
   }
@@ -488,6 +574,15 @@
 
     window.addEventListener('keydown', handleKeydown);
 
+    const mobileMql = window.matchMedia('(max-width: 768px)');
+    const handleMobileMqlChange = (e: MediaQueryListEvent) => {
+      isMobile = e.matches;
+      if (!isMobile) {
+        isSidebarOpen.set(false);
+      }
+    };
+    mobileMql.addEventListener('change', handleMobileMqlChange);
+
     const statusInterval = setInterval(fetchLiveStatus, 10000);
     const statsInterval = setInterval(fetchSystemStats, 5000);
     const capInterval = setInterval(fetchCapabilities, 10000);
@@ -503,13 +598,14 @@
       clearInterval(subsInterval);
       window.removeEventListener('hashchange', handleHashChange);
       window.removeEventListener('keydown', handleKeydown);
+      mobileMql.removeEventListener('change', handleMobileMqlChange);
     };
   });
 </script>
 
 <div class="dashboard-layout" class:sb-collapsed={isSidebarCollapsed}>
   <!-- Mobile header bar -->
-  <header class="mobile-header">
+  <header class="mobile-header" inert={drawerIsModal}>
     <button
       class="burger-btn"
       onclick={toggleSidebar}
@@ -522,17 +618,21 @@
         <rect y="16.5" width="22" height="2.5" rx="1.25" fill="currentColor" />
       </svg>
     </button>
-    <span style="font-weight: 600; font-size: 16px;">XKeen CP</span>
+    <span id="mobile-header-title" style="font-weight: 600; font-size: 16px;">XKeen CP</span>
     <span style="width: 34px;"></span>
   </header>
 
   <!-- Off-canvas overlay (mobile only) -->
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
   <div
     class="sidebar-overlay"
     class:hidden={!$isSidebarOpen}
     onclick={closeSidebar}
+    onkeydown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        closeSidebar();
+      }
+    }}
     role="button"
     tabindex="0"
     aria-label={$t('nav.close_menu')}
@@ -544,6 +644,13 @@
     class="sidebar"
     class:sidebar-open={$isSidebarOpen}
     style="display: flex; flex-direction: column;"
+    bind:this={sidebarEl}
+    onkeydown={handleDrawerKeydown}
+    role={drawerIsModal ? 'dialog' : undefined}
+    aria-modal={drawerIsModal ? 'true' : undefined}
+    aria-labelledby={drawerIsModal ? 'mobile-header-title' : undefined}
+    tabindex="-1"
+    inert={isMobile && !$isSidebarOpen}
   >
     <Sidebar
       {currentTab}
@@ -560,7 +667,7 @@
   </div>
 
   <!-- Main content area -->
-  <div class="main-content">
+  <div class="main-content" inert={drawerIsModal}>
     <!-- Mihomo offline warning banner -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
       <div style="margin: 12px 16px 0;">
@@ -1318,6 +1425,19 @@
   }
   .status-badge-item:nth-last-child(-n + 4) {
     border-bottom: 0;
+  }
+
+  @media (max-width: 768px) {
+    .status-badge-item {
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+    }
+    .status-badge-item:nth-child(2n) {
+      border-right: 0;
+    }
+    .status-badge-item:nth-last-child(-n + 2) {
+      border-bottom: 0;
+    }
   }
 
   .svc-cell-stack {
