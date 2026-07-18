@@ -915,8 +915,6 @@ body.drawer-locked {
   flex-wrap: wrap;
 }
 
-
-
 /* ------------ Utilities ------------- */
 .text-center {
   text-align: center;
@@ -1861,4 +1859,3 @@ a.chip:hover {
     font-size: 16px;
   }
 }
-

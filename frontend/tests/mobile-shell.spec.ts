@@ -33,7 +33,12 @@ test.describe('Mobile shell (Pixel 5)', () => {
           body: JSON.stringify({
             success: true,
             data: {
-              mihomo: { installed: true, reachable: true, api_reachable: true, process_running: true },
+              mihomo: {
+                installed: true,
+                reachable: true,
+                api_reachable: true,
+                process_running: true
+              },
               kernels: { xray: { installed: false }, mihomo: { installed: true } }
             }
           })
@@ -70,9 +75,7 @@ test.describe('Mobile shell (Pixel 5)', () => {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
-            rules: [
-              { type: 'Domain', payload: 'google.com', proxy: 'PROXY' }
-            ]
+            rules: [{ type: 'Domain', payload: 'google.com', proxy: 'PROXY' }]
           })
         });
       } else if (url.includes('/api/mihomo/proxy/providers/rules')) {
