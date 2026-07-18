@@ -57,12 +57,12 @@
 
   .btn-primary {
     background: linear-gradient(180deg, var(--accent), var(--accent-2));
-    color: #03182a;
+    color: var(--btn-primary-text, #03182a);
     box-shadow: 0 6px 18px -8px var(--accent);
   }
   .btn-primary:hover:not(:disabled) {
     filter: brightness(1.07);
-    color: #03182a;
+    color: var(--btn-primary-text, #03182a);
   }
 
   .btn-secondary {
