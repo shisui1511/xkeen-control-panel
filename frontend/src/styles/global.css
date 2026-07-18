@@ -125,6 +125,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
   * {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
@@ -894,6 +897,9 @@ input[type='number'] {
 
 /* ------------ Mobile breakpoint ------------- */
 @media (max-width: 768px) {
+  .dashboard-layout {
+    flex-direction: column;
+  }
   .sidebar {
     transform: translateX(-100%);
   }
@@ -908,6 +914,7 @@ input[type='number'] {
   }
   .mobile-header {
     display: flex;
+    width: 100%;
   }
   .main-content {
     margin-left: 0;
