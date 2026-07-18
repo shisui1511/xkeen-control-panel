@@ -51,6 +51,9 @@
   --scrollbar-thumb: #102a44;
   --scrollbar-thumb-hover: #1a426b;
   --surface-tint: rgba(255, 255, 255, 0.04);
+  --btn-primary-text: #03182a;
+  --bg-group-head-from: rgba(20, 51, 79, 0.9);
+  --bg-group-head-to: rgba(16, 42, 68, 0.95);
 
   --hover: rgba(41, 194, 240, 0.08);
 
@@ -135,6 +138,9 @@
   --scrollbar-thumb: var(--border-strong);
   --scrollbar-thumb-hover: #a9b8c9;
   --surface-tint: rgba(12, 34, 55, 0.04);
+  --btn-primary-text: #ffffff;
+  --bg-group-head-from: rgba(240, 244, 248, 0.95);
+  --bg-group-head-to: rgba(228, 235, 244, 0.95);
 
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 8px 20px -14px rgba(12, 34, 55, 0.18);
 }
@@ -304,12 +310,12 @@ h2.card-title {
 
 .btn-primary {
   background: linear-gradient(180deg, var(--accent), var(--accent-2));
-  color: #03182a;
+  color: var(--btn-primary-text, #03182a);
   box-shadow: 0 6px 18px -8px var(--accent);
 }
 .btn-primary:hover:not(:disabled) {
   filter: brightness(1.07);
-  color: #03182a;
+  color: var(--btn-primary-text, #03182a);
 }
 
 .btn-secondary {
