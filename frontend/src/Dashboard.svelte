@@ -486,6 +486,20 @@
     }
   });
 
+  // scrollY-preserving body scroll-lock (RESEARCH §2), reactive on drawerIsModal so
+  // it auto-releases on close and on nav-item auto-close (pitfall 6 — no stuck state).
+  $effect(() => {
+    if (drawerIsModal) {
+      lockedScrollY = window.scrollY;
+      document.body.style.top = `-${lockedScrollY}px`;
+      document.body.classList.add('drawer-locked');
+    } else {
+      document.body.classList.remove('drawer-locked');
+      document.body.style.top = '';
+      window.scrollTo(0, lockedScrollY);
+    }
+  });
+
   function switchTab(tab: string) {
     window.location.hash = '#/' + tab;
   }
@@ -590,7 +604,7 @@
         <rect y="16.5" width="22" height="2.5" rx="1.25" fill="currentColor" />
       </svg>
     </button>
-    <span style="font-weight: 600; font-size: 16px;">XKeen CP</span>
+    <span id="mobile-header-title" style="font-weight: 600; font-size: 16px;">XKeen CP</span>
     <span style="width: 34px;"></span>
   </header>
 
@@ -614,6 +628,10 @@
     style="display: flex; flex-direction: column;"
     bind:this={sidebarEl}
     onkeydown={handleDrawerKeydown}
+    role="dialog"
+    aria-modal={drawerIsModal ? 'true' : undefined}
+    aria-labelledby="mobile-header-title"
+    tabindex="-1"
   >
     <Sidebar
       {currentTab}
@@ -630,7 +648,7 @@
   </div>
 
   <!-- Main content area -->
-  <div class="main-content">
+  <div class="main-content" inert={drawerIsModal}>
     <!-- Mihomo offline warning banner -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
       <div style="margin: 12px 16px 0;">
