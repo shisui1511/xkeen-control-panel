@@ -22,7 +22,7 @@
           <Icon name={getIconName(toast.type)} size={16} />
         </span>
         <span class="toast__message">{toast.message}</span>
-        <button class="toast__close" on:click={() => dismiss(toast.id)} aria-label="Dismiss"
+        <button class="toast__close" onclick={() => dismiss(toast.id)} aria-label="Dismiss"
           >×</button
         >
       </div>
