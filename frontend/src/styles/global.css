@@ -125,6 +125,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
   * {
     animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
@@ -455,6 +458,7 @@ input[type='number'] {
 .sidebar {
   width: var(--sidebar-w);
   height: 100vh;
+  height: 100dvh;
   position: fixed;
   left: 0;
   top: 0;
@@ -462,6 +466,7 @@ input[type='number'] {
   border-right: 1px solid #03101e;
   padding: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   z-index: 200;
   transition: transform 0.25s ease;
   display: flex;
@@ -659,6 +664,7 @@ input[type='number'] {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
+  padding-top: calc(12px + env(safe-area-inset-top));
   background: var(--bg-deep);
   border-bottom: 1px solid #03101e;
   position: sticky;
@@ -677,9 +683,14 @@ input[type='number'] {
   justify-content: center;
   border-radius: 6px;
   transition: background var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
 }
 .burger-btn:hover {
   background: rgba(255, 255, 255, 0.06);
+}
+.burger-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .sidebar-overlay {
@@ -688,6 +699,18 @@ input[type='number'] {
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
   z-index: 150;
+  -webkit-tap-highlight-color: transparent;
+}
+.sidebar-overlay:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Scroll-lock contract for the off-canvas drawer (consumed by plan 68-02's JS) */
+body.drawer-locked {
+  position: fixed;
+  width: 100%;
+  overflow: hidden;
 }
 
 /* ------------ Confirm modal ------------- */
@@ -894,6 +917,15 @@ input[type='number'] {
 
 /* ------------ Mobile breakpoint ------------- */
 @media (max-width: 768px) {
+  .dashboard-layout {
+    flex-direction: column;
+  }
+  .input,
+  select.input,
+  input,
+  textarea {
+    font-size: 16px;
+  }
   .sidebar {
     transform: translateX(-100%);
   }
@@ -908,6 +940,7 @@ input[type='number'] {
   }
   .mobile-header {
     display: flex;
+    width: 100%;
   }
   .main-content {
     margin-left: 0;
@@ -920,6 +953,9 @@ input[type='number'] {
   }
   .status-badges-row,
   .stats-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .qa-grid-mini {
     grid-template-columns: 1fr 1fr;
   }
 }
