@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"html"
 	"net/http"
 )
 
@@ -22,5 +23,6 @@ func JSONSuccess(w http.ResponseWriter, data interface{}) {
 func JSONError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: msg})
+	json.NewEncoder(w).Encode(APIResponse{Success: false, Error: html.EscapeString(msg)})
 }
+
