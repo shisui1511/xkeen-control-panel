@@ -47,6 +47,16 @@
   let theme = $state(document.documentElement.getAttribute('data-theme') || 'light');
   let pwaInstallPrompt = $state<any>(null);
 
+  // Mobile drawer modal gate (D-10): drawer behaves as an accessible modal dialog
+  // only when isMobile (≤768px) AND the drawer is open. Desktop keeps the sidebar
+  // as a plain, non-modal neighbor of the content.
+  let isMobile = $state(window.matchMedia('(max-width: 768px)').matches);
+  const drawerIsModal = $derived(isMobile && $isSidebarOpen);
+
+  let sidebarEl: HTMLElement | null = $state(null);
+  let previouslyFocusedElement: HTMLElement | null = null;
+  let lockedScrollY = 0;
+
   // Dashboard live monitoring state
   interface ServiceStatus {
     xkeen: string;
@@ -425,6 +435,57 @@
     }
   }
 
+  function getDrawerFocusables(): HTMLElement[] {
+    if (!sidebarEl) return [];
+    const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    return Array.from(sidebarEl.querySelectorAll(selectors)) as HTMLElement[];
+  }
+
+  function handleDrawerKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      closeSidebar();
+      return;
+    }
+    if (e.key === 'Tab') {
+      const focusables = getDrawerFocusables();
+      if (focusables.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey) {
+        if (active === first) {
+          last.focus();
+          e.preventDefault();
+        }
+      } else {
+        if (active === last) {
+          first.focus();
+          e.preventDefault();
+        }
+      }
+    }
+  }
+
+  // Focus save/restore for the mobile drawer-as-modal (mirrors Modal.svelte).
+  $effect(() => {
+    if (drawerIsModal) {
+      previouslyFocusedElement = document.activeElement as HTMLElement;
+      setTimeout(() => {
+        if (sidebarEl) {
+          const focusables = getDrawerFocusables();
+          if (focusables.length > 0) focusables[0].focus();
+          else sidebarEl.focus();
+        }
+      }, 0);
+    } else if (previouslyFocusedElement) {
+      previouslyFocusedElement.focus();
+      previouslyFocusedElement = null;
+    }
+  });
+
   function switchTab(tab: string) {
     window.location.hash = '#/' + tab;
   }
@@ -488,6 +549,12 @@
 
     window.addEventListener('keydown', handleKeydown);
 
+    const mobileMql = window.matchMedia('(max-width: 768px)');
+    const handleMobileMqlChange = (e: MediaQueryListEvent) => {
+      isMobile = e.matches;
+    };
+    mobileMql.addEventListener('change', handleMobileMqlChange);
+
     const statusInterval = setInterval(fetchLiveStatus, 10000);
     const statsInterval = setInterval(fetchSystemStats, 5000);
     const capInterval = setInterval(fetchCapabilities, 10000);
@@ -503,6 +570,7 @@
       clearInterval(subsInterval);
       window.removeEventListener('hashchange', handleHashChange);
       window.removeEventListener('keydown', handleKeydown);
+      mobileMql.removeEventListener('change', handleMobileMqlChange);
     };
   });
 </script>
@@ -544,6 +612,8 @@
     class="sidebar"
     class:sidebar-open={$isSidebarOpen}
     style="display: flex; flex-direction: column;"
+    bind:this={sidebarEl}
+    onkeydown={handleDrawerKeydown}
   >
     <Sidebar
       {currentTab}
