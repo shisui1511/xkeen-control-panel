@@ -102,6 +102,21 @@
   /* Layout */
   --sidebar-w: 252px;
   --topbar-h: 64px;
+
+  /* CodeMirror tokens */
+  --cm-bg: #050d16;
+  --cm-keyword: #29c2f0;
+  --cm-string: #46d18a;
+  --cm-number: #f0b450;
+  --cm-comment: #869cb3;
+  --cm-property: #d9e7f4;
+  --cm-variable: #d9e7f4;
+  --cm-operator: #29c2f0;
+  --cm-boolean: #f0b450;
+  --cm-null: #f4707f;
+  --cm-bracket: #d9e7f4;
+  --cm-active-line: #0b1a2d;
+  --cm-border: #0e2034;
 }
 
 /* ------------ Light theme (inverted) ------------- */
@@ -143,6 +158,21 @@
   --bg-group-head-to: rgba(228, 235, 244, 0.95);
 
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 8px 20px -14px rgba(12, 34, 55, 0.18);
+
+  /* CodeMirror tokens */
+  --cm-bg: #ffffff;
+  --cm-keyword: #0a779f;
+  --cm-string: #1a7f4e;
+  --cm-number: #8b5c00;
+  --cm-comment: #5b6f86; /* Используем fg-secondary вместо fg-dim для обеспечения контраста 5.18:1 */
+  --cm-property: #0c2237;
+  --cm-variable: #0c2237;
+  --cm-operator: #0a779f;
+  --cm-boolean: #8b5c00;
+  --cm-null: #c22a3a;
+  --cm-bracket: #0c2237;
+  --cm-active-line: #f0f4f9;
+  --cm-border: #e1e7ef;
 }
 
 @media (prefers-reduced-motion: reduce) {
