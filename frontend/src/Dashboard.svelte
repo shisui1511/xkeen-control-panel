@@ -1703,21 +1703,7 @@
     flex-shrink: 0;
   }
 
-  :global(.dashboard-layout.editor-active) {
-    height: 100vh;
-    height: 100dvh;
-    overflow: hidden;
-  }
-  :global(.main-content.editor-active) {
-    height: 100%;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-  :global(.main-content.editor-active > div) {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
+  /* Fullscreen editor layout geometry (.dashboard-layout.editor-active,
+     .main-content.editor-active) lives solely in global.css to avoid
+     maintaining two out-of-sync copies of the same !important rules. */
 </style>

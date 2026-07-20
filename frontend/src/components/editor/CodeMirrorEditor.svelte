@@ -245,14 +245,8 @@
 <div class="editor-cm-wrapper" bind:this={editorContainer}></div>
 
 <style>
-  .editor-cm-wrapper {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-    position: relative;
-  }
+  /* .editor-cm-wrapper geometry is owned by global.css (unconditional
+     !important rule) — keeping a second copy here risks silent drift. */
   :global(.cm-editor) {
     flex: 1 !important;
     display: flex !important;

@@ -2137,15 +2137,6 @@
     color: var(--fg-primary);
   }
 
-  .editor-main-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
   .editor-toolbar {
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);
@@ -2725,18 +2716,6 @@
     transform: rotate(180deg);
   }
 
-  .editor-empty-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    min-height: 0;
-    padding: 24px;
-    box-sizing: border-box;
-  }
   .editor-empty-card :global(.empty-state) {
     justify-content: center;
   }
