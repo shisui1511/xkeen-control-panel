@@ -57,7 +57,6 @@
     { tag: t.number, color: 'var(--cm-number)' },
     { tag: t.comment, color: 'var(--cm-comment)' },
     { tag: t.propertyName, color: 'var(--cm-property)' },
-    { tag: t.workspaceName, color: 'var(--cm-variable)' },
     { tag: t.variableName, color: 'var(--cm-variable)' },
     { tag: t.operator, color: 'var(--cm-operator)' },
     { tag: t.bool, color: 'var(--cm-boolean)' },
