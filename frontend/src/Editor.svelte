@@ -1247,7 +1247,7 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<div class="container editor-page-container">
+<div class="editor-page-container">
   <div class="page-head">
     <div>
       <div class="crumbs">
@@ -1258,9 +1258,9 @@
           {$t('editor.tab_constructor')}
         {/if}
       </div>
-      <h1>{activeTab === 'constructor' ? $t('editor.constructor_title') : $t('editor.h1')}</h1>
+      <h1>{activeTab === 'constructor' ? ($t('editor.constructor_title') || 'Конструктор конфигурации') : ($t('editor.h1') || 'Конфигурация')}</h1>
       <p class="sub">
-        {activeTab === 'constructor' ? $t('editor.constructor_subtitle') : $t('editor.h1_sub')}
+        {activeTab === 'constructor' ? ($t('editor.constructor_subtitle') || 'Пошаговое создание конфигураций') : ($t('editor.h1_sub') || 'YAML / JSON конфиги с подсветкой, валидацией по схеме и автодополнением.')}
       </p>
     </div>
     {#if activeTab === 'files'}
@@ -2755,12 +2755,15 @@
     }
   }
 
-  .container.editor-page-container {
+  .editor-page-container {
+    width: 100%;
     max-width: 100%;
+    margin: 0;
     flex: 1;
+    height: 100%;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    min-height: 0;
     padding: 16px;
     box-sizing: border-box;
   }

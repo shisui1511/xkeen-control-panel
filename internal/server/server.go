@@ -54,8 +54,19 @@ type HTTPSConfig struct {
 func New(cfg *Config, version string, web fs.FS) (*Server, error) {
 	mux := http.NewServeMux()
 
-	// Serve static files
-	mux.Handle("/", http.FileServer(http.FS(web)))
+	// Serve static files with strict cache control for index.html and long-term cache for assets
+	fileServer := http.FileServer(http.FS(web))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path == "/" || path == "/index.html" || filepath.Ext(path) == "" {
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+		} else if len(path) >= 8 && path[:8] == "/assets/" {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 
 	authService := auth.NewAuthService(cfg.PasswordHash, cfg.SecureCookie, cfg.MaxLoginAttempts, cfg.LockoutDuration, cfg.SavePasswordHash)
 

@@ -1945,8 +1945,10 @@ a.chip:hover {
   overflow: hidden !important;
 }
 
-.container.editor-page-container {
+.editor-page-container {
+  width: 100% !important;
   max-width: 100% !important;
+  margin: 0 !important;
   flex: 1 !important;
   height: 100% !important;
   min-height: 0 !important;
@@ -1986,6 +1988,7 @@ a.chip:hover {
   overflow-y: auto !important;
 }
 
+.file-tree-card,
 .editor-main-card,
 .editor-empty-card {
   background: var(--bg-card);
