@@ -26,6 +26,7 @@
     indentOnInput,
     syntaxHighlighting,
     defaultHighlightStyle,
+    HighlightStyle,
     bracketMatching,
     foldKeymap
   } from '@codemirror/language';
@@ -33,6 +34,7 @@
   import { json, jsonParseLinter, jsonLanguage } from '@codemirror/lang-json';
   import { yaml, yamlLanguage } from '@codemirror/lang-yaml';
   import { hoverTooltip } from '@codemirror/view';
+  import { tags as t } from '@lezer/highlight';
 
   // Schema support
   import {
@@ -48,6 +50,22 @@
   import { xraySchema } from '../../schemas/xray';
   import { mihomoSchema } from '../../schemas/mihomo';
   import { xraySnippetSource, mihomoSnippetSource } from '../../lib/snippets';
+
+  const customHighlightStyle = HighlightStyle.define([
+    { tag: t.keyword, color: 'var(--cm-keyword)' },
+    { tag: t.string, color: 'var(--cm-string)' },
+    { tag: t.number, color: 'var(--cm-number)' },
+    { tag: t.comment, color: 'var(--cm-comment)' },
+    { tag: t.propertyName, color: 'var(--cm-property)' },
+    { tag: t.workspaceName, color: 'var(--cm-variable)' },
+    { tag: t.variableName, color: 'var(--cm-variable)' },
+    { tag: t.operator, color: 'var(--cm-operator)' },
+    { tag: t.bool, color: 'var(--cm-boolean)' },
+    { tag: t.null, color: 'var(--cm-null)' },
+    { tag: t.bracket, color: 'var(--cm-bracket)' },
+    { tag: t.className, color: 'var(--cm-variable)' },
+    { tag: t.typeName, color: 'var(--cm-keyword)' }
+  ]);
 
   let {
     content = '',
@@ -155,7 +173,7 @@
         dropCursor(),
         EditorState.allowMultipleSelections.of(true),
         indentOnInput(),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        syntaxHighlighting(customHighlightStyle),
         bracketMatching(),
         closeBrackets(),
         autocompletion(),
@@ -230,13 +248,14 @@
 <style>
   .editor-cm-wrapper {
     height: 100%;
-    min-height: 500px;
+    min-height: 0;
     position: relative;
   }
   :global(.cm-editor) {
     height: 100% !important;
-    font-size: 13.5px;
-    background: #050d16 !important;
+    font-size: 14px;
+    background: var(--cm-bg) !important;
+    color: var(--fg-primary) !important;
   }
   :global(.cm-scroller) {
     overflow: auto !important;
@@ -244,20 +263,23 @@
     scrollbar-color: var(--border) transparent;
   }
   :global(.cm-gutters) {
-    background: #050d16 !important;
-    border-right: 1px solid #0e2034 !important;
-    color: var(--fg-faint) !important;
+    background: var(--cm-bg) !important;
+    border-right: 1px solid var(--cm-border) !important;
+    color: var(--fg-dim) !important;
   }
   :global(.cm-gutter) {
-    background: #050d16 !important;
-    color: var(--fg-faint) !important;
+    background: var(--cm-bg) !important;
+    color: var(--fg-dim) !important;
   }
   :global(.cm-activeLineGutter) {
-    background-color: #0b1a2d !important;
+    background-color: var(--cm-active-line) !important;
     color: var(--accent) !important;
   }
   :global(.cm-activeLine) {
-    background-color: #0b1a2d !important;
+    background-color: var(--cm-active-line) !important;
+  }
+  :global(.cm-selectionBackground) {
+    background: var(--hover) !important;
   }
   :global(.cm-content) {
     font-family: var(--font-family-mono) !important;
@@ -275,5 +297,14 @@
   }
   :global(.cm-scroller::-webkit-scrollbar-thumb:hover) {
     background: var(--fg-dim);
+  }
+
+  @media (max-width: 768px) {
+    :global(.cm-editor) {
+      font-size: 16px;
+    }
+    :global(.cm-gutters) {
+      display: none !important;
+    }
   }
 </style>
