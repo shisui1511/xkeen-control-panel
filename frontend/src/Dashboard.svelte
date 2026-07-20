@@ -603,7 +603,7 @@
   });
 </script>
 
-<div class="dashboard-layout" class:sb-collapsed={isSidebarCollapsed}>
+<div class="dashboard-layout" class:sb-collapsed={isSidebarCollapsed} class:editor-active={currentTab === 'editor'}>
   <!-- Mobile header bar -->
   <header class="mobile-header" inert={drawerIsModal}>
     <button
@@ -667,7 +667,7 @@
   </div>
 
   <!-- Main content area -->
-  <div class="main-content" inert={drawerIsModal}>
+  <div class="main-content" class:editor-active={currentTab === 'editor'} inert={drawerIsModal}>
     <!-- Mihomo offline warning banner -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
       <div style="margin: 12px 16px 0;">
@@ -1701,5 +1701,22 @@
     padding: 4px 8px;
     margin-left: auto;
     flex-shrink: 0;
+  }
+
+  :global(.dashboard-layout.editor-active) {
+    height: 100vh;
+    overflow: hidden;
+  }
+  :global(.main-content.editor-active) {
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  :global(.main-content.editor-active > div) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 </style>

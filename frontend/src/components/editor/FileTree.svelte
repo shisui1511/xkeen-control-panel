@@ -156,7 +156,7 @@
     font-weight: 700;
   }
   .file-list {
-    max-height: 250px;
+    max-height: 350px;
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;

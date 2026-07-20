@@ -18,6 +18,7 @@
   import EditorTabs from './components/editor/EditorTabs.svelte';
   import CodeMirrorEditor from './components/editor/CodeMirrorEditor.svelte';
   import BackupSidebar from './components/editor/BackupSidebar.svelte';
+  import Modal from './components/Modal.svelte';
 
   interface Template {
     name: string;
@@ -1246,7 +1247,7 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<div class="container">
+<div class="container editor-page-container">
   <div class="page-head">
     <div>
       <div class="crumbs">
@@ -1575,7 +1576,7 @@
           {/if}
 
           <!-- CodeMirror editor component -->
-          <div style="height: 520px; position:relative; background: #050d16; min-height:0;">
+          <div style="flex: 1; min-height: 0; position:relative; background: var(--cm-bg);">
             {#if loading}
               <div
                 style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:rgba(5,13,22,0.7);z-index:10;"
@@ -1620,9 +1621,7 @@
           </div>
 
           <!-- Status Bar / Bottom Drawer Trigger -->
-          <div
-            style="padding: 6px 14px; background: rgba(0,0,0,0.2); border-top: 1px solid var(--border); display:flex; align-items:center; font-family: var(--font-family-mono); font-size: 11px; color: var(--fg-dim); min-height:30px;"
-          >
+          <div class="editor-statusbar">
             <span class="status-indicator" class:status-dirty={isDirty} style="margin-right: 14px;">
               <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
               {isDirty ? $t('editor.unsaved') || 'Изменён' : $t('editor.saved') || 'Сохранён'}
@@ -1685,7 +1684,7 @@
                 </button>
               {/if}
 
-              <span style="border-left: 1px solid var(--border); padding-left: 12px;"
+              <span class="status-tip status-shortcut-tip" style="border-left: 1px solid var(--border); padding-left: 12px;"
                 >Ctrl+S — сохранить</span
               >
             </div>
@@ -1719,497 +1718,380 @@
 </div>
 
 <!-- CRUD Modals -->
-{#if showCreateModal}
-  <div
-    class="confirm-modal-backdrop"
-    role="button"
-    tabindex="0"
-    onclick={() => (showCreateModal = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showCreateModal = false)}
-  >
-    <div
-      class="confirm-modal"
-      role="presentation"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-    >
-      <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">
-        {$t('editor.create_file')}
-      </h3>
-      <label for="new-file-name" class="sr-only">{$t('editor.file_name')}</label>
-      <input
-        id="new-file-name"
-        type="text"
-        bind:value={newFileName}
-        placeholder={$t('editor.file_name')}
-        class="input"
-        style="margin-bottom: 16px;"
-        onkeydown={(e) => e.key === 'Enter' && createFile()}
-      />
-      <div class="confirm-modal-actions">
-        <button onclick={() => (showCreateModal = false)} class="btn btn-secondary">
-          {$t('app.cancel')}
-        </button>
-        <button onclick={createFile} class="btn btn-primary">
-          {$t('app.create')}
+<Modal isOpen={showCreateModal} title={$t('editor.create_file')} onclose={() => (showCreateModal = false)}>
+  <label for="new-file-name" class="sr-only">{$t('editor.file_name')}</label>
+  <input
+    id="new-file-name"
+    type="text"
+    bind:value={newFileName}
+    placeholder={$t('editor.file_name')}
+    class="input"
+    style="margin-bottom: 16px; width: 100%;"
+    onkeydown={(e) => e.key === 'Enter' && createFile()}
+  />
+  <div class="confirm-modal-actions">
+    <button onclick={() => (showCreateModal = false)} class="btn btn-secondary">
+      {$t('app.cancel')}
+    </button>
+    <button onclick={createFile} class="btn btn-primary">
+      {$t('app.create')}
+    </button>
+  </div>
+</Modal>
+
+<Modal isOpen={showRenameModal} title={$t('editor.rename_file')} onclose={() => (showRenameModal = false)}>
+  <label for="rename-target" class="sr-only">{$t('editor.new_name')}</label>
+  <input
+    id="rename-target"
+    type="text"
+    bind:value={renameTarget}
+    placeholder={$t('editor.new_name')}
+    class="input"
+    style="margin-bottom: 16px; width: 100%;"
+    onkeydown={(e) => e.key === 'Enter' && renameFile()}
+  />
+  <div class="confirm-modal-actions">
+    <button onclick={() => (showRenameModal = false)} class="btn btn-secondary">
+      {$t('app.cancel')}
+    </button>
+    <button onclick={renameFile} class="btn btn-primary">
+      {$t('app.rename')}
+    </button>
+  </div>
+</Modal>
+
+<Modal isOpen={showTemplatesModal} title={$t('editor.templates') || 'Шаблоны'} maxWidth="900px" onclose={() => (showTemplatesModal = false)}>
+  {#if templateStatus}
+    <div style="margin-top: -10px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+      <p class="templates-modal-subtitle" style="margin: 0;">
+        {$t('editor.templates_desc') || 'Шаблоны конфигураций'}
+      </p>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        {#if templateStatus.has_update}
+          <span class="templates-badge update-available">
+            <span class="pulse-dot"></span>
+            {$t('editor.update_available') || 'Доступно обновление'} (v{templateStatus.current_version})
+          </span>
+        {:else if templateStatus.current_version}
+          <span class="templates-badge up-to-date">
+            <span class="dot"></span>
+            {$t('editor.up_to_date') || 'Обновлено'} (v{templateStatus.current_version})
+          </span>
+        {/if}
+        <button
+          class="btn btn-secondary templates-update-btn"
+          style="padding: 4px 8px; font-size: 12px;"
+          onclick={updateTemplates}
+          disabled={updatingTemplates}
+          title={$t('editor.templates_update')}
+        >
+          <span class="templates-update-icon" class:spinning={updatingTemplates}>
+            <Icon name="refresh" size={12} />
+          </span>
+          {$t('editor.templates_update') || 'Обновить'}
         </button>
       </div>
     </div>
-  </div>
-{/if}
+  {/if}
 
-{#if showRenameModal}
-  <div
-    class="confirm-modal-backdrop"
-    role="button"
-    tabindex="0"
-    onclick={() => (showRenameModal = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showRenameModal = false)}
-  >
-    <div
-      class="confirm-modal"
-      role="presentation"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-    >
-      <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">
-        {$t('editor.rename_file')}
-      </h3>
-      <label for="rename-target" class="sr-only">{$t('editor.new_name')}</label>
-      <input
-        id="rename-target"
-        type="text"
-        bind:value={renameTarget}
-        placeholder={$t('editor.new_name')}
-        class="input"
-        style="margin-bottom: 16px;"
-        onkeydown={(e) => e.key === 'Enter' && renameFile()}
-      />
-      <div class="confirm-modal-actions">
-        <button onclick={() => (showRenameModal = false)} class="btn btn-secondary">
-          {$t('app.cancel')}
+  <!-- 2-column body -->
+  <div class="templates-body-grid">
+    <!-- Left column: tabs + list -->
+    <div class="templates-col-list">
+      <div class="templates-kernel-tabs">
+        <button
+          class="tab-btn"
+          class:active={templateTab === 'xray'}
+          aria-pressed={templateTab === 'xray'}
+          onclick={async () => {
+            templateTab = 'xray';
+            selectedTemplate = null;
+            templatePreview = '';
+            const first = filteredTemplates[0];
+            if (first) await loadTemplatePreview(first);
+          }}
+        >
+          {$t('editor.templates_tab_xray') || 'Xray'}
         </button>
-        <button onclick={renameFile} class="btn btn-primary">
-          {$t('app.rename')}
+        <button
+          class="tab-btn"
+          class:active={templateTab === 'mihomo'}
+          aria-pressed={templateTab === 'mihomo'}
+          onclick={async () => {
+            templateTab = 'mihomo';
+            selectedTemplate = null;
+            templatePreview = '';
+            const first = filteredTemplates[0];
+            if (first) await loadTemplatePreview(first);
+          }}
+        >
+          {$t('editor.templates_tab_mihomo') || 'Mihomo'}
         </button>
       </div>
-    </div>
-  </div>
-{/if}
 
-{#if showTemplatesModal}
-  <div
-    class="confirm-modal-backdrop"
-    role="button"
-    tabindex="0"
-    onclick={() => (showTemplatesModal = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showTemplatesModal = false)}
-  >
-    <div
-      class="confirm-modal templates-wide-modal"
-      role="presentation"
-      aria-modal="true"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-    >
-      <!-- Header -->
-      <div class="modal-header">
-        <div class="templates-modal-title-block">
-          <h3
-            style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px;"
+      <div class="template-list">
+        {#each filteredTemplates as template (template.name)}
+          <button
+            class="template-item"
+            class:selected={selectedTemplate?.name === template.name}
+            onclick={() => loadTemplatePreview(template)}
+            disabled={templateLoading}
           >
-            {$t('editor.templates') || 'Шаблоны'}
-            {#if templateStatus}
-              {#if templateStatus.has_update}
-                <span class="templates-badge update-available">
-                  <span class="pulse-dot"></span>
-                  {$t('editor.update_available') || 'Доступно обновление'} (v{templateStatus.current_version})
-                </span>
-              {:else if templateStatus.current_version}
-                <span class="templates-badge up-to-date">
-                  <span class="dot"></span>
-                  {$t('editor.up_to_date') || 'Обновлено'} (v{templateStatus.current_version})
-                </span>
-              {/if}
-            {/if}
-          </h3>
-          <p class="templates-modal-subtitle">
-            {$t('editor.templates_desc') || 'Шаблоны конфигураций'}
+            <div class="template-info">
+              <span class="template-name">{template.name}</span>
+              <span class="template-desc">{template.description}</span>
+            </div>
+            <span class="template-type">{template.type}</span>
+          </button>
+        {:else}
+          <div class="templates-empty-state">
+            <p class="templates-empty-title">{$t('editor.no_templates')}</p>
+            <p class="templates-empty-hint">{$t('editor.no_templates_hint')}</p>
+          </div>
+        {/each}
+      </div>
+    </div>
+
+    <!-- Right column: preview -->
+    <div class="templates-col-preview">
+      {#if loadingPreview}
+        <div class="templates-preview-loading">
+          <span class="spinning"><Icon name="refresh" size={16} /></span>
+        </div>
+      {:else if templatePreview}
+        <pre class="template-preview-code">{templatePreview}</pre>
+      {:else}
+        <div class="templates-preview-placeholder">
+          <p style="color: var(--fg-dim); font-size: 13px; text-align: center;">
+            {selectedTemplate ? '' : 'Выберите шаблон для предпросмотра'}
           </p>
         </div>
-        <div class="templates-modal-header-actions">
-          <button
-            class="btn btn-secondary templates-update-btn"
-            onclick={updateTemplates}
-            disabled={updatingTemplates}
-            title={$t('editor.templates_update')}
-          >
-            <span class="templates-update-icon" class:spinning={updatingTemplates}>
-              <Icon name="refresh" size={14} />
-            </span>
-            {$t('editor.templates_update') || 'Обновить'}
-          </button>
-          <button
-            class="btn-close"
-            aria-label="Закрыть"
-            onclick={() => (showTemplatesModal = false)}
-          >
-            <Icon name="cross" size={14} />
-          </button>
-        </div>
-      </div>
-
-      <!-- 2-column body -->
-      <div class="templates-body-grid">
-        <!-- Left column: tabs + list -->
-        <div class="templates-col-list">
-          <div class="templates-kernel-tabs">
-            <button
-              class="tab-btn"
-              class:active={templateTab === 'xray'}
-              aria-pressed={templateTab === 'xray'}
-              onclick={async () => {
-                templateTab = 'xray';
-                selectedTemplate = null;
-                templatePreview = '';
-                const first = filteredTemplates[0];
-                if (first) await loadTemplatePreview(first);
-              }}
-            >
-              {$t('editor.templates_tab_xray') || 'Xray'}
-            </button>
-            <button
-              class="tab-btn"
-              class:active={templateTab === 'mihomo'}
-              aria-pressed={templateTab === 'mihomo'}
-              onclick={async () => {
-                templateTab = 'mihomo';
-                selectedTemplate = null;
-                templatePreview = '';
-                const first = filteredTemplates[0];
-                if (first) await loadTemplatePreview(first);
-              }}
-            >
-              {$t('editor.templates_tab_mihomo') || 'Mihomo'}
-            </button>
-          </div>
-
-          <div class="template-list">
-            {#each filteredTemplates as template (template.name)}
-              <button
-                class="template-item"
-                class:selected={selectedTemplate?.name === template.name}
-                onclick={() => loadTemplatePreview(template)}
-                disabled={templateLoading}
-              >
-                <div class="template-info">
-                  <span class="template-name">{template.name}</span>
-                  <span class="template-desc">{template.description}</span>
-                </div>
-                <span class="template-type">{template.type}</span>
-              </button>
-            {:else}
-              <div class="templates-empty-state">
-                <p class="templates-empty-title">{$t('editor.no_templates')}</p>
-                <p class="templates-empty-hint">{$t('editor.no_templates_hint')}</p>
-              </div>
-            {/each}
-          </div>
-        </div>
-
-        <!-- Right column: preview -->
-        <div class="templates-col-preview">
-          {#if loadingPreview}
-            <div class="templates-preview-loading">
-              <span class="spinning"><Icon name="refresh" size={16} /></span>
-            </div>
-          {:else if templatePreview}
-            <pre class="template-preview-code">{templatePreview}</pre>
-          {:else}
-            <div class="templates-preview-placeholder">
-              <p style="color: var(--fg-dim); font-size: 13px; text-align: center;">
-                {selectedTemplate ? '' : 'Выберите шаблон для предпросмотра'}
-              </p>
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <!-- Footer -->
-      <div class="templates-modal-footer">
-        <button
-          class="btn btn-primary"
-          disabled={!selectedTemplate || !editorView || templateLoading}
-          title={!editorView ? $t('editor.no_file_for_template') : undefined}
-          onclick={() => selectedTemplate && applyTemplate(selectedTemplate)}
-        >
-          {$t('editor.apply_template')}
-        </button>
-      </div>
+      {/if}
     </div>
   </div>
-{/if}
 
-{#if showGeneratorModal}
-  <div
-    class="confirm-modal-backdrop"
-    role="button"
-    tabindex="0"
-    onclick={() => (showGeneratorModal = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showGeneratorModal = false)}
-  >
-    <div
-      class="confirm-modal"
-      style="max-width: 500px;"
-      role="presentation"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
+  <!-- Footer -->
+  <div class="templates-modal-footer" style="margin-top: 16px; display: flex; justify-content: flex-end;">
+    <button
+      class="btn btn-primary"
+      disabled={!selectedTemplate || !editorView || templateLoading}
+      title={!editorView ? $t('editor.no_file_for_template') : undefined}
+      onclick={() => selectedTemplate && applyTemplate(selectedTemplate)}
     >
-      <div class="modal-header">
-        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
-          {$t('editor.generator') || 'Генератор исходящих'}
-        </h3>
-        <button class="btn-close" onclick={() => (showGeneratorModal = false)}>
-          <Icon name="cross" size={14} />
-        </button>
-      </div>
+      {$t('editor.apply_template')}
+    </button>
+  </div>
+</Modal>
 
-      <div class="form-group" style="margin-bottom: 12px; margin-top: 12px;">
+<Modal isOpen={showGeneratorModal} title={$t('editor.generator') || 'Генератор исходящих'} onclose={() => (showGeneratorModal = false)}>
+  <div class="form-group" style="margin-bottom: 12px;">
+    <label
+      for="gen-protocol"
+      style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+      >{$t('editor.protocol') || 'Протокол'}</label
+    >
+    <select id="gen-protocol" bind:value={genProtocol} class="input" style="width: 100%;">
+      <option value="vless">VLESS</option>
+      <option value="shadowsocks">Shadowsocks</option>
+    </select>
+  </div>
+
+  <div
+    class="form-grid"
+    style="margin-bottom: 12px; display: grid; grid-template-columns: 2fr 1fr; gap: 12px;"
+  >
+    <div class="form-group">
+      <label
+        for="gen-address"
+        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+        >{$t('editor.address') || 'Адрес'}</label
+      >
+      <input
+        id="gen-address"
+        type="text"
+        bind:value={genAddress}
+        placeholder="example.com"
+        class="input"
+        style="width: 100%;"
+      />
+    </div>
+    <div class="form-group">
+      <label
+        for="gen-port"
+        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+        >{$t('editor.port') || 'Порт'}</label
+      >
+      <input id="gen-port" type="number" bind:value={genPort} class="input" style="width: 100%;" />
+    </div>
+  </div>
+
+  <div class="form-group" style="margin-bottom: 12px;">
+    <label
+      for="gen-uuid"
+      style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+      >{genProtocol === 'vless' ? 'UUID' : 'Password'}</label
+    >
+    <div class="input-group" style="display: flex; gap: 8px;">
+      <input id="gen-uuid" type="text" bind:value={genUUID} class="input" style="flex: 1;" />
+      <button
+        class="btn btn-secondary"
+        style="padding: 0 12px;"
+        onclick={() => (genUUID = crypto.randomUUID())}
+        title={$t('editor.generate_uuid')}
+      >
+        <Icon name="refresh" size={14} />
+      </button>
+    </div>
+  </div>
+
+  {#if genProtocol === 'vless'}
+    <div class="form-group" style="margin-bottom: 12px;">
+      <label
+        for="gen-sni"
+        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+        >SNI</label
+      >
+      <input
+        id="gen-sni"
+        type="text"
+        bind:value={genSNI}
+        placeholder="sni.example.com"
+        class="input"
+        style="width: 100%;"
+      />
+    </div>
+
+    <div
+      class="form-grid"
+      style="margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;"
+    >
+      <div class="form-group">
         <label
-          for="gen-protocol"
+          for="gen-security"
           style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-          >{$t('editor.protocol') || 'Протокол'}</label
+          >Security</label
         >
-        <select id="gen-protocol" bind:value={genProtocol} class="input" style="width: 100%;">
-          <option value="vless">VLESS</option>
-          <option value="shadowsocks">Shadowsocks</option>
+        <select id="gen-security" bind:value={genSecurity} class="input" style="width: 100%;">
+          <option value="reality">Reality</option>
+          <option value="tls">TLS</option>
+          <option value="none">None</option>
         </select>
       </div>
+      {#if genSecurity === 'reality'}
+        <div class="form-group">
+          <label
+            for="gen-shortid"
+            style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+            >Short ID</label
+          >
+          <input
+            id="gen-shortid"
+            type="text"
+            bind:value={genShortId}
+            placeholder="hex string"
+            class="input"
+            style="width: 100%;"
+          />
+        </div>
+      {/if}
+    </div>
+  {/if}
 
-      <div
-        class="form-grid"
-        style="margin-bottom: 12px; display: grid; grid-template-columns: 2fr 1fr; gap: 12px;"
+  <div class="confirm-modal-actions" style="margin-top: 16px;">
+    <button onclick={() => (showGeneratorModal = false)} class="btn btn-secondary">
+      {$t('app.cancel')}
+    </button>
+    <button onclick={generateOutbound} class="btn btn-primary">
+      {$t('app.generate') || 'Сгенерировать'}
+    </button>
+  </div>
+</Modal>
+
+<Modal isOpen={showSaveConfirmModal} title={$t('editor.confirm_save_title') || 'Confirm Save'} maxWidth="700px" onclose={() => (showSaveConfirmModal = false)}>
+  <!-- Validation status -->
+  {#if validationLoading}
+    <div class="validation-result validation-loading" style="margin-top: 0;">
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 38 38"
+        stroke="var(--accent)"
+        style="flex-shrink:0"
       >
-        <div class="form-group">
-          <label
-            for="gen-address"
-            style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-            >{$t('editor.address') || 'Адрес'}</label
-          >
-          <input
-            id="gen-address"
-            type="text"
-            bind:value={genAddress}
-            placeholder="example.com"
-            class="input"
-          />
-        </div>
-        <div class="form-group">
-          <label
-            for="gen-port"
-            style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-            >{$t('editor.port') || 'Порт'}</label
-          >
-          <input id="gen-port" type="number" bind:value={genPort} class="input" />
-        </div>
-      </div>
-
-      <div class="form-group" style="margin-bottom: 12px;">
-        <label
-          for="gen-uuid"
-          style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-          >{genProtocol === 'vless' ? 'UUID' : 'Password'}</label
-        >
-        <div class="input-group" style="display: flex; gap: 8px;">
-          <input id="gen-uuid" type="text" bind:value={genUUID} class="input" style="flex: 1;" />
-          <button
-            class="btn btn-secondary"
-            style="padding: 0 12px;"
-            onclick={() => (genUUID = crypto.randomUUID())}
-            title={$t('editor.generate_uuid')}
-          >
-            <Icon name="refresh" size={14} />
-          </button>
-        </div>
-      </div>
-
-      {#if genProtocol === 'vless'}
-        <div class="form-group" style="margin-bottom: 12px;">
-          <label
-            for="gen-sni"
-            style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-            >SNI</label
-          >
-          <input
-            id="gen-sni"
-            type="text"
-            bind:value={genSNI}
-            placeholder="sni.example.com"
-            class="input"
-          />
-        </div>
-
-        <div
-          class="form-grid"
-          style="margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;"
-        >
-          <div class="form-group">
-            <label
-              for="gen-security"
-              style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-              >Security</label
-            >
-            <select id="gen-security" bind:value={genSecurity} class="input" style="width: 100%;">
-              <option value="reality">Reality</option>
-              <option value="tls">TLS</option>
-              <option value="none">None</option>
-            </select>
-          </div>
-          {#if genSecurity === 'reality'}
-            <div class="form-group">
-              <label
-                for="gen-shortid"
-                style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-                >Short ID</label
-              >
-              <input
-                id="gen-shortid"
-                type="text"
-                bind:value={genShortId}
-                placeholder="hex string"
-                class="input"
+        <g fill="none" fill-rule="evenodd">
+          <g transform="translate(1 1)" stroke-width="2">
+            <circle stroke-opacity=".5" cx="18" cy="18" r="18" />
+            <path d="M36 18c0-9.94-8.06-18-18-18">
+              <animateTransform
+                attributeName="transform"
+                type="rotate"
+                from="0 18 18"
+                to="360 18 18"
+                dur="1s"
+                repeatCount="indefinite"
               />
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-      <div class="confirm-modal-actions">
-        <button onclick={() => (showGeneratorModal = false)} class="btn btn-secondary">
-          {$t('app.cancel')}
-        </button>
-        <button onclick={generateOutbound} class="btn btn-primary">
-          {$t('app.generate') || 'Сгенерировать'}
-        </button>
-      </div>
+            </path>
+          </g>
+        </g>
+      </svg>
+      <span>{$t('editor.validating') || 'Проверка конфигурации...'}</span>
     </div>
-  </div>
-{/if}
-
-{#if showSaveConfirmModal}
-  <div
-    class="confirm-modal-backdrop"
-    role="button"
-    tabindex="0"
-    onclick={() => (showSaveConfirmModal = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showSaveConfirmModal = false)}
-  >
-    <div
-      class="confirm-modal"
-      style="max-width: 700px; width: 90%; display: flex; flex-direction: column; max-height: 85vh;"
-      role="presentation"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-    >
-      <div class="modal-header">
-        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
-          {$t('editor.confirm_save_title') || 'Confirm Save'}
-        </h3>
-        <button
-          class="btn-close"
-          onclick={() => (showSaveConfirmModal = false)}
-          aria-label="Close modal"
-        >
-          <Icon name="cross" size={14} />
-        </button>
+  {:else if validationResult}
+    {#if validationResult.valid}
+      <div class="validation-result validation-ok" style="margin-top: 0;">
+        <span class="v-icon">✓</span>
+        <span>{$t('editor.validation_valid') || 'Конфигурация корректна.'}</span>
       </div>
-
-      <!-- Validation status -->
-      {#if validationLoading}
-        <div class="validation-result validation-loading" style="margin-top: 12px;">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 38 38"
-            stroke="var(--accent)"
-            style="flex-shrink:0"
-          >
-            <g fill="none" fill-rule="evenodd">
-              <g transform="translate(1 1)" stroke-width="2">
-                <circle stroke-opacity=".5" cx="18" cy="18" r="18" />
-                <path d="M36 18c0-9.94-8.06-18-18-18">
-                  <animateTransform
-                    attributeName="transform"
-                    type="rotate"
-                    from="0 18 18"
-                    to="360 18 18"
-                    dur="1s"
-                    repeatCount="indefinite"
-                  />
-                </path>
-              </g>
-            </g>
-          </svg>
-          <span>{$t('editor.validating') || 'Проверка конфигурации...'}</span>
+    {:else}
+      <div class="validation-result validation-err" style="margin-top: 0;">
+        <div class="validation-err-head">
+          <span class="v-icon">✗</span>
+          <span>{$t('editor.validation_invalid') || 'Конфигурация содержит ошибки:'}</span>
         </div>
-      {:else if validationResult}
-        {#if validationResult.valid}
-          <div class="validation-result validation-ok" style="margin-top: 12px;">
-            <span class="v-icon">✓</span>
-            <span>{$t('editor.validation_valid') || 'Конфигурация корректна.'}</span>
-          </div>
-        {:else}
-          <div class="validation-result validation-err" style="margin-top: 12px;">
-            <div class="validation-err-head">
-              <span class="v-icon">✗</span>
-              <span>{$t('editor.validation_invalid') || 'Конфигурация содержит ошибки:'}</span>
-            </div>
-            <pre>{validationResult.error}</pre>
-          </div>
-        {/if}
-      {/if}
+        <pre>{validationResult.error}</pre>
+      </div>
+    {/if}
+  {/if}
 
-      <!-- Diff Preview -->
-      <div class="diff-preview" style="margin-top: 12px;">
-        <div class="diff-preview-title">
-          {$t('editor.diff_preview') || 'Предпросмотр изменений'}
-        </div>
-        <div class="diff-preview-body">
-          {#each getDiffGroups(originalContent, editorView ? editorView.state.doc.toString() : '') as group}
-            {#if group.type === 'added'}
-              {#each group.lines as line}
-                <div class="diff-line diff-line-added">+ {line}</div>
-              {/each}
-            {:else if group.type === 'removed'}
-              {#each group.lines as line}
-                <div class="diff-line diff-line-removed">- {line}</div>
-              {/each}
-            {:else if group.type === 'collapsed'}
-              <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
-            {:else}
-              {#each group.lines as line}
-                <div class="diff-line diff-line-unchanged">{line}</div>
-              {/each}
-            {/if}
+  <!-- Diff Preview -->
+  <div class="diff-preview" style="margin-top: 12px;">
+    <div class="diff-preview-title">
+      {$t('editor.diff_preview') || 'Предпросмотр изменений'}
+    </div>
+    <div class="diff-preview-body" style="max-height: 40vh; overflow-y: auto;">
+      {#each getDiffGroups(originalContent, editorView ? editorView.state.doc.toString() : '') as group}
+        {#if group.type === 'added'}
+          {#each group.lines as line}
+            <div class="diff-line diff-line-added">+ {line}</div>
           {/each}
-        </div>
-      </div>
-
-      <div class="confirm-modal-actions" style="margin-top: 16px;">
-        <button onclick={() => (showSaveConfirmModal = false)} class="btn btn-secondary">
-          {$t('app.cancel')}
-        </button>
-        <button
-          onclick={confirmSave}
-          class="btn btn-primary"
-          disabled={saving || (validationResult && !validationResult.valid && !expertMode)}
-        >
-          {saving ? $t('app.loading') : $t('app.save')}
-        </button>
-      </div>
+        {:else if group.type === 'removed'}
+          {#each group.lines as line}
+            <div class="diff-line diff-line-removed">- {line}</div>
+          {/each}
+        {:else if group.type === 'collapsed'}
+          <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
+        {:else}
+          {#each group.lines as line}
+            <div class="diff-line diff-line-unchanged">{line}</div>
+          {/each}
+        {/if}
+      {/each}
     </div>
   </div>
-{/if}
+
+  <div class="confirm-modal-actions" style="margin-top: 16px;">
+    <button onclick={() => (showSaveConfirmModal = false)} class="btn btn-secondary">
+      {$t('app.cancel')}
+    </button>
+    <button
+      onclick={confirmSave}
+      class="btn btn-primary"
+      disabled={saving || (validationResult && !validationResult.valid && !expertMode)}
+    >
+      {saving ? $t('app.loading') : $t('app.save')}
+    </button>
+  </div>
+</Modal>
 
 <style>
   .status-dirty {
@@ -2857,6 +2739,63 @@
     .editor-grid {
       grid-template-columns: 1fr !important;
       gap: 12px;
+    }
+  }
+
+  .container.editor-page-container {
+    max-width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 16px;
+    box-sizing: border-box;
+  }
+  .editor-grid {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 14px;
+    flex: 1;
+    min-height: 0;
+  }
+  .editor-main-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
+  .editor-statusbar {
+    padding: 6px 14px;
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    color: var(--fg-dim);
+    min-height: 30px;
+  }
+  .editor-breadcrumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 14px;
+    background: rgba(0, 0, 0, 0.1);
+    border-bottom: 1px solid var(--border);
+    font-size: 11.5px;
+    color: var(--fg-dim);
+  }
+  @media (max-width: 768px) {
+    .editor-breadcrumbs {
+      display: none !important;
+    }
+    .status-shortcut-tip {
+      display: none !important;
     }
   }
 </style>
