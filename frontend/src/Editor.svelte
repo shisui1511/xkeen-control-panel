@@ -2239,7 +2239,7 @@
     background: var(--hover);
   }
 
-  .templates-wide-modal {
+  :global(.templates-wide-modal) {
     max-width: 900px !important;
     width: 90vw !important;
     padding: 0 !important;
@@ -2248,7 +2248,7 @@
     flex-direction: column;
   }
 
-  .templates-wide-modal .modal-header {
+  :global(.templates-wide-modal .modal-header) {
     padding: 20px 20px 12px;
     border-bottom: 1px solid var(--border);
     display: flex;
@@ -2257,7 +2257,7 @@
     flex-shrink: 0;
   }
 
-  .templates-modal-title-block {
+  :global(.templates-modal-title-block) {
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -2321,7 +2321,7 @@
     }
   }
 
-  .templates-modal-header-actions {
+  :global(.templates-modal-header-actions) {
     display: flex;
     align-items: center;
     gap: 8px;
