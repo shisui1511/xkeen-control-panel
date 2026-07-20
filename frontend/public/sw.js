@@ -38,7 +38,33 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: cache-first
+  // App shell (/ and /index.html): network-first. A cache-first strategy
+  // here would permanently mask the Cache-Control: no-cache header the
+  // server sends for these paths and keep serving a stale bundle after
+  // deploy, even to returning PWA users. Falls back to the cached copy
+  // only when the network is unavailable (offline support).
+  const isAppShell =
+    event.request.mode === 'navigate' || url.pathname === '/' || url.pathname === '/index.html';
+  if (isAppShell) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, clone);
+            });
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Other static assets (hashed JS/CSS/manifest): cache-first — safe
+  // because Vite content-hashes these filenames, so a given URL never
+  // changes content between deploys.
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
