@@ -1705,6 +1705,7 @@
 
   :global(.dashboard-layout.editor-active) {
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
   }
   :global(.main-content.editor-active) {

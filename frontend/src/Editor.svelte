@@ -1863,7 +1863,7 @@
       {:else}
         <div class="templates-preview-placeholder">
           <p style="color: var(--fg-dim); font-size: 13px; text-align: center;">
-            {selectedTemplate ? '' : 'Выберите шаблон для предпросмотра'}
+            {selectedTemplate ? '' : ($t('editor.select_template_preview') || 'Выберите шаблон для предпросмотра')}
           </p>
         </div>
       {/if}

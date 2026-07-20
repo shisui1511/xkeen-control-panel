@@ -32,6 +32,7 @@
       }, 0);
     } else if (previouslyFocusedElement) {
       previouslyFocusedElement.focus();
+      previouslyFocusedElement = null;
     }
   });
 
