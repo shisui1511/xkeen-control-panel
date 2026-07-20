@@ -1918,3 +1918,123 @@ a.chip:hover {
     font-size: 16px;
   }
 }
+
+/* ------------ Fullscreen Editor Mode Layout (REQ-3) ------------- */
+.dashboard-layout.editor-active {
+  height: 100vh !important;
+  height: 100dvh !important;
+  max-height: 100vh !important;
+  max-height: 100dvh !important;
+  overflow: hidden !important;
+}
+
+.main-content.editor-active {
+  height: 100% !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.main-content.editor-active > div {
+  flex: 1 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.container.editor-page-container {
+  max-width: 100% !important;
+  flex: 1 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  padding: 16px !important;
+  box-sizing: border-box !important;
+}
+
+.editor-page-container > .page-head {
+  flex: 0 0 auto !important;
+}
+
+.editor-tabs {
+  flex: 0 0 auto !important;
+  align-self: flex-start !important;
+  width: fit-content !important;
+}
+
+.editor-grid {
+  display: grid !important;
+  grid-template-columns: 260px 1fr !important;
+  gap: 14px !important;
+  flex: 1 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  align-items: stretch !important;
+  overflow: hidden !important;
+}
+
+.file-tree-container {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+}
+
+.editor-main-card,
+.editor-empty-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+.editor-empty-card {
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 24px !important;
+}
+
+.editor-main-card > .editor-tabs-bar,
+.editor-main-card > .editor-breadcrumbs,
+.editor-main-card > .editor-toolbar,
+.editor-main-card > .editor-statusbar {
+  flex: 0 0 auto !important;
+}
+
+.editor-cm-wrapper {
+  flex: 1 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+.cm-editor {
+  flex: 1 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.cm-scroller {
+  flex: 1 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+}
+
