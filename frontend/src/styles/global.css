@@ -1971,13 +1971,27 @@ a.chip:hover {
 
 .editor-grid {
   display: grid !important;
-  grid-template-columns: 260px 1fr !important;
   gap: 14px !important;
   flex: 1 !important;
   height: 100% !important;
   min-height: 0 !important;
   align-items: stretch !important;
   overflow: hidden !important;
+}
+
+.editor-grid:not(.sidebar-collapsed) {
+  grid-template-columns: 260px 1fr !important;
+}
+
+.editor-grid.sidebar-collapsed {
+  grid-template-columns: 1fr !important;
+}
+
+@media (max-width: 767px) {
+  .editor-grid:not(.sidebar-collapsed) {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
 }
 
 .file-tree-container {

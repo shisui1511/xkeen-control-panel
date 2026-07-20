@@ -1379,7 +1379,7 @@
   </div>
 
   {#if activeTab === 'files'}
-    <div class="editor-grid" style={showSidebar ? '' : 'grid-template-columns: 1fr;'}>
+    <div class="editor-grid" class:sidebar-collapsed={!showSidebar}>
       {#if showSidebar}
         <FileTree
           {xrayFiles}
@@ -2137,13 +2137,6 @@
     color: var(--fg-primary);
   }
 
-  .editor-grid {
-    display: grid;
-    grid-template-columns: 260px 1fr;
-    gap: 14px;
-    align-items: start;
-  }
-
   .editor-main-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -2748,42 +2741,6 @@
     justify-content: center;
   }
 
-  @media (max-width: 767px) {
-    .editor-grid {
-      grid-template-columns: 1fr !important;
-      gap: 12px;
-    }
-  }
-
-  .editor-page-container {
-    width: 100%;
-    max-width: 100%;
-    margin: 0;
-    flex: 1;
-    height: 100%;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    padding: 16px;
-    box-sizing: border-box;
-  }
-  .editor-grid {
-    display: grid;
-    grid-template-columns: 260px 1fr;
-    gap: 14px;
-    flex: 1;
-    min-height: 0;
-  }
-  .editor-main-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    min-height: 0;
-  }
   .editor-statusbar {
     padding: 6px 14px;
     background: rgba(0, 0, 0, 0.2);
