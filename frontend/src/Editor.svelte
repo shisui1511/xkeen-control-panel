@@ -1760,7 +1760,7 @@
   </div>
 </Modal>
 
-<Modal isOpen={showTemplatesModal} title={$t('editor.templates') || 'Шаблоны'} maxWidth="900px" onclose={() => (showTemplatesModal = false)}>
+<Modal isOpen={showTemplatesModal} title={$t('editor.templates') || 'Шаблоны'} maxWidth="900px" class="templates-wide-modal" onclose={() => (showTemplatesModal = false)}>
   {#if templateStatus}
     <div style="margin-top: -10px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
       <p class="templates-modal-subtitle" style="margin: 0;">

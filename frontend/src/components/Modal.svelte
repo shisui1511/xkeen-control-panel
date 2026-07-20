@@ -5,12 +5,14 @@
     isOpen = false,
     title = '',
     maxWidth = '520px',
+    class: className = '',
     onclose,
     children
   } = $props<{
     isOpen: boolean;
     title: string;
     maxWidth?: string;
+    class?: string;
     onclose: () => void;
     children?: Snippet;
   }>();
@@ -73,7 +75,7 @@
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <div class="modal-backdrop" role="presentation" onclick={onclose}>
     <div
-      class="modal-container"
+      class="modal-container {className}"
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
