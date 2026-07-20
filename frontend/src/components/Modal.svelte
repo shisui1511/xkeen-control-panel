@@ -4,11 +4,13 @@
   let {
     isOpen = false,
     title = '',
+    maxWidth = '520px',
     onclose,
     children
   } = $props<{
     isOpen: boolean;
     title: string;
+    maxWidth?: string;
     onclose: () => void;
     children?: Snippet;
   }>();
@@ -78,6 +80,7 @@
       bind:this={modalElement}
       onkeydown={handleKeydown}
       onclick={(e) => e.stopPropagation()}
+      style="max-width: {maxWidth};"
       tabindex="-1"
     >
       <header class="modal-header">
