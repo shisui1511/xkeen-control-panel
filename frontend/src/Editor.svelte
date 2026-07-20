@@ -2100,6 +2100,8 @@
 
   .editor-tabs {
     display: inline-flex;
+    align-self: flex-start;
+    width: fit-content;
     gap: 4px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border);
@@ -2730,8 +2732,19 @@
     transform: rotate(180deg);
   }
 
+  .editor-empty-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 0;
+    padding: 24px;
+    box-sizing: border-box;
+  }
   .editor-empty-card :global(.empty-state) {
-    min-height: 500px;
     justify-content: center;
   }
 

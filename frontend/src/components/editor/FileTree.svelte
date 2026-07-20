@@ -43,7 +43,7 @@
   }
 </script>
 
-<div>
+<div class="file-tree-container">
   <!-- File Search -->
   <div style="margin-bottom: 12px; position: relative;">
     <input
@@ -140,6 +140,12 @@
 </div>
 
 <style>
+  .file-tree-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+  }
   .editor-files {
     background: var(--bg-card);
     border: 1px solid var(--border);

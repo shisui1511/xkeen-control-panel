@@ -246,17 +246,24 @@
 
 <style>
   .editor-cm-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
     height: 100%;
     min-height: 0;
     position: relative;
   }
   :global(.cm-editor) {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
     height: 100% !important;
     font-size: 14px;
     background: var(--cm-bg) !important;
     color: var(--fg-primary) !important;
   }
   :global(.cm-scroller) {
+    flex: 1 !important;
     overflow: auto !important;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
