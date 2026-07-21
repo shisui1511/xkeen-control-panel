@@ -268,13 +268,6 @@
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape' && isFullscreen) {
-      isFullscreen = false;
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
-      }
-    }
-
     if (e.ctrlKey && e.key === 'Tab') {
       e.preventDefault();
       if (tabs.length <= 1) return;
