@@ -2022,7 +2022,7 @@ a.chip:hover {
   padding: 24px !important;
 }
 
-.editor-main-card > .editor-tabs-bar,
+.editor-main-card > .editor-tab-strip,
 .editor-main-card > .editor-breadcrumbs,
 .editor-main-card > .editor-toolbar,
 .editor-main-card > .editor-statusbar {
