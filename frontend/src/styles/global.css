@@ -1987,7 +1987,7 @@ a.chip:hover {
   grid-template-columns: 1fr !important;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 768px) {
   .editor-grid:not(.sidebar-collapsed) {
     grid-template-columns: 1fr !important;
     gap: 12px !important;
