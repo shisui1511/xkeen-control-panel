@@ -931,9 +931,16 @@
     }
   }
 
-  async function deleteFile() {
+  let showDeleteConfirmModal = $state(false);
+
+  function deleteFile() {
     if (!selectedFile) return;
-    if (!confirm($t('app.delete') + ' ' + selectedFile.split('/').pop() + '?')) return;
+    showDeleteConfirmModal = true;
+  }
+
+  async function confirmDeleteFile() {
+    if (!selectedFile) return;
+    showDeleteConfirmModal = false;
 
     const csrfToken = localStorage.getItem('csrf_token');
 
@@ -1465,7 +1472,7 @@
               >
                 <span
                   class="badge badge-warning"
-                  style="font-size: 11px; display: flex; align-items: center; gap: 4px;"
+                  style="font-size: 12px; display: flex; align-items: center; gap: 4px;"
                 >
                   <span class="tab-dirty-dot" style="margin:0">●</span>
                   {$t('editor.has_draft') || 'Черновик'}
@@ -1552,7 +1559,7 @@
                 <span class="v-icon">⚠</span>
                 <div>
                   <div style="font-weight: 600;">{$t('editor.mihomo_autoedit_title')}</div>
-                  <div style="font-size: 11.5px; opacity: 0.9; margin-top: 4px; line-height: 1.4;">
+                  <div style="font-size: 12px; opacity: 0.9; margin-top: 4px; line-height: 1.4;">
                     {$t('editor.mihomo_autoedit_body')}
                   </div>
                 </div>
@@ -1858,7 +1865,7 @@
         <pre class="template-preview-code">{templatePreview}</pre>
       {:else}
         <div class="templates-preview-placeholder">
-          <p style="color: var(--fg-dim); font-size: 13px; text-align: center;">
+          <p style="color: var(--fg-dim); font-size: 14px; text-align: center;">
             {selectedTemplate ? '' : ($t('editor.select_template_preview') || 'Выберите шаблон для предпросмотра')}
           </p>
         </div>
@@ -2044,6 +2051,24 @@
   </div>
 </Modal>
 
+<Modal
+  isOpen={showDeleteConfirmModal}
+  title={`${$t('editor.delete_file')}: ${selectedFile.split('/').pop() || ''}`}
+  onclose={() => (showDeleteConfirmModal = false)}
+>
+  <p style="margin: 0;">
+    {$t('editor.delete_confirm_body', { file: selectedFile.split('/').pop() || '' })}
+  </p>
+  <div class="confirm-modal-actions" style="margin-top: 16px;">
+    <button onclick={() => (showDeleteConfirmModal = false)} class="btn btn-secondary">
+      {$t('app.cancel')}
+    </button>
+    <button onclick={confirmDeleteFile} class="btn btn-danger">
+      {$t('app.delete')}
+    </button>
+  </div>
+</Modal>
+
 <style>
   .status-dirty {
     color: var(--warning) !important;
@@ -2065,8 +2090,8 @@
     background: none;
     border: none;
     color: var(--fg-secondary);
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 14px;
+    font-weight: 600;
     padding: 6px 14px;
     border-radius: var(--radius-sm);
     cursor: pointer;
@@ -2098,14 +2123,14 @@
 
   .editor-toolbar .file-name {
     font-family: var(--font-family-mono);
-    font-size: 13px;
+    font-size: 14px;
     color: var(--fg-primary);
     font-weight: 600;
   }
 
   .editor-toolbar .file-meta {
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
   }
 
@@ -2156,17 +2181,17 @@
 
   .template-name {
     font-weight: 600;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--fg-primary);
   }
 
   .template-desc {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--fg-dim);
   }
 
   .template-type {
-    font-size: 10px;
+    font-size: 12px;
     text-transform: uppercase;
     background: var(--bg-card);
     padding: 2px 6px;
@@ -2208,15 +2233,15 @@
   .templates-modal-subtitle {
     margin: 0;
     color: var(--fg-dim);
-    font-size: 11.5px;
+    font-size: 12px;
   }
 
   .templates-badge {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
-    font-weight: 500;
+    font-size: 12px;
+    font-weight: 600;
     padding: 3px 8px;
     border-radius: 12px;
   }
@@ -2325,7 +2350,7 @@
 
   .templates-kernel-tabs .tab-btn {
     padding: 6px 12px;
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .templates-col-list .template-list {
@@ -2343,7 +2368,7 @@
     margin: 0;
     padding: 16px;
     font-family: var(--font-family-mono);
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.5;
     color: var(--fg-secondary);
     overflow-y: auto;
@@ -2380,14 +2405,14 @@
   }
 
   .templates-empty-title {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--fg-secondary);
     margin: 0 0 6px;
   }
 
   .templates-empty-hint {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--fg-dim);
     margin: 0;
   }
@@ -2450,7 +2475,7 @@
     border: none;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--fg-primary);
     text-align: left;
     transition: background 0.15s;
@@ -2476,7 +2501,7 @@
     gap: 8px;
     padding: 10px 14px;
     border-radius: 6px;
-    font-size: 12.5px;
+    font-size: 12px;
   }
 
   .validation-loading {
@@ -2486,7 +2511,7 @@
   }
 
   .v-icon {
-    font-weight: 700;
+    font-weight: 600;
     flex-shrink: 0;
   }
 
@@ -2499,7 +2524,7 @@
   }
 
   .diff-preview-title {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--fg-dim);
     text-transform: uppercase;
@@ -2511,7 +2536,7 @@
   .diff-preview-body {
     flex: 1;
     overflow-y: auto;
-    background: #050d16;
+    background: var(--cm-bg);
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 10px;
@@ -2526,12 +2551,12 @@
   }
 
   .diff-line-added {
-    color: #a3e9b6;
+    color: var(--success);
     background: rgba(163, 233, 182, 0.04);
   }
 
   .diff-line-removed {
-    color: #f87171;
+    color: var(--danger);
     background: rgba(248, 113, 113, 0.04);
   }
 
@@ -2562,7 +2587,7 @@
   .btn-accent {
     background: linear-gradient(180deg, var(--accent), var(--accent-2));
     border: 1px solid var(--accent);
-    color: #111;
+    color: var(--btn-primary-text, #03182a);
     font-weight: 600;
   }
   .btn-accent:hover:not(:disabled) {
@@ -2609,7 +2634,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--accent);
     padding: 0 10px;
     border-left: 1px solid var(--border);
@@ -2623,7 +2648,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--fg-dim);
-    font-size: 11px;
+    font-size: 12px;
     padding: 4px 10px;
     cursor: pointer;
     font-family: var(--font-family-mono);
@@ -2654,7 +2679,7 @@
     display: flex;
     align-items: center;
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
     min-height: 30px;
   }
@@ -2666,7 +2691,7 @@
     padding: 8px 14px;
     background: rgba(0, 0, 0, 0.1);
     border-bottom: 1px solid var(--border);
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--fg-dim);
   }
   @media (max-width: 768px) {

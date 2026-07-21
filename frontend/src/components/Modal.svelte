@@ -149,7 +149,7 @@
   }
   .modal-title {
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 0.02em;
     margin: 0;
     color: var(--fg-primary);
@@ -176,6 +176,6 @@
     padding: 20px;
     overflow-y: auto;
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: 14px;
   }
 </style>

@@ -187,6 +187,7 @@
   "editor.generate_uuid": "Generate UUID",
   "editor.create_file": "Create file",
   "editor.delete_file": "Delete file",
+  "editor.delete_confirm_body": "Are you sure you want to delete the file {file}?",
   "editor.rename_file": "Rename file",
   "editor.file_name": "file_name.json",
   "editor.new_name": "new_name.json",

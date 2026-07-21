@@ -153,6 +153,8 @@
   --scrollbar-thumb: var(--border-strong);
   --scrollbar-thumb-hover: #a9b8c9;
   --surface-tint: rgba(12, 34, 55, 0.04);
+  --surface-overlay-from: #ffffff;
+  --surface-overlay-to: #f3f6fa;
   --btn-primary-text: #ffffff;
   --bg-group-head-from: rgba(240, 244, 248, 0.95);
   --bg-group-head-to: rgba(228, 235, 244, 0.95);
