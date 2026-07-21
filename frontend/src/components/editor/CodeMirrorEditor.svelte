@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
+import { t as translate } from '../../i18n';
   import {
     EditorView,
     keymap,
@@ -234,7 +235,42 @@
     }
   });
 
+  let isFullscreen = $state(false);
+
+  function toggleFullscreen() {
+    isFullscreen = !isFullscreen;
+    if (isFullscreen) {
+      if (editorContainer?.requestFullscreen) {
+        editorContainer.requestFullscreen().catch(() => {});
+      } else if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    } else {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  }
+
+  function handleFullscreenChange() {
+    isFullscreen = !!document.fullscreenElement;
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && isFullscreen) {
+      isFullscreen = false;
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  }
+
+  onMount(() => {
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+  });
+
   onDestroy(() => {
+    document.removeEventListener('fullscreenchange', handleFullscreenChange);
     if (view) {
       view.destroy();
       view = null;
@@ -242,7 +278,45 @@
   });
 </script>
 
-<div class="editor-cm-wrapper" bind:this={editorContainer}></div>
+<svelte:window onkeydown={handleKeydown} />
+
+<div class="editor-cm-wrapper" class:is-fullscreen={isFullscreen} bind:this={editorContainer}>
+  <div class="editor-cm-toolbar" class:is-fullscreen={isFullscreen}>
+    <button
+      type="button"
+      class="editor-cm-tool-btn"
+      onclick={toggleFullscreen}
+      title={isFullscreen ? ($translate('editor.exit_fullscreen') || 'Свернуть') : ($translate('editor.fullscreen') || 'Во весь экран')}
+      aria-label={isFullscreen ? ($translate('editor.exit_fullscreen') || 'Свернуть') : ($translate('editor.fullscreen') || 'Во весь экран')}
+    >
+      {#if isFullscreen}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          ><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg
+        >
+      {:else}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          ><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg
+        >
+      {/if}
+    </button>
+  </div>
+</div>
 
 <style>
   /* .editor-cm-wrapper geometry is owned by global.css (unconditional
