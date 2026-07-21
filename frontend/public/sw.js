@@ -27,10 +27,10 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, clone);
-          });
+          if (response.ok && event.request.method === 'GET') {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
           return response;
         })
         .catch(() => caches.match(event.request))
@@ -38,7 +38,39 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: cache-first
+  // App shell (/, /index.html, /manifest.json): network-first. A cache-first
+  // strategy here would permanently mask the Cache-Control: no-cache header
+  // the server sends for these paths and keep serving a stale bundle after
+  // deploy, even to returning PWA users. Falls back to the cached copy
+  // only when the network is unavailable (offline support). /manifest.json
+  // is included because it ships unhashed from public/ and can change
+  // between deploys (icons, theme_color, name) — unlike the hashed static
+  // assets handled by the cache-first branch below.
+  const isAppShell =
+    event.request.mode === 'navigate' ||
+    url.pathname === '/' ||
+    url.pathname === '/index.html' ||
+    url.pathname === '/manifest.json';
+  if (isAppShell) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, clone);
+            });
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // Other static assets (hashed JS/CSS/manifest): cache-first — safe
+  // because Vite content-hashes these filenames, so a given URL never
+  // changes content between deploys.
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;

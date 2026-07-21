@@ -18,6 +18,7 @@
   import EditorTabs from './components/editor/EditorTabs.svelte';
   import CodeMirrorEditor from './components/editor/CodeMirrorEditor.svelte';
   import BackupSidebar from './components/editor/BackupSidebar.svelte';
+  import Modal from './components/Modal.svelte';
 
   interface Template {
     name: string;
@@ -124,25 +125,6 @@
   // Local active tab: 'files' | 'constructor'
   let activeTab = $state<'files' | 'constructor'>('files');
 
-  let isMihomoAutoEdited = $derived(
-    selectedFile.includes('/mihomo/') &&
-      (selectedFile.endsWith('config.yaml') || selectedFile.endsWith('config.yml'))
-  );
-
-  let dismissMihomoAutoEditWarning = $state(false);
-  let lastSelectedFile = $state('');
-
-  $effect(() => {
-    if (selectedFile !== lastSelectedFile) {
-      if (lastSelectedFile && selectedFile !== lastSelectedFile) {
-        localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
-      }
-      lastSelectedFile = selectedFile;
-      const dismissed = localStorage.getItem('xcp:dismissed_warning:mihomo_auto_edit');
-      dismissMihomoAutoEditWarning = dismissed === selectedFile;
-    }
-  });
-
   function jumpToSegment(pos: number) {
     if (!editorView) return;
     editorView.focus();
@@ -244,8 +226,8 @@
   }
 
   function checkDirty(): boolean {
-    const activeTab = tabs.find((t) => t.path === activeTabPath);
-    return activeTab ? activeTab.isDirty : false;
+    const currentTab = tabs.find((t) => t.path === activeTabPath);
+    return currentTab ? currentTab.isDirty : false;
   }
 
   function confirmUnsaved(): boolean {
@@ -313,15 +295,15 @@
 
     // Save current tab state before leaving
     if (activeTabPath && editorView) {
-      const activeTab = tabs.find((t) => t.path === activeTabPath);
-      if (activeTab) {
-        activeTab.scrollState = {
+      const currentTab = tabs.find((t) => t.path === activeTabPath);
+      if (currentTab) {
+        currentTab.scrollState = {
           top: editorView.scrollDOM.scrollTop,
           left: editorView.scrollDOM.scrollLeft
         };
-        activeTab.cursorPos = editorView.state.selection.main.head;
-        activeTab.currentContent = editorView.state.doc.toString();
-        activeTab.isDirty = activeTab.currentContent !== activeTab.originalContent;
+        currentTab.cursorPos = editorView.state.selection.main.head;
+        currentTab.currentContent = editorView.state.doc.toString();
+        currentTab.isDirty = currentTab.currentContent !== currentTab.originalContent;
       }
     }
 
@@ -397,10 +379,14 @@
         selectedFile = '';
         originalContent = '';
         isDirty = false;
+        showSidebar = true;
       }
     }
 
     tabs = [...tabs];
+    if (tabs.length === 0) {
+      showSidebar = true;
+    }
   }
 
   async function loadFile(path: string, isPreviewClick = true) {
@@ -439,15 +425,15 @@
 
       // Save active tab state before leaving
       if (activeTabPath && editorView) {
-        const activeTab = tabs.find((t) => t.path === activeTabPath);
-        if (activeTab) {
-          activeTab.scrollState = {
+        const currentTab = tabs.find((t) => t.path === activeTabPath);
+        if (currentTab) {
+          currentTab.scrollState = {
             top: editorView.scrollDOM.scrollTop,
             left: editorView.scrollDOM.scrollLeft
           };
-          activeTab.cursorPos = editorView.state.selection.main.head;
-          activeTab.currentContent = editorView.state.doc.toString();
-          activeTab.isDirty = activeTab.currentContent !== activeTab.originalContent;
+          currentTab.cursorPos = editorView.state.selection.main.head;
+          currentTab.currentContent = editorView.state.doc.toString();
+          currentTab.isDirty = currentTab.currentContent !== currentTab.originalContent;
         }
       }
 
@@ -568,8 +554,6 @@
   }
 
   let showSaveConfirmModal = $state(false);
-  let validationResult = $state<{ valid: boolean; error: string } | null>(null);
-  let validationLoading = $state(false);
   let diffChanges = $state<any[]>([]);
 
   // Kebab menu for destructive actions (Delete)
@@ -717,8 +701,6 @@
     }
 
     showSaveConfirmModal = true;
-    validationLoading = false;
-    validationResult = { valid: true, error: '' };
   }
 
   async function confirmSave() {
@@ -752,8 +734,6 @@
       localStorage.removeItem(`editor.draft.${selectedFile}`);
       hasDraft = false;
       draftContent = '';
-      localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
-      dismissMihomoAutoEditWarning = false;
       await loadBackups(selectedFile);
     } catch (e: any) {
       showToast('error', $t('editor.save_error') + ': ' + e.message);
@@ -793,9 +773,6 @@
       localStorage.removeItem(`editor.draft.${selectedFile}`);
       hasDraft = false;
       draftContent = '';
-
-      localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
-      dismissMihomoAutoEditWarning = false;
 
       // Update tab state
       const activeT = tabs.find((t) => t.path === selectedFile);
@@ -934,9 +911,16 @@
     }
   }
 
-  async function deleteFile() {
+  let showDeleteConfirmModal = $state(false);
+
+  function deleteFile() {
     if (!selectedFile) return;
-    if (!confirm($t('app.delete') + ' ' + selectedFile.split('/').pop() + '?')) return;
+    showDeleteConfirmModal = true;
+  }
+
+  async function confirmDeleteFile() {
+    if (!selectedFile) return;
+    showDeleteConfirmModal = false;
 
     const csrfToken = localStorage.getItem('csrf_token');
 
@@ -1042,12 +1026,12 @@
         editorView.dispatch({
           changes: { from: 0, to: editorView.state.doc.length, insert: fixed }
         });
-        showToast('success', `Quick fixes applied: ${fixesApplied}`);
+        showToast('success', $t('editor.quick_fixes_applied', { count: fixesApplied }));
       } else {
-        showToast('info', 'No quick fixes needed');
+        showToast('info', $t('editor.no_quick_fixes_needed'));
       }
     } catch (e) {
-      showToast('error', 'Quick fix error: ' + (e as any)?.message);
+      showToast('error', $t('editor.quick_fix_error', { message: (e as any)?.message ?? '' }));
     }
   }
 
@@ -1246,7 +1230,7 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<div class="container">
+<div class="editor-page-container">
   <div class="page-head">
     <div>
       <div class="crumbs">
@@ -1257,9 +1241,16 @@
           {$t('editor.tab_constructor')}
         {/if}
       </div>
-      <h1>{activeTab === 'constructor' ? $t('editor.constructor_title') : $t('editor.h1')}</h1>
+      <h1>
+        {activeTab === 'constructor'
+          ? $t('editor.constructor_title') || 'Конструктор конфигурации'
+          : $t('editor.h1') || 'Конфигурация'}
+      </h1>
       <p class="sub">
-        {activeTab === 'constructor' ? $t('editor.constructor_subtitle') : $t('editor.h1_sub')}
+        {activeTab === 'constructor'
+          ? $t('editor.constructor_subtitle') || 'Пошаговое создание конфигураций'
+          : $t('editor.h1_sub') ||
+            'YAML / JSON конфиги с подсветкой, валидацией по схеме и автодополнением.'}
       </p>
     </div>
     {#if activeTab === 'files'}
@@ -1378,7 +1369,7 @@
   </div>
 
   {#if activeTab === 'files'}
-    <div class="editor-grid" style={showSidebar ? '' : 'grid-template-columns: 1fr;'}>
+    <div class="editor-grid" class:sidebar-collapsed={!showSidebar}>
       {#if showSidebar}
         <FileTree
           {xrayFiles}
@@ -1397,6 +1388,28 @@
             description={$t('editor.empty_state_body')}
             icon={EditorIcon}
           />
+          {#if !showSidebar}
+            <button
+              class="btn btn-primary"
+              style="margin-top: 14px;"
+              onclick={() => (showSidebar = true)}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><path
+                  d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                /></svg
+              >
+              {$t('editor.show_files') || 'Показать файлы'}
+            </button>
+          {/if}
         </div>
       {:else}
         <div class="editor-main-card">
@@ -1468,7 +1481,7 @@
               >
                 <span
                   class="badge badge-warning"
-                  style="font-size: 11px; display: flex; align-items: center; gap: 4px;"
+                  style="font-size: 12px; display: flex; align-items: center; gap: 4px;"
                 >
                   <span class="tab-dirty-dot" style="margin:0">●</span>
                   {$t('editor.has_draft') || 'Черновик'}
@@ -1544,38 +1557,8 @@
             </div>
           </div>
 
-          <!-- Autoedit warning -->
-          {#if isMihomoAutoEdited && !dismissMihomoAutoEditWarning}
-            <div
-              class="validation-result validation-loading"
-              style="margin: 10px 14px 0; display: flex; flex-direction: column; gap: 8px;"
-              transition:slide={{ duration: 150 }}
-            >
-              <div style="display: flex; align-items: flex-start; gap: 8px;">
-                <span class="v-icon">⚠</span>
-                <div>
-                  <div style="font-weight: 600;">{$t('editor.mihomo_autoedit_title')}</div>
-                  <div style="font-size: 11.5px; opacity: 0.9; margin-top: 4px; line-height: 1.4;">
-                    {$t('editor.mihomo_autoedit_body')}
-                  </div>
-                </div>
-              </div>
-              <div style="display: flex; justify-content: flex-end; width: 100%;">
-                <button
-                  class="btn btn-xs btn-secondary"
-                  onclick={() => {
-                    dismissMihomoAutoEditWarning = true;
-                    localStorage.setItem('xcp:dismissed_warning:mihomo_auto_edit', selectedFile);
-                  }}
-                >
-                  Скрыть предупреждение
-                </button>
-              </div>
-            </div>
-          {/if}
-
           <!-- CodeMirror editor component -->
-          <div style="height: 520px; position:relative; background: #050d16; min-height:0;">
+          <div style="flex: 1; min-height: 0; position:relative; background: var(--cm-bg);">
             {#if loading}
               <div
                 style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:rgba(5,13,22,0.7);z-index:10;"
@@ -1620,9 +1603,7 @@
           </div>
 
           <!-- Status Bar / Bottom Drawer Trigger -->
-          <div
-            style="padding: 6px 14px; background: rgba(0,0,0,0.2); border-top: 1px solid var(--border); display:flex; align-items:center; font-family: var(--font-family-mono); font-size: 11px; color: var(--fg-dim); min-height:30px;"
-          >
+          <div class="editor-statusbar">
             <span class="status-indicator" class:status-dirty={isDirty} style="margin-right: 14px;">
               <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
               {isDirty ? $t('editor.unsaved') || 'Изменён' : $t('editor.saved') || 'Сохранён'}
@@ -1685,7 +1666,9 @@
                 </button>
               {/if}
 
-              <span style="border-left: 1px solid var(--border); padding-left: 12px;"
+              <span
+                class="status-tip status-shortcut-tip"
+                style="border-left: 1px solid var(--border); padding-left: 12px;"
                 >Ctrl+S — сохранить</span
               >
             </div>
@@ -1719,497 +1702,377 @@
 </div>
 
 <!-- CRUD Modals -->
-{#if showCreateModal}
-  <div
-    class="confirm-modal-backdrop"
-    role="button"
-    tabindex="0"
-    onclick={() => (showCreateModal = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showCreateModal = false)}
-  >
+<Modal
+  isOpen={showCreateModal}
+  title={$t('editor.create_file')}
+  onclose={() => (showCreateModal = false)}
+>
+  <label for="new-file-name" class="sr-only">{$t('editor.file_name')}</label>
+  <input
+    id="new-file-name"
+    type="text"
+    bind:value={newFileName}
+    placeholder={$t('editor.file_name')}
+    class="input"
+    style="margin-bottom: 16px; width: 100%;"
+    onkeydown={(e) => e.key === 'Enter' && createFile()}
+  />
+  <div class="confirm-modal-actions">
+    <button onclick={() => (showCreateModal = false)} class="btn btn-secondary">
+      {$t('app.cancel')}
+    </button>
+    <button onclick={createFile} class="btn btn-primary">
+      {$t('app.create')}
+    </button>
+  </div>
+</Modal>
+
+<Modal
+  isOpen={showRenameModal}
+  title={$t('editor.rename_file')}
+  onclose={() => (showRenameModal = false)}
+>
+  <label for="rename-target" class="sr-only">{$t('editor.new_name')}</label>
+  <input
+    id="rename-target"
+    type="text"
+    bind:value={renameTarget}
+    placeholder={$t('editor.new_name')}
+    class="input"
+    style="margin-bottom: 16px; width: 100%;"
+    onkeydown={(e) => e.key === 'Enter' && renameFile()}
+  />
+  <div class="confirm-modal-actions">
+    <button onclick={() => (showRenameModal = false)} class="btn btn-secondary">
+      {$t('app.cancel')}
+    </button>
+    <button onclick={renameFile} class="btn btn-primary">
+      {$t('app.rename')}
+    </button>
+  </div>
+</Modal>
+
+<Modal
+  isOpen={showTemplatesModal}
+  title={$t('editor.templates') || 'Шаблоны'}
+  maxWidth="900px"
+  class="templates-wide-modal"
+  onclose={() => (showTemplatesModal = false)}
+>
+  {#if templateStatus}
     <div
-      class="confirm-modal"
-      role="presentation"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
+      style="margin-top: -10px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;"
     >
-      <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">
-        {$t('editor.create_file')}
-      </h3>
-      <label for="new-file-name" class="sr-only">{$t('editor.file_name')}</label>
-      <input
-        id="new-file-name"
-        type="text"
-        bind:value={newFileName}
-        placeholder={$t('editor.file_name')}
-        class="input"
-        style="margin-bottom: 16px;"
-        onkeydown={(e) => e.key === 'Enter' && createFile()}
-      />
-      <div class="confirm-modal-actions">
-        <button onclick={() => (showCreateModal = false)} class="btn btn-secondary">
-          {$t('app.cancel')}
-        </button>
-        <button onclick={createFile} class="btn btn-primary">
-          {$t('app.create')}
+      <p class="templates-modal-subtitle" style="margin: 0;">
+        {$t('editor.templates_desc') || 'Шаблоны конфигураций'}
+      </p>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        {#if templateStatus.has_update}
+          <span class="templates-badge update-available">
+            <span class="pulse-dot"></span>
+            {$t('editor.update_available') || 'Доступно обновление'} (v{templateStatus.current_version})
+          </span>
+        {:else if templateStatus.current_version}
+          <span class="templates-badge up-to-date">
+            <span class="dot"></span>
+            {$t('editor.up_to_date') || 'Обновлено'} (v{templateStatus.current_version})
+          </span>
+        {/if}
+        <button
+          class="btn btn-secondary templates-update-btn"
+          style="padding: 4px 8px; font-size: 12px;"
+          onclick={updateTemplates}
+          disabled={updatingTemplates}
+          title={$t('editor.templates_update')}
+        >
+          <span class="templates-update-icon" class:spinning={updatingTemplates}>
+            <Icon name="refresh" size={12} />
+          </span>
+          {$t('editor.templates_update') || 'Обновить'}
         </button>
       </div>
     </div>
-  </div>
-{/if}
+  {/if}
 
-{#if showRenameModal}
-  <div
-    class="confirm-modal-backdrop"
-    role="button"
-    tabindex="0"
-    onclick={() => (showRenameModal = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showRenameModal = false)}
-  >
-    <div
-      class="confirm-modal"
-      role="presentation"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-    >
-      <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin-bottom: 12px;">
-        {$t('editor.rename_file')}
-      </h3>
-      <label for="rename-target" class="sr-only">{$t('editor.new_name')}</label>
-      <input
-        id="rename-target"
-        type="text"
-        bind:value={renameTarget}
-        placeholder={$t('editor.new_name')}
-        class="input"
-        style="margin-bottom: 16px;"
-        onkeydown={(e) => e.key === 'Enter' && renameFile()}
-      />
-      <div class="confirm-modal-actions">
-        <button onclick={() => (showRenameModal = false)} class="btn btn-secondary">
-          {$t('app.cancel')}
+  <!-- 2-column body -->
+  <div class="templates-body-grid">
+    <!-- Left column: tabs + list -->
+    <div class="templates-col-list">
+      <div class="templates-kernel-tabs">
+        <button
+          class="tab-btn"
+          class:active={templateTab === 'xray'}
+          aria-pressed={templateTab === 'xray'}
+          onclick={async () => {
+            templateTab = 'xray';
+            selectedTemplate = null;
+            templatePreview = '';
+            const first = filteredTemplates[0];
+            if (first) await loadTemplatePreview(first);
+          }}
+        >
+          {$t('editor.templates_tab_xray') || 'Xray'}
         </button>
-        <button onclick={renameFile} class="btn btn-primary">
-          {$t('app.rename')}
+        <button
+          class="tab-btn"
+          class:active={templateTab === 'mihomo'}
+          aria-pressed={templateTab === 'mihomo'}
+          onclick={async () => {
+            templateTab = 'mihomo';
+            selectedTemplate = null;
+            templatePreview = '';
+            const first = filteredTemplates[0];
+            if (first) await loadTemplatePreview(first);
+          }}
+        >
+          {$t('editor.templates_tab_mihomo') || 'Mihomo'}
         </button>
       </div>
-    </div>
-  </div>
-{/if}
 
-{#if showTemplatesModal}
-  <div
-    class="confirm-modal-backdrop"
-    role="button"
-    tabindex="0"
-    onclick={() => (showTemplatesModal = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showTemplatesModal = false)}
-  >
-    <div
-      class="confirm-modal templates-wide-modal"
-      role="presentation"
-      aria-modal="true"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-    >
-      <!-- Header -->
-      <div class="modal-header">
-        <div class="templates-modal-title-block">
-          <h3
-            style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 8px;"
+      <div class="template-list">
+        {#each filteredTemplates as template (template.name)}
+          <button
+            class="template-item"
+            class:selected={selectedTemplate?.name === template.name}
+            onclick={() => loadTemplatePreview(template)}
+            disabled={templateLoading}
           >
-            {$t('editor.templates') || 'Шаблоны'}
-            {#if templateStatus}
-              {#if templateStatus.has_update}
-                <span class="templates-badge update-available">
-                  <span class="pulse-dot"></span>
-                  {$t('editor.update_available') || 'Доступно обновление'} (v{templateStatus.current_version})
-                </span>
-              {:else if templateStatus.current_version}
-                <span class="templates-badge up-to-date">
-                  <span class="dot"></span>
-                  {$t('editor.up_to_date') || 'Обновлено'} (v{templateStatus.current_version})
-                </span>
-              {/if}
-            {/if}
-          </h3>
-          <p class="templates-modal-subtitle">
-            {$t('editor.templates_desc') || 'Шаблоны конфигураций'}
+            <div class="template-info">
+              <span class="template-name">{template.name}</span>
+              <span class="template-desc">{template.description}</span>
+            </div>
+            <span class="template-type">{template.type}</span>
+          </button>
+        {:else}
+          <div class="templates-empty-state">
+            <p class="templates-empty-title">{$t('editor.no_templates')}</p>
+            <p class="templates-empty-hint">{$t('editor.no_templates_hint')}</p>
+          </div>
+        {/each}
+      </div>
+    </div>
+
+    <!-- Right column: preview -->
+    <div class="templates-col-preview">
+      {#if loadingPreview}
+        <div class="templates-preview-loading">
+          <span class="spinning"><Icon name="refresh" size={16} /></span>
+        </div>
+      {:else if templatePreview}
+        <pre class="template-preview-code">{templatePreview}</pre>
+      {:else}
+        <div class="templates-preview-placeholder">
+          <p style="color: var(--fg-dim); font-size: 14px; text-align: center;">
+            {selectedTemplate ? '' : $t('editor.select_template_preview')}
           </p>
         </div>
-        <div class="templates-modal-header-actions">
-          <button
-            class="btn btn-secondary templates-update-btn"
-            onclick={updateTemplates}
-            disabled={updatingTemplates}
-            title={$t('editor.templates_update')}
-          >
-            <span class="templates-update-icon" class:spinning={updatingTemplates}>
-              <Icon name="refresh" size={14} />
-            </span>
-            {$t('editor.templates_update') || 'Обновить'}
-          </button>
-          <button
-            class="btn-close"
-            aria-label="Закрыть"
-            onclick={() => (showTemplatesModal = false)}
-          >
-            <Icon name="cross" size={14} />
-          </button>
-        </div>
-      </div>
-
-      <!-- 2-column body -->
-      <div class="templates-body-grid">
-        <!-- Left column: tabs + list -->
-        <div class="templates-col-list">
-          <div class="templates-kernel-tabs">
-            <button
-              class="tab-btn"
-              class:active={templateTab === 'xray'}
-              aria-pressed={templateTab === 'xray'}
-              onclick={async () => {
-                templateTab = 'xray';
-                selectedTemplate = null;
-                templatePreview = '';
-                const first = filteredTemplates[0];
-                if (first) await loadTemplatePreview(first);
-              }}
-            >
-              {$t('editor.templates_tab_xray') || 'Xray'}
-            </button>
-            <button
-              class="tab-btn"
-              class:active={templateTab === 'mihomo'}
-              aria-pressed={templateTab === 'mihomo'}
-              onclick={async () => {
-                templateTab = 'mihomo';
-                selectedTemplate = null;
-                templatePreview = '';
-                const first = filteredTemplates[0];
-                if (first) await loadTemplatePreview(first);
-              }}
-            >
-              {$t('editor.templates_tab_mihomo') || 'Mihomo'}
-            </button>
-          </div>
-
-          <div class="template-list">
-            {#each filteredTemplates as template (template.name)}
-              <button
-                class="template-item"
-                class:selected={selectedTemplate?.name === template.name}
-                onclick={() => loadTemplatePreview(template)}
-                disabled={templateLoading}
-              >
-                <div class="template-info">
-                  <span class="template-name">{template.name}</span>
-                  <span class="template-desc">{template.description}</span>
-                </div>
-                <span class="template-type">{template.type}</span>
-              </button>
-            {:else}
-              <div class="templates-empty-state">
-                <p class="templates-empty-title">{$t('editor.no_templates')}</p>
-                <p class="templates-empty-hint">{$t('editor.no_templates_hint')}</p>
-              </div>
-            {/each}
-          </div>
-        </div>
-
-        <!-- Right column: preview -->
-        <div class="templates-col-preview">
-          {#if loadingPreview}
-            <div class="templates-preview-loading">
-              <span class="spinning"><Icon name="refresh" size={16} /></span>
-            </div>
-          {:else if templatePreview}
-            <pre class="template-preview-code">{templatePreview}</pre>
-          {:else}
-            <div class="templates-preview-placeholder">
-              <p style="color: var(--fg-dim); font-size: 13px; text-align: center;">
-                {selectedTemplate ? '' : 'Выберите шаблон для предпросмотра'}
-              </p>
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <!-- Footer -->
-      <div class="templates-modal-footer">
-        <button
-          class="btn btn-primary"
-          disabled={!selectedTemplate || !editorView || templateLoading}
-          title={!editorView ? $t('editor.no_file_for_template') : undefined}
-          onclick={() => selectedTemplate && applyTemplate(selectedTemplate)}
-        >
-          {$t('editor.apply_template')}
-        </button>
-      </div>
+      {/if}
     </div>
   </div>
-{/if}
 
-{#if showGeneratorModal}
+  <!-- Footer -->
   <div
-    class="confirm-modal-backdrop"
-    role="button"
-    tabindex="0"
-    onclick={() => (showGeneratorModal = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showGeneratorModal = false)}
+    class="templates-modal-footer"
+    style="margin-top: 16px; display: flex; justify-content: flex-end;"
   >
-    <div
-      class="confirm-modal"
-      style="max-width: 500px;"
-      role="presentation"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
+    <button
+      class="btn btn-primary"
+      disabled={!selectedTemplate || !editorView || templateLoading}
+      title={!editorView ? $t('editor.no_file_for_template') : undefined}
+      onclick={() => selectedTemplate && applyTemplate(selectedTemplate)}
     >
-      <div class="modal-header">
-        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
-          {$t('editor.generator') || 'Генератор исходящих'}
-        </h3>
-        <button class="btn-close" onclick={() => (showGeneratorModal = false)}>
-          <Icon name="cross" size={14} />
-        </button>
-      </div>
+      {$t('editor.apply_template')}
+    </button>
+  </div>
+</Modal>
 
-      <div class="form-group" style="margin-bottom: 12px; margin-top: 12px;">
+<Modal
+  isOpen={showGeneratorModal}
+  title={$t('editor.generator') || 'Генератор исходящих'}
+  onclose={() => (showGeneratorModal = false)}
+>
+  <div class="form-group" style="margin-bottom: 12px;">
+    <label
+      for="gen-protocol"
+      style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+      >{$t('editor.protocol') || 'Протокол'}</label
+    >
+    <select id="gen-protocol" bind:value={genProtocol} class="input" style="width: 100%;">
+      <option value="vless">VLESS</option>
+      <option value="shadowsocks">Shadowsocks</option>
+    </select>
+  </div>
+
+  <div
+    class="form-grid"
+    style="margin-bottom: 12px; display: grid; grid-template-columns: 2fr 1fr; gap: 12px;"
+  >
+    <div class="form-group">
+      <label
+        for="gen-address"
+        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+        >{$t('editor.address') || 'Адрес'}</label
+      >
+      <input
+        id="gen-address"
+        type="text"
+        bind:value={genAddress}
+        placeholder="example.com"
+        class="input"
+        style="width: 100%;"
+      />
+    </div>
+    <div class="form-group">
+      <label
+        for="gen-port"
+        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+        >{$t('editor.port') || 'Порт'}</label
+      >
+      <input id="gen-port" type="number" bind:value={genPort} class="input" style="width: 100%;" />
+    </div>
+  </div>
+
+  <div class="form-group" style="margin-bottom: 12px;">
+    <label
+      for="gen-uuid"
+      style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+      >{genProtocol === 'vless' ? 'UUID' : 'Password'}</label
+    >
+    <div class="input-group" style="display: flex; gap: 8px;">
+      <input id="gen-uuid" type="text" bind:value={genUUID} class="input" style="flex: 1;" />
+      <button
+        class="btn btn-secondary"
+        style="padding: 0 12px;"
+        onclick={() => (genUUID = crypto.randomUUID())}
+        title={$t('editor.generate_uuid')}
+      >
+        <Icon name="refresh" size={14} />
+      </button>
+    </div>
+  </div>
+
+  {#if genProtocol === 'vless'}
+    <div class="form-group" style="margin-bottom: 12px;">
+      <label
+        for="gen-sni"
+        style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
+        >SNI</label
+      >
+      <input
+        id="gen-sni"
+        type="text"
+        bind:value={genSNI}
+        placeholder="sni.example.com"
+        class="input"
+        style="width: 100%;"
+      />
+    </div>
+
+    <div
+      class="form-grid"
+      style="margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;"
+    >
+      <div class="form-group">
         <label
-          for="gen-protocol"
+          for="gen-security"
           style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-          >{$t('editor.protocol') || 'Протокол'}</label
+          >Security</label
         >
-        <select id="gen-protocol" bind:value={genProtocol} class="input" style="width: 100%;">
-          <option value="vless">VLESS</option>
-          <option value="shadowsocks">Shadowsocks</option>
+        <select id="gen-security" bind:value={genSecurity} class="input" style="width: 100%;">
+          <option value="reality">Reality</option>
+          <option value="tls">TLS</option>
+          <option value="none">None</option>
         </select>
       </div>
-
-      <div
-        class="form-grid"
-        style="margin-bottom: 12px; display: grid; grid-template-columns: 2fr 1fr; gap: 12px;"
-      >
+      {#if genSecurity === 'reality'}
         <div class="form-group">
           <label
-            for="gen-address"
+            for="gen-shortid"
             style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-            >{$t('editor.address') || 'Адрес'}</label
+            >Short ID</label
           >
           <input
-            id="gen-address"
+            id="gen-shortid"
             type="text"
-            bind:value={genAddress}
-            placeholder="example.com"
+            bind:value={genShortId}
+            placeholder="hex string"
             class="input"
+            style="width: 100%;"
           />
-        </div>
-        <div class="form-group">
-          <label
-            for="gen-port"
-            style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-            >{$t('editor.port') || 'Порт'}</label
-          >
-          <input id="gen-port" type="number" bind:value={genPort} class="input" />
-        </div>
-      </div>
-
-      <div class="form-group" style="margin-bottom: 12px;">
-        <label
-          for="gen-uuid"
-          style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-          >{genProtocol === 'vless' ? 'UUID' : 'Password'}</label
-        >
-        <div class="input-group" style="display: flex; gap: 8px;">
-          <input id="gen-uuid" type="text" bind:value={genUUID} class="input" style="flex: 1;" />
-          <button
-            class="btn btn-secondary"
-            style="padding: 0 12px;"
-            onclick={() => (genUUID = crypto.randomUUID())}
-            title={$t('editor.generate_uuid')}
-          >
-            <Icon name="refresh" size={14} />
-          </button>
-        </div>
-      </div>
-
-      {#if genProtocol === 'vless'}
-        <div class="form-group" style="margin-bottom: 12px;">
-          <label
-            for="gen-sni"
-            style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-            >SNI</label
-          >
-          <input
-            id="gen-sni"
-            type="text"
-            bind:value={genSNI}
-            placeholder="sni.example.com"
-            class="input"
-          />
-        </div>
-
-        <div
-          class="form-grid"
-          style="margin-bottom: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px;"
-        >
-          <div class="form-group">
-            <label
-              for="gen-security"
-              style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-              >Security</label
-            >
-            <select id="gen-security" bind:value={genSecurity} class="input" style="width: 100%;">
-              <option value="reality">Reality</option>
-              <option value="tls">TLS</option>
-              <option value="none">None</option>
-            </select>
-          </div>
-          {#if genSecurity === 'reality'}
-            <div class="form-group">
-              <label
-                for="gen-shortid"
-                style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-                >Short ID</label
-              >
-              <input
-                id="gen-shortid"
-                type="text"
-                bind:value={genShortId}
-                placeholder="hex string"
-                class="input"
-              />
-            </div>
-          {/if}
         </div>
       {/if}
-
-      <div class="confirm-modal-actions">
-        <button onclick={() => (showGeneratorModal = false)} class="btn btn-secondary">
-          {$t('app.cancel')}
-        </button>
-        <button onclick={generateOutbound} class="btn btn-primary">
-          {$t('app.generate') || 'Сгенерировать'}
-        </button>
-      </div>
     </div>
+  {/if}
+
+  <div class="confirm-modal-actions" style="margin-top: 16px;">
+    <button onclick={() => (showGeneratorModal = false)} class="btn btn-secondary">
+      {$t('app.cancel')}
+    </button>
+    <button onclick={generateOutbound} class="btn btn-primary">
+      {$t('app.generate') || 'Сгенерировать'}
+    </button>
   </div>
-{/if}
+</Modal>
 
-{#if showSaveConfirmModal}
-  <div
-    class="confirm-modal-backdrop"
-    role="button"
-    tabindex="0"
-    onclick={() => (showSaveConfirmModal = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showSaveConfirmModal = false)}
-  >
-    <div
-      class="confirm-modal"
-      style="max-width: 700px; width: 90%; display: flex; flex-direction: column; max-height: 85vh;"
-      role="presentation"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-    >
-      <div class="modal-header">
-        <h3 style="color: var(--fg-primary); font-size: 16px; font-weight: 700; margin: 0;">
-          {$t('editor.confirm_save_title') || 'Confirm Save'}
-        </h3>
-        <button
-          class="btn-close"
-          onclick={() => (showSaveConfirmModal = false)}
-          aria-label="Close modal"
-        >
-          <Icon name="cross" size={14} />
-        </button>
-      </div>
-
-      <!-- Validation status -->
-      {#if validationLoading}
-        <div class="validation-result validation-loading" style="margin-top: 12px;">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 38 38"
-            stroke="var(--accent)"
-            style="flex-shrink:0"
-          >
-            <g fill="none" fill-rule="evenodd">
-              <g transform="translate(1 1)" stroke-width="2">
-                <circle stroke-opacity=".5" cx="18" cy="18" r="18" />
-                <path d="M36 18c0-9.94-8.06-18-18-18">
-                  <animateTransform
-                    attributeName="transform"
-                    type="rotate"
-                    from="0 18 18"
-                    to="360 18 18"
-                    dur="1s"
-                    repeatCount="indefinite"
-                  />
-                </path>
-              </g>
-            </g>
-          </svg>
-          <span>{$t('editor.validating') || 'Проверка конфигурации...'}</span>
-        </div>
-      {:else if validationResult}
-        {#if validationResult.valid}
-          <div class="validation-result validation-ok" style="margin-top: 12px;">
-            <span class="v-icon">✓</span>
-            <span>{$t('editor.validation_valid') || 'Конфигурация корректна.'}</span>
-          </div>
-        {:else}
-          <div class="validation-result validation-err" style="margin-top: 12px;">
-            <div class="validation-err-head">
-              <span class="v-icon">✗</span>
-              <span>{$t('editor.validation_invalid') || 'Конфигурация содержит ошибки:'}</span>
-            </div>
-            <pre>{validationResult.error}</pre>
-          </div>
-        {/if}
-      {/if}
-
-      <!-- Diff Preview -->
-      <div class="diff-preview" style="margin-top: 12px;">
-        <div class="diff-preview-title">
-          {$t('editor.diff_preview') || 'Предпросмотр изменений'}
-        </div>
-        <div class="diff-preview-body">
-          {#each getDiffGroups(originalContent, editorView ? editorView.state.doc.toString() : '') as group}
-            {#if group.type === 'added'}
-              {#each group.lines as line}
-                <div class="diff-line diff-line-added">+ {line}</div>
-              {/each}
-            {:else if group.type === 'removed'}
-              {#each group.lines as line}
-                <div class="diff-line diff-line-removed">- {line}</div>
-              {/each}
-            {:else if group.type === 'collapsed'}
-              <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
-            {:else}
-              {#each group.lines as line}
-                <div class="diff-line diff-line-unchanged">{line}</div>
-              {/each}
-            {/if}
+<Modal
+  isOpen={showSaveConfirmModal}
+  title={$t('editor.confirm_save_title') || 'Confirm Save'}
+  maxWidth="700px"
+  onclose={() => (showSaveConfirmModal = false)}
+>
+  <!-- Diff Preview -->
+  <div class="diff-preview" style="margin-top: 12px;">
+    <div class="diff-preview-title">
+      {$t('editor.diff_preview') || 'Предпросмотр изменений'}
+    </div>
+    <div class="diff-preview-body" style="max-height: 40vh; overflow-y: auto;">
+      {#each getDiffGroups(originalContent, editorView ? editorView.state.doc.toString() : '') as group}
+        {#if group.type === 'added'}
+          {#each group.lines as line}
+            <div class="diff-line diff-line-added">+ {line}</div>
           {/each}
-        </div>
-      </div>
-
-      <div class="confirm-modal-actions" style="margin-top: 16px;">
-        <button onclick={() => (showSaveConfirmModal = false)} class="btn btn-secondary">
-          {$t('app.cancel')}
-        </button>
-        <button
-          onclick={confirmSave}
-          class="btn btn-primary"
-          disabled={saving || (validationResult && !validationResult.valid && !expertMode)}
-        >
-          {saving ? $t('app.loading') : $t('app.save')}
-        </button>
-      </div>
+        {:else if group.type === 'removed'}
+          {#each group.lines as line}
+            <div class="diff-line diff-line-removed">- {line}</div>
+          {/each}
+        {:else if group.type === 'collapsed'}
+          <div class="diff-line diff-line-collapsed">{group.lines[0]}</div>
+        {:else}
+          {#each group.lines as line}
+            <div class="diff-line diff-line-unchanged">{line}</div>
+          {/each}
+        {/if}
+      {/each}
     </div>
   </div>
-{/if}
+
+  <div class="confirm-modal-actions" style="margin-top: 16px;">
+    <button onclick={() => (showSaveConfirmModal = false)} class="btn btn-secondary">
+      {$t('app.cancel')}
+    </button>
+    <button onclick={confirmSave} class="btn btn-primary" disabled={saving}>
+      {saving ? $t('app.loading') : $t('app.save')}
+    </button>
+  </div>
+</Modal>
+
+<Modal
+  isOpen={showDeleteConfirmModal}
+  title={`${$t('editor.delete_file')}: ${selectedFile.split('/').pop() || ''}`}
+  onclose={() => (showDeleteConfirmModal = false)}
+>
+  <p style="margin: 0;">
+    {$t('editor.delete_confirm_body', { file: selectedFile.split('/').pop() || '' })}
+  </p>
+  <div class="confirm-modal-actions" style="margin-top: 16px;">
+    <button onclick={() => (showDeleteConfirmModal = false)} class="btn btn-secondary">
+      {$t('app.cancel')}
+    </button>
+    <button onclick={confirmDeleteFile} class="btn btn-danger">
+      {$t('app.delete')}
+    </button>
+  </div>
+</Modal>
 
 <style>
   .status-dirty {
@@ -2218,6 +2081,8 @@
 
   .editor-tabs {
     display: inline-flex;
+    align-self: flex-start;
+    width: fit-content;
     gap: 4px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border);
@@ -2230,8 +2095,8 @@
     background: none;
     border: none;
     color: var(--fg-secondary);
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 14px;
+    font-weight: 600;
     padding: 6px 14px;
     border-radius: var(--radius-sm);
     cursor: pointer;
@@ -2253,22 +2118,6 @@
     color: var(--fg-primary);
   }
 
-  .editor-grid {
-    display: grid;
-    grid-template-columns: 260px 1fr;
-    gap: 14px;
-    align-items: start;
-  }
-
-  .editor-main-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
   .editor-toolbar {
     padding: 10px 14px;
     border-bottom: 1px solid var(--border);
@@ -2279,14 +2128,14 @@
 
   .editor-toolbar .file-name {
     font-family: var(--font-family-mono);
-    font-size: 13px;
+    font-size: 14px;
     color: var(--fg-primary);
     font-weight: 600;
   }
 
   .editor-toolbar .file-meta {
     font-family: var(--font-family-mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-dim);
   }
 
@@ -2337,17 +2186,17 @@
 
   .template-name {
     font-weight: 600;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--fg-primary);
   }
 
   .template-desc {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--fg-dim);
   }
 
   .template-type {
-    font-size: 10px;
+    font-size: 12px;
     text-transform: uppercase;
     background: var(--bg-card);
     padding: 2px 6px;
@@ -2362,7 +2211,7 @@
     background: var(--hover);
   }
 
-  .templates-wide-modal {
+  :global(.templates-wide-modal) {
     max-width: 900px !important;
     width: 90vw !important;
     padding: 0 !important;
@@ -2371,7 +2220,7 @@
     flex-direction: column;
   }
 
-  .templates-wide-modal .modal-header {
+  :global(.templates-wide-modal .modal-header) {
     padding: 20px 20px 12px;
     border-bottom: 1px solid var(--border);
     display: flex;
@@ -2380,7 +2229,7 @@
     flex-shrink: 0;
   }
 
-  .templates-modal-title-block {
+  :global(.templates-modal-title-block) {
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -2389,15 +2238,15 @@
   .templates-modal-subtitle {
     margin: 0;
     color: var(--fg-dim);
-    font-size: 11.5px;
+    font-size: 12px;
   }
 
   .templates-badge {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: 11px;
-    font-weight: 500;
+    font-size: 12px;
+    font-weight: 600;
     padding: 3px 8px;
     border-radius: 12px;
   }
@@ -2444,7 +2293,7 @@
     }
   }
 
-  .templates-modal-header-actions {
+  :global(.templates-modal-header-actions) {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -2506,7 +2355,7 @@
 
   .templates-kernel-tabs .tab-btn {
     padding: 6px 12px;
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .templates-col-list .template-list {
@@ -2524,7 +2373,7 @@
     margin: 0;
     padding: 16px;
     font-family: var(--font-family-mono);
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.5;
     color: var(--fg-secondary);
     overflow-y: auto;
@@ -2561,14 +2410,14 @@
   }
 
   .templates-empty-title {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--fg-secondary);
     margin: 0 0 6px;
   }
 
   .templates-empty-hint {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--fg-dim);
     margin: 0;
   }
@@ -2631,7 +2480,7 @@
     border: none;
     border-radius: 6px;
     cursor: pointer;
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--fg-primary);
     text-align: left;
     transition: background 0.15s;
@@ -2657,7 +2506,7 @@
     gap: 8px;
     padding: 10px 14px;
     border-radius: 6px;
-    font-size: 12.5px;
+    font-size: 12px;
   }
 
   .validation-loading {
@@ -2666,33 +2515,9 @@
     border: 1px solid rgba(41, 194, 240, 0.2);
   }
 
-  .validation-ok {
-    background: rgba(16, 185, 129, 0.08);
-    color: var(--success);
-    border: 1px solid rgba(16, 185, 129, 0.2);
-  }
-
   .v-icon {
-    font-weight: 700;
+    font-weight: 600;
     flex-shrink: 0;
-  }
-
-  .validation-err {
-    background: rgba(239, 68, 68, 0.08);
-    color: var(--danger);
-    border: 1px solid rgba(239, 68, 68, 0.2);
-    flex-direction: column;
-    width: 100%;
-  }
-
-  .validation-err pre {
-    margin: 6px 0 0;
-    font-size: 11px;
-    white-space: pre-wrap;
-    word-break: break-all;
-    color: var(--fg-dim);
-    font-family: var(--font-family-mono);
-    width: 100%;
   }
 
   .diff-preview {
@@ -2704,7 +2529,7 @@
   }
 
   .diff-preview-title {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--fg-dim);
     text-transform: uppercase;
@@ -2716,7 +2541,7 @@
   .diff-preview-body {
     flex: 1;
     overflow-y: auto;
-    background: #050d16;
+    background: var(--cm-bg);
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 10px;
@@ -2731,12 +2556,12 @@
   }
 
   .diff-line-added {
-    color: #a3e9b6;
+    color: var(--success);
     background: rgba(163, 233, 182, 0.04);
   }
 
   .diff-line-removed {
-    color: #f87171;
+    color: var(--danger);
     background: rgba(248, 113, 113, 0.04);
   }
 
@@ -2767,7 +2592,7 @@
   .btn-accent {
     background: linear-gradient(180deg, var(--accent), var(--accent-2));
     border: 1px solid var(--accent);
-    color: #111;
+    color: var(--btn-primary-text, #03182a);
     font-weight: 600;
   }
   .btn-accent:hover:not(:disabled) {
@@ -2814,7 +2639,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--accent);
     padding: 0 10px;
     border-left: 1px solid var(--border);
@@ -2828,7 +2653,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--fg-dim);
-    font-size: 11px;
+    font-size: 12px;
     padding: 4px 10px;
     cursor: pointer;
     font-family: var(--font-family-mono);
@@ -2849,14 +2674,63 @@
   }
 
   .editor-empty-card :global(.empty-state) {
-    min-height: 500px;
     justify-content: center;
   }
 
-  @media (max-width: 767px) {
-    .editor-grid {
-      grid-template-columns: 1fr !important;
-      gap: 12px;
+  .editor-statusbar {
+    padding: 6px 14px;
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    font-family: var(--font-family-mono);
+    font-size: 12px;
+    color: var(--fg-dim);
+    min-height: 30px;
+  }
+  .editor-breadcrumbs {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 14px;
+    background: rgba(0, 0, 0, 0.1);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--fg-dim);
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .editor-breadcrumbs::-webkit-scrollbar {
+    height: 3px;
+  }
+  .editor-breadcrumbs::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: var(--radius);
+  }
+  .breadcrumb-segment {
+    display: inline-block;
+    background: transparent;
+    border: none;
+    padding: 0;
+    color: var(--fg-dim);
+    font: inherit;
+    cursor: pointer;
+    max-width: 160px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .breadcrumb-divider {
+    flex-shrink: 0;
+  }
+  @media (max-width: 768px) {
+    .editor-breadcrumbs {
+      display: none !important;
+    }
+    .status-shortcut-tip {
+      display: none !important;
     }
   }
 </style>

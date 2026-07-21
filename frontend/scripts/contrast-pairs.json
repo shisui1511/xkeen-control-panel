@@ -82,5 +82,133 @@
     "fg": "--accent-text",
     "bg": { "over": "--bg-card", "mixToken": "--accent-text", "mixPercent": 8 },
     "minRatio": 4.5
+  },
+  {
+    "id": "cm-keyword-dark",
+    "theme": "dark",
+    "fg": "--cm-keyword",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-string-dark",
+    "theme": "dark",
+    "fg": "--cm-string",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-number-dark",
+    "theme": "dark",
+    "fg": "--cm-number",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-comment-dark",
+    "theme": "dark",
+    "fg": "--cm-comment",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-property-dark",
+    "theme": "dark",
+    "fg": "--cm-property",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-variable-dark",
+    "theme": "dark",
+    "fg": "--cm-variable",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-operator-dark",
+    "theme": "dark",
+    "fg": "--cm-operator",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-boolean-dark",
+    "theme": "dark",
+    "fg": "--cm-boolean",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  { "id": "cm-null-dark", "theme": "dark", "fg": "--cm-null", "bg": "--cm-bg", "minRatio": 4.5 },
+  {
+    "id": "cm-bracket-dark",
+    "theme": "dark",
+    "fg": "--cm-bracket",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-keyword-light",
+    "theme": "light",
+    "fg": "--cm-keyword",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-string-light",
+    "theme": "light",
+    "fg": "--cm-string",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-number-light",
+    "theme": "light",
+    "fg": "--cm-number",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-comment-light",
+    "theme": "light",
+    "fg": "--cm-comment",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-property-light",
+    "theme": "light",
+    "fg": "--cm-property",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-variable-light",
+    "theme": "light",
+    "fg": "--cm-variable",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-operator-light",
+    "theme": "light",
+    "fg": "--cm-operator",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  {
+    "id": "cm-boolean-light",
+    "theme": "light",
+    "fg": "--cm-boolean",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
+  },
+  { "id": "cm-null-light", "theme": "light", "fg": "--cm-null", "bg": "--cm-bg", "minRatio": 4.5 },
+  {
+    "id": "cm-bracket-light",
+    "theme": "light",
+    "fg": "--cm-bracket",
+    "bg": "--cm-bg",
+    "minRatio": 4.5
   }
 ]

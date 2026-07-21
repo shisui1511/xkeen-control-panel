@@ -138,17 +138,17 @@
 
   function getDiskBarColor(stats: SystemStats): string {
     if (!stats.disk) {
-      return 'var(--color-success, var(--color-primary, #2ecc71))';
+      return 'var(--success)';
     }
     const pct = (stats.disk.used / stats.disk.total) * 100;
     const freeMB = stats.disk.free / 1024 / 1024;
     if (pct > 90 || freeMB < 10) {
-      return 'var(--color-danger, #e74c3c)';
+      return 'var(--danger)';
     }
     if (pct > 80) {
-      return 'var(--color-warning, #f39c12)';
+      return 'var(--warning)';
     }
-    return 'var(--color-success, var(--color-primary, #2ecc71))';
+    return 'var(--success)';
   }
 
   async function fetchSubscriptionSummary() {
@@ -421,20 +421,6 @@
     currentTab = getTabFromHash();
   }
 
-  let isSidebarCollapsed = $state(localStorage.getItem('sidebar.collapsed') === 'true');
-
-  function toggleSidebarCollapse() {
-    isSidebarCollapsed = !isSidebarCollapsed;
-    localStorage.setItem('sidebar.collapsed', String(isSidebarCollapsed));
-  }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
-      e.preventDefault();
-      toggleSidebarCollapse();
-    }
-  }
-
   function getDrawerFocusables(): HTMLElement[] {
     if (!sidebarEl) return [];
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -572,8 +558,6 @@
       window.location.hash = '#/' + currentTab;
     }
 
-    window.addEventListener('keydown', handleKeydown);
-
     const mobileMql = window.matchMedia('(max-width: 768px)');
     const handleMobileMqlChange = (e: MediaQueryListEvent) => {
       isMobile = e.matches;
@@ -597,13 +581,12 @@
       clearInterval(capInterval);
       clearInterval(subsInterval);
       window.removeEventListener('hashchange', handleHashChange);
-      window.removeEventListener('keydown', handleKeydown);
       mobileMql.removeEventListener('change', handleMobileMqlChange);
     };
   });
 </script>
 
-<div class="dashboard-layout" class:sb-collapsed={isSidebarCollapsed}>
+<div class="dashboard-layout" class:editor-active={currentTab === 'editor'}>
   <!-- Mobile header bar -->
   <header class="mobile-header" inert={drawerIsModal}>
     <button
@@ -661,13 +644,11 @@
       {loading}
       {pwaInstallPrompt}
       onInstallPWA={installPWA}
-      isCollapsed={isSidebarCollapsed}
-      onToggleCollapse={toggleSidebarCollapse}
     />
   </div>
 
   <!-- Main content area -->
-  <div class="main-content" inert={drawerIsModal}>
+  <div class="main-content" class:editor-active={currentTab === 'editor'} inert={drawerIsModal}>
     <!-- Mihomo offline warning banner -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
       <div style="margin: 12px 16px 0;">
@@ -1338,7 +1319,10 @@
         </div>
       </div>
     {:else if currentTab === 'editor'}
-      <div transition:fade={{ duration: 150 }}>
+      <div
+        style="flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100%;"
+        transition:fade={{ duration: 150 }}
+      >
         <Editor onSwitchTab={switchTab} />
       </div>
     {:else if currentTab === 'logs'}
@@ -1702,4 +1686,8 @@
     margin-left: auto;
     flex-shrink: 0;
   }
+
+  /* Fullscreen editor layout geometry (.dashboard-layout.editor-active,
+     .main-content.editor-active) lives solely in global.css to avoid
+     maintaining two out-of-sync copies of the same !important rules. */
 </style>

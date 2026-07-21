@@ -21,6 +21,9 @@ func (w *maxBytesResponseWriter) WriteHeader(code int) {
 	}
 	w.statusCode = code
 	w.wroteHeader = true
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "application/json")
+	}
 	w.ResponseWriter.WriteHeader(code)
 }
 
@@ -92,7 +95,7 @@ func MaxBytes(next http.Handler) http.Handler {
 
 		wrappedWriter := &maxBytesResponseWriter{ResponseWriter: w}
 		r.Body = &maxBytesReader{
-			rc: http.MaxBytesReader(wrappedWriter, r.Body, limit),
+			rc: http.MaxBytesReader(nil, r.Body, limit),
 			w:  wrappedWriter,
 		}
 

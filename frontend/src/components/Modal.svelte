@@ -4,11 +4,15 @@
   let {
     isOpen = false,
     title = '',
+    maxWidth = '520px',
+    class: className = '',
     onclose,
     children
   } = $props<{
     isOpen: boolean;
     title: string;
+    maxWidth?: string;
+    class?: string;
     onclose: () => void;
     children?: Snippet;
   }>();
@@ -28,6 +32,7 @@
       }, 0);
     } else if (previouslyFocusedElement) {
       previouslyFocusedElement.focus();
+      previouslyFocusedElement = null;
     }
   });
 
@@ -71,13 +76,14 @@
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <div class="modal-backdrop" role="presentation" onclick={onclose}>
     <div
-      class="modal-container"
+      class="modal-container {className}"
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
       bind:this={modalElement}
       onkeydown={handleKeydown}
       onclick={(e) => e.stopPropagation()}
+      style="max-width: {maxWidth};"
       tabindex="-1"
     >
       <header class="modal-header">
@@ -143,7 +149,7 @@
   }
   .modal-title {
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 0.02em;
     margin: 0;
     color: var(--fg-primary);
@@ -170,6 +176,6 @@
     padding: 20px;
     overflow-y: auto;
     color: var(--fg-primary);
-    font-size: 13px;
+    font-size: 14px;
   }
 </style>

@@ -11,8 +11,6 @@
   export let loading: boolean = false;
   export let pwaInstallPrompt: any = null;
   export let onInstallPWA: () => void = () => {};
-  export let isCollapsed: boolean = false;
-  export let onToggleCollapse: () => void = () => {};
 </script>
 
 <!-- Brand block -->

@@ -149,12 +149,13 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
+	r.Body = http.MaxBytesReader(nil, r.Body, maxConfigBytes)
 	data, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
-		if err.Error() == "http: request body too large" {
-			a.errorResponse(w, "request body too large (max 1 MB)", http.StatusRequestEntityTooLarge)
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) || err.Error() == "http: request body too large" {
+			a.errorResponse(w, "request body too large", http.StatusRequestEntityTooLarge)
 			return
 		}
 		a.errorResponse(w, a.t(r, "config.write_error"), http.StatusInternalServerError)
@@ -637,11 +638,12 @@ func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
+	r.Body = http.MaxBytesReader(nil, r.Body, maxConfigBytes)
 	var req MihomoMergeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		if err.Error() == "http: request body too large" {
-			a.errorResponse(w, "request body too large (max 1 MB)", http.StatusRequestEntityTooLarge)
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) || err.Error() == "http: request body too large" {
+			a.errorResponse(w, "request body too large", http.StatusRequestEntityTooLarge)
 			return
 		}
 		a.errorResponse(w, "invalid request body", http.StatusBadRequest)

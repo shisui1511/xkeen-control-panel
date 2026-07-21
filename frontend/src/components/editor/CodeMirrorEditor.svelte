@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
+  import { t as translate } from '../../i18n';
   import {
     EditorView,
     keymap,
@@ -26,6 +27,7 @@
     indentOnInput,
     syntaxHighlighting,
     defaultHighlightStyle,
+    HighlightStyle,
     bracketMatching,
     foldKeymap
   } from '@codemirror/language';
@@ -33,6 +35,7 @@
   import { json, jsonParseLinter, jsonLanguage } from '@codemirror/lang-json';
   import { yaml, yamlLanguage } from '@codemirror/lang-yaml';
   import { hoverTooltip } from '@codemirror/view';
+  import { tags as t } from '@lezer/highlight';
 
   // Schema support
   import {
@@ -48,6 +51,21 @@
   import { xraySchema } from '../../schemas/xray';
   import { mihomoSchema } from '../../schemas/mihomo';
   import { xraySnippetSource, mihomoSnippetSource } from '../../lib/snippets';
+
+  const customHighlightStyle = HighlightStyle.define([
+    { tag: t.keyword, color: 'var(--cm-keyword)' },
+    { tag: t.string, color: 'var(--cm-string)' },
+    { tag: t.number, color: 'var(--cm-number)' },
+    { tag: t.comment, color: 'var(--cm-comment)' },
+    { tag: t.propertyName, color: 'var(--cm-property)' },
+    { tag: t.variableName, color: 'var(--cm-variable)' },
+    { tag: t.operator, color: 'var(--cm-operator)' },
+    { tag: t.bool, color: 'var(--cm-boolean)' },
+    { tag: t.null, color: 'var(--cm-null)' },
+    { tag: t.bracket, color: 'var(--cm-bracket)' },
+    { tag: t.className, color: 'var(--cm-variable)' },
+    { tag: t.typeName, color: 'var(--cm-keyword)' }
+  ]);
 
   let {
     content = '',
@@ -155,7 +173,7 @@
         dropCursor(),
         EditorState.allowMultipleSelections.of(true),
         indentOnInput(),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        syntaxHighlighting(customHighlightStyle),
         bracketMatching(),
         closeBrackets(),
         autocompletion(),
@@ -217,7 +235,42 @@
     }
   });
 
+  let isFullscreen = $state(false);
+
+  function toggleFullscreen() {
+    isFullscreen = !isFullscreen;
+    if (isFullscreen) {
+      if (editorContainer?.requestFullscreen) {
+        editorContainer.requestFullscreen().catch(() => {});
+      } else if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    } else {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  }
+
+  function handleFullscreenChange() {
+    isFullscreen = !!document.fullscreenElement;
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && isFullscreen) {
+      isFullscreen = false;
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  }
+
+  onMount(() => {
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+  });
+
   onDestroy(() => {
+    document.removeEventListener('fullscreenchange', handleFullscreenChange);
     if (view) {
       view.destroy();
       view = null;
@@ -225,39 +278,87 @@
   });
 </script>
 
-<div class="editor-cm-wrapper" bind:this={editorContainer}></div>
+<svelte:window onkeydown={handleKeydown} />
+
+<div class="editor-cm-wrapper" class:is-fullscreen={isFullscreen} bind:this={editorContainer}>
+  <div class="editor-cm-toolbar" class:is-fullscreen={isFullscreen}>
+    <button
+      type="button"
+      class="editor-cm-tool-btn"
+      onclick={toggleFullscreen}
+      title={isFullscreen
+        ? $translate('editor.exit_fullscreen') || 'Свернуть'
+        : $translate('editor.fullscreen') || 'Во весь экран'}
+      aria-label={isFullscreen
+        ? $translate('editor.exit_fullscreen') || 'Свернуть'
+        : $translate('editor.fullscreen') || 'Во весь экран'}
+    >
+      {#if isFullscreen}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          ><path
+            d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"
+          /></svg
+        >
+      {:else}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg
+        >
+      {/if}
+    </button>
+  </div>
+</div>
 
 <style>
-  .editor-cm-wrapper {
-    height: 100%;
-    min-height: 500px;
-    position: relative;
-  }
+  /* .editor-cm-wrapper geometry is owned by global.css (unconditional
+     !important rule) — keeping a second copy here risks silent drift. */
   :global(.cm-editor) {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
     height: 100% !important;
-    font-size: 13.5px;
-    background: #050d16 !important;
+    font-size: 14px;
+    background: var(--cm-bg) !important;
+    color: var(--fg-primary) !important;
   }
   :global(.cm-scroller) {
+    flex: 1 !important;
     overflow: auto !important;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
   }
   :global(.cm-gutters) {
-    background: #050d16 !important;
-    border-right: 1px solid #0e2034 !important;
-    color: var(--fg-faint) !important;
+    background: var(--cm-bg) !important;
+    border-right: 1px solid var(--cm-border) !important;
+    color: var(--fg-dim) !important;
   }
   :global(.cm-gutter) {
-    background: #050d16 !important;
-    color: var(--fg-faint) !important;
+    background: var(--cm-bg) !important;
+    color: var(--fg-dim) !important;
   }
   :global(.cm-activeLineGutter) {
-    background-color: #0b1a2d !important;
+    background-color: var(--cm-active-line) !important;
     color: var(--accent) !important;
   }
   :global(.cm-activeLine) {
-    background-color: #0b1a2d !important;
+    background-color: var(--cm-active-line) !important;
+  }
+  :global(.cm-selectionBackground) {
+    background: var(--hover) !important;
   }
   :global(.cm-content) {
     font-family: var(--font-family-mono) !important;
@@ -275,5 +376,14 @@
   }
   :global(.cm-scroller::-webkit-scrollbar-thumb:hover) {
     background: var(--fg-dim);
+  }
+
+  @media (max-width: 768px) {
+    :global(.cm-editor) {
+      font-size: 16px;
+    }
+    :global(.cm-gutters) {
+      display: none !important;
+    }
   }
 </style>
