@@ -1046,12 +1046,12 @@
         editorView.dispatch({
           changes: { from: 0, to: editorView.state.doc.length, insert: fixed }
         });
-        showToast('success', `Quick fixes applied: ${fixesApplied}`);
+        showToast('success', $t('editor.quick_fixes_applied', { count: fixesApplied }));
       } else {
-        showToast('info', 'No quick fixes needed');
+        showToast('info', $t('editor.no_quick_fixes_needed'));
       }
     } catch (e) {
-      showToast('error', 'Quick fix error: ' + (e as any)?.message);
+      showToast('error', $t('editor.quick_fix_error', { message: (e as any)?.message ?? '' }));
     }
   }
 
@@ -1866,7 +1866,7 @@
       {:else}
         <div class="templates-preview-placeholder">
           <p style="color: var(--fg-dim); font-size: 14px; text-align: center;">
-            {selectedTemplate ? '' : ($t('editor.select_template_preview') || 'Выберите шаблон для предпросмотра')}
+            {selectedTemplate ? '' : $t('editor.select_template_preview')}
           </p>
         </div>
       {/if}
