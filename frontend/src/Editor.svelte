@@ -125,25 +125,6 @@
   // Local active tab: 'files' | 'constructor'
   let activeTab = $state<'files' | 'constructor'>('files');
 
-  let isMihomoAutoEdited = $derived(
-    selectedFile.includes('/mihomo/') &&
-      (selectedFile.endsWith('config.yaml') || selectedFile.endsWith('config.yml'))
-  );
-
-  let dismissMihomoAutoEditWarning = $state(false);
-  let lastSelectedFile = $state('');
-
-  $effect(() => {
-    if (selectedFile !== lastSelectedFile) {
-      if (lastSelectedFile && selectedFile !== lastSelectedFile) {
-        localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
-      }
-      lastSelectedFile = selectedFile;
-      const dismissed = localStorage.getItem('xcp:dismissed_warning:mihomo_auto_edit');
-      dismissMihomoAutoEditWarning = dismissed === selectedFile;
-    }
-  });
-
   function jumpToSegment(pos: number) {
     if (!editorView) return;
     editorView.focus();
@@ -405,10 +386,14 @@
         selectedFile = '';
         originalContent = '';
         isDirty = false;
+        showSidebar = true;
       }
     }
 
     tabs = [...tabs];
+    if (tabs.length === 0) {
+      showSidebar = true;
+    }
   }
 
   async function loadFile(path: string, isPreviewClick = true) {
@@ -756,8 +741,6 @@
       localStorage.removeItem(`editor.draft.${selectedFile}`);
       hasDraft = false;
       draftContent = '';
-      localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
-      dismissMihomoAutoEditWarning = false;
       await loadBackups(selectedFile);
     } catch (e: any) {
       showToast('error', $t('editor.save_error') + ': ' + e.message);
@@ -797,9 +780,6 @@
       localStorage.removeItem(`editor.draft.${selectedFile}`);
       hasDraft = false;
       draftContent = '';
-
-      localStorage.removeItem('xcp:dismissed_warning:mihomo_auto_edit');
-      dismissMihomoAutoEditWarning = false;
 
       // Update tab state
       const activeT = tabs.find((t) => t.path === selectedFile);
@@ -1408,6 +1388,26 @@
             description={$t('editor.empty_state_body')}
             icon={EditorIcon}
           />
+          {#if !showSidebar}
+            <button
+              class="btn btn-primary"
+              style="margin-top: 14px;"
+              onclick={() => (showSidebar = true)}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                ><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg
+              >
+              {$t('editor.show_files') || 'Показать файлы'}
+            </button>
+          {/if}
         </div>
       {:else}
         <div class="editor-main-card">
@@ -1555,35 +1555,7 @@
             </div>
           </div>
 
-          <!-- Autoedit warning -->
-          {#if isMihomoAutoEdited && !dismissMihomoAutoEditWarning}
-            <div
-              class="validation-result validation-loading"
-              style="margin: 10px 14px 0; display: flex; flex-direction: column; gap: 8px;"
-              transition:slide={{ duration: 150 }}
-            >
-              <div style="display: flex; align-items: flex-start; gap: 8px;">
-                <span class="v-icon">⚠</span>
-                <div>
-                  <div style="font-weight: 600;">{$t('editor.mihomo_autoedit_title')}</div>
-                  <div style="font-size: 12px; opacity: 0.9; margin-top: 4px; line-height: 1.4;">
-                    {$t('editor.mihomo_autoedit_body')}
-                  </div>
-                </div>
-              </div>
-              <div style="display: flex; justify-content: flex-end; width: 100%;">
-                <button
-                  class="btn btn-xs btn-secondary"
-                  onclick={() => {
-                    dismissMihomoAutoEditWarning = true;
-                    localStorage.setItem('xcp:dismissed_warning:mihomo_auto_edit', selectedFile);
-                  }}
-                >
-                  Скрыть предупреждение
-                </button>
-              </div>
-            </div>
-          {/if}
+
 
           <!-- CodeMirror editor component -->
           <div style="flex: 1; min-height: 0; position:relative; background: var(--cm-bg);">

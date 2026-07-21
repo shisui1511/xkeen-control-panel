@@ -2194,75 +2194,76 @@ a.chip:hover {
   min-height: 0 !important;
   overflow: hidden !important;
   box-sizing: border-box !important;
+}
 
-  /* Fullscreen CodeMirror Editor*/
-  .editor-cm-wrapper.is-fullscreen {
-    position: fixed !important;
-    inset: 0 !important;
-    z-index: 10000 !important;
-    width: 100vw !important;
-    height: 100vh !important;
-    border-radius: 0 !important;
-    border: none !important;
-    margin: 0 !important;
-    background: var(--cm-bg, #050d16) !important;
-  }
+.editor-empty-card {
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 24px !important;
+}
 
-  .editor-cm-toolbar {
-    position: absolute;
-    top: 8px;
-    right: 12px;
-    z-index: 20;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    opacity: 0.65;
-    transition: opacity 0.15s ease-in-out;
-    background: rgba(15, 23, 42, 0.65);
-    backdrop-filter: blur(8px);
-    padding: 4px;
-    border-radius: var(--radius-sm, 6px);
-    border: 1px solid var(--border);
-  }
+/* Fullscreen CodeMirror Editor (Xkeen-UI Style) */
+.editor-cm-wrapper.is-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 10000 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  border-radius: 0 !important;
+  border: none !important;
+  margin: 0 !important;
+  background: var(--cm-bg, #050d16) !important;
+}
 
-  .editor-cm-wrapper:hover .editor-cm-toolbar,
-  .editor-cm-toolbar:hover,
-  .editor-cm-toolbar.is-fullscreen {
-    opacity: 1;
-  }
+.editor-cm-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.65;
+  transition: opacity 0.15s ease-in-out;
+  background: var(--bg-card);
+  backdrop-filter: blur(8px);
+  padding: 4px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border);
+}
 
-  .editor-cm-toolbar.is-fullscreen {
-    position: fixed !important;
-    top: 12px !important;
-    right: 16px !important;
-    z-index: 10010 !important;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  }
+.editor-cm-wrapper:hover .editor-cm-toolbar,
+.editor-cm-toolbar:hover,
+.editor-cm-toolbar.is-fullscreen {
+  opacity: 1;
+}
 
-  .editor-cm-tool-btn {
-    background: transparent;
-    border: none;
-    color: var(--fg-secondary, #94a3b8);
-    padding: 4px 6px;
-    border-radius: 4px;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    transition: all 0.15s ease;
-  }
+.editor-cm-toolbar.is-fullscreen {
+  position: fixed !important;
+  top: 12px !important;
+  right: 16px !important;
+  z-index: 10010 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
 
-  .editor-cm-tool-btn:hover {
-    background: var(--hover);
-    color: var(--fg-primary);
-  }
+.editor-cm-tool-btn {
+  background: transparent;
+  border: none;
+  color: var(--fg-secondary);
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
 
-  .editor-empty-card {
-    align-items: center !important;
-    justify-content: center !important;
-    padding: 24px !important;
-  }
+.editor-cm-tool-btn:hover {
+  background: var(--hover);
+  color: var(--fg-primary);
+}
 
   .editor-main-card>.editor-tab-strip,
   .editor-main-card>.editor-breadcrumbs,
