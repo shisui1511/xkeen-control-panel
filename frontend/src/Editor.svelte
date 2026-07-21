@@ -245,8 +245,8 @@
   }
 
   function checkDirty(): boolean {
-    const activeTab = tabs.find((t) => t.path === activeTabPath);
-    return activeTab ? activeTab.isDirty : false;
+    const currentTab = tabs.find((t) => t.path === activeTabPath);
+    return currentTab ? currentTab.isDirty : false;
   }
 
   function confirmUnsaved(): boolean {
@@ -314,15 +314,15 @@
 
     // Save current tab state before leaving
     if (activeTabPath && editorView) {
-      const activeTab = tabs.find((t) => t.path === activeTabPath);
-      if (activeTab) {
-        activeTab.scrollState = {
+      const currentTab = tabs.find((t) => t.path === activeTabPath);
+      if (currentTab) {
+        currentTab.scrollState = {
           top: editorView.scrollDOM.scrollTop,
           left: editorView.scrollDOM.scrollLeft
         };
-        activeTab.cursorPos = editorView.state.selection.main.head;
-        activeTab.currentContent = editorView.state.doc.toString();
-        activeTab.isDirty = activeTab.currentContent !== activeTab.originalContent;
+        currentTab.cursorPos = editorView.state.selection.main.head;
+        currentTab.currentContent = editorView.state.doc.toString();
+        currentTab.isDirty = currentTab.currentContent !== currentTab.originalContent;
       }
     }
 
@@ -440,15 +440,15 @@
 
       // Save active tab state before leaving
       if (activeTabPath && editorView) {
-        const activeTab = tabs.find((t) => t.path === activeTabPath);
-        if (activeTab) {
-          activeTab.scrollState = {
+        const currentTab = tabs.find((t) => t.path === activeTabPath);
+        if (currentTab) {
+          currentTab.scrollState = {
             top: editorView.scrollDOM.scrollTop,
             left: editorView.scrollDOM.scrollLeft
           };
-          activeTab.cursorPos = editorView.state.selection.main.head;
-          activeTab.currentContent = editorView.state.doc.toString();
-          activeTab.isDirty = activeTab.currentContent !== activeTab.originalContent;
+          currentTab.cursorPos = editorView.state.selection.main.head;
+          currentTab.currentContent = editorView.state.doc.toString();
+          currentTab.isDirty = currentTab.currentContent !== currentTab.originalContent;
         }
       }
 
