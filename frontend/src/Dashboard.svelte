@@ -421,20 +421,6 @@
     currentTab = getTabFromHash();
   }
 
-  let isSidebarCollapsed = $state(localStorage.getItem('sidebar.collapsed') === 'true');
-
-  function toggleSidebarCollapse() {
-    isSidebarCollapsed = !isSidebarCollapsed;
-    localStorage.setItem('sidebar.collapsed', String(isSidebarCollapsed));
-  }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
-      e.preventDefault();
-      toggleSidebarCollapse();
-    }
-  }
-
   function getDrawerFocusables(): HTMLElement[] {
     if (!sidebarEl) return [];
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -572,8 +558,6 @@
       window.location.hash = '#/' + currentTab;
     }
 
-    window.addEventListener('keydown', handleKeydown);
-
     const mobileMql = window.matchMedia('(max-width: 768px)');
     const handleMobileMqlChange = (e: MediaQueryListEvent) => {
       isMobile = e.matches;
@@ -597,13 +581,12 @@
       clearInterval(capInterval);
       clearInterval(subsInterval);
       window.removeEventListener('hashchange', handleHashChange);
-      window.removeEventListener('keydown', handleKeydown);
       mobileMql.removeEventListener('change', handleMobileMqlChange);
     };
   });
 </script>
 
-<div class="dashboard-layout" class:sb-collapsed={isSidebarCollapsed} class:editor-active={currentTab === 'editor'}>
+<div class="dashboard-layout" class:editor-active={currentTab === 'editor'}>
   <!-- Mobile header bar -->
   <header class="mobile-header" inert={drawerIsModal}>
     <button
@@ -661,8 +644,6 @@
       {loading}
       {pwaInstallPrompt}
       onInstallPWA={installPWA}
-      isCollapsed={isSidebarCollapsed}
-      onToggleCollapse={toggleSidebarCollapse}
     />
   </div>
 
