@@ -207,6 +207,8 @@
   "editor.quick_fixes_applied": "Quick fixes applied: {count}",
   "editor.no_quick_fixes_needed": "No quick fixes needed",
   "editor.quick_fix_error": "Quick fix error: {message}",
+  "editor.fullscreen": "Full screen",
+  "editor.exit_fullscreen": "Exit full screen",
   "editor.confirm_save_title": "Confirm Save",
   "editor.validating": "Validating configuration...",
   "editor.validation_status": "Validation Status:",

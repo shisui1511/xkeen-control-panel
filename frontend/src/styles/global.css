@@ -2016,6 +2016,16 @@ a.chip:hover {
   min-height: 0 !important;
   overflow: hidden !important;
   box-sizing: border-box !important;
+.editor-main-card.is-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 9999 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  border-radius: 0 !important;
+  border: none !important;
+  margin: 0 !important;
+  background: var(--bg-card) !important;
 }
 
 .editor-empty-card {

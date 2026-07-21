@@ -204,6 +204,8 @@
   "editor.quick_fixes_applied": "Быстрые исправления применены: {count}",
   "editor.no_quick_fixes_needed": "Быстрые исправления не требуются",
   "editor.quick_fix_error": "Ошибка быстрого исправления: {message}",
+  "editor.fullscreen": "На весь экран",
+  "editor.exit_fullscreen": "Свернуть",
   "editor.confirm_save_title": "Подтверждение сохранения",
   "editor.validating": "Проверка конфигурации...",
   "editor.validation_status": "Статус валидации:",

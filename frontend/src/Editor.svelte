@@ -80,6 +80,24 @@
   let xrayFiles = $state<ConfigFileInfo[]>([]);
   let mihomoFiles = $state<ConfigFileInfo[]>([]);
   let showSidebar = $state(true);
+  let isFullscreen = $state(false);
+
+  function toggleFullscreen() {
+    isFullscreen = !isFullscreen;
+    if (isFullscreen) {
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    } else {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  }
+
+  function handleFullscreenChange() {
+    isFullscreen = !!document.fullscreenElement;
+  }
 
   // Status bar cursor position
   let cursorLine = $state(1);
@@ -287,6 +305,13 @@
   }
 
   function handleGlobalKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && isFullscreen) {
+      isFullscreen = false;
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+
     if (e.ctrlKey && e.key === 'Tab') {
       e.preventDefault();
       if (tabs.length <= 1) return;
@@ -1241,10 +1266,12 @@
     loadTemplates();
     checkHashTab();
     window.addEventListener('hashchange', checkHashTab);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
   });
 
   onDestroy(() => {
     window.removeEventListener('hashchange', checkHashTab);
+    document.removeEventListener('fullscreenchange', handleFullscreenChange);
   });
 </script>
 
@@ -1403,7 +1430,7 @@
           />
         </div>
       {:else}
-        <div class="editor-main-card">
+        <div class="editor-main-card" class:is-fullscreen={isFullscreen}>
           <EditorTabs
             {tabs}
             {activeTabPath}
@@ -1453,6 +1480,39 @@
                   stroke-width="2"
                   stroke-linecap="round"
                   stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg
+                >
+              {/if}
+            </button>
+            <button
+              class="btn btn-secondary"
+              style="padding: 6px 10px; margin-right: 8px;"
+              onclick={toggleFullscreen}
+              title={isFullscreen ? ($t('editor.exit_fullscreen') || 'Свернуть') : ($t('editor.fullscreen') || 'Во весь экран')}
+              aria-label={isFullscreen ? ($t('editor.exit_fullscreen') || 'Свернуть') : ($t('editor.fullscreen') || 'Во весь экран')}
+            >
+              {#if isFullscreen}
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg
+                >
+              {:else}
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  ><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg
                 >
               {/if}
             </button>
