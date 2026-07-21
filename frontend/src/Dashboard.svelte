@@ -138,17 +138,17 @@
 
   function getDiskBarColor(stats: SystemStats): string {
     if (!stats.disk) {
-      return 'var(--color-success, var(--color-primary, #2ecc71))';
+      return 'var(--success)';
     }
     const pct = (stats.disk.used / stats.disk.total) * 100;
     const freeMB = stats.disk.free / 1024 / 1024;
     if (pct > 90 || freeMB < 10) {
-      return 'var(--color-danger, #e74c3c)';
+      return 'var(--danger)';
     }
     if (pct > 80) {
-      return 'var(--color-warning, #f39c12)';
+      return 'var(--warning)';
     }
-    return 'var(--color-success, var(--color-primary, #2ecc71))';
+    return 'var(--success)';
   }
 
   async function fetchSubscriptionSummary() {
