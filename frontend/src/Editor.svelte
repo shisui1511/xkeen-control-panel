@@ -569,8 +569,6 @@
   }
 
   let showSaveConfirmModal = $state(false);
-  let validationResult = $state<{ valid: boolean; error: string } | null>(null);
-  let validationLoading = $state(false);
   let diffChanges = $state<any[]>([]);
 
   // Kebab menu for destructive actions (Delete)
@@ -718,8 +716,6 @@
     }
 
     showSaveConfirmModal = true;
-    validationLoading = false;
-    validationResult = { valid: true, error: '' };
   }
 
   async function confirmSave() {
@@ -2008,51 +2004,6 @@
 </Modal>
 
 <Modal isOpen={showSaveConfirmModal} title={$t('editor.confirm_save_title') || 'Confirm Save'} maxWidth="700px" onclose={() => (showSaveConfirmModal = false)}>
-  <!-- Validation status -->
-  {#if validationLoading}
-    <div class="validation-result validation-loading" style="margin-top: 0;">
-      <svg
-        width="16"
-        height="16"
-        viewBox="0 0 38 38"
-        stroke="var(--accent)"
-        style="flex-shrink:0"
-      >
-        <g fill="none" fill-rule="evenodd">
-          <g transform="translate(1 1)" stroke-width="2">
-            <circle stroke-opacity=".5" cx="18" cy="18" r="18" />
-            <path d="M36 18c0-9.94-8.06-18-18-18">
-              <animateTransform
-                attributeName="transform"
-                type="rotate"
-                from="0 18 18"
-                to="360 18 18"
-                dur="1s"
-                repeatCount="indefinite"
-              />
-            </path>
-          </g>
-        </g>
-      </svg>
-      <span>{$t('editor.validating') || 'Проверка конфигурации...'}</span>
-    </div>
-  {:else if validationResult}
-    {#if validationResult.valid}
-      <div class="validation-result validation-ok" style="margin-top: 0;">
-        <span class="v-icon">✓</span>
-        <span>{$t('editor.validation_valid') || 'Конфигурация корректна.'}</span>
-      </div>
-    {:else}
-      <div class="validation-result validation-err" style="margin-top: 0;">
-        <div class="validation-err-head">
-          <span class="v-icon">✗</span>
-          <span>{$t('editor.validation_invalid') || 'Конфигурация содержит ошибки:'}</span>
-        </div>
-        <pre>{validationResult.error}</pre>
-      </div>
-    {/if}
-  {/if}
-
   <!-- Diff Preview -->
   <div class="diff-preview" style="margin-top: 12px;">
     <div class="diff-preview-title">
@@ -2086,7 +2037,7 @@
     <button
       onclick={confirmSave}
       class="btn btn-primary"
-      disabled={saving || (validationResult && !validationResult.valid && !expertMode)}
+      disabled={saving}
     >
       {saving ? $t('app.loading') : $t('app.save')}
     </button>
@@ -2534,33 +2485,9 @@
     border: 1px solid rgba(41, 194, 240, 0.2);
   }
 
-  .validation-ok {
-    background: rgba(16, 185, 129, 0.08);
-    color: var(--success);
-    border: 1px solid rgba(16, 185, 129, 0.2);
-  }
-
   .v-icon {
     font-weight: 700;
     flex-shrink: 0;
-  }
-
-  .validation-err {
-    background: rgba(239, 68, 68, 0.08);
-    color: var(--danger);
-    border: 1px solid rgba(239, 68, 68, 0.2);
-    flex-direction: column;
-    width: 100%;
-  }
-
-  .validation-err pre {
-    margin: 6px 0 0;
-    font-size: 11px;
-    white-space: pre-wrap;
-    word-break: break-all;
-    color: var(--fg-dim);
-    font-family: var(--font-family-mono);
-    width: 100%;
   }
 
   .diff-preview {
