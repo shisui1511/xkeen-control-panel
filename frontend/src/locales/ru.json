@@ -39,6 +39,8 @@
   "auth.login_btn": "Войти",
   "auth.logging_in": "Вход...",
   "auth.login_error": "Ошибка входа",
+  "auth.invalid_password": "Неверный пароль",
+  "auth.too_many_attempts": "Слишком много попыток входа. Повторите через {seconds} с.",
   "auth.setup_title": "Первичная настройка",
   "auth.setup_desc": "Установите пароль для доступа к панели управления",
   "auth.password_min": "Минимум 8 символов",

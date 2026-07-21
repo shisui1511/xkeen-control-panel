@@ -39,6 +39,8 @@
   "auth.login_btn": "Login",
   "auth.logging_in": "Logging in...",
   "auth.login_error": "Login error",
+  "auth.invalid_password": "Invalid password",
+  "auth.too_many_attempts": "Too many login attempts. Try again in {seconds}s.",
   "auth.setup_title": "Initial Setup",
   "auth.setup_desc": "Set password to access the control panel",
   "auth.password_min": "Minimum 8 characters",

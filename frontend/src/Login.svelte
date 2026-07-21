@@ -34,8 +34,27 @@
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || $t('auth.login_error'));
+        let payload: any = null;
+        try {
+          payload = await res.json();
+        } catch (e) {
+          // response body wasn't JSON
+        }
+
+        if (res.status === 429) {
+          const seconds = payload?.retry_after;
+          throw new Error(
+            seconds
+              ? $t('auth.too_many_attempts', { seconds: String(seconds) })
+              : $t('auth.login_error')
+          );
+        }
+
+        if (res.status === 401) {
+          throw new Error($t('auth.invalid_password'));
+        }
+
+        throw new Error($t('auth.login_error'));
       }
 
       const data = await res.json();
@@ -92,10 +111,6 @@
       </div>
     </div>
 
-    {#if error}
-      <div class="alert alert-error" style="margin-bottom:18px;">{error}</div>
-    {/if}
-
     <div class="form-group" style="margin-bottom:14px;">
       <label class="form-label" for="password">{$t('auth.password')}</label>
       <input
@@ -107,7 +122,11 @@
         placeholder={$t('auth.enter_password')}
         disabled={loading}
         autocomplete="current-password"
+        autofocus
       />
+      {#if error}
+        <div class="alert alert-error" style="margin-top:10px;margin-bottom:0;">{error}</div>
+      {/if}
     </div>
 
     <button
@@ -186,7 +205,7 @@
     font-size: 22px;
     font-weight: 700;
     letter-spacing: -0.01em;
-    color: #fff;
+    color: var(--fg-primary);
     line-height: 1;
   }
   .login-brand .b1 :global(.x),
