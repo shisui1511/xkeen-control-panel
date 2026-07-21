@@ -38,13 +38,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // App shell (/ and /index.html): network-first. A cache-first strategy
-  // here would permanently mask the Cache-Control: no-cache header the
-  // server sends for these paths and keep serving a stale bundle after
+  // App shell (/, /index.html, /manifest.json): network-first. A cache-first
+  // strategy here would permanently mask the Cache-Control: no-cache header
+  // the server sends for these paths and keep serving a stale bundle after
   // deploy, even to returning PWA users. Falls back to the cached copy
-  // only when the network is unavailable (offline support).
+  // only when the network is unavailable (offline support). /manifest.json
+  // is included because it ships unhashed from public/ and can change
+  // between deploys (icons, theme_color, name) — unlike the hashed static
+  // assets handled by the cache-first branch below.
   const isAppShell =
-    event.request.mode === 'navigate' || url.pathname === '/' || url.pathname === '/index.html';
+    event.request.mode === 'navigate' ||
+    url.pathname === '/' ||
+    url.pathname === '/index.html' ||
+    url.pathname === '/manifest.json';
   if (isAppShell) {
     event.respondWith(
       fetch(event.request)
