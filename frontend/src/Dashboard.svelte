@@ -1319,7 +1319,10 @@
         </div>
       </div>
     {:else if currentTab === 'editor'}
-      <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100%;" transition:fade={{ duration: 150 }}>
+      <div
+        style="flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100%;"
+        transition:fade={{ duration: 150 }}
+      >
         <Editor onSwitchTab={switchTab} />
       </div>
     {:else if currentTab === 'logs'}

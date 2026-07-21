@@ -1241,9 +1241,16 @@
           {$t('editor.tab_constructor')}
         {/if}
       </div>
-      <h1>{activeTab === 'constructor' ? ($t('editor.constructor_title') || 'Конструктор конфигурации') : ($t('editor.h1') || 'Конфигурация')}</h1>
+      <h1>
+        {activeTab === 'constructor'
+          ? $t('editor.constructor_title') || 'Конструктор конфигурации'
+          : $t('editor.h1') || 'Конфигурация'}
+      </h1>
       <p class="sub">
-        {activeTab === 'constructor' ? ($t('editor.constructor_subtitle') || 'Пошаговое создание конфигураций') : ($t('editor.h1_sub') || 'YAML / JSON конфиги с подсветкой, валидацией по схеме и автодополнением.')}
+        {activeTab === 'constructor'
+          ? $t('editor.constructor_subtitle') || 'Пошаговое создание конфигураций'
+          : $t('editor.h1_sub') ||
+            'YAML / JSON конфиги с подсветкой, валидацией по схеме и автодополнением.'}
       </p>
     </div>
     {#if activeTab === 'files'}
@@ -1396,7 +1403,9 @@
                 stroke-width="2"
                 stroke-linecap="round"
                 stroke-linejoin="round"
-                ><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg
+                ><path
+                  d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                /></svg
               >
               {$t('editor.show_files') || 'Показать файлы'}
             </button>
@@ -1548,8 +1557,6 @@
             </div>
           </div>
 
-
-
           <!-- CodeMirror editor component -->
           <div style="flex: 1; min-height: 0; position:relative; background: var(--cm-bg);">
             {#if loading}
@@ -1659,7 +1666,9 @@
                 </button>
               {/if}
 
-              <span class="status-tip status-shortcut-tip" style="border-left: 1px solid var(--border); padding-left: 12px;"
+              <span
+                class="status-tip status-shortcut-tip"
+                style="border-left: 1px solid var(--border); padding-left: 12px;"
                 >Ctrl+S — сохранить</span
               >
             </div>
@@ -1693,7 +1702,11 @@
 </div>
 
 <!-- CRUD Modals -->
-<Modal isOpen={showCreateModal} title={$t('editor.create_file')} onclose={() => (showCreateModal = false)}>
+<Modal
+  isOpen={showCreateModal}
+  title={$t('editor.create_file')}
+  onclose={() => (showCreateModal = false)}
+>
   <label for="new-file-name" class="sr-only">{$t('editor.file_name')}</label>
   <input
     id="new-file-name"
@@ -1714,7 +1727,11 @@
   </div>
 </Modal>
 
-<Modal isOpen={showRenameModal} title={$t('editor.rename_file')} onclose={() => (showRenameModal = false)}>
+<Modal
+  isOpen={showRenameModal}
+  title={$t('editor.rename_file')}
+  onclose={() => (showRenameModal = false)}
+>
   <label for="rename-target" class="sr-only">{$t('editor.new_name')}</label>
   <input
     id="rename-target"
@@ -1735,9 +1752,17 @@
   </div>
 </Modal>
 
-<Modal isOpen={showTemplatesModal} title={$t('editor.templates') || 'Шаблоны'} maxWidth="900px" class="templates-wide-modal" onclose={() => (showTemplatesModal = false)}>
+<Modal
+  isOpen={showTemplatesModal}
+  title={$t('editor.templates') || 'Шаблоны'}
+  maxWidth="900px"
+  class="templates-wide-modal"
+  onclose={() => (showTemplatesModal = false)}
+>
   {#if templateStatus}
-    <div style="margin-top: -10px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+    <div
+      style="margin-top: -10px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;"
+    >
       <p class="templates-modal-subtitle" style="margin: 0;">
         {$t('editor.templates_desc') || 'Шаблоны конфигураций'}
       </p>
@@ -1846,7 +1871,10 @@
   </div>
 
   <!-- Footer -->
-  <div class="templates-modal-footer" style="margin-top: 16px; display: flex; justify-content: flex-end;">
+  <div
+    class="templates-modal-footer"
+    style="margin-top: 16px; display: flex; justify-content: flex-end;"
+  >
     <button
       class="btn btn-primary"
       disabled={!selectedTemplate || !editorView || templateLoading}
@@ -1858,7 +1886,11 @@
   </div>
 </Modal>
 
-<Modal isOpen={showGeneratorModal} title={$t('editor.generator') || 'Генератор исходящих'} onclose={() => (showGeneratorModal = false)}>
+<Modal
+  isOpen={showGeneratorModal}
+  title={$t('editor.generator') || 'Генератор исходящих'}
+  onclose={() => (showGeneratorModal = false)}
+>
   <div class="form-group" style="margin-bottom: 12px;">
     <label
       for="gen-protocol"
@@ -1982,7 +2014,12 @@
   </div>
 </Modal>
 
-<Modal isOpen={showSaveConfirmModal} title={$t('editor.confirm_save_title') || 'Confirm Save'} maxWidth="700px" onclose={() => (showSaveConfirmModal = false)}>
+<Modal
+  isOpen={showSaveConfirmModal}
+  title={$t('editor.confirm_save_title') || 'Confirm Save'}
+  maxWidth="700px"
+  onclose={() => (showSaveConfirmModal = false)}
+>
   <!-- Diff Preview -->
   <div class="diff-preview" style="margin-top: 12px;">
     <div class="diff-preview-title">
@@ -2013,11 +2050,7 @@
     <button onclick={() => (showSaveConfirmModal = false)} class="btn btn-secondary">
       {$t('app.cancel')}
     </button>
-    <button
-      onclick={confirmSave}
-      class="btn btn-primary"
-      disabled={saving}
-    >
+    <button onclick={confirmSave} class="btn btn-primary" disabled={saving}>
       {saving ? $t('app.loading') : $t('app.save')}
     </button>
   </div>

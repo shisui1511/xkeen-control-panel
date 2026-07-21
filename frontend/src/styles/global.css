@@ -297,8 +297,8 @@ h2.card-title {
   font-size: 11px;
 }
 
-.card .card-title .ct-actions>button,
-.card .card-title .ct-actions>.ct-btn {
+.card .card-title .ct-actions > button,
+.card .card-title .ct-actions > .ct-btn {
   background: transparent;
   border: 0;
   padding: 4px;
@@ -312,8 +312,8 @@ h2.card-title {
     background var(--transition-fast);
 }
 
-.card .card-title .ct-actions>button:hover,
-.card .card-title .ct-actions>.ct-btn:hover {
+.card .card-title .ct-actions > button:hover,
+.card .card-title .ct-actions > .ct-btn:hover {
   color: var(--accent);
   background: rgba(255, 255, 255, 0.04);
 }
@@ -464,9 +464,11 @@ input[type='number'] {
 }
 
 .alert-warning {
-  background: linear-gradient(180deg,
-      color-mix(in srgb, var(--warning) 12%, transparent),
-      color-mix(in srgb, var(--warning) 4%, transparent));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--warning) 12%, transparent),
+    color-mix(in srgb, var(--warning) 4%, transparent)
+  );
   border-color: color-mix(in srgb, var(--warning) 40%, transparent);
   color: var(--warning);
 }
@@ -605,7 +607,7 @@ input[type='number'] {
   color: #fff;
 }
 
-.sidebar-logo .brand-text .b1>span.x {
+.sidebar-logo .brand-text .b1 > span.x {
   color: var(--accent);
   font-weight: 800;
   text-shadow: 0 0 14px rgba(41, 194, 240, 0.4);
@@ -650,14 +652,14 @@ input[type='number'] {
   color: var(--accent-hover);
 }
 
-.nav-group summary>.group-ttl {
+.nav-group summary > .group-ttl {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.nav-group summary>.group-ttl :global(svg),
-.nav-group summary>.group-ttl svg {
+.nav-group summary > .group-ttl :global(svg),
+.nav-group summary > .group-ttl svg {
   width: 16px;
   height: 16px;
   color: var(--accent);
@@ -898,7 +900,6 @@ body.drawer-locked {
 }
 
 @keyframes ledPulse {
-
   0%,
   100% {
     opacity: 1;
@@ -1551,12 +1552,12 @@ td.mono,
   transition: var(--transition-fast);
 }
 
-.toggle-switch input:checked+.toggle-slider {
+.toggle-switch input:checked + .toggle-slider {
   background: var(--accent-soft);
   border-color: var(--accent);
 }
 
-.toggle-switch input:checked+.toggle-slider::before {
+.toggle-switch input:checked + .toggle-slider::before {
   background: var(--accent);
   transform: translateX(16px);
   box-shadow: 0 0 6px var(--accent);
@@ -1780,9 +1781,11 @@ pre.code-output {
   gap: 16px;
   padding: 12px 18px;
   background:
-    linear-gradient(90deg,
+    linear-gradient(
+      90deg,
       color-mix(in srgb, var(--danger) 10%, transparent),
-      color-mix(in srgb, var(--danger) 0%, transparent) 40%),
+      color-mix(in srgb, var(--danger) 0%, transparent) 40%
+    ),
     linear-gradient(180deg, var(--surface-overlay-from), var(--surface-overlay-to));
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   border-left: 0;
@@ -1834,7 +1837,6 @@ pre.code-output {
 }
 
 @keyframes apiLedPulse {
-
   0%,
   100% {
     box-shadow:
@@ -2116,7 +2118,7 @@ a.chip:hover {
   flex-direction: column !important;
 }
 
-.main-content.editor-active>div {
+.main-content.editor-active > div {
   flex: 1 !important;
   height: 100% !important;
   min-height: 0 !important;
@@ -2139,7 +2141,7 @@ a.chip:hover {
   box-sizing: border-box !important;
 }
 
-.editor-page-container>.page-head {
+.editor-page-container > .page-head {
   flex: 0 0 auto !important;
 }
 
@@ -2265,35 +2267,35 @@ a.chip:hover {
   color: var(--fg-primary);
 }
 
-  .editor-main-card>.editor-tab-strip,
-  .editor-main-card>.editor-breadcrumbs,
-  .editor-main-card>.editor-toolbar,
-  .editor-main-card>.editor-statusbar {
-    flex: 0 0 auto !important;
-  }
+.editor-main-card > .editor-tab-strip,
+.editor-main-card > .editor-breadcrumbs,
+.editor-main-card > .editor-toolbar,
+.editor-main-card > .editor-statusbar {
+  flex: 0 0 auto !important;
+}
 
-  .editor-cm-wrapper {
-    flex: 1 !important;
-    height: 100% !important;
-    min-height: 0 !important;
-    display: flex !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
-    position: relative !important;
-  }
+.editor-cm-wrapper {
+  flex: 1 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  position: relative !important;
+}
 
-  .cm-editor {
-    flex: 1 !important;
-    height: 100% !important;
-    min-height: 0 !important;
-    display: flex !important;
-    flex-direction: column !important;
-    overflow: hidden !important;
-  }
+.cm-editor {
+  flex: 1 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
 
-  .cm-scroller {
-    flex: 1 !important;
-    height: 100% !important;
-    min-height: 0 !important;
-    overflow: auto !important;
-  }
+.cm-scroller {
+  flex: 1 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+}
