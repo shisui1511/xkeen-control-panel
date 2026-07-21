@@ -27,7 +27,7 @@ func (a *API) OutboundParse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
+	r.Body = http.MaxBytesReader(nil, r.Body, maxConfigBytes)
 	var req OutboundParseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		var maxBytesErr *http.MaxBytesError
@@ -79,7 +79,7 @@ func (a *API) OutboundImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
+	r.Body = http.MaxBytesReader(nil, r.Body, maxConfigBytes)
 	var req OutboundImportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		var maxBytesErr *http.MaxBytesError
@@ -197,7 +197,7 @@ func (a *API) OutboundImportBulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBytes)
+	r.Body = http.MaxBytesReader(nil, r.Body, maxConfigBytes)
 	var req OutboundImportBulkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		var maxBytesErr *http.MaxBytesError
