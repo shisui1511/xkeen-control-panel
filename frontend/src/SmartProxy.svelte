@@ -648,7 +648,7 @@
         </div>
       </div>
 
-      <div class="modal-card-body">
+      <div style="display: flex; flex-direction: column; gap: 16px;">
         {#if error}
           <div class="alert alert-error mb-2">{error}</div>
         {/if}
@@ -783,7 +783,7 @@
         {/if}
       </div>
 
-      <div class="modal-card-footer">
+      <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
         {#if currentStep > 1}
           <button class="btn btn-secondary" onclick={prevStep} style="margin-right:auto;">
             {$t('app.back')}

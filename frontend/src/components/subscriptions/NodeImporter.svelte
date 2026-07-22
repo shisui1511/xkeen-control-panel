@@ -79,7 +79,7 @@
       </button>
     </div>
 
-    <div class="modal-card-body diag-body">
+    <div class="diag-body">
       {#if diagnosticLoading}
         <div class="text-center" style="padding: 2rem 0; color: var(--fg-dim);">
           <span class="spinner" style="margin-right: 8px;">...</span>
@@ -155,7 +155,7 @@
       {/if}
     </div>
 
-    <div class="modal-card-footer">
+    <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
       <button class="btn btn-secondary" onclick={onClose}>{$t('app.close')}</button>
     </div>
 </Modal>
