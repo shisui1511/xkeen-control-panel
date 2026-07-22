@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Modal from '../Modal.svelte';
   import { t, currentLang } from '../../i18n';
   import { capabilities } from '../../stores';
 
@@ -55,28 +56,27 @@
   }
 </script>
 
-<div class="modal-overlay" role="button" tabindex="0" onclick={onClose} onkeydown={handleKeydown}>
-  <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
-    <div class="modal-card-header">
-      <h2>{editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}</h2>
-      <button class="modal-close-btn" onclick={onClose}>&times;</button>
+<Modal
+  isOpen={true}
+  title={editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}
+  onclose={onClose}
+>
+  <div style="display: flex; flex-direction: column; gap: 16px;">
+    <div class="form-group">
+      <label for="form-name" class="form-label">{$t('subscr.name')}</label>
+      <input
+        id="form-name"
+        type="text"
+        class="input"
+        bind:value={formName}
+        placeholder={$t('subscr.name_placeholder')}
+      />
     </div>
-    <div class="modal-card-body">
-      <div class="form-group">
-        <label for="form-name" class="form-label">{$t('subscr.name')}</label>
-        <input
-          id="form-name"
-          type="text"
-          class="input"
-          bind:value={formName}
-          placeholder={$t('subscr.name_placeholder')}
-        />
-      </div>
 
-      <div class="form-group">
-        <label class="form-label"
-          >{$currentLang === 'ru' ? 'Интеграция в ядра' : 'Kernel Integration'}</label
-        >
+    <div class="form-group">
+      <span class="form-label" style="display: block; margin-bottom: 6px;"
+        >{$currentLang === 'ru' ? 'Интеграция в ядра' : 'Kernel Integration'}</span
+      >
         <div style="display: flex; gap: 20px; margin-bottom: 12px;">
           <label
             style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13.5px; color: var(--fg-primary);"
@@ -129,8 +129,8 @@
 
       {#if formEnableXray}
         <div class="form-group">
-          <label class="form-label"
-            >{$currentLang === 'ru' ? 'Режим маршрутизации XRay' : 'XRay Routing Mode'}</label
+          <span class="form-label" style="display: block; margin-bottom: 6px;"
+            >{$currentLang === 'ru' ? 'Режим маршрутизации XRay' : 'XRay Routing Mode'}</span
           >
           <div class="seg-btn" style="margin-bottom: 12px;">
             <button
@@ -214,10 +214,10 @@
 
       {#if formEnableMihomo}
         <div class="form-group">
-          <label class="form-label"
+          <span class="form-label" style="display: block; margin-bottom: 6px;"
             >{$currentLang === 'ru'
               ? 'Интегрировать в группы Mihomo'
-              : 'Integrate into Mihomo groups'}</label
+              : 'Integrate into Mihomo groups'}</span
           >
 
           {#if $capabilities?.active_kernel === 'xray'}
@@ -328,107 +328,14 @@
           {/if}
         </label>
       </div>
-    </div>
-    <div class="modal-card-footer">
+    <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
       <button class="btn btn-secondary" onclick={onClose}>{$t('app.cancel')}</button>
       <button class="btn btn-primary" onclick={onSave}>{$t('app.save')}</button>
     </div>
   </div>
-</div>
+</Modal>
 
 <style>
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 20px;
-  }
-
-  .modal-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    width: 100%;
-    max-width: 520px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    max-height: 90vh;
-    animation: modal-anim 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes modal-anim {
-    from {
-      transform: scale(0.95) translateY(10px);
-      opacity: 0;
-    }
-    to {
-      transform: scale(1) translateY(0);
-      opacity: 1;
-    }
-  }
-
-  .modal-card-header {
-    padding: 16px 24px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .modal-card-header h2 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--fg-primary);
-  }
-
-  .modal-close-btn {
-    background: none;
-    border: none;
-    color: var(--fg-dim);
-    font-size: 24px;
-    cursor: pointer;
-    line-height: 1;
-    padding: 4px;
-  }
-
-  .modal-close-btn:hover {
-    color: var(--fg-primary);
-  }
-
-  .modal-card-body {
-    padding: 24px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) var(--bg-card);
-  }
-  .modal-card-body::-webkit-scrollbar {
-    width: 6px;
-  }
-  .modal-card-body::-webkit-scrollbar-track {
-    background: var(--bg-card);
-  }
-  .modal-card-body::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
-    border-radius: 4px;
-  }
-  .modal-card-body::-webkit-scrollbar-thumb:hover {
-    background: var(--accent);
-  }
-
   .form-group-checkbox {
     display: flex;
     align-items: center;
@@ -441,14 +348,6 @@
     color: var(--fg-primary);
     cursor: pointer;
     user-select: none;
-  }
-
-  .modal-card-footer {
-    padding: 16px 24px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
   }
 
   /* Advanced toggle button and fields box */
