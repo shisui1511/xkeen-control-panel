@@ -16,7 +16,9 @@
   }
 
   let activeTool = 'ping';
-  let host = '';
+  let pingHost = '';
+  let tracerouteHost = '';
+  let dnsHost = '';
   let url = '';
   let recordType = 'A';
   let count = 4;
@@ -60,6 +62,8 @@
 
   // DOM elements for focus
   let hostInput: HTMLInputElement;
+  let tracerouteHostInput: HTMLInputElement;
+  let dnsHostInput: HTMLInputElement;
   let urlInput: HTMLInputElement;
   let proxyTargetInput: HTMLInputElement;
   let portHostInput: HTMLInputElement;
@@ -144,12 +148,18 @@
   function selectHistoryItem(item: HistoryItem) {
     activeTool = item.type;
     result = null;
-    if (item.type === 'ping' || item.type === 'traceroute' || item.type === 'dns') {
-      host = item.params.host;
-      if (item.type === 'dns' && item.params.record_type) {
+    if (item.type === 'ping') {
+      pingHost = item.params.host;
+      setTimeout(() => hostInput?.focus(), 50);
+    } else if (item.type === 'traceroute') {
+      tracerouteHost = item.params.host;
+      setTimeout(() => tracerouteHostInput?.focus(), 50);
+    } else if (item.type === 'dns') {
+      dnsHost = item.params.host;
+      if (item.params.record_type) {
         recordType = item.params.record_type;
       }
-      setTimeout(() => hostInput?.focus(), 50);
+      setTimeout(() => dnsHostInput?.focus(), 50);
     } else if (item.type === 'http') {
       url = item.params.url;
       setTimeout(() => urlInput?.focus(), 50);
@@ -199,10 +209,24 @@
   }
 
   $: finalProxyURL = proxyTargetPreset === 'custom' ? customProxyURL : proxyTargetPreset;
+  $: resultTarget =
+    activeTool === 'http'
+      ? url
+      : activeTool === 'ping'
+        ? pingHost
+        : activeTool === 'traceroute'
+          ? tracerouteHost
+          : activeTool === 'dns'
+            ? dnsHost
+            : activeTool === 'port'
+              ? portHost
+              : activeTool === 'proxy'
+                ? finalProxyURL
+                : '';
 
   async function runPing() {
-    if (!host) return;
-    if (!validateHost(host)) {
+    if (!pingHost) return;
+    if (!validateHost(pingHost)) {
       result = { success: false, error: $t('net.invalid_host') };
       return;
     }
@@ -214,15 +238,15 @@
       const res = await fetch('/api/network/ping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
-        body: JSON.stringify({ host, count })
+        body: JSON.stringify({ host: pingHost, count })
       });
       const data = await res.json();
       result = data;
       if (res.ok && data?.success) {
         saveHistory({
           type: 'ping',
-          label: `[Ping] ${host}`,
-          params: { host }
+          label: `[Ping] ${pingHost}`,
+          params: { host: pingHost }
         });
       }
     } catch (e) {
@@ -233,8 +257,8 @@
   }
 
   async function runTraceroute() {
-    if (!host) return;
-    if (!validateHost(host)) {
+    if (!tracerouteHost) return;
+    if (!validateHost(tracerouteHost)) {
       result = { success: false, error: $t('net.invalid_host') };
       return;
     }
@@ -246,15 +270,15 @@
       const res = await fetch('/api/network/traceroute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
-        body: JSON.stringify({ host, max_hops: maxHops })
+        body: JSON.stringify({ host: tracerouteHost, max_hops: maxHops })
       });
       const data = await res.json();
       result = data;
       if (res.ok && data?.success) {
         saveHistory({
           type: 'traceroute',
-          label: `[Traceroute] ${host}`,
-          params: { host }
+          label: `[Traceroute] ${tracerouteHost}`,
+          params: { host: tracerouteHost }
         });
       }
     } catch (e) {
@@ -265,8 +289,8 @@
   }
 
   async function runDNS() {
-    if (!host) return;
-    if (!validateHost(host)) {
+    if (!dnsHost) return;
+    if (!validateHost(dnsHost)) {
       result = { success: false, error: $t('net.invalid_host') };
       return;
     }
@@ -278,15 +302,15 @@
       const res = await fetch('/api/network/dns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
-        body: JSON.stringify({ host, record_type: recordType })
+        body: JSON.stringify({ host: dnsHost, record_type: recordType })
       });
       const data = await res.json();
       result = data;
       if (res.ok && data?.success) {
         saveHistory({
           type: 'dns',
-          label: `[DNS ${recordType}] ${host}`,
-          params: { host, record_type: recordType }
+          label: `[DNS ${recordType}] ${dnsHost}`,
+          params: { host: dnsHost, record_type: recordType }
         });
       }
     } catch (e) {
@@ -486,7 +510,7 @@
         <input
           bind:this={hostInput}
           class="input"
-          bind:value={host}
+          bind:value={pingHost}
           placeholder="cloudflare.com"
           disabled={loading}
         />
@@ -509,7 +533,7 @@
           class="btn btn-primary"
           style="flex:1;"
           onclick={() => runTool('ping')}
-          disabled={loading || !host}
+          disabled={loading || !pingHost}
         >
           {loading && activeTool === 'ping' ? $t('net.running') : $t('net.run')}
         </button>
@@ -533,7 +557,13 @@
         {$t('net.tab_traceroute')}
       </h3>
       <div class="form-group" style="margin-bottom:10px;">
-        <input class="input" bind:value={host} placeholder="github.com" disabled={loading} />
+        <input
+          bind:this={tracerouteHostInput}
+          class="input"
+          bind:value={tracerouteHost}
+          placeholder="github.com"
+          disabled={loading}
+        />
       </div>
       {#if showSettings.traceroute}
         <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
@@ -553,7 +583,7 @@
           class="btn btn-primary"
           style="flex:1;"
           onclick={() => runTool('traceroute')}
-          disabled={loading || !host}
+          disabled={loading || !tracerouteHost}
         >
           {loading && activeTool === 'traceroute' ? $t('net.running') : $t('net.run')}
         </button>
@@ -579,7 +609,13 @@
         {$t('net.tab_dns')}
       </h3>
       <div class="form-group" style="margin-bottom:10px;">
-        <input class="input" bind:value={host} placeholder="api.openai.com" disabled={loading} />
+        <input
+          bind:this={dnsHostInput}
+          class="input"
+          bind:value={dnsHost}
+          placeholder="api.openai.com"
+          disabled={loading}
+        />
       </div>
       {#if showSettings.dns}
         <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
@@ -596,7 +632,7 @@
           class="btn btn-primary"
           style="flex:1;"
           onclick={() => runTool('dns')}
-          disabled={loading || !host}
+          disabled={loading || !dnsHost}
         >
           {loading && activeTool === 'dns' ? $t('net.running') : $t('net.run')}
         </button>
@@ -877,7 +913,7 @@
       <h2 class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
         <span
           >{$t('net.result')} — {activeTool.toUpperCase()}
-          {activeTool === 'http' ? url : host}</span
+          {resultTarget}</span
         >
         <span
           class="badge"
