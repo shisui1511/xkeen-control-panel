@@ -150,7 +150,7 @@
         <div class="sub-node-info">
           <div class="sub-node-name-row">
             <span class="sub-node-name">
-              {node.name || $t('country.' + node.country) || node.tag}
+              {node.name || (node.country ? $t('country.' + node.country) : '') || node.tag}
               {#if node.is_new}
                 <span class="sub-node-name-new"> [NEW]</span>
               {/if}
