@@ -868,7 +868,9 @@
               >
             {/if}
           </div>
-          <button class="td-close" onclick={closeTagBrowser} aria-label="Close">✕</button>
+          <button class="td-close" onclick={closeTagBrowser} aria-label={$t('app.close')}
+            >✕</button
+          >
         </div>
 
         <div class="td-hint">
@@ -1000,7 +1002,9 @@
               >
             {/if}
           </div>
-          <button class="td-close" onclick={closeTagBrowser} aria-label="Close">✕</button>
+          <button class="td-close" onclick={closeTagBrowser} aria-label={$t('app.close')}
+            >✕</button
+          >
         </div>
 
         <div class="td-hint">

@@ -333,7 +333,7 @@
             class="collapse-toggle"
             class:expanded={expandedSubs[sub.id]}
             onclick={() => onToggleExpand(sub.id)}
-            aria-label="Toggle node list"
+            aria-label={$t('subscr.toggle_node_list')}
           >
             <svg
               width="14"
@@ -422,7 +422,7 @@
             <button
               class="action-icon-btn action-btn-dots"
               onclick={() => onToggleDropdown(sub.id)}
-              aria-label="More actions"
+              aria-label={$t('subscr.more_actions')}
             >
               <svg
                 width="14"

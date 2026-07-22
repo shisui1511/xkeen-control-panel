@@ -2550,7 +2550,7 @@
                   type="button"
                   onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
                   style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                  aria-label="Remove">✕</button
+                  aria-label={$t('app.remove')}>✕</button
                 >
                 <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
                   <strong>{$t('app.error')}:</strong>
@@ -2572,7 +2572,7 @@
                   type="button"
                   onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
                   style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                  aria-label="Remove">✕</button
+                  aria-label={$t('app.remove')}>✕</button
                 >
                 <div
                   style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"

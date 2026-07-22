@@ -411,7 +411,7 @@
           <p class="info-banner-description">{$t('trafficquotas.banner_text')}</p>
         </div>
       </div>
-      <button class="info-banner-close" onclick={dismissBanner} aria-label="Dismiss banner">
+      <button class="info-banner-close" onclick={dismissBanner} aria-label={$t('app.dismiss')}>
         &times;
       </button>
     </div>
