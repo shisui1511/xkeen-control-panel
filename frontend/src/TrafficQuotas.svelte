@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import Modal from './components/Modal.svelte';
   import { t, currentLang } from './i18n';
   import PageHeader from './PageHeader.svelte';
   import Icon from './lib/components/Icon.svelte';
@@ -309,12 +310,6 @@
 
   function handleDocumentClick() {
     activeDropdownId = null;
-  }
-
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      cancelEdit();
-    }
   }
 
   let dismissedBanner = false;
@@ -684,20 +679,12 @@
 </div>
 
 <!-- Modal Form -->
-{#if showForm}
-  <div
-    class="modal-overlay"
-    role="button"
-    tabindex="0"
-    onclick={cancelEdit}
-    onkeydown={handleKeydown}
-  >
-    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
-      <div class="modal-card-header">
-        <h2>{editingQuota ? $t('trafficquotas.edit_quota') : $t('trafficquotas.new_quota')}</h2>
-        <button class="modal-close-btn" onclick={cancelEdit}>&times;</button>
-      </div>
-      <div class="modal-card-body">
+<Modal
+  isOpen={showForm}
+  title={editingQuota ? $t('trafficquotas.edit_quota') : $t('trafficquotas.new_quota')}
+  onclose={cancelEdit}
+>
+  <div style="display: flex; flex-direction: column; gap: 16px;">
         <div class="form-group">
           <label for="form-name" class="form-label">{$t('trafficquotas.name')}</label>
           <input
@@ -800,13 +787,12 @@
           </label>
         </div>
       </div>
-      <div class="modal-card-footer">
+      <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
         <button class="btn btn-secondary" onclick={cancelEdit}>{$t('app.cancel')}</button>
         <button class="btn btn-primary" onclick={saveQuota}>{$t('app.save')}</button>
       </div>
     </div>
-  </div>
-{/if}
+  </Modal>
 
 <style>
   .crumb-separator {
@@ -1008,91 +994,7 @@
     gap: 16px;
   }
 
-  /* Modal Styles */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 20px;
-  }
 
-  .modal-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    width: 100%;
-    max-width: 520px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    max-height: 90vh;
-    animation: modal-anim 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes modal-anim {
-    from {
-      transform: scale(0.95) translateY(10px);
-      opacity: 0;
-    }
-    to {
-      transform: scale(1) translateY(0);
-      opacity: 1;
-    }
-  }
-
-  .modal-card-header {
-    padding: 16px 24px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .modal-card-header h2 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--fg-primary);
-  }
-
-  .modal-close-btn {
-    background: none;
-    border: none;
-    color: var(--fg-dim);
-    font-size: 24px;
-    cursor: pointer;
-    line-height: 1;
-    padding: 4px;
-  }
-
-  .modal-close-btn:hover {
-    color: var(--fg-primary);
-  }
-
-  .modal-card-body {
-    padding: 24px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .modal-card-footer {
-    padding: 16px 24px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-  }
 
   .form-group-checkbox {
     display: flex;

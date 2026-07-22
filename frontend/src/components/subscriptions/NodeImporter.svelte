@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Modal from '../Modal.svelte';
   import { t } from '../../i18n';
 
   interface Subscription {
@@ -45,20 +46,14 @@
       return dateStr;
     }
   }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      onClose();
-    }
-  }
 </script>
 
-<div class="modal-overlay" role="button" tabindex="0" onclick={onClose} onkeydown={handleKeydown}>
-  <div class="modal-card modal-large" role="presentation" onclick={(e) => e.stopPropagation()}>
-    <div class="modal-card-header">
-      <h2>{diagnosticSub ? $t('subscr.diag_title').replace('{name}', diagnosticSub.name) : ''}</h2>
-      <button class="modal-close-btn" onclick={onClose}>&times;</button>
-    </div>
+<Modal
+  isOpen={!!diagnosticSub}
+  title={diagnosticSub ? $t('subscr.diag_title').replace('{name}', diagnosticSub.name) : ''}
+  onclose={onClose}
+  class="node-importer-wide"
+>
 
     <div class="diag-tabs">
       <button
@@ -163,111 +158,10 @@
     <div class="modal-card-footer">
       <button class="btn btn-secondary" onclick={onClose}>{$t('app.close')}</button>
     </div>
-  </div>
-</div>
+</Modal>
 
 <style>
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 20px;
-  }
-
-  .modal-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    width: 100%;
-    max-width: 520px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    max-height: 90vh;
-    animation: modal-anim 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes modal-anim {
-    from {
-      transform: scale(0.95) translateY(10px);
-      opacity: 0;
-    }
-    to {
-      transform: scale(1) translateY(0);
-      opacity: 1;
-    }
-  }
-
-  .modal-card-header {
-    padding: 16px 24px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .modal-card-header h2 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--fg-primary);
-  }
-
-  .modal-close-btn {
-    background: none;
-    border: none;
-    color: var(--fg-dim);
-    font-size: 24px;
-    cursor: pointer;
-    line-height: 1;
-    padding: 4px;
-  }
-
-  .modal-close-btn:hover {
-    color: var(--fg-primary);
-  }
-
-  .modal-card-body {
-    padding: 24px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border-strong) var(--bg-card);
-  }
-  .modal-card-body::-webkit-scrollbar {
-    width: 6px;
-  }
-  .modal-card-body::-webkit-scrollbar-track {
-    background: var(--bg-card);
-  }
-  .modal-card-body::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
-    border-radius: 4px;
-  }
-  .modal-card-body::-webkit-scrollbar-thumb:hover {
-    background: var(--accent);
-  }
-
-  .modal-card-footer {
-    padding: 16px 24px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-  }
-
-  .modal-large {
+  :global(.node-importer-wide) {
     max-width: 800px;
     width: 100%;
   }
