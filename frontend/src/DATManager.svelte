@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import Modal from './components/Modal.svelte';
   import { t, currentLang, pluralize } from './i18n';
   import Icon from './lib/components/Icon.svelte';
   import { showToast, capabilities } from './stores';
@@ -819,11 +820,23 @@
 </div>
 
 <!-- Tag Browser Modal -->
-{#if tagDrawer.open}
-  <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-  <div class="tag-overlay" onclick={closeTagBrowser}>
-    <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
-    <div class="tag-drawer" onclick={(e) => e.stopPropagation()}>
+<Modal
+  isOpen={tagDrawer.open}
+  title={tagDrawer.file?.name || 'Tag Browser'}
+  class="dat-drawer-modal"
+  onclose={closeTagBrowser}
+>
+  <div
+    tabindex="-1"
+    style="outline: none; display: flex; flex-direction: column; height: 100%;"
+    onkeydown={(e) => {
+      if (e.key === 'Escape' && entryDrawer.open) {
+        e.stopPropagation();
+        e.preventDefault();
+        closeEntryBrowser();
+      }
+    }}
+  >
       {#if entryDrawer.open}
         <!-- Entry Browser View -->
         <div class="td-header">
@@ -1087,9 +1100,8 @@
           {/if}
         </div>
       {/if}
-    </div>
   </div>
-{/if}
+</Modal>
 
 <style>
   .crumb-separator {
@@ -1241,37 +1253,33 @@
     }
   }
 
-  /* ── Tag Browser Modal ── */
+  /* ── Tag Browser Modal (Right-docked Drawer) ── */
 
-  .tag-overlay {
+  :global(.dat-drawer-modal) {
     position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.55);
-    z-index: 200;
-    display: flex;
-    align-items: stretch;
-    justify-content: flex-end;
-    animation: fadeIn 140ms ease;
-  }
-
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-    }
-    to {
-      opacity: 1;
-    }
-  }
-
-  .tag-drawer {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    height: 100vh;
+    max-height: 100vh;
     width: 420px;
     max-width: 92vw;
-    background: var(--bg-card);
+    margin: 0 0 0 auto;
+    border-radius: 0;
     border-left: 1px solid var(--border-strong);
+    background: var(--bg-card);
+    animation: slideIn 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  :global(.dat-drawer-modal .modal-header) {
+    display: none;
+  }
+
+  :global(.dat-drawer-modal .modal-content) {
+    padding: 0;
+    height: 100%;
     display: flex;
     flex-direction: column;
-    animation: slideIn 180ms cubic-bezier(0.4, 0, 0.2, 1);
-    overflow: hidden;
   }
 
   @keyframes slideIn {
