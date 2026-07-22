@@ -610,16 +610,7 @@
     class="sidebar-overlay"
     class:hidden={!$isSidebarOpen}
     onclick={closeSidebar}
-    onkeydown={(e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        closeSidebar();
-      }
-    }}
-    role="button"
-    tabindex="0"
-    aria-label={$t('nav.close_menu')}
-    title={$t('nav.close_menu')}
+    role="presentation"
   ></div>
 
   <!-- Sidebar -->
@@ -1219,14 +1210,10 @@
         <div style="margin-bottom: 8px;">
           <Card title={$t('dash.quick_actions')}>
             <div class="qa-grid-mini">
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
+              <button
+                type="button"
                 class="qa-mini"
                 onclick={() => switchTab('proxies')}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('proxies')}
               >
                 <span class="qa-mini-ico"><Icon name="proxies" size={18} /></span>
                 <span
@@ -1238,20 +1225,14 @@
                         : 'Mihomo узлы и группы'}</span
                   ></span
                 >
-              </div>
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
+              </button>
+              <button
+                type="button"
                 class="qa-mini"
                 onclick={() => {
                   switchTab('proxies');
                   window.location.hash = '#/proxies?tab=providers';
                 }}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) =>
-                  e.key === 'Enter' &&
-                  (switchTab('proxies'), (window.location.hash = '#/proxies?tab=providers'))}
               >
                 <span class="qa-mini-ico"><Icon name="subscriptions" size={18} /></span>
                 <span
@@ -1261,59 +1242,43 @@
                       : $t('dash.subs_empty')}</span
                   ></span
                 >
-              </div>
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
+              </button>
+              <button
+                type="button"
                 class="qa-mini"
                 onclick={() => switchTab('editor')}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('editor')}
               >
                 <span class="qa-mini-ico"><Icon name="editor" size={18} /></span>
                 <span
                   ><b>{$t('nav.editor')}</b><span class="s">{$t('dash.editor_subtitle')}</span
                   ></span
                 >
-              </div>
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
+              </button>
+              <button
+                type="button"
                 class="qa-mini"
                 onclick={() => switchTab('logs')}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('logs')}
               >
                 <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
                 <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 500 строк</span></span>
-              </div>
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
+              </button>
+              <button
+                type="button"
                 class="qa-mini"
                 onclick={() => switchTab('dat')}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('dat')}
               >
                 <span class="qa-mini-ico"><Icon name="dat" size={18} /></span>
                 <span><b>{$t('nav.dat')}</b><span class="s">geoip · geosite · правила</span></span>
-              </div>
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
+              </button>
+              <button
+                type="button"
                 class="qa-mini"
                 onclick={() => switchTab('console')}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('console')}
               >
                 <span class="qa-mini-ico"><Icon name="console" size={18} /></span>
                 <span><b>{$t('nav.console')}</b><span class="s">shell в окружении XKeen</span></span
                 >
-              </div>
+              </button>
             </div>
           </Card>
         </div>
@@ -1499,6 +1464,9 @@
     transition: all 0.15s;
     text-decoration: none;
     color: inherit;
+    width: 100%;
+    font: inherit;
+    text-align: left;
   }
 
   .qa-mini:hover {
