@@ -823,6 +823,9 @@
 <Modal
   isOpen={tagDrawer.open}
   title={tagDrawer.file?.name || 'Tag Browser'}
+  ariaLabel={entryDrawer.open
+    ? entryDrawer.tag
+    : tagDrawer.file?.name || 'Tag Browser'}
   class="dat-drawer-modal"
   onclose={closeTagBrowser}
 >

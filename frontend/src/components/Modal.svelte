@@ -6,6 +6,7 @@
     title = '',
     maxWidth = '520px',
     class: className = '',
+    ariaLabel = '',
     onclose,
     children
   } = $props<{
@@ -13,6 +14,8 @@
     title: string;
     maxWidth?: string;
     class?: string;
+    /** Overrides the accessible name when the visible `.modal-header` (and its `<h2>`) is hidden by a caller's stylesheet. */
+    ariaLabel?: string;
     onclose: () => void;
     children?: Snippet;
   }>();
@@ -79,7 +82,8 @@
       class="modal-container {className}"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="modal-title"
+      aria-label={ariaLabel || undefined}
+      aria-labelledby={ariaLabel ? undefined : 'modal-title'}
       bind:this={modalElement}
       onkeydown={handleKeydown}
       onclick={(e) => e.stopPropagation()}
