@@ -1430,15 +1430,6 @@
           if (!uploading) document.getElementById('backup-upload-input')?.click();
         }}
       >
-        <input
-          id="backup-upload-input"
-          type="file"
-          accept=".tar.gz"
-          style="display: none;"
-          onchange={handleFileSelect}
-          disabled={uploading || creatingSnapshot || restoringSnapshot !== ''}
-        />
-
         {#if uploading}
           <span
             class="spinner"
@@ -1461,6 +1452,14 @@
           </div>
         {/if}
       </button>
+      <input
+        id="backup-upload-input"
+        type="file"
+        accept=".tar.gz"
+        style="display: none;"
+        onchange={handleFileSelect}
+        disabled={uploading || creatingSnapshot || restoringSnapshot !== ''}
+      />
     </div>
   {/if}
 
