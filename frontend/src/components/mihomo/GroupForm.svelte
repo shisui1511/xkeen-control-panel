@@ -35,18 +35,18 @@
 
 <div class="form-card">
   <div class="form-row">
-    <label class="form-label">{ru ? 'Тип' : 'Type'}</label>
-    <select class="form-select" bind:value={ng.type}>
+    <label class="form-label" for="group-type">{ru ? 'Тип' : 'Type'}</label>
+    <select id="group-type" class="form-select" bind:value={ng.type}>
       {#each GROUP_TYPES as t}<option value={t}>{t}</option>{/each}
     </select>
   </div>
   <div class="form-row">
-    <label class="form-label">{ru ? 'Имя группы' : 'Group name'}</label>
-    <input class="form-input" bind:value={ng.name} placeholder="Выбор прокси" />
+    <label class="form-label" for="group-name">{ru ? 'Имя группы' : 'Group name'}</label>
+    <input id="group-name" class="form-input" bind:value={ng.name} placeholder="Выбор прокси" />
   </div>
   {#if hasMihomoProviders}
     <div class="form-row">
-      <label class="form-label"
+      <label class="form-label" for="group-use-providers"
         >{ru ? 'Провайдеры подписок (use:)' : 'Subscription providers (use:)'}</label
       >
       <div class="tag-input-wrap">
@@ -67,6 +67,7 @@
           </span>
         {/each}
         <select
+          id="group-use-providers"
           class="form-select-inline"
           value=""
           onchange={(e) => {
@@ -93,8 +94,8 @@
   {/if}
   {#if ng.type === 'load-balance'}
     <div class="form-row">
-      <label class="form-label">{ru ? 'Стратегия балансировки' : 'Load-balance strategy'}</label>
-      <select class="form-select" bind:value={ng.strategy}>
+      <label class="form-label" for="group-strategy">{ru ? 'Стратегия балансировки' : 'Load-balance strategy'}</label>
+      <select id="group-strategy" class="form-select" bind:value={ng.strategy}>
         <option value={undefined}>-- {ru ? 'выберите стратегию' : 'select strategy'} --</option>
         <option value="round-robin">round-robin</option>
         <option value="consistent-hashing">consistent-hashing</option>
@@ -112,7 +113,7 @@
     </label>
   </div>
   <div class="form-row">
-    <label class="form-label">{ru ? 'Прокси' : 'Proxies'}</label>
+    <label class="form-label" for="group-proxies">{ru ? 'Прокси' : 'Proxies'}</label>
     <div class="tag-input-wrap">
       {#each ng.proxies as p}
         <span class="tag-pill">
@@ -124,7 +125,7 @@
           >
         </span>
       {/each}
-      <select class="form-select-inline" bind:value={ngProxyInput} onchange={addGroupProxy}>
+      <select id="group-proxies" class="form-select-inline" bind:value={ngProxyInput} onchange={addGroupProxy}>
         <option value="">+ {ru ? 'добавить' : 'add'}...</option>
         {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
       </select>
@@ -133,12 +134,12 @@
   {#if ng.type !== 'select'}
     <div class="form-row2">
       <div class="form-col">
-        <label class="form-label">URL</label>
-        <input class="form-input" bind:value={ng.url} />
+        <label class="form-label" for="group-url">URL</label>
+        <input id="group-url" class="form-input" bind:value={ng.url} />
       </div>
       <div class="form-col form-col-sm">
-        <label class="form-label">{ru ? 'Интервал (с)' : 'Interval (s)'}</label>
-        <input class="form-input" type="number" bind:value={ng.interval} />
+        <label class="form-label" for="group-interval">{ru ? 'Интервал (с)' : 'Interval (s)'}</label>
+        <input id="group-interval" class="form-input" type="number" bind:value={ng.interval} />
       </div>
     </div>
   {/if}
