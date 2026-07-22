@@ -10,6 +10,7 @@
   }
 
   let {
+    isOpen = false,
     editingSub = null,
     formName = $bindable(''),
     formEnableXray = $bindable(false),
@@ -28,6 +29,7 @@
     onClose,
     onSave
   }: {
+    isOpen?: boolean;
     editingSub: Subscription | null;
     formName: string;
     formEnableXray: boolean;
@@ -57,7 +59,7 @@
 </script>
 
 <Modal
-  isOpen={true}
+  isOpen={isOpen}
   title={editingSub ? $t('subscr.edit_title') : $t('subscr.add_title')}
   onclose={onClose}
 >

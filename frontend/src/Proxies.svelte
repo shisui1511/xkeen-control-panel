@@ -1848,39 +1848,36 @@
   {/if}
 </div>
 
-{#if showAddModal}
-  <SubscriptionFormModal
-    {editingSub}
-    bind:formName
-    bind:formEnableXray
-    bind:formEnableMihomo
-    bind:formURL
-    bind:formInterval
-    bind:formRoutingMode
-    bind:formTagPrefix
-    bind:formFilterName
-    bind:formFilterType
-    bind:formFilterTransport
-    bind:formMihomoGroups
-    bind:formEnabled
-    bind:formUseProviderInterval
-    {availableMihomoGroups}
-    onClose={closeModal}
-    onSave={saveSubscription}
-  />
-{/if}
+<SubscriptionFormModal
+  isOpen={showAddModal}
+  {editingSub}
+  bind:formName
+  bind:formEnableXray
+  bind:formEnableMihomo
+  bind:formURL
+  bind:formInterval
+  bind:formRoutingMode
+  bind:formTagPrefix
+  bind:formFilterName
+  bind:formFilterType
+  bind:formFilterTransport
+  bind:formMihomoGroups
+  bind:formEnabled
+  bind:formUseProviderInterval
+  {availableMihomoGroups}
+  onClose={closeModal}
+  onSave={saveSubscription}
+/>
 
-{#if showDiagnosticModal && diagnosticSub}
-  <NodeImporter
-    {diagnosticSub}
-    {diagnosticTab}
-    {diagnosticLoading}
-    {parseReportData}
-    {rawResponseData}
-    onClose={closeDiagnosticModal}
-    onTabChange={(tab) => (diagnosticTab = tab)}
-  />
-{/if}
+<NodeImporter
+  {diagnosticSub}
+  {diagnosticTab}
+  {diagnosticLoading}
+  {parseReportData}
+  {rawResponseData}
+  onClose={closeDiagnosticModal}
+  onTabChange={(tab) => (diagnosticTab = tab)}
+/>
 
 <style>
   /* Tabs styles */
