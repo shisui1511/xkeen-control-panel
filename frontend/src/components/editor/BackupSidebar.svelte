@@ -50,19 +50,18 @@
         <div
           class="backup-item"
           class:active={selectedBackup === backup}
-          role="button"
-          tabindex="0"
-          onclick={() => onSelectBackup(backup)}
-          onkeydown={(e) =>
-            (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onSelectBackup(backup))}
         >
-          <span class="backup-time">{formatBackupDate(backup)}</span>
           <button
+            type="button"
+            class="backup-select-btn"
+            onclick={() => onSelectBackup(backup)}
+          >
+            <span class="backup-time">{formatBackupDate(backup)}</span>
+          </button>
+          <button
+            type="button"
             class="btn btn-sm btn-secondary restore-inline-btn"
-            onclick={(e) => {
-              e.stopPropagation();
-              onRestoreBackup(backup);
-            }}
+            onclick={() => onRestoreBackup(backup)}
           >
             Восстановить
           </button>
@@ -150,18 +149,30 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 10px;
+    padding: 4px 6px;
     background: transparent;
     color: var(--fg-dim);
-    border: 0;
     border-radius: var(--radius);
-    cursor: pointer;
-    font-size: 12px;
-    text-align: left;
     transition: all 0.15s ease;
+    width: 100%;
   }
 
-  .backup-item:focus-visible {
+  .backup-select-btn {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+    padding: 4px 4px;
+    border-radius: var(--radius);
+  }
+
+  .backup-select-btn:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
   }

@@ -937,13 +937,11 @@
     {:else}
       <div style="display:flex; flex-direction:column; gap:8px;">
         {#each historyList as item}
-          <div
-            role="button"
-            tabindex="0"
+          <button
+            type="button"
             class="history-row"
-            style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; cursor:pointer; font-size:13px; transition:all 0.2s ease;"
+            style="display:flex; align-items:center; justify-content:space-between; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; cursor:pointer; font-size:13px; transition:all 0.2s ease; width:100%; font-family:inherit; text-align:left;"
             onclick={() => selectHistoryItem(item)}
-            onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectHistoryItem(item)}
           >
             <div style="display:flex; align-items:center; gap:8px;">
               <span
@@ -964,7 +962,7 @@
             >
               {new Date(item.timestamp).toLocaleTimeString()}
             </span>
-          </div>
+          </button>
         {/each}
       </div>
     {/if}
