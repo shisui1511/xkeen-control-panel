@@ -1066,13 +1066,6 @@
     }
   }
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      closeModal();
-      closeDiagnosticModal();
-    }
-  }
-
   function handleClickOutside(e: MouseEvent) {
     if (activeDropdownId) {
       const target = e.target as HTMLElement;
@@ -1367,7 +1360,6 @@
 
     window.addEventListener('hashchange', handleHashChange);
     window.addEventListener('click', handleClickOutside);
-    window.addEventListener('keydown', handleKeydown);
 
     return () => {
       clearInterval(interval);
@@ -1375,7 +1367,6 @@
       pendingTimeouts.forEach(clearTimeout);
       window.removeEventListener('hashchange', handleHashChange);
       window.removeEventListener('click', handleClickOutside);
-      window.removeEventListener('keydown', handleKeydown);
     };
   });
 </script>
