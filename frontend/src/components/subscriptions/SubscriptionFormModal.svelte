@@ -133,6 +133,7 @@
               type="button"
               class="seg-opt"
               class:seg-active={formRoutingMode === 'manual'}
+              aria-pressed={formRoutingMode === 'manual'}
               onclick={() => (formRoutingMode = 'manual')}
             >
               {$currentLang === 'ru' ? 'Ручной' : 'Manual'}
@@ -141,6 +142,7 @@
               type="button"
               class="seg-opt"
               class:seg-active={formRoutingMode === 'auto'}
+              aria-pressed={formRoutingMode === 'auto'}
               onclick={() => (formRoutingMode = 'auto')}
             >
               {$currentLang === 'ru' ? 'Автоматический (!CN)' : 'Automatic (!CN)'}

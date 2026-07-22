@@ -334,6 +334,7 @@
             class:expanded={expandedSubs[sub.id]}
             onclick={() => onToggleExpand(sub.id)}
             aria-label={$t('subscr.toggle_node_list')}
+            aria-expanded={!!expandedSubs[sub.id]}
           >
             <svg
               width="14"
@@ -423,6 +424,8 @@
               class="action-icon-btn action-btn-dots"
               onclick={() => onToggleDropdown(sub.id)}
               aria-label={$t('subscr.more_actions')}
+              aria-haspopup="menu"
+              aria-expanded={activeDropdownId === sub.id}
             >
               <svg
                 width="14"
@@ -440,15 +443,17 @@
               </svg>
             </button>
             {#if activeDropdownId === sub.id}
-              <div class="dropdown-menu">
+              <div class="dropdown-menu" role="menu">
                 {#if devMode}
                   <button
+                    role="menuitem"
                     onclick={() => {
                       onOpenDiagnostic(sub);
                     }}>🔍 {$t('subscr.diag_btn')}</button
                   >
                 {/if}
                 <button
+                  role="menuitem"
                   onclick={() => {
                     onDeleteSub(sub.id);
                   }}
