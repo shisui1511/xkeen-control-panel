@@ -43,7 +43,6 @@
         <button
           type="button"
           class="tab-close-btn"
-          tabindex="-1"
           onclick={() => onCloseTab(tab.path)}
           title="Закрыть"
           aria-label="Закрыть"
