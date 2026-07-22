@@ -428,6 +428,18 @@ input[type='number'] {
   margin-bottom: 1rem;
 }
 
+.input-error {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent) !important;
+}
+
+.error-text {
+  display: block;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
 .form-label {
   display: block;
   margin-bottom: 0.4rem;
@@ -779,6 +791,11 @@ input[type='number'] {
   color: #fff;
 }
 
+:is(button, a, input, select, textarea, [tabindex]:not([tabindex='-1'])):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .burger-btn {
   background: none;
   border: 0;
@@ -799,7 +816,7 @@ input[type='number'] {
 
 .burger-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .sidebar-overlay {
@@ -813,7 +830,7 @@ input[type='number'] {
 
 .sidebar-overlay:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 /* Scroll-lock contract for the off-canvas drawer (consumed by plan 68-02's JS) */
