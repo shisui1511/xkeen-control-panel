@@ -356,7 +356,7 @@
             title={sub.last_error || (sub.enabled ? $t('app.active') : $t('app.disabled'))}
           ></div>
 
-          <h2 class="sub-name" onclick={() => onToggleExpand(sub.id)}>
+          <h2 class="sub-name">
             {sub.profile_title || sub.name}
           </h2>
           {#if isFormatError(sub.last_error)}
@@ -376,7 +376,6 @@
 
           <span
             class="nodes-count-badge"
-            onclick={() => onToggleExpand(sub.id)}
             title={$t('subscr.nodes_count').replace(
               '{count}',
               String(sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0)
@@ -822,13 +821,7 @@
     border-radius: 12px;
     font-size: 11.5px;
     font-weight: 700;
-    cursor: pointer;
     transition: all var(--transition-fast);
-  }
-  .nodes-count-badge:hover {
-    background: rgba(41, 194, 240, 0.18);
-    border-color: rgba(41, 194, 240, 0.45);
-    box-shadow: 0 0 10px rgba(41, 194, 240, 0.2);
   }
 
   /* action кнопки-иконки */

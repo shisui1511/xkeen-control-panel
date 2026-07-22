@@ -24,29 +24,27 @@
 {#if tabs.length > 0}
   <div class="editor-tab-strip">
     {#each tabs as tab (tab.path)}
-      <button
+      <div
         class="editor-tab"
         class:active={tab.path === activeTabPath}
         class:preview={tab.isPreview}
-        onclick={() => onSwitchTab(tab.path)}
-        ondblclick={() => onPinTab(tab.path)}
       >
-        <span class="tab-name">{tab.name}</span>
-        {#if tab.isDirty}
-          <span class="tab-dirty-dot">●</span>
-        {/if}
-        <span
+        <button
+          type="button"
+          class="tab-main"
+          onclick={() => onSwitchTab(tab.path)}
+          ondblclick={() => onPinTab(tab.path)}
+        >
+          <span class="tab-name">{tab.name}</span>
+          {#if tab.isDirty}
+            <span class="tab-dirty-dot">●</span>
+          {/if}
+        </button>
+        <button
+          type="button"
           class="tab-close-btn"
-          role="button"
           tabindex="-1"
-          onclick={(e) => {
-            e.stopPropagation();
-            onCloseTab(tab.path);
-          }}
-          onkeydown={(e) => {
-            e.stopPropagation();
-            if (e.key === 'Enter' || e.key === ' ') onCloseTab(tab.path);
-          }}
+          onclick={() => onCloseTab(tab.path)}
           title="Закрыть"
           aria-label="Закрыть"
         >
@@ -61,8 +59,8 @@
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
-        </span>
-      </button>
+        </button>
+      </div>
     {/each}
   </div>
 {/if}
@@ -90,17 +88,26 @@
   .editor-tab {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
+    padding: 0 6px 0 0;
     background: rgba(255, 255, 255, 0.01);
     color: var(--fg-dim);
-    border: 0;
     border-right: 1px solid var(--border);
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 500;
     transition: all 0.15s ease;
     position: relative;
+  }
+
+  .tab-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px 8px 16px;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
   }
 
   .editor-tab:hover {
