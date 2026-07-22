@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import Modal from './components/Modal.svelte';
   import { t, currentLang } from './i18n';
   import { showConfirm } from './stores';
 
@@ -442,12 +443,7 @@
 
       <div class="template-cards-grid">
         <!-- Card 1: Night VPN -->
-        <div
-          class="card template-card"
-          onclick={() => createFromTemplate('night')}
-          role="button"
-          tabindex="0"
-        >
+        <div class="card template-card">
           <div class="template-icon text-accent">
             <svg
               width="24"
@@ -462,18 +458,18 @@
           </div>
           <h3>{$t('smartproxy.preset_night_title')}</h3>
           <p>{$t('smartproxy.preset_night_desc')}</p>
-          <button class="btn btn-secondary btn-sm" style="margin-top:auto;">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            style="margin-top:auto;"
+            onclick={() => createFromTemplate('night')}
+          >
             {$t('smartproxy.select')}
           </button>
         </div>
 
         <!-- Card 2: Workdays -->
-        <div
-          class="card template-card"
-          onclick={() => createFromTemplate('workday')}
-          role="button"
-          tabindex="0"
-        >
+        <div class="card template-card">
           <div class="template-icon text-success">
             <svg
               width="24"
@@ -491,18 +487,18 @@
           </div>
           <h3>{$t('smartproxy.preset_workdays')}</h3>
           <p>{$t('smartproxy.preset_workday_desc')}</p>
-          <button class="btn btn-secondary btn-sm" style="margin-top:auto;">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            style="margin-top:auto;"
+            onclick={() => createFromTemplate('workday')}
+          >
             {$t('smartproxy.select')}
           </button>
         </div>
 
         <!-- Card 3: 24/7 -->
-        <div
-          class="card template-card"
-          onclick={() => createFromTemplate('always')}
-          role="button"
-          tabindex="0"
-        >
+        <div class="card template-card">
           <div class="template-icon text-warning">
             <svg
               width="24"
@@ -518,7 +514,12 @@
           </div>
           <h3>{$t('smartproxy.preset_always_title')}</h3>
           <p>{$t('smartproxy.preset_always_desc')}</p>
-          <button class="btn btn-secondary btn-sm" style="margin-top:auto;">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            style="margin-top:auto;"
+            onclick={() => createFromTemplate('always')}
+          >
             {$t('smartproxy.select')}
           </button>
         </div>
@@ -622,19 +623,12 @@
 </div>
 
 <!-- Add/Edit Modal (3-Step Wizard) -->
-{#if showForm}
-  <div
-    class="modal-overlay"
-    role="button"
-    tabindex="0"
-    onclick={cancelEdit}
-    onkeydown={handleKeydown}
-  >
-    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
-      <div class="modal-card-header">
-        <h2>{editingProfile ? $t('smartproxy.edit_profile') : $t('smartproxy.new_profile')}</h2>
-        <button class="modal-close-btn" onclick={cancelEdit}>&times;</button>
-      </div>
+<Modal
+  isOpen={showForm}
+  title={editingProfile ? $t('smartproxy.edit_profile') : $t('smartproxy.new_profile')}
+  onclose={cancelEdit}
+  maxWidth="680px"
+>
 
       <!-- Step Indicators -->
       <div class="wizard-steps-bar">
@@ -810,9 +804,7 @@
           </button>
         {/if}
       </div>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <style>
   .profile-grid {
@@ -908,105 +900,7 @@
     background: rgba(235, 94, 85, 0.1);
   }
 
-  /* Modal Styles */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 20px;
-  }
 
-  .modal-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    width: 100%;
-    max-width: 680px; /* Slightly wider modal for beautiful grid scroll */
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    max-height: 90vh;
-    animation: modal-anim 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes modal-anim {
-    from {
-      transform: scale(0.95) translateY(10px);
-      opacity: 0;
-    }
-    to {
-      transform: scale(1) translateY(0);
-      opacity: 1;
-    }
-  }
-
-  .modal-card-header {
-    padding: 16px 24px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .modal-card-header h2 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--fg-primary);
-  }
-
-  .modal-close-btn {
-    background: none;
-    border: none;
-    color: var(--fg-dim);
-    font-size: 24px;
-    cursor: pointer;
-    line-height: 1;
-    padding: 4px;
-  }
-
-  .modal-close-btn:hover {
-    color: var(--fg-primary);
-  }
-
-  .modal-card-body {
-    padding: 24px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .form-group-checkbox {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 4px;
-  }
-
-  .checkbox-label {
-    font-size: 13px;
-    color: var(--fg-primary);
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .modal-card-footer {
-    padding: 16px 24px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-  }
 
   /* Wizard Step indicators styling */
   .wizard-steps-bar {

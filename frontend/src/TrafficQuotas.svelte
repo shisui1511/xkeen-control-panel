@@ -791,7 +791,6 @@
         <button class="btn btn-secondary" onclick={cancelEdit}>{$t('app.cancel')}</button>
         <button class="btn btn-primary" onclick={saveQuota}>{$t('app.save')}</button>
       </div>
-    </div>
   </Modal>
 
 <style>

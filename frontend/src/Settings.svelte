@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import Modal from './components/Modal.svelte';
   import { t, setLang, currentLang, getAvailableLangs, type Lang } from './i18n';
   import Icon from './lib/components/Icon.svelte';
   import StorageCard from './lib/components/StorageCard.svelte';
@@ -1153,44 +1154,30 @@
     </div>
   {/if}
 
-  {#if showConfirmUpdateModal}
-    <div
-      class="modal-overlay"
-      role="button"
-      tabindex="0"
-      onclick={() => (showConfirmUpdateModal = false)}
-      onkeydown={(e) => e.key === 'Escape' && (showConfirmUpdateModal = false)}
-    >
-      <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
-        <div class="modal-card-header">
-          <h2>{$t('settings.update_confirm_title')}</h2>
-          <button class="modal-close-btn" onclick={() => (showConfirmUpdateModal = false)}
-            >&times;</button
-          >
-        </div>
-        <div class="modal-card-body">
-          <p>{$t('settings.update_confirm_text')}</p>
-          {#if updateInfo?.changelog}
-            <div class="changelog-box" style="max-height: 300px; margin-top: 10px;">
-              <pre>{updateInfo.changelog}</pre>
-            </div>
-          {/if}
-        </div>
-        <div class="modal-card-footer">
-          <button class="btn btn-secondary" onclick={() => (showConfirmUpdateModal = false)}
-            >{$t('app.cancel')}</button
-          >
-          <button
-            class="btn btn-primary"
-            onclick={() => {
-              showConfirmUpdateModal = false;
-              installUpdate();
-            }}>{$t('settings.update_install_btn')}</button
-          >
-        </div>
+  <Modal
+    isOpen={showConfirmUpdateModal}
+    title={$t('settings.update_confirm_title')}
+    onclose={() => (showConfirmUpdateModal = false)}
+  >
+    <p>{$t('settings.update_confirm_text')}</p>
+    {#if updateInfo?.changelog}
+      <div class="changelog-box" style="max-height: 300px; margin-top: 10px;">
+        <pre>{updateInfo.changelog}</pre>
       </div>
+    {/if}
+    <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
+      <button class="btn btn-secondary" onclick={() => (showConfirmUpdateModal = false)}
+        >{$t('app.cancel')}</button
+      >
+      <button
+        class="btn btn-primary"
+        onclick={() => {
+          showConfirmUpdateModal = false;
+          installUpdate();
+        }}>{$t('settings.update_install_btn')}</button
+      >
     </div>
-  {/if}
+  </Modal>
 
   <!-- Backups tab -->
   {#if activeTab === 'backups'}
@@ -1427,26 +1414,20 @@
       </div>
 
       <!-- Drag-and-Drop Dropzone -->
-      <div
-        role="button"
-        tabindex="0"
+      <button
+        type="button"
         class="backup-dropzone {isDragOver ? 'drag-over' : ''} {uploading ? 'uploading' : ''}"
-        style="display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px dashed {isDragOver
+        disabled={uploading}
+        style="width: 100%; border-radius: var(--radius-md); padding: 30px 20px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px dashed {isDragOver
           ? '#29c2f0'
           : 'var(--border)'}; background: {isDragOver
           ? 'rgba(41, 194, 240, 0.08)'
-          : 'rgba(0, 0, 0, 0.2)'}; border-radius: var(--radius-md); padding: 30px 20px; text-align: center; cursor: {uploading
-          ? 'not-allowed'
-          : 'pointer'}; gap: 8px; transition: all 0.3s ease; position: relative;"
+          : 'rgba(0, 0, 0, 0.2)'}; font: inherit; color: inherit; gap: 8px; transition: all 0.3s ease; position: relative;"
         ondragover={handleDragOver}
         ondragleave={handleDragLeave}
         ondrop={handleDrop}
         onclick={() => {
           if (!uploading) document.getElementById('backup-upload-input')?.click();
-        }}
-        onkeydown={(e) => {
-          if (e.key === 'Enter' && !uploading)
-            document.getElementById('backup-upload-input')?.click();
         }}
       >
         <input
@@ -1479,7 +1460,7 @@
             Поддерживаются файлы .tar.gz размером до 15 МБ
           </div>
         {/if}
-      </div>
+      </button>
     </div>
   {/if}
 
@@ -2114,91 +2095,7 @@
     transform: translateX(16px);
   }
 
-  /* Modal Styles */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 20px;
-  }
 
-  .modal-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    width: 100%;
-    max-width: 520px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    max-height: 90vh;
-    animation: modal-anim 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes modal-anim {
-    from {
-      transform: scale(0.95) translateY(10px);
-      opacity: 0;
-    }
-    to {
-      transform: scale(1) translateY(0);
-      opacity: 1;
-    }
-  }
-
-  .modal-card-header {
-    padding: 16px 24px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .modal-card-header h2 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--fg-primary);
-  }
-
-  .modal-close-btn {
-    background: none;
-    border: none;
-    color: var(--fg-dim);
-    font-size: 24px;
-    cursor: pointer;
-    line-height: 1;
-    padding: 4px;
-  }
-
-  .modal-close-btn:hover {
-    color: var(--fg-primary);
-  }
-
-  .modal-card-body {
-    padding: 24px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .modal-card-footer {
-    padding: 16px 24px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 12px;
-  }
 
   .btn-sm {
     padding: 6px 12px;
