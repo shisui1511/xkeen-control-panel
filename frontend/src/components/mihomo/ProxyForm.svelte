@@ -23,7 +23,7 @@
   <div class="form-row">
     <label class="form-label" for="proxy-type">{ru ? 'Тип' : 'Type'}</label>
     <select id="proxy-type" class="form-select" bind:value={np.type}>
-      {#each PROXY_TYPES as t}<option value={t}>{t}</option>{/each}
+      {#each PROXY_TYPES as pt}<option value={pt}>{pt}</option>{/each}
     </select>
   </div>
   <div class="form-row">
