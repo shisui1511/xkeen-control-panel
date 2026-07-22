@@ -50,12 +50,6 @@
   } = $props();
 
   let showAdvanced = $state(false);
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      onClose();
-    }
-  }
 </script>
 
 <Modal
