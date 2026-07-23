@@ -42,7 +42,13 @@
   function getFocusableElements(): HTMLElement[] {
     if (!modalElement) return [];
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-    return Array.from(modalElement.querySelectorAll(selectors)) as HTMLElement[];
+    // offsetParent is null for display:none (on the element or an ancestor) — callers
+    // like the dat-drawer variant hide Modal's own header (and its close button) via
+    // CSS in favor of a custom in-content header. .focus() on such an element is a
+    // silent no-op, so it must be excluded here rather than merely deprioritized.
+    return Array.from(modalElement.querySelectorAll(selectors)).filter(
+      (el) => (el as HTMLElement).offsetParent !== null
+    ) as HTMLElement[];
   }
 
   function handleKeydown(event: KeyboardEvent) {
