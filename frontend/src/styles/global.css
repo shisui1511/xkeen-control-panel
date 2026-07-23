@@ -560,7 +560,7 @@ input[type='number'] {
   position: fixed;
   left: 0;
   top: 0;
-  background: var(--bg-deep);
+  background: var(--bg-card);
   border-right: 1px solid #03101e;
   padding: 0;
   overflow-y: auto;
@@ -668,6 +668,9 @@ input[type='number'] {
   display: flex;
   align-items: center;
   gap: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav-group summary > .group-ttl :global(svg),
@@ -709,6 +712,9 @@ input[type='number'] {
   font-weight: 500;
   text-align: left;
   gap: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav-item:hover {
@@ -716,12 +722,12 @@ input[type='number'] {
   color: var(--fg-primary);
 }
 
-.nav-item.active {
-  color: #fff;
+.nav-item[aria-current="page"] {
+  color: var(--fg-primary);
   background: rgba(255, 255, 255, 0.04);
 }
 
-.nav-item.active::after {
+.nav-item[aria-current="page"]::after {
   content: '';
   position: absolute;
   right: 0;
@@ -745,26 +751,9 @@ input[type='number'] {
   opacity: 0.85;
 }
 
-.nav-item.active :global(svg) {
+.nav-item[aria-current="page"] :global(svg) {
   color: var(--accent);
   opacity: 1;
-}
-
-.nav-item-preview {
-  opacity: 0.6;
-}
-
-.nav-preview-tag {
-  margin-left: auto;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fg-faint);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 1px 4px;
 }
 
 /* Main content */
