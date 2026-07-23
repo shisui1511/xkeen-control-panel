@@ -3,14 +3,71 @@
   import { isSidebarOpen, capabilities, mihomoApiAvailable } from '../stores';
   import Icon from '../lib/components/Icon.svelte';
 
-  export let currentTab: string = 'dashboard';
-  export let onSwitchTab: (tab: string) => void = () => {};
-  export let theme: string = 'light';
-  export let onToggleTheme: () => void = () => {};
-  export let onLogout: () => void = () => {};
-  export let loading: boolean = false;
-  export let pwaInstallPrompt: any = null;
-  export let onInstallPWA: () => void = () => {};
+  let {
+    currentTab = 'dashboard',
+    onSwitchTab = () => {},
+    theme = 'light',
+    onToggleTheme = () => {},
+    onLogout = () => {},
+    loading = false,
+    pwaInstallPrompt = null,
+    onInstallPWA = () => {}
+  }: {
+    currentTab?: string;
+    onSwitchTab?: (tab: string) => void;
+    theme?: string;
+    onToggleTheme?: () => void;
+    onLogout?: () => void;
+    loading?: boolean;
+    pwaInstallPrompt?: unknown;
+    onInstallPWA?: () => void;
+  } = $props();
+
+  type GroupKey = 'overview' | 'proxy_subs' | 'routing' | 'observability' | 'system';
+  const DEFAULT_GROUP_OPEN: Record<GroupKey, boolean> = {
+    overview: true,
+    proxy_subs: true,
+    routing: true,
+    observability: true,
+    system: true
+  };
+
+  function loadGroupOpenState(): Record<GroupKey, boolean> {
+    const state = { ...DEFAULT_GROUP_OPEN };
+    try {
+      const raw = localStorage.getItem('sidebar_group_state');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          for (const key of Object.keys(DEFAULT_GROUP_OPEN) as GroupKey[]) {
+            if (typeof parsed[key] === 'boolean') {
+              state[key] = parsed[key];
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // localStorage unavailable or corrupted state — fail-closed to defaults (all open)
+    }
+    return state;
+  }
+
+  const groupOpen = $state<Record<GroupKey, boolean>>(loadGroupOpenState());
+
+  $effect(() => {
+    const snapshot = {
+      overview: groupOpen.overview,
+      proxy_subs: groupOpen.proxy_subs,
+      routing: groupOpen.routing,
+      observability: groupOpen.observability,
+      system: groupOpen.system
+    };
+    try {
+      localStorage.setItem('sidebar_group_state', JSON.stringify(snapshot));
+    } catch (e) {
+      // localStorage may be unavailable
+    }
+  });
 </script>
 
 <!-- Brand block -->
@@ -46,11 +103,11 @@
 </div>
 
 <nav style="flex: 1; overflow-y: auto; padding: 4px 0 10px; scrollbar-width: none;">
-  <!-- Core group -->
-  <details class="nav-group" open>
+  <!-- Overview group -->
+  <details class="nav-group" bind:open={groupOpen.overview}>
     <summary>
       <span class="group-ttl">
-        <!-- Основное → compass: центр / навигация -->
+        <!-- Обзор → compass: центр / навигация -->
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -66,139 +123,28 @@
             opacity=".85"
           /></svg
         >
-        {$t('nav.group_core')}
+        <span class="lbl">{$t('nav.group_overview')}</span>
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
     <a
       href="#/dashboard"
       class="nav-item"
-      class:active={currentTab === 'dashboard'}
+      aria-current={currentTab === 'dashboard' ? 'page' : undefined}
+      data-label={$t('nav.dashboard')}
       onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.dashboard')}
     >
       <Icon name="dashboard" size={16} />
-      {$t('nav.dashboard')}
-    </a>
-    <a
-      href="#/services"
-      class="nav-item"
-      class:active={currentTab === 'services'}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.services')}
-    >
-      <Icon name="services" size={16} />
-      {$t('nav.services')}
-    </a>
-    <a
-      href="#/editor"
-      class="nav-item"
-      class:active={currentTab === 'editor'}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.editor')}
-    >
-      <Icon name="editor" size={16} />
-      {$t('nav.editor')}
-    </a>
-    <a
-      href="#/settings"
-      class="nav-item"
-      class:active={currentTab === 'settings'}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.settings')}
-    >
-      <Icon name="settings" size={16} />
-      {$t('nav.settings')}
+      <span class="lbl">{$t('nav.dashboard')}</span>
     </a>
   </details>
 
-  <!-- Services group -->
-  <details class="nav-group" open>
+  <!-- Proxies & Subscriptions group -->
+  <details class="nav-group" bind:open={groupOpen.proxy_subs}>
     <summary>
       <span class="group-ttl">
-        <!-- Сервисы → server stack -->
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-          ><rect x="3" y="3.5" width="18" height="6" rx="1.5" /><rect
-            x="3"
-            y="14.5"
-            width="18"
-            height="6"
-            rx="1.5"
-          /><circle cx="7" cy="6.5" r=".9" fill="currentColor" stroke="none" /><circle
-            cx="7"
-            cy="17.5"
-            r=".9"
-            fill="currentColor"
-            stroke="none"
-          /><path d="M11 6.5h7M11 17.5h7" /></svg
-        >
-        {$t('nav.group_services')}
-      </span>
-      <span class="nav-group-arrow">▶</span>
-    </summary>
-    <a
-      href="#/logs"
-      class="nav-item"
-      class:active={currentTab === 'logs'}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.logs')}
-    >
-      <Icon name="logs" size={16} />
-      {$t('nav.logs')}
-    </a>
-    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
-      <a
-        href="#/connections"
-        class="nav-item"
-        class:active={currentTab === 'connections'}
-        onclick={() => isSidebarOpen.set(false)}
-        title={$t('nav.connections')}
-      >
-        <Icon name="connections" size={16} />
-        {$t('nav.connections')}
-        {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
-          <span
-            class="nav-badge-warn"
-            role="img"
-            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
-          >
-        {/if}
-      </a>
-    {/if}
-    <a
-      href="#/dat"
-      class="nav-item"
-      class:active={currentTab === 'dat'}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.dat')}
-    >
-      <Icon name="dat" size={16} />
-      {$t('nav.dat')}
-    </a>
-
-    <a
-      href="#/console"
-      class="nav-item"
-      class:active={currentTab === 'console'}
-      onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.console')}
-    >
-      <Icon name="console" size={16} />
-      {$t('nav.console')}
-    </a>
-  </details>
-
-  <!-- Proxy & Rules group -->
-  <details class="nav-group" open>
-    <summary>
-      <span class="group-ttl">
+        <!-- Прокси и подписки → shield -->
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -210,7 +156,7 @@
         >
           <path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6Z" />
         </svg>
-        {$t('nav.group_proxy')}
+        <span class="lbl">{$t('nav.group_proxy_subs')}</span>
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
@@ -218,29 +164,13 @@
       <a
         href="#/proxies"
         class="nav-item"
-        class:active={currentTab === 'proxies'}
+        aria-current={currentTab === 'proxies' ? 'page' : undefined}
+        data-label={$t('nav.proxies')}
         onclick={() => isSidebarOpen.set(false)}
         title={$t('nav.proxies')}
       >
         <Icon name="proxies" size={16} />
-        {$t('nav.proxies')}
-        {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
-          <span
-            class="nav-badge-warn"
-            role="img"
-            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
-          >
-        {/if}
-      </a>
-      <a
-        href="#/rules"
-        class="nav-item"
-        class:active={currentTab === 'rules'}
-        onclick={() => isSidebarOpen.set(false)}
-        title={$t('nav.rules')}
-      >
-        <Icon name="rules" size={16} />
-        {$t('nav.rules')}
+        <span class="lbl">{$t('nav.proxies')}</span>
         {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
           <span
             class="nav-badge-warn"
@@ -254,21 +184,143 @@
       <a
         href="#/smartproxy"
         class="nav-item"
-        class:active={currentTab === 'smartproxy'}
+        aria-current={currentTab === 'smartproxy' ? 'page' : undefined}
+        data-label={$t('nav.smartproxy')}
         onclick={() => isSidebarOpen.set(false)}
         title={$t('nav.smartproxy')}
       >
         <Icon name="smartproxy" size={16} />
-        {$t('nav.smartproxy')}
+        <span class="lbl">{$t('nav.smartproxy')}</span>
       </a>
     {/if}
   </details>
 
-  <!-- Tools group -->
-  <details class="nav-group" open>
+  <!-- Routing group -->
+  <details class="nav-group" bind:open={groupOpen.routing}>
     <summary>
       <span class="group-ttl">
-        <!-- Инструменты → wrench + screwdriver crossed -->
+        <!-- Маршрутизация → routed path between two points -->
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="6" cy="6" r="2.5" />
+          <circle cx="18" cy="18" r="2.5" />
+          <path d="M8.2 7.5C10 10 14 14 15.8 16.5" />
+        </svg>
+        <span class="lbl">{$t('nav.group_routing')}</span>
+      </span>
+      <span class="nav-group-arrow">▶</span>
+    </summary>
+    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
+      <a
+        href="#/rules"
+        class="nav-item"
+        aria-current={currentTab === 'rules' ? 'page' : undefined}
+        data-label={$t('nav.rules')}
+        onclick={() => isSidebarOpen.set(false)}
+        title={$t('nav.rules')}
+      >
+        <Icon name="rules" size={16} />
+        <span class="lbl">{$t('nav.rules')}</span>
+        {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
+          <span
+            class="nav-badge-warn"
+            role="img"
+            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+          >
+        {/if}
+      </a>
+    {/if}
+  </details>
+
+  <!-- Observability group -->
+  <details class="nav-group" bind:open={groupOpen.observability}>
+    <summary>
+      <span class="group-ttl">
+        <!-- Наблюдение → activity/pulse -->
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M3 12h4l2-7 4 14 2-7h6" />
+        </svg>
+        <span class="lbl">{$t('nav.group_observability')}</span>
+      </span>
+      <span class="nav-group-arrow">▶</span>
+    </summary>
+    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
+      <a
+        href="#/connections"
+        class="nav-item"
+        aria-current={currentTab === 'connections' ? 'page' : undefined}
+        data-label={$t('nav.connections')}
+        onclick={() => isSidebarOpen.set(false)}
+        title={$t('nav.connections')}
+      >
+        <Icon name="connections" size={16} />
+        <span class="lbl">{$t('nav.connections')}</span>
+        {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
+          <span
+            class="nav-badge-warn"
+            role="img"
+            aria-label={$t('dash.quickstart.sidebar_badge_aria')}>!</span
+          >
+        {/if}
+      </a>
+    {/if}
+    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
+      <a
+        href="#/traffic"
+        class="nav-item"
+        aria-current={currentTab === 'traffic' ? 'page' : undefined}
+        data-label={$t('nav.traffic')}
+        onclick={() => isSidebarOpen.set(false)}
+        title={$t('nav.traffic')}
+      >
+        <Icon name="traffic" size={16} />
+        <span class="lbl">{$t('nav.traffic')}</span>
+      </a>
+      <a
+        href="#/trafficquotas"
+        class="nav-item"
+        aria-current={currentTab === 'trafficquotas' ? 'page' : undefined}
+        data-label={$t('nav.trafficquotas')}
+        onclick={() => isSidebarOpen.set(false)}
+        title={$t('nav.trafficquotas')}
+      >
+        <Icon name="trafficquotas" size={16} />
+        <span class="lbl">{$t('nav.trafficquotas')}</span>
+      </a>
+    {/if}
+    <a
+      href="#/logs"
+      class="nav-item"
+      aria-current={currentTab === 'logs' ? 'page' : undefined}
+      data-label={$t('nav.logs')}
+      onclick={() => isSidebarOpen.set(false)}
+      title={$t('nav.logs')}
+    >
+      <Icon name="logs" size={16} />
+      <span class="lbl">{$t('nav.logs')}</span>
+    </a>
+  </details>
+
+  <!-- System group -->
+  <details class="nav-group" bind:open={groupOpen.system}>
+    <summary>
+      <span class="group-ttl">
+        <!-- Система → wrench + screwdriver crossed -->
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -281,84 +333,84 @@
             d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-7 7V21h3.3l7-7a4 4 0 0 0 5.4-5.4l-2.3 2.3-2-2 1-1z"
           /><path d="m17 14 4 4-2 2-4-4" /></svg
         >
-        {$t('nav.group_tools')}
+        <span class="lbl">{$t('nav.group_system')}</span>
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
-    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
-      <a
-        href="#/traffic"
-        class="nav-item"
-        class:active={currentTab === 'traffic'}
-        onclick={() => isSidebarOpen.set(false)}
-        title={$t('nav.traffic')}
-      >
-        <Icon name="traffic" size={16} />
-        {$t('nav.traffic')}
-      </a>
-      <a
-        href="#/trafficquotas"
-        class="nav-item"
-        class:active={currentTab === 'trafficquotas'}
-        onclick={() => isSidebarOpen.set(false)}
-        title={$t('nav.trafficquotas')}
-      >
-        <Icon name="trafficquotas" size={16} />
-        {$t('nav.trafficquotas')}
-      </a>
-    {/if}
+    <a
+      href="#/services"
+      class="nav-item"
+      aria-current={currentTab === 'services' ? 'page' : undefined}
+      data-label={$t('nav.services')}
+      onclick={() => isSidebarOpen.set(false)}
+      title={$t('nav.services')}
+    >
+      <Icon name="services" size={16} />
+      <span class="lbl">{$t('nav.services')}</span>
+    </a>
+    <a
+      href="#/dat"
+      class="nav-item"
+      aria-current={currentTab === 'dat' ? 'page' : undefined}
+      data-label={$t('nav.dat')}
+      onclick={() => isSidebarOpen.set(false)}
+      title={$t('nav.dat')}
+    >
+      <Icon name="dat" size={16} />
+      <span class="lbl">{$t('nav.dat')}</span>
+    </a>
+    <a
+      href="#/console"
+      class="nav-item"
+      aria-current={currentTab === 'console' ? 'page' : undefined}
+      data-label={$t('nav.console')}
+      onclick={() => isSidebarOpen.set(false)}
+      title={$t('nav.console')}
+    >
+      <Icon name="console" size={16} />
+      <span class="lbl">{$t('nav.console')}</span>
+    </a>
     <a
       href="#/network"
       class="nav-item"
-      class:active={currentTab === 'network'}
+      aria-current={currentTab === 'network' ? 'page' : undefined}
+      data-label={$t('nav.network')}
       onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.network')}
     >
       <Icon name="network" size={16} />
-      {$t('nav.network')}
+      <span class="lbl">{$t('nav.network')}</span>
     </a>
-  </details>
-
-  <!-- Access group -->
-  <details class="nav-group" open>
-    <summary>
-      <span class="group-ttl">
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          ><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path
-            d="M7 11V7a5 5 0 0 1 10 0v4"
-          /></svg
-        >
-        {$t('nav.group_access')}
-      </span>
-      <span class="nav-group-arrow">▶</span>
-    </summary>
+    <a
+      href="#/editor"
+      class="nav-item"
+      aria-current={currentTab === 'editor' ? 'page' : undefined}
+      data-label={$t('nav.editor')}
+      onclick={() => isSidebarOpen.set(false)}
+      title={$t('nav.editor')}
+    >
+      <Icon name="editor" size={16} />
+      <span class="lbl">{$t('nav.editor')}</span>
+    </a>
     <a
       href="#/settings"
-      class="nav-item nav-item-preview"
-      class:active={currentTab === 'settings'}
+      class="nav-item"
+      aria-current={currentTab === 'settings' ? 'page' : undefined}
+      data-label={$t('nav.settings')}
       onclick={() => isSidebarOpen.set(false)}
       title={$t('nav.settings')}
     >
       <Icon name="settings" size={16} />
-      {$t('nav.settings')}
-      <span class="nav-preview-tag">превью</span>
+      <span class="lbl">{$t('nav.settings')}</span>
     </a>
   </details>
 </nav>
 
-<div style="border-top: 1px solid #03101e; padding: 0.5rem 0; background: var(--bg-deep);">
+<div style="border-top: 1px solid var(--border); padding: 0.5rem 0; background: var(--bg-card);">
   {#if pwaInstallPrompt}
     <button class="nav-item" onclick={onInstallPWA} title={$t('nav.install_pwa')}>
       <Icon name="pwa" size={16} />
-      {$t('nav.install_pwa')}
+      <span class="lbl">{$t('nav.install_pwa')}</span>
     </button>
   {/if}
   <button
@@ -367,11 +419,11 @@
     title={theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
   >
     <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
-    {theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
+    <span class="lbl">{theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}</span>
   </button>
   <button class="nav-item" onclick={onLogout} disabled={loading} title={$t('auth.logout')}>
     <Icon name="logout" size={16} />
-    {loading ? $t('auth.logging_out') : $t('auth.logout')}
+    <span class="lbl">{loading ? $t('auth.logging_out') : $t('auth.logout')}</span>
   </button>
 </div>
 
