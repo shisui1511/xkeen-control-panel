@@ -830,6 +830,7 @@
   onclose={closeTagBrowser}
 >
   <div
+    role="presentation"
     tabindex="-1"
     style="outline: none; display: flex; flex-direction: column; height: 100%;"
     onkeydown={(e) => {
