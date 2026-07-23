@@ -22,6 +22,52 @@
     pwaInstallPrompt?: unknown;
     onInstallPWA?: () => void;
   } = $props();
+
+  type GroupKey = 'overview' | 'proxy_subs' | 'routing' | 'observability' | 'system';
+  const DEFAULT_GROUP_OPEN: Record<GroupKey, boolean> = {
+    overview: true,
+    proxy_subs: true,
+    routing: true,
+    observability: true,
+    system: true
+  };
+
+  function loadGroupOpenState(): Record<GroupKey, boolean> {
+    const state = { ...DEFAULT_GROUP_OPEN };
+    try {
+      const raw = localStorage.getItem('sidebar_group_state');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          for (const key of Object.keys(DEFAULT_GROUP_OPEN) as GroupKey[]) {
+            if (typeof parsed[key] === 'boolean') {
+              state[key] = parsed[key];
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // localStorage unavailable or corrupted state — fail-closed to defaults (all open)
+    }
+    return state;
+  }
+
+  const groupOpen = $state<Record<GroupKey, boolean>>(loadGroupOpenState());
+
+  $effect(() => {
+    const snapshot = {
+      overview: groupOpen.overview,
+      proxy_subs: groupOpen.proxy_subs,
+      routing: groupOpen.routing,
+      observability: groupOpen.observability,
+      system: groupOpen.system
+    };
+    try {
+      localStorage.setItem('sidebar_group_state', JSON.stringify(snapshot));
+    } catch (e) {
+      // localStorage may be unavailable
+    }
+  });
 </script>
 
 <!-- Brand block -->
@@ -58,7 +104,7 @@
 
 <nav style="flex: 1; overflow-y: auto; padding: 4px 0 10px; scrollbar-width: none;">
   <!-- Overview group -->
-  <details class="nav-group" open>
+  <details class="nav-group" bind:open={groupOpen.overview}>
     <summary>
       <span class="group-ttl">
         <!-- Обзор → compass: центр / навигация -->
@@ -95,7 +141,7 @@
   </details>
 
   <!-- Proxies & Subscriptions group -->
-  <details class="nav-group" open>
+  <details class="nav-group" bind:open={groupOpen.proxy_subs}>
     <summary>
       <span class="group-ttl">
         <!-- Прокси и подписки → shield -->
@@ -150,7 +196,7 @@
   </details>
 
   <!-- Routing group -->
-  <details class="nav-group" open>
+  <details class="nav-group" bind:open={groupOpen.routing}>
     <summary>
       <span class="group-ttl">
         <!-- Маршрутизация → routed path between two points -->
@@ -194,7 +240,7 @@
   </details>
 
   <!-- Observability group -->
-  <details class="nav-group" open>
+  <details class="nav-group" bind:open={groupOpen.observability}>
     <summary>
       <span class="group-ttl">
         <!-- Наблюдение → activity/pulse -->
@@ -271,7 +317,7 @@
   </details>
 
   <!-- System group -->
-  <details class="nav-group" open>
+  <details class="nav-group" bind:open={groupOpen.system}>
     <summary>
       <span class="group-ttl">
         <!-- Система → wrench + screwdriver crossed -->
