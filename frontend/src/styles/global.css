@@ -102,6 +102,7 @@
 
   /* Layout */
   --sidebar-w: 252px;
+  --rail-w: 64px;
   --topbar-h: 64px;
 
   /* CodeMirror tokens */
@@ -754,6 +755,87 @@ input[type='number'] {
 .nav-item[aria-current="page"] :global(svg) {
   color: var(--accent);
   opacity: 1;
+}
+
+/* Icon-rail collapse (desktop-only, D-12) — mobile off-canvas drawer
+   (max-width: 768px) must never be affected, so every rail rule is
+   scoped inside this media query to keep the two collapse mechanisms
+   from colliding (adjacency). */
+@media (min-width: 769px) {
+  .sidebar {
+    transition:
+      width 220ms ease,
+      padding 220ms ease,
+      gap 220ms ease;
+  }
+
+  .sidebar.rail {
+    width: var(--rail-w);
+  }
+
+  .sidebar.rail .sidebar-logo {
+    justify-content: center;
+    padding: 18px 0;
+  }
+
+  .sidebar.rail .sidebar-logo .brand-text {
+    display: none;
+  }
+
+  .sidebar.rail .nav-group summary {
+    justify-content: center;
+    padding: 14px 0 8px;
+  }
+
+  .sidebar.rail .nav-group summary > .group-ttl {
+    gap: 0;
+  }
+
+  .sidebar.rail .nav-group-arrow {
+    display: none;
+  }
+
+  .sidebar.rail .nav-item {
+    justify-content: center;
+    padding: 8px 0;
+    gap: 0;
+  }
+
+  .sidebar.rail .lbl {
+    display: none;
+  }
+
+  /* Floating tooltip for collapsed rail items — content comes from
+     data-label (Plan 02 adds the attribute to every .nav-item); not
+     width-constrained by --rail-w, so the full localized string shows. */
+  .sidebar.rail .nav-item::after {
+    content: attr(data-label);
+    position: absolute;
+    left: 100%;
+    top: 50%;
+    transform: translateY(-50%) translateX(6px);
+    background: var(--bg-deep);
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition:
+      opacity 150ms ease,
+      transform 150ms ease;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+    z-index: 400;
+  }
+
+  .sidebar.rail .nav-item:hover::after,
+  .sidebar.rail .nav-item:focus-visible::after {
+    opacity: 1;
+    transform: translateY(-50%) translateX(10px);
+  }
 }
 
 /* Main content */
