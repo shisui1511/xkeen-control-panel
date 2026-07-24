@@ -570,10 +570,11 @@
     const statsInterval = setInterval(fetchSystemStats, 5000);
     const capInterval = setInterval(fetchCapabilities, 10000);
     const subsInterval = setInterval(fetchSubscriptionSummary, 30000);
-    window.addEventListener('beforeinstallprompt', (e: Event) => {
+    const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       pwaInstallPrompt = e;
-    });
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     return () => {
       clearInterval(statusInterval);
       clearInterval(statsInterval);
@@ -581,6 +582,7 @@
       clearInterval(subsInterval);
       window.removeEventListener('hashchange', handleHashChange);
       mobileMql.removeEventListener('change', handleMobileMqlChange);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
   });
 </script>
