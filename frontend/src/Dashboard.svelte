@@ -1052,9 +1052,11 @@
                       {formatBytes(systemStats.disk.free)}
                     </div>
                     <div class="res-sub">
-                      {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })} из {formatBytes(
-                        systemStats.disk.total
-                      )} · {((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)}%
+                      {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })}
+                      {$t('dash.disk_of_total_pct', {
+                        total: formatBytes(systemStats.disk.total),
+                        pct: ((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)
+                      })}
                     </div>
                     <div class="stat-bar">
                       <div
@@ -1074,14 +1076,14 @@
                   <div class="stat-value">
                     {(systemStats.memory.used / 1024 / 1024).toFixed(2)}<span
                       style="color:var(--fg-secondary);font-size:14px;font-weight:500;margin-left:6px;"
-                      >МБ</span
+                      >{$t('dash.unit_mb')}</span
                     >
                   </div>
                   <div class="res-sub">
-                    из {(systemStats.memory.total / 1024 / 1024).toFixed(2)} МБ · {(
-                      (systemStats.memory.used / systemStats.memory.total) *
-                      100
-                    ).toFixed(1)}%
+                    {$t('dash.ram_of_total_pct', {
+                      total: (systemStats.memory.total / 1024 / 1024).toFixed(2),
+                      pct: ((systemStats.memory.used / systemStats.memory.total) * 100).toFixed(1)
+                    })}
                   </div>
                   <div class="stat-bar">
                     <div
@@ -1097,9 +1099,11 @@
                   <div class="stat-label">{$t('dash.load')}</div>
                   <div class="stat-value">{systemStats.load[0].toFixed(2)}</div>
                   <div class="res-sub">
-                    1м {systemStats.load[0].toFixed(2)} · 5м {systemStats.load[1].toFixed(2)} · 15м {systemStats.load[2].toFixed(
-                      2
-                    )}
+                    {$t('dash.load_avg_line', {
+                      v1: systemStats.load[0].toFixed(2),
+                      v2: systemStats.load[1].toFixed(2),
+                      v3: systemStats.load[2].toFixed(2)
+                    })}
                   </div>
                   {#if sparklineData}
                     <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
@@ -1122,8 +1126,11 @@
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.uptime')}</div>
                   <div class="stat-value">
-                    {systemStats.uptime.days}д {systemStats.uptime.hours}ч {systemStats.uptime
-                      .minutes}м
+                    {$t('dash.uptime_dhm', {
+                      days: systemStats.uptime.days,
+                      hours: systemStats.uptime.hours,
+                      minutes: systemStats.uptime.minutes
+                    })}
                   </div>
                   {#if systemStats.boot_time}
                     <div class="res-sub">
@@ -1139,8 +1146,10 @@
                   <div class="stat-label">{$t('dash.goroutines')}</div>
                   <div class="stat-value">{systemStats.go_runtime.goroutines}</div>
                   <div class="res-sub">
-                    heap {(systemStats.go_runtime.heap_alloc / 1024 / 1024).toFixed(1)} МБ · gc {systemStats
-                      .go_runtime.num_gc} мс
+                    {$t('dash.goroutines_heap_gc', {
+                      heap: (systemStats.go_runtime.heap_alloc / 1024 / 1024).toFixed(1),
+                      gc: systemStats.go_runtime.num_gc
+                    })}
                   </div>
                   {#if systemStats.go_runtime.go_version || systemStats.go_runtime.goarch}
                     <div class="stats" style="margin-top:10px;">
@@ -1230,10 +1239,13 @@
                 <span
                   ><b>{$t('nav.proxies')}</b><span class="s"
                     >{totalProxiesCount > 0
-                      ? `${totalProxiesCount} узлов · ${activeProxiesCount} активных`
+                      ? $t('dash.proxies_summary', {
+                          total: totalProxiesCount,
+                          active: activeProxiesCount
+                        })
                       : subscriptionProxiesCount > 0
-                        ? `${subscriptionProxiesCount} из подписок`
-                        : 'Mihomo узлы и группы'}</span
+                        ? $t('dash.proxies_from_subs', { count: subscriptionProxiesCount })
+                        : $t('dash.proxies_placeholder')}</span
                   ></span
                 >
               </button>
@@ -1249,7 +1261,7 @@
                 <span
                   ><b>{$t('nav.subscriptions')}</b><span class="s"
                     >{totalSubsCount > 0
-                      ? `${totalSubsCount} источника${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
+                      ? `${$t('dash.subs_count', { count: totalSubsCount })}${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
                       : $t('dash.subs_empty')}</span
                   ></span
                 >
@@ -1271,7 +1283,7 @@
                 onclick={() => switchTab('logs')}
               >
                 <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
-                <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 500 строк</span></span>
+                <span><b>{$t('nav.logs')}</b><span class="s">{$t('dash.logs_subtitle')}</span></span>
               </button>
               <button
                 type="button"
@@ -1279,7 +1291,7 @@
                 onclick={() => switchTab('dat')}
               >
                 <span class="qa-mini-ico"><Icon name="dat" size={18} /></span>
-                <span><b>{$t('nav.dat')}</b><span class="s">geoip · geosite · правила</span></span>
+                <span><b>{$t('nav.dat')}</b><span class="s">{$t('dash.dat_subtitle')}</span></span>
               </button>
               <button
                 type="button"
@@ -1287,7 +1299,7 @@
                 onclick={() => switchTab('console')}
               >
                 <span class="qa-mini-ico"><Icon name="console" size={18} /></span>
-                <span><b>{$t('nav.console')}</b><span class="s">shell в окружении XKeen</span></span
+                <span><b>{$t('nav.console')}</b><span class="s">{$t('dash.console_subtitle')}</span></span
                 >
               </button>
             </div>
