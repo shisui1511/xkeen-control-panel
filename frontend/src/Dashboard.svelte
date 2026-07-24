@@ -1210,7 +1210,8 @@
                         systemStats.config_lines,
                         $t('dash.info_lines_one', { count: String(systemStats.config_lines) }),
                         $t('dash.info_lines_few', { count: String(systemStats.config_lines) }),
-                        $t('dash.info_lines_many', { count: String(systemStats.config_lines) })
+                        $t('dash.info_lines_many', { count: String(systemStats.config_lines) }),
+                        $currentLang
                       )}</span
                     >
                   {/if}
