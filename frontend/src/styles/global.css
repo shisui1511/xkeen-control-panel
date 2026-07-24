@@ -564,8 +564,12 @@ input[type='number'] {
   background: var(--bg-card);
   border-right: 1px solid #03101e;
   padding: 0;
+  /* CR-01: `overflow-x: visible` next to `overflow-y: auto` is a no-op —
+     per the CSS Overflow spec, when one axis is `auto`/`scroll` and the
+     other is explicitly `visible`, the `visible` one is recomputed to
+     `auto`. Removed rather than left as a misleading dead declaration;
+     see the rail-tooltip comment below for the real fix. */
   overflow-y: auto;
-  overflow-x: visible;
   overscroll-behavior: contain;
   z-index: 200;
   transition: transform 0.25s ease;
@@ -806,37 +810,15 @@ input[type='number'] {
     display: none;
   }
 
-  /* Floating tooltip for collapsed rail items — content comes from
-     data-label (Plan 02 adds the attribute to every .nav-item); not
-     width-constrained by --rail-w, so the full localized string shows. */
-  .sidebar.rail .nav-item::after {
-    content: attr(data-label);
-    position: absolute;
-    left: 100%;
-    top: 50%;
-    transform: translateY(-50%) translateX(6px);
-    background: var(--bg-deep);
-    color: #fff;
-    padding: 6px 10px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1.2;
-    white-space: nowrap;
-    opacity: 0;
-    pointer-events: none;
-    transition:
-      opacity 150ms ease,
-      transform 150ms ease;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
-    z-index: 400;
-  }
-
-  .sidebar.rail .nav-item:hover::after,
-  .sidebar.rail .nav-item:focus-visible::after {
-    opacity: 1;
-    transform: translateY(-50%) translateX(10px);
-  }
+  /* CR-01: the floating rail-item tooltip used to live here as a CSS-only
+     .nav-item::after with position: absolute. It never actually painted —
+     .sidebar's overflow-y: auto forces overflow-x to compute to auto too
+     (CSS Overflow spec), which clips any overflowing absolutely-positioned
+     descendant regardless of an explicit `overflow-x: visible` override
+     (that combination is the trigger for the quirk, not an escape from it).
+     The tooltip is now a JS-managed element portaled to <body> in
+     Sidebar.svelte (see `.rail-tooltip` in its <style> block), which lives
+     outside .sidebar's clipping box entirely. */
 
   .main-content.rail {
     margin-left: var(--rail-w);

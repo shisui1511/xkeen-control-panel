@@ -99,6 +99,74 @@
   const showMihomoNav = $derived(
     $capabilities === null || $capabilities.active_kernel !== 'xray'
   );
+
+  // CR-01: rail-mode (collapsed) nav-item labels used to rely on a CSS-only
+  // `.nav-item::after` tooltip, which never rendered — `.sidebar` clips any
+  // overflowing absolutely-positioned descendant regardless of an
+  // `overflow-x: visible` override (see global.css comment). Fixed by
+  // portaling a single JS-positioned tooltip element to <body>, entirely
+  // outside `.sidebar`'s clipping box, driven by delegated pointer/focus
+  // listeners so every `.nav-item` (inside <nav> and in the footer actions
+  // below it) gets a working tooltip without per-element handlers.
+  let railTooltip = $state<{ label: string; top: number; left: number } | null>(null);
+
+  function showRailTooltipFor(target: EventTarget | null) {
+    if (!$isSidebarCollapsed) {
+      railTooltip = null;
+      return;
+    }
+    const navItem = (target as HTMLElement | null)?.closest?.(
+      '.nav-item[data-label]'
+    ) as HTMLElement | null;
+    if (!navItem) {
+      railTooltip = null;
+      return;
+    }
+    const rect = navItem.getBoundingClientRect();
+    railTooltip = {
+      label: navItem.getAttribute('data-label') ?? '',
+      top: rect.top + rect.height / 2,
+      left: rect.right + 6
+    };
+  }
+
+  function handleRailPointerOver(e: PointerEvent) {
+    showRailTooltipFor(e.target);
+  }
+  function handleRailPointerOut() {
+    railTooltip = null;
+  }
+  function handleRailFocusIn(e: FocusEvent) {
+    showRailTooltipFor(e.target);
+  }
+  function handleRailFocusOut() {
+    railTooltip = null;
+  }
+
+  $effect(() => {
+    window.addEventListener('pointerover', handleRailPointerOver);
+    window.addEventListener('pointerout', handleRailPointerOut);
+    window.addEventListener('focusin', handleRailFocusIn);
+    window.addEventListener('focusout', handleRailFocusOut);
+    return () => {
+      window.removeEventListener('pointerover', handleRailPointerOver);
+      window.removeEventListener('pointerout', handleRailPointerOut);
+      window.removeEventListener('focusin', handleRailFocusIn);
+      window.removeEventListener('focusout', handleRailFocusOut);
+    };
+  });
+
+  // Minimal portal action — moves the tooltip node to <body> on mount so it
+  // paints outside .sidebar's overflow clipping box, and cleans it up on
+  // destroy (the tooltip is only ever mounted while railTooltip is set).
+  function portalToBody(node: HTMLElement) {
+    document.body.appendChild(node);
+    return {
+      destroy() {
+        node.remove();
+      }
+    };
+  }
 </script>
 
 <!-- Brand block -->
@@ -483,6 +551,17 @@
   </button>
 </div>
 
+{#if railTooltip}
+  <div
+    class="rail-tooltip"
+    use:portalToBody
+    role="tooltip"
+    style="top: {railTooltip.top}px; left: {railTooltip.left}px;"
+  >
+    {railTooltip.label}
+  </div>
+{/if}
+
 <style>
   :global(.collapse-toggle-icon) {
     flex-shrink: 0;
@@ -490,6 +569,26 @@
   }
   :global(.collapse-toggle-icon.is-expanded) {
     transform: rotate(180deg);
+  }
+
+  /* CR-01: portaled to <body> (see portalToBody in <script>) so it paints
+     outside .sidebar's overflow clipping box. Positioned imperatively via
+     getBoundingClientRect(), not CSS-anchored to its former .nav-item
+     ancestor, since it no longer lives inside it in the DOM. */
+  .rail-tooltip {
+    position: fixed;
+    transform: translateY(-50%);
+    background: var(--bg-deep);
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+    z-index: 400;
   }
 
   .nav-badge-warn {
