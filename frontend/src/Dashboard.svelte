@@ -837,10 +837,9 @@
                           >{$t('dash.problems.kernel_crash_title')}</strong
                         >
                         <div class="problem-desc">
-                          {$t('dash.problems.kernel_crash_desc').replace(
-                            '{kernel}',
-                            $capabilities?.active_kernel || ''
-                          )}
+                          {$t('dash.problems.kernel_crash_desc', {
+                            kernel: $capabilities?.active_kernel || ''
+                          })}
                         </div>
                       </div>
                     </div>
@@ -857,10 +856,9 @@
                       <div>
                         <strong class="problem-title">{$t('dash.problems.disk_low_title')}</strong>
                         <div class="problem-desc">
-                          {$t('dash.problems.disk_low_desc').replace(
-                            '{free}',
-                            formatBytes(systemStats.disk.free)
-                          )}
+                          {$t('dash.problems.disk_low_desc', {
+                            free: formatBytes(systemStats.disk.free)
+                          })}
                         </div>
                       </div>
                     </div>
@@ -878,10 +876,9 @@
                         <strong class="problem-title">{$t('dash.problems.ssl_expire_title')}</strong
                         >
                         <div class="problem-desc">
-                          {$t('dash.problems.ssl_expire_desc').replace(
-                            '{days}',
-                            String(systemStats.ssl_cert_days)
-                          )}
+                          {$t('dash.problems.ssl_expire_desc', {
+                            days: systemStats.ssl_cert_days
+                          })}
                         </div>
                       </div>
                     </div>
