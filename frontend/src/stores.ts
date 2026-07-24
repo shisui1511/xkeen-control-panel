@@ -68,9 +68,15 @@ export async function fetchCapabilities(): Promise<void> {
       // Update Mihomo API availability store unconditionally on every successful fetch.
       // Sidebar and Dashboard checklist both subscribe to this store reactively (D-12, D-13).
       mihomoApiAvailable.set(data.mihomo?.api_reachable ?? false);
+    } else {
+      // Non-OK response: capabilities are stale/unknown, do not keep reporting
+      // a possibly-outdated "API reachable" state (WR-03).
+      mihomoApiAvailable.set(false);
     }
   } catch (_) {
-    // Silently ignore — capabilities will remain null
+    // Request failed entirely (network error, etc.) — capabilities will
+    // remain null, and the availability badge must not show stale "OK".
+    mihomoApiAvailable.set(false);
   }
 }
 
