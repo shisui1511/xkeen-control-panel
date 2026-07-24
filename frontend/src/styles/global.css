@@ -1026,10 +1026,6 @@ body.drawer-locked {
   border-right: 0;
 }
 
-.status-badge-item:nth-last-child(-n + 1) {
-  border-bottom: 0;
-}
-
 .status-badge-label {
   font-weight: 700;
   color: var(--fg-primary);
@@ -1830,28 +1826,6 @@ pre.code-output {
   text-align: center;
   color: var(--fg-dim);
   font-style: italic;
-}
-
-/* Status badge value — stacks status text + version number vertically */
-.status-badge-value {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-/* Version chip — mono, dim, subtle border */
-.version-badge {
-  font-family: var(--font-family-mono);
-  font-size: 10px;
-  color: var(--fg-dim);
-  letter-spacing: 0.03em;
-  background: var(--surface-tint);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 1px 6px;
 }
 
 .card.card-tight {
