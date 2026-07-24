@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { t, currentLang, setLang, pluralize } from './i18n';
+  import { t, currentLang, pluralize } from './i18n';
   import {
     isSidebarOpen,
     isSidebarCollapsed,
@@ -112,7 +112,6 @@
 
   let systemStats = $state<SystemStats | null>(null);
   let loadHistory = $state<number[]>([]);
-  let activeSubscriptionsCount = $state(0);
   let totalSubsCount = $state(0);
   let hasSubscription = $state(false);
   let subsLastUpdated = $state('');
@@ -160,7 +159,6 @@
       if (res.ok) {
         const envelope = await res.json();
         const subs = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
-        activeSubscriptionsCount = subs.filter((s: any) => s.enabled).length;
         totalSubsCount = subs.length;
         hasSubscription = subs.length > 0;
         subscriptionProxiesCount = subs.reduce(
