@@ -57,7 +57,6 @@
   "auth.logout": "Logout",
   "auth.logging_out": "Logging out...",
   "nav.dashboard": "Dashboard",
-  "nav.monitoring": "XKeen Monitoring",
   "nav.editor": "Editor",
   "nav.logs": "Logs",
   "nav.proxies": "Proxies",
