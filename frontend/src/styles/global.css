@@ -841,6 +841,18 @@ input[type='number'] {
   .main-content.rail {
     margin-left: var(--rail-w);
   }
+
+  /* .nav-item already sets position: relative (base rule above), so the
+     absolutely-positioned badge below anchors to it. Without this override,
+     .nav-badge-warn's margin-left: auto consumes all free space before
+     justify-content: center can act, pushing the icon to the rail's left
+     edge (WR-05). */
+  .sidebar.rail .nav-badge-warn {
+    margin-left: 0;
+    position: absolute;
+    top: 4px;
+    right: 8px;
+  }
 }
 
 /* Main content */
