@@ -565,6 +565,7 @@ input[type='number'] {
   border-right: 1px solid #03101e;
   padding: 0;
   overflow-y: auto;
+  overflow-x: visible;
   overscroll-behavior: contain;
   z-index: 200;
   transition: transform 0.25s ease;
