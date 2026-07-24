@@ -92,6 +92,13 @@
       window.removeEventListener('keydown', handleGlobalKeydown);
     };
   });
+
+  // Single source of truth for "does this nav item/group belong to the Mihomo
+  // kernel" gating — hoisted so the group-level and item-level checks can
+  // never drift apart (WR-01 / IN-05).
+  const showMihomoNav = $derived(
+    $capabilities === null || $capabilities.active_kernel !== 'xray'
+  );
 </script>
 
 <!-- Brand block -->
@@ -165,26 +172,26 @@
   </details>
 
   <!-- Proxies & Subscriptions group -->
-  <details class="nav-group" bind:open={groupOpen.proxy_subs}>
-    <summary>
-      <span class="group-ttl">
-        <!-- Прокси и подписки → shield -->
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6Z" />
-        </svg>
-        <span class="lbl">{$t('nav.group_proxy_subs')}</span>
-      </span>
-      <span class="nav-group-arrow">▶</span>
-    </summary>
-    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
+  {#if showMihomoNav}
+    <details class="nav-group" bind:open={groupOpen.proxy_subs}>
+      <summary>
+        <span class="group-ttl">
+          <!-- Прокси и подписки → shield -->
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M12 2 4 6v6c0 5 3.5 9 8 10 4.5-1 8-5 8-10V6Z" />
+          </svg>
+          <span class="lbl">{$t('nav.group_proxy_subs')}</span>
+        </span>
+        <span class="nav-group-arrow">▶</span>
+      </summary>
       <a
         href="#/proxies"
         class="nav-item"
@@ -203,8 +210,6 @@
           >
         {/if}
       </a>
-    {/if}
-    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
       <a
         href="#/smartproxy"
         class="nav-item"
@@ -216,32 +221,32 @@
         <Icon name="smartproxy" size={16} />
         <span class="lbl">{$t('nav.smartproxy')}</span>
       </a>
-    {/if}
-  </details>
+    </details>
+  {/if}
 
   <!-- Routing group -->
-  <details class="nav-group" bind:open={groupOpen.routing}>
-    <summary>
-      <span class="group-ttl">
-        <!-- Маршрутизация → routed path between two points -->
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="6" cy="6" r="2.5" />
-          <circle cx="18" cy="18" r="2.5" />
-          <path d="M8.2 7.5C10 10 14 14 15.8 16.5" />
-        </svg>
-        <span class="lbl">{$t('nav.group_routing')}</span>
-      </span>
-      <span class="nav-group-arrow">▶</span>
-    </summary>
-    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
+  {#if showMihomoNav}
+    <details class="nav-group" bind:open={groupOpen.routing}>
+      <summary>
+        <span class="group-ttl">
+          <!-- Маршрутизация → routed path between two points -->
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="6" cy="6" r="2.5" />
+            <circle cx="18" cy="18" r="2.5" />
+            <path d="M8.2 7.5C10 10 14 14 15.8 16.5" />
+          </svg>
+          <span class="lbl">{$t('nav.group_routing')}</span>
+        </span>
+        <span class="nav-group-arrow">▶</span>
+      </summary>
       <a
         href="#/rules"
         class="nav-item"
@@ -260,8 +265,8 @@
           >
         {/if}
       </a>
-    {/if}
-  </details>
+    </details>
+  {/if}
 
   <!-- Observability group -->
   <details class="nav-group" bind:open={groupOpen.observability}>
@@ -283,7 +288,7 @@
       </span>
       <span class="nav-group-arrow">▶</span>
     </summary>
-    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
+    {#if showMihomoNav}
       <a
         href="#/connections"
         class="nav-item"
@@ -303,7 +308,7 @@
         {/if}
       </a>
     {/if}
-    {#if $capabilities === null || $capabilities.active_kernel !== 'xray'}
+    {#if showMihomoNav}
       <a
         href="#/traffic"
         class="nav-item"
