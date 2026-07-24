@@ -733,11 +733,7 @@
                       : $t('dash.quickstart.step2_label')}
                   </span>
                   {#if !hasSubscription}
-                    <a
-                      class="btn btn-secondary qs-cta"
-                      href="#/proxies?tab=providers"
-                      onclick={() => switchTab('proxies')}
-                    >
+                    <a class="btn btn-secondary qs-cta" href="#/proxies?tab=providers">
                       {$t('dash.quickstart.step2_cta')}
                     </a>
                   {/if}
