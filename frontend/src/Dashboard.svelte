@@ -125,8 +125,10 @@
     serviceStatus.xkeen === 'running' &&
       $capabilities?.active_kernel &&
       $capabilities.active_kernel !== 'none' &&
-      (($capabilities.active_kernel === 'mihomo' && serviceStatus.mihomo === 'stopped') ||
-        ($capabilities.active_kernel === 'xray' && serviceStatus.xray === 'stopped'))
+      (($capabilities.active_kernel === 'mihomo' &&
+        (serviceStatus.mihomo === 'stopped' || serviceStatus.mihomo === 'error')) ||
+        ($capabilities.active_kernel === 'xray' &&
+          (serviceStatus.xray === 'stopped' || serviceStatus.xray === 'error')))
   );
 
   const isDiskLow = $derived(
