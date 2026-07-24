@@ -432,7 +432,12 @@
 
 <div style="border-top: 1px solid var(--border); padding: 0.5rem 0; background: var(--bg-card);">
   {#if pwaInstallPrompt}
-    <button class="nav-item" onclick={onInstallPWA} title={$t('nav.install_pwa')}>
+    <button
+      class="nav-item"
+      onclick={onInstallPWA}
+      title={$t('nav.install_pwa')}
+      data-label={$t('nav.install_pwa')}
+    >
       <Icon name="pwa" size={16} />
       <span class="lbl">{$t('nav.install_pwa')}</span>
     </button>
@@ -441,11 +446,18 @@
     class="nav-item"
     onclick={onToggleTheme}
     title={theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
+    data-label={theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
   >
     <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
     <span class="lbl">{theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}</span>
   </button>
-  <button class="nav-item" onclick={onLogout} disabled={loading} title={$t('auth.logout')}>
+  <button
+    class="nav-item"
+    onclick={onLogout}
+    disabled={loading}
+    title={$t('auth.logout')}
+    data-label={$t('auth.logout')}
+  >
     <Icon name="logout" size={16} />
     <span class="lbl">{loading ? $t('auth.logging_out') : $t('auth.logout')}</span>
   </button>
