@@ -641,7 +641,7 @@
   </div>
 
   <!-- Main content area -->
-  <div class="main-content" class:editor-active={currentTab === 'editor'} inert={drawerIsModal}>
+  <div class="main-content" class:editor-active={currentTab === 'editor'} class:rail={$isSidebarCollapsed} inert={drawerIsModal}>
     <!-- Mihomo offline warning banner -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
       <div style="margin: 12px 16px 0;">

@@ -836,6 +836,10 @@ input[type='number'] {
     opacity: 1;
     transform: translateY(-50%) translateX(10px);
   }
+
+  .main-content.rail {
+    margin-left: var(--rail-w);
+  }
 }
 
 /* Main content */
