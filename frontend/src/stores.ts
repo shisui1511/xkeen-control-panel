@@ -77,6 +77,29 @@ export async function fetchCapabilities(): Promise<void> {
 // UI state: controls whether the off-canvas sidebar is visible on mobile
 export const isSidebarOpen = writable(false);
 
+// UI state: desktop icon-rail sidebar collapse (persistent, NOT the mobile
+// off-canvas drawer above — isSidebarOpen and isSidebarCollapsed are separate
+// mechanisms and must not be merged, D-12/D-13/D-14).
+function readInitialCollapsed(): boolean {
+  try {
+    const saved = localStorage.getItem('sidebar_collapsed');
+    return saved === 'true';
+  } catch (e) {
+    // localStorage unavailable or corrupted — fail-closed to expanded (false)
+    return false;
+  }
+}
+
+export const isSidebarCollapsed = writable<boolean>(readInitialCollapsed());
+
+isSidebarCollapsed.subscribe((v) => {
+  try {
+    localStorage.setItem('sidebar_collapsed', String(v));
+  } catch (e) {
+    // localStorage may be unavailable
+  }
+});
+
 // --- Toast store ---
 
 export interface ToastItem {

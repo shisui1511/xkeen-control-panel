@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '../i18n';
-  import { isSidebarOpen, capabilities, mihomoApiAvailable } from '../stores';
+  import { isSidebarOpen, isSidebarCollapsed, capabilities, mihomoApiAvailable } from '../stores';
   import Icon from '../lib/components/Icon.svelte';
 
   let {
@@ -67,6 +67,30 @@
     } catch (e) {
       // localStorage may be unavailable
     }
+  });
+
+  // Page-global Ctrl+B / Cmd+B hotkey toggles icon-rail collapse (D-13),
+  // ignored while a text input/textarea/select/contenteditable has focus.
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    if (!(e.ctrlKey || e.metaKey) || (e.key !== 'b' && e.key !== 'B')) {
+      return;
+    }
+    const target = e.target as HTMLElement | null;
+    const tag = target?.tagName;
+    const isTextInput =
+      tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable;
+    if (isTextInput) {
+      return;
+    }
+    e.preventDefault();
+    isSidebarCollapsed.update((v) => !v);
+  }
+
+  $effect(() => {
+    window.addEventListener('keydown', handleGlobalKeydown);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeydown);
+    };
   });
 </script>
 
@@ -425,9 +449,32 @@
     <Icon name="logout" size={16} />
     <span class="lbl">{loading ? $t('auth.logging_out') : $t('auth.logout')}</span>
   </button>
+  <button
+    class="nav-item"
+    onclick={() => isSidebarCollapsed.update((v) => !v)}
+    title={$t($isSidebarCollapsed ? 'nav.expand_sidebar' : 'nav.collapse_sidebar')}
+    data-label={$t($isSidebarCollapsed ? 'nav.expand_sidebar' : 'nav.collapse_sidebar')}
+  >
+    <Icon
+      name="chevron-right"
+      size={16}
+      class={$isSidebarCollapsed ? 'collapse-toggle-icon' : 'collapse-toggle-icon is-expanded'}
+    />
+    <span class="lbl"
+      >{$t($isSidebarCollapsed ? 'nav.expand_sidebar' : 'nav.collapse_sidebar')}</span
+    >
+  </button>
 </div>
 
 <style>
+  :global(.collapse-toggle-icon) {
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+  }
+  :global(.collapse-toggle-icon.is-expanded) {
+    transform: rotate(180deg);
+  }
+
   .nav-badge-warn {
     display: inline-flex;
     align-items: center;
