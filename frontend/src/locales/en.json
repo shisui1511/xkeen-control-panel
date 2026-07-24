@@ -124,7 +124,6 @@
   "dash.info_lines_many": "{count} lines",
   "dash.uptime_since": "since {time}",
   "dash.uptime_stable": "stable",
-  "dash.uptime_restarts": "0 restarts",
   "dash.router_info": "Router Information",
   "dash.router_model": "Router Model",
   "dash.router_hostname": "Hostname",

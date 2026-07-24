@@ -121,7 +121,6 @@
   "dash.info_lines_many": "{count} строк",
   "dash.uptime_since": "с {time}",
   "dash.uptime_stable": "стабильно",
-  "dash.uptime_restarts": "0 рестартов",
   "dash.router_info": "Информация о роутере",
   "dash.router_model": "Модель роутера",
   "dash.router_hostname": "Имя хоста",

@@ -1130,7 +1130,6 @@
                   {/if}
                   <div class="stats" style="margin-top:10px;">
                     <span class="stat">{$t('dash.uptime_stable')}</span>
-                    <span class="stat">{$t('dash.uptime_restarts')}</span>
                   </div>
                 </div>
                 <div class="stat-box">
