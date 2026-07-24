@@ -191,13 +191,11 @@
         const data = await res.json();
         const proxies = data.proxies || {};
         const keys = Object.keys(proxies);
-        totalProxiesCount = keys.length;
-        activeProxiesCount = keys.filter(
-          (k) =>
-            proxies[k].alive !== false &&
-            proxies[k].type !== 'Selector' &&
-            proxies[k].type !== 'URLTest'
-        ).length;
+        const nodeKeys = keys.filter(
+          (k) => proxies[k].type !== 'Selector' && proxies[k].type !== 'URLTest'
+        );
+        totalProxiesCount = nodeKeys.length;
+        activeProxiesCount = nodeKeys.filter((k) => proxies[k].alive !== false).length;
       }
     } catch (_) {}
   }
