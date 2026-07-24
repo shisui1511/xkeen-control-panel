@@ -4,6 +4,7 @@
   import { t, currentLang, setLang, pluralize } from './i18n';
   import {
     isSidebarOpen,
+    isSidebarCollapsed,
     capabilities,
     fetchCapabilities,
     showToast,
@@ -617,6 +618,7 @@
   <div
     class="sidebar"
     class:sidebar-open={$isSidebarOpen}
+    class:rail={$isSidebarCollapsed}
     style="display: flex; flex-direction: column;"
     bind:this={sidebarEl}
     onkeydown={handleDrawerKeydown}
