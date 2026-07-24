@@ -175,6 +175,8 @@
   "dash.quickstart.step4_done": "Mihomo running",
   "dash.quickstart.step4_cta": "Services →",
   "dash.quickstart.sidebar_badge_aria": "Mihomo API unavailable",
+  "dash.quickstart.step_done": "Done",
+  "dash.quickstart.step_pending": "Not done",
   "dash.updated_today": "updated today",
   "dash.subs_empty": "Proxy subscriptions",
   "dash.editor_subtitle": "edit config.yaml",

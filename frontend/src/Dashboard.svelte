@@ -702,14 +702,19 @@
               <ul class="quickstart-list" role="list">
                 <!-- Step 1: kernel selected (always done when card is visible) -->
                 <li class="qs-step qs-step--done">
-                  <span class="qs-icon" aria-label="Выполнено">
+                  <span class="qs-icon" aria-label={$t('dash.quickstart.step_done')}>
                     <Icon name="check" size={16} color="var(--success)" />
                   </span>
                   <span class="qs-text">{$t('dash.quickstart.step1_label')}</span>
                 </li>
                 <!-- Step 2: subscription added -->
                 <li class="qs-step" class:qs-step--done={hasSubscription}>
-                  <span class="qs-icon" aria-label={hasSubscription ? 'Выполнено' : 'Не выполнено'}>
+                  <span
+                    class="qs-icon"
+                    aria-label={hasSubscription
+                      ? $t('dash.quickstart.step_done')
+                      : $t('dash.quickstart.step_pending')}
+                  >
                     {#if hasSubscription}
                       <Icon name="check" size={16} color="var(--success)" />
                     {:else}
@@ -743,7 +748,9 @@
                 <li class="qs-step" class:qs-step--done={$mihomoApiAvailable}>
                   <span
                     class="qs-icon"
-                    aria-label={$mihomoApiAvailable ? 'Выполнено' : 'Не выполнено'}
+                    aria-label={$mihomoApiAvailable
+                      ? $t('dash.quickstart.step_done')
+                      : $t('dash.quickstart.step_pending')}
                   >
                     {#if $mihomoApiAvailable}
                       <Icon name="check" size={16} color="var(--success)" />
@@ -780,7 +787,9 @@
                 <li class="qs-step" class:qs-step--done={serviceStatus.mihomo === 'running'}>
                   <span
                     class="qs-icon"
-                    aria-label={serviceStatus.mihomo === 'running' ? 'Выполнено' : 'Не выполнено'}
+                    aria-label={serviceStatus.mihomo === 'running'
+                      ? $t('dash.quickstart.step_done')
+                      : $t('dash.quickstart.step_pending')}
                   >
                     {#if serviceStatus.mihomo === 'running'}
                       <Icon name="check" size={16} color="var(--success)" />

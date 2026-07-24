@@ -172,6 +172,8 @@
   "dash.quickstart.step4_done": "Mihomo запущен",
   "dash.quickstart.step4_cta": "Сервисы →",
   "dash.quickstart.sidebar_badge_aria": "Mihomo API недоступен",
+  "dash.quickstart.step_done": "Выполнено",
+  "dash.quickstart.step_pending": "Не выполнено",
   "dash.updated_today": "обновлено сегодня",
   "dash.subs_empty": "Подписки на прокси",
   "dash.editor_subtitle": "правка config.yaml",
