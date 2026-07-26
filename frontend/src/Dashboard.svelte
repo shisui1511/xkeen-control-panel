@@ -207,6 +207,10 @@
         fetch('/api/service/status'),
         fetch('/api/mihomo/status')
       ]);
+      // WR-03: allSettled never rejects, so a total outage must be derived
+      // explicitly here rather than relying on the outer catch below (which
+      // every individually-shielded fetch in this function makes unreachable).
+      statusError = svcRes.status === 'rejected' && mihomoRes.status === 'rejected';
 
       let isXkeenRunning = false;
       let xkeenRaw = '';
