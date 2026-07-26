@@ -45,7 +45,10 @@ proxies:
       });
 
       Element.prototype.requestFullscreen = function () {
-        current = this;
+        // Capturing the fullscreened element is the whole point of this stub.
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        const target: Element = this;
+        current = target;
         document.dispatchEvent(new Event('fullscreenchange'));
         return Promise.resolve();
       } as any;
@@ -213,6 +216,14 @@ proxies:
 
     const dialog = page.locator('[role="dialog"][aria-modal="true"]');
     await expect(dialog).toBeVisible();
+
+    // Modal.svelte moves focus into the dialog via a setTimeout(0) macrotask
+    // (kept unchanged per plan prohibitions). Wait for focus to actually land
+    // inside the dialog before pressing Escape — this mirrors real usage
+    // (a human always takes longer than one JS tick to react to the dialog
+    // appearing) and avoids asserting on the sub-millisecond focus-transfer
+    // window itself, which is not the behavior under test here.
+    await expect(dialog.locator('.modal-close-btn')).toBeFocused();
 
     await page.keyboard.press('Escape');
 
