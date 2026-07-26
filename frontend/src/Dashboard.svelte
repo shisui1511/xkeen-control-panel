@@ -200,6 +200,17 @@
     } catch (_) {}
   }
 
+  // WR-04: a plain "running"/"запущен" substring match also matches its own
+  // negation ("not running" / "не запущен"), misreporting a stopped service
+  // as running. Require the positive word AND the absence of a "not"/"не"
+  // immediately preceding it.
+  function guessXkeenRunning(text: string): boolean {
+    const lower = text.toLowerCase();
+    const hasRunningWord = /\brunning\b/.test(lower) || /запущен/.test(lower);
+    const isNegated = /\bnot\s+running\b/.test(lower) || /не\s*запущен/.test(lower);
+    return hasRunningWord && !isNegated;
+  }
+
   async function fetchLiveStatus() {
     statusError = false;
     try {
@@ -223,13 +234,11 @@
             xkeenRaw = parsed.data.raw || '';
           } else {
             xkeenRaw = text;
-            isXkeenRunning =
-              text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
+            isXkeenRunning = guessXkeenRunning(text);
           }
         } catch (_) {
           xkeenRaw = text;
-          isXkeenRunning =
-            text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
+          isXkeenRunning = guessXkeenRunning(text);
         }
       }
 
