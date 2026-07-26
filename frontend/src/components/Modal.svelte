@@ -25,6 +25,14 @@
 
   $effect(() => {
     if (isOpen) {
+      // Native Fullscreen API paints only the fullscreened element's subtree
+      // (e.g. .editor-cm-wrapper); a <Modal> always renders at its own call
+      // site outside that subtree, so a dialog opened during fullscreen would
+      // hold focus while being invisible on screen (G-71-29). Leave fullscreen
+      // first so the dialog renders in normal document flow.
+      if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+        document.exitFullscreen().catch(() => {});
+      }
       previouslyFocusedElement = document.activeElement as HTMLElement;
       setTimeout(() => {
         if (modalElement) {
