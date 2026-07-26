@@ -257,6 +257,14 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      // Modal.svelte's own exit-fullscreen call is asynchronous, so
+      // `fullscreenchange` may not have reset `isFullscreen` yet when Escape
+      // arrives here. While a dialog is open it owns Escape — yield instead
+      // of double-acting on the same keypress (G-71-29).
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('[role="dialog"][aria-modal="true"]')) return;
+    }
     if (e.key === 'Escape' && isFullscreen) {
       isFullscreen = false;
       if (document.fullscreenElement) {
