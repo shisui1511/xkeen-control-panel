@@ -2160,6 +2160,13 @@ a.chip:hover {
   textarea {
     font-size: 16px;
   }
+
+  /* 72-REVIEW WR-02: icon-rail collapse only exists on desktop (.sidebar.rail
+     is scoped to the desktop breakpoint below); the toggle is a dead control
+     inside the mobile drawer and must not be shown there. */
+  .sidebar-collapse-toggle {
+    display: none;
+  }
 }
 
 /* ------------ Fullscreen Editor Mode Layout (REQ-3) ------------- */

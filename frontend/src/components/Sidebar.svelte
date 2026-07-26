@@ -535,9 +535,9 @@
     <span class="lbl">{loading ? $t('auth.logging_out') : $t('auth.logout')}</span>
   </button>
   <button
-    class="nav-item"
+    class="nav-item sidebar-collapse-toggle"
     onclick={() => isSidebarCollapsed.update((v) => !v)}
-    title={$t($isSidebarCollapsed ? 'nav.expand_sidebar' : 'nav.collapse_sidebar')}
+    title={$isSidebarCollapsed ? undefined : $t('nav.collapse_sidebar')}
     data-label={$t($isSidebarCollapsed ? 'nav.expand_sidebar' : 'nav.collapse_sidebar')}
   >
     <Icon
