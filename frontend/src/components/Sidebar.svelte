@@ -100,6 +100,12 @@
     $capabilities === null || $capabilities.active_kernel !== 'xray'
   );
 
+  // Same hoist for the "Mihomo API unreachable" nav-item badge (72-REVIEW WR-05)
+  // — was copy-pasted verbatim at 3 call sites, risking condition drift.
+  const showMihomoApiBadge = $derived(
+    $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable
+  );
+
   // CR-01: rail-mode (collapsed) nav-item labels used to rely on a CSS-only
   // `.nav-item::after` tooltip, which never rendered — `.sidebar` clips any
   // overflowing absolutely-positioned descendant regardless of an
@@ -270,7 +276,7 @@
       >
         <Icon name="proxies" size={16} />
         <span class="lbl">{$t('nav.proxies')}</span>
-        {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
+        {#if showMihomoApiBadge}
           <span
             class="nav-badge-warn"
             role="img"
@@ -325,7 +331,7 @@
       >
         <Icon name="rules" size={16} />
         <span class="lbl">{$t('nav.rules')}</span>
-        {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
+        {#if showMihomoApiBadge}
           <span
             class="nav-badge-warn"
             role="img"
@@ -367,7 +373,7 @@
       >
         <Icon name="connections" size={16} />
         <span class="lbl">{$t('nav.connections')}</span>
-        {#if $capabilities?.active_kernel === 'mihomo' && !$mihomoApiAvailable}
+        {#if showMihomoApiBadge}
           <span
             class="nav-badge-warn"
             role="img"
