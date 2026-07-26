@@ -232,7 +232,7 @@
       aria-current={currentTab === 'dashboard' ? 'page' : undefined}
       data-label={$t('nav.dashboard')}
       onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.dashboard')}
+      title={$isSidebarCollapsed ? undefined : $t('nav.dashboard')}
     >
       <Icon name="dashboard" size={16} />
       <span class="lbl">{$t('nav.dashboard')}</span>
@@ -266,7 +266,7 @@
         aria-current={currentTab === 'proxies' ? 'page' : undefined}
         data-label={$t('nav.proxies')}
         onclick={() => isSidebarOpen.set(false)}
-        title={$t('nav.proxies')}
+        title={$isSidebarCollapsed ? undefined : $t('nav.proxies')}
       >
         <Icon name="proxies" size={16} />
         <span class="lbl">{$t('nav.proxies')}</span>
@@ -284,7 +284,7 @@
         aria-current={currentTab === 'smartproxy' ? 'page' : undefined}
         data-label={$t('nav.smartproxy')}
         onclick={() => isSidebarOpen.set(false)}
-        title={$t('nav.smartproxy')}
+        title={$isSidebarCollapsed ? undefined : $t('nav.smartproxy')}
       >
         <Icon name="smartproxy" size={16} />
         <span class="lbl">{$t('nav.smartproxy')}</span>
@@ -321,7 +321,7 @@
         aria-current={currentTab === 'rules' ? 'page' : undefined}
         data-label={$t('nav.rules')}
         onclick={() => isSidebarOpen.set(false)}
-        title={$t('nav.rules')}
+        title={$isSidebarCollapsed ? undefined : $t('nav.rules')}
       >
         <Icon name="rules" size={16} />
         <span class="lbl">{$t('nav.rules')}</span>
@@ -363,7 +363,7 @@
         aria-current={currentTab === 'connections' ? 'page' : undefined}
         data-label={$t('nav.connections')}
         onclick={() => isSidebarOpen.set(false)}
-        title={$t('nav.connections')}
+        title={$isSidebarCollapsed ? undefined : $t('nav.connections')}
       >
         <Icon name="connections" size={16} />
         <span class="lbl">{$t('nav.connections')}</span>
@@ -383,7 +383,7 @@
         aria-current={currentTab === 'traffic' ? 'page' : undefined}
         data-label={$t('nav.traffic')}
         onclick={() => isSidebarOpen.set(false)}
-        title={$t('nav.traffic')}
+        title={$isSidebarCollapsed ? undefined : $t('nav.traffic')}
       >
         <Icon name="traffic" size={16} />
         <span class="lbl">{$t('nav.traffic')}</span>
@@ -394,7 +394,7 @@
         aria-current={currentTab === 'trafficquotas' ? 'page' : undefined}
         data-label={$t('nav.trafficquotas')}
         onclick={() => isSidebarOpen.set(false)}
-        title={$t('nav.trafficquotas')}
+        title={$isSidebarCollapsed ? undefined : $t('nav.trafficquotas')}
       >
         <Icon name="trafficquotas" size={16} />
         <span class="lbl">{$t('nav.trafficquotas')}</span>
@@ -406,7 +406,7 @@
       aria-current={currentTab === 'logs' ? 'page' : undefined}
       data-label={$t('nav.logs')}
       onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.logs')}
+      title={$isSidebarCollapsed ? undefined : $t('nav.logs')}
     >
       <Icon name="logs" size={16} />
       <span class="lbl">{$t('nav.logs')}</span>
@@ -440,7 +440,7 @@
       aria-current={currentTab === 'services' ? 'page' : undefined}
       data-label={$t('nav.services')}
       onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.services')}
+      title={$isSidebarCollapsed ? undefined : $t('nav.services')}
     >
       <Icon name="services" size={16} />
       <span class="lbl">{$t('nav.services')}</span>
@@ -451,7 +451,7 @@
       aria-current={currentTab === 'dat' ? 'page' : undefined}
       data-label={$t('nav.dat')}
       onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.dat')}
+      title={$isSidebarCollapsed ? undefined : $t('nav.dat')}
     >
       <Icon name="dat" size={16} />
       <span class="lbl">{$t('nav.dat')}</span>
@@ -462,7 +462,7 @@
       aria-current={currentTab === 'console' ? 'page' : undefined}
       data-label={$t('nav.console')}
       onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.console')}
+      title={$isSidebarCollapsed ? undefined : $t('nav.console')}
     >
       <Icon name="console" size={16} />
       <span class="lbl">{$t('nav.console')}</span>
@@ -473,7 +473,7 @@
       aria-current={currentTab === 'network' ? 'page' : undefined}
       data-label={$t('nav.network')}
       onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.network')}
+      title={$isSidebarCollapsed ? undefined : $t('nav.network')}
     >
       <Icon name="network" size={16} />
       <span class="lbl">{$t('nav.network')}</span>
@@ -484,7 +484,7 @@
       aria-current={currentTab === 'editor' ? 'page' : undefined}
       data-label={$t('nav.editor')}
       onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.editor')}
+      title={$isSidebarCollapsed ? undefined : $t('nav.editor')}
     >
       <Icon name="editor" size={16} />
       <span class="lbl">{$t('nav.editor')}</span>
@@ -495,7 +495,7 @@
       aria-current={currentTab === 'settings' ? 'page' : undefined}
       data-label={$t('nav.settings')}
       onclick={() => isSidebarOpen.set(false)}
-      title={$t('nav.settings')}
+      title={$isSidebarCollapsed ? undefined : $t('nav.settings')}
     >
       <Icon name="settings" size={16} />
       <span class="lbl">{$t('nav.settings')}</span>
@@ -508,7 +508,7 @@
     <button
       class="nav-item"
       onclick={onInstallPWA}
-      title={$t('nav.install_pwa')}
+      title={$isSidebarCollapsed ? undefined : $t('nav.install_pwa')}
       data-label={$t('nav.install_pwa')}
     >
       <Icon name="pwa" size={16} />
@@ -518,7 +518,7 @@
   <button
     class="nav-item"
     onclick={onToggleTheme}
-    title={theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
+    title={$isSidebarCollapsed ? undefined : theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
     data-label={theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
   >
     <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
@@ -528,7 +528,7 @@
     class="nav-item"
     onclick={onLogout}
     disabled={loading}
-    title={$t('auth.logout')}
+    title={$isSidebarCollapsed ? undefined : $t('auth.logout')}
     data-label={$t('auth.logout')}
   >
     <Icon name="logout" size={16} />
