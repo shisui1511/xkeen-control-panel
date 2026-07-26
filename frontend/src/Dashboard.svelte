@@ -422,7 +422,8 @@
 
   function getDrawerFocusables(): HTMLElement[] {
     if (!sidebarEl) return [];
-    const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    const selectors =
+      'summary, button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
     return Array.from(sidebarEl.querySelectorAll(selectors)).filter(
       (el) => !(el as HTMLElement).closest('details:not([open])')
     ) as HTMLElement[];
