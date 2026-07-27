@@ -9,6 +9,8 @@
   "app.success": "Success",
   "app.error": "Error",
   "app.unavailable": "Unavailable",
+  "app.chunk_load_failed": "Failed to load section",
+  "app.retry": "Retry",
   "app.save": "Save",
   "app.cancel": "Cancel",
   "app.create": "Create",

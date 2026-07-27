@@ -9,6 +9,8 @@
   "app.success": "Успешно",
   "app.error": "Ошибка",
   "app.unavailable": "Недоступно",
+  "app.chunk_load_failed": "Не удалось загрузить раздел",
+  "app.retry": "Повторить",
   "app.save": "Сохранить",
   "app.cancel": "Отмена",
   "app.create": "Создать",
