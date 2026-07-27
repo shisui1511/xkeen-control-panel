@@ -27,6 +27,17 @@ func (w *maxBytesResponseWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// Write forwards to the underlying ResponseWriter for every handler in the
+// chain, so CodeQL's go/reflected-xss (#126) flags it as a generic sink
+// reachable from the JSON-decode-error paths in internal/handlers/outbound.go
+// (any []byte written here is treated as tainted once it derives from request
+// data). This is a false positive: every handler behind this middleware
+// writes exclusively through JSONSuccess/JSONError (internal/handlers/response.go),
+// which always set Content-Type: application/json and encode via
+// encoding/json (auto-escapes '<', '>', '&'); JSONError additionally runs
+// html.EscapeString on the message. auth.SecurityHeaders further sets
+// X-Content-Type-Options: nosniff and a strict CSP on every response, so a
+// browser will never interpret this body as HTML/JS regardless of content.
 func (w *maxBytesResponseWriter) Write(b []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
