@@ -119,4 +119,22 @@ test.describe('Lazy tab loading (Logs)', () => {
     await expect(page.locator('.skeleton-card')).not.toBeVisible({ timeout: 10000 });
     await expect(page.getByText('Не удалось загрузить раздел')).not.toBeVisible();
   });
+
+  const lazyTabs = ['proxies', 'settings', 'dat', 'console'];
+
+  for (const tab of lazyTabs) {
+    test(`ленивый чанк вкладки «${tab}» грузится по клику и отрисовывается`, async ({ page }) => {
+      await page.goto('/');
+      await expect(page.locator('.dashboard-layout')).toBeVisible();
+
+      const navItem = page.locator(`a[href="#/${tab}"]`);
+      await navItem.click();
+
+      await expect(navItem).toHaveAttribute('aria-current', 'page');
+      // Дожидаемся исчезновения Skeleton (чанк успешно загружен) и появления
+      // реального содержимого вкладки (не пустой контейнер).
+      await expect(page.locator('.skeleton-card')).not.toBeVisible({ timeout: 10000 });
+      await expect(page.locator('.main-content')).not.toBeEmpty();
+    });
+  }
 });
