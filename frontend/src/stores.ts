@@ -108,23 +108,36 @@ isSidebarCollapsed.subscribe((v) => {
 
 // --- Toast store ---
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface ToastItem {
   id: number;
   type: 'success' | 'error' | 'info' | 'warning';
   message: string;
   duration?: number;
+  action?: ToastAction;
 }
 
 export const toastStore = writable<ToastItem[]>([]);
 
 let _toastCounter = 0;
 
-export function showToast(type: ToastItem['type'], message: string, duration = 4000): void {
+export function showToast(
+  type: ToastItem['type'],
+  message: string,
+  duration = 4000,
+  action?: ToastAction
+): void {
   const id = ++_toastCounter;
-  toastStore.update((items) => [...items, { id, type, message, duration }]);
-  setTimeout(() => {
-    toastStore.update((items) => items.filter((t) => t.id !== id));
-  }, duration);
+  toastStore.update((items) => [...items, { id, type, message, duration, action }]);
+  if (duration > 0) {
+    setTimeout(() => {
+      toastStore.update((items) => items.filter((t) => t.id !== id));
+    }, duration);
+  }
 }
 
 // --- ConfirmDialog store ---
