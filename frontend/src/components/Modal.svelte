@@ -6,6 +6,8 @@
     title = '',
     maxWidth = '520px',
     class: className = '',
+    ariaLabel = '',
+    dataTestid = '',
     onclose,
     children
   } = $props<{
@@ -13,6 +15,10 @@
     title: string;
     maxWidth?: string;
     class?: string;
+    /** Overrides the accessible name when the visible `.modal-header` (and its `<h2>`) is hidden by a caller's stylesheet. */
+    ariaLabel?: string;
+    /** Optional `data-testid` on the container, for callers whose E2E specs target a specific dialog instance. */
+    dataTestid?: string;
     onclose: () => void;
     children?: Snippet;
   }>();
@@ -22,6 +28,14 @@
 
   $effect(() => {
     if (isOpen) {
+      // Native Fullscreen API paints only the fullscreened element's subtree
+      // (e.g. .editor-cm-wrapper); a <Modal> always renders at its own call
+      // site outside that subtree, so a dialog opened during fullscreen would
+      // hold focus while being invisible on screen (G-71-29). Leave fullscreen
+      // first so the dialog renders in normal document flow.
+      if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+        document.exitFullscreen().catch(() => {});
+      }
       previouslyFocusedElement = document.activeElement as HTMLElement;
       setTimeout(() => {
         if (modalElement) {
@@ -39,7 +53,13 @@
   function getFocusableElements(): HTMLElement[] {
     if (!modalElement) return [];
     const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
-    return Array.from(modalElement.querySelectorAll(selectors)) as HTMLElement[];
+    // offsetParent is null for display:none (on the element or an ancestor) — callers
+    // like the dat-drawer variant hide Modal's own header (and its close button) via
+    // CSS in favor of a custom in-content header. .focus() on such an element is a
+    // silent no-op, so it must be excluded here rather than merely deprioritized.
+    return Array.from(modalElement.querySelectorAll(selectors)).filter(
+      (el) => (el as HTMLElement).offsetParent !== null
+    ) as HTMLElement[];
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -72,14 +92,16 @@
 </script>
 
 {#if isOpen}
-  <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="modal-backdrop" role="presentation" onclick={onclose}>
     <div
       class="modal-container {className}"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="modal-title"
+      aria-label={ariaLabel || undefined}
+      aria-labelledby={ariaLabel ? undefined : 'modal-title'}
+      data-testid={dataTestid || undefined}
       bind:this={modalElement}
       onkeydown={handleKeydown}
       onclick={(e) => e.stopPropagation()}

@@ -39,16 +39,3 @@
     <span class="error-text" id={`${id}-error`}>{error}</span>
   {/if}
 </div>
-
-<style>
-  .input-error {
-    border-color: var(--danger) !important;
-    box-shadow: 0 0 0 3px rgba(239, 91, 107, 0.18) !important;
-  }
-  .error-text {
-    display: block;
-    margin-top: 6px;
-    font-size: 11.5px;
-    color: var(--danger);
-  }
-</style>

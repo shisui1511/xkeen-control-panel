@@ -1066,13 +1066,6 @@
     }
   }
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      closeModal();
-      closeDiagnosticModal();
-    }
-  }
-
   function handleClickOutside(e: MouseEvent) {
     if (activeDropdownId) {
       const target = e.target as HTMLElement;
@@ -1367,7 +1360,6 @@
 
     window.addEventListener('hashchange', handleHashChange);
     window.addEventListener('click', handleClickOutside);
-    window.addEventListener('keydown', handleKeydown);
 
     return () => {
       clearInterval(interval);
@@ -1375,7 +1367,6 @@
       pendingTimeouts.forEach(clearTimeout);
       window.removeEventListener('hashchange', handleHashChange);
       window.removeEventListener('click', handleClickOutside);
-      window.removeEventListener('keydown', handleKeydown);
     };
   });
 </script>
@@ -1599,15 +1590,13 @@
             {@const nodes = getFilteredNodes(group, searchDebouncedQuery)}
             {@const icon = getGroupIcon(group.name)}
             <div class="group-card">
-              <div
+              <button
+                type="button"
                 class="gc-head"
                 class:collapsible
-                role={collapsible ? 'button' : undefined}
-                tabindex={collapsible ? 0 : undefined}
+                disabled={!collapsible}
                 aria-expanded={collapsible ? !isCollapsed : undefined}
                 onclick={() => collapsible && toggleCollapse(group.name)}
-                onkeydown={(e) =>
-                  (e.key === 'Enter' || e.key === ' ') && collapsible && toggleCollapse(group.name)}
               >
                 <div class="gc-head-row1">
                   {#if icon}
@@ -1674,7 +1663,7 @@
                     <span style="color:var(--fg-dim)">—</span>
                   {/each}
                 </div>
-              </div>
+              </button>
 
               {#if isCollapsed}
                 <div class="dot-container">
@@ -1709,71 +1698,61 @@
                     {@const proxy = proxies[proxyName]}
                     {@const flag = getCountryFlag(proxyName)}
 
-                    <div
-                      class="proxy-card"
-                      class:now={isActive}
-                      role="button"
-                      tabindex={group.type === 'Selector' ? 0 : -1}
-                      title={group.type !== 'Selector'
-                        ? $t('proxies.managed_automatically')
-                        : undefined}
-                      onclick={() =>
-                        group.type === 'Selector' && selectProxy(group.name, proxyName)}
-                      onkeydown={(e) =>
-                        e.key === 'Enter' &&
-                        group.type === 'Selector' &&
-                        selectProxy(group.name, proxyName)}
-                      style={group.type === 'Selector' ? 'cursor: pointer;' : 'cursor: default;'}
-                    >
-                      <div class="p-header">
-                        <span class="p-name">
-                          {#if flag}{flag}
-                          {/if}{proxyName}
-                        </span>
-                        <span class="p-type">{getProxyTypeLabel(proxy)}</span>
-                      </div>
+                    <div class="proxy-card" class:now={isActive}>
+                      <button
+                        type="button"
+                        class="proxy-select-btn"
+                        disabled={group.type !== 'Selector'}
+                        title={group.type !== 'Selector'
+                          ? $t('proxies.managed_automatically')
+                          : undefined}
+                        onclick={() =>
+                          group.type === 'Selector' && selectProxy(group.name, proxyName)}
+                      >
+                        <div class="p-header">
+                          <span class="p-name">
+                            {#if flag}{flag}
+                            {/if}{proxyName}
+                          </span>
+                          <span class="p-type">{getProxyTypeLabel(proxy)}</span>
+                        </div>
 
-                      <div class="p-footer">
-                        <span class={healthClass}>{healthText}</span>
-
-                        <div class="p-actions-wrap">
-                          {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
-                            <button
-                              class="btn-latency-test"
-                              onclick={(e) => {
-                                e.stopPropagation();
-                                testProxyLatency(proxyName);
-                              }}
-                              disabled={testingProxy === proxyName}
-                              title={$t('proxies.test_single')}
-                            >
-                              {#if testingProxy === proxyName}
-                                <span
-                                  class="spinner"
-                                  style="font-size: 10px; font-family: monospace;">...</span
-                                >
-                              {:else}
-                                <svg
-                                  width="12"
-                                  height="12"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  stroke-width="2"
-                                  style="opacity: 0.6;"
-                                  ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
-                                >
-                              {/if}
-                            </button>
-                          {/if}
-
+                        <div class="p-footer">
+                          <span class={healthClass}>{healthText}</span>
                           {#if group.type === 'Selector'}
                             <span class="selector-dot" class:active={isActive}
                               >{isActive ? '●' : '○'}</span
                             >
                           {/if}
                         </div>
-                      </div>
+                      </button>
+
+                      {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
+                        <button
+                          type="button"
+                          class="btn-latency-test"
+                          onclick={() => testProxyLatency(proxyName)}
+                          disabled={testingProxy === proxyName}
+                          title={$t('proxies.test_single')}
+                        >
+                          {#if testingProxy === proxyName}
+                            <span class="spinner" style="font-size: 10px; font-family: monospace;"
+                              >...</span
+                            >
+                          {:else}
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              style="opacity: 0.6;"
+                              ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
+                            >
+                          {/if}
+                        </button>
+                      {/if}
                     </div>
                   {/each}
                 </div>
@@ -1856,39 +1835,36 @@
   {/if}
 </div>
 
-{#if showAddModal}
-  <SubscriptionFormModal
-    {editingSub}
-    bind:formName
-    bind:formEnableXray
-    bind:formEnableMihomo
-    bind:formURL
-    bind:formInterval
-    bind:formRoutingMode
-    bind:formTagPrefix
-    bind:formFilterName
-    bind:formFilterType
-    bind:formFilterTransport
-    bind:formMihomoGroups
-    bind:formEnabled
-    bind:formUseProviderInterval
-    {availableMihomoGroups}
-    onClose={closeModal}
-    onSave={saveSubscription}
-  />
-{/if}
+<SubscriptionFormModal
+  isOpen={showAddModal}
+  {editingSub}
+  bind:formName
+  bind:formEnableXray
+  bind:formEnableMihomo
+  bind:formURL
+  bind:formInterval
+  bind:formRoutingMode
+  bind:formTagPrefix
+  bind:formFilterName
+  bind:formFilterType
+  bind:formFilterTransport
+  bind:formMihomoGroups
+  bind:formEnabled
+  bind:formUseProviderInterval
+  {availableMihomoGroups}
+  onClose={closeModal}
+  onSave={saveSubscription}
+/>
 
-{#if showDiagnosticModal && diagnosticSub}
-  <NodeImporter
-    {diagnosticSub}
-    {diagnosticTab}
-    {diagnosticLoading}
-    {parseReportData}
-    {rawResponseData}
-    onClose={closeDiagnosticModal}
-    onTabChange={(tab) => (diagnosticTab = tab)}
-  />
-{/if}
+<NodeImporter
+  {diagnosticSub}
+  {diagnosticTab}
+  {diagnosticLoading}
+  {parseReportData}
+  {rawResponseData}
+  onClose={closeDiagnosticModal}
+  onTabChange={(tab) => (diagnosticTab = tab)}
+/>
 
 <style>
   /* Tabs styles */
@@ -1973,6 +1949,16 @@
     border-bottom: 1px solid var(--border-strong);
     position: relative;
     overflow: hidden;
+    width: 100%;
+    border-left: 0;
+    border-right: 0;
+    border-top: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+  }
+  .group-card .gc-head:disabled {
+    cursor: default;
   }
   .group-card .gc-head::before {
     content: '';
@@ -2129,13 +2115,30 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 10px 12px;
+    padding: 0;
+    display: flex;
+    position: relative;
+    transition: all var(--transition-fast);
+    min-height: 84px;
+  }
+  .proxy-select-btn {
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    padding: 10px 12px;
+    width: 100%;
+    height: 100%;
     min-height: 84px;
-    position: relative;
-    transition: all var(--transition-fast);
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    border-radius: var(--radius-md);
+  }
+  .proxy-select-btn:disabled {
+    cursor: default;
   }
   .proxy-card::after {
     content: '';

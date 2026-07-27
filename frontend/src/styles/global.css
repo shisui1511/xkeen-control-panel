@@ -102,6 +102,7 @@
 
   /* Layout */
   --sidebar-w: 252px;
+  --rail-w: 64px;
   --topbar-h: 64px;
 
   /* CodeMirror tokens */
@@ -428,6 +429,18 @@ input[type='number'] {
   margin-bottom: 1rem;
 }
 
+.input-error {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent) !important;
+}
+
+.error-text {
+  display: block;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
 .form-label {
   display: block;
   margin-bottom: 0.4rem;
@@ -548,9 +561,14 @@ input[type='number'] {
   position: fixed;
   left: 0;
   top: 0;
-  background: var(--bg-deep);
+  background: var(--bg-card);
   border-right: 1px solid #03101e;
   padding: 0;
+  /* CR-01: `overflow-x: visible` next to `overflow-y: auto` is a no-op —
+     per the CSS Overflow spec, when one axis is `auto`/`scroll` and the
+     other is explicitly `visible`, the `visible` one is recomputed to
+     `auto`. Removed rather than left as a misleading dead declaration;
+     see the rail-tooltip comment below for the real fix. */
   overflow-y: auto;
   overscroll-behavior: contain;
   z-index: 200;
@@ -656,6 +674,9 @@ input[type='number'] {
   display: flex;
   align-items: center;
   gap: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav-group summary > .group-ttl :global(svg),
@@ -697,6 +718,9 @@ input[type='number'] {
   font-weight: 500;
   text-align: left;
   gap: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav-item:hover {
@@ -704,12 +728,12 @@ input[type='number'] {
   color: var(--fg-primary);
 }
 
-.nav-item.active {
-  color: #fff;
+.nav-item[aria-current='page'] {
+  color: var(--fg-primary);
   background: rgba(255, 255, 255, 0.04);
 }
 
-.nav-item.active::after {
+.nav-item[aria-current='page']::after {
   content: '';
   position: absolute;
   right: 0;
@@ -733,26 +757,84 @@ input[type='number'] {
   opacity: 0.85;
 }
 
-.nav-item.active :global(svg) {
+.nav-item[aria-current='page'] :global(svg) {
   color: var(--accent);
   opacity: 1;
 }
 
-.nav-item-preview {
-  opacity: 0.6;
-}
+/* Icon-rail collapse (desktop-only, D-12) — mobile off-canvas drawer
+   (max-width: 768px) must never be affected, so every rail rule is
+   scoped inside this media query to keep the two collapse mechanisms
+   from colliding (adjacency). */
+@media (min-width: 769px) {
+  .sidebar {
+    transition:
+      width 220ms ease,
+      padding 220ms ease,
+      gap 220ms ease;
+  }
 
-.nav-preview-tag {
-  margin-left: auto;
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fg-faint);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 1px 4px;
+  .sidebar.rail {
+    width: var(--rail-w);
+  }
+
+  .sidebar.rail .sidebar-logo {
+    justify-content: center;
+    padding: 18px 0;
+  }
+
+  .sidebar.rail .sidebar-logo .brand-text {
+    display: none;
+  }
+
+  .sidebar.rail .nav-group summary {
+    justify-content: center;
+    padding: 14px 0 8px;
+  }
+
+  .sidebar.rail .nav-group summary > .group-ttl {
+    gap: 0;
+  }
+
+  .sidebar.rail .nav-group-arrow {
+    display: none;
+  }
+
+  .sidebar.rail .nav-item {
+    justify-content: center;
+    padding: 8px 0;
+    gap: 0;
+  }
+
+  .sidebar.rail .lbl {
+    display: none;
+  }
+
+  /* CR-01: the floating rail-item tooltip used to live here as a CSS-only
+     .nav-item::after with position: absolute. It never actually painted —
+     .sidebar's overflow-y: auto forces overflow-x to compute to auto too
+     (CSS Overflow spec), which clips any overflowing absolutely-positioned
+     descendant regardless of an explicit `overflow-x: visible` override
+     (that combination is the trigger for the quirk, not an escape from it).
+     The tooltip is now a JS-managed element portaled to <body> in
+     Sidebar.svelte (see `.rail-tooltip` in its <style> block), which lives
+     outside .sidebar's clipping box entirely. */
+
+  .main-content.rail {
+    margin-left: var(--rail-w);
+  }
+
+  /* .nav-item already sets position: relative (base rule above), so the
+     absolutely-positioned badge below anchors to it. Without this override,
+     .nav-badge-warn's margin-left: auto consumes all free space before
+     justify-content: center can act, pushing the icon to the rail's left
+     edge (WR-05). */
+  .sidebar.rail .nav-badge-warn {
+    margin-left: 0;
+    position: absolute;
+    top: 4px;
+    right: 8px;
+  }
 }
 
 /* Main content */
@@ -779,6 +861,11 @@ input[type='number'] {
   color: #fff;
 }
 
+:is(button, a, input, select, textarea, [tabindex]:not([tabindex='-1'])):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .burger-btn {
   background: none;
   border: 0;
@@ -799,7 +886,7 @@ input[type='number'] {
 
 .burger-btn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 .sidebar-overlay {
@@ -813,7 +900,7 @@ input[type='number'] {
 
 .sidebar-overlay:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 /* Scroll-lock contract for the off-canvas drawer (consumed by plan 68-02's JS) */
@@ -931,10 +1018,6 @@ body.drawer-locked {
 
 .status-badge-item:last-child {
   border-right: 0;
-}
-
-.status-badge-item:nth-last-child(-n + 1) {
-  border-bottom: 0;
 }
 
 .status-badge-label {
@@ -1739,28 +1822,6 @@ pre.code-output {
   font-style: italic;
 }
 
-/* Status badge value — stacks status text + version number vertically */
-.status-badge-value {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-/* Version chip — mono, dim, subtle border */
-.version-badge {
-  font-family: var(--font-family-mono);
-  font-size: 10px;
-  color: var(--fg-dim);
-  letter-spacing: 0.03em;
-  background: var(--surface-tint);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 1px 6px;
-}
-
 .card.card-tight {
   padding: 0;
   overflow: hidden;
@@ -2098,6 +2159,13 @@ a.chip:hover {
   input,
   textarea {
     font-size: 16px;
+  }
+
+  /* 72-REVIEW WR-02: icon-rail collapse only exists on desktop (.sidebar.rail
+     is scoped to the desktop breakpoint below); the toggle is a dead control
+     inside the mobile drawer and must not be shown there. */
+  .sidebar-collapse-toggle {
+    display: none;
   }
 }
 

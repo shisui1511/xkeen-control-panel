@@ -85,7 +85,7 @@ proxy-groups:
     await expect(addBtn).toBeVisible();
     await addBtn.click();
 
-    const modal = page.locator('.modal-card');
+    const modal = page.locator('.modal-container');
     await expect(modal).toBeVisible();
 
     // 2. Verify checkboxes exist
@@ -105,8 +105,12 @@ proxy-groups:
     // Check Mihomo integration
     await mihomoCheckbox.click();
 
-    // Mihomo groups selection panel should be displayed with parsed groups
-    await expect(modal.locator('label:has-text("Интегрировать в группы Mihomo")')).toBeVisible();
+    // Mihomo groups selection panel should be displayed with parsed groups.
+    // This is a <span class="form-label"> (not <label>) since it's an unassociated
+    // section heading, not a control label — a11y fix from Phase 71 (WR-06).
+    await expect(
+      modal.locator('.form-label:has-text("Интегрировать в группы Mihomo")')
+    ).toBeVisible();
     const selectiveCheckbox = modal.locator('input[type="checkbox"] + span:has-text("Selective")');
     const proxyCheckbox = modal.locator('input[type="checkbox"] + span:has-text("Proxy")');
     await expect(selectiveCheckbox).toBeVisible();
@@ -134,7 +138,7 @@ proxy-groups:
     await page.goto('/#/subscriptions');
     await page.locator('button:has-text("Добавить")').first().click();
 
-    const modal = page.locator('.modal-card');
+    const modal = page.locator('.modal-container');
     await modal.locator('input#form-name').fill('My test sub');
     await modal.locator('input#form-url').fill('https://example.com/sub.yaml');
 
@@ -491,9 +495,10 @@ proxy-groups:
     const card = page.locator('#sub-card-sub_fail');
     await expect(card).toBeVisible();
 
-    // Toggle expand to trigger load
-    const countBadge = card.locator('.nodes-count-badge');
-    await countBadge.click();
+    // Toggle expand to trigger load — .collapse-toggle is now the single semantic
+    // toggle (WR-05 a11y fix removed the redundant onclick from .nodes-count-badge)
+    const collapseToggle = card.locator('.collapse-toggle');
+    await collapseToggle.click();
 
     // Verify error and retry button are visible
     const errorDetails = card.locator('.sub-error-details');
@@ -559,8 +564,10 @@ proxy-groups:
     const card = page.locator('#sub-card-sub_untested');
     await expect(card).toBeVisible();
 
-    const countBadge = card.locator('.nodes-count-badge');
-    await countBadge.click();
+    // .collapse-toggle is now the single semantic toggle (WR-05 a11y fix removed
+    // the redundant onclick from .nodes-count-badge)
+    const collapseToggle = card.locator('.collapse-toggle');
+    await collapseToggle.click();
 
     // Verify untested node renders neutral dash instead of green checkmark
     const nodeRow = card.locator('.sub-node-row');

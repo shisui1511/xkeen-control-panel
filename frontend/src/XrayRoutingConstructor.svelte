@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import Modal from './components/Modal.svelte';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities } from './stores';
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
@@ -1915,8 +1916,11 @@
                 </div>
                 <div class="form-row2" style="margin-top:var(--spacing-2, 8px)">
                   <div class="form-col">
-                    <label class="form-label">{ru ? 'Порт входящего' : 'Inbound port'}</label>
+                    <label class="form-label" for="xray-inbound-port-{inbound.tag}"
+                      >{ru ? 'Порт входящего' : 'Inbound port'}</label
+                    >
                     <input
+                      id="xray-inbound-port-{inbound.tag}"
                       class="form-input"
                       type="number"
                       bind:value={inbound.port}
@@ -1926,9 +1930,11 @@
                     />
                   </div>
                   <div class="form-col">
-                    <label class="form-label">{ru ? 'Адрес прослушивания' : 'Listen address'}</label
+                    <label class="form-label" for="xray-inbound-listen-{inbound.tag}"
+                      >{ru ? 'Адрес прослушивания' : 'Listen address'}</label
                     >
                     <input
+                      id="xray-inbound-listen-{inbound.tag}"
                       class="form-input"
                       bind:value={inbound.listen}
                       oninput={() => (isDirty = true)}
@@ -1941,17 +1947,35 @@
             {#if showInboundForm}
               <div class="form-card">
                 <div class="form-row">
-                  <label class="form-label">{ru ? 'Тег' : 'Tag'}</label>
-                  <input class="form-input" bind:value={newInbound.tag} placeholder="socks-in" />
+                  <label class="form-label" for="xray-new-inbound-tag">{ru ? 'Тег' : 'Tag'}</label>
+                  <input
+                    id="xray-new-inbound-tag"
+                    class="form-input"
+                    bind:value={newInbound.tag}
+                    placeholder="socks-in"
+                  />
                 </div>
                 <div class="form-row2">
                   <div class="form-col">
-                    <label class="form-label">{ru ? 'Порт' : 'Port'}</label>
-                    <input class="form-input" type="number" bind:value={newInbound.port} />
+                    <label class="form-label" for="xray-new-inbound-port"
+                      >{ru ? 'Порт' : 'Port'}</label
+                    >
+                    <input
+                      id="xray-new-inbound-port"
+                      class="form-input"
+                      type="number"
+                      bind:value={newInbound.port}
+                    />
                   </div>
                   <div class="form-col">
-                    <label class="form-label">{ru ? 'Протокол' : 'Protocol'}</label>
-                    <select class="form-select" bind:value={newInbound.protocol}>
+                    <label class="form-label" for="xray-new-inbound-protocol"
+                      >{ru ? 'Протокол' : 'Protocol'}</label
+                    >
+                    <select
+                      id="xray-new-inbound-protocol"
+                      class="form-select"
+                      bind:value={newInbound.protocol}
+                    >
                       <option value="socks">socks</option>
                       <option value="http">http</option>
                     </select>
@@ -2078,25 +2102,45 @@
             {#if showDnsForm}
               <div class="form-card">
                 <div class="form-row">
-                  <label class="form-label">{ru ? 'Адрес сервера' : 'Server address'}</label>
-                  <input class="form-input" bind:value={newDns.address} placeholder="8.8.8.8" />
+                  <label class="form-label" for="xray-new-dns-address"
+                    >{ru ? 'Адрес сервера' : 'Server address'}</label
+                  >
+                  <input
+                    id="xray-new-dns-address"
+                    class="form-input"
+                    bind:value={newDns.address}
+                    placeholder="8.8.8.8"
+                  />
                 </div>
                 <div class="form-row2">
                   <div class="form-col">
-                    <label class="form-label">{ru ? 'Порт' : 'Port'}</label>
-                    <input class="form-input" type="number" bind:value={newDns.port} />
+                    <label class="form-label" for="xray-new-dns-port">{ru ? 'Порт' : 'Port'}</label>
+                    <input
+                      id="xray-new-dns-port"
+                      class="form-input"
+                      type="number"
+                      bind:value={newDns.port}
+                    />
                   </div>
                   <div class="form-col">
-                    <label class="form-label">{ru ? 'Тег (опционально)' : 'Tag (optional)'}</label>
-                    <input class="form-input" bind:value={newDns.tag} placeholder="dns-in-ytb" />
+                    <label class="form-label" for="xray-new-dns-tag"
+                      >{ru ? 'Тег (опционально)' : 'Tag (optional)'}</label
+                    >
+                    <input
+                      id="xray-new-dns-tag"
+                      class="form-input"
+                      bind:value={newDns.tag}
+                      placeholder="dns-in-ytb"
+                    />
                   </div>
                 </div>
                 {#if newDns.tag.trim()}
                   <div class="form-row">
-                    <label class="form-label"
+                    <label class="form-label" for="xray-new-dns-domains"
                       >{ru ? 'Домены для перенаправления' : 'Domains for redirect'}</label
                     >
                     <input
+                      id="xray-new-dns-domains"
                       class="form-input"
                       bind:value={newDns.domainsRaw}
                       placeholder="geosite:youtube, google.com"
@@ -2139,16 +2183,24 @@
               <div class="form-card" style="margin-top: 8px;">
                 <div class="form-row2">
                   <div class="form-col">
-                    <label class="form-label">{ru ? 'Домен' : 'Domain'}</label>
+                    <label class="form-label" for="xray-new-host-domain"
+                      >{ru ? 'Домен' : 'Domain'}</label
+                    >
                     <input
+                      id="xray-new-host-domain"
                       class="form-input"
                       bind:value={newHost.domain}
                       placeholder="dns.google"
                     />
                   </div>
                   <div class="form-col">
-                    <label class="form-label">IP</label>
-                    <input class="form-input" bind:value={newHost.ip} placeholder="8.8.8.8" />
+                    <label class="form-label" for="xray-new-host-ip">IP</label>
+                    <input
+                      id="xray-new-host-ip"
+                      class="form-input"
+                      bind:value={newHost.ip}
+                      placeholder="8.8.8.8"
+                    />
                   </div>
                 </div>
                 <div class="form-actions">
@@ -2731,203 +2783,175 @@
   {/if}
 </div>
 
-{#if showApplyConfirm}
-  <div
-    class="modal-overlay"
-    role="button"
-    tabindex="0"
-    data-testid="apply-confirm-dialog"
-    onclick={() => (showApplyConfirm = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}
-  >
-    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
-      <div class="modal-card-header">
-        <h2>{$t('editor.apply_confirm_title')}</h2>
-        <button class="modal-close-btn" onclick={() => (showApplyConfirm = false)}>&times;</button>
+<Modal
+  isOpen={showApplyConfirm}
+  title={$t('editor.apply_confirm_title')}
+  dataTestid="apply-confirm-dialog"
+  onclose={() => (showApplyConfirm = false)}
+>
+  <p>{$t('editor.apply_confirm_body')}</p>
+  <div class="changed-files-list" style="margin-top: 12px;">
+    <strong>{ru ? 'Будут изменены файлы:' : 'Files to be modified:'}</strong>
+    <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+      {#each filesToModify as file}
+        {#if file.changesCount > 0}
+          <li>
+            <code>{file.name}</code>:
+            <span
+              class="badge"
+              style="background-color: var(--color-warning-bg); color: var(--color-warning-fg);"
+            >
+              {ru
+                ? `Изменено ${file.changesCount} секций`
+                : `Modified ${file.changesCount} sections`}
+            </span>
+          </li>
+        {:else}
+          <li><code>{file.name}</code>: {ru ? 'Без изменений' : 'No changes'}</li>
+        {/if}
+      {/each}
+    </ul>
+    <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
+      {ru
+        ? '* Автоматически будет создана резервная копия (хранится до 5 последних бэкапов)'
+        : '* A backup will be created automatically (up to 5 copies stored)'}
+    </p>
+  </div>
+  <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
+    <button class="btn btn-secondary" onclick={() => (showApplyConfirm = false)}>
+      {$t('app.cancel')}
+    </button>
+    <button class="btn btn-primary" onclick={handleApplyChanges} disabled={applyLoading}>
+      {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
+    </button>
+  </div>
+</Modal>
+
+<Modal isOpen={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
+  <div style="display: flex; flex-direction: column; gap: 16px;">
+    {#if importErrorMsg}
+      <div class="error-msg" style="color: var(--danger); margin-bottom: 12px; font-size: 13px;">
+        {importErrorMsg}
       </div>
-      <div class="modal-card-body">
-        <p>{$t('editor.apply_confirm_body')}</p>
-        <div class="changed-files-list" style="margin-top: 12px;">
-          <strong>{ru ? 'Будут изменены файлы:' : 'Files to be modified:'}</strong>
-          <ul style="margin: 8px 0 0 0; padding-left: 20px;">
-            {#each filesToModify as file}
-              {#if file.changesCount > 0}
-                <li>
-                  <code>{file.name}</code>:
+    {/if}
+
+    {#if importStep === 1}
+      <div class="form-group">
+        <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
+        <textarea
+          id="import-link"
+          class="input textarea-link"
+          bind:value={importLink}
+          placeholder={$t('subscr.import_link_placeholder')}
+          rows="4"
+          style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
+        ></textarea>
+      </div>
+    {:else if importStep === 2 && importNodes.length > 0}
+      <div class="preview-section">
+        <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
+          {$t('subscr.import_preview_title')}
+        </h3>
+        <div
+          class="preview-list"
+          style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;"
+        >
+          {#each importNodes as item, idx}
+            {#if item.rowError}
+              <div
+                class="preview-item-card"
+                style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+              >
+                <button
+                  type="button"
+                  onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                  style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
+                  aria-label={$t('app.remove')}>✕</button
+                >
+                <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
+                  <strong>{$t('app.error')}:</strong>
+                  {item.rowError}
+                </div>
+                <div
+                  style="font-size: 11px; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
+                  title={item.link}
+                >
+                  {item.link}
+                </div>
+              </div>
+            {:else}
+              <div
+                class="preview-item-card"
+                style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+              >
+                <button
+                  type="button"
+                  onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                  style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
+                  aria-label={$t('app.remove')}>✕</button
+                >
+                <div
+                  style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
+                >
                   <span
-                    class="badge"
-                    style="background-color: var(--color-warning-bg); color: var(--color-warning-fg);"
+                    ><strong style="color: var(--fg);">{item.outbound?.protocol}</strong> · {getNodeServer(
+                      item.outbound
+                    )}:{getNodePort(item.outbound)}</span
                   >
-                    {ru
-                      ? `Изменено ${file.changesCount} секций`
-                      : `Modified ${file.changesCount} sections`}
-                  </span>
-                </li>
-              {:else}
-                <li><code>{file.name}</code>: {ru ? 'Без изменений' : 'No changes'}</li>
-              {/if}
-            {/each}
-          </ul>
-          <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
-            {ru
-              ? '* Автоматически будет создана резервная копия (хранится до 5 последних бэкапов)'
-              : '* A backup will be created automatically (up to 5 copies stored)'}
-          </p>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label
+                    class="form-label"
+                    style="margin: 0; font-size: 12px; flex-shrink: 0;"
+                    for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label
+                  >
+                  <input
+                    id="import-tag-{idx}"
+                    type="text"
+                    class="input"
+                    bind:value={item.tag}
+                    style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
+                  />
+                </div>
+              </div>
+            {/if}
+          {/each}
         </div>
       </div>
-      <div class="modal-card-footer">
-        <button class="btn btn-secondary" onclick={() => (showApplyConfirm = false)}>
-          {$t('app.cancel')}
+    {/if}
+
+    <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
+      <button class="btn btn-secondary" onclick={closeImportModal} disabled={importLoading}>
+        {$t('app.cancel')}
+      </button>
+      {#if importStep === 1}
+        <button
+          class="btn btn-primary"
+          onclick={parseImportLink}
+          disabled={!importLink.trim() || importLoading}
+        >
+          {#if importLoading}
+            <span class="spinner-xs" style="margin-right: 6px;"></span>
+          {/if}
+          {$t('subscr.import_btn_parse')}
         </button>
-        <button class="btn btn-primary" onclick={handleApplyChanges} disabled={applyLoading}>
-          {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
+      {:else}
+        <button
+          class="btn btn-primary"
+          onclick={confirmImportNode}
+          disabled={importLoading ||
+            importNodes.length === 0 ||
+            importNodes.some((n) => n.rowError)}
+        >
+          {#if importLoading}
+            <span class="spinner-xs" style="margin-right: 6px;"></span>
+          {/if}
+          {ru ? `Импортировать (${importNodes.length})` : `Import (${importNodes.length})`}
         </button>
-      </div>
+      {/if}
     </div>
   </div>
-{/if}
-
-{#if showImportModal}
-  <div
-    class="modal-overlay"
-    role="button"
-    tabindex="0"
-    onclick={closeImportModal}
-    onkeydown={(e) => e.key === 'Escape' && closeImportModal()}
-  >
-    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
-      <div class="modal-card-header">
-        <h2>{$t('subscr.import_modal_title')}</h2>
-        <button class="modal-close-btn" onclick={closeImportModal}>&times;</button>
-      </div>
-      <div class="modal-card-body">
-        {#if importErrorMsg}
-          <div
-            class="error-msg"
-            style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
-          >
-            {importErrorMsg}
-          </div>
-        {/if}
-
-        {#if importStep === 1}
-          <div class="form-group">
-            <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
-            <textarea
-              id="import-link"
-              class="input textarea-link"
-              bind:value={importLink}
-              placeholder={$t('subscr.import_link_placeholder')}
-              rows="4"
-              style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
-            ></textarea>
-          </div>
-        {:else if importStep === 2 && importNodes.length > 0}
-          <div class="preview-section">
-            <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
-              {$t('subscr.import_preview_title')}
-            </h3>
-            <div
-              class="preview-list"
-              style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;"
-            >
-              {#each importNodes as item, idx}
-                {#if item.rowError}
-                  <div
-                    class="preview-item-card"
-                    style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
-                  >
-                    <button
-                      type="button"
-                      onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
-                      style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                      aria-label="Remove">✕</button
-                    >
-                    <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
-                      <strong>{$t('app.error')}:</strong>
-                      {item.rowError}
-                    </div>
-                    <div
-                      style="font-size: 11px; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
-                      title={item.link}
-                    >
-                      {item.link}
-                    </div>
-                  </div>
-                {:else}
-                  <div
-                    class="preview-item-card"
-                    style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
-                  >
-                    <button
-                      type="button"
-                      onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
-                      style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                      aria-label="Remove">✕</button
-                    >
-                    <div
-                      style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
-                    >
-                      <span
-                        ><strong style="color: var(--fg);">{item.outbound?.protocol}</strong> · {getNodeServer(
-                          item.outbound
-                        )}:{getNodePort(item.outbound)}</span
-                      >
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <label
-                        class="form-label"
-                        style="margin: 0; font-size: 12px; flex-shrink: 0;"
-                        for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label
-                      >
-                      <input
-                        id="import-tag-{idx}"
-                        type="text"
-                        class="input"
-                        bind:value={item.tag}
-                        style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
-                      />
-                    </div>
-                  </div>
-                {/if}
-              {/each}
-            </div>
-          </div>
-        {/if}
-      </div>
-      <div class="modal-card-footer">
-        <button class="btn btn-secondary" onclick={closeImportModal} disabled={importLoading}>
-          {$t('app.cancel')}
-        </button>
-        {#if importStep === 1}
-          <button
-            class="btn btn-primary"
-            onclick={parseImportLink}
-            disabled={!importLink.trim() || importLoading}
-          >
-            {#if importLoading}
-              <span class="spinner-xs" style="margin-right: 6px;"></span>
-            {/if}
-            {$t('subscr.import_btn_parse')}
-          </button>
-        {:else}
-          <button
-            class="btn btn-primary"
-            onclick={confirmImportNode}
-            disabled={importLoading ||
-              importNodes.length === 0 ||
-              importNodes.some((n) => n.rowError)}
-          >
-            {#if importLoading}
-              <span class="spinner-xs" style="margin-right: 6px;"></span>
-            {/if}
-            {ru ? `Импортировать (${importNodes.length})` : `Import (${importNodes.length})`}
-          </button>
-        {/if}
-      </div>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <style>
   .container {
@@ -3445,69 +3469,5 @@
     border: solid white;
     border-width: 0 2px 2px 0;
     transform: rotate(45deg);
-  }
-
-  /* Modal styles */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-
-  .modal-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 8px);
-    width: 500px;
-    max-width: 90%;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-  }
-
-  .modal-card-header {
-    padding: 16px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .modal-card-header h2 {
-    margin: 0;
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: var(--fg);
-  }
-
-  .modal-close-btn {
-    background: transparent;
-    border: none;
-    font-size: 1.5rem;
-    color: var(--fg-secondary);
-    cursor: pointer;
-  }
-
-  .modal-card-body {
-    padding: 16px;
-    font-size: var(--font-size-sm, 0.8125rem);
-    color: var(--fg);
-    max-height: 400px;
-    overflow-y: auto;
-  }
-
-  .modal-card-footer {
-    padding: 16px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
   }
 </style>

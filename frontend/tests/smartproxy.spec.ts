@@ -129,7 +129,7 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
     await page.locator('button.btn-primary:has-text("Добавить")').first().click();
 
     // Verify Modal & Step 1 is active
-    await expect(page.locator('.modal-card')).toBeVisible();
+    await expect(page.locator('.modal-container')).toBeVisible();
     await expect(page.locator('.wizard-step-indicator').nth(0)).toHaveClass(/active/);
 
     // Fill profile name
@@ -173,7 +173,7 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
     await page.locator('button.btn-primary:has-text("Сохранить")').click();
 
     // Modal should close and the created profile should appear in the list
-    await expect(page.locator('.modal-card')).not.toBeVisible();
+    await expect(page.locator('.modal-container')).not.toBeVisible();
     await expect(page.locator('.profile-card-name')).toContainText('Manual Profile');
     await expect(page.locator('.profile-card')).toHaveCount(1);
 
@@ -194,7 +194,7 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
     await templateCards.nth(0).locator('button').click();
 
     // Modal is opened directly at Step 2
-    await expect(page.locator('.modal-card')).toBeVisible();
+    await expect(page.locator('.modal-container')).toBeVisible();
     await expect(page.locator('.wizard-step-indicator').nth(1)).toHaveClass(/active/);
     await expect(page.locator('#sp-name')).not.toBeVisible(); // Name is at Step 1
 

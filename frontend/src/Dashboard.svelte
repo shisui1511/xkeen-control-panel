@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
-  import { t, currentLang, setLang, pluralize } from './i18n';
+  import { t, currentLang, pluralize } from './i18n';
   import {
     isSidebarOpen,
+    isSidebarCollapsed,
     capabilities,
     fetchCapabilities,
     showToast,
@@ -111,7 +112,6 @@
 
   let systemStats = $state<SystemStats | null>(null);
   let loadHistory = $state<number[]>([]);
-  let activeSubscriptionsCount = $state(0);
   let totalSubsCount = $state(0);
   let hasSubscription = $state(false);
   let subsLastUpdated = $state('');
@@ -124,8 +124,10 @@
     serviceStatus.xkeen === 'running' &&
       $capabilities?.active_kernel &&
       $capabilities.active_kernel !== 'none' &&
-      (($capabilities.active_kernel === 'mihomo' && serviceStatus.mihomo === 'stopped') ||
-        ($capabilities.active_kernel === 'xray' && serviceStatus.xray === 'stopped'))
+      (($capabilities.active_kernel === 'mihomo' &&
+        (serviceStatus.mihomo === 'stopped' || serviceStatus.mihomo === 'error')) ||
+        ($capabilities.active_kernel === 'xray' &&
+          (serviceStatus.xray === 'stopped' || serviceStatus.xray === 'error')))
   );
 
   const isDiskLow = $derived(
@@ -157,7 +159,6 @@
       if (res.ok) {
         const envelope = await res.json();
         const subs = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
-        activeSubscriptionsCount = subs.filter((s: any) => s.enabled).length;
         totalSubsCount = subs.length;
         hasSubscription = subs.length > 0;
         subscriptionProxiesCount = subs.reduce(
@@ -190,15 +191,24 @@
         const data = await res.json();
         const proxies = data.proxies || {};
         const keys = Object.keys(proxies);
-        totalProxiesCount = keys.length;
-        activeProxiesCount = keys.filter(
-          (k) =>
-            proxies[k].alive !== false &&
-            proxies[k].type !== 'Selector' &&
-            proxies[k].type !== 'URLTest'
-        ).length;
+        const nodeKeys = keys.filter(
+          (k) => proxies[k].type !== 'Selector' && proxies[k].type !== 'URLTest'
+        );
+        totalProxiesCount = nodeKeys.length;
+        activeProxiesCount = nodeKeys.filter((k) => proxies[k].alive !== false).length;
       }
     } catch (_) {}
+  }
+
+  // WR-04: a plain "running"/"запущен" substring match also matches its own
+  // negation ("not running" / "не запущен"), misreporting a stopped service
+  // as running. Require the positive word AND the absence of a "not"/"не"
+  // immediately preceding it.
+  function guessXkeenRunning(text: string): boolean {
+    const lower = text.toLowerCase();
+    const hasRunningWord = /\brunning\b/.test(lower) || /запущен/.test(lower);
+    const isNegated = /\bnot\s+running\b/.test(lower) || /не\s*запущен/.test(lower);
+    return hasRunningWord && !isNegated;
   }
 
   async function fetchLiveStatus() {
@@ -208,6 +218,10 @@
         fetch('/api/service/status'),
         fetch('/api/mihomo/status')
       ]);
+      // WR-03: allSettled never rejects, so a total outage must be derived
+      // explicitly here rather than relying on the outer catch below (which
+      // every individually-shielded fetch in this function makes unreachable).
+      statusError = svcRes.status === 'rejected' && mihomoRes.status === 'rejected';
 
       let isXkeenRunning = false;
       let xkeenRaw = '';
@@ -220,13 +234,11 @@
             xkeenRaw = parsed.data.raw || '';
           } else {
             xkeenRaw = text;
-            isXkeenRunning =
-              text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
+            isXkeenRunning = guessXkeenRunning(text);
           }
         } catch (_) {
           xkeenRaw = text;
-          isXkeenRunning =
-            text.toLowerCase().includes('running') || text.toLowerCase().includes('запущен');
+          isXkeenRunning = guessXkeenRunning(text);
         }
       }
 
@@ -423,7 +435,8 @@
 
   function getDrawerFocusables(): HTMLElement[] {
     if (!sidebarEl) return [];
-    const selectors = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    const selectors =
+      'summary, button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
     return Array.from(sidebarEl.querySelectorAll(selectors)).filter(
       (el) => !(el as HTMLElement).closest('details:not([open])')
     ) as HTMLElement[];
@@ -571,10 +584,11 @@
     const statsInterval = setInterval(fetchSystemStats, 5000);
     const capInterval = setInterval(fetchCapabilities, 10000);
     const subsInterval = setInterval(fetchSubscriptionSummary, 30000);
-    window.addEventListener('beforeinstallprompt', (e: Event) => {
+    const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       pwaInstallPrompt = e;
-    });
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     return () => {
       clearInterval(statusInterval);
       clearInterval(statsInterval);
@@ -582,6 +596,7 @@
       clearInterval(subsInterval);
       window.removeEventListener('hashchange', handleHashChange);
       mobileMql.removeEventListener('change', handleMobileMqlChange);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
   });
 </script>
@@ -610,22 +625,14 @@
     class="sidebar-overlay"
     class:hidden={!$isSidebarOpen}
     onclick={closeSidebar}
-    onkeydown={(e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        closeSidebar();
-      }
-    }}
-    role="button"
-    tabindex="0"
-    aria-label={$t('nav.close_menu')}
-    title={$t('nav.close_menu')}
+    role="presentation"
   ></div>
 
   <!-- Sidebar -->
   <div
     class="sidebar"
     class:sidebar-open={$isSidebarOpen}
+    class:rail={$isSidebarCollapsed}
     style="display: flex; flex-direction: column;"
     bind:this={sidebarEl}
     onkeydown={handleDrawerKeydown}
@@ -648,7 +655,12 @@
   </div>
 
   <!-- Main content area -->
-  <div class="main-content" class:editor-active={currentTab === 'editor'} inert={drawerIsModal}>
+  <div
+    class="main-content"
+    class:editor-active={currentTab === 'editor'}
+    class:rail={$isSidebarCollapsed}
+    inert={drawerIsModal}
+  >
     <!-- Mihomo offline warning banner -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
       <div style="margin: 12px 16px 0;">
@@ -709,14 +721,19 @@
               <ul class="quickstart-list" role="list">
                 <!-- Step 1: kernel selected (always done when card is visible) -->
                 <li class="qs-step qs-step--done">
-                  <span class="qs-icon" aria-label="Выполнено">
+                  <span class="qs-icon" aria-label={$t('dash.quickstart.step_done')}>
                     <Icon name="check" size={16} color="var(--success)" />
                   </span>
                   <span class="qs-text">{$t('dash.quickstart.step1_label')}</span>
                 </li>
                 <!-- Step 2: subscription added -->
                 <li class="qs-step" class:qs-step--done={hasSubscription}>
-                  <span class="qs-icon" aria-label={hasSubscription ? 'Выполнено' : 'Не выполнено'}>
+                  <span
+                    class="qs-icon"
+                    aria-label={hasSubscription
+                      ? $t('dash.quickstart.step_done')
+                      : $t('dash.quickstart.step_pending')}
+                  >
                     {#if hasSubscription}
                       <Icon name="check" size={16} color="var(--success)" />
                     {:else}
@@ -737,11 +754,7 @@
                       : $t('dash.quickstart.step2_label')}
                   </span>
                   {#if !hasSubscription}
-                    <a
-                      class="btn btn-secondary qs-cta"
-                      href="#/proxies?tab=providers"
-                      onclick={() => switchTab('proxies')}
-                    >
+                    <a class="btn btn-secondary qs-cta" href="#/proxies?tab=providers">
                       {$t('dash.quickstart.step2_cta')}
                     </a>
                   {/if}
@@ -750,7 +763,9 @@
                 <li class="qs-step" class:qs-step--done={$mihomoApiAvailable}>
                   <span
                     class="qs-icon"
-                    aria-label={$mihomoApiAvailable ? 'Выполнено' : 'Не выполнено'}
+                    aria-label={$mihomoApiAvailable
+                      ? $t('dash.quickstart.step_done')
+                      : $t('dash.quickstart.step_pending')}
                   >
                     {#if $mihomoApiAvailable}
                       <Icon name="check" size={16} color="var(--success)" />
@@ -787,7 +802,9 @@
                 <li class="qs-step" class:qs-step--done={serviceStatus.mihomo === 'running'}>
                   <span
                     class="qs-icon"
-                    aria-label={serviceStatus.mihomo === 'running' ? 'Выполнено' : 'Не выполнено'}
+                    aria-label={serviceStatus.mihomo === 'running'
+                      ? $t('dash.quickstart.step_done')
+                      : $t('dash.quickstart.step_pending')}
                   >
                     {#if serviceStatus.mihomo === 'running'}
                       <Icon name="check" size={16} color="var(--success)" />
@@ -837,10 +854,9 @@
                           >{$t('dash.problems.kernel_crash_title')}</strong
                         >
                         <div class="problem-desc">
-                          {$t('dash.problems.kernel_crash_desc').replace(
-                            '{kernel}',
-                            $capabilities?.active_kernel || ''
-                          )}
+                          {$t('dash.problems.kernel_crash_desc', {
+                            kernel: $capabilities?.active_kernel || ''
+                          })}
                         </div>
                       </div>
                     </div>
@@ -857,10 +873,9 @@
                       <div>
                         <strong class="problem-title">{$t('dash.problems.disk_low_title')}</strong>
                         <div class="problem-desc">
-                          {$t('dash.problems.disk_low_desc').replace(
-                            '{free}',
-                            formatBytes(systemStats.disk.free)
-                          )}
+                          {$t('dash.problems.disk_low_desc', {
+                            free: formatBytes(systemStats.disk.free)
+                          })}
                         </div>
                       </div>
                     </div>
@@ -878,10 +893,9 @@
                         <strong class="problem-title">{$t('dash.problems.ssl_expire_title')}</strong
                         >
                         <div class="problem-desc">
-                          {$t('dash.problems.ssl_expire_desc').replace(
-                            '{days}',
-                            String(systemStats.ssl_cert_days)
-                          )}
+                          {$t('dash.problems.ssl_expire_desc', {
+                            days: systemStats.ssl_cert_days
+                          })}
                         </div>
                       </div>
                     </div>
@@ -1050,9 +1064,11 @@
                       {formatBytes(systemStats.disk.free)}
                     </div>
                     <div class="res-sub">
-                      {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })} из {formatBytes(
-                        systemStats.disk.total
-                      )} · {((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)}%
+                      {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })}
+                      {$t('dash.disk_of_total_pct', {
+                        total: formatBytes(systemStats.disk.total),
+                        pct: ((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)
+                      })}
                     </div>
                     <div class="stat-bar">
                       <div
@@ -1072,14 +1088,14 @@
                   <div class="stat-value">
                     {(systemStats.memory.used / 1024 / 1024).toFixed(2)}<span
                       style="color:var(--fg-secondary);font-size:14px;font-weight:500;margin-left:6px;"
-                      >МБ</span
+                      >{$t('dash.unit_mb')}</span
                     >
                   </div>
                   <div class="res-sub">
-                    из {(systemStats.memory.total / 1024 / 1024).toFixed(2)} МБ · {(
-                      (systemStats.memory.used / systemStats.memory.total) *
-                      100
-                    ).toFixed(1)}%
+                    {$t('dash.ram_of_total_pct', {
+                      total: (systemStats.memory.total / 1024 / 1024).toFixed(2),
+                      pct: ((systemStats.memory.used / systemStats.memory.total) * 100).toFixed(1)
+                    })}
                   </div>
                   <div class="stat-bar">
                     <div
@@ -1095,9 +1111,11 @@
                   <div class="stat-label">{$t('dash.load')}</div>
                   <div class="stat-value">{systemStats.load[0].toFixed(2)}</div>
                   <div class="res-sub">
-                    1м {systemStats.load[0].toFixed(2)} · 5м {systemStats.load[1].toFixed(2)} · 15м {systemStats.load[2].toFixed(
-                      2
-                    )}
+                    {$t('dash.load_avg_line', {
+                      v1: systemStats.load[0].toFixed(2),
+                      v2: systemStats.load[1].toFixed(2),
+                      v3: systemStats.load[2].toFixed(2)
+                    })}
                   </div>
                   {#if sparklineData}
                     <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
@@ -1120,8 +1138,11 @@
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.uptime')}</div>
                   <div class="stat-value">
-                    {systemStats.uptime.days}д {systemStats.uptime.hours}ч {systemStats.uptime
-                      .minutes}м
+                    {$t('dash.uptime_dhm', {
+                      days: systemStats.uptime.days,
+                      hours: systemStats.uptime.hours,
+                      minutes: systemStats.uptime.minutes
+                    })}
                   </div>
                   {#if systemStats.boot_time}
                     <div class="res-sub">
@@ -1130,15 +1151,16 @@
                   {/if}
                   <div class="stats" style="margin-top:10px;">
                     <span class="stat">{$t('dash.uptime_stable')}</span>
-                    <span class="stat">{$t('dash.uptime_restarts')}</span>
                   </div>
                 </div>
                 <div class="stat-box">
                   <div class="stat-label">{$t('dash.goroutines')}</div>
                   <div class="stat-value">{systemStats.go_runtime.goroutines}</div>
                   <div class="res-sub">
-                    heap {(systemStats.go_runtime.heap_alloc / 1024 / 1024).toFixed(1)} МБ · gc {systemStats
-                      .go_runtime.num_gc} мс
+                    {$t('dash.goroutines_heap_gc', {
+                      heap: (systemStats.go_runtime.heap_alloc / 1024 / 1024).toFixed(1),
+                      gc: systemStats.go_runtime.num_gc
+                    })}
                   </div>
                   {#if systemStats.go_runtime.go_version || systemStats.go_runtime.goarch}
                     <div class="stats" style="margin-top:10px;">
@@ -1201,7 +1223,8 @@
                         systemStats.config_lines,
                         $t('dash.info_lines_one', { count: String(systemStats.config_lines) }),
                         $t('dash.info_lines_few', { count: String(systemStats.config_lines) }),
-                        $t('dash.info_lines_many', { count: String(systemStats.config_lines) })
+                        $t('dash.info_lines_many', { count: String(systemStats.config_lines) }),
+                        $currentLang
                       )}</span
                     >
                   {/if}
@@ -1219,101 +1242,61 @@
         <div style="margin-bottom: 8px;">
           <Card title={$t('dash.quick_actions')}>
             <div class="qa-grid-mini">
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
-                class="qa-mini"
-                onclick={() => switchTab('proxies')}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('proxies')}
-              >
+              <button type="button" class="qa-mini" onclick={() => switchTab('proxies')}>
                 <span class="qa-mini-ico"><Icon name="proxies" size={18} /></span>
                 <span
                   ><b>{$t('nav.proxies')}</b><span class="s"
                     >{totalProxiesCount > 0
-                      ? `${totalProxiesCount} узлов · ${activeProxiesCount} активных`
+                      ? $t('dash.proxies_summary', {
+                          total: totalProxiesCount,
+                          active: activeProxiesCount
+                        })
                       : subscriptionProxiesCount > 0
-                        ? `${subscriptionProxiesCount} из подписок`
-                        : 'Mihomo узлы и группы'}</span
+                        ? $t('dash.proxies_from_subs', { count: subscriptionProxiesCount })
+                        : $t('dash.proxies_placeholder')}</span
                   ></span
                 >
-              </div>
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
+              </button>
+              <button
+                type="button"
                 class="qa-mini"
                 onclick={() => {
                   switchTab('proxies');
                   window.location.hash = '#/proxies?tab=providers';
                 }}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) =>
-                  e.key === 'Enter' &&
-                  (switchTab('proxies'), (window.location.hash = '#/proxies?tab=providers'))}
               >
                 <span class="qa-mini-ico"><Icon name="subscriptions" size={18} /></span>
                 <span
                   ><b>{$t('nav.subscriptions')}</b><span class="s"
                     >{totalSubsCount > 0
-                      ? `${totalSubsCount} источника${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
+                      ? `${$t('dash.subs_count', { count: totalSubsCount })}${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
                       : $t('dash.subs_empty')}</span
                   ></span
                 >
-              </div>
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
-                class="qa-mini"
-                onclick={() => switchTab('editor')}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('editor')}
-              >
+              </button>
+              <button type="button" class="qa-mini" onclick={() => switchTab('editor')}>
                 <span class="qa-mini-ico"><Icon name="editor" size={18} /></span>
                 <span
                   ><b>{$t('nav.editor')}</b><span class="s">{$t('dash.editor_subtitle')}</span
                   ></span
                 >
-              </div>
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
-                class="qa-mini"
-                onclick={() => switchTab('logs')}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('logs')}
-              >
+              </button>
+              <button type="button" class="qa-mini" onclick={() => switchTab('logs')}>
                 <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
-                <span><b>{$t('nav.logs')}</b><span class="s">хвост последних 500 строк</span></span>
-              </div>
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
-                class="qa-mini"
-                onclick={() => switchTab('dat')}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('dat')}
-              >
-                <span class="qa-mini-ico"><Icon name="dat" size={18} /></span>
-                <span><b>{$t('nav.dat')}</b><span class="s">geoip · geosite · правила</span></span>
-              </div>
-              <!-- svelte-ignore a11y-click-events-have-key-events -->
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div
-                class="qa-mini"
-                onclick={() => switchTab('console')}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === 'Enter' && switchTab('console')}
-              >
-                <span class="qa-mini-ico"><Icon name="console" size={18} /></span>
-                <span><b>{$t('nav.console')}</b><span class="s">shell в окружении XKeen</span></span
+                <span><b>{$t('nav.logs')}</b><span class="s">{$t('dash.logs_subtitle')}</span></span
                 >
-              </div>
+              </button>
+              <button type="button" class="qa-mini" onclick={() => switchTab('dat')}>
+                <span class="qa-mini-ico"><Icon name="dat" size={18} /></span>
+                <span><b>{$t('nav.dat')}</b><span class="s">{$t('dash.dat_subtitle')}</span></span>
+              </button>
+              <button type="button" class="qa-mini" onclick={() => switchTab('console')}>
+                <span class="qa-mini-ico"><Icon name="console" size={18} /></span>
+                <span
+                  ><b>{$t('nav.console')}</b><span class="s">{$t('dash.console_subtitle')}</span
+                  ></span
+                >
+              </button>
             </div>
           </Card>
         </div>
@@ -1499,6 +1482,9 @@
     transition: all 0.15s;
     text-decoration: none;
     color: inherit;
+    width: 100%;
+    font: inherit;
+    text-align: left;
   }
 
   .qa-mini:hover {

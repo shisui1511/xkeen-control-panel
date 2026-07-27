@@ -68,14 +68,43 @@ export async function fetchCapabilities(): Promise<void> {
       // Update Mihomo API availability store unconditionally on every successful fetch.
       // Sidebar and Dashboard checklist both subscribe to this store reactively (D-12, D-13).
       mihomoApiAvailable.set(data.mihomo?.api_reachable ?? false);
+    } else {
+      // Non-OK response: capabilities are stale/unknown, do not keep reporting
+      // a possibly-outdated "API reachable" state (WR-03).
+      mihomoApiAvailable.set(false);
     }
   } catch (_) {
-    // Silently ignore — capabilities will remain null
+    // Request failed entirely (network error, etc.) — capabilities will
+    // remain null, and the availability badge must not show stale "OK".
+    mihomoApiAvailable.set(false);
   }
 }
 
 // UI state: controls whether the off-canvas sidebar is visible on mobile
 export const isSidebarOpen = writable(false);
+
+// UI state: desktop icon-rail sidebar collapse (persistent, NOT the mobile
+// off-canvas drawer above — isSidebarOpen and isSidebarCollapsed are separate
+// mechanisms and must not be merged, D-12/D-13/D-14).
+function readInitialCollapsed(): boolean {
+  try {
+    const saved = localStorage.getItem('sidebar_collapsed');
+    return saved === 'true';
+  } catch (e) {
+    // localStorage unavailable or corrupted — fail-closed to expanded (false)
+    return false;
+  }
+}
+
+export const isSidebarCollapsed = writable<boolean>(readInitialCollapsed());
+
+isSidebarCollapsed.subscribe((v) => {
+  try {
+    localStorage.setItem('sidebar_collapsed', String(v));
+  } catch (e) {
+    // localStorage may be unavailable
+  }
+});
 
 // --- Toast store ---
 

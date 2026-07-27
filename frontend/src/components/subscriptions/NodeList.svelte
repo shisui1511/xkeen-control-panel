@@ -112,63 +112,63 @@
       node.use_case || node.speed
         ? `${node.use_case || ''}${node.use_case && node.speed ? ' - ' : ''}${node.speed || ''}`
         : `${node.protocol || ''}${node.protocol && node.transport ? ' · ' + node.transport : ''}${node.security && node.security !== 'none' ? ' · ' + node.security : ''}`}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="sub-node-row"
-      class:active={isNodeActive}
-      onclick={() => {
-        if (enableXray) {
-          onSetActiveNode(subId, node.tag);
-        }
-      }}
-    >
-      {#if isNodeActive}
-        <div class="sub-node-active-bar"></div>
-      {/if}
-
-      <!-- Flag Avatar -->
-      <div
-        class="sub-node-avatar-container"
-        class:active={isNodeActive}
-        style={(!flagsSupported || !node.flag) && node.country
-          ? getCountryColorStyle(node.country)
-          : ''}
+    <div class="sub-node-row" class:active={isNodeActive}>
+      <button
+        type="button"
+        class="sub-node-select-btn"
+        onclick={() => {
+          if (enableXray) {
+            onSetActiveNode(subId, node.tag);
+          }
+        }}
       >
-        {#if flagsSupported && node.flag}
-          <span class="sub-node-flag">{node.flag}</span>
-        {:else if node.country}
-          <span class="sub-node-avatar-text">{node.country}</span>
-        {:else}
-          <span class="sub-node-flag-fallback">🌐</span>
+        {#if isNodeActive}
+          <div class="sub-node-active-bar"></div>
         {/if}
-      </div>
 
-      <!-- Text Info -->
-      <div class="sub-node-info">
-        <div class="sub-node-name-row">
-          <span class="sub-node-name">
-            {node.name || $t('country.' + node.country) || node.tag}
-            {#if node.is_new}
-              <span class="sub-node-name-new"> [NEW]</span>
-            {/if}
-          </span>
-        </div>
-        <div class="sub-node-meta-row">
-          {#if metaText}
-            <span class="sub-node-chip-blue">{metaText}</span>
+        <!-- Flag Avatar -->
+        <div
+          class="sub-node-avatar-container"
+          class:active={isNodeActive}
+          style={(!flagsSupported || !node.flag) && node.country
+            ? getCountryColorStyle(node.country)
+            : ''}
+        >
+          {#if flagsSupported && node.flag}
+            <span class="sub-node-flag">{node.flag}</span>
+          {:else if node.country}
+            <span class="sub-node-avatar-text">{node.country}</span>
+          {:else}
+            <span class="sub-node-flag-fallback">🌐</span>
           {/if}
         </div>
-      </div>
+
+        <!-- Text Info -->
+        <div class="sub-node-info">
+          <div class="sub-node-name-row">
+            <span class="sub-node-name">
+              {node.name || (node.country ? $t('country.' + node.country) : '') || node.tag}
+              {#if node.is_new}
+                <span class="sub-node-name-new"> [NEW]</span>
+              {/if}
+            </span>
+          </div>
+          <div class="sub-node-meta-row">
+            {#if metaText}
+              <span class="sub-node-chip-blue">{metaText}</span>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Status chip -->
+        <span class="sub-node-chip-gold">{enableMihomo ? 'YAML' : 'JSON'}</span>
+      </button>
 
       <!-- Status / Ping right -->
       <div class="sub-node-status-container">
-        <span class="sub-node-chip-gold">{enableMihomo ? 'YAML' : 'JSON'}</span>
-
         <button
           class="sub-node-ping-btn"
-          onclick={(e) => {
-            e.stopPropagation();
+          onclick={() => {
             onCheckNodeHealth(subId, node.tag);
           }}
           disabled={checkingNodes[node.tag]}
@@ -274,10 +274,24 @@
     position: relative;
     display: flex;
     align-items: center;
-    padding: 10px 16px;
     border-bottom: 1px solid var(--border);
-    cursor: pointer;
     transition: background var(--transition-fast);
+    padding-right: 16px;
+  }
+
+  .sub-node-select-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    padding: 10px 16px;
+    background: none;
+    border: 0;
+    font: inherit;
+    text-align: left;
+    color: inherit;
+    cursor: pointer;
+    min-width: 0;
   }
 
   .sub-node-row:last-child {

@@ -1073,7 +1073,7 @@
           </div>
         {/each}
         {#if !restartLogExpanded && restartLog.length > 5}
-          <div class="log-more" onclick={() => (restartLogExpanded = true)}>
+          <button type="button" class="log-more" onclick={() => (restartLogExpanded = true)}>
             {pluralize(
               restartLog.length - 5,
               $t('svc.log_show_more_one', { count: String(restartLog.length - 5) }),
@@ -1081,7 +1081,7 @@
               $t('svc.log_show_more_many', { count: String(restartLog.length - 5) }),
               $currentLang
             )}
-          </div>
+          </button>
         {/if}
       </div>
     </div>
@@ -1344,6 +1344,10 @@
     color: var(--accent);
     cursor: pointer;
     padding: 4px;
+    background: none;
+    border: 0;
+    font-family: inherit;
+    width: 100%;
   }
   .log-more:hover {
     text-decoration: underline;

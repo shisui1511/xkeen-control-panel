@@ -31,22 +31,23 @@
 <div class="form-card">
   <div class="form-row2">
     <div class="form-col">
-      <label class="form-label">{ru ? 'Тип правила' : 'Rule type'}</label>
-      <select class="form-select" bind:value={nr.type}>
+      <label class="form-label" for="rule-type">{ru ? 'Тип правила' : 'Rule type'}</label>
+      <select id="rule-type" class="form-select" bind:value={nr.type}>
         {#each RULE_TYPES as t}<option value={t}>{t}</option>{/each}
       </select>
     </div>
     <div class="form-col">
-      <label class="form-label">{ru ? 'Исходящий' : 'Outbound'}</label>
-      <select class="form-select" bind:value={nr.outbound}>
+      <label class="form-label" for="rule-outbound">{ru ? 'Исходящий' : 'Outbound'}</label>
+      <select id="rule-outbound" class="form-select" bind:value={nr.outbound}>
         {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
       </select>
     </div>
   </div>
   {#if nr.type !== 'MATCH'}
     <div class="form-row">
-      <label class="form-label">{ru ? 'Значение' : 'Value'}</label>
+      <label class="form-label" for="rule-value">{ru ? 'Значение' : 'Value'}</label>
       <input
+        id="rule-value"
         class="form-input"
         bind:value={nr.value}
         placeholder={nr.type === 'GEOIP'

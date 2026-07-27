@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import Modal from './components/Modal.svelte';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities } from './stores';
   import { parseValidationError } from './lib/errorParser';
@@ -1951,10 +1952,14 @@
 
                     {#if g.enabled !== false}
                       <div class="zkeen-group-body">
-                        <label class="form-label" style="font-size: 11px; margin-bottom: 2px;"
+                        <label
+                          for="mihomo-group-default-outbound-{g.name}"
+                          class="form-label"
+                          style="font-size: 11px; margin-bottom: 2px;"
                           >{ru ? 'Исходящий канал по умолчанию' : 'Default outbound'}</label
                         >
                         <select
+                          id="mihomo-group-default-outbound-{g.name}"
                           class="form-select"
                           value={g.proxies[0] || 'DIRECT'}
                           onchange={(e) => {
@@ -2226,21 +2231,32 @@
                 </div>
               {/if}
               <div class="form-row">
-                <label class="form-label">{ru ? 'Режим' : 'Enhanced mode'}</label>
-                <select class="form-select" bind:value={dns.enhancedMode}>
+                <label class="form-label" for="mihomo-dns-enhanced-mode"
+                  >{ru ? 'Режим' : 'Enhanced mode'}</label
+                >
+                <select
+                  id="mihomo-dns-enhanced-mode"
+                  class="form-select"
+                  bind:value={dns.enhancedMode}
+                >
                   <option value="fake-ip">fake-ip</option>
                   <option value="redir-host">redir-host</option>
                 </select>
               </div>
               {#if dns.enhancedMode === 'fake-ip'}
                 <div class="form-row">
-                  <label class="form-label">Fake-IP Range</label>
-                  <input class="form-input" bind:value={dns.fakeIPRange} />
+                  <label class="form-label" for="mihomo-dns-fakeip-range">Fake-IP Range</label>
+                  <input
+                    id="mihomo-dns-fakeip-range"
+                    class="form-input"
+                    bind:value={dns.fakeIPRange}
+                  />
                 </div>
               {/if}
               <div class="form-row">
-                <label class="form-label">Nameservers</label>
+                <label class="form-label" for="mihomo-dns-nameservers">Nameservers</label>
                 <textarea
+                  id="mihomo-dns-nameservers"
                   class="form-textarea"
                   value={dns.nameservers.join('\n')}
                   rows="3"
@@ -2249,8 +2265,9 @@
                 ></textarea>
               </div>
               <div class="form-row">
-                <label class="form-label">Fallback</label>
+                <label class="form-label" for="mihomo-dns-fallback">Fallback</label>
                 <textarea
+                  id="mihomo-dns-fallback"
                   class="form-textarea"
                   value={dns.fallback.join('\n')}
                   rows="2"
@@ -2272,8 +2289,8 @@
             </div>
             {#if tun.enabled}
               <div class="form-row">
-                <label class="form-label">Stack</label>
-                <select class="form-select" bind:value={tun.stack}>
+                <label class="form-label" for="mihomo-tun-stack">Stack</label>
+                <select id="mihomo-tun-stack" class="form-select" bind:value={tun.stack}>
                   <option value="mixed">mixed</option>
                   <option value="system">system</option>
                   <option value="gvisor">gvisor</option>
@@ -2292,8 +2309,9 @@
                 </label>
               </div>
               <div class="form-row">
-                <label class="form-label">DNS hijack</label>
+                <label class="form-label" for="mihomo-tun-dns-hijack">DNS hijack</label>
                 <input
+                  id="mihomo-tun-dns-hijack"
                   class="form-input"
                   value={tun.dnsHijack.join(', ')}
                   onchange={(e) =>
@@ -2462,194 +2480,164 @@
   {/if}
 </div>
 
-{#if showApplyConfirm}
-  <div
-    class="modal-overlay"
-    role="button"
-    tabindex="0"
-    data-testid="apply-confirm-dialog"
-    onclick={() => (showApplyConfirm = false)}
-    onkeydown={(e) => e.key === 'Escape' && (showApplyConfirm = false)}
-  >
-    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
-      <div class="modal-card-header">
-        <h2>{$t('editor.apply_confirm_title')}</h2>
-        <button class="modal-close-btn" onclick={() => (showApplyConfirm = false)}>&times;</button>
+<Modal
+  isOpen={showApplyConfirm}
+  title={$t('editor.apply_confirm_title')}
+  dataTestid="apply-confirm-dialog"
+  onclose={() => (showApplyConfirm = false)}
+>
+  <p>{$t('editor.apply_confirm_body')}</p>
+  <div class="changed-files-list" style="margin-top: 12px;">
+    <strong>{ru ? 'Будут обновлены секции в файле:' : 'Sections to be updated in file:'}</strong>
+    <div style="margin: 8px 0; font-family: monospace; font-size: 13px;">
+      <code>{selectedFile || '/opt/etc/mihomo/config.yaml'}</code>
+    </div>
+    <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+      <li><code>proxy-groups</code></li>
+      <li><code>rule-providers</code></li>
+      <li><code>rules</code></li>
+    </ul>
+    <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
+      {ru
+        ? '* Автоматически будет создана резервная копия (хранится до 5 последних бэкапов)'
+        : '* A backup will be created automatically (up to 5 copies stored)'}
+    </p>
+  </div>
+  <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
+    <button class="btn btn-secondary" onclick={() => (showApplyConfirm = false)}>
+      {$t('app.cancel')}
+    </button>
+    <button class="btn btn-primary" onclick={handleApplyMihomo} disabled={applyLoading}>
+      {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
+    </button>
+  </div>
+</Modal>
+
+<Modal isOpen={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
+  <div style="display: flex; flex-direction: column; gap: 16px;">
+    {#if importErrorMsg}
+      <div class="error-msg" style="color: var(--danger); margin-bottom: 12px; font-size: 13px;">
+        {importErrorMsg}
       </div>
-      <div class="modal-card-body">
-        <p>{$t('editor.apply_confirm_body')}</p>
-        <div class="changed-files-list" style="margin-top: 12px;">
-          <strong
-            >{ru ? 'Будут обновлены секции в файле:' : 'Sections to be updated in file:'}</strong
-          >
-          <div style="margin: 8px 0; font-family: monospace; font-size: 13px;">
-            <code>{selectedFile || '/opt/etc/mihomo/config.yaml'}</code>
-          </div>
-          <ul style="margin: 8px 0 0 0; padding-left: 20px;">
-            <li><code>proxy-groups</code></li>
-            <li><code>rule-providers</code></li>
-            <li><code>rules</code></li>
-          </ul>
-          <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
-            {ru
-              ? '* Автоматически будет создана резервная копия (хранится до 5 последних бэкапов)'
-              : '* A backup will be created automatically (up to 5 copies stored)'}
-          </p>
+    {/if}
+
+    {#if importStep === 1}
+      <div class="form-group">
+        <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
+        <textarea
+          id="import-link"
+          class="input textarea-link"
+          bind:value={importLink}
+          placeholder={$t('subscr.import_link_placeholder')}
+          rows="4"
+          style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
+        ></textarea>
+      </div>
+    {:else if importStep === 2 && importNodes.length > 0}
+      <div class="preview-section">
+        <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
+          {$t('subscr.import_preview_title')}
+        </h3>
+        <div
+          class="preview-list"
+          style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;"
+        >
+          {#each importNodes as item, idx}
+            {#if item.rowError}
+              <div
+                class="preview-item-card"
+                style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+              >
+                <button
+                  type="button"
+                  onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                  style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
+                  aria-label={$t('app.remove')}>✕</button
+                >
+                <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
+                  <strong>{$t('app.error')}:</strong>
+                  {item.rowError}
+                </div>
+                <div
+                  style="font-size: 11px; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
+                  title={item.link}
+                >
+                  {item.link}
+                </div>
+              </div>
+            {:else}
+              <div
+                class="preview-item-card"
+                style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
+              >
+                <button
+                  type="button"
+                  onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
+                  style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
+                  aria-label={$t('app.remove')}>✕</button
+                >
+                <div
+                  style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
+                >
+                  <span
+                    ><strong style="color: var(--fg);">{item.outbound?.protocol}</strong> · {getNodeServer(
+                      item.outbound
+                    )}:{getNodePort(item.outbound)}</span
+                  >
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label
+                    class="form-label"
+                    style="margin: 0; font-size: 12px; flex-shrink: 0;"
+                    for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label
+                  >
+                  <input
+                    id="import-tag-{idx}"
+                    type="text"
+                    class="input"
+                    bind:value={item.tag}
+                    style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
+                  />
+                </div>
+              </div>
+            {/if}
+          {/each}
         </div>
       </div>
-      <div class="modal-card-footer">
-        <button class="btn btn-secondary" onclick={() => (showApplyConfirm = false)}>
-          {$t('app.cancel')}
+    {/if}
+
+    <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
+      <button class="btn btn-secondary" onclick={closeImportModal} disabled={importLoading}>
+        {$t('app.cancel')}
+      </button>
+      {#if importStep === 1}
+        <button
+          class="btn btn-primary"
+          onclick={parseImportLink}
+          disabled={!importLink.trim() || importLoading}
+        >
+          {#if importLoading}
+            <span class="spinner-xs" style="margin-right: 6px;"></span>
+          {/if}
+          {$t('subscr.import_btn_parse')}
         </button>
-        <button class="btn btn-primary" onclick={handleApplyMihomo} disabled={applyLoading}>
-          {applyLoading ? $t('editor.saving') : $t('editor.apply_and_restart')}
+      {:else}
+        <button
+          class="btn btn-primary"
+          onclick={confirmImportNode}
+          disabled={importLoading ||
+            importNodes.length === 0 ||
+            importNodes.some((n) => n.rowError)}
+        >
+          {#if importLoading}
+            <span class="spinner-xs" style="margin-right: 6px;"></span>
+          {/if}
+          {ru ? `Импортировать (${importNodes.length})` : `Import (${importNodes.length})`}
         </button>
-      </div>
+      {/if}
     </div>
   </div>
-{/if}
-
-{#if showImportModal}
-  <div
-    class="modal-overlay"
-    role="button"
-    tabindex="0"
-    onclick={closeImportModal}
-    onkeydown={(e) => e.key === 'Escape' && closeImportModal()}
-  >
-    <div class="modal-card" role="presentation" onclick={(e) => e.stopPropagation()}>
-      <div class="modal-card-header">
-        <h2>{$t('subscr.import_modal_title')}</h2>
-        <button class="modal-close-btn" onclick={closeImportModal}>&times;</button>
-      </div>
-      <div class="modal-card-body">
-        {#if importErrorMsg}
-          <div
-            class="error-msg"
-            style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
-          >
-            {importErrorMsg}
-          </div>
-        {/if}
-
-        {#if importStep === 1}
-          <div class="form-group">
-            <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
-            <textarea
-              id="import-link"
-              class="input textarea-link"
-              bind:value={importLink}
-              placeholder={$t('subscr.import_link_placeholder')}
-              rows="4"
-              style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
-            ></textarea>
-          </div>
-        {:else if importStep === 2 && importNodes.length > 0}
-          <div class="preview-section">
-            <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
-              {$t('subscr.import_preview_title')}
-            </h3>
-            <div
-              class="preview-list"
-              style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; scrollbar-width: thin;"
-            >
-              {#each importNodes as item, idx}
-                {#if item.rowError}
-                  <div
-                    class="preview-item-card"
-                    style="background: var(--bg-card); border: 1px solid var(--danger); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
-                  >
-                    <button
-                      type="button"
-                      onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
-                      style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                      aria-label="Remove">✕</button
-                    >
-                    <div style="font-size: 12px; color: var(--danger); padding-right: 20px;">
-                      <strong>{$t('app.error')}:</strong>
-                      {item.rowError}
-                    </div>
-                    <div
-                      style="font-size: 11px; color: var(--fg-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;"
-                      title={item.link}
-                    >
-                      {item.link}
-                    </div>
-                  </div>
-                {:else}
-                  <div
-                    class="preview-item-card"
-                    style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 10px; display: flex; flex-direction: column; gap: 8px; position: relative;"
-                  >
-                    <button
-                      type="button"
-                      onclick={() => (importNodes = importNodes.filter((_, i) => i !== idx))}
-                      style="position: absolute; right: 10px; top: 10px; background: none; border: 0; color: var(--fg-secondary); cursor: pointer; font-size: 12px;"
-                      aria-label="Remove">✕</button
-                    >
-                    <div
-                      style="display: flex; justify-content: space-between; font-size: 12px; color: var(--fg-secondary); padding-right: 20px;"
-                    >
-                      <span
-                        ><strong style="color: var(--fg);">{item.outbound?.protocol}</strong> · {getNodeServer(
-                          item.outbound
-                        )}:{getNodePort(item.outbound)}</span
-                      >
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <label
-                        class="form-label"
-                        style="margin: 0; font-size: 12px; flex-shrink: 0;"
-                        for="import-tag-{idx}">{$t('subscr.import_tag_custom')}:</label
-                      >
-                      <input
-                        id="import-tag-{idx}"
-                        type="text"
-                        class="input"
-                        bind:value={item.tag}
-                        style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
-                      />
-                    </div>
-                  </div>
-                {/if}
-              {/each}
-            </div>
-          </div>
-        {/if}
-      </div>
-      <div class="modal-card-footer">
-        <button class="btn btn-secondary" onclick={closeImportModal} disabled={importLoading}>
-          {$t('app.cancel')}
-        </button>
-        {#if importStep === 1}
-          <button
-            class="btn btn-primary"
-            onclick={parseImportLink}
-            disabled={!importLink.trim() || importLoading}
-          >
-            {#if importLoading}
-              <span class="spinner-xs" style="margin-right: 6px;"></span>
-            {/if}
-            {$t('subscr.import_btn_parse')}
-          </button>
-        {:else}
-          <button
-            class="btn btn-primary"
-            onclick={confirmImportNode}
-            disabled={importLoading ||
-              importNodes.length === 0 ||
-              importNodes.some((n) => n.rowError)}
-          >
-            {#if importLoading}
-              <span class="spinner-xs" style="margin-right: 6px;"></span>
-            {/if}
-            {ru ? `Импортировать (${importNodes.length})` : `Import (${importNodes.length})`}
-          </button>
-        {/if}
-      </div>
-    </div>
-  </div>
-{/if}
+</Modal>
 
 <style>
   .crumb-sep {
@@ -3327,69 +3315,6 @@
     border-radius: 50%;
   }
 
-  /* Modal styles */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-
-  .modal-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 8px);
-    width: 500px;
-    max-width: 90%;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-  }
-
-  .modal-card-header {
-    padding: 16px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .modal-card-header h2 {
-    margin: 0;
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: var(--fg);
-  }
-
-  .modal-close-btn {
-    background: transparent;
-    border: none;
-    font-size: 1.5rem;
-    color: var(--fg-secondary);
-    cursor: pointer;
-  }
-
-  .modal-card-body {
-    padding: 16px;
-    font-size: var(--font-size-sm, 0.8125rem);
-    color: var(--fg);
-    max-height: 400px;
-    overflow-y: auto;
-  }
-
-  .modal-card-footer {
-    padding: 16px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
   @keyframes spin {
     to {
       transform: rotate(360deg);

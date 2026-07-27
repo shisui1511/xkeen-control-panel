@@ -21,70 +21,114 @@
 
 <div class="form-card">
   <div class="form-row">
-    <label class="form-label">{ru ? 'Тип' : 'Type'}</label>
-    <select class="form-select" bind:value={np.type}>
-      {#each PROXY_TYPES as t}<option value={t}>{t}</option>{/each}
+    <label class="form-label" for="proxy-type">{ru ? 'Тип' : 'Type'}</label>
+    <select id="proxy-type" class="form-select" bind:value={np.type}>
+      {#each PROXY_TYPES as pt}<option value={pt}>{pt}</option>{/each}
     </select>
   </div>
   <div class="form-row">
-    <label class="form-label">{ru ? 'Имя' : 'Name'}</label>
-    <input class="form-input" bind:value={np.name} placeholder="my-proxy" />
+    <label class="form-label" for="proxy-name">{ru ? 'Имя' : 'Name'}</label>
+    <input id="proxy-name" class="form-input" bind:value={np.name} placeholder="my-proxy" />
   </div>
   <div class="form-row2">
     <div class="form-col">
-      <label class="form-label">{ru ? 'Сервер' : 'Server'}</label>
-      <input class="form-input" bind:value={np.server} placeholder="example.com" />
+      <label class="form-label" for="proxy-server">{ru ? 'Сервер' : 'Server'}</label>
+      <input
+        id="proxy-server"
+        class="form-input"
+        bind:value={np.server}
+        placeholder="example.com"
+      />
     </div>
     <div class="form-col form-col-sm">
-      <label class="form-label">{ru ? 'Порт' : 'Port'}</label>
-      <input class="form-input" type="number" bind:value={np.port} min="1" max="65535" />
+      <label class="form-label" for="proxy-port">{ru ? 'Порт' : 'Port'}</label>
+      <input
+        id="proxy-port"
+        class="form-input"
+        type="number"
+        bind:value={np.port}
+        min="1"
+        max="65535"
+      />
     </div>
   </div>
 
   {#if np.type === 'vless'}
     <div class="form-row">
-      <label class="form-label">UUID</label>
+      <label class="form-label" for="proxy-vless-uuid">UUID</label>
       <div class="input-with-btn">
-        <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
+        <input id="proxy-vless-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
         <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
           >⟳</button
         >
       </div>
     </div>
     <div class="form-row">
-      <label class="form-label">Reality Public Key</label>
-      <input class="form-input" bind:value={np.publicKey} placeholder="public-key" />
+      <label class="form-label" for="proxy-vless-public-key">Reality Public Key</label>
+      <input
+        id="proxy-vless-public-key"
+        class="form-input"
+        bind:value={np.publicKey}
+        placeholder="public-key"
+      />
     </div>
     <div class="form-row2">
       <div class="form-col">
-        <label class="form-label">Short ID</label>
-        <input class="form-input" bind:value={np.shortId} placeholder="short-id" />
+        <label class="form-label" for="proxy-vless-short-id">Short ID</label>
+        <input
+          id="proxy-vless-short-id"
+          class="form-input"
+          bind:value={np.shortId}
+          placeholder="short-id"
+        />
       </div>
       <div class="form-col">
-        <label class="form-label">SNI</label>
-        <input class="form-input" bind:value={np.servername} placeholder="www.apple.com" />
+        <label class="form-label" for="proxy-vless-sni">SNI</label>
+        <input
+          id="proxy-vless-sni"
+          class="form-input"
+          bind:value={np.servername}
+          placeholder="www.apple.com"
+        />
       </div>
     </div>
   {:else if np.type === 'hysteria2'}
     <div class="form-row">
-      <label class="form-label">{ru ? 'Пароль' : 'Password'}</label>
-      <input class="form-input" bind:value={np.password} placeholder="password" />
+      <label class="form-label" for="proxy-hysteria2-password">{ru ? 'Пароль' : 'Password'}</label>
+      <input
+        id="proxy-hysteria2-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
     <div class="form-row">
-      <label class="form-label">SNI</label>
-      <input class="form-input" bind:value={np.sni} placeholder="example.com" />
+      <label class="form-label" for="proxy-hysteria2-sni">SNI</label>
+      <input
+        id="proxy-hysteria2-sni"
+        class="form-input"
+        bind:value={np.sni}
+        placeholder="example.com"
+      />
     </div>
     <div class="form-row">
-      <label class="form-label">{$t('editor.obfsType')}</label>
-      <select class="form-select" bind:value={np.obfsType}>
+      <label class="form-label" for="proxy-hysteria2-obfs-type">{$t('editor.obfsType')}</label>
+      <select id="proxy-hysteria2-obfs-type" class="form-select" bind:value={np.obfsType}>
         <option value="none">{$t('editor.none')}</option>
         <option value="simple">{$t('editor.simple')}</option>
       </select>
     </div>
     {#if np.obfsType === 'simple'}
       <div class="form-row">
-        <label class="form-label">{$t('editor.obfsPassword')}</label>
-        <input class="form-input" bind:value={np.obfsPassword} placeholder="obfs password" />
+        <label class="form-label" for="proxy-hysteria2-obfs-password"
+          >{$t('editor.obfsPassword')}</label
+        >
+        <input
+          id="proxy-hysteria2-obfs-password"
+          class="form-input"
+          bind:value={np.obfsPassword}
+          placeholder="obfs password"
+        />
       </div>
     {/if}
     <div class="form-row">
@@ -98,38 +142,48 @@
     </div>
   {:else if np.type === 'tuic'}
     <div class="form-row">
-      <label class="form-label">UUID</label>
+      <label class="form-label" for="proxy-tuic-uuid">UUID</label>
       <div class="input-with-btn">
-        <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
+        <input id="proxy-tuic-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
         <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
           >⟳</button
         >
       </div>
     </div>
     <div class="form-row">
-      <label class="form-label">{ru ? 'Пароль' : 'Password'}</label>
-      <input class="form-input" bind:value={np.password} placeholder="password" />
+      <label class="form-label" for="proxy-tuic-password">{ru ? 'Пароль' : 'Password'}</label>
+      <input
+        id="proxy-tuic-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
     <div class="form-row">
-      <label class="form-label">SNI</label>
-      <input class="form-input" bind:value={np.sni} placeholder="example.com" />
+      <label class="form-label" for="proxy-tuic-sni">SNI</label>
+      <input id="proxy-tuic-sni" class="form-input" bind:value={np.sni} placeholder="example.com" />
     </div>
   {:else if np.type === 'ss'}
     <div class="form-row">
-      <label class="form-label">Cipher</label>
-      <select class="form-select" bind:value={np.cipher}>
+      <label class="form-label" for="proxy-ss-cipher">Cipher</label>
+      <select id="proxy-ss-cipher" class="form-select" bind:value={np.cipher}>
         {#each CIPHERS as c}<option value={c}>{c}</option>{/each}
       </select>
     </div>
     <div class="form-row">
-      <label class="form-label">{ru ? 'Пароль' : 'Password'}</label>
-      <input class="form-input" bind:value={np.password} placeholder="password" />
+      <label class="form-label" for="proxy-ss-password">{ru ? 'Пароль' : 'Password'}</label>
+      <input
+        id="proxy-ss-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
   {:else if np.type === 'vmess'}
     <div class="form-row">
-      <label class="form-label">UUID</label>
+      <label class="form-label" for="proxy-vmess-uuid">UUID</label>
       <div class="input-with-btn">
-        <input class="form-input" bind:value={np.uuid} placeholder="uuid" />
+        <input id="proxy-vmess-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
         <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
           >⟳</button
         >
@@ -137,43 +191,58 @@
     </div>
     <div class="form-row2">
       <div class="form-col">
-        <label class="form-label">Network</label>
-        <select class="form-select" bind:value={np.network}>
+        <label class="form-label" for="proxy-vmess-network">Network</label>
+        <select id="proxy-vmess-network" class="form-select" bind:value={np.network}>
           <option value="ws">WebSocket</option>
           <option value="tcp">TCP</option>
           <option value="grpc">gRPC</option>
         </select>
       </div>
       <div class="form-col">
-        <label class="form-label">TLS</label>
-        <input type="checkbox" bind:checked={np.tls} style="margin-top:8px" />
+        <label class="form-label" for="proxy-vmess-tls">TLS</label>
+        <input id="proxy-vmess-tls" type="checkbox" bind:checked={np.tls} style="margin-top:8px" />
       </div>
     </div>
     {#if np.network === 'ws'}
       <div class="form-row">
-        <label class="form-label">WS Path</label>
-        <input class="form-input" bind:value={np.wsPath} placeholder="/" />
+        <label class="form-label" for="proxy-vmess-ws-path">WS Path</label>
+        <input id="proxy-vmess-ws-path" class="form-input" bind:value={np.wsPath} placeholder="/" />
       </div>
     {/if}
     {#if np.tls}
       <div class="form-row">
-        <label class="form-label">SNI</label>
-        <input class="form-input" bind:value={np.sni} placeholder="example.com" />
+        <label class="form-label" for="proxy-vmess-sni">SNI</label>
+        <input
+          id="proxy-vmess-sni"
+          class="form-input"
+          bind:value={np.sni}
+          placeholder="example.com"
+        />
       </div>
     {/if}
   {:else if np.type === 'trojan'}
     <div class="form-row">
-      <label class="form-label">{ru ? 'Пароль' : 'Password'}</label>
-      <input class="form-input" bind:value={np.password} placeholder="password" />
+      <label class="form-label" for="proxy-trojan-password">{ru ? 'Пароль' : 'Password'}</label>
+      <input
+        id="proxy-trojan-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
     <div class="form-row">
-      <label class="form-label">SNI</label>
-      <input class="form-input" bind:value={np.sni} placeholder="example.com" />
+      <label class="form-label" for="proxy-trojan-sni">SNI</label>
+      <input
+        id="proxy-trojan-sni"
+        class="form-input"
+        bind:value={np.sni}
+        placeholder="example.com"
+      />
     </div>
     <div class="form-row2">
       <div class="form-col">
-        <label class="form-label">Network</label>
-        <select class="form-select" bind:value={np.network}>
+        <label class="form-label" for="proxy-trojan-network">Network</label>
+        <select id="proxy-trojan-network" class="form-select" bind:value={np.network}>
           <option value="tcp">TCP</option>
           <option value="ws">WebSocket</option>
         </select>
@@ -181,8 +250,13 @@
     </div>
     {#if np.network === 'ws'}
       <div class="form-row">
-        <label class="form-label">WS Path</label>
-        <input class="form-input" bind:value={np.wsPath} placeholder="/" />
+        <label class="form-label" for="proxy-trojan-ws-path">WS Path</label>
+        <input
+          id="proxy-trojan-ws-path"
+          class="form-input"
+          bind:value={np.wsPath}
+          placeholder="/"
+        />
       </div>
     {/if}
     <div class="form-row">
@@ -196,25 +270,49 @@
     </div>
   {:else if np.type === 'socks'}
     <div class="form-row">
-      <label class="form-label"
+      <label class="form-label" for="proxy-socks-username"
         >{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label
       >
-      <input class="form-input" bind:value={np.username} placeholder="username" />
+      <input
+        id="proxy-socks-username"
+        class="form-input"
+        bind:value={np.username}
+        placeholder="username"
+      />
     </div>
     <div class="form-row">
-      <label class="form-label">{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label>
-      <input class="form-input" bind:value={np.password} placeholder="password" />
+      <label class="form-label" for="proxy-socks-password"
+        >{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label
+      >
+      <input
+        id="proxy-socks-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
   {:else if np.type === 'http'}
     <div class="form-row">
-      <label class="form-label"
+      <label class="form-label" for="proxy-http-username"
         >{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label
       >
-      <input class="form-input" bind:value={np.username} placeholder="username" />
+      <input
+        id="proxy-http-username"
+        class="form-input"
+        bind:value={np.username}
+        placeholder="username"
+      />
     </div>
     <div class="form-row">
-      <label class="form-label">{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label>
-      <input class="form-input" bind:value={np.password} placeholder="password" />
+      <label class="form-label" for="proxy-http-password"
+        >{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label
+      >
+      <input
+        id="proxy-http-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
     <div class="form-row">
       <label

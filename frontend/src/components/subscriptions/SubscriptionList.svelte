@@ -333,7 +333,8 @@
             class="collapse-toggle"
             class:expanded={expandedSubs[sub.id]}
             onclick={() => onToggleExpand(sub.id)}
-            aria-label="Toggle node list"
+            aria-label={$t('subscr.toggle_node_list')}
+            aria-expanded={!!expandedSubs[sub.id]}
           >
             <svg
               width="14"
@@ -356,7 +357,7 @@
             title={sub.last_error || (sub.enabled ? $t('app.active') : $t('app.disabled'))}
           ></div>
 
-          <h2 class="sub-name" onclick={() => onToggleExpand(sub.id)}>
+          <h2 class="sub-name">
             {sub.profile_title || sub.name}
           </h2>
           {#if isFormatError(sub.last_error)}
@@ -376,7 +377,6 @@
 
           <span
             class="nodes-count-badge"
-            onclick={() => onToggleExpand(sub.id)}
             title={$t('subscr.nodes_count').replace(
               '{count}',
               String(sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0)
@@ -423,7 +423,9 @@
             <button
               class="action-icon-btn action-btn-dots"
               onclick={() => onToggleDropdown(sub.id)}
-              aria-label="More actions"
+              aria-label={$t('subscr.more_actions')}
+              aria-haspopup="menu"
+              aria-expanded={activeDropdownId === sub.id}
             >
               <svg
                 width="14"
@@ -441,15 +443,17 @@
               </svg>
             </button>
             {#if activeDropdownId === sub.id}
-              <div class="dropdown-menu">
+              <div class="dropdown-menu" role="menu">
                 {#if devMode}
                   <button
+                    role="menuitem"
                     onclick={() => {
                       onOpenDiagnostic(sub);
                     }}>🔍 {$t('subscr.diag_btn')}</button
                   >
                 {/if}
                 <button
+                  role="menuitem"
                   onclick={() => {
                     onDeleteSub(sub.id);
                   }}
@@ -822,13 +826,7 @@
     border-radius: 12px;
     font-size: 11.5px;
     font-weight: 700;
-    cursor: pointer;
     transition: all var(--transition-fast);
-  }
-  .nodes-count-badge:hover {
-    background: rgba(41, 194, 240, 0.18);
-    border-color: rgba(41, 194, 240, 0.45);
-    box-shadow: 0 0 10px rgba(41, 194, 240, 0.2);
   }
 
   /* action кнопки-иконки */
