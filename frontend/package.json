@@ -9,6 +9,7 @@
     "test:e2e": "playwright test",
     "test:unit": "vitest run",
     "check:contrast": "node scripts/check-contrast.cjs",
+    "check:bundle-size": "node scripts/check-bundle-size.cjs",
     "lint": "svelte-check --tsconfig ./tsconfig.json && eslint .",
     "format:check": "prettier --check ."
   },
