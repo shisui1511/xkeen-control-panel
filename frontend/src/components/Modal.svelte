@@ -7,6 +7,7 @@
     maxWidth = '520px',
     class: className = '',
     ariaLabel = '',
+    dataTestid = '',
     onclose,
     children
   } = $props<{
@@ -16,6 +17,8 @@
     class?: string;
     /** Overrides the accessible name when the visible `.modal-header` (and its `<h2>`) is hidden by a caller's stylesheet. */
     ariaLabel?: string;
+    /** Optional `data-testid` on the container, for callers whose E2E specs target a specific dialog instance. */
+    dataTestid?: string;
     onclose: () => void;
     children?: Snippet;
   }>();
@@ -98,6 +101,7 @@
       aria-modal="true"
       aria-label={ariaLabel || undefined}
       aria-labelledby={ariaLabel ? undefined : 'modal-title'}
+      data-testid={dataTestid || undefined}
       bind:this={modalElement}
       onkeydown={handleKeydown}
       onclick={(e) => e.stopPropagation()}

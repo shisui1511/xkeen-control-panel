@@ -2483,6 +2483,7 @@
 <Modal
   isOpen={showApplyConfirm}
   title={$t('editor.apply_confirm_title')}
+  dataTestid="apply-confirm-dialog"
   onclose={() => (showApplyConfirm = false)}
 >
   <p>{$t('editor.apply_confirm_body')}</p>
@@ -3314,69 +3315,6 @@
     border-radius: 50%;
   }
 
-  /* Modal styles */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-
-  .modal-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 8px);
-    width: 500px;
-    max-width: 90%;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-  }
-
-  .modal-card-header {
-    padding: 16px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .modal-card-header h2 {
-    margin: 0;
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: var(--fg);
-  }
-
-  .modal-close-btn {
-    background: transparent;
-    border: none;
-    font-size: 1.5rem;
-    color: var(--fg-secondary);
-    cursor: pointer;
-  }
-
-  .modal-card-body {
-    padding: 16px;
-    font-size: var(--font-size-sm, 0.8125rem);
-    color: var(--fg);
-    max-height: 400px;
-    overflow-y: auto;
-  }
-
-  .modal-card-footer {
-    padding: 16px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
   @keyframes spin {
     to {
       transform: rotate(360deg);
