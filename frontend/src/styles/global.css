@@ -728,12 +728,12 @@ input[type='number'] {
   color: var(--fg-primary);
 }
 
-.nav-item[aria-current="page"] {
+.nav-item[aria-current='page'] {
   color: var(--fg-primary);
   background: rgba(255, 255, 255, 0.04);
 }
 
-.nav-item[aria-current="page"]::after {
+.nav-item[aria-current='page']::after {
   content: '';
   position: absolute;
   right: 0;
@@ -757,7 +757,7 @@ input[type='number'] {
   opacity: 0.85;
 }
 
-.nav-item[aria-current="page"] :global(svg) {
+.nav-item[aria-current='page'] :global(svg) {
   color: var(--accent);
   opacity: 1;
 }

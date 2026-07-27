@@ -112,10 +112,7 @@
       node.use_case || node.speed
         ? `${node.use_case || ''}${node.use_case && node.speed ? ' - ' : ''}${node.speed || ''}`
         : `${node.protocol || ''}${node.protocol && node.transport ? ' · ' + node.transport : ''}${node.security && node.security !== 'none' ? ' · ' + node.security : ''}`}
-    <div
-      class="sub-node-row"
-      class:active={isNodeActive}
-    >
+    <div class="sub-node-row" class:active={isNodeActive}>
       <button
         type="button"
         class="sub-node-select-btn"

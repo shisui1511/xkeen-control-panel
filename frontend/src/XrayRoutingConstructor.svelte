@@ -1916,7 +1916,9 @@
                 </div>
                 <div class="form-row2" style="margin-top:var(--spacing-2, 8px)">
                   <div class="form-col">
-                    <label class="form-label" for="xray-inbound-port-{inbound.tag}">{ru ? 'Порт входящего' : 'Inbound port'}</label>
+                    <label class="form-label" for="xray-inbound-port-{inbound.tag}"
+                      >{ru ? 'Порт входящего' : 'Inbound port'}</label
+                    >
                     <input
                       id="xray-inbound-port-{inbound.tag}"
                       class="form-input"
@@ -1928,7 +1930,8 @@
                     />
                   </div>
                   <div class="form-col">
-                    <label class="form-label" for="xray-inbound-listen-{inbound.tag}">{ru ? 'Адрес прослушивания' : 'Listen address'}</label
+                    <label class="form-label" for="xray-inbound-listen-{inbound.tag}"
+                      >{ru ? 'Адрес прослушивания' : 'Listen address'}</label
                     >
                     <input
                       id="xray-inbound-listen-{inbound.tag}"
@@ -1945,16 +1948,34 @@
               <div class="form-card">
                 <div class="form-row">
                   <label class="form-label" for="xray-new-inbound-tag">{ru ? 'Тег' : 'Tag'}</label>
-                  <input id="xray-new-inbound-tag" class="form-input" bind:value={newInbound.tag} placeholder="socks-in" />
+                  <input
+                    id="xray-new-inbound-tag"
+                    class="form-input"
+                    bind:value={newInbound.tag}
+                    placeholder="socks-in"
+                  />
                 </div>
                 <div class="form-row2">
                   <div class="form-col">
-                    <label class="form-label" for="xray-new-inbound-port">{ru ? 'Порт' : 'Port'}</label>
-                    <input id="xray-new-inbound-port" class="form-input" type="number" bind:value={newInbound.port} />
+                    <label class="form-label" for="xray-new-inbound-port"
+                      >{ru ? 'Порт' : 'Port'}</label
+                    >
+                    <input
+                      id="xray-new-inbound-port"
+                      class="form-input"
+                      type="number"
+                      bind:value={newInbound.port}
+                    />
                   </div>
                   <div class="form-col">
-                    <label class="form-label" for="xray-new-inbound-protocol">{ru ? 'Протокол' : 'Protocol'}</label>
-                    <select id="xray-new-inbound-protocol" class="form-select" bind:value={newInbound.protocol}>
+                    <label class="form-label" for="xray-new-inbound-protocol"
+                      >{ru ? 'Протокол' : 'Protocol'}</label
+                    >
+                    <select
+                      id="xray-new-inbound-protocol"
+                      class="form-select"
+                      bind:value={newInbound.protocol}
+                    >
                       <option value="socks">socks</option>
                       <option value="http">http</option>
                     </select>
@@ -2081,17 +2102,36 @@
             {#if showDnsForm}
               <div class="form-card">
                 <div class="form-row">
-                  <label class="form-label" for="xray-new-dns-address">{ru ? 'Адрес сервера' : 'Server address'}</label>
-                  <input id="xray-new-dns-address" class="form-input" bind:value={newDns.address} placeholder="8.8.8.8" />
+                  <label class="form-label" for="xray-new-dns-address"
+                    >{ru ? 'Адрес сервера' : 'Server address'}</label
+                  >
+                  <input
+                    id="xray-new-dns-address"
+                    class="form-input"
+                    bind:value={newDns.address}
+                    placeholder="8.8.8.8"
+                  />
                 </div>
                 <div class="form-row2">
                   <div class="form-col">
                     <label class="form-label" for="xray-new-dns-port">{ru ? 'Порт' : 'Port'}</label>
-                    <input id="xray-new-dns-port" class="form-input" type="number" bind:value={newDns.port} />
+                    <input
+                      id="xray-new-dns-port"
+                      class="form-input"
+                      type="number"
+                      bind:value={newDns.port}
+                    />
                   </div>
                   <div class="form-col">
-                    <label class="form-label" for="xray-new-dns-tag">{ru ? 'Тег (опционально)' : 'Tag (optional)'}</label>
-                    <input id="xray-new-dns-tag" class="form-input" bind:value={newDns.tag} placeholder="dns-in-ytb" />
+                    <label class="form-label" for="xray-new-dns-tag"
+                      >{ru ? 'Тег (опционально)' : 'Tag (optional)'}</label
+                    >
+                    <input
+                      id="xray-new-dns-tag"
+                      class="form-input"
+                      bind:value={newDns.tag}
+                      placeholder="dns-in-ytb"
+                    />
                   </div>
                 </div>
                 {#if newDns.tag.trim()}
@@ -2143,7 +2183,9 @@
               <div class="form-card" style="margin-top: 8px;">
                 <div class="form-row2">
                   <div class="form-col">
-                    <label class="form-label" for="xray-new-host-domain">{ru ? 'Домен' : 'Domain'}</label>
+                    <label class="form-label" for="xray-new-host-domain"
+                      >{ru ? 'Домен' : 'Domain'}</label
+                    >
                     <input
                       id="xray-new-host-domain"
                       class="form-input"
@@ -2153,7 +2195,12 @@
                   </div>
                   <div class="form-col">
                     <label class="form-label" for="xray-new-host-ip">IP</label>
-                    <input id="xray-new-host-ip" class="form-input" bind:value={newHost.ip} placeholder="8.8.8.8" />
+                    <input
+                      id="xray-new-host-ip"
+                      class="form-input"
+                      bind:value={newHost.ip}
+                      placeholder="8.8.8.8"
+                    />
                   </div>
                 </div>
                 <div class="form-actions">
@@ -2779,17 +2826,10 @@
   </div>
 </Modal>
 
-<Modal
-  isOpen={showImportModal}
-  title={$t('subscr.import_modal_title')}
-  onclose={closeImportModal}
->
+<Modal isOpen={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
   <div style="display: flex; flex-direction: column; gap: 16px;">
     {#if importErrorMsg}
-      <div
-        class="error-msg"
-        style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
-      >
+      <div class="error-msg" style="color: var(--danger); margin-bottom: 12px; font-size: 13px;">
         {importErrorMsg}
       </div>
     {/if}

@@ -629,181 +629,180 @@
   onclose={cancelEdit}
   maxWidth="680px"
 >
+  <!-- Step Indicators -->
+  <div class="wizard-steps-bar">
+    <div class="wizard-step-indicator" class:active={currentStep >= 1}>
+      <span class="step-num">1</span>
+      <span class="step-lbl">{$t('smartproxy.step_1')}</span>
+    </div>
+    <div class="wizard-step-line" class:active={currentStep >= 2}></div>
+    <div class="wizard-step-indicator" class:active={currentStep >= 2}>
+      <span class="step-num">2</span>
+      <span class="step-lbl">{$t('smartproxy.step_2')}</span>
+    </div>
+    <div class="wizard-step-line" class:active={currentStep >= 3}></div>
+    <div class="wizard-step-indicator" class:active={currentStep >= 3}>
+      <span class="step-num">3</span>
+      <span class="step-lbl">{$t('smartproxy.step_3')}</span>
+    </div>
+  </div>
 
-      <!-- Step Indicators -->
-      <div class="wizard-steps-bar">
-        <div class="wizard-step-indicator" class:active={currentStep >= 1}>
-          <span class="step-num">1</span>
-          <span class="step-lbl">{$t('smartproxy.step_1')}</span>
-        </div>
-        <div class="wizard-step-line" class:active={currentStep >= 2}></div>
-        <div class="wizard-step-indicator" class:active={currentStep >= 2}>
-          <span class="step-num">2</span>
-          <span class="step-lbl">{$t('smartproxy.step_2')}</span>
-        </div>
-        <div class="wizard-step-line" class:active={currentStep >= 3}></div>
-        <div class="wizard-step-indicator" class:active={currentStep >= 3}>
-          <span class="step-num">3</span>
-          <span class="step-lbl">{$t('smartproxy.step_3')}</span>
-        </div>
+  <div style="display: flex; flex-direction: column; gap: 16px;">
+    {#if error}
+      <div class="alert alert-error mb-2">{error}</div>
+    {/if}
+    <!-- STEP 1: Basic Info -->
+    {#if currentStep === 1}
+      <div class="form-group">
+        <label for="sp-name" class="form-label">{$t('smartproxy.name')} *</label>
+        <input
+          id="sp-name"
+          type="text"
+          class="input"
+          bind:value={formName}
+          placeholder={$t('smartproxy.name_placeholder')}
+        />
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 16px;">
-        {#if error}
-          <div class="alert alert-error mb-2">{error}</div>
+      <div class="form-group">
+        <label for="sp-mode" class="form-label">{$t('smartproxy.mode')}</label>
+        <select id="sp-mode" class="input" bind:value={formMode} disabled>
+          <option value="time-based">{$t('smartproxy.mode_time')}</option>
+        </select>
+        <p class="hint" style="margin-top:6px;">
+          {$t('smartproxy.schedule_mode_hint')}
+        </p>
+      </div>
+
+      <div class="form-group-checkbox" style="margin-top: 10px;">
+        <label class="toggle-switch">
+          <input type="checkbox" id="sp-enabled" bind:checked={formEnabled} />
+          <span class="toggle-slider"></span>
+        </label>
+        <label for="sp-enabled" class="checkbox-label">
+          {$t('smartproxy.profile_active')}
+        </label>
+      </div>
+    {/if}
+
+    <!-- STEP 2: Targets Selection -->
+    {#if currentStep === 2}
+      <div class="form-group">
+        <label for="sp-group" class="form-label">{$t('smartproxy.proxy_group')} *</label>
+        {#if mihomoGroups.length > 0}
+          <select id="sp-group" class="input" bind:value={formGroupName}>
+            <option value="">-- {$t('smartproxy.select_group')} --</option>
+            {#each mihomoGroups as g}
+              <option value={g}>{g}</option>
+            {/each}
+          </select>
+        {:else}
+          <input
+            id="sp-group"
+            type="text"
+            class="input"
+            bind:value={formGroupName}
+            placeholder={$t('smartproxy.proxy_group_placeholder')}
+          />
         {/if}
-        <!-- STEP 1: Basic Info -->
-        {#if currentStep === 1}
-          <div class="form-group">
-            <label for="sp-name" class="form-label">{$t('smartproxy.name')} *</label>
-            <input
-              id="sp-name"
-              type="text"
-              class="input"
-              bind:value={formName}
-              placeholder={$t('smartproxy.name_placeholder')}
-            />
-          </div>
+      </div>
 
-          <div class="form-group">
-            <label for="sp-mode" class="form-label">{$t('smartproxy.mode')}</label>
-            <select id="sp-mode" class="input" bind:value={formMode} disabled>
-              <option value="time-based">{$t('smartproxy.mode_time')}</option>
-            </select>
-            <p class="hint" style="margin-top:6px;">
-              {$t('smartproxy.schedule_mode_hint')}
-            </p>
-          </div>
-
-          <div class="form-group-checkbox" style="margin-top: 10px;">
-            <label class="toggle-switch">
-              <input type="checkbox" id="sp-enabled" bind:checked={formEnabled} />
-              <span class="toggle-slider"></span>
-            </label>
-            <label for="sp-enabled" class="checkbox-label">
-              {$t('smartproxy.profile_active')}
-            </label>
-          </div>
+      <div class="form-group">
+        <label for="sp-proxy" class="form-label">{$t('smartproxy.proxy')} *</label>
+        {#if mihomoProxies.length > 0}
+          <select id="sp-proxy" class="input" bind:value={formProxyName}>
+            <option value="">-- {$t('smartproxy.select_proxy')} --</option>
+            <option value="DIRECT">DIRECT</option>
+            {#each mihomoProxies as p}
+              <option value={p}>{p}</option>
+            {/each}
+          </select>
+        {:else}
+          <input
+            id="sp-proxy"
+            type="text"
+            class="input"
+            bind:value={formProxyName}
+            placeholder={$t('smartproxy.proxy_placeholder')}
+          />
         {/if}
+      </div>
+    {/if}
 
-        <!-- STEP 2: Targets Selection -->
-        {#if currentStep === 2}
-          <div class="form-group">
-            <label for="sp-group" class="form-label">{$t('smartproxy.proxy_group')} *</label>
-            {#if mihomoGroups.length > 0}
-              <select id="sp-group" class="input" bind:value={formGroupName}>
-                <option value="">-- {$t('smartproxy.select_group')} --</option>
-                {#each mihomoGroups as g}
-                  <option value={g}>{g}</option>
-                {/each}
-              </select>
-            {:else}
-              <input
-                id="sp-group"
-                type="text"
-                class="input"
-                bind:value={formGroupName}
-                placeholder={$t('smartproxy.proxy_group_placeholder')}
-              />
-            {/if}
+    <!-- STEP 3: Grid Scheduler -->
+    {#if currentStep === 3}
+      <div class="grid-presets-toolbar">
+        <button type="button" class="btn btn-secondary btn-sm" onclick={presetFillAll}>
+          {$t('smartproxy.preset_fill')}
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick={presetClearAll}>
+          {$t('smartproxy.preset_clear')}
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick={presetWorkdays}>
+          {$t('smartproxy.preset_workdays')}
+        </button>
+      </div>
+
+      <p class="hint" style="margin-bottom:8px;">
+        {$t('smartproxy.grid_paint_hint')}
+      </p>
+
+      <!-- 7x24 Grid Container with thin scrollbar -->
+      <div class="grid-scrollbar-container">
+        <div class="schedule-grid-table">
+          <!-- Top Hour Headers -->
+          <div class="grid-row-header">
+            <div class="day-label-sticky header-cell"></div>
+            {#each Array(24) as _, h}
+              <div class="hour-header-cell">{h.toString().padStart(2, '0')}</div>
+            {/each}
           </div>
 
-          <div class="form-group">
-            <label for="sp-proxy" class="form-label">{$t('smartproxy.proxy')} *</label>
-            {#if mihomoProxies.length > 0}
-              <select id="sp-proxy" class="input" bind:value={formProxyName}>
-                <option value="">-- {$t('smartproxy.select_proxy')} --</option>
-                <option value="DIRECT">DIRECT</option>
-                {#each mihomoProxies as p}
-                  <option value={p}>{p}</option>
-                {/each}
-              </select>
-            {:else}
-              <input
-                id="sp-proxy"
-                type="text"
-                class="input"
-                bind:value={formProxyName}
-                placeholder={$t('smartproxy.proxy_placeholder')}
-              />
-            {/if}
-          </div>
-        {/if}
-
-        <!-- STEP 3: Grid Scheduler -->
-        {#if currentStep === 3}
-          <div class="grid-presets-toolbar">
-            <button type="button" class="btn btn-secondary btn-sm" onclick={presetFillAll}>
-              {$t('smartproxy.preset_fill')}
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick={presetClearAll}>
-              {$t('smartproxy.preset_clear')}
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick={presetWorkdays}>
-              {$t('smartproxy.preset_workdays')}
-            </button>
-          </div>
-
-          <p class="hint" style="margin-bottom:8px;">
-            {$t('smartproxy.grid_paint_hint')}
-          </p>
-
-          <!-- 7x24 Grid Container with thin scrollbar -->
-          <div class="grid-scrollbar-container">
-            <div class="schedule-grid-table">
-              <!-- Top Hour Headers -->
-              <div class="grid-row-header">
-                <div class="day-label-sticky header-cell"></div>
-                {#each Array(24) as _, h}
-                  <div class="hour-header-cell">{h.toString().padStart(2, '0')}</div>
-                {/each}
-              </div>
-
-              <!-- Grid Rows per Day -->
-              {#each allDays as d}
-                <div class="grid-row-day">
-                  <div class="day-label-sticky">{dayNames[d]}</div>
-                  {#each Array(24) as _, h}
-                    {@const isCellActive = formSchedule[d][h]}
-                    <div
-                      class="grid-cell"
-                      class:active={isCellActive}
-                      onmousedown={(e) => {
-                        e.preventDefault();
-                        handleCellMouseDown(d, h);
-                      }}
-                      onmouseenter={() => handleCellMouseEnter(d, h)}
-                      role="presentation"
-                    ></div>
-                  {/each}
-                </div>
+          <!-- Grid Rows per Day -->
+          {#each allDays as d}
+            <div class="grid-row-day">
+              <div class="day-label-sticky">{dayNames[d]}</div>
+              {#each Array(24) as _, h}
+                {@const isCellActive = formSchedule[d][h]}
+                <div
+                  class="grid-cell"
+                  class:active={isCellActive}
+                  onmousedown={(e) => {
+                    e.preventDefault();
+                    handleCellMouseDown(d, h);
+                  }}
+                  onmouseenter={() => handleCellMouseEnter(d, h)}
+                  role="presentation"
+                ></div>
               {/each}
             </div>
-          </div>
-        {/if}
+          {/each}
+        </div>
       </div>
+    {/if}
+  </div>
 
-      <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
-        {#if currentStep > 1}
-          <button class="btn btn-secondary" onclick={prevStep} style="margin-right:auto;">
-            {$t('app.back')}
-          </button>
-        {/if}
-        <button class="btn btn-secondary" onclick={cancelEdit}>{$t('app.cancel')}</button>
-        {#if currentStep < 3}
-          <button
-            class="btn btn-primary"
-            onclick={nextStep}
-            disabled={currentStep === 2 && (!formGroupName || !formProxyName)}
-          >
-            {$t('app.continue')}
-          </button>
-        {:else}
-          <button class="btn btn-primary" onclick={saveProfile}>
-            {$t('app.save')}
-          </button>
-        {/if}
-      </div>
+  <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
+    {#if currentStep > 1}
+      <button class="btn btn-secondary" onclick={prevStep} style="margin-right:auto;">
+        {$t('app.back')}
+      </button>
+    {/if}
+    <button class="btn btn-secondary" onclick={cancelEdit}>{$t('app.cancel')}</button>
+    {#if currentStep < 3}
+      <button
+        class="btn btn-primary"
+        onclick={nextStep}
+        disabled={currentStep === 2 && (!formGroupName || !formProxyName)}
+      >
+        {$t('app.continue')}
+      </button>
+    {:else}
+      <button class="btn btn-primary" onclick={saveProfile}>
+        {$t('app.save')}
+      </button>
+    {/if}
+  </div>
 </Modal>
 
 <style>
@@ -899,8 +898,6 @@
   .dropdown-menu button.delete-action:hover {
     background: rgba(235, 94, 85, 0.1);
   }
-
-
 
   /* Wizard Step indicators styling */
   .wizard-steps-bar {

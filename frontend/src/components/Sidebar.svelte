@@ -96,9 +96,7 @@
   // Single source of truth for "does this nav item/group belong to the Mihomo
   // kernel" gating — hoisted so the group-level and item-level checks can
   // never drift apart (WR-01 / IN-05).
-  const showMihomoNav = $derived(
-    $capabilities === null || $capabilities.active_kernel !== 'xray'
-  );
+  const showMihomoNav = $derived($capabilities === null || $capabilities.active_kernel !== 'xray');
 
   // Same hoist for the "Mihomo API unreachable" nav-item badge (72-REVIEW WR-05)
   // — was copy-pasted verbatim at 3 call sites, risking condition drift.
@@ -524,7 +522,11 @@
   <button
     class="nav-item"
     onclick={onToggleTheme}
-    title={$isSidebarCollapsed ? undefined : theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
+    title={$isSidebarCollapsed
+      ? undefined
+      : theme === 'dark'
+        ? $t('nav.theme_light')
+        : $t('nav.theme_dark')}
     data-label={theme === 'dark' ? $t('nav.theme_light') : $t('nav.theme_dark')}
   >
     <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />

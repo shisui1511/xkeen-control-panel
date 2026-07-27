@@ -47,15 +47,8 @@
     <!-- Список бэкапов слева -->
     <div class="drawer-sidebar">
       {#each backups as backup}
-        <div
-          class="backup-item"
-          class:active={selectedBackup === backup}
-        >
-          <button
-            type="button"
-            class="backup-select-btn"
-            onclick={() => onSelectBackup(backup)}
-          >
+        <div class="backup-item" class:active={selectedBackup === backup}>
+          <button type="button" class="backup-select-btn" onclick={() => onSelectBackup(backup)}>
             <span class="backup-time">{formatBackupDate(backup)}</span>
           </button>
           <button

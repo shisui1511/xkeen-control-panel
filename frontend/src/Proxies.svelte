@@ -1698,10 +1698,7 @@
                     {@const proxy = proxies[proxyName]}
                     {@const flag = getCountryFlag(proxyName)}
 
-                    <div
-                      class="proxy-card"
-                      class:now={isActive}
-                    >
+                    <div class="proxy-card" class:now={isActive}>
                       <button
                         type="button"
                         class="proxy-select-btn"
@@ -1739,9 +1736,8 @@
                           title={$t('proxies.test_single')}
                         >
                           {#if testingProxy === proxyName}
-                            <span
-                              class="spinner"
-                              style="font-size: 10px; font-family: monospace;">...</span
+                            <span class="spinner" style="font-size: 10px; font-family: monospace;"
+                              >...</span
                             >
                           {:else}
                             <svg

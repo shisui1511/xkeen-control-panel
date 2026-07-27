@@ -2231,8 +2231,14 @@
                 </div>
               {/if}
               <div class="form-row">
-                <label class="form-label" for="mihomo-dns-enhanced-mode">{ru ? 'Режим' : 'Enhanced mode'}</label>
-                <select id="mihomo-dns-enhanced-mode" class="form-select" bind:value={dns.enhancedMode}>
+                <label class="form-label" for="mihomo-dns-enhanced-mode"
+                  >{ru ? 'Режим' : 'Enhanced mode'}</label
+                >
+                <select
+                  id="mihomo-dns-enhanced-mode"
+                  class="form-select"
+                  bind:value={dns.enhancedMode}
+                >
                   <option value="fake-ip">fake-ip</option>
                   <option value="redir-host">redir-host</option>
                 </select>
@@ -2240,7 +2246,11 @@
               {#if dns.enhancedMode === 'fake-ip'}
                 <div class="form-row">
                   <label class="form-label" for="mihomo-dns-fakeip-range">Fake-IP Range</label>
-                  <input id="mihomo-dns-fakeip-range" class="form-input" bind:value={dns.fakeIPRange} />
+                  <input
+                    id="mihomo-dns-fakeip-range"
+                    class="form-input"
+                    bind:value={dns.fakeIPRange}
+                  />
                 </div>
               {/if}
               <div class="form-row">
@@ -2477,9 +2487,7 @@
 >
   <p>{$t('editor.apply_confirm_body')}</p>
   <div class="changed-files-list" style="margin-top: 12px;">
-    <strong
-      >{ru ? 'Будут обновлены секции в файле:' : 'Sections to be updated in file:'}</strong
-    >
+    <strong>{ru ? 'Будут обновлены секции в файле:' : 'Sections to be updated in file:'}</strong>
     <div style="margin: 8px 0; font-family: monospace; font-size: 13px;">
       <code>{selectedFile || '/opt/etc/mihomo/config.yaml'}</code>
     </div>
@@ -2504,17 +2512,10 @@
   </div>
 </Modal>
 
-<Modal
-  isOpen={showImportModal}
-  title={$t('subscr.import_modal_title')}
-  onclose={closeImportModal}
->
+<Modal isOpen={showImportModal} title={$t('subscr.import_modal_title')} onclose={closeImportModal}>
   <div style="display: flex; flex-direction: column; gap: 16px;">
     {#if importErrorMsg}
-      <div
-        class="error-msg"
-        style="color: var(--danger); margin-bottom: 12px; font-size: 13px;"
-      >
+      <div class="error-msg" style="color: var(--danger); margin-bottom: 12px; font-size: 13px;">
         {importErrorMsg}
       </div>
     {/if}

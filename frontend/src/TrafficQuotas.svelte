@@ -685,113 +685,111 @@
   onclose={cancelEdit}
 >
   <div style="display: flex; flex-direction: column; gap: 16px;">
-        <div class="form-group">
-          <label for="form-name" class="form-label">{$t('trafficquotas.name')}</label>
-          <input
-            id="form-name"
-            type="text"
-            class="input"
-            bind:value={formName}
-            placeholder={$t('trafficquotas.name_placeholder')}
-          />
-        </div>
+    <div class="form-group">
+      <label for="form-name" class="form-label">{$t('trafficquotas.name')}</label>
+      <input
+        id="form-name"
+        type="text"
+        class="input"
+        bind:value={formName}
+        placeholder={$t('trafficquotas.name_placeholder')}
+      />
+    </div>
 
-        <div class="form-group">
-          <label for="form-type" class="form-label">{$t('trafficquotas.target_type')}</label>
-          <select id="form-type" class="input" bind:value={formTargetType}>
-            <option value="global">{$t('trafficquotas.target_global')}</option>
-            <option value="proxy">{$t('trafficquotas.target_proxy')}</option>
-          </select>
-        </div>
+    <div class="form-group">
+      <label for="form-type" class="form-label">{$t('trafficquotas.target_type')}</label>
+      <select id="form-type" class="input" bind:value={formTargetType}>
+        <option value="global">{$t('trafficquotas.target_global')}</option>
+        <option value="proxy">{$t('trafficquotas.target_proxy')}</option>
+      </select>
+    </div>
 
-        {#if formTargetType === 'proxy'}
-          <div class="form-group">
-            <label for="form-target" class="form-label">{$t('trafficquotas.proxy_name')}</label>
-            <input
-              id="form-target"
-              type="text"
-              class="input"
-              bind:value={formTargetID}
-              placeholder="HK-1"
-            />
-          </div>
-        {/if}
-
-        <div class="form-row-grid">
-          <div class="form-group">
-            <label for="form-limit" class="form-label">{$t('trafficquotas.limit')}</label>
-            <input
-              id="form-limit"
-              type="number"
-              class="input"
-              bind:value={formLimitValue}
-              min="0.1"
-              step="0.1"
-            />
-          </div>
-          <div class="form-group">
-            <label for="form-unit" class="form-label">{$t('trafficquotas.unit')}</label>
-            <select id="form-unit" class="input" bind:value={formLimitUnit}>
-              {#each units as u}
-                <option value={u.value}>{u.value}</option>
-              {/each}
-            </select>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="form-period" class="form-label">{$t('trafficquotas.period')}</label>
-          <select id="form-period" class="input" bind:value={formPeriod}>
-            {#each periods as p}
-              <option value={p.value}>{p.label}</option>
-            {/each}
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="form-threshold" class="form-label"
-            >{$t('trafficquotas.alert_threshold')} (%)</label
-          >
-          <input
-            id="form-threshold"
-            type="number"
-            class="input"
-            bind:value={formAlertThreshold}
-            min="1"
-            max="100"
-          />
-        </div>
-
-        <div class="form-group">
-          <label for="form-action" class="form-label">{$t('trafficquotas.action')}</label>
-          <select id="form-action" class="input" bind:value={formAction}>
-            <option value="notify">{$t('trafficquotas.action_notify')}</option>
-            <option value="throttle" disabled
-              >{$t('trafficquotas.action_throttle')} ({$t(
-                'trafficquotas.action_unsupported'
-              )})</option
-            >
-            <option value="log_only">{$t('trafficquotas.action_log_only')}</option>
-            <option value="block">{$t('trafficquotas.action_block')}</option>
-            <option value="redirect_direct">{$t('trafficquotas.action_redirect_direct')}</option>
-          </select>
-        </div>
-
-        <div class="form-group-checkbox">
-          <label class="toggle-switch">
-            <input type="checkbox" id="form-enabled" bind:checked={formEnabled} />
-            <span class="toggle-slider"></span>
-          </label>
-          <label for="form-enabled" class="checkbox-label">
-            {$t('trafficquotas.status_enabled')}
-          </label>
-        </div>
+    {#if formTargetType === 'proxy'}
+      <div class="form-group">
+        <label for="form-target" class="form-label">{$t('trafficquotas.proxy_name')}</label>
+        <input
+          id="form-target"
+          type="text"
+          class="input"
+          bind:value={formTargetID}
+          placeholder="HK-1"
+        />
       </div>
-      <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
-        <button class="btn btn-secondary" onclick={cancelEdit}>{$t('app.cancel')}</button>
-        <button class="btn btn-primary" onclick={saveQuota}>{$t('app.save')}</button>
+    {/if}
+
+    <div class="form-row-grid">
+      <div class="form-group">
+        <label for="form-limit" class="form-label">{$t('trafficquotas.limit')}</label>
+        <input
+          id="form-limit"
+          type="number"
+          class="input"
+          bind:value={formLimitValue}
+          min="0.1"
+          step="0.1"
+        />
       </div>
-  </Modal>
+      <div class="form-group">
+        <label for="form-unit" class="form-label">{$t('trafficquotas.unit')}</label>
+        <select id="form-unit" class="input" bind:value={formLimitUnit}>
+          {#each units as u}
+            <option value={u.value}>{u.value}</option>
+          {/each}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label for="form-period" class="form-label">{$t('trafficquotas.period')}</label>
+      <select id="form-period" class="input" bind:value={formPeriod}>
+        {#each periods as p}
+          <option value={p.value}>{p.label}</option>
+        {/each}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="form-threshold" class="form-label"
+        >{$t('trafficquotas.alert_threshold')} (%)</label
+      >
+      <input
+        id="form-threshold"
+        type="number"
+        class="input"
+        bind:value={formAlertThreshold}
+        min="1"
+        max="100"
+      />
+    </div>
+
+    <div class="form-group">
+      <label for="form-action" class="form-label">{$t('trafficquotas.action')}</label>
+      <select id="form-action" class="input" bind:value={formAction}>
+        <option value="notify">{$t('trafficquotas.action_notify')}</option>
+        <option value="throttle" disabled
+          >{$t('trafficquotas.action_throttle')} ({$t('trafficquotas.action_unsupported')})</option
+        >
+        <option value="log_only">{$t('trafficquotas.action_log_only')}</option>
+        <option value="block">{$t('trafficquotas.action_block')}</option>
+        <option value="redirect_direct">{$t('trafficquotas.action_redirect_direct')}</option>
+      </select>
+    </div>
+
+    <div class="form-group-checkbox">
+      <label class="toggle-switch">
+        <input type="checkbox" id="form-enabled" bind:checked={formEnabled} />
+        <span class="toggle-slider"></span>
+      </label>
+      <label for="form-enabled" class="checkbox-label">
+        {$t('trafficquotas.status_enabled')}
+      </label>
+    </div>
+  </div>
+  <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
+    <button class="btn btn-secondary" onclick={cancelEdit}>{$t('app.cancel')}</button>
+    <button class="btn btn-primary" onclick={saveQuota}>{$t('app.save')}</button>
+  </div>
+</Modal>
 
 <style>
   .crumb-separator {
@@ -992,8 +990,6 @@
     grid-template-columns: 1fr 1fr;
     gap: 16px;
   }
-
-
 
   .form-group-checkbox {
     display: flex;

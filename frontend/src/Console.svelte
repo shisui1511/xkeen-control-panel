@@ -266,11 +266,7 @@
   </div>
 </div>
 
-<Modal
-  isOpen={!!confirmPending}
-  title={$t('console.confirm_title')}
-  onclose={cancelConfirm}
->
+<Modal isOpen={!!confirmPending} title={$t('console.confirm_title')} onclose={cancelConfirm}>
   {#if confirmPending}
     <p style="margin: 0; line-height: 1.5; color: var(--fg-secondary);">
       {$t('console.confirm_desc', { name: 'xkeen ' + confirmPending.command })}
@@ -471,8 +467,6 @@
   .history-status.error-text {
     color: var(--danger);
   }
-
-
 
   @media (max-width: 768px) {
     .console-grid {

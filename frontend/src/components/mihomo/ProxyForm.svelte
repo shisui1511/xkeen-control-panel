@@ -33,11 +33,23 @@
   <div class="form-row2">
     <div class="form-col">
       <label class="form-label" for="proxy-server">{ru ? 'Сервер' : 'Server'}</label>
-      <input id="proxy-server" class="form-input" bind:value={np.server} placeholder="example.com" />
+      <input
+        id="proxy-server"
+        class="form-input"
+        bind:value={np.server}
+        placeholder="example.com"
+      />
     </div>
     <div class="form-col form-col-sm">
       <label class="form-label" for="proxy-port">{ru ? 'Порт' : 'Port'}</label>
-      <input id="proxy-port" class="form-input" type="number" bind:value={np.port} min="1" max="65535" />
+      <input
+        id="proxy-port"
+        class="form-input"
+        type="number"
+        bind:value={np.port}
+        min="1"
+        max="65535"
+      />
     </div>
   </div>
 
@@ -53,26 +65,51 @@
     </div>
     <div class="form-row">
       <label class="form-label" for="proxy-vless-public-key">Reality Public Key</label>
-      <input id="proxy-vless-public-key" class="form-input" bind:value={np.publicKey} placeholder="public-key" />
+      <input
+        id="proxy-vless-public-key"
+        class="form-input"
+        bind:value={np.publicKey}
+        placeholder="public-key"
+      />
     </div>
     <div class="form-row2">
       <div class="form-col">
         <label class="form-label" for="proxy-vless-short-id">Short ID</label>
-        <input id="proxy-vless-short-id" class="form-input" bind:value={np.shortId} placeholder="short-id" />
+        <input
+          id="proxy-vless-short-id"
+          class="form-input"
+          bind:value={np.shortId}
+          placeholder="short-id"
+        />
       </div>
       <div class="form-col">
         <label class="form-label" for="proxy-vless-sni">SNI</label>
-        <input id="proxy-vless-sni" class="form-input" bind:value={np.servername} placeholder="www.apple.com" />
+        <input
+          id="proxy-vless-sni"
+          class="form-input"
+          bind:value={np.servername}
+          placeholder="www.apple.com"
+        />
       </div>
     </div>
   {:else if np.type === 'hysteria2'}
     <div class="form-row">
       <label class="form-label" for="proxy-hysteria2-password">{ru ? 'Пароль' : 'Password'}</label>
-      <input id="proxy-hysteria2-password" class="form-input" bind:value={np.password} placeholder="password" />
+      <input
+        id="proxy-hysteria2-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
     <div class="form-row">
       <label class="form-label" for="proxy-hysteria2-sni">SNI</label>
-      <input id="proxy-hysteria2-sni" class="form-input" bind:value={np.sni} placeholder="example.com" />
+      <input
+        id="proxy-hysteria2-sni"
+        class="form-input"
+        bind:value={np.sni}
+        placeholder="example.com"
+      />
     </div>
     <div class="form-row">
       <label class="form-label" for="proxy-hysteria2-obfs-type">{$t('editor.obfsType')}</label>
@@ -83,8 +120,15 @@
     </div>
     {#if np.obfsType === 'simple'}
       <div class="form-row">
-        <label class="form-label" for="proxy-hysteria2-obfs-password">{$t('editor.obfsPassword')}</label>
-        <input id="proxy-hysteria2-obfs-password" class="form-input" bind:value={np.obfsPassword} placeholder="obfs password" />
+        <label class="form-label" for="proxy-hysteria2-obfs-password"
+          >{$t('editor.obfsPassword')}</label
+        >
+        <input
+          id="proxy-hysteria2-obfs-password"
+          class="form-input"
+          bind:value={np.obfsPassword}
+          placeholder="obfs password"
+        />
       </div>
     {/if}
     <div class="form-row">
@@ -108,7 +152,12 @@
     </div>
     <div class="form-row">
       <label class="form-label" for="proxy-tuic-password">{ru ? 'Пароль' : 'Password'}</label>
-      <input id="proxy-tuic-password" class="form-input" bind:value={np.password} placeholder="password" />
+      <input
+        id="proxy-tuic-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
     <div class="form-row">
       <label class="form-label" for="proxy-tuic-sni">SNI</label>
@@ -123,7 +172,12 @@
     </div>
     <div class="form-row">
       <label class="form-label" for="proxy-ss-password">{ru ? 'Пароль' : 'Password'}</label>
-      <input id="proxy-ss-password" class="form-input" bind:value={np.password} placeholder="password" />
+      <input
+        id="proxy-ss-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
   {:else if np.type === 'vmess'}
     <div class="form-row">
@@ -158,17 +212,32 @@
     {#if np.tls}
       <div class="form-row">
         <label class="form-label" for="proxy-vmess-sni">SNI</label>
-        <input id="proxy-vmess-sni" class="form-input" bind:value={np.sni} placeholder="example.com" />
+        <input
+          id="proxy-vmess-sni"
+          class="form-input"
+          bind:value={np.sni}
+          placeholder="example.com"
+        />
       </div>
     {/if}
   {:else if np.type === 'trojan'}
     <div class="form-row">
       <label class="form-label" for="proxy-trojan-password">{ru ? 'Пароль' : 'Password'}</label>
-      <input id="proxy-trojan-password" class="form-input" bind:value={np.password} placeholder="password" />
+      <input
+        id="proxy-trojan-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
     <div class="form-row">
       <label class="form-label" for="proxy-trojan-sni">SNI</label>
-      <input id="proxy-trojan-sni" class="form-input" bind:value={np.sni} placeholder="example.com" />
+      <input
+        id="proxy-trojan-sni"
+        class="form-input"
+        bind:value={np.sni}
+        placeholder="example.com"
+      />
     </div>
     <div class="form-row2">
       <div class="form-col">
@@ -182,7 +251,12 @@
     {#if np.network === 'ws'}
       <div class="form-row">
         <label class="form-label" for="proxy-trojan-ws-path">WS Path</label>
-        <input id="proxy-trojan-ws-path" class="form-input" bind:value={np.wsPath} placeholder="/" />
+        <input
+          id="proxy-trojan-ws-path"
+          class="form-input"
+          bind:value={np.wsPath}
+          placeholder="/"
+        />
       </div>
     {/if}
     <div class="form-row">
@@ -199,22 +273,46 @@
       <label class="form-label" for="proxy-socks-username"
         >{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label
       >
-      <input id="proxy-socks-username" class="form-input" bind:value={np.username} placeholder="username" />
+      <input
+        id="proxy-socks-username"
+        class="form-input"
+        bind:value={np.username}
+        placeholder="username"
+      />
     </div>
     <div class="form-row">
-      <label class="form-label" for="proxy-socks-password">{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label>
-      <input id="proxy-socks-password" class="form-input" bind:value={np.password} placeholder="password" />
+      <label class="form-label" for="proxy-socks-password"
+        >{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label
+      >
+      <input
+        id="proxy-socks-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
   {:else if np.type === 'http'}
     <div class="form-row">
       <label class="form-label" for="proxy-http-username"
         >{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label
       >
-      <input id="proxy-http-username" class="form-input" bind:value={np.username} placeholder="username" />
+      <input
+        id="proxy-http-username"
+        class="form-input"
+        bind:value={np.username}
+        placeholder="username"
+      />
     </div>
     <div class="form-row">
-      <label class="form-label" for="proxy-http-password">{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label>
-      <input id="proxy-http-password" class="form-input" bind:value={np.password} placeholder="password" />
+      <label class="form-label" for="proxy-http-password"
+        >{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label
+      >
+      <input
+        id="proxy-http-password"
+        class="form-input"
+        bind:value={np.password}
+        placeholder="password"
+      />
     </div>
     <div class="form-row">
       <label

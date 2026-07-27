@@ -94,7 +94,9 @@
   {/if}
   {#if ng.type === 'load-balance'}
     <div class="form-row">
-      <label class="form-label" for="group-strategy">{ru ? 'Стратегия балансировки' : 'Load-balance strategy'}</label>
+      <label class="form-label" for="group-strategy"
+        >{ru ? 'Стратегия балансировки' : 'Load-balance strategy'}</label
+      >
       <select id="group-strategy" class="form-select" bind:value={ng.strategy}>
         <option value={undefined}>-- {ru ? 'выберите стратегию' : 'select strategy'} --</option>
         <option value="round-robin">round-robin</option>
@@ -125,7 +127,12 @@
           >
         </span>
       {/each}
-      <select id="group-proxies" class="form-select-inline" bind:value={ngProxyInput} onchange={addGroupProxy}>
+      <select
+        id="group-proxies"
+        class="form-select-inline"
+        bind:value={ngProxyInput}
+        onchange={addGroupProxy}
+      >
         <option value="">+ {ru ? 'добавить' : 'add'}...</option>
         {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
       </select>
@@ -138,7 +145,8 @@
         <input id="group-url" class="form-input" bind:value={ng.url} />
       </div>
       <div class="form-col form-col-sm">
-        <label class="form-label" for="group-interval">{ru ? 'Интервал (с)' : 'Interval (s)'}</label>
+        <label class="form-label" for="group-interval">{ru ? 'Интервал (с)' : 'Interval (s)'}</label
+        >
         <input id="group-interval" class="form-input" type="number" bind:value={ng.interval} />
       </div>
     </div>

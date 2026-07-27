@@ -655,7 +655,12 @@
   </div>
 
   <!-- Main content area -->
-  <div class="main-content" class:editor-active={currentTab === 'editor'} class:rail={$isSidebarCollapsed} inert={drawerIsModal}>
+  <div
+    class="main-content"
+    class:editor-active={currentTab === 'editor'}
+    class:rail={$isSidebarCollapsed}
+    inert={drawerIsModal}
+  >
     <!-- Mihomo offline warning banner -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
       <div style="margin: 12px 16px 0;">
@@ -1237,11 +1242,7 @@
         <div style="margin-bottom: 8px;">
           <Card title={$t('dash.quick_actions')}>
             <div class="qa-grid-mini">
-              <button
-                type="button"
-                class="qa-mini"
-                onclick={() => switchTab('proxies')}
-              >
+              <button type="button" class="qa-mini" onclick={() => switchTab('proxies')}>
                 <span class="qa-mini-ico"><Icon name="proxies" size={18} /></span>
                 <span
                   ><b>{$t('nav.proxies')}</b><span class="s"
@@ -1273,40 +1274,27 @@
                   ></span
                 >
               </button>
-              <button
-                type="button"
-                class="qa-mini"
-                onclick={() => switchTab('editor')}
-              >
+              <button type="button" class="qa-mini" onclick={() => switchTab('editor')}>
                 <span class="qa-mini-ico"><Icon name="editor" size={18} /></span>
                 <span
                   ><b>{$t('nav.editor')}</b><span class="s">{$t('dash.editor_subtitle')}</span
                   ></span
                 >
               </button>
-              <button
-                type="button"
-                class="qa-mini"
-                onclick={() => switchTab('logs')}
-              >
+              <button type="button" class="qa-mini" onclick={() => switchTab('logs')}>
                 <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
-                <span><b>{$t('nav.logs')}</b><span class="s">{$t('dash.logs_subtitle')}</span></span>
+                <span><b>{$t('nav.logs')}</b><span class="s">{$t('dash.logs_subtitle')}</span></span
+                >
               </button>
-              <button
-                type="button"
-                class="qa-mini"
-                onclick={() => switchTab('dat')}
-              >
+              <button type="button" class="qa-mini" onclick={() => switchTab('dat')}>
                 <span class="qa-mini-ico"><Icon name="dat" size={18} /></span>
                 <span><b>{$t('nav.dat')}</b><span class="s">{$t('dash.dat_subtitle')}</span></span>
               </button>
-              <button
-                type="button"
-                class="qa-mini"
-                onclick={() => switchTab('console')}
-              >
+              <button type="button" class="qa-mini" onclick={() => switchTab('console')}>
                 <span class="qa-mini-ico"><Icon name="console" size={18} /></span>
-                <span><b>{$t('nav.console')}</b><span class="s">{$t('dash.console_subtitle')}</span></span
+                <span
+                  ><b>{$t('nav.console')}</b><span class="s">{$t('dash.console_subtitle')}</span
+                  ></span
                 >
               </button>
             </div>
