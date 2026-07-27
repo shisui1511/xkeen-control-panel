@@ -247,7 +247,11 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     });
 
     await page.goto('/#/proxies');
-    await page.waitForSelector('.group-grid, .page-head', { timeout: 10000 });
+    // .page-head is a generic class also rendered on Dashboard's own default
+    // view (briefly active before the hash-based tab switch completes), so
+    // waiting on it as an OR-fallback here raced against that transition and
+    // resolved too early. .group-grid is unique to the Proxies page.
+    await page.waitForSelector('.group-grid', { timeout: 10000 });
   });
 
   test('Grid Layout - nodes rendered in 5 columns grid', async ({ page }) => {
@@ -405,8 +409,14 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
   });
 
   test('Provider CRUD and Merge - tab switching and subscription actions', async ({ page }) => {
-    const groupsTab = page.locator('button:has-text("Группы")');
-    const providersTab = page.locator('button:has-text("Провайдеры")');
+    // Scoped to .tabs-container: a bare `button:has-text(...)` also matches the
+    // Dashboard qa-mini quick-action button (accessible name "Прокси Mihomo
+    // узлы и группы" contains the substring "Группы"), which can still be
+    // fading out in the DOM during the 150ms transition:fade cross-fade when
+    // this test's beforeEach lands right after the #/proxies tab switch.
+    const tabsContainer = page.locator('.tabs-container');
+    const groupsTab = tabsContainer.locator('button:has-text("Группы")');
+    const providersTab = tabsContainer.locator('button:has-text("Провайдеры")');
 
     await expect(groupsTab).toBeVisible();
     await expect(providersTab).toBeVisible();
