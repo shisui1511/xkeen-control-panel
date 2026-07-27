@@ -179,7 +179,7 @@ test.describe('Traffic Quotas page test suite', () => {
     const addBtn = page.locator('button:has-text("Добавить лимит")');
     await addBtn.click();
 
-    const modal = page.locator('.modal-card');
+    const modal = page.locator('.modal-container');
     await expect(modal).toBeVisible();
 
     await page.fill('#form-name', 'New Proxy Limit');

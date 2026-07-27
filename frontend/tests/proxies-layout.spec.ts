@@ -297,7 +297,7 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     expect(putRequest.name).toBe('proxy-02');
   });
 
-  // D-08: Compact padding — .proxy-card имеет padding-top: 10px
+  // D-08: Compact padding — .proxy-select-btn (содержимое .proxy-card) имеет padding-top: 10px
   test('D-08: .proxy-card имеет padding-top 10px', async ({ page }) => {
     const largeGroup = page.locator('.group-card').filter({ hasText: 'LargeGroup' }).first();
 
@@ -305,9 +305,11 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     await largeGroup.locator('.gc-head').first().click();
     await expect(largeGroup.locator('.proxy-card')).toHaveCount(12);
 
-    // Получаем computed style первой карточки прокси
+    // Padding теперь на .proxy-select-btn: .proxy-card — не-интерактивная обёртка
+    // (padding: 0) с двумя дочерними кнопками (select + latency-test), а
+    // сама компактная отбивка контента задана на кнопке выбора прокси.
     const paddingTop = await largeGroup
-      .locator('.proxy-card')
+      .locator('.proxy-card .proxy-select-btn')
       .first()
       .evaluate((el: Element) => {
         return window.getComputedStyle(el).paddingTop;

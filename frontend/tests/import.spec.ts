@@ -146,7 +146,7 @@ test.describe('Import Proxy Node E2E test suite', () => {
     await importBtn.click();
 
     // 2. Modal opens, step 1
-    const modal = page.locator('.modal-card');
+    const modal = page.locator('.modal-container');
     await expect(modal).toBeVisible();
     await expect(modal.locator('h2')).toContainText('Импорт прокси-узла');
 
@@ -190,7 +190,7 @@ test.describe('Import Proxy Node E2E test suite', () => {
     const importBtn = page.locator('button:has-text("Импорт узла")');
     await importBtn.click();
 
-    const modal = page.locator('.modal-card');
+    const modal = page.locator('.modal-container');
     await modal.locator('textarea').fill('invalid-link-format');
     await modal.locator('button:has-text("Распознать")').click();
 
@@ -204,7 +204,7 @@ test.describe('Import Proxy Node E2E test suite', () => {
     const importBtn = page.locator('button:has-text("Импорт узла")');
     await importBtn.click();
 
-    const modal = page.locator('.modal-card');
+    const modal = page.locator('.modal-container');
     await modal.locator('textarea').fill('vless://error-import#tag');
     await modal.locator('button:has-text("Распознать")').click();
 
@@ -222,7 +222,7 @@ test.describe('Import Proxy Node E2E test suite', () => {
     const importBtn = page.locator('button:has-text("Импорт узла")');
     await importBtn.click();
 
-    const modal = page.locator('.modal-card');
+    const modal = page.locator('.modal-container');
     await modal.locator('textarea').fill('vless://link1#tag1\nvless://link2#tag2');
     await modal.locator('button:has-text("Распознать")').click();
 
@@ -285,7 +285,7 @@ test.describe('Import Node из конструкторов (D-15, D-16, D-17)', 
     });
 
     await page.locator('button:has-text("Импорт узла")').click();
-    const modal = page.locator('.modal-card');
+    const modal = page.locator('.modal-container');
     await modal.locator('textarea').fill('vless://test-link#tag');
     await modal.locator('button:has-text("Распознать")').click();
     await expect(modal.locator('.preview-section')).toBeVisible();
