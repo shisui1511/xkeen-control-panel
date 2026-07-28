@@ -146,6 +146,11 @@ jobs:
           cd frontend
           npm run build
 
+      - name: Check bundle size budget (<=200 KB gzip)
+        run: |
+          cd frontend
+          npm run check:bundle-size
+
       - name: Report bundle size
         uses: preactjs/compressed-size-action@v3
         with:

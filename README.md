@@ -7,7 +7,7 @@
 Веб-панель для управления XKeen на роутерах Keenetic/Netcraze.
 
 - **Go backend** — статический бинарник, 5–10 MB RAM
-- **Svelte 5 frontend** — встроен в бинарник, bundle ~160 KB gzipped
+- **Svelte 5 frontend** — встроен в бинарник, первый экран ~43 KB gzip JS (вкладки грузятся лениво)
 - **ARM64 + MIPSLE + MIPS** — поддержка всех Keenetic с Entware
 - **Smart Proxy** — автоматическое переключение прокси по расписанию и задержке
 - **Traffic Quotas** — учёт трафика и гибкие лимиты на прокси
