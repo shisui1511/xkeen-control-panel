@@ -17,19 +17,6 @@
   import Button from './components/Button.svelte';
   import Icon from './lib/components/Icon.svelte';
   import Skeleton from './components/Skeleton.svelte';
-  import Editor from './Editor.svelte';
-  import Services from './Services.svelte';
-  import Settings from './Settings.svelte';
-  import Proxies from './Proxies.svelte';
-  import Connections from './Connections.svelte';
-  import Rules from './Rules.svelte';
-  import Traffic from './Traffic.svelte';
-  import NetworkTools from './NetworkTools.svelte';
-  import SmartProxy from './SmartProxy.svelte';
-  import TrafficQuotas from './TrafficQuotas.svelte';
-  import DATManager from './DATManager.svelte';
-  import MihomoGenerator from './MihomoGenerator.svelte';
-  import Console from './Console.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
 
   let version = $state($t('app.loading'));
@@ -619,8 +606,8 @@
 
     // Production builds wrap every `import()` in Vite's own preload helper,
     // which does not reliably surface the failure to the `{:catch}` branch
-    // of `{#await import(...)}` (the promise rejection observed by Svelte's
-    // await block can be swallowed by the preload machinery). Vite's own
+    // of a lazy-chunk `{#await}` block (the promise rejection observed by
+    // Svelte's await block can be swallowed by the preload machinery). Vite's own
     // documented mechanism for lazy-chunk load failures is this global event;
     // `preventDefault()` stops it from becoming an uncaught window error, and
     // we route it through the same `reportChunkError` toast+retry pipeline.
@@ -1354,12 +1341,18 @@
           </div>
         </div>
       {:else if currentTab === 'editor'}
-        <div
-          style="flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100%;"
-          transition:fade={{ duration: 150 }}
-        >
-          <Editor onSwitchTab={switchTab} />
-        </div>
+        {#await import('./Editor.svelte')}
+          <Skeleton type="card" height="100%" />
+        {:then { default: Editor }}
+          <div
+            style="flex: 1; display: flex; flex-direction: column; min-height: 0; height: 100%;"
+            transition:fade={{ duration: 150 }}
+          >
+            <Editor onSwitchTab={switchTab} />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'logs'}
         {#await import('./Logs.svelte')}
           <Skeleton type="card" height="60vh" />
@@ -1371,53 +1364,125 @@
           {@const _ = queueMicrotask(() => reportChunkError(err))}
         {/await}
       {:else if currentTab === 'proxies'}
-        <div transition:fade={{ duration: 150 }}>
-          <Proxies />
-        </div>
+        {#await import('./Proxies.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: Proxies }}
+          <div transition:fade={{ duration: 150 }}>
+            <Proxies />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'connections'}
-        <div transition:fade={{ duration: 150 }}>
-          <Connections />
-        </div>
+        {#await import('./Connections.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: Connections }}
+          <div transition:fade={{ duration: 150 }}>
+            <Connections />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'rules'}
-        <div transition:fade={{ duration: 150 }}>
-          <Rules />
-        </div>
+        {#await import('./Rules.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: Rules }}
+          <div transition:fade={{ duration: 150 }}>
+            <Rules />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'traffic'}
-        <div transition:fade={{ duration: 150 }}>
-          <Traffic />
-        </div>
+        {#await import('./Traffic.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: Traffic }}
+          <div transition:fade={{ duration: 150 }}>
+            <Traffic />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'services'}
-        <div transition:fade={{ duration: 150 }}>
-          <Services onSwitchTab={switchTab} />
-        </div>
+        {#await import('./Services.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: Services }}
+          <div transition:fade={{ duration: 150 }}>
+            <Services onSwitchTab={switchTab} />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'smartproxy'}
-        <div transition:fade={{ duration: 150 }}>
-          <SmartProxy onSwitchTab={switchTab} />
-        </div>
+        {#await import('./SmartProxy.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: SmartProxy }}
+          <div transition:fade={{ duration: 150 }}>
+            <SmartProxy onSwitchTab={switchTab} />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'trafficquotas'}
-        <div transition:fade={{ duration: 150 }}>
-          <TrafficQuotas onSwitchTab={switchTab} />
-        </div>
+        {#await import('./TrafficQuotas.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: TrafficQuotas }}
+          <div transition:fade={{ duration: 150 }}>
+            <TrafficQuotas onSwitchTab={switchTab} />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'dat'}
-        <div transition:fade={{ duration: 150 }}>
-          <DATManager onSwitchTab={switchTab} />
-        </div>
+        {#await import('./DATManager.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: DATManager }}
+          <div transition:fade={{ duration: 150 }}>
+            <DATManager onSwitchTab={switchTab} />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'mihomo-gen'}
-        <div transition:fade={{ duration: 150 }}>
-          <MihomoGenerator onSwitchTab={switchTab} />
-        </div>
+        {#await import('./MihomoGenerator.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: MihomoGenerator }}
+          <div transition:fade={{ duration: 150 }}>
+            <MihomoGenerator onSwitchTab={switchTab} />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'console'}
-        <div transition:fade={{ duration: 150 }}>
-          <Console onSwitchTab={switchTab} />
-        </div>
+        {#await import('./Console.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: Console }}
+          <div transition:fade={{ duration: 150 }}>
+            <Console onSwitchTab={switchTab} />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'network'}
-        <div transition:fade={{ duration: 150 }}>
-          <NetworkTools onSwitchTab={switchTab} />
-        </div>
+        {#await import('./NetworkTools.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: NetworkTools }}
+          <div transition:fade={{ duration: 150 }}>
+            <NetworkTools onSwitchTab={switchTab} />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {:else if currentTab === 'settings'}
-        <div transition:fade={{ duration: 150 }}>
-          <Settings onSwitchTab={switchTab} />
-        </div>
+        {#await import('./Settings.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: Settings }}
+          <div transition:fade={{ duration: 150 }}>
+            <Settings onSwitchTab={switchTab} />
+          </div>
+        {:catch err}
+          {@const _ = queueMicrotask(() => reportChunkError(err))}
+        {/await}
       {/if}
     {/key}
   </div>
