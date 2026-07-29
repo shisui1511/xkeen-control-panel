@@ -7,10 +7,10 @@
   import Icon from './lib/components/Icon.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import EditorIcon from './lib/components/icons/Editor.svelte';
+  import Skeleton from './components/Skeleton.svelte';
   import { EditorState } from '@codemirror/state';
   import { EditorView } from '@codemirror/view';
 
-  import Constructor from './Constructor.svelte';
   import { buildPathAtCursor, type PathSegment } from './lib/editor-utils';
 
   // Subcomponents
@@ -125,6 +125,36 @@
   // Local active tab: 'files' | 'constructor'
   let activeTab = $state<'files' | 'constructor'>('files');
 
+  // Constructor.svelte lazy-chunk boundary (Pitfall 1, RESEARCH.md): without
+  // this, XrayRoutingConstructor.svelte (3 473 lines) rides statically inside
+  // this file's own lazy chunk. `constructorReloadKey` keys the {#key} block
+  // wrapping the {#await import(...)} below; the actual recovery mechanism is
+  // a full reload — see Dashboard.svelte's retryChunkLoad() for the same
+  // reasoning (a failed dynamic import() specifier is permanently cached by
+  // the browser's module map for the document's lifetime).
+  let constructorReloadKey = $state(0);
+  let constructorChunkErrorShown = false;
+
+  function retryConstructorChunkLoad() {
+    constructorChunkErrorShown = false;
+    constructorReloadKey++;
+    window.location.reload();
+  }
+
+  function reportConstructorChunkError(err: unknown): void {
+    console.error('Failed to load Constructor lazy chunk', err);
+    if (constructorChunkErrorShown) return;
+    constructorChunkErrorShown = true;
+    showToast('error', $t('app.chunk_load_failed'), 0, {
+      label: $t('app.retry'),
+      onClick: retryConstructorChunkLoad
+    });
+  }
+
+  function reportConstructorChunkErrorAction(_node: HTMLElement, err: unknown): void {
+    reportConstructorChunkError(err);
+  }
+
   function jumpToSegment(pos: number) {
     if (!editorView) return;
     editorView.focus();
@@ -156,6 +186,7 @@
 
   function setTab(tab: 'files' | 'constructor') {
     activeTab = tab;
+    constructorChunkErrorShown = false;
     if (tab === 'constructor') {
       window.location.hash = '#/constructor';
     } else {
@@ -239,11 +270,11 @@
     try {
       const resXray = await fetch(`/api/config/list?dir=${encodeURIComponent(xrayDir)}`);
       if (resXray.ok) {
-        xrayFiles = (await resXray.ok) ? await resXray.json() : [];
+        xrayFiles = await resXray.json();
       }
       const resMihomo = await fetch(`/api/config/list?dir=${encodeURIComponent(mihomoDir)}`);
       if (resMihomo.ok) {
-        mihomoFiles = (await resMihomo.ok) ? await resMihomo.json() : [];
+        mihomoFiles = await resMihomo.json();
       }
     } catch (e) {
       showToast('error', $t('editor.load_error'));
@@ -352,7 +383,7 @@
     }
   }
 
-  function closeTab(path: string, force = false) {
+  async function closeTab(path: string, force = false) {
     const tabIndex = tabs.findIndex((t) => t.path === path);
     if (tabIndex === -1) return;
 
@@ -360,7 +391,7 @@
 
     if (tabToClose.isDirty && !force) {
       if (activeTabPath !== path) {
-        switchTab(path);
+        await switchTab(path);
       }
       if (!confirmUnsaved()) return;
     }
@@ -934,7 +965,7 @@
 
       showToast('success', $t('app.delete'));
       const fileToDelete = selectedFile;
-      closeTab(fileToDelete, true);
+      await closeTab(fileToDelete, true);
       await loadFiles();
     } catch (e) {
       showToast('error', $t('editor.delete_error') + ': ' + (e as any)?.message);
@@ -1689,15 +1720,30 @@
       {/if}
     </div>
   {:else if activeTab === 'constructor'}
-    <div transition:fade={{ duration: 150 }} style="margin-top: 16px;">
-      <Constructor
-        {onSwitchTab}
-        onInsertIntoEditor={handleInsertIntoEditor}
-        {selectedFile}
-        embedded={true}
-        invalidateCache={activeTab === 'constructor'}
-      />
-    </div>
+    {#key constructorReloadKey}
+      {#await import('./Constructor.svelte')}
+        <Skeleton type="card" height="60vh" />
+      {:then { default: Constructor }}
+        <div transition:fade={{ duration: 150 }} style="margin-top: 16px;">
+          <Constructor
+            {onSwitchTab}
+            onInsertIntoEditor={handleInsertIntoEditor}
+            {selectedFile}
+            embedded={true}
+            invalidateCache={activeTab === 'constructor'}
+          />
+        </div>
+      {:catch err}
+        <div use:reportConstructorChunkErrorAction={err}>
+          <EmptyState
+            title={$t('app.chunk_load_failed')}
+            description=""
+            ctaText={$t('app.retry')}
+            oncta={retryConstructorChunkLoad}
+          />
+        </div>
+      {/await}
+    {/key}
   {/if}
 </div>
 

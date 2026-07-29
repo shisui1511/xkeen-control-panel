@@ -1,8 +1,8 @@
 <script lang="ts">
   import { t } from './i18n';
-  import { capabilities } from './stores';
-  import XrayRoutingConstructor from './XrayRoutingConstructor.svelte';
-  import MihomoGenerator from './MihomoGenerator.svelte';
+  import { capabilities, showToast } from './stores';
+  import Skeleton from './components/Skeleton.svelte';
+  import EmptyState from './components/EmptyState.svelte';
 
   let {
     onSwitchTab = () => {},
@@ -27,6 +27,38 @@
       kernelInitialized = true;
     }
   });
+
+  // Nested lazy boundary for the kernel-specific constructor (Pitfall 1,
+  // RESEARCH.md): XrayRoutingConstructor.svelte (3 473 lines) has no other
+  // import() call site in the app, so Rollup folds it into whichever chunk
+  // statically imports it unless this component gives it its own dynamic
+  // import() — that's what produces a distinct XrayRoutingConstructor-*.js
+  // chunk (MihomoGenerator.svelte already gets a separate shared chunk via
+  // Dashboard.svelte's own 'mihomo-gen' tab; this second import() call site
+  // just resolves to the same de-duped chunk). Same reload-based retry
+  // reasoning as Dashboard.svelte/Editor.svelte.
+  let kernelChunkReloadKey = $state(0);
+  let kernelChunkErrorShown = false;
+
+  function retryKernelChunkLoad() {
+    kernelChunkErrorShown = false;
+    kernelChunkReloadKey++;
+    window.location.reload();
+  }
+
+  function reportKernelChunkError(err: unknown): void {
+    console.error('Failed to load kernel constructor lazy chunk', kernel, err);
+    if (kernelChunkErrorShown) return;
+    kernelChunkErrorShown = true;
+    showToast('error', $t('app.chunk_load_failed'), 0, {
+      label: $t('app.retry'),
+      onClick: retryKernelChunkLoad
+    });
+  }
+
+  function reportKernelChunkErrorAction(_node: HTMLElement, err: unknown): void {
+    reportKernelChunkError(err);
+  }
 </script>
 
 <div class="constructor-wrapper">
@@ -38,6 +70,7 @@
       onclick={() => {
         kernel = 'xray';
         kernelInitialized = true;
+        kernelChunkErrorShown = false;
       }}
     >
       {$t('editor.kernel_xray')}
@@ -49,6 +82,7 @@
       onclick={() => {
         kernel = 'mihomo';
         kernelInitialized = true;
+        kernelChunkErrorShown = false;
       }}
     >
       {$t('editor.kernel_mihomo')}
@@ -56,17 +90,45 @@
   </div>
 
   <div class="constructor-body">
-    {#if kernel === 'xray'}
-      <XrayRoutingConstructor {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} />
-    {:else}
-      <MihomoGenerator
-        {onSwitchTab}
-        {selectedFile}
-        {onInsertIntoEditor}
-        {embedded}
-        {invalidateCache}
-      />
-    {/if}
+    {#key kernelChunkReloadKey}
+      {#if kernel === 'xray'}
+        {#await import('./XrayRoutingConstructor.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: XrayRoutingConstructor }}
+          <XrayRoutingConstructor {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} />
+        {:catch err}
+          <div use:reportKernelChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryKernelChunkLoad}
+            />
+          </div>
+        {/await}
+      {:else}
+        {#await import('./MihomoGenerator.svelte')}
+          <Skeleton type="card" height="60vh" />
+        {:then { default: MihomoGenerator }}
+          <MihomoGenerator
+            {onSwitchTab}
+            {selectedFile}
+            {onInsertIntoEditor}
+            {embedded}
+            {invalidateCache}
+          />
+        {:catch err}
+          <div use:reportKernelChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryKernelChunkLoad}
+            />
+          </div>
+        {/await}
+      {/if}
+    {/key}
   </div>
 </div>
 

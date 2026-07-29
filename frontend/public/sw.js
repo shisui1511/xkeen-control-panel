@@ -1,4 +1,4 @@
-const CACHE_NAME = 'xcp-v1';
+const CACHE_NAME = 'xcp-v__BUILD_VERSION__';
 const STATIC_ASSETS = ['/', '/index.html', '/manifest.json'];
 
 self.addEventListener('install', (event) => {
@@ -22,19 +22,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // API calls: network-first
+  // API calls: always go to the network and are never cached — a stale
+  // kernel/proxy status served from Cache Storage would look "current" to
+  // the user, which is worse than an empty state.
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          if (response.ok && event.request.method === 'GET') {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          }
-          return response;
-        })
-        .catch(() => caches.match(event.request))
-    );
+    event.respondWith(fetch(event.request));
     return;
   }
 
@@ -55,7 +47,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          if (response.ok) {
+          if (response.ok && event.request.method === 'GET') {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, clone);
@@ -74,15 +66,17 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
-      return fetch(event.request).then((response) => {
-        if (response.ok && event.request.method === 'GET') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, clone);
-          });
-        }
-        return response;
-      });
+      return fetch(event.request)
+        .then((response) => {
+          if (response.ok && event.request.method === 'GET') {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, clone);
+            });
+          }
+          return response;
+        })
+        .catch(() => new Response('', { status: 503, statusText: 'Service Unavailable' }));
     })
   );
 });

@@ -5,10 +5,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "postbuild": "node scripts/inject-sw-version.cjs",
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:unit": "vitest run",
     "check:contrast": "node scripts/check-contrast.cjs",
+    "check:bundle-size": "node scripts/check-bundle-size.cjs",
     "lint": "svelte-check --tsconfig ./tsconfig.json && eslint .",
     "format:check": "prettier --check ."
   },

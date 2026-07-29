@@ -141,10 +141,20 @@ jobs:
           cd frontend
           npm run check:contrast
 
+      - name: Run frontend unit tests
+        run: |
+          cd frontend
+          npm run test:unit
+
       - name: Build frontend
         run: |
           cd frontend
           npm run build
+
+      - name: Check bundle size budget (<=200 KB gzip)
+        run: |
+          cd frontend
+          npm run check:bundle-size
 
       - name: Report bundle size
         uses: preactjs/compressed-size-action@v3
@@ -206,7 +216,10 @@ jobs:
           }
           EOF
           ./xcp -config config.json &
-          sleep 2
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8090/api/version && break
+            sleep 0.5
+          done
 
       - name: Run Playwright tests
         run: |

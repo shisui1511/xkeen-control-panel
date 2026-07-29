@@ -22,6 +22,17 @@
           <Icon name={getIconName(toast.type)} size={16} />
         </span>
         <span class="toast__message">{toast.message}</span>
+        {#if toast.action}
+          <button
+            class="btn btn-secondary toast__action"
+            onclick={() => {
+              toast.action?.onClick();
+              dismiss(toast.id);
+            }}
+          >
+            {toast.action.label}
+          </button>
+        {/if}
         <button class="toast__close" onclick={() => dismiss(toast.id)} aria-label="Dismiss"
           >×</button
         >
@@ -105,6 +116,11 @@
     flex: 1;
     line-height: 1.4;
     word-break: break-word;
+  }
+  .toast__action {
+    flex-shrink: 0;
+    padding: 4px 10px;
+    font-size: 12px;
   }
   .toast__close {
     flex-shrink: 0;
