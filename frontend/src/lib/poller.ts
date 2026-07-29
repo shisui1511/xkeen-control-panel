@@ -58,7 +58,7 @@ export function usePoller(
       backoffMs = activeIntervalMs; // Reset backoff on success
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
-      if (err?.status === 401 || err?.message?.includes('401')) {
+      if (err?.status === 401 || err?.message === 'Unauthorized' || /\b401\b/.test(err?.message || '')) {
         // Trigger global logout & stop poller
         isStopped = true;
         clearTimer();

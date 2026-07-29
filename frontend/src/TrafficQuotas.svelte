@@ -77,7 +77,9 @@
   $: totalPct = sumQuotaLimit > 0 ? Math.min(100, ((stats?.total || 0) / sumQuotaLimit) * 100) : 0;
 
   async function fetchQuotas(signal?: AbortSignal) {
-    loading = true;
+    if (quotas.length === 0) {
+      loading = true;
+    }
     try {
       const res = await fetch('/api/traffic/quotas', { signal });
       if (res.ok) quotas = await res.json();

@@ -611,6 +611,7 @@
     usePoller((signal) => fetchSystemStats(signal), 5000);
     usePoller((signal) => fetchCapabilities(signal), 10000);
     usePoller((signal) => fetchSubscriptionSummary(signal), 30000);
+    usePoller((signal) => fetchProxySummary(signal), 30000);
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       pwaInstallPrompt = e;

@@ -471,7 +471,9 @@
   }
 
   async function fetchProxies(signal?: AbortSignal) {
-    loading = true;
+    if (Object.keys(proxies).length === 0) {
+      loading = true;
+    }
     error = '';
     loadTimedOut = false;
     if (loadTimeoutId) clearTimeout(loadTimeoutId);
@@ -809,7 +811,9 @@
   }
 
   async function loadSubscriptions(signal?: AbortSignal) {
-    loading = true;
+    if (subscriptions.length === 0 && Object.keys(proxies).length === 0) {
+      loading = true;
+    }
     try {
       const res = await fetch('/api/proxy-providers', { signal });
       if (res.ok) {
