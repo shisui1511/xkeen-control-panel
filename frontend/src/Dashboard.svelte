@@ -167,7 +167,9 @@
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      console.error('fetchSubscriptionSummary failed:', e);
+    }
   }
 
   async function fetchProxySummary() {
@@ -183,7 +185,9 @@
         totalProxiesCount = nodeKeys.length;
         activeProxiesCount = nodeKeys.filter((k) => proxies[k].alive !== false).length;
       }
-    } catch (_) {}
+    } catch (e) {
+      console.error('fetchProxySummary failed:', e);
+    }
   }
 
   // WR-04: a plain "running"/"запущен" substring match also matches its own
@@ -239,7 +243,9 @@
           const connData = await connRes.json();
           connCount = connData?.connections?.length ?? 0;
         }
-      } catch (_) {}
+      } catch (e) {
+        console.error('fetchLiveStatus connection count fetch failed:', e);
+      }
 
       // Get kernel versions and process_status from /api/kernels
       let xrayVer = '';
