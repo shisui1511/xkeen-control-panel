@@ -14,14 +14,19 @@ function injectVersion(source, version) {
 
 function main() {
   try {
-    if (!fs.existsSync(SW_PATH)) {
-      console.error(`❌ Не найден ${SW_PATH} — сначала выполните npm run build`);
-      process.exit(1);
-      return;
+    const version = require('../package.json').version;
+    let source;
+    try {
+      source = fs.readFileSync(SW_PATH, 'utf8');
+    } catch (err) {
+      if (err && err.code === 'ENOENT') {
+        console.error(`❌ Не найден ${SW_PATH} — сначала выполните npm run build`);
+        process.exit(1);
+        return;
+      }
+      throw err;
     }
 
-    const version = require('../package.json').version;
-    const source = fs.readFileSync(SW_PATH, 'utf8');
     const result = injectVersion(source, version);
     fs.writeFileSync(SW_PATH, result);
 
