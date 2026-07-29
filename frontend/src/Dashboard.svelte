@@ -145,7 +145,8 @@
       const res = await fetch('/api/subscriptions');
       if (res.ok) {
         const envelope = await res.json();
-        const subs = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
+        const rawList = Array.isArray(envelope) ? envelope : (envelope?.data ?? []);
+        const subs = Array.isArray(rawList) ? rawList : [];
         totalSubsCount = subs.length;
         hasSubscription = subs.length > 0;
         subscriptionProxiesCount = subs.reduce(

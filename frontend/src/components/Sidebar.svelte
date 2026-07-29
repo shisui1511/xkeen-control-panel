@@ -138,13 +138,21 @@
     showRailTooltipFor(e.target);
   }
   function handleRailPointerOut() {
-    railTooltip = null;
+    if (railTooltip !== null) {
+      queueMicrotask(() => {
+        railTooltip = null;
+      });
+    }
   }
   function handleRailFocusIn(e: FocusEvent) {
     showRailTooltipFor(e.target);
   }
   function handleRailFocusOut() {
-    railTooltip = null;
+    if (railTooltip !== null) {
+      queueMicrotask(() => {
+        railTooltip = null;
+      });
+    }
   }
 
   $effect(() => {
