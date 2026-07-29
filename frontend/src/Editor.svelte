@@ -266,11 +266,11 @@
     try {
       const resXray = await fetch(`/api/config/list?dir=${encodeURIComponent(xrayDir)}`);
       if (resXray.ok) {
-        xrayFiles = (await resXray.ok) ? await resXray.json() : [];
+        xrayFiles = await resXray.json();
       }
       const resMihomo = await fetch(`/api/config/list?dir=${encodeURIComponent(mihomoDir)}`);
       if (resMihomo.ok) {
-        mihomoFiles = (await resMihomo.ok) ? await resMihomo.json() : [];
+        mihomoFiles = await resMihomo.json();
       }
     } catch (e) {
       showToast('error', $t('editor.load_error'));
