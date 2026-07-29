@@ -379,7 +379,7 @@
     }
   }
 
-  function closeTab(path: string, force = false) {
+  async function closeTab(path: string, force = false) {
     const tabIndex = tabs.findIndex((t) => t.path === path);
     if (tabIndex === -1) return;
 
@@ -387,7 +387,7 @@
 
     if (tabToClose.isDirty && !force) {
       if (activeTabPath !== path) {
-        switchTab(path);
+        await switchTab(path);
       }
       if (!confirmUnsaved()) return;
     }
@@ -961,7 +961,7 @@
 
       showToast('success', $t('app.delete'));
       const fileToDelete = selectedFile;
-      closeTab(fileToDelete, true);
+      await closeTab(fileToDelete, true);
       await loadFiles();
     } catch (e) {
       showToast('error', $t('editor.delete_error') + ': ' + (e as any)?.message);
