@@ -2,6 +2,7 @@
   import { t } from './i18n';
   import { capabilities, showToast } from './stores';
   import Skeleton from './components/Skeleton.svelte';
+  import EmptyState from './components/EmptyState.svelte';
 
   let {
     onSwitchTab = () => {},
@@ -93,6 +94,12 @@
           <XrayRoutingConstructor {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} />
         {:catch err}
           {@const _ = queueMicrotask(() => reportKernelChunkError(err))}
+          <EmptyState
+            title={$t('app.chunk_load_failed')}
+            description=""
+            ctaText={$t('app.retry')}
+            oncta={retryKernelChunkLoad}
+          />
         {/await}
       {:else}
         {#await import('./MihomoGenerator.svelte')}
@@ -107,6 +114,12 @@
           />
         {:catch err}
           {@const _ = queueMicrotask(() => reportKernelChunkError(err))}
+          <EmptyState
+            title={$t('app.chunk_load_failed')}
+            description=""
+            ctaText={$t('app.retry')}
+            oncta={retryKernelChunkLoad}
+          />
         {/await}
       {/if}
     {/key}

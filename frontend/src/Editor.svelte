@@ -266,11 +266,11 @@
     try {
       const resXray = await fetch(`/api/config/list?dir=${encodeURIComponent(xrayDir)}`);
       if (resXray.ok) {
-        xrayFiles = (await resXray.ok) ? await resXray.json() : [];
+        xrayFiles = await resXray.json();
       }
       const resMihomo = await fetch(`/api/config/list?dir=${encodeURIComponent(mihomoDir)}`);
       if (resMihomo.ok) {
-        mihomoFiles = (await resMihomo.ok) ? await resMihomo.json() : [];
+        mihomoFiles = await resMihomo.json();
       }
     } catch (e) {
       showToast('error', $t('editor.load_error'));
@@ -379,7 +379,7 @@
     }
   }
 
-  function closeTab(path: string, force = false) {
+  async function closeTab(path: string, force = false) {
     const tabIndex = tabs.findIndex((t) => t.path === path);
     if (tabIndex === -1) return;
 
@@ -387,7 +387,7 @@
 
     if (tabToClose.isDirty && !force) {
       if (activeTabPath !== path) {
-        switchTab(path);
+        await switchTab(path);
       }
       if (!confirmUnsaved()) return;
     }
@@ -961,7 +961,7 @@
 
       showToast('success', $t('app.delete'));
       const fileToDelete = selectedFile;
-      closeTab(fileToDelete, true);
+      await closeTab(fileToDelete, true);
       await loadFiles();
     } catch (e) {
       showToast('error', $t('editor.delete_error') + ': ' + (e as any)?.message);
@@ -1731,6 +1731,12 @@
         </div>
       {:catch err}
         {@const _ = queueMicrotask(() => reportConstructorChunkError(err))}
+        <EmptyState
+          title={$t('app.chunk_load_failed')}
+          description=""
+          ctaText={$t('app.retry')}
+          oncta={retryConstructorChunkLoad}
+        />
       {/await}
     {/key}
   {/if}
