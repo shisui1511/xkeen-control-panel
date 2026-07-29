@@ -1731,6 +1731,12 @@
         </div>
       {:catch err}
         {@const _ = queueMicrotask(() => reportConstructorChunkError(err))}
+        <EmptyState
+          title={$t('app.chunk_load_failed')}
+          description=""
+          ctaText={$t('app.retry')}
+          oncta={retryConstructorChunkLoad}
+        />
       {/await}
     {/key}
   {/if}
