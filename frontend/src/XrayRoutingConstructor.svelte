@@ -825,7 +825,7 @@
     }
 
     // UX-06: Pre-emptive warning if empty proxies list
-    if (customOutbounds.length === 0) {
+    if (!showApplyConfirm && customOutbounds.length === 0) {
       if (
         !(await showConfirm({
           title: $t('editor.empty_proxies_title') || 'Отсутствуют прокси-серверы',

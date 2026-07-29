@@ -251,11 +251,12 @@ proxies:
     await expect(confirmBtn).toBeVisible();
     await confirmBtn.click();
 
-    // 3. Verify dialog popped up with the port collision details
-    await page.waitForTimeout(500);
-    expect(dialogTriggered).toBe(true);
-    expect(dialogMsg).toContain('1182');
-    expect(dialogMsg).toContain('mihomo');
-    expect(dialogMsg).toContain('xray');
+    // 3. Verify ConfirmDialog popped up with the port collision details
+    const collisionConfirm = page.locator('.confirm-body, .confirm-message');
+    await expect(collisionConfirm).toBeVisible();
+    const text = await collisionConfirm.innerText();
+    expect(text).toContain('1182');
+    expect(text).toContain('mihomo');
+    expect(text).toContain('xray');
   });
 });

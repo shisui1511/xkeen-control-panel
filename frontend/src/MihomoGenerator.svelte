@@ -1352,7 +1352,7 @@
   // findTopLevelSection and replaceMihomoTopLevelSection are imported from './lib/mihomoYaml'
 
   async function handleApplyMihomo() {
-    if (proxies.length === 0) {
+    if (!showApplyConfirm && proxies.length === 0) {
       if (
         !(await showConfirm({
           title: $t('editor.empty_proxies_title') || 'Отсутствуют прокси-серверы',
