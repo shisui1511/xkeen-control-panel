@@ -233,6 +233,13 @@ proxies:
     await expect(applyBtn).toBeVisible({ timeout: 5000 });
     await applyBtn.click();
 
+    const warningConfirm = page.locator(
+      '.confirm-actions button.btn-warning, .confirm-actions button.btn-primary'
+    );
+    if (await warningConfirm.isVisible().catch(() => false)) {
+      await warningConfirm.click();
+    }
+
     // Wait for the Svelte confirmation modal to appear
     const confirmModal = page.locator('[data-testid="apply-confirm-dialog"]');
     await expect(confirmModal).toBeVisible({ timeout: 5000 });

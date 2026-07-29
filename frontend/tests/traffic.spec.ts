@@ -112,19 +112,17 @@ test.describe('Traffic page test suite', () => {
   });
 
   test('reset stats button triggers dialog and requests API', async ({ page }) => {
-    let confirmTriggered = false;
-    page.on('dialog', async (dialog) => {
-      confirmTriggered = true;
-      expect(dialog.message()).toContain('Reset statistics');
-      await dialog.accept();
-    });
-
     // Нажимаем на кнопку сброса
     const resetButton = page.locator('.btn-reset');
     await expect(resetButton).toBeVisible();
     await resetButton.click();
 
-    expect(confirmTriggered).toBe(true);
+    // Проверяем появление стилизованного ConfirmDialog
+    const confirmBtn = page
+      .locator('.confirm-actions button.btn-danger, .confirm-actions button.btn-primary')
+      .first();
+    await expect(confirmBtn).toBeVisible();
+    await confirmBtn.click();
   });
 
   test('SVG charts have role and aria-labels for accessibility', async ({ page }) => {

@@ -1007,7 +1007,9 @@
       !(await showConfirm({
         title: $t('subscr.delete_title') || 'Удаление подписки',
         objectName: subName,
-        consequence: $t('subscr.delete_consequence') || 'Подписка и все связанные прокси будут удалены из конфигурации.',
+        consequence:
+          $t('subscr.delete_consequence') ||
+          'Подписка и все связанные прокси будут удалены из конфигурации.',
         variant: 'danger',
         confirmLabel: $t('app.delete') || 'Удалить'
       }))

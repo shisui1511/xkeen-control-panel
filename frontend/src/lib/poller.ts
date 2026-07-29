@@ -58,7 +58,11 @@ export function usePoller(
       backoffMs = activeIntervalMs; // Reset backoff on success
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
-      if (err?.status === 401 || err?.message === 'Unauthorized' || /\b401\b/.test(err?.message || '')) {
+      if (
+        err?.status === 401 ||
+        err?.message === 'Unauthorized' ||
+        /\b401\b/.test(err?.message || '')
+      ) {
         // Trigger global logout & stop poller
         isStopped = true;
         clearTimer();
@@ -86,9 +90,7 @@ export function usePoller(
       return; // Completely paused when tab is hidden
     }
 
-    const interval = isHidden
-      ? (options.backgroundIntervalMs ?? 30000)
-      : backoffMs;
+    const interval = isHidden ? (options.backgroundIntervalMs ?? 30000) : backoffMs;
 
     timer = setTimeout(executePoll, interval);
   }

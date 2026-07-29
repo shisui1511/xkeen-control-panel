@@ -190,7 +190,9 @@
     if (
       !(await showConfirm({
         title: $t('traffic.reset_title') || 'Сброс статистики',
-        consequence: $t('traffic.reset_confirm') || 'Вся накопленная статистика использования трафика будет сброшена.',
+        consequence:
+          $t('traffic.reset_confirm') ||
+          'Вся накопленная статистика использования трафика будет сброшена.',
         variant: 'danger',
         confirmLabel: $t('app.reset') || 'Сбросить'
       }))

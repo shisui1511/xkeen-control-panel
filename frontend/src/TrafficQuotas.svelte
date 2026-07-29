@@ -71,6 +71,12 @@
     { label: 'TB', value: 'TB', bytes: 1024 * 1024 * 1024 * 1024 }
   ];
 
+  $: periods = [
+    { label: $t('trafficquotas.period_daily') || 'Ежедневно', value: 'daily' },
+    { label: $t('trafficquotas.period_weekly') || 'Еженедельно', value: 'weekly' },
+    { label: $t('trafficquotas.period_monthly') || 'Ежемесячно', value: 'monthly' }
+  ];
+
   $: activeQuotas = quotas.filter((q) => q.enabled);
   $: totalUsed = quotas.reduce((s, q) => s + q.used_bytes, 0);
   $: sumQuotaLimit = activeQuotas.reduce((s, q) => s + q.limit_bytes, 0);
@@ -199,7 +205,9 @@
       !(await showConfirm({
         title: $t('trafficquotas.delete_title') || 'Удаление квоты трафика',
         objectName: q ? q.name : id,
-        consequence: $t('trafficquotas.delete_consequence') || 'Правило ограничения трафика будет безвозвратно удалено.',
+        consequence:
+          $t('trafficquotas.delete_consequence') ||
+          'Правило ограничения трафика будет безвозвратно удалено.',
         variant: 'danger',
         confirmLabel: $t('app.delete') || 'Удалить'
       }))

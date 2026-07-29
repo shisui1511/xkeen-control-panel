@@ -178,7 +178,9 @@
       !(await showConfirm({
         title: $t('settings.snapshot_restore_title') || 'Восстановление снапшота',
         objectName: snap ? `${snap.name}` : id,
-        consequence: $t('settings.snapshot_restore_confirm') || 'Текущая конфигурация системы будет заменена данными снапшота.',
+        consequence:
+          $t('settings.snapshot_restore_confirm') ||
+          'Текущая конфигурация системы будет заменена данными снапшота.',
         variant: 'warning',
         confirmLabel: $t('settings.restore') || 'Восстановить'
       }))
@@ -209,7 +211,9 @@
       !(await showConfirm({
         title: $t('settings.snapshot_delete_title') || 'Удаление снапшота',
         objectName: snap ? `${snap.name}` : id,
-        consequence: $t('settings.snapshot_delete_confirm') || 'Снапшот будет удален без возможности восстановления.',
+        consequence:
+          $t('settings.snapshot_delete_confirm') ||
+          'Снапшот будет удален без возможности восстановления.',
         variant: 'danger',
         confirmLabel: $t('app.delete') || 'Удалить'
       }))
@@ -301,7 +305,9 @@
       !(await showConfirm({
         title: $t('settings.backup_restore_title') || 'Восстановление резервной копии',
         objectName: filename,
-        consequence: $t('settings.backup_restore_confirm') || 'Файл конфигурации будет заменен резервной копией.',
+        consequence:
+          $t('settings.backup_restore_confirm') ||
+          'Файл конфигурации будет заменен резервной копией.',
         variant: 'warning',
         confirmLabel: $t('settings.restore') || 'Восстановить'
       }))
@@ -345,7 +351,9 @@
       !(await showConfirm({
         title: $t('settings.backup_delete_title') || 'Удаление резервной копии',
         objectName: filename,
-        consequence: $t('settings.backup_delete_confirm') || 'Резервная копия будет удалена без возможности восстановления.',
+        consequence:
+          $t('settings.backup_delete_confirm') ||
+          'Резервная копия будет удалена без возможности восстановления.',
         variant: 'danger',
         confirmLabel: $t('app.delete') || 'Удалить'
       }))

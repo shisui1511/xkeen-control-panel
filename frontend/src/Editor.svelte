@@ -888,7 +888,8 @@
       !(await showConfirm({
         title: $t('editor.restore_backup_title') || 'Восстановление бэкапа',
         objectName: filename,
-        consequence: $t('editor.restore_confirm') || 'Текущее содержимое редактора будет заменено бэкапом.',
+        consequence:
+          $t('editor.restore_confirm') || 'Текущее содержимое редактора будет заменено бэкапом.',
         variant: 'warning',
         confirmLabel: $t('editor.restore') || 'Восстановить'
       }))
@@ -1159,7 +1160,8 @@
       !(await showConfirm({
         title: $t('editor.template_apply_title') || 'Применение шаблона',
         objectName: template.name,
-        consequence: $t('editor.confirm_template') || 'Текущие несохраненные изменения будут потеряны.',
+        consequence:
+          $t('editor.confirm_template') || 'Текущие несохраненные изменения будут потеряны.',
         variant: 'warning',
         confirmLabel: $t('editor.apply') || 'Применить'
       }))

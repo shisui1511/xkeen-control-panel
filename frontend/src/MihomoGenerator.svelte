@@ -1356,7 +1356,9 @@
       if (
         !(await showConfirm({
           title: $t('editor.empty_proxies_title') || 'Отсутствуют прокси-серверы',
-          consequence: $t('editor.empty_proxies_warning') || 'В вашей конфигурации нет ни одного прокси-сервера. Вы уверены, что хотите применить её?',
+          consequence:
+            $t('editor.empty_proxies_warning') ||
+            'В вашей конфигурации нет ни одного прокси-сервера. Вы уверены, что хотите применить её?',
           variant: 'warning',
           confirmLabel: $t('app.continue') || 'Продолжить'
         }))
@@ -1393,7 +1395,9 @@
         !(await showConfirm({
           title: $t('editor.port_collision_title') || 'Конфликт портов',
           message: details,
-          consequence: ru ? 'Продолжение может вызвать сбой в работе служб.' : 'Proceeding may cause service disruption.',
+          consequence: ru
+            ? 'Продолжение может вызвать сбой в работе служб.'
+            : 'Proceeding may cause service disruption.',
           variant: 'danger',
           confirmLabel: $t('app.continue') || 'Продолжить'
         }))
