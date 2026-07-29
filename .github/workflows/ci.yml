@@ -141,6 +141,11 @@ jobs:
           cd frontend
           npm run check:contrast
 
+      - name: Run frontend unit tests
+        run: |
+          cd frontend
+          npm run test:unit
+
       - name: Build frontend
         run: |
           cd frontend
