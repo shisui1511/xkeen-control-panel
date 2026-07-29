@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import checkBundleSize from '../scripts/check-bundle-size.cjs';
+import injectSwVersion from '../scripts/inject-sw-version.cjs';
 
 const {
   BUDGET_BYTES,
@@ -7,8 +8,12 @@ const {
   gzipSize,
   formatKb,
   checkNoExternalResources,
-  checkWoff2Only
+  checkWoff2Only,
+  checkSwCacheVersioned,
+  checkApiBranchUncached
 } = checkBundleSize;
+
+const { injectVersion } = injectSwVersion;
 
 describe('Bundle Size Gate', () => {
   it('findEntryChunk returns the record with isEntry: true, ignoring async chunks', () => {
@@ -87,5 +92,82 @@ describe('Bundle Size Gate', () => {
       }
     `;
     expect(checkWoff2Only(css)).toEqual([]);
+  });
+
+  it('checkApiBranchUncached finds a violation when the /api/ branch caches the response', () => {
+    const sw = `
+      self.addEventListener('fetch', (event) => {
+        const url = new URL(event.request.url);
+        if (url.pathname.startsWith('/api/')) {
+          event.respondWith(
+            fetch(event.request).then((response) => {
+              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
+              return response;
+            })
+          );
+          return;
+        }
+      });
+    `;
+    const violations = checkApiBranchUncached(sw);
+    expect(violations.length).toBeGreaterThan(0);
+  });
+
+  it('checkApiBranchUncached returns an empty array for a plain network passthrough branch', () => {
+    const sw = `
+      self.addEventListener('fetch', (event) => {
+        const url = new URL(event.request.url);
+        if (url.pathname.startsWith('/api/')) {
+          event.respondWith(fetch(event.request));
+          return;
+        }
+      });
+    `;
+    expect(checkApiBranchUncached(sw)).toEqual([]);
+  });
+
+  it('checkApiBranchUncached returns an empty array when Cache Storage is used only outside the /api/ branch (region-scoped)', () => {
+    const sw = `
+      self.addEventListener('install', (event) => {
+        event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(['/'])));
+      });
+      self.addEventListener('fetch', (event) => {
+        const url = new URL(event.request.url);
+        if (url.pathname.startsWith('/api/')) {
+          event.respondWith(fetch(event.request));
+          return;
+        }
+        event.respondWith(
+          caches.match(event.request).then((cached) => cached || fetch(event.request))
+        );
+      });
+    `;
+    expect(checkApiBranchUncached(sw)).toEqual([]);
+  });
+
+  it('checkSwCacheVersioned returns a violation when the build placeholder was not substituted', () => {
+    const sw = "const CACHE_NAME = 'xcp-v__BUILD_VERSION__';";
+    const violations = checkSwCacheVersioned(sw, '0.21.0');
+    expect(violations.length).toBeGreaterThan(0);
+  });
+
+  it('checkSwCacheVersioned returns a violation when the version does not match package.json', () => {
+    const sw = "const CACHE_NAME = 'xcp-v0.20.0';";
+    const violations = checkSwCacheVersioned(sw, '0.21.0');
+    expect(violations.length).toBeGreaterThan(0);
+  });
+
+  it('checkSwCacheVersioned returns an empty array when the version is correctly substituted', () => {
+    const sw = "const CACHE_NAME = 'xcp-v0.21.0';";
+    expect(checkSwCacheVersioned(sw, '0.21.0')).toEqual([]);
+  });
+
+  it('injectVersion substitutes the version into the CACHE_NAME declaration', () => {
+    const out = injectVersion("const CACHE_NAME = 'xcp-vX';", '9.9.9');
+    expect(out).toBe("const CACHE_NAME = 'xcp-v9.9.9';");
+  });
+
+  it('injectVersion throws when the CACHE_NAME declaration is missing', () => {
+    expect(() => injectVersion('// no cache name here', '9.9.9')).toThrow();
   });
 });
