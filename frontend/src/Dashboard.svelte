@@ -530,6 +530,10 @@
     });
   }
 
+  function reportChunkErrorAction(_node: HTMLElement, err: unknown): void {
+    reportChunkError(err);
+  }
+
   function switchTab(tab: string) {
     lastChunkErrorTab = null;
     window.location.hash = '#/' + tab;
@@ -1358,13 +1362,14 @@
             <Editor onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'logs'}
         {#await import('./Logs.svelte')}
@@ -1374,13 +1379,14 @@
             <Logs />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'proxies'}
         {#await import('./Proxies.svelte')}
@@ -1390,13 +1396,14 @@
             <Proxies />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'connections'}
         {#await import('./Connections.svelte')}
@@ -1406,13 +1413,14 @@
             <Connections />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'rules'}
         {#await import('./Rules.svelte')}
@@ -1422,13 +1430,14 @@
             <Rules />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'traffic'}
         {#await import('./Traffic.svelte')}
@@ -1438,13 +1447,14 @@
             <Traffic />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'services'}
         {#await import('./Services.svelte')}
@@ -1454,13 +1464,14 @@
             <Services onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'smartproxy'}
         {#await import('./SmartProxy.svelte')}
@@ -1470,13 +1481,14 @@
             <SmartProxy onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'trafficquotas'}
         {#await import('./TrafficQuotas.svelte')}
@@ -1486,13 +1498,14 @@
             <TrafficQuotas onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'dat'}
         {#await import('./DATManager.svelte')}
@@ -1502,13 +1515,14 @@
             <DATManager onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'mihomo-gen'}
         {#await import('./MihomoGenerator.svelte')}
@@ -1518,13 +1532,14 @@
             <MihomoGenerator onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'console'}
         {#await import('./Console.svelte')}
@@ -1534,13 +1549,14 @@
             <Console onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'network'}
         {#await import('./NetworkTools.svelte')}
@@ -1550,13 +1566,14 @@
             <NetworkTools onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {:else if currentTab === 'settings'}
         {#await import('./Settings.svelte')}
@@ -1566,13 +1583,14 @@
             <Settings onSwitchTab={switchTab} />
           </div>
         {:catch err}
-          {@const _ = queueMicrotask(() => reportChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryChunkLoad}
-          />
+          <div use:reportChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryChunkLoad}
+            />
+          </div>
         {/await}
       {/if}
     {/key}

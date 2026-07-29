@@ -19,7 +19,7 @@
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
     <script>
-      if (navigator.serviceWorker) {
+      if ('serviceWorker' in navigator && navigator.serviceWorker) {
         navigator.serviceWorker.register('./sw.js').catch(() => {});
       }
     </script>

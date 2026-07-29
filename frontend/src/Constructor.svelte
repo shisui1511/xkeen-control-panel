@@ -55,6 +55,10 @@
       onClick: retryKernelChunkLoad
     });
   }
+
+  function reportKernelChunkErrorAction(_node: HTMLElement, err: unknown): void {
+    reportKernelChunkError(err);
+  }
 </script>
 
 <div class="constructor-wrapper">
@@ -93,13 +97,14 @@
         {:then { default: XrayRoutingConstructor }}
           <XrayRoutingConstructor {onSwitchTab} {selectedFile} {onInsertIntoEditor} {embedded} />
         {:catch err}
-          {@const _ = queueMicrotask(() => reportKernelChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryKernelChunkLoad}
-          />
+          <div use:reportKernelChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryKernelChunkLoad}
+            />
+          </div>
         {/await}
       {:else}
         {#await import('./MihomoGenerator.svelte')}
@@ -113,13 +118,14 @@
             {invalidateCache}
           />
         {:catch err}
-          {@const _ = queueMicrotask(() => reportKernelChunkError(err))}
-          <EmptyState
-            title={$t('app.chunk_load_failed')}
-            description=""
-            ctaText={$t('app.retry')}
-            oncta={retryKernelChunkLoad}
-          />
+          <div use:reportKernelChunkErrorAction={err}>
+            <EmptyState
+              title={$t('app.chunk_load_failed')}
+              description=""
+              ctaText={$t('app.retry')}
+              oncta={retryKernelChunkLoad}
+            />
+          </div>
         {/await}
       {/if}
     {/key}

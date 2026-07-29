@@ -151,6 +151,10 @@
     });
   }
 
+  function reportConstructorChunkErrorAction(_node: HTMLElement, err: unknown): void {
+    reportConstructorChunkError(err);
+  }
+
   function jumpToSegment(pos: number) {
     if (!editorView) return;
     editorView.focus();
@@ -1730,13 +1734,14 @@
           />
         </div>
       {:catch err}
-        {@const _ = queueMicrotask(() => reportConstructorChunkError(err))}
-        <EmptyState
-          title={$t('app.chunk_load_failed')}
-          description=""
-          ctaText={$t('app.retry')}
-          oncta={retryConstructorChunkLoad}
-        />
+        <div use:reportConstructorChunkErrorAction={err}>
+          <EmptyState
+            title={$t('app.chunk_load_failed')}
+            description=""
+            ctaText={$t('app.retry')}
+            oncta={retryConstructorChunkLoad}
+          />
+        </div>
       {/await}
     {/key}
   {/if}
