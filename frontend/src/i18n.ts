@@ -69,14 +69,18 @@ export const translationsStore = writable<Record<Lang, Record<string, string>>>(
 function detectLanguage(): Lang {
   let saved: Lang | null = null;
   try {
-    saved = localStorage.getItem('lang') as Lang;
+    if (typeof localStorage !== 'undefined') {
+      saved = localStorage.getItem('lang') as Lang;
+    }
   } catch (e) {
     // localStorage may be unavailable
   }
   if (saved && (saved === 'ru' || saved === 'en')) return saved;
 
-  const browserLang = navigator.language.split('-')[0];
-  if (browserLang === 'ru') return 'ru';
+  if (typeof navigator !== 'undefined' && navigator.language) {
+    const browserLang = navigator.language.split('-')[0];
+    if (browserLang === 'ru') return 'ru';
+  }
   return 'en';
 }
 
