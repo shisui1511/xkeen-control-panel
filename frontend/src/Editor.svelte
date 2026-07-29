@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { fade, slide } from 'svelte/transition';
   import { t, currentLang } from './i18n';
-  import { showToast, capabilities } from './stores';
+  import { showToast, capabilities, showConfirm } from './stores';
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
   import EmptyState from './components/EmptyState.svelte';
@@ -261,8 +261,13 @@
     return currentTab ? currentTab.isDirty : false;
   }
 
-  function confirmUnsaved(): boolean {
-    return confirm($t('editor.unsaved_warning') || 'Unsaved changes will be lost. Proceed?');
+  async function confirmUnsaved(): Promise<boolean> {
+    return await showConfirm({
+      title: $t('editor.unsaved_changes_title') || 'Несохраненные изменения',
+      message: $t('editor.unsaved_warning') || 'Unsaved changes will be lost. Proceed?',
+      variant: 'warning',
+      confirmLabel: $t('app.continue') || 'Продолжить'
+    });
   }
 
   async function loadFiles(dir?: string) {
@@ -878,7 +883,17 @@
   }
 
   async function restoreBackup(backupPath: string) {
-    if (!confirm($t('editor.restore_confirm'))) return;
+    const filename = backupPath.split('/').pop() || backupPath;
+    if (
+      !(await showConfirm({
+        title: $t('editor.restore_backup_title') || 'Восстановление бэкапа',
+        objectName: filename,
+        consequence: $t('editor.restore_confirm') || 'Текущее содержимое редактора будет заменено бэкапом.',
+        variant: 'warning',
+        confirmLabel: $t('editor.restore') || 'Восстановить'
+      }))
+    )
+      return;
 
     try {
       const res = await fetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
@@ -1139,12 +1154,15 @@
 
   async function applyTemplate(template: Template) {
     if (!editorView) return;
-    if (isDirty && !confirmUnsaved()) return;
+    if (isDirty && !(await confirmUnsaved())) return;
     if (
-      !confirm(
-        $t('editor.confirm_template') ||
-          'Apply this template? Current unsaved changes will be lost.'
-      )
+      !(await showConfirm({
+        title: $t('editor.template_apply_title') || 'Применение шаблона',
+        objectName: template.name,
+        consequence: $t('editor.confirm_template') || 'Текущие несохраненные изменения будут потеряны.',
+        variant: 'warning',
+        confirmLabel: $t('editor.apply') || 'Применить'
+      }))
     )
       return;
 

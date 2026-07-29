@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Modal from './components/Modal.svelte';
   import { t, currentLang } from './i18n';
+  import { showConfirm } from './stores';
   import PageHeader from './PageHeader.svelte';
   import Icon from './lib/components/Icon.svelte';
 
@@ -191,7 +192,17 @@
   }
 
   async function deleteQuota(id: string) {
-    if (!confirm($t('app.delete') + '?')) return;
+    const q = quotas.find((item) => item.id === id);
+    if (
+      !(await showConfirm({
+        title: $t('trafficquotas.delete_title') || 'Удаление квоты трафика',
+        objectName: q ? q.name : id,
+        consequence: $t('trafficquotas.delete_consequence') || 'Правило ограничения трафика будет безвозвратно удалено.',
+        variant: 'danger',
+        confirmLabel: $t('app.delete') || 'Удалить'
+      }))
+    )
+      return;
     const csrfToken = localStorage.getItem('csrf_token');
     try {
       const res = await fetch(`/api/traffic/quotas/delete?id=${id}`, {

@@ -997,11 +997,18 @@
   async function deleteSubscription(id: string) {
     const sub = subscriptions.find((s) => s.id === id);
     if (!sub) return;
-    const confirmMsg = $t('subscr.delete_confirm')
-      ? $t('subscr.delete_confirm').replace('{name}', sub.profile_title || sub.name)
-      : `Удалить подписку: Вы уверены, что хотите безвозвратно удалить подписку '${sub.profile_title || sub.name}'?`;
+    const subName = sub.profile_title || sub.name || id;
 
-    if (!confirm(confirmMsg)) return;
+    if (
+      !(await showConfirm({
+        title: $t('subscr.delete_title') || 'Удаление подписки',
+        objectName: subName,
+        consequence: $t('subscr.delete_consequence') || 'Подписка и все связанные прокси будут удалены из конфигурации.',
+        variant: 'danger',
+        confirmLabel: $t('app.delete') || 'Удалить'
+      }))
+    )
+      return;
 
     const csrfToken = localStorage.getItem('csrf_token');
     try {

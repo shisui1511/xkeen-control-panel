@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import Modal from './components/Modal.svelte';
   import { currentLang, t } from './i18n';
-  import { capabilities, showToast, fetchCapabilities } from './stores';
+  import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
   import { parseValidationError } from './lib/errorParser';
   import { findPortCollisions, parseMihomoPorts, type PortAllocation } from './lib/portChecker';
@@ -827,10 +827,12 @@
     // UX-06: Pre-emptive warning if empty proxies list
     if (customOutbounds.length === 0) {
       if (
-        !confirm(
-          $t('editor.empty_proxies_warning') ||
-            'No proxy servers configured. The configuration might be broken!'
-        )
+        !(await showConfirm({
+          title: $t('editor.empty_proxies_title') || 'Отсутствуют прокси-серверы',
+          consequence: $t('editor.empty_proxies_warning') || 'В вашей конфигурации нет ни одного прокси-сервера. Вы уверены, что хотите применить её?',
+          variant: 'warning',
+          confirmLabel: $t('app.continue') || 'Продолжить'
+        }))
       ) {
         applyLoading = false;
         return;
@@ -878,10 +880,15 @@
         })
         .join('\n');
 
-      const msg = ru
-        ? `Обнаружен конфликт портов:\n${details}\n\nПродолжить применение?`
-        : `Port collisions detected:\n${details}\n\nDo you want to proceed?`;
-      if (!confirm(msg)) {
+      if (
+        !(await showConfirm({
+          title: $t('editor.port_collision_title') || 'Конфликт портов',
+          message: details,
+          consequence: ru ? 'Продолжение может вызвать сбой в работе служб.' : 'Proceeding may cause service disruption.',
+          variant: 'danger',
+          confirmLabel: $t('app.continue') || 'Продолжить'
+        }))
+      ) {
         applyLoading = false;
         return;
       }
