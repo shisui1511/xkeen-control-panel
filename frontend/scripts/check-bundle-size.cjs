@@ -8,6 +8,8 @@ const MANIFEST_PATH = path.join(__dirname, '../dist/.vite/manifest.json');
 const SRC_INDEX_HTML_PATH = path.join(__dirname, '../index.html');
 const DIST_INDEX_HTML_PATH = path.join(__dirname, '../dist/index.html');
 const FONTS_CSS_PATH = path.join(__dirname, '../src/styles/fonts.css');
+const PUBLIC_SW_PATH = path.join(__dirname, '../public/sw.js');
+const DIST_SW_PATH = path.join(__dirname, '../dist/sw.js');
 const BUDGET_BYTES = 200 * 1024; // 200 KB gzip
 
 function findEntryChunk(manifest) {
@@ -63,6 +65,55 @@ function checkWoff2Only(css) {
         }
       }
     }
+  }
+  return violations;
+}
+
+// Проверка REQ-13: CACHE_NAME в собранном dist/sw.js версионирован —
+// плейсхолдер подставлен, значение совпадает с версией из package.json.
+function checkSwCacheVersioned(distSwSource, version) {
+  const violations = [];
+  if (distSwSource.includes('__BUILD_VERSION__')) {
+    violations.push('В dist/sw.js остался неподставленный build-плейсхолдер __BUILD_VERSION__');
+  }
+  const match = /const CACHE_NAME = '([^']*)';/.exec(distSwSource);
+  const expected = `xcp-v${version}`;
+  const actual = match ? match[1] : null;
+  if (actual !== expected) {
+    violations.push(
+      `CACHE_NAME в dist/sw.js равен '${actual}', ожидалось '${expected}' (версия package.json не подставлена)`
+    );
+  }
+  return violations;
+}
+
+// Проверка REQ-13/F-21: ветка /api/ обработчика fetch в public/sw.js не
+// обращается к Cache Storage API. Регион-ограниченная проверка: вырезает
+// только тело if-блока /api/ (та же техника парности скобок, что и
+// extractBlock в check-contrast.cjs), т.к. идентификатор caches легитимно
+// присутствует в install/activate/app-shell/cache-first блоках того же файла.
+function checkApiBranchUncached(swSource) {
+  const violations = [];
+  const conditionRegex = /if\s*\(\s*url\.pathname\.startsWith\(\s*['"]\/api\/['"]\s*\)\s*\)\s*\{/;
+  const match = conditionRegex.exec(swSource);
+  if (!match) {
+    violations.push('Не найдена ветка обработки /api/ в обработчике fetch');
+    return violations;
+  }
+  const startIndex = match.index + match[0].length;
+  let braceCount = 1;
+  let endIndex = startIndex;
+  while (braceCount > 0 && endIndex < swSource.length) {
+    const char = swSource[endIndex];
+    if (char === '{') braceCount++;
+    else if (char === '}') braceCount--;
+    endIndex++;
+  }
+  const region = swSource.slice(startIndex, endIndex - 1);
+  if (/\bcaches\b/.test(region)) {
+    violations.push(
+      'Ветка /api/ обращается к Cache Storage (caches.*) — кэширование должно быть полностью отключено'
+    );
   }
   return violations;
 }
@@ -143,6 +194,45 @@ function main(argv) {
       failed = true;
     }
 
+    // Группа 4 (REQ-13): ветка /api/ в public/sw.js не обращается к Cache Storage.
+    console.log('🔄 Проверка отсутствия кэширования /api/** в Service Worker...');
+    let apiBranchOk = true;
+    if (fs.existsSync(PUBLIC_SW_PATH)) {
+      const swSource = fs.readFileSync(PUBLIC_SW_PATH, 'utf8');
+      for (const violation of checkApiBranchUncached(swSource)) {
+        console.error(`❌ ${violation}`);
+        apiBranchOk = false;
+      }
+    } else {
+      console.error(`❌ Не найден ${PUBLIC_SW_PATH}`);
+      apiBranchOk = false;
+    }
+    if (apiBranchOk) {
+      console.log('✅ PASS: ветка /api/ в public/sw.js не обращается к Cache Storage');
+    } else {
+      failed = true;
+    }
+
+    // Группа 5 (REQ-13): CACHE_NAME в dist/sw.js версионирован по package.json.
+    console.log('🔄 Проверка версии CACHE_NAME в dist/sw.js...');
+    let swVersionOk = true;
+    if (fs.existsSync(DIST_SW_PATH)) {
+      const distSwSource = fs.readFileSync(DIST_SW_PATH, 'utf8');
+      const version = require('../package.json').version;
+      for (const violation of checkSwCacheVersioned(distSwSource, version)) {
+        console.error(`❌ ${violation}`);
+        swVersionOk = false;
+      }
+    } else {
+      console.error(`❌ Не найден dist/sw.js — сначала выполните npm run build`);
+      swVersionOk = false;
+    }
+    if (swVersionOk) {
+      console.log('✅ PASS: версия CACHE_NAME в dist/sw.js подставлена корректно');
+    } else {
+      failed = true;
+    }
+
     if (reportOnly) {
       process.exit(0);
       return;
@@ -171,5 +261,7 @@ module.exports = {
   gzipSize,
   formatKb,
   checkNoExternalResources,
-  checkWoff2Only
+  checkWoff2Only,
+  checkSwCacheVersioned,
+  checkApiBranchUncached
 };
