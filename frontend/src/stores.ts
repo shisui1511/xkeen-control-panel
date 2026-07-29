@@ -37,9 +37,9 @@ export const mihomoApiAvailable = writable<boolean>(false);
 
 let lastValidActiveKernel = '';
 
-export async function fetchCapabilities(): Promise<void> {
+export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
   try {
-    const res = await fetch('/api/capabilities');
+    const res = await fetch('/api/capabilities', { signal });
     if (res.ok) {
       const envelope = await res.json();
       // Capabilities uses JSONSuccess envelope: {success, data: {...}}

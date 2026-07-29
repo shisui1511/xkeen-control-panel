@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { t, currentLang } from './i18n';
+  import { usePoller } from './lib/poller';
   import { capabilities, fetchCapabilities, showToast, devMode } from './stores';
   import { parseValidationError } from './lib/errorParser';
   import Skeleton from './components/Skeleton.svelte';
@@ -469,7 +470,7 @@
     };
   }
 
-  async function fetchProxies() {
+  async function fetchProxies(signal?: AbortSignal) {
     loading = true;
     error = '';
     loadTimedOut = false;
@@ -482,7 +483,7 @@
       }
     }, 10000);
     try {
-      const res = await fetch('/api/mihomo/proxy/proxies');
+      const res = await fetch('/api/mihomo/proxy/proxies', { signal });
       if (!res.ok) throw new Error($t('proxies.load_error'));
       const data = await res.json();
       proxies = data.proxies || {};
@@ -527,7 +528,9 @@
       });
       updateCollapsed();
     } catch (e: any) {
-      error = e.message;
+      if (e?.name !== 'AbortError') {
+        error = e.message;
+      }
     } finally {
       if (loadTimeoutId) {
         clearTimeout(loadTimeoutId);
@@ -805,15 +808,17 @@
     }
   }
 
-  async function loadSubscriptions() {
+  async function loadSubscriptions(signal?: AbortSignal) {
     loading = true;
     try {
-      const res = await fetch('/api/proxy-providers');
+      const res = await fetch('/api/proxy-providers', { signal });
       if (res.ok) {
         subscriptions = await res.json();
       }
-    } catch (e) {
-      showToast('error', $t('subscr.load_error'));
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        showToast('error', $t('subscr.load_error'));
+      }
     } finally {
       loading = false;
     }
@@ -1339,14 +1344,10 @@
       activeTab = 'providers';
     }
 
-    fetchProxies();
-    loadSubscriptions().then(() => {
+    const poller = usePoller(async (signal) => {
+      await fetchProxies(signal);
+      await loadSubscriptions(signal);
       checkAutoExpand();
-    });
-
-    const interval = setInterval(() => {
-      fetchProxies();
-      loadSubscriptions();
     }, 10000);
 
     const handleHashChange = () => {
@@ -1362,7 +1363,7 @@
     window.addEventListener('click', handleClickOutside);
 
     return () => {
-      clearInterval(interval);
+      poller.stop();
       if (loadTimeoutId) clearTimeout(loadTimeoutId);
       pendingTimeouts.forEach(clearTimeout);
       window.removeEventListener('hashchange', handleHashChange);

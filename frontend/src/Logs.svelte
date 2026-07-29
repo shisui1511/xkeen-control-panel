@@ -182,6 +182,7 @@
     };
 
     ws.onmessage = (event) => {
+      if (document.hidden) return;
       if (!paused) {
         const entry = parseLogLine(event.data);
         logs = [...logs, entry].slice(-MAX_LOG_BUFFER);
@@ -254,8 +255,15 @@
     return colors[Math.abs(hash) % colors.length];
   }
 
+  function handleVisibilityChange() {
+    if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN) && !paused && !destroyed) {
+      connect();
+    }
+  }
+
   onMount(() => {
     connect();
+    window.addEventListener('visibilitychange', handleVisibilityChange);
     const mainContent = document.querySelector('.main-content') as HTMLElement;
     if (mainContent) {
       mainContent.style.overflowY = 'hidden';
@@ -265,6 +273,7 @@
   onDestroy(() => {
     destroyed = true;
     disconnect();
+    window.removeEventListener('visibilitychange', handleVisibilityChange);
     const mainContent = document.querySelector('.main-content') as HTMLElement;
     if (mainContent) {
       mainContent.style.overflowY = '';

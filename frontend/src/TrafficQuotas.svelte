@@ -37,73 +37,68 @@
   }
 
   let quotas: Quota[] = [];
-  let stats: {
-    proxies: ProxyStat[];
-    total_upload: number;
-    total_download: number;
-    total: number;
-    reset_time?: number;
-  } | null = null;
+  let stats: any = null;
   let alerts: Alert[] = [];
-  let loading = false;
+  let loading = true;
   let error = '';
+  let activeTab: 'quotas' | 'stats' | 'alerts' = 'quotas';
   let togglingQuotas: Record<string, boolean> = {};
+
+  // Forecast state
+  let selectedForecastPeriod: 'daily' | 'weekly' | 'monthly' = 'monthly';
+  let forecastValue: { expected: number; limit: number; pct: number } | null = null;
+  let showForecastCalculating = false;
 
   // Form state
   let showForm = false;
   let editingQuota: Quota | null = null;
   let formName = '';
-  let formTargetType = 'global';
+  let formTargetType: 'global' | 'ip' | 'mac' | 'user' = 'global';
   let formTargetID = '';
   let formLimitValue = 10;
   let formLimitUnit = 'GB';
-  let formPeriod = 'monthly';
+  let formPeriod: 'daily' | 'weekly' | 'monthly' = 'monthly';
   let formAlertThreshold = 80;
-  let formAction = 'notify';
+  let formAction: 'notify' | 'block' = 'notify';
   let formEnabled = true;
-
   let activeDropdownId: string | null = null;
+  let dismissedBanner = false;
 
   const units = [
-    { value: 'MB', bytes: 1024 * 1024 },
-    { value: 'GB', bytes: 1024 * 1024 * 1024 },
-    { value: 'TB', bytes: 1024 * 1024 * 1024 * 1024 }
-  ];
-
-  $: periods = [
-    { value: 'daily', label: $t('trafficquotas.period_daily') },
-    { value: 'weekly', label: $t('trafficquotas.period_weekly') },
-    { value: 'monthly', label: $t('trafficquotas.period_monthly') }
+    { label: 'MB', value: 'MB', bytes: 1024 * 1024 },
+    { label: 'GB', value: 'GB', bytes: 1024 * 1024 * 1024 },
+    { label: 'TB', value: 'TB', bytes: 1024 * 1024 * 1024 * 1024 }
   ];
 
   $: activeQuotas = quotas.filter((q) => q.enabled);
+  $: totalUsed = quotas.reduce((s, q) => s + q.used_bytes, 0);
   $: sumQuotaLimit = activeQuotas.reduce((s, q) => s + q.limit_bytes, 0);
   $: totalPct = sumQuotaLimit > 0 ? Math.min(100, ((stats?.total || 0) / sumQuotaLimit) * 100) : 0;
 
-  async function fetchQuotas() {
+  async function fetchQuotas(signal?: AbortSignal) {
     loading = true;
     try {
-      const res = await fetch('/api/traffic/quotas');
+      const res = await fetch('/api/traffic/quotas', { signal });
       if (res.ok) quotas = await res.json();
     } catch (e: any) {
-      error = e.message;
+      if (e?.name !== 'AbortError') error = e.message;
     } finally {
       loading = false;
     }
   }
 
-  async function fetchStats() {
+  async function fetchStats(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/traffic/stats');
+      const res = await fetch('/api/traffic/stats', { signal });
       if (res.ok) stats = await res.json();
     } catch (e) {
       // ignore
     }
   }
 
-  async function fetchAlerts() {
+  async function fetchAlerts(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/traffic/alerts');
+      const res = await fetch('/api/traffic/alerts', { signal });
       if (res.ok) alerts = await res.json();
     } catch (e) {
       // ignore
@@ -312,15 +307,10 @@
     activeDropdownId = null;
   }
 
-  let dismissedBanner = false;
-
   function dismissBanner() {
     dismissedBanner = true;
     localStorage.setItem('tq_banner_dismissed', 'true');
   }
-
-  let forecastValue: number | null = null;
-  let showForecastCalculating = false;
 
   $: {
     if (stats && stats.reset_time) {
@@ -346,17 +336,14 @@
 
   onMount(() => {
     dismissedBanner = localStorage.getItem('tq_banner_dismissed') === 'true';
-    fetchQuotas();
-    fetchStats();
-    fetchAlerts();
     document.addEventListener('click', handleDocumentClick);
-    const interval = setInterval(() => {
-      fetchQuotas();
-      fetchStats();
-      fetchAlerts();
+    const poller = usePoller(async (signal) => {
+      await fetchQuotas(signal);
+      await fetchStats(signal);
+      await fetchAlerts(signal);
     }, 30000);
     return () => {
-      clearInterval(interval);
+      poller.stop();
       document.removeEventListener('click', handleDocumentClick);
     };
   });

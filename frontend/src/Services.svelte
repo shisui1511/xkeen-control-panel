@@ -8,6 +8,7 @@
     isKernelChecking,
     capabilities
   } from './stores';
+  import { usePoller } from './lib/poller';
   import Skeleton from './components/Skeleton.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
@@ -108,9 +109,9 @@
     }
   }
 
-  async function fetchStatus() {
+  async function fetchStatus(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/service/status');
+      const res = await fetch('/api/service/status', { signal });
       if (res.ok) {
         const text = await res.text();
         try {
@@ -185,9 +186,9 @@
     }
   }
 
-  async function fetchKernels() {
+  async function fetchKernels(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/kernels');
+      const res = await fetch('/api/kernels', { signal });
       if (res.ok) {
         const envelope = await res.json();
         const list = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
@@ -440,16 +441,12 @@
   let switchingKernelTo: string | null = null;
 
   onMount(() => {
-    // Единый тикер: fetchKernels — источник правды для статуса процесса.
-    // fetchStatus нужен только для XKeen pid/uptime/binaryPath.
-    fetchKernels();
-    fetchStatus();
     fetchRestartLog();
-    const kernelInterval = setInterval(fetchKernels, 5000);
-    const statusInterval = setInterval(fetchStatus, 15000);
+    const kernelPoller = usePoller((signal) => fetchKernels(signal), 5000);
+    const statusPoller = usePoller((signal) => fetchStatus(signal), 15000);
     return () => {
-      clearInterval(kernelInterval);
-      clearInterval(statusInterval);
+      kernelPoller.stop();
+      statusPoller.stop();
       Object.values(statusIntervals).forEach(clearInterval);
     };
   });

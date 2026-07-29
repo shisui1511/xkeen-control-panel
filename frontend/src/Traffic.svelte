@@ -106,6 +106,7 @@
     };
 
     ws.onmessage = (event) => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const data = JSON.parse(event.data);
         const upSpeed = data.up || 0;
@@ -219,12 +220,20 @@
     }
   }
 
+  function handleVisibilityChange() {
+    if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN)) {
+      connect();
+    }
+  }
+
   onMount(() => {
     connect();
+    window.addEventListener('visibilitychange', handleVisibilityChange);
   });
 
   onDestroy(() => {
     disconnect();
+    window.removeEventListener('visibilitychange', handleVisibilityChange);
   });
 
   // SVG Chart path generators

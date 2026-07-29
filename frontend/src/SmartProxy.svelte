@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { usePoller } from './lib/poller';
   import Modal from './components/Modal.svelte';
   import { t, currentLang } from './i18n';
   import { showConfirm } from './stores';
@@ -72,11 +73,11 @@
     }
   }
 
-  async function fetchStatus() {
+  async function fetchStatus(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/smart-proxy/status');
+      const res = await fetch('/api/smart-proxy/status', { signal });
       if (res.ok) status = await res.json();
-    } catch (e) {
+    } catch (e: any) {
       // ignore
     }
   }
@@ -359,13 +360,12 @@
 
   onMount(() => {
     fetchProfiles();
-    fetchStatus();
-    const interval = setInterval(fetchStatus, 30000);
+    const statusPoller = usePoller((signal) => fetchStatus(signal), 30000);
     window.addEventListener('click', handleClickOutside);
     window.addEventListener('keydown', handleKeydown);
     window.addEventListener('mouseup', handleMouseUp);
     return () => {
-      clearInterval(interval);
+      statusPoller.stop();
       window.removeEventListener('click', handleClickOutside);
       window.removeEventListener('keydown', handleKeydown);
       window.removeEventListener('mouseup', handleMouseUp);
