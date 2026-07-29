@@ -34,10 +34,10 @@ function checkNoExternalResources(html) {
   let tagMatch;
   while ((tagMatch = tagRegex.exec(html)) !== null) {
     const tag = tagMatch[0];
-    const attrRegex = /\b(href|src)\s*=\s*"([^"]*)"/gi;
+    const attrRegex = /\b(href|src)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
     let attrMatch;
     while ((attrMatch = attrRegex.exec(tag)) !== null) {
-      const value = attrMatch[2];
+      const value = attrMatch[2] ?? attrMatch[3];
       if (/^(https?:)?\/\//i.test(value)) {
         violations.push(value);
       }
