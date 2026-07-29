@@ -216,7 +216,10 @@ jobs:
           }
           EOF
           ./xcp -config config.json &
-          sleep 2
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8090/api/version && break
+            sleep 0.5
+          done
 
       - name: Run Playwright tests
         run: |
