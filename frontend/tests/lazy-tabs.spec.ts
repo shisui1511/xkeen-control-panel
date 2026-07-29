@@ -108,8 +108,8 @@ test.describe('Lazy tab loading (Logs)', () => {
 
     await page.locator('a[href="#/logs"]').click();
 
-    await expect(page.getByText('Не удалось загрузить раздел')).toBeVisible({ timeout: 10000 });
-    const retryButton = page.getByRole('button', { name: 'Повторить' });
+    await expect(page.getByRole('heading', { name: 'Не удалось загрузить раздел' })).toBeVisible({ timeout: 10000 });
+    const retryButton = page.getByRole('button', { name: 'Повторить' }).first();
     await expect(retryButton).toBeVisible();
 
     // Снимаем перехват, чтобы повторная попытка успешно загрузила чанк
@@ -117,7 +117,7 @@ test.describe('Lazy tab loading (Logs)', () => {
     await retryButton.click();
 
     await expect(page.locator('.skeleton-card')).not.toBeVisible({ timeout: 10000 });
-    await expect(page.getByText('Не удалось загрузить раздел')).not.toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Не удалось загрузить раздел' })).not.toBeVisible();
   });
 
   const lazyTabs = ['proxies', 'settings', 'dat', 'console'];
