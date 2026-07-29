@@ -418,18 +418,20 @@
   }
 
   function getKernel(name: string) {
-    return kernels.find((k) => k.name === name);
+    return Array.isArray(kernels) ? kernels.find((k) => k.name === name) : undefined;
   }
 
-  $: xray = kernels.find((k) => k.name === 'xray');
-  $: mihomo = kernels.find((k) => k.name === 'mihomo');
-  $: isAnyKernelChecking = kernels.some((k) => k.status === 'checking');
+  $: xray = Array.isArray(kernels) ? kernels.find((k) => k.name === 'xray') : undefined;
+  $: mihomo = Array.isArray(kernels) ? kernels.find((k) => k.name === 'mihomo') : undefined;
+  $: isAnyKernelChecking = Array.isArray(kernels)
+    ? kernels.some((k) => k.status === 'checking')
+    : false;
   $: activeKernel = (() => {
     if (xray?.process_status === 'running') return 'xray';
     if (mihomo?.process_status === 'running') return 'mihomo';
-    const lastSwitch = restartLog.find(
-      (entry) => entry.action.startsWith('switch_kernel:') && entry.success
-    );
+    const lastSwitch = Array.isArray(restartLog)
+      ? restartLog.find((entry) => entry.action.startsWith('switch_kernel:') && entry.success)
+      : undefined;
     if (lastSwitch) {
       return lastSwitch.action.split(':')[1];
     }

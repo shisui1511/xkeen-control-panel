@@ -3,6 +3,7 @@
   import Modal from './components/Modal.svelte';
   import { t, currentLang } from './i18n';
   import { showConfirm } from './stores';
+  import { usePoller } from './lib/poller';
   import PageHeader from './PageHeader.svelte';
   import Icon from './lib/components/Icon.svelte';
 
@@ -19,6 +20,7 @@
     alert_threshold: number;
     action?: string;
     current_bytes: number;
+    used_bytes?: number;
     last_reset: number;
   }
 
@@ -47,20 +49,21 @@
 
   // Forecast state
   let selectedForecastPeriod: 'daily' | 'weekly' | 'monthly' = 'monthly';
-  let forecastValue: { expected: number; limit: number; pct: number } | null = null;
+  let forecastValue: number | null = null;
   let showForecastCalculating = false;
 
   // Form state
   let showForm = false;
   let editingQuota: Quota | null = null;
   let formName = '';
-  let formTargetType: 'global' | 'ip' | 'mac' | 'user' = 'global';
+  let formTargetType: 'global' | 'proxy' | 'ip' | 'mac' | 'user' | string = 'global';
   let formTargetID = '';
   let formLimitValue = 10;
   let formLimitUnit = 'GB';
-  let formPeriod: 'daily' | 'weekly' | 'monthly' = 'monthly';
+  let formPeriod: 'daily' | 'weekly' | 'monthly' | string = 'monthly';
   let formAlertThreshold = 80;
-  let formAction: 'notify' | 'block' = 'notify';
+  let formAction: 'notify' | 'block' | 'throttle' | 'log_only' | 'redirect_direct' | string =
+    'notify';
   let formEnabled = true;
   let activeDropdownId: string | null = null;
   let dismissedBanner = false;
@@ -78,7 +81,7 @@
   ];
 
   $: activeQuotas = quotas.filter((q) => q.enabled);
-  $: totalUsed = quotas.reduce((s, q) => s + q.used_bytes, 0);
+  $: totalUsed = quotas.reduce((s, q) => s + (q.used_bytes || q.current_bytes || 0), 0);
   $: sumQuotaLimit = activeQuotas.reduce((s, q) => s + q.limit_bytes, 0);
   $: totalPct = sumQuotaLimit > 0 ? Math.min(100, ((stats?.total || 0) / sumQuotaLimit) * 100) : 0;
 

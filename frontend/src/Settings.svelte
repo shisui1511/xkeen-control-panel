@@ -177,7 +177,7 @@
     if (
       !(await showConfirm({
         title: $t('settings.snapshot_restore_title') || 'Восстановление снапшота',
-        objectName: snap ? `${snap.name}` : id,
+        objectName: snap ? snap.label || snap.id : id,
         consequence:
           $t('settings.snapshot_restore_confirm') ||
           'Текущая конфигурация системы будет заменена данными снапшота.',
@@ -210,7 +210,7 @@
     if (
       !(await showConfirm({
         title: $t('settings.snapshot_delete_title') || 'Удаление снапшота',
-        objectName: snap ? `${snap.name}` : id,
+        objectName: snap ? snap.label || snap.id : id,
         consequence:
           $t('settings.snapshot_delete_confirm') ||
           'Снапшот будет удален без возможности восстановления.',

@@ -58,3 +58,22 @@ export function parseMihomoPorts(yamlText: string): PortAllocation[] {
   }
   return ports;
 }
+
+export function parseXrayPorts(jsonText: string): PortAllocation[] {
+  const ports: PortAllocation[] = [];
+  try {
+    const data = JSON.parse(jsonText);
+    if (data && data.inbounds && Array.isArray(data.inbounds)) {
+      for (const inb of data.inbounds) {
+        if (inb.port && typeof inb.port === 'number') {
+          ports.push({
+            port: inb.port,
+            engine: 'xray',
+            purpose: inb.protocol || 'inbound'
+          });
+        }
+      }
+    }
+  } catch (e) {}
+  return ports;
+}

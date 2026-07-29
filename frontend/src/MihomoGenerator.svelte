@@ -4,7 +4,7 @@
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { parseValidationError } from './lib/errorParser';
-  import { findPortCollisions, type PortAllocation } from './lib/portChecker';
+  import { findPortCollisions, parseXrayPorts, type PortAllocation } from './lib/portChecker';
   import {
     slugifyProviderName,
     yamlSafeString,
@@ -1374,10 +1374,21 @@
     applyLoading = true;
 
     // Check port collisions
+    let xrayPorts: PortAllocation[] = [];
+    try {
+      const res = await fetch(
+        '/api/config/read?path=' + encodeURIComponent('/opt/etc/xray/configs/00_main.json')
+      );
+      if (res.ok) {
+        const text = await res.text();
+        xrayPorts = parseXrayPorts(text);
+      }
+    } catch (e) {}
+
     const mihomoPorts: PortAllocation[] = [
       { port: existingTproxyPort ?? 5001, engine: 'mihomo', purpose: 'tproxy-port' },
       { port: existingRedirPort ?? 5000, engine: 'mihomo', purpose: 'redir-port' },
-      { port: existingMixedPort ?? 7890, engine: 'mihomo', purpose: 'mixed-port' }
+      { port: 7890, engine: 'mihomo', purpose: 'mixed-port' }
     ];
 
     const allPorts = [...mihomoPorts, ...xrayPorts];
@@ -1453,6 +1464,8 @@
         throw new Error(errorText || 'Failed to merge config');
       }
 
+      let restartUrl = '/api/service/control?action=restart';
+      const activeKernel = $capabilities?.active_kernel;
       if (activeKernel && activeKernel !== 'mihomo') {
         if (
           await showConfirm({
@@ -1522,6 +1535,8 @@
       isDirty = false;
 
       // Restart service
+      let restartUrl = '/api/service/control?action=restart';
+      const activeKernel = $capabilities?.active_kernel;
       if (activeKernel && activeKernel !== 'mihomo') {
         if (
           await showConfirm({

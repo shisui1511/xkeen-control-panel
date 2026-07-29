@@ -632,10 +632,6 @@
     window.addEventListener('vite:preloadError', handlePreloadError);
 
     return () => {
-      clearInterval(statusInterval);
-      clearInterval(statsInterval);
-      clearInterval(capInterval);
-      clearInterval(subsInterval);
       window.removeEventListener('hashchange', handleHashChange);
       mobileMql.removeEventListener('change', handleMobileMqlChange);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);

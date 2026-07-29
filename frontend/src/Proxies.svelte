@@ -2,7 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { t, currentLang } from './i18n';
   import { usePoller } from './lib/poller';
-  import { capabilities, fetchCapabilities, showToast, devMode } from './stores';
+  import { capabilities, fetchCapabilities, showToast, devMode, showConfirm } from './stores';
   import { parseValidationError } from './lib/errorParser';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
@@ -1436,7 +1436,7 @@
           placeholder={$t('proxies.filter_placeholder')}
           aria-label={$t('proxies.filter_placeholder')}
         />
-        <button class="btn btn-secondary" onclick={fetchProxies} disabled={loading}>
+        <button class="btn btn-secondary" onclick={() => fetchProxies()} disabled={loading}>
           <svg
             width="14"
             height="14"

@@ -84,7 +84,7 @@ describe('usePoller', () => {
   });
 
   it('passes AbortSignal to pollFn and aborts on stop()', async () => {
-    let capturedSignal: AbortSignal | null = null;
+    let capturedSignal: any = null;
     const pollFn = vi.fn().mockImplementation(async (signal: AbortSignal) => {
       capturedSignal = signal;
     });
