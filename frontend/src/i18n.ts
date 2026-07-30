@@ -29,7 +29,8 @@ const baseTranslations: Record<Lang, Record<string, string>> = {
     'auth.password_short': 'Пароль должен быть не менее 8 символов',
     'auth.password_mismatch': 'Пароли не совпадают',
     'auth.logout': 'Выйти',
-    'auth.logging_out': 'Выход...'
+    'auth.logging_out': 'Выход...',
+    'auth.session_expired': 'Сессия истекла, выполните повторный вход'
   },
   en: {
     'app.name': 'XKeen Control Panel',
@@ -55,7 +56,8 @@ const baseTranslations: Record<Lang, Record<string, string>> = {
     'auth.password_short': 'Password must be at least 8 characters',
     'auth.password_mismatch': 'Passwords do not match',
     'auth.logout': 'Logout',
-    'auth.logging_out': 'Logging out...'
+    'auth.logging_out': 'Logging out...',
+    'auth.session_expired': 'Session expired, please sign in again'
   }
 };
 
