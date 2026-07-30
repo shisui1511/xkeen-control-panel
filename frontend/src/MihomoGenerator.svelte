@@ -4,7 +4,12 @@
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { parseValidationError } from './lib/errorParser';
-  import { findPortCollisions, parseXrayPorts, type PortAllocation } from './lib/portChecker';
+  import {
+    findPortCollisions,
+    parseXrayPorts,
+    parseMihomoPorts,
+    type PortAllocation
+  } from './lib/portChecker';
   import {
     slugifyProviderName,
     yamlSafeString,
