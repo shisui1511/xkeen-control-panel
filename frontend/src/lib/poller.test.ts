@@ -97,14 +97,19 @@ describe('usePoller', () => {
     expect(capturedSignal?.aborted).toBe(true);
   });
 
-  it('stops polling on 401 error', async () => {
+  it('falls through to generic backoff on 401 error (session expiry is handled by apiFetch, not the poller)', async () => {
     const pollFn = vi.fn().mockRejectedValue({ status: 401, message: 'Unauthorized' });
     const poller = usePoller(pollFn, 1000);
 
-    expect(pollFn).toHaveBeenCalledTimes(1);
+    expect(pollFn).toHaveBeenCalledTimes(1); // initial execution
 
-    await vi.advanceTimersByTimeAsync(5000);
-    expect(pollFn).toHaveBeenCalledTimes(1); // No more calls
+    // No special-casing: 401 is just another rejection, so the same
+    // exponential backoff as any other error applies (1st error -> 2000ms).
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(pollFn).toHaveBeenCalledTimes(1); // not called yet at 1000ms
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(pollFn).toHaveBeenCalledTimes(2); // called at 2000ms
 
     poller.stop();
   });
