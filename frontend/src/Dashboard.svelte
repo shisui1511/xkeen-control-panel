@@ -10,6 +10,7 @@
     showToast,
     mihomoApiAvailable
   } from './stores';
+  import { usePoller } from './lib/poller';
   import Sidebar from './components/Sidebar.svelte';
   import Toast from './components/Toast.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -140,9 +141,9 @@
     return 'var(--success)';
   }
 
-  async function fetchSubscriptionSummary() {
+  async function fetchSubscriptionSummary(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/subscriptions');
+      const res = await fetch('/api/subscriptions', { signal });
       if (res.ok) {
         const envelope = await res.json();
         const rawList = Array.isArray(envelope) ? envelope : (envelope?.data ?? []);
@@ -169,14 +170,16 @@
           }
         }
       }
-    } catch (e) {
-      console.error('fetchSubscriptionSummary failed:', e);
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        console.error('fetchSubscriptionSummary failed:', e);
+      }
     }
   }
 
-  async function fetchProxySummary() {
+  async function fetchProxySummary(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/mihomo/proxy/proxies');
+      const res = await fetch('/api/mihomo/proxy/proxies', { signal });
       if (res.ok) {
         const data = await res.json();
         const proxies = data.proxies || {};
@@ -187,8 +190,10 @@
         totalProxiesCount = nodeKeys.length;
         activeProxiesCount = nodeKeys.filter((k) => proxies[k].alive !== false).length;
       }
-    } catch (e) {
-      console.error('fetchProxySummary failed:', e);
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        console.error('fetchProxySummary failed:', e);
+      }
     }
   }
 
@@ -203,12 +208,12 @@
     return hasRunningWord && !isNegated;
   }
 
-  async function fetchLiveStatus() {
+  async function fetchLiveStatus(signal?: AbortSignal) {
     statusError = false;
     try {
       const [svcRes, mihomoRes] = await Promise.allSettled([
-        fetch('/api/service/status'),
-        fetch('/api/mihomo/status')
+        fetch('/api/service/status', { signal }),
+        fetch('/api/mihomo/status', { signal })
       ]);
       // WR-03: allSettled never rejects, so a total outage must be derived
       // explicitly here rather than relying on the outer catch below (which
@@ -240,13 +245,13 @@
       // Try to get connection count from mihomo
       let connCount = 0;
       try {
-        const connRes = await fetch('/api/mihomo/proxy/connections?limit=1');
+        const connRes = await fetch('/api/mihomo/proxy/connections?limit=1', { signal });
         if (connRes.ok) {
           const connData = await connRes.json();
           connCount = connData?.connections?.length ?? 0;
         }
       } catch (e) {
-        console.error('fetchLiveStatus connection count fetch failed:', e);
+        // ignore
       }
 
       // Get kernel versions and process_status from /api/kernels
@@ -255,7 +260,7 @@
       let xrayProcessStatus = 'unknown';
       let mihomoProcessStatus = 'unknown';
       try {
-        const kernelsRes = await fetch('/api/kernels');
+        const kernelsRes = await fetch('/api/kernels', { signal });
         if (kernelsRes.ok) {
           const kernelsEnvelope = await kernelsRes.json();
           // KernelList uses JSONSuccess envelope: {success, data: [...]}
@@ -297,9 +302,9 @@
     }
   }
 
-  async function fetchSystemStats() {
+  async function fetchSystemStats(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/system/stats');
+      const res = await fetch('/api/system/stats', { signal });
       if (res.ok) {
         systemStats = await res.json();
         if (systemStats) {
@@ -309,7 +314,7 @@
           statsLastFetched = `${p(d.getDate())}.${p(d.getMonth() + 1)}.${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       // ignore
     }
   }
@@ -585,10 +590,6 @@
 
   onMount(() => {
     fetchVersion();
-    fetchLiveStatus();
-    fetchSystemStats();
-    fetchCapabilities();
-    fetchSubscriptionSummary();
     fetchProxySummary();
 
     currentTab = getTabFromHash();
@@ -606,10 +607,11 @@
     };
     mobileMql.addEventListener('change', handleMobileMqlChange);
 
-    const statusInterval = setInterval(fetchLiveStatus, 10000);
-    const statsInterval = setInterval(fetchSystemStats, 5000);
-    const capInterval = setInterval(fetchCapabilities, 10000);
-    const subsInterval = setInterval(fetchSubscriptionSummary, 30000);
+    usePoller((signal) => fetchLiveStatus(signal), 10000);
+    usePoller((signal) => fetchSystemStats(signal), 5000);
+    usePoller((signal) => fetchCapabilities(signal), 10000);
+    usePoller((signal) => fetchSubscriptionSummary(signal), 30000);
+    usePoller((signal) => fetchProxySummary(signal), 30000);
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       pwaInstallPrompt = e;
@@ -630,10 +632,6 @@
     window.addEventListener('vite:preloadError', handlePreloadError);
 
     return () => {
-      clearInterval(statusInterval);
-      clearInterval(statsInterval);
-      clearInterval(capInterval);
-      clearInterval(subsInterval);
       window.removeEventListener('hashchange', handleHashChange);
       mobileMql.removeEventListener('change', handleMobileMqlChange);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);

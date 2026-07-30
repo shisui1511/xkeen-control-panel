@@ -120,7 +120,10 @@ test.describe('Phase 37 integration tests (DAT Deep Search & Port Collision Warn
             })
           });
         }
-      } else if (url.includes('/api/config/read') && url.includes('03_inbounds.json')) {
+      } else if (
+        url.includes('/api/config/read') &&
+        (url.includes('00_main.json') || url.includes('03_inbounds.json'))
+      ) {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -233,6 +236,13 @@ proxies:
     await expect(applyBtn).toBeVisible({ timeout: 5000 });
     await applyBtn.click();
 
+    const warningConfirm = page.locator(
+      '.confirm-actions button.btn-warning, .confirm-actions button.btn-primary'
+    );
+    if (await warningConfirm.isVisible().catch(() => false)) {
+      await warningConfirm.click();
+    }
+
     // Wait for the Svelte confirmation modal to appear
     const confirmModal = page.locator('[data-testid="apply-confirm-dialog"]');
     await expect(confirmModal).toBeVisible({ timeout: 5000 });
@@ -244,11 +254,10 @@ proxies:
     await expect(confirmBtn).toBeVisible();
     await confirmBtn.click();
 
-    // 3. Verify dialog popped up with the port collision details
-    await page.waitForTimeout(500);
-    expect(dialogTriggered).toBe(true);
-    expect(dialogMsg).toContain('1182');
-    expect(dialogMsg).toContain('mihomo');
-    expect(dialogMsg).toContain('xray');
+    // 3. Verify ConfirmDialog popped up with the port collision details
+    const collisionConfirm = page.locator('.confirm-message:has-text("1182")');
+    await expect(collisionConfirm).toBeVisible({ timeout: 10000 });
+    await expect(collisionConfirm).toContainText('mihomo');
+    await expect(collisionConfirm).toContainText('xray');
   });
 });

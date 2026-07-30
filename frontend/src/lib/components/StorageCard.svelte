@@ -1,35 +1,29 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { t } from '../../i18n';
   import { formatBytes } from '../format';
+  import { usePoller } from '../poller';
 
   let diskStats = $state<{ total: number; used: number; free: number } | null>(null);
 
-  async function fetchDiskStats() {
+  async function fetchDiskStats(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/system/stats');
+      const res = await fetch('/api/system/stats', { signal });
       if (res.ok) {
         const data = await res.json();
         if (data && data.disk) {
           diskStats = data.disk;
         }
       }
-    } catch (e) {
-      console.error('Failed to fetch disk stats:', e);
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        console.error('Failed to fetch disk stats:', e);
+      }
     }
   }
 
-  let diskInterval: any;
-
   onMount(() => {
-    fetchDiskStats();
-    diskInterval = setInterval(fetchDiskStats, 10000);
-  });
-
-  onDestroy(() => {
-    if (diskInterval) {
-      clearInterval(diskInterval);
-    }
+    usePoller((signal) => fetchDiskStats(signal), 10000);
   });
 </script>
 

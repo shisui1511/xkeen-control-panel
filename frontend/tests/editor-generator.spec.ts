@@ -448,6 +448,13 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await expect(applyBtn).toBeVisible();
     await applyBtn.click();
 
+    const warningConfirm = page.locator(
+      '.confirm-actions button.btn-warning, .confirm-actions button.btn-primary'
+    );
+    if (await warningConfirm.isVisible().catch(() => false)) {
+      await warningConfirm.click();
+    }
+
     const confirmDialog = page.locator('[data-testid="apply-confirm-dialog"]');
     await expect(confirmDialog).toBeVisible();
 

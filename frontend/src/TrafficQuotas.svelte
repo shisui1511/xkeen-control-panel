@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import Modal from './components/Modal.svelte';
   import { t, currentLang } from './i18n';
+  import { showConfirm } from './stores';
+  import { usePoller } from './lib/poller';
   import PageHeader from './PageHeader.svelte';
   import Icon from './lib/components/Icon.svelte';
 
@@ -18,6 +20,7 @@
     alert_threshold: number;
     action?: string;
     current_bytes: number;
+    used_bytes?: number;
     last_reset: number;
   }
 
@@ -37,73 +40,77 @@
   }
 
   let quotas: Quota[] = [];
-  let stats: {
-    proxies: ProxyStat[];
-    total_upload: number;
-    total_download: number;
-    total: number;
-    reset_time?: number;
-  } | null = null;
+  let stats: any = null;
   let alerts: Alert[] = [];
-  let loading = false;
+  let loading = true;
   let error = '';
+  let activeTab: 'quotas' | 'stats' | 'alerts' = 'quotas';
   let togglingQuotas: Record<string, boolean> = {};
+
+  // Forecast state
+  let selectedForecastPeriod: 'daily' | 'weekly' | 'monthly' = 'monthly';
+  let forecastValue: number | null = null;
+  let showForecastCalculating = false;
 
   // Form state
   let showForm = false;
   let editingQuota: Quota | null = null;
   let formName = '';
-  let formTargetType = 'global';
+  let formTargetType: 'global' | 'proxy' | 'ip' | 'mac' | 'user' | string = 'global';
   let formTargetID = '';
   let formLimitValue = 10;
   let formLimitUnit = 'GB';
-  let formPeriod = 'monthly';
+  let formPeriod: 'daily' | 'weekly' | 'monthly' | string = 'monthly';
   let formAlertThreshold = 80;
-  let formAction = 'notify';
+  let formAction: 'notify' | 'block' | 'throttle' | 'log_only' | 'redirect_direct' | string =
+    'notify';
   let formEnabled = true;
-
   let activeDropdownId: string | null = null;
+  let dismissedBanner = false;
 
   const units = [
-    { value: 'MB', bytes: 1024 * 1024 },
-    { value: 'GB', bytes: 1024 * 1024 * 1024 },
-    { value: 'TB', bytes: 1024 * 1024 * 1024 * 1024 }
+    { label: 'MB', value: 'MB', bytes: 1024 * 1024 },
+    { label: 'GB', value: 'GB', bytes: 1024 * 1024 * 1024 },
+    { label: 'TB', value: 'TB', bytes: 1024 * 1024 * 1024 * 1024 }
   ];
 
   $: periods = [
-    { value: 'daily', label: $t('trafficquotas.period_daily') },
-    { value: 'weekly', label: $t('trafficquotas.period_weekly') },
-    { value: 'monthly', label: $t('trafficquotas.period_monthly') }
+    { label: $t('trafficquotas.period_daily') || 'Ежедневно', value: 'daily' },
+    { label: $t('trafficquotas.period_weekly') || 'Еженедельно', value: 'weekly' },
+    { label: $t('trafficquotas.period_monthly') || 'Ежемесячно', value: 'monthly' }
   ];
 
   $: activeQuotas = quotas.filter((q) => q.enabled);
+  $: totalUsed = quotas.reduce((s, q) => s + (q.used_bytes || q.current_bytes || 0), 0);
   $: sumQuotaLimit = activeQuotas.reduce((s, q) => s + q.limit_bytes, 0);
   $: totalPct = sumQuotaLimit > 0 ? Math.min(100, ((stats?.total || 0) / sumQuotaLimit) * 100) : 0;
 
-  async function fetchQuotas() {
-    loading = true;
+  async function fetchQuotas(signal?: AbortSignal) {
+    if (quotas.length === 0) {
+      loading = true;
+    }
     try {
-      const res = await fetch('/api/traffic/quotas');
+      const res = await fetch('/api/traffic/quotas', { signal });
       if (res.ok) quotas = await res.json();
     } catch (e: any) {
-      error = e.message;
+      if (e?.name !== 'AbortError') error = e.message;
     } finally {
       loading = false;
     }
   }
 
-  async function fetchStats() {
+  async function fetchStats(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/traffic/stats');
+      const res = await fetch('/api/traffic/stats', { signal });
       if (res.ok) stats = await res.json();
     } catch (e) {
       // ignore
     }
   }
 
-  async function fetchAlerts() {
+  async function fetchAlerts(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/traffic/alerts');
+      const res = await fetch('/api/traffic/alerts', { signal });
       if (res.ok) alerts = await res.json();
     } catch (e) {
       // ignore
@@ -196,7 +203,19 @@
   }
 
   async function deleteQuota(id: string) {
-    if (!confirm($t('app.delete') + '?')) return;
+    const q = quotas.find((item) => item.id === id);
+    if (
+      !(await showConfirm({
+        title: $t('trafficquotas.delete_title') || 'Удаление квоты трафика',
+        objectName: q ? q.name : id,
+        consequence:
+          $t('trafficquotas.delete_consequence') ||
+          'Правило ограничения трафика будет безвозвратно удалено.',
+        variant: 'danger',
+        confirmLabel: $t('app.delete') || 'Удалить'
+      }))
+    )
+      return;
     const csrfToken = localStorage.getItem('csrf_token');
     try {
       const res = await fetch(`/api/traffic/quotas/delete?id=${id}`, {
@@ -312,15 +331,10 @@
     activeDropdownId = null;
   }
 
-  let dismissedBanner = false;
-
   function dismissBanner() {
     dismissedBanner = true;
     localStorage.setItem('tq_banner_dismissed', 'true');
   }
-
-  let forecastValue: number | null = null;
-  let showForecastCalculating = false;
 
   $: {
     if (stats && stats.reset_time) {
@@ -346,17 +360,14 @@
 
   onMount(() => {
     dismissedBanner = localStorage.getItem('tq_banner_dismissed') === 'true';
-    fetchQuotas();
-    fetchStats();
-    fetchAlerts();
     document.addEventListener('click', handleDocumentClick);
-    const interval = setInterval(() => {
-      fetchQuotas();
-      fetchStats();
-      fetchAlerts();
+    const poller = usePoller(async (signal) => {
+      await fetchQuotas(signal);
+      await fetchStats(signal);
+      await fetchAlerts(signal);
     }, 30000);
     return () => {
-      clearInterval(interval);
+      poller.stop();
       document.removeEventListener('click', handleDocumentClick);
     };
   });

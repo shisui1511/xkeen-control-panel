@@ -21,7 +21,13 @@ export async function apiFetch(url: string, options: RequestInit = {}): Promise<
   if (csrfToken) {
     headers.set('X-CSRF-Token', csrfToken);
   }
-  return fetch(url, { ...options, headers });
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    const err: any = new Error('Unauthorized');
+    err.status = 401;
+    throw err;
+  }
+  return res;
 }
 
 /**

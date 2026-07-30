@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { t, currentLang } from './i18n';
-  import { capabilities, fetchCapabilities, showToast, devMode } from './stores';
+  import { usePoller } from './lib/poller';
+  import { capabilities, fetchCapabilities, showToast, devMode, showConfirm } from './stores';
   import { parseValidationError } from './lib/errorParser';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
@@ -469,8 +470,10 @@
     };
   }
 
-  async function fetchProxies() {
-    loading = true;
+  async function fetchProxies(signal?: AbortSignal) {
+    if (Object.keys(proxies).length === 0) {
+      loading = true;
+    }
     error = '';
     loadTimedOut = false;
     if (loadTimeoutId) clearTimeout(loadTimeoutId);
@@ -482,7 +485,7 @@
       }
     }, 10000);
     try {
-      const res = await fetch('/api/mihomo/proxy/proxies');
+      const res = await fetch('/api/mihomo/proxy/proxies', { signal });
       if (!res.ok) throw new Error($t('proxies.load_error'));
       const data = await res.json();
       proxies = data.proxies || {};
@@ -527,7 +530,9 @@
       });
       updateCollapsed();
     } catch (e: any) {
-      error = e.message;
+      if (e?.name !== 'AbortError') {
+        error = e.message;
+      }
     } finally {
       if (loadTimeoutId) {
         clearTimeout(loadTimeoutId);
@@ -805,15 +810,19 @@
     }
   }
 
-  async function loadSubscriptions() {
-    loading = true;
+  async function loadSubscriptions(signal?: AbortSignal) {
+    if (subscriptions.length === 0 && Object.keys(proxies).length === 0) {
+      loading = true;
+    }
     try {
-      const res = await fetch('/api/proxy-providers');
+      const res = await fetch('/api/proxy-providers', { signal });
       if (res.ok) {
         subscriptions = await res.json();
       }
-    } catch (e) {
-      showToast('error', $t('subscr.load_error'));
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        showToast('error', $t('subscr.load_error'));
+      }
     } finally {
       loading = false;
     }
@@ -992,11 +1001,20 @@
   async function deleteSubscription(id: string) {
     const sub = subscriptions.find((s) => s.id === id);
     if (!sub) return;
-    const confirmMsg = $t('subscr.delete_confirm')
-      ? $t('subscr.delete_confirm').replace('{name}', sub.profile_title || sub.name)
-      : `Удалить подписку: Вы уверены, что хотите безвозвратно удалить подписку '${sub.profile_title || sub.name}'?`;
+    const subName = sub.profile_title || sub.name || id;
 
-    if (!confirm(confirmMsg)) return;
+    if (
+      !(await showConfirm({
+        title: $t('subscr.delete_title') || 'Удаление подписки',
+        objectName: subName,
+        consequence:
+          $t('subscr.delete_consequence') ||
+          'Подписка и все связанные прокси будут удалены из конфигурации.',
+        variant: 'danger',
+        confirmLabel: $t('app.delete') || 'Удалить'
+      }))
+    )
+      return;
 
     const csrfToken = localStorage.getItem('csrf_token');
     try {
@@ -1339,14 +1357,10 @@
       activeTab = 'providers';
     }
 
-    fetchProxies();
-    loadSubscriptions().then(() => {
+    const poller = usePoller(async (signal) => {
+      await fetchProxies(signal);
+      await loadSubscriptions(signal);
       checkAutoExpand();
-    });
-
-    const interval = setInterval(() => {
-      fetchProxies();
-      loadSubscriptions();
     }, 10000);
 
     const handleHashChange = () => {
@@ -1362,7 +1376,7 @@
     window.addEventListener('click', handleClickOutside);
 
     return () => {
-      clearInterval(interval);
+      poller.stop();
       if (loadTimeoutId) clearTimeout(loadTimeoutId);
       pendingTimeouts.forEach(clearTimeout);
       window.removeEventListener('hashchange', handleHashChange);
@@ -1422,7 +1436,7 @@
           placeholder={$t('proxies.filter_placeholder')}
           aria-label={$t('proxies.filter_placeholder')}
         />
-        <button class="btn btn-secondary" onclick={fetchProxies} disabled={loading}>
+        <button class="btn btn-secondary" onclick={() => fetchProxies()} disabled={loading}>
           <svg
             width="14"
             height="14"

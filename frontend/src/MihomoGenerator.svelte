@@ -2,9 +2,14 @@
   import { onMount } from 'svelte';
   import Modal from './components/Modal.svelte';
   import { currentLang, t } from './i18n';
-  import { capabilities, showToast, fetchCapabilities } from './stores';
+  import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { parseValidationError } from './lib/errorParser';
-  import { findPortCollisions, type PortAllocation } from './lib/portChecker';
+  import {
+    findPortCollisions,
+    parseXrayPorts,
+    parseMihomoPorts,
+    type PortAllocation
+  } from './lib/portChecker';
   import {
     slugifyProviderName,
     yamlSafeString,
@@ -1352,8 +1357,17 @@
   // findTopLevelSection and replaceMihomoTopLevelSection are imported from './lib/mihomoYaml'
 
   async function handleApplyMihomo() {
-    if (proxies.length === 0) {
-      if (!confirm($t('editor.empty_proxies_warning') || 'No proxy servers configured.')) {
+    if (!showApplyConfirm && proxies.length === 0) {
+      if (
+        !(await showConfirm({
+          title: $t('editor.empty_proxies_title') || 'Отсутствуют прокси-серверы',
+          consequence:
+            $t('editor.empty_proxies_warning') ||
+            'В вашей конфигурации нет ни одного прокси-сервера. Вы уверены, что хотите применить её?',
+          variant: 'warning',
+          confirmLabel: $t('app.continue') || 'Продолжить'
+        }))
+      ) {
         return;
       }
     }
@@ -1365,34 +1379,34 @@
     applyLoading = true;
 
     // Check port collisions
-    const mihomoPorts: PortAllocation[] = [
-      { port: existingTproxyPort ?? 5001, engine: 'mihomo', purpose: 'tproxy-port' },
-      { port: existingRedirPort ?? 5000, engine: 'mihomo', purpose: 'redir-port' },
-      { port: 9090, engine: 'mihomo', purpose: 'external-controller' }
-    ];
-
     let xrayPorts: PortAllocation[] = [];
     try {
       const res = await fetch(
-        '/api/config/read?path=' + encodeURIComponent('/opt/etc/xray/03_inbounds.json')
+        '/api/config/read?path=' + encodeURIComponent('/opt/etc/xray/configs/00_main.json')
       );
       if (res.ok) {
-        const data = await res.json();
-        if (data && Array.isArray(data.inbounds)) {
-          for (const ib of data.inbounds) {
-            if (ib && ib.port) {
-              xrayPorts.push({
-                port: Number(ib.port),
-                engine: 'xray',
-                purpose: ib.tag || 'inbound'
-              });
-            }
-          }
+        const text = await res.text();
+        xrayPorts = parseXrayPorts(text);
+      }
+    } catch (e) {}
+
+    let mihomoPorts: PortAllocation[] = [
+      { port: existingTproxyPort ?? 5001, engine: 'mihomo', purpose: 'tproxy-port' },
+      { port: existingRedirPort ?? 5000, engine: 'mihomo', purpose: 'redir-port' },
+      { port: 7890, engine: 'mihomo', purpose: 'mixed-port' }
+    ];
+    try {
+      const resM = await fetch(
+        '/api/config/read?path=' + encodeURIComponent('/opt/etc/mihomo/config.yaml')
+      );
+      if (resM.ok) {
+        const textM = await resM.text();
+        const parsedM = parseMihomoPorts(textM);
+        if (parsedM.length > 0) {
+          mihomoPorts = parsedM;
         }
       }
-    } catch (e) {
-      console.warn('Failed to load Xray inbounds for port checking:', e);
-    }
+    } catch (e) {}
 
     const allPorts = [...mihomoPorts, ...xrayPorts];
     const collisions = findPortCollisions(allPorts);
@@ -1405,10 +1419,17 @@
         })
         .join('\n');
 
-      const msg = ru
-        ? `Обнаружен конфликт портов:\n${details}\n\nПродолжить применение?`
-        : `Port collisions detected:\n${details}\n\nDo you want to proceed?`;
-      if (!confirm(msg)) {
+      if (
+        !(await showConfirm({
+          title: $t('editor.port_collision_title') || 'Конфликт портов',
+          message: details,
+          consequence: ru
+            ? 'Продолжение может вызвать сбой в работе служб.'
+            : 'Proceeding may cause service disruption.',
+          variant: 'danger',
+          confirmLabel: $t('app.continue') || 'Продолжить'
+        }))
+      ) {
         applyLoading = false;
         return;
       }
@@ -1460,13 +1481,19 @@
         throw new Error(errorText || 'Failed to merge config');
       }
 
-      const activeKernel = $capabilities?.active_kernel;
       let restartUrl = '/api/service/control?action=restart';
+      const activeKernel = $capabilities?.active_kernel;
       if (activeKernel && activeKernel !== 'mihomo') {
-        const msg = ru
-          ? `Активным ядром сейчас является '${activeKernel}'. Хотите переключить его на 'mihomo'?`
-          : `Active kernel is currently '${activeKernel}'. Do you want to switch to 'mihomo'?`;
-        if (confirm(msg)) {
+        if (
+          await showConfirm({
+            title: $t('editor.switch_kernel_title') || 'Переключение ядра',
+            consequence: ru
+              ? `Активным ядром сейчас является '${activeKernel}'. Переключить его на 'mihomo'?`
+              : `Active kernel is currently '${activeKernel}'. Switch to 'mihomo'?`,
+            variant: 'primary',
+            confirmLabel: $t('editor.switch') || 'Переключить'
+          })
+        ) {
           restartUrl = '/api/service/control?action=switch_kernel&kernel=mihomo';
         }
       }
@@ -1525,13 +1552,19 @@
       isDirty = false;
 
       // Restart service
-      const activeKernel = $capabilities?.active_kernel;
       let restartUrl = '/api/service/control?action=restart';
+      const activeKernel = $capabilities?.active_kernel;
       if (activeKernel && activeKernel !== 'mihomo') {
-        const msg = ru
-          ? `Активным ядром сейчас является '${activeKernel}'. Хотите переключить его на 'mihomo'?`
-          : `Active kernel is currently '${activeKernel}'. Do you want to switch to 'mihomo'?`;
-        if (confirm(msg)) {
+        if (
+          await showConfirm({
+            title: $t('editor.switch_kernel_title') || 'Переключение ядра',
+            consequence: ru
+              ? `Активным ядром сейчас является '${activeKernel}'. Переключить его на 'mihomo'?`
+              : `Active kernel is currently '${activeKernel}'. Switch to 'mihomo'?`,
+            variant: 'primary',
+            confirmLabel: $t('editor.switch') || 'Переключить'
+          })
+        ) {
           restartUrl = '/api/service/control?action=switch_kernel&kernel=mihomo';
         }
       }

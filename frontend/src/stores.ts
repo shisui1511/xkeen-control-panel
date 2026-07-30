@@ -37,9 +37,9 @@ export const mihomoApiAvailable = writable<boolean>(false);
 
 let lastValidActiveKernel = '';
 
-export async function fetchCapabilities(): Promise<void> {
+export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
   try {
-    const res = await fetch('/api/capabilities');
+    const res = await fetch('/api/capabilities', { signal });
     if (res.ok) {
       const envelope = await res.json();
       // Capabilities uses JSONSuccess envelope: {success, data: {...}}
@@ -144,22 +144,40 @@ export function showToast(
 
 export interface ConfirmRequest {
   title: string;
-  message: string;
-  confirmLabel: string;
-  cancelLabel: string;
+  message?: string;
+  objectName?: string;
+  consequence?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  variant?: 'danger' | 'warning' | 'primary';
   resolve: (value: boolean) => void;
 }
 
 export const confirmStore = writable<ConfirmRequest | null>(null);
 
 export function showConfirm(
-  title: string,
-  message: string,
-  confirmLabel = 'OK',
-  cancelLabel = 'Cancel'
+  titleOrOptions: string | Omit<ConfirmRequest, 'resolve'>,
+  message?: string,
+  confirmLabel?: string,
+  cancelLabel?: string
 ): Promise<boolean> {
   return new Promise((resolve) => {
-    confirmStore.set({ title, message, confirmLabel, cancelLabel, resolve });
+    if (typeof titleOrOptions === 'object' && titleOrOptions !== null) {
+      confirmStore.set({
+        variant: 'danger',
+        ...titleOrOptions,
+        resolve
+      });
+    } else {
+      confirmStore.set({
+        title: String(titleOrOptions),
+        message,
+        confirmLabel,
+        cancelLabel,
+        variant: 'danger',
+        resolve
+      });
+    }
   });
 }
 

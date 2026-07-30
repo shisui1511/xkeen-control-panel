@@ -11,7 +11,7 @@
     children
   } = $props<{
     type?: 'button' | 'submit' | 'reset';
-    variant?: 'primary' | 'secondary' | 'danger';
+    variant?: 'primary' | 'secondary' | 'danger' | 'warning';
     disabled?: boolean;
     loading?: boolean;
     title?: string;

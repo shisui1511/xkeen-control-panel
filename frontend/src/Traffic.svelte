@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t, currentLang } from './i18n';
-  import { showToast } from './stores';
+  import { showToast, showConfirm } from './stores';
 
   interface TrafficPoint {
     up: number;
@@ -106,6 +106,7 @@
     };
 
     ws.onmessage = (event) => {
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const data = JSON.parse(event.data);
         const upSpeed = data.up || 0;
@@ -186,7 +187,17 @@
   }
 
   async function resetStatistics() {
-    if (!confirm($t('traffic.reset_confirm'))) return;
+    if (
+      !(await showConfirm({
+        title: $t('traffic.reset_title') || 'Сброс статистики',
+        consequence:
+          $t('traffic.reset_confirm') ||
+          'Вся накопленная статистика использования трафика будет сброшена.',
+        variant: 'danger',
+        confirmLabel: $t('app.reset') || 'Сбросить'
+      }))
+    )
+      return;
     try {
       const csrfToken = localStorage.getItem('csrf_token');
       const res = await fetch('/api/traffic/reset', {
@@ -219,12 +230,20 @@
     }
   }
 
+  function handleVisibilityChange() {
+    if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN)) {
+      connect();
+    }
+  }
+
   onMount(() => {
     connect();
+    window.addEventListener('visibilitychange', handleVisibilityChange);
   });
 
   onDestroy(() => {
     disconnect();
+    window.removeEventListener('visibilitychange', handleVisibilityChange);
   });
 
   // SVG Chart path generators

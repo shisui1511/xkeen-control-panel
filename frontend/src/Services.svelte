@@ -8,6 +8,7 @@
     isKernelChecking,
     capabilities
   } from './stores';
+  import { usePoller } from './lib/poller';
   import Skeleton from './components/Skeleton.svelte';
 
   export let onSwitchTab: (tab: string) => void = () => {};
@@ -108,9 +109,9 @@
     }
   }
 
-  async function fetchStatus() {
+  async function fetchStatus(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/service/status');
+      const res = await fetch('/api/service/status', { signal });
       if (res.ok) {
         const text = await res.text();
         try {
@@ -185,9 +186,9 @@
     }
   }
 
-  async function fetchKernels() {
+  async function fetchKernels(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/kernels');
+      const res = await fetch('/api/kernels', { signal });
       if (res.ok) {
         const envelope = await res.json();
         const list = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
@@ -417,18 +418,20 @@
   }
 
   function getKernel(name: string) {
-    return kernels.find((k) => k.name === name);
+    return Array.isArray(kernels) ? kernels.find((k) => k.name === name) : undefined;
   }
 
-  $: xray = kernels.find((k) => k.name === 'xray');
-  $: mihomo = kernels.find((k) => k.name === 'mihomo');
-  $: isAnyKernelChecking = kernels.some((k) => k.status === 'checking');
+  $: xray = Array.isArray(kernels) ? kernels.find((k) => k.name === 'xray') : undefined;
+  $: mihomo = Array.isArray(kernels) ? kernels.find((k) => k.name === 'mihomo') : undefined;
+  $: isAnyKernelChecking = Array.isArray(kernels)
+    ? kernels.some((k) => k.status === 'checking')
+    : false;
   $: activeKernel = (() => {
     if (xray?.process_status === 'running') return 'xray';
     if (mihomo?.process_status === 'running') return 'mihomo';
-    const lastSwitch = restartLog.find(
-      (entry) => entry.action.startsWith('switch_kernel:') && entry.success
-    );
+    const lastSwitch = Array.isArray(restartLog)
+      ? restartLog.find((entry) => entry.action.startsWith('switch_kernel:') && entry.success)
+      : undefined;
     if (lastSwitch) {
       return lastSwitch.action.split(':')[1];
     }
@@ -440,16 +443,12 @@
   let switchingKernelTo: string | null = null;
 
   onMount(() => {
-    // Единый тикер: fetchKernels — источник правды для статуса процесса.
-    // fetchStatus нужен только для XKeen pid/uptime/binaryPath.
-    fetchKernels();
-    fetchStatus();
     fetchRestartLog();
-    const kernelInterval = setInterval(fetchKernels, 5000);
-    const statusInterval = setInterval(fetchStatus, 15000);
+    const kernelPoller = usePoller((signal) => fetchKernels(signal), 5000);
+    const statusPoller = usePoller((signal) => fetchStatus(signal), 15000);
     return () => {
-      clearInterval(kernelInterval);
-      clearInterval(statusInterval);
+      kernelPoller.stop();
+      statusPoller.stop();
       Object.values(statusIntervals).forEach(clearInterval);
     };
   });
