@@ -252,11 +252,10 @@ proxies:
     await confirmBtn.click();
 
     // 3. Verify ConfirmDialog popped up with the port collision details
-    const collisionConfirm = page.locator('.confirm-body, .confirm-message');
+    const collisionConfirm = page.locator('.confirm-body, .confirm-message').last();
     await expect(collisionConfirm).toBeVisible();
-    const text = await collisionConfirm.innerText();
-    expect(text).toContain('1182');
-    expect(text).toContain('mihomo');
-    expect(text).toContain('xray');
+    await expect(collisionConfirm).toContainText('1182');
+    await expect(collisionConfirm).toContainText('mihomo');
+    await expect(collisionConfirm).toContainText('xray');
   });
 });
