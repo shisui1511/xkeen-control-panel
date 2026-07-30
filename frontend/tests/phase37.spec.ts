@@ -120,7 +120,10 @@ test.describe('Phase 37 integration tests (DAT Deep Search & Port Collision Warn
             })
           });
         }
-      } else if (url.includes('/api/config/read') && url.includes('03_inbounds.json')) {
+      } else if (
+        url.includes('/api/config/read') &&
+        (url.includes('00_main.json') || url.includes('03_inbounds.json'))
+      ) {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -252,9 +255,8 @@ proxies:
     await confirmBtn.click();
 
     // 3. Verify ConfirmDialog popped up with the port collision details
-    const collisionConfirm = page.locator('.confirm-body, .confirm-message').last();
-    await expect(collisionConfirm).toBeVisible();
-    await expect(collisionConfirm).toContainText('1182');
+    const collisionConfirm = page.locator('.confirm-message:has-text("1182")');
+    await expect(collisionConfirm).toBeVisible({ timeout: 10000 });
     await expect(collisionConfirm).toContainText('mihomo');
     await expect(collisionConfirm).toContainText('xray');
   });

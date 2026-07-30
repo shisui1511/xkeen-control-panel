@@ -1385,11 +1385,23 @@
       }
     } catch (e) {}
 
-    const mihomoPorts: PortAllocation[] = [
+    let mihomoPorts: PortAllocation[] = [
       { port: existingTproxyPort ?? 5001, engine: 'mihomo', purpose: 'tproxy-port' },
       { port: existingRedirPort ?? 5000, engine: 'mihomo', purpose: 'redir-port' },
       { port: 7890, engine: 'mihomo', purpose: 'mixed-port' }
     ];
+    try {
+      const resM = await fetch(
+        '/api/config/read?path=' + encodeURIComponent('/opt/etc/mihomo/config.yaml')
+      );
+      if (resM.ok) {
+        const textM = await resM.text();
+        const parsedM = parseMihomoPorts(textM);
+        if (parsedM.length > 0) {
+          mihomoPorts = parsedM;
+        }
+      }
+    } catch (e) {}
 
     const allPorts = [...mihomoPorts, ...xrayPorts];
     const collisions = findPortCollisions(allPorts);
