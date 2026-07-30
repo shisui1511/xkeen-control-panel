@@ -59,6 +59,7 @@
   "auth.password_mismatch": "Пароли не совпадают",
   "auth.logout": "Выйти",
   "auth.logging_out": "Выход...",
+  "auth.session_expired": "Сессия истекла, выполните повторный вход",
   "nav.dashboard": "Дашборд",
   "nav.editor": "Редактор",
   "nav.logs": "Логи",

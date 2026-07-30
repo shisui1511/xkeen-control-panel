@@ -24,7 +24,8 @@ export interface PollerControls {
 
 /**
  * Svelte 5 friendly poller helper with visibility handling, AbortController cancellation,
- * exponential backoff, 401 handling, and automatic cleanup on unmount.
+ * exponential backoff, and automatic cleanup on unmount. Session-expiry handling is
+ * centralized in lib/api.ts's apiFetch — this poller has no auth-status-specific logic.
  */
 export function usePoller(
   pollFn: (signal: AbortSignal) => Promise<void>,
@@ -58,20 +59,10 @@ export function usePoller(
       backoffMs = activeIntervalMs; // Reset backoff on success
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
-      if (
-        err?.status === 401 ||
-        err?.message === 'Unauthorized' ||
-        /\b401\b/.test(err?.message || '')
-      ) {
-        // Trigger global logout & stop poller
-        isStopped = true;
-        clearTimer();
-        if (inFlightController) inFlightController.abort();
-        if (typeof window !== 'undefined') {
-          window.location.href = '/login';
-        }
-        return;
-      }
+      // Session-expiry / auth errors are handled centrally by apiFetch
+      // (logout+toast+redirect fires there before this catch runs) — no
+      // special-casing needed here beyond falling through to the generic
+      // backoff below.
       // Exponential backoff up to 60000 ms
       backoffMs = Math.min(backoffMs * 2, 60000);
     } finally {

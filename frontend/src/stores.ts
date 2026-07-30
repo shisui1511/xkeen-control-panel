@@ -1,4 +1,5 @@
 import { writable, get } from 'svelte/store';
+import { apiFetchJSON } from './lib/api';
 
 // --- Capabilities store ---
 
@@ -39,43 +40,43 @@ let lastValidActiveKernel = '';
 
 export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
   try {
-    const res = await fetch('/api/capabilities', { signal });
-    if (res.ok) {
-      const envelope = await res.json();
-      // Capabilities uses JSONSuccess envelope: {success, data: {...}}
-      const data: CapabilitiesData = envelope.data ?? envelope;
+    const data = await apiFetchJSON<CapabilitiesData>('/api/capabilities', { signal });
 
-      if (data.active_kernel) {
-        lastValidActiveKernel = data.active_kernel;
-      } else if (lastValidActiveKernel) {
-        data.active_kernel = lastValidActiveKernel;
-      }
-
-      if (get(isKernelChecking)) {
-        capabilities.update((current) => {
-          if (current) {
-            return {
-              ...data,
-              active_kernel: current.active_kernel
-            };
-          }
-          return data;
-        });
-      } else {
-        capabilities.set(data);
-      }
-
-      // Update Mihomo API availability store unconditionally on every successful fetch.
-      // Sidebar and Dashboard checklist both subscribe to this store reactively (D-12, D-13).
-      mihomoApiAvailable.set(data.mihomo?.api_reachable ?? false);
-    } else {
-      // Non-OK response: capabilities are stale/unknown, do not keep reporting
-      // a possibly-outdated "API reachable" state (WR-03).
-      mihomoApiAvailable.set(false);
+    if (data.active_kernel) {
+      lastValidActiveKernel = data.active_kernel;
+    } else if (lastValidActiveKernel) {
+      data.active_kernel = lastValidActiveKernel;
     }
-  } catch (_) {
-    // Request failed entirely (network error, etc.) — capabilities will
-    // remain null, and the availability badge must not show stale "OK".
+
+    if (get(isKernelChecking)) {
+      capabilities.update((current) => {
+        if (current) {
+          return {
+            ...data,
+            active_kernel: current.active_kernel
+          };
+        }
+        return data;
+      });
+    } else {
+      capabilities.set(data);
+    }
+
+    // Update Mihomo API availability store unconditionally on every successful fetch.
+    // Sidebar and Dashboard checklist both subscribe to this store reactively (D-12, D-13).
+    mihomoApiAvailable.set(data.mihomo?.api_reachable ?? false);
+  } catch (e: any) {
+    // Cancelled poll: no state change.
+    if (e?.name === 'AbortError') return;
+    // Session expired: apiFetch already handled logout+toast+redirect centrally,
+    // wiping capabilities state here would just flash stale UI before the
+    // navigation completes.
+    if (e?.status === 401) return;
+    // Any other failure (network error, non-OK response, etc.) — capabilities
+    // are stale/unknown, do not keep reporting a possibly-outdated "API
+    // reachable" state (WR-03). No toast here: this is a background poll every
+    // 10s, not a user action — a deliberate departure from D-03, documented in
+    // 75-01-SUMMARY.md.
     mihomoApiAvailable.set(false);
   }
 }
@@ -187,12 +188,8 @@ export const devMode = writable(false);
 
 export async function fetchDevMode(): Promise<void> {
   try {
-    const res = await fetch('/api/settings');
-    if (res.ok) {
-      const envelope = await res.json();
-      const data = envelope.data ?? envelope;
-      devMode.set(data.dev_mode ?? false);
-    }
+    const data = await apiFetchJSON<{ dev_mode: boolean }>('/api/settings');
+    devMode.set(data.dev_mode ?? false);
   } catch (_) {
     // ignore
   }
@@ -200,18 +197,12 @@ export async function fetchDevMode(): Promise<void> {
 
 export async function setDevMode(enabled: boolean): Promise<void> {
   try {
-    const csrfToken = localStorage.getItem('csrf_token');
-    const res = await fetch('/api/settings/dev-mode', {
+    await apiFetchJSON<{ dev_mode: boolean }>('/api/settings/dev-mode', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled })
     });
-    if (res.ok) {
-      devMode.set(enabled);
-    } else {
-      devMode.set(!enabled);
-      showToast('error', await res.text());
-    }
+    devMode.set(enabled);
   } catch (e) {
     devMode.set(!enabled);
     showToast('error', e instanceof Error ? e.message : String(e));

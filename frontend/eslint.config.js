@@ -38,6 +38,19 @@ export default ts.config(
     }
   },
   {
+    files: ['src/**/*.{svelte,ts}'],
+    ignores: ['src/lib/api.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'warn', // flip to 'error' in the final migration wave
+        {
+          selector: "CallExpression[callee.name='fetch']",
+          message: 'Use apiFetch/apiFetchJSON from lib/api.ts instead of bare fetch().'
+        }
+      ]
+    }
+  },
+  {
     ignores: ['build/', 'dist/', '.svelte-kit/', 'node_modules/']
   }
 );
