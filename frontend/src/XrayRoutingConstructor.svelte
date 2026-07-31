@@ -6,6 +6,7 @@
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
   import { parseValidationError } from './lib/errorParser';
   import { findPortCollisions, parseMihomoPorts, type PortAllocation } from './lib/portChecker';
+  import { apiFetch, apiFetchJSON } from './lib/api';
 
   let {
     onSwitchTab = () => {},
@@ -178,12 +179,10 @@
   async function enableDNSRedirect() {
     dnsRedirectLoading = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/service/dns-redirect', {
+      const res = await apiFetch('/api/service/dns-redirect', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ enabled: true })
       });
@@ -201,6 +200,7 @@
         );
       }
     } catch (err: any) {
+      if (err?.status === 401) return;
       showToast('error', err.message || String(err));
     } finally {
       dnsRedirectLoading = false;
@@ -211,10 +211,11 @@
     schemaLoading = true;
     schemaError = '';
     try {
-      const res = await fetch('/api/assets/definition');
+      const res = await apiFetch('/api/assets/definition');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       schema = await res.json();
     } catch (e: any) {
+      if (e?.status === 401) return;
       schemaError = e.message || 'Unknown error';
     } finally {
       schemaLoading = false;
@@ -297,11 +298,12 @@
     const promises = XRAY_FILES.map(async (name) => {
       try {
         const path = `${XRAY_DIR}/${name}`;
-        const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+        const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         xrayFiles[name] = data;
       } catch (e: any) {
+        if (e?.status === 401) return;
         loadErrors[name] = e.message;
         xrayFiles[name] = {};
       }
@@ -425,7 +427,7 @@
     const subs: any[] = [];
 
     try {
-      const listRes = await fetch(`/api/config/list?dir=${encodeURIComponent(XRAY_DIR)}`);
+      const listRes = await apiFetch(`/api/config/list?dir=${encodeURIComponent(XRAY_DIR)}`);
       if (listRes.ok) {
         const files: { name: string; path: string; size: number }[] = await listRes.json();
         const outboundFiles = files.filter(
@@ -433,7 +435,7 @@
         );
         for (const f of outboundFiles) {
           try {
-            const res = await fetch(`/api/config/read?path=${encodeURIComponent(f.path)}`);
+            const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(f.path)}`);
             if (!res.ok) continue;
             const json = await res.json();
             const fileOutbounds = (json.outbounds ?? []) as any[];
@@ -692,16 +694,14 @@
     if (!prevJson) return;
     try {
       applyLoading = true;
-      const csrfToken = localStorage.getItem('csrf_token');
       const parsedObj = JSON.parse(prevJson);
 
       for (const [name, content] of Object.entries(parsedObj)) {
         const path = `${XRAY_DIR}/${name}`;
-        const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
+        const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken || ''
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify(content, null, 2)
         });
@@ -716,11 +716,8 @@
       await loadXrayOutboundTags();
       isDirty = false;
 
-      const restartRes = await fetch('/api/service/control?action=restart', {
-        method: 'POST',
-        headers: {
-          'X-CSRF-Token': csrfToken || ''
-        }
+      const restartRes = await apiFetch('/api/service/control?action=restart', {
+        method: 'POST'
       });
       if (!restartRes.ok) {
         throw new Error('Failed to restart service');
@@ -729,6 +726,7 @@
       showToast('success', $t('editor.undo_success') || 'Last change reverted successfully');
       checkUndo();
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', `Undo failed: ${e.message}`);
     } finally {
       applyLoading = false;
@@ -860,14 +858,15 @@
 
     let mihomoPorts: PortAllocation[] = [];
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         '/api/config/read?path=' + encodeURIComponent('/opt/etc/mihomo/config.yaml')
       );
       if (res.ok) {
         const yamlText = await res.text();
         mihomoPorts = parseMihomoPorts(yamlText);
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       console.warn('Failed to load Mihomo config for port checking:', e);
     }
 
@@ -899,8 +898,6 @@
     }
 
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-
       const changed = filesToModify.filter((f) => f.changesCount > 0);
       if (changed.length === 0) {
         showToast('info', $t('editor.no_changes'));
@@ -921,9 +918,9 @@
         const [, managed] = managedPair;
         const existing = xrayFiles[file.name] ?? {};
         const merged = mergeXrayFile(file.name, existing, managed);
-        const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(file.path)}`, {
+        const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(file.path)}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(merged, null, 2)
         });
         if (!saveRes.ok) {
@@ -939,9 +936,8 @@
       }
 
       // 2. Рестарт XKeen
-      const restartRes = await fetch('/api/service/control?action=restart', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const restartRes = await apiFetch('/api/service/control?action=restart', {
+        method: 'POST'
       });
       if (!restartRes.ok) throw new Error('Failed to restart service');
 
@@ -949,6 +945,7 @@
       showToast('success', $t('editor.file_saved'));
       await loadAllConfigs();
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('editor.save_error') + ': ' + e.message);
     } finally {
       applyLoading = false;
@@ -1302,8 +1299,6 @@
 
     applyLoading = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-
       // Write 04_outbounds.json
       const outboundsPath = `${XRAY_DIR}/04_outbounds.json`;
       const existingOutbounds = (xrayFiles['04_outbounds.json']?.outbounds || []) as any[];
@@ -1315,11 +1310,11 @@
         outbounds: [...templateOutbounds, ...customOutbounds]
       };
 
-      const saveOutboundsRes = await fetch(
+      const saveOutboundsRes = await apiFetch(
         `/api/config/save?path=${encodeURIComponent(outboundsPath)}`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(mergedOutbounds, null, 2)
         }
       );
@@ -1327,11 +1322,11 @@
 
       // Write 05_routing.json
       const routingPath = `${XRAY_DIR}/05_routing.json`;
-      const saveRoutingRes = await fetch(
+      const saveRoutingRes = await apiFetch(
         `/api/config/save?path=${encodeURIComponent(routingPath)}`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(getRoutingForTemplate(templateId, tag), null, 2)
         }
       );
@@ -1342,6 +1337,7 @@
       }
       await loadAllConfigs();
     } catch (e: any) {
+      if (e?.status === 401) return;
       if (!silent) {
         showToast('error', $t('editor.save_error') + ': ' + e.message);
       }
@@ -1467,21 +1463,13 @@
     importLoading = true;
 
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/outbound/parse', {
+      const data = await apiFetchJSON<any>('/api/outbound/parse', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ links: lines })
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        importErrorMsg = data.error || $t('subscr.import_error_invalid');
-        return;
-      }
 
       if (data.data && data.data.length > 0) {
         const newImportNodes = [];
@@ -1526,31 +1514,24 @@
     importLoading = true;
 
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
       const items = importNodes.map((item) => ({
         link: item.link,
         tag: item.tag.trim()
       }));
 
-      const res = await fetch('/api/outbound/import-bulk', {
+      await apiFetchJSON('/api/outbound/import-bulk', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ items })
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        importErrorMsg = data.error || $t('subscr.import_error');
-        return;
-      }
 
       showToast('success', $t('subscr.import_success', { count: importNodes.length }));
       showImportModal = false;
       await loadXrayOutboundTags();
     } catch (e: any) {
+      if (e?.status === 401) return;
       importErrorMsg = e.message || $t('subscr.import_error');
     } finally {
       importLoading = false;
