@@ -3,6 +3,7 @@
   import Modal from './components/Modal.svelte';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
+  import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import {
     findPortCollisions,
@@ -30,7 +31,7 @@
   export let selectedFile: string = '';
   export let onInsertIntoEditor: (content: string) => void = () => {};
   export let embedded: boolean = false;
-  export let initialPreset: string = '';
+  export const initialPreset: string = '';
   export let invalidateCache: boolean = false;
 
   type ProxyType = 'vless' | 'hysteria2' | 'tuic' | 'ss' | 'vmess';
@@ -650,7 +651,7 @@
   // ── Import proxies from subscriptions ───────────────────────────────────
   async function loadSubscriptions() {
     try {
-      const res = await fetch('/api/subscriptions');
+      const res = await apiFetch('/api/subscriptions');
       if (!res.ok) return;
       const subs = await res.json();
       if (Array.isArray(subs)) {
@@ -662,6 +663,7 @@
         mihomoProviders = mergeMihomoProviders([], lastParsedProviders);
       }
     } catch (e: any) {
+      if (e?.status === 401) return;
       console.error(e);
     }
   }
@@ -669,7 +671,7 @@
   // ── Import proxies from subscriptions ───────────────────────────────────
   async function loadSubscriptionProxies() {
     try {
-      const res = await fetch('/api/subscriptions');
+      const res = await apiFetch('/api/subscriptions');
       if (!res.ok) return;
       const subs = await res.json();
       if (Array.isArray(subs)) {
@@ -684,7 +686,7 @@
       let imported = 0;
       for (const sub of subs) {
         if (!sub.enabled) continue;
-        const nr = await fetch(`/api/subscriptions/nodes?id=${sub.id}`);
+        const nr = await apiFetch(`/api/subscriptions/nodes?id=${sub.id}`);
         if (!nr.ok) continue;
         const nodes: any[] = await nr.json();
         if (!nodes || nodes.length === 0) continue;
@@ -797,21 +799,13 @@
     importLoading = true;
 
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/outbound/parse', {
+      const data = await apiFetchJSON<any>('/api/outbound/parse', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ links: lines })
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        importErrorMsg = data.error || $t('subscr.import_error_invalid');
-        return;
-      }
 
       if (data.data && data.data.length > 0) {
         const newImportNodes = [];
@@ -1013,7 +1007,7 @@
     if (configLoadedForPath === path && !force) return;
     configLoadedForPath = path;
     try {
-      const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+      const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
       if (res.status === 404) {
         populateMihomoFromYAML('');
         return;
@@ -1025,6 +1019,7 @@
       const text = await res.text();
       populateMihomoFromYAML(text);
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', `Ошибка загрузки конфига: ${e.message}`);
     }
     await loadSubscriptions();
@@ -1032,7 +1027,7 @@
 
   async function checkZkeenGeodata() {
     try {
-      const res = await fetch('/api/dat/tags?name=geosite.dat');
+      const res = await apiFetch('/api/dat/tags?name=geosite.dat');
       if (res.ok) {
         const json = await res.json();
         const tags = json.tags || [];
@@ -1259,12 +1254,10 @@
   async function enableDNSRedirect() {
     dnsRedirectLoading = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/service/dns-redirect', {
+      const res = await apiFetch('/api/service/dns-redirect', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ enabled: true })
       });
@@ -1282,6 +1275,7 @@
         );
       }
     } catch (err: any) {
+      if (err?.status === 401) return;
       showToast('error', err.message || String(err));
     } finally {
       dnsRedirectLoading = false;
@@ -1339,10 +1333,11 @@
     schemaLoading = true;
     schemaError = '';
     try {
-      const res = await fetch('/api/assets/definition');
+      const res = await apiFetch('/api/assets/definition');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       schema = await res.json();
     } catch (e: any) {
+      if (e?.status === 401) return;
       schemaError = e.message || 'Unknown error';
     } finally {
       schemaLoading = false;
@@ -1381,14 +1376,16 @@
     // Check port collisions
     let xrayPorts: PortAllocation[] = [];
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         '/api/config/read?path=' + encodeURIComponent('/opt/etc/xray/configs/00_main.json')
       );
       if (res.ok) {
         const text = await res.text();
         xrayPorts = parseXrayPorts(text);
       }
-    } catch (e) {}
+    } catch (e: any) {
+      if (e?.status === 401) return;
+    }
 
     let mihomoPorts: PortAllocation[] = [
       { port: existingTproxyPort ?? 5001, engine: 'mihomo', purpose: 'tproxy-port' },
@@ -1396,7 +1393,7 @@
       { port: 7890, engine: 'mihomo', purpose: 'mixed-port' }
     ];
     try {
-      const resM = await fetch(
+      const resM = await apiFetch(
         '/api/config/read?path=' + encodeURIComponent('/opt/etc/mihomo/config.yaml')
       );
       if (resM.ok) {
@@ -1406,7 +1403,9 @@
           mihomoPorts = parsedM;
         }
       }
-    } catch (e) {}
+    } catch (e: any) {
+      if (e?.status === 401) return;
+    }
 
     const allPorts = [...mihomoPorts, ...xrayPorts];
     const collisions = findPortCollisions(allPorts);
@@ -1436,11 +1435,10 @@
     }
 
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
       const path = selectedFile || '/opt/etc/mihomo/config.yaml';
 
       // Save previous state to localStorage for Undo
-      const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+      const readRes = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
       if (readRes.ok) {
         const currentYAML = await readRes.text();
         localStorage.setItem('xcp_prev_mihomo_yaml', currentYAML);
@@ -1460,11 +1458,10 @@
 
       validationError = '';
 
-      const mergeRes = await fetch('/api/config/mihomo-merge', {
+      const mergeRes = await apiFetch('/api/config/mihomo-merge', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ path, sections })
       });
@@ -1498,11 +1495,8 @@
         }
       }
 
-      const restartRes = await fetch(restartUrl, {
-        method: 'POST',
-        headers: {
-          'X-CSRF-Token': csrfToken || ''
-        }
+      const restartRes = await apiFetch(restartUrl, {
+        method: 'POST'
       });
 
       if (!restartRes.ok) {
@@ -1518,6 +1512,7 @@
           : 'Mihomo configuration updated and restarted'
       );
     } catch (err: any) {
+      if (err?.status === 401) return;
       console.error(err);
       showToast('error', err.message || (ru ? 'Ошибка сохранения' : 'Save error'));
     } finally {
@@ -1530,15 +1525,13 @@
     if (!prevYAML) return;
     try {
       applyLoading = true;
-      const csrfToken = localStorage.getItem('csrf_token');
       const path = selectedFile || '/opt/etc/mihomo/config.yaml';
 
       // Save back to file
-      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
+      const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: prevYAML
       });
@@ -1569,11 +1562,8 @@
         }
       }
 
-      const restartRes = await fetch(restartUrl, {
-        method: 'POST',
-        headers: {
-          'X-CSRF-Token': csrfToken || ''
-        }
+      const restartRes = await apiFetch(restartUrl, {
+        method: 'POST'
       });
       if (!restartRes.ok) {
         throw new Error('Failed to restart service');
@@ -1584,6 +1574,7 @@
       showToast('success', $t('editor.undo_success') || 'Last change reverted successfully');
       checkUndo();
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', `Undo failed: ${e.message}`);
     } finally {
       applyLoading = false;
@@ -2412,7 +2403,7 @@
         <div class="preview-header">
           <span class="preview-title">YAML {ru ? 'превью' : 'preview'}</span>
           {#if yaml}
-            <button class="btn btn-secondary btn-sm" onclick={copyYAML}>
+            <button class="btn btn-secondary btn-sm" onclick={copyYAML} aria-label="Copy YAML">
               <svg
                 width="12"
                 height="12"
@@ -2963,10 +2954,6 @@
     display: flex;
     gap: 6px;
     align-items: center;
-  }
-
-  .input-with-btn .form-input {
-    flex: 1;
   }
 
   .btn-gen {
