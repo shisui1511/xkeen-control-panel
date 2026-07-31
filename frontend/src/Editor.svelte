@@ -3,6 +3,7 @@
   import { fade, slide } from 'svelte/transition';
   import { t, currentLang } from './i18n';
   import { showToast, capabilities, showConfirm } from './stores';
+  import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Icon from './lib/components/Icon.svelte';
   import EmptyState from './components/EmptyState.svelte';
@@ -25,6 +26,12 @@
     description: string;
     type: string;
     url: string;
+  }
+
+  interface TemplateStatus {
+    updated_at?: string;
+    commit?: string;
+    count?: number;
   }
 
   interface ConfigFileInfo {
@@ -273,15 +280,16 @@
   async function loadFiles(dir?: string) {
     if (dir) currentDir = dir;
     try {
-      const resXray = await fetch(`/api/config/list?dir=${encodeURIComponent(xrayDir)}`);
+      const resXray = await apiFetch(`/api/config/list?dir=${encodeURIComponent(xrayDir)}`);
       if (resXray.ok) {
         xrayFiles = await resXray.json();
       }
-      const resMihomo = await fetch(`/api/config/list?dir=${encodeURIComponent(mihomoDir)}`);
+      const resMihomo = await apiFetch(`/api/config/list?dir=${encodeURIComponent(mihomoDir)}`);
       if (resMihomo.ok) {
         mihomoFiles = await resMihomo.json();
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('editor.load_error'));
     }
   }
@@ -454,7 +462,7 @@
     }
 
     try {
-      const res = await fetch(`/api/config/read?path=${encodeURIComponent(path)}`);
+      const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
       if (!res.ok) throw new Error('Failed to load file');
 
       const content = await res.text();
@@ -562,11 +570,12 @@
 
   async function loadBackups(path: string) {
     try {
-      const res = await fetch(`/api/config/backups?path=${encodeURIComponent(path)}`);
+      const res = await apiFetch(`/api/config/backups?path=${encodeURIComponent(path)}`);
       if (res.ok) {
         backups = await res.json();
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       // Backups are optional
     }
   }
@@ -577,7 +586,7 @@
     backupLoading = true;
     diffGroups = [];
     try {
-      const res = await fetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
+      const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
       if (!res.ok) throw new Error('Failed to load backup content');
       const backupContent = await res.text();
       const currentContent = editorView ? editorView.state.doc.toString() : '';
@@ -747,12 +756,10 @@
     try {
       const content = editorView.state.doc.toString();
 
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
+      const res = await apiFetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: content
       });
@@ -772,6 +779,7 @@
       draftContent = '';
       await loadBackups(selectedFile);
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('editor.save_error') + ': ' + e.message);
     } finally {
       saving = false;
@@ -786,14 +794,12 @@
 
     try {
       const content = editorView.state.doc.toString();
-      const csrfToken = localStorage.getItem('csrf_token');
 
       // 1. POST /api/config/save
-      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
+      const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: content
       });
@@ -822,9 +828,8 @@
 
       // 2. POST /api/service/control?action=restart
       backgroundStatusText = $t('editor.restarting') || 'Перезапуск службы...';
-      const restartRes = await fetch('/api/service/control?action=restart', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const restartRes = await apiFetch('/api/service/control?action=restart', {
+        method: 'POST'
       });
 
       const restartText = await restartRes.text();
@@ -833,6 +838,7 @@
       // 3. Status polling
       startBackgroundStatusCheck();
     } catch (e: any) {
+      if (e?.status === 401) return;
       console.error('handleSaveAndApply error:', e);
       showToast('error', $t('editor.save_error') + ': ' + e.message);
       applyLoading = false;
@@ -852,7 +858,7 @@
       backgroundStatusText = `${$t('editor.checking_status') || 'Проверка статуса...'} (${attempts}/${maxAttempts})`;
 
       try {
-        const res = await fetch('/api/service/status');
+        const res = await apiFetch('/api/service/status');
         if (res.ok) {
           const parsed = await res.json();
           if (parsed && parsed.success && parsed.data && parsed.data.is_running === true) {
@@ -866,7 +872,11 @@
             return;
           }
         }
-      } catch (err) {
+      } catch (err: any) {
+        if (err?.status === 401) {
+          clearInterval(interval);
+          return;
+        }
         // Ignore check errors and retry
       }
 
@@ -897,7 +907,7 @@
       return;
 
     try {
-      const res = await fetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
+      const res = await apiFetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
       if (!res.ok) throw new Error('Failed to load backup');
 
       const content = await res.text();
@@ -935,15 +945,13 @@
   async function createFile() {
     if (!newFileName) return;
 
-    const csrfToken = localStorage.getItem('csrf_token');
     const path = selectedFile
       ? selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + newFileName
       : '/opt/etc/xray/configs/' + newFileName;
 
     try {
-      const res = await fetch(`/api/config/create?path=${encodeURIComponent(path)}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch(`/api/config/create?path=${encodeURIComponent(path)}`, {
+        method: 'POST'
       });
 
       if (!res.ok) throw new Error(await res.text());
@@ -953,7 +961,8 @@
       newFileName = '';
       await loadFiles();
       await loadFile(path);
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('editor.create_error') + ': ' + (e as any)?.message);
     }
   }
@@ -969,12 +978,9 @@
     if (!selectedFile) return;
     showDeleteConfirmModal = false;
 
-    const csrfToken = localStorage.getItem('csrf_token');
-
     try {
-      const res = await fetch(`/api/config/delete?path=${encodeURIComponent(selectedFile)}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch(`/api/config/delete?path=${encodeURIComponent(selectedFile)}`, {
+        method: 'POST'
       });
 
       if (!res.ok) throw new Error(await res.text());
@@ -983,7 +989,8 @@
       const fileToDelete = selectedFile;
       await closeTab(fileToDelete, true);
       await loadFiles();
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('editor.delete_error') + ': ' + (e as any)?.message);
     }
   }
@@ -991,15 +998,13 @@
   async function renameFile() {
     if (!renameTarget || !selectedFile) return;
 
-    const csrfToken = localStorage.getItem('csrf_token');
     const newPath = selectedFile.substring(0, selectedFile.lastIndexOf('/') + 1) + renameTarget;
 
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/config/rename?old=${encodeURIComponent(selectedFile)}&new=${encodeURIComponent(newPath)}`,
         {
-          method: 'POST',
-          headers: { 'X-CSRF-Token': csrfToken || '' }
+          method: 'POST'
         }
       );
 
@@ -1010,7 +1015,8 @@
       renameTarget = '';
       await loadFiles();
       await loadFile(newPath);
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('editor.rename_error') + ': ' + (e as any)?.message);
     }
   }
@@ -1084,14 +1090,10 @@
 
   async function loadTemplates() {
     try {
-      const res = await fetch('/api/templates/list');
-      if (res.ok) {
-        const data = await res.json();
-        templates = Array.isArray(data) ? data : [];
-      } else {
-        templates = [];
-      }
-    } catch (e) {
+      const data = await apiFetchJSON<Template[]>('/api/templates/list');
+      templates = Array.isArray(data) ? data : [];
+    } catch (e: any) {
+      if (e?.status === 401) return;
       templates = [];
     }
   }
@@ -1101,12 +1103,12 @@
     templatePreview = '';
     loadingPreview = true;
     try {
-      const res = await fetch(`/api/templates/fetch?name=${encodeURIComponent(template.name)}`);
-      if (res.ok) {
-        const data = await res.json();
-        templatePreview = (data.content || '').split('\n').slice(0, 50).join('\n');
-      }
-    } catch (e) {
+      const data = await apiFetchJSON<{ content: string }>(
+        `/api/templates/fetch?name=${encodeURIComponent(template.name)}`
+      );
+      templatePreview = (data.content || '').split('\n').slice(0, 50).join('\n');
+    } catch (e: any) {
+      if (e?.status === 401) return;
       templatePreview = '';
     } finally {
       loadingPreview = false;
@@ -1115,11 +1117,9 @@
 
   async function loadTemplateStatus() {
     try {
-      const res = await fetch('/api/templates/status');
-      if (res.ok) {
-        templateStatus = await res.json();
-      }
-    } catch (e) {
+      templateStatus = await apiFetchJSON<TemplateStatus>('/api/templates/status');
+    } catch (e: any) {
+      if (e?.status === 401) return;
       templateStatus = null;
     }
   }
@@ -1127,10 +1127,8 @@
   async function updateTemplates() {
     updatingTemplates = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/templates/update', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch('/api/templates/update', {
+        method: 'POST'
       });
       if (!res.ok) throw new Error((await res.text()) || 'Failed');
       await loadTemplates();
@@ -1139,6 +1137,7 @@
       showToast('success', $t('editor.templates_updated'));
       await loadTemplateStatus();
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('editor.templates_update_error'));
     } finally {
       updatingTemplates = false;
@@ -1170,9 +1169,9 @@
 
     templateLoading = true;
     try {
-      const res = await fetch(`/api/templates/fetch?name=${encodeURIComponent(template.name)}`);
-      if (!res.ok) throw new Error((await res.text()) || 'Failed to fetch template');
-      const data = await res.json();
+      const data = await apiFetchJSON<{ content: string }>(
+        `/api/templates/fetch?name=${encodeURIComponent(template.name)}`
+      );
 
       if (!data.content) throw new Error('Template is empty');
 
@@ -1183,6 +1182,7 @@
       showTemplatesModal = false;
       showToast('success', $t('editor.template_applied') || 'Template applied successfully');
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast(
         'error',
         ($t('editor.template_error') || 'Failed to apply template') + ': ' + e.message
@@ -2496,27 +2496,6 @@
     flex-shrink: 0;
   }
 
-  .modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .btn-close {
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--fg-dim);
-    display: flex;
-    align-items: center;
-    padding: 4px;
-    border-radius: 4px;
-  }
-  .btn-close:hover {
-    background: var(--hover);
-    color: var(--fg-primary);
-  }
-
   .kebab-wrap {
     position: relative;
     display: inline-block;
@@ -2564,26 +2543,6 @@
     height: 1px;
     background: var(--border);
     margin: 4px 0;
-  }
-
-  .validation-result {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 10px 14px;
-    border-radius: 6px;
-    font-size: 12px;
-  }
-
-  .validation-loading {
-    background: rgba(41, 194, 240, 0.08);
-    color: var(--accent);
-    border: 1px solid rgba(41, 194, 240, 0.2);
-  }
-
-  .v-icon {
-    font-weight: 600;
-    flex-shrink: 0;
   }
 
   .diff-preview {
