@@ -11,6 +11,7 @@
     mihomoApiAvailable
   } from './stores';
   import { usePoller } from './lib/poller';
+  import { apiFetch, apiFetchJSON } from './lib/api';
   import Sidebar from './components/Sidebar.svelte';
   import Toast from './components/Toast.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -47,6 +48,12 @@
   let lockedScrollY = 0;
 
   // Dashboard live monitoring state
+  interface Kernel {
+    name: string;
+    current_version?: string;
+    process_status?: string;
+  }
+
   interface ServiceStatus {
     xkeen: string;
     xray: string;
@@ -143,7 +150,7 @@
 
   async function fetchSubscriptionSummary(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/subscriptions', { signal });
+      const res = await apiFetch('/api/subscriptions', { signal });
       if (res.ok) {
         const envelope = await res.json();
         const rawList = Array.isArray(envelope) ? envelope : (envelope?.data ?? []);
@@ -171,15 +178,15 @@
         }
       }
     } catch (e: any) {
-      if (e?.name !== 'AbortError') {
-        console.error('fetchSubscriptionSummary failed:', e);
-      }
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
+      console.error('fetchSubscriptionSummary failed:', e);
     }
   }
 
   async function fetchProxySummary(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/mihomo/proxy/proxies', { signal });
+      const res = await apiFetch('/api/mihomo/proxy/proxies', { signal });
       if (res.ok) {
         const data = await res.json();
         const proxies = data.proxies || {};
@@ -191,9 +198,9 @@
         activeProxiesCount = nodeKeys.filter((k) => proxies[k].alive !== false).length;
       }
     } catch (e: any) {
-      if (e?.name !== 'AbortError') {
-        console.error('fetchProxySummary failed:', e);
-      }
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
+      console.error('fetchProxySummary failed:', e);
     }
   }
 
@@ -212,8 +219,8 @@
     statusError = false;
     try {
       const [svcRes, mihomoRes] = await Promise.allSettled([
-        fetch('/api/service/status', { signal }),
-        fetch('/api/mihomo/status', { signal })
+        apiFetch('/api/service/status', { signal }),
+        apiFetch('/api/mihomo/status', { signal })
       ]);
       // WR-03: allSettled never rejects, so a total outage must be derived
       // explicitly here rather than relying on the outer catch below (which
@@ -245,13 +252,13 @@
       // Try to get connection count from mihomo
       let connCount = 0;
       try {
-        const connRes = await fetch('/api/mihomo/proxy/connections?limit=1', { signal });
+        const connRes = await apiFetch('/api/mihomo/proxy/connections?limit=1', { signal });
         if (connRes.ok) {
           const connData = await connRes.json();
           connCount = connData?.connections?.length ?? 0;
         }
-      } catch (e) {
-        // ignore
+      } catch (e: any) {
+        if (e?.status === 401) return;
       }
 
       // Get kernel versions and process_status from /api/kernels
@@ -260,13 +267,8 @@
       let xrayProcessStatus = 'unknown';
       let mihomoProcessStatus = 'unknown';
       try {
-        const kernelsRes = await fetch('/api/kernels', { signal });
-        if (kernelsRes.ok) {
-          const kernelsEnvelope = await kernelsRes.json();
-          // KernelList uses JSONSuccess envelope: {success, data: [...]}
-          const kernels = Array.isArray(kernelsEnvelope)
-            ? kernelsEnvelope
-            : (kernelsEnvelope.data ?? kernelsEnvelope);
+        const kernels = await apiFetchJSON<Kernel[]>('/api/kernels', { signal });
+        if (Array.isArray(kernels)) {
           for (const k of kernels) {
             if (k.name === 'xray') {
               xrayVer = k.current_version || '';
@@ -281,7 +283,8 @@
           xrayProcessStatus = 'error';
           mihomoProcessStatus = 'error';
         }
-      } catch (_) {
+      } catch (e: any) {
+        if (e?.status === 401) return;
         xrayProcessStatus = 'error';
         mihomoProcessStatus = 'error';
       }
@@ -294,7 +297,9 @@
         xrayVersion: xrayVer,
         mihomoVersion: mihomoVer
       };
-    } catch (_) {
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
       statusError = true;
       serviceStatus = { ...serviceStatus, xray: 'error', mihomo: 'error' };
     } finally {
@@ -304,7 +309,7 @@
 
   async function fetchSystemStats(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/system/stats', { signal });
+      const res = await apiFetch('/api/system/stats', { signal });
       if (res.ok) {
         systemStats = await res.json();
         if (systemStats) {
@@ -315,7 +320,8 @@
         }
       }
     } catch (e: any) {
-      // ignore
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
     }
   }
 
@@ -365,11 +371,11 @@
 
   async function fetchVersion() {
     try {
-      const res = await fetch('/api/version');
-      const data = await res.json();
+      const data = await apiFetchJSON<{ version: string; panel_version: string }>('/api/version');
       version = data.version;
       panelVersion = data.panel_version;
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       version = $t('app.error');
       panelVersion = $t('app.error');
     }
@@ -390,14 +396,12 @@
   async function handleLogout() {
     loading = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      await fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      await apiFetch('/api/auth/logout', {
+        method: 'POST'
       });
       localStorage.removeItem('csrf_token');
       window.location.href = '/';
-    } catch (e) {
+    } catch (e: any) {
       console.error('Logout error:', e);
     } finally {
       loading = false;
@@ -564,10 +568,8 @@
 
   async function restartXkeen() {
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/service/control?action=restart', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch('/api/service/control?action=restart', {
+        method: 'POST'
       });
       if (res.ok) {
         showToast('success', $t('app.restart') + ' XKeen...');
@@ -575,7 +577,8 @@
       } else {
         showToast('error', $t('app.error'));
       }
-    } catch (_) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('app.error'));
     }
   }
