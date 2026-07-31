@@ -472,6 +472,7 @@
   }
 
   async function fetchProxies(signal?: AbortSignal) {
+    const reqSignal = signal instanceof AbortSignal ? signal : undefined;
     if (Object.keys(proxies).length === 0) {
       loading = true;
     }
@@ -489,7 +490,7 @@
       const data = await apiFetchJSON<{ proxies: Record<string, any> }>(
         '/api/mihomo/proxy/proxies',
         {
-          signal
+          signal: reqSignal
         }
       );
       proxies = data.proxies || {};
@@ -810,11 +811,14 @@
   }
 
   async function loadSubscriptions(signal?: AbortSignal) {
+    const reqSignal = signal instanceof AbortSignal ? signal : undefined;
     if (subscriptions.length === 0 && Object.keys(proxies).length === 0) {
       loading = true;
     }
     try {
-      subscriptions = await apiFetchJSON<Subscription[]>('/api/proxy-providers', { signal });
+      subscriptions = await apiFetchJSON<Subscription[]>('/api/proxy-providers', {
+        signal: reqSignal
+      });
     } catch (e: any) {
       if (e?.name !== 'AbortError' && e?.status !== 401) {
         showToast('error', $t('subscr.load_error'));
