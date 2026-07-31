@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { t } from './i18n';
   import { capabilities, fetchCapabilities, showToast, showConfirm } from './stores';
+  import { apiFetch } from './lib/api';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
@@ -68,31 +69,33 @@
 
   async function loadProcessMode() {
     try {
-      const res = await fetch('/api/mihomo/proxy/configs');
+      const res = await apiFetch('/api/mihomo/proxy/configs');
       if (res.ok) {
         const cfg = await res.json();
         showProcessName = cfg['find-process-mode'] === 'always';
       }
-    } catch (_) {}
+    } catch (e: any) {
+      if (e?.status === 401) return;
+    }
   }
 
   async function onToggleProcessName() {
     if (processModePatchPending) return;
     processModePatchPending = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/mihomo/proxy/configs', {
+      const res = await apiFetch('/api/mihomo/proxy/configs', {
         method: 'PATCH',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 'find-process-mode': showProcessName ? 'always' : 'off' })
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (_) {
+    } catch (e: any) {
       // Revert on network error or non-2xx HTTP response
       showProcessName = !showProcessName;
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
     } finally {
       processModePatchPending = false;
     }
@@ -198,15 +201,15 @@
 
   async function closeConnection(id: string) {
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/mihomo/proxy/connections/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch(`/api/mihomo/proxy/connections/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
       });
 
       if (!res.ok) throw new Error('Failed to close connection');
       showToast('success', $t('conn.close_success'));
     } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
       error = e.message;
     }
   }
@@ -220,15 +223,15 @@
     );
     if (!confirmed) return;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/mihomo/proxy/connections', {
-        method: 'DELETE',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch('/api/mihomo/proxy/connections', {
+        method: 'DELETE'
       });
 
       if (!res.ok) throw new Error('Failed to close all connections');
       showToast('success', $t('conn.close_all_success'));
     } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
       error = e.message;
     }
   }
@@ -287,12 +290,10 @@
   async function launchMihomo() {
     mihomoLaunching = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/mihomo/control', {
+      const res = await apiFetch('/api/mihomo/control', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ action: 'start' })
       });
@@ -306,7 +307,8 @@
         await fetchCapabilities();
       }, 4000);
     } catch (e: any) {
-      showToast('error', e.message);
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
       mihomoLaunching = false;
     }
   }

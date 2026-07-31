@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from './i18n';
+  import { apiFetch } from './lib/api';
 
   let password = '';
   let confirmPassword = '';
@@ -27,7 +28,7 @@
     loading = true;
 
     try {
-      const res = await fetch('/api/auth/setup', {
+      const res = await apiFetch('/api/auth/setup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password })
@@ -39,10 +40,11 @@
       }
 
       // После успешной установки — автоматический вход
-      const loginRes = await fetch('/api/auth/login', {
+      const loginRes = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ password }),
+        skip401Redirect: true
       });
 
       if (loginRes.ok) {
@@ -51,7 +53,11 @@
         window.location.href = '/';
       }
     } catch (e: any) {
-      error = e.message;
+      if (e?.status === 401) {
+        error = $t('auth.invalid_password');
+      } else {
+        error = e.message;
+      }
     } finally {
       loading = false;
     }

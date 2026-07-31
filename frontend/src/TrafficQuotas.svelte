@@ -2,12 +2,13 @@
   import { onMount } from 'svelte';
   import Modal from './components/Modal.svelte';
   import { t, currentLang } from './i18n';
-  import { showConfirm } from './stores';
+  import { showConfirm, showToast } from './stores';
   import { usePoller } from './lib/poller';
   import PageHeader from './PageHeader.svelte';
   import Icon from './lib/components/Icon.svelte';
+  import { apiFetch, apiFetchJSON } from './lib/api';
 
-  export let onSwitchTab: (tab: string) => void = () => {};
+  export const onSwitchTab: (tab: string) => void = () => {};
 
   interface Quota {
     id: string;
@@ -90,10 +91,13 @@
       loading = true;
     }
     try {
-      const res = await fetch('/api/traffic/quotas', { signal });
+      const res = await apiFetch('/api/traffic/quotas', { signal });
       if (res.ok) quotas = await res.json();
     } catch (e: any) {
-      if (e?.name !== 'AbortError') error = e.message;
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
+      error = e.message;
+      throw e;
     } finally {
       loading = false;
     }
@@ -101,19 +105,21 @@
 
   async function fetchStats(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/traffic/stats', { signal });
+      const res = await apiFetch('/api/traffic/stats', { signal });
       if (res.ok) stats = await res.json();
-    } catch (e) {
-      // ignore
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
     }
   }
 
   async function fetchAlerts(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/traffic/alerts', { signal });
+      const res = await apiFetch('/api/traffic/alerts', { signal });
       if (res.ok) alerts = await res.json();
-    } catch (e) {
-      // ignore
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
     }
   }
 
@@ -168,7 +174,6 @@
   }
 
   async function saveQuota() {
-    const csrfToken = localStorage.getItem('csrf_token');
     const payload = {
       name: formName,
       target_type: formTargetType,
@@ -185,11 +190,10 @@
       : '/api/traffic/quotas/add';
 
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       });
@@ -198,7 +202,9 @@
       editingQuota = null;
       await fetchQuotas();
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
+      showToast('error', e.message);
     }
   }
 
@@ -216,31 +222,31 @@
       }))
     )
       return;
-    const csrfToken = localStorage.getItem('csrf_token');
     try {
-      const res = await fetch(`/api/traffic/quotas/delete?id=${id}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch(`/api/traffic/quotas/delete?id=${id}`, {
+        method: 'POST'
       });
       if (!res.ok) throw new Error('Failed to delete');
       await fetchQuotas();
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
+      showToast('error', e.message);
     }
   }
 
   async function toggleEnabled(q: Quota) {
     togglingQuotas[q.id] = true;
-    const csrfToken = localStorage.getItem('csrf_token');
     try {
-      const res = await fetch(`/api/traffic/quotas/enabled?id=${q.id}&enabled=${!q.enabled}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch(`/api/traffic/quotas/enabled?id=${q.id}&enabled=${!q.enabled}`, {
+        method: 'POST'
       });
       if (!res.ok) throw new Error('Failed to toggle');
       await fetchQuotas();
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
+      showToast('error', e.message);
     } finally {
       delete togglingQuotas[q.id];
       togglingQuotas = togglingQuotas;
@@ -248,30 +254,30 @@
   }
 
   async function resetQuota(id: string) {
-    const csrfToken = localStorage.getItem('csrf_token');
     try {
-      const res = await fetch(`/api/traffic/quotas/reset?id=${id}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch(`/api/traffic/quotas/reset?id=${id}`, {
+        method: 'POST'
       });
       if (!res.ok) throw new Error('Failed to reset');
       await fetchQuotas();
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
+      showToast('error', e.message);
     }
   }
 
   async function clearAlerts() {
-    const csrfToken = localStorage.getItem('csrf_token');
     try {
-      const res = await fetch('/api/traffic/alerts/clear', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch('/api/traffic/alerts/clear', {
+        method: 'POST'
       });
       if (!res.ok) throw new Error('Failed to clear');
       alerts = [];
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
+      showToast('error', e.message);
     }
   }
 

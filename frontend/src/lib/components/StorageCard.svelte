@@ -3,12 +3,13 @@
   import { t } from '../../i18n';
   import { formatBytes } from '../format';
   import { usePoller } from '../poller';
+  import { apiFetch } from '../api';
 
   let diskStats = $state<{ total: number; used: number; free: number } | null>(null);
 
   async function fetchDiskStats(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/system/stats', { signal });
+      const res = await apiFetch('/api/system/stats', { signal });
       if (res.ok) {
         const data = await res.json();
         if (data && data.disk) {
@@ -16,9 +17,10 @@
         }
       }
     } catch (e: any) {
-      if (e?.name !== 'AbortError') {
-        console.error('Failed to fetch disk stats:', e);
+      if (e?.name === 'AbortError' || e?.status === 401) {
+        return;
       }
+      console.error('Failed to fetch disk stats:', e);
     }
   }
 

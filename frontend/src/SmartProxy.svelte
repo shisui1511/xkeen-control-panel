@@ -3,9 +3,10 @@
   import { usePoller } from './lib/poller';
   import Modal from './components/Modal.svelte';
   import { t, currentLang } from './i18n';
-  import { showConfirm } from './stores';
+  import { showConfirm, showToast } from './stores';
+  import { apiFetch, apiFetchJSON } from './lib/api';
 
-  export let onSwitchTab: (tab: string) => void = () => {};
+  export const onSwitchTab: (tab: string) => void = () => {};
 
   interface Profile {
     id: string;
@@ -63,11 +64,13 @@
     loading = true;
     error = '';
     try {
-      const res = await fetch('/api/smart-proxy/profiles');
+      const res = await apiFetch('/api/smart-proxy/profiles');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       profiles = await res.json();
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
+      showToast('error', e.message);
     } finally {
       loading = false;
     }
@@ -75,16 +78,18 @@
 
   async function fetchStatus(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/smart-proxy/status', { signal });
+      const res = await apiFetch('/api/smart-proxy/status', { signal });
       if (res.ok) status = await res.json();
     } catch (e: any) {
-      // ignore
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
+      throw e;
     }
   }
 
   async function fetchClashProxies() {
     try {
-      const res = await fetch('/api/mihomo/proxy/proxies');
+      const res = await apiFetch('/api/mihomo/proxy/proxies');
       if (res.ok) {
         const data = await res.json();
         const groups: string[] = [];
@@ -105,8 +110,8 @@
         mihomoGroups = groups.sort();
         mihomoProxies = proxies.sort();
       }
-    } catch (e) {
-      // ignore
+    } catch (e: any) {
+      if (e?.status === 401) return;
     }
   }
 
@@ -263,7 +268,6 @@
       return;
     }
 
-    const csrfToken = localStorage.getItem('csrf_token');
     const payload: any = {
       name: formName,
       enabled: formEnabled,
@@ -278,11 +282,10 @@
       : '/api/smart-proxy/profiles/add';
 
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       });
@@ -294,43 +297,40 @@
       await fetchProfiles();
       await fetchStatus();
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
+      showToast('error', e.message);
     }
   }
 
   async function deleteProfile(id: string) {
     error = '';
     if (!(await showConfirm($t('app.confirm'), $t('app.delete') + '?'))) return;
-    const csrfToken = localStorage.getItem('csrf_token');
     try {
-      const res = await fetch(`/api/smart-proxy/profiles/delete?id=${id}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      await apiFetchJSON(`/api/smart-proxy/profiles/delete?id=${id}`, {
+        method: 'POST'
       });
-      if (!res.ok) throw new Error('Failed to delete');
       await fetchProfiles();
       await fetchStatus();
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
+      showToast('error', e.message);
     }
   }
 
   async function toggleEnabled(p: Profile) {
     error = '';
-    const csrfToken = localStorage.getItem('csrf_token');
     try {
-      const res = await fetch(
-        `/api/smart-proxy/profiles/enabled?id=${p.id}&enabled=${!p.enabled}`,
-        {
-          method: 'POST',
-          headers: { 'X-CSRF-Token': csrfToken || '' }
-        }
-      );
-      if (!res.ok) throw new Error('Failed to toggle');
+      await apiFetchJSON(`/api/smart-proxy/profiles/enabled?id=${p.id}&enabled=${!p.enabled}`, {
+        method: 'POST'
+      });
       await fetchProfiles();
       await fetchStatus();
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
+      showToast('error', e.message);
     }
   }
 

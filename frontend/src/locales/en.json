@@ -59,6 +59,7 @@
   "auth.password_mismatch": "Passwords do not match",
   "auth.logout": "Logout",
   "auth.logging_out": "Logging out...",
+  "auth.session_expired": "Session expired, please sign in again",
   "nav.dashboard": "Dashboard",
   "nav.editor": "Editor",
   "nav.logs": "Logs",

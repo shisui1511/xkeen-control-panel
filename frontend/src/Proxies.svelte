@@ -3,6 +3,7 @@
   import { t, currentLang } from './i18n';
   import { usePoller } from './lib/poller';
   import { capabilities, fetchCapabilities, showToast, devMode, showConfirm } from './stores';
+  import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
@@ -471,6 +472,7 @@
   }
 
   async function fetchProxies(signal?: AbortSignal) {
+    const reqSignal = signal instanceof AbortSignal ? signal : undefined;
     if (Object.keys(proxies).length === 0) {
       loading = true;
     }
@@ -485,9 +487,12 @@
       }
     }, 10000);
     try {
-      const res = await fetch('/api/mihomo/proxy/proxies', { signal });
-      if (!res.ok) throw new Error($t('proxies.load_error'));
-      const data = await res.json();
+      const data = await apiFetchJSON<{ proxies: Record<string, any> }>(
+        '/api/mihomo/proxy/proxies',
+        {
+          signal: reqSignal
+        }
+      );
       proxies = data.proxies || {};
       const mappedGroups = Object.values(proxies)
         .filter((p: Proxy) => {
@@ -530,7 +535,7 @@
       });
       updateCollapsed();
     } catch (e: any) {
-      if (e?.name !== 'AbortError') {
+      if (e?.name !== 'AbortError' && e?.status !== 401) {
         error = e.message;
       }
     } finally {
@@ -553,12 +558,10 @@
     };
 
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/mihomo/proxy/proxies/${encodeURIComponent(groupName)}`, {
+      const res = await apiFetch(`/api/mihomo/proxy/proxies/${encodeURIComponent(groupName)}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ name: proxyName })
       });
@@ -569,6 +572,7 @@
         ...groups[groupIndex],
         now: oldProxyName
       };
+      if (e?.status === 401) return;
       showToast('error', $t('proxies.select_error'));
     }
   }
@@ -577,26 +581,23 @@
     testingLatency = true;
     error = '';
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
       const urlTestGroups = groups.filter((g) => g.type === 'URLTest');
       if (urlTestGroups.length > 0) {
         await Promise.all(
           urlTestGroups.map((g) =>
-            fetch(
+            apiFetch(
               `/api/mihomo/proxy/group/${encodeURIComponent(g.name)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`,
               {
-                method: 'GET',
-                headers: { 'X-CSRF-Token': csrfToken || '' }
+                method: 'GET'
               }
             )
           )
         );
       } else {
-        const res = await fetch(
+        const res = await apiFetch(
           '/api/mihomo/proxy/proxies/delay?url=http://www.gstatic.com/generate_204&timeout=5000',
           {
-            method: 'GET',
-            headers: { 'X-CSRF-Token': csrfToken || '' }
+            method: 'GET'
           }
         );
         if (!res.ok) throw new Error($t('proxies.load_error'));
@@ -606,6 +607,7 @@
         testingLatency = false;
       }, 2000);
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
       testingLatency = false;
     }
@@ -614,12 +616,10 @@
   async function testProxyLatency(proxyName: string) {
     testingProxy = proxyName;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/mihomo/proxy/proxies/${encodeURIComponent(proxyName)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`,
         {
-          method: 'GET',
-          headers: { 'X-CSRF-Token': csrfToken || '' }
+          method: 'GET'
         }
       );
       if (!res.ok) throw new Error($t('proxies.load_error'));
@@ -681,12 +681,10 @@
   async function launchMihomo() {
     mihomoLaunching = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/mihomo/control', {
+      const res = await apiFetch('/api/mihomo/control', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ action: 'start' })
       });
@@ -701,6 +699,7 @@
         await fetchProxies();
       }, 4000);
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
       mihomoLaunching = false;
     }
@@ -755,15 +754,16 @@
     rawResponseData = null;
 
     try {
-      const resReport = await fetch(`/api/subscriptions/parse-report?id=${sub.id}`);
+      const resReport = await apiFetch(`/api/subscriptions/parse-report?id=${sub.id}`);
       if (resReport.ok) {
         parseReportData = await resReport.json();
       }
-      const resRaw = await fetch(`/api/subscriptions/raw?id=${sub.id}`);
+      const resRaw = await apiFetch(`/api/subscriptions/raw?id=${sub.id}`);
       if (resRaw.ok) {
         rawResponseData = await resRaw.json();
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       // Ignored
     } finally {
       diagnosticLoading = false;
@@ -777,7 +777,7 @@
 
   async function loadAvailableMihomoGroups() {
     try {
-      const res = await fetch('/api/config/read?path=%2Fopt%2Fetc%2Fmihomo%2Fconfig.yaml');
+      const res = await apiFetch('/api/config/read?path=%2Fopt%2Fetc%2Fmihomo%2Fconfig.yaml');
       if (!res.ok) return;
       const data = await res.json();
       const yamlContent = data.content || '';
@@ -811,16 +811,16 @@
   }
 
   async function loadSubscriptions(signal?: AbortSignal) {
+    const reqSignal = signal instanceof AbortSignal ? signal : undefined;
     if (subscriptions.length === 0 && Object.keys(proxies).length === 0) {
       loading = true;
     }
     try {
-      const res = await fetch('/api/proxy-providers', { signal });
-      if (res.ok) {
-        subscriptions = await res.json();
-      }
+      subscriptions = await apiFetchJSON<Subscription[]>('/api/proxy-providers', {
+        signal: reqSignal
+      });
     } catch (e: any) {
-      if (e?.name !== 'AbortError') {
+      if (e?.name !== 'AbortError' && e?.status !== 401) {
         showToast('error', $t('subscr.load_error'));
       }
     } finally {
@@ -834,7 +834,6 @@
 
     refreshLoading[id] = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token') || '';
       const tasks: Promise<
         | { kernel: 'xray' | 'mihomo'; status: 'fulfilled'; value?: any }
         | { kernel: 'xray' | 'mihomo'; status: 'rejected'; reason: any }
@@ -843,9 +842,8 @@
       if (sub.enable_xray) {
         tasks.push(
           (async () => {
-            const res = await fetch(`/api/subscriptions/refresh?id=${id}`, {
-              method: 'POST',
-              headers: { 'X-CSRF-Token': csrfToken }
+            const res = await apiFetch(`/api/subscriptions/refresh?id=${id}`, {
+              method: 'POST'
             });
             if (res.ok) {
               return { kernel: 'xray' as const, status: 'fulfilled' as const };
@@ -862,9 +860,8 @@
       if (sub.enable_mihomo && providerName) {
         tasks.push(
           (async () => {
-            const res = await fetch(`/api/proxy-providers/${providerName}/refresh`, {
-              method: 'PUT',
-              headers: { 'X-CSRF-Token': csrfToken }
+            const res = await apiFetch(`/api/proxy-providers/${providerName}/refresh`, {
+              method: 'PUT'
             });
             if (res.ok) {
               return { kernel: 'mihomo' as const, status: 'fulfilled' as const };
@@ -914,7 +911,8 @@
       if (expandedSubs[id]) {
         await loadNodesBySource(id);
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('app.error'));
     } finally {
       refreshLoading[id] = false;
@@ -924,10 +922,8 @@
   async function refreshAll() {
     loading = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/subscriptions/refresh-all', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch('/api/subscriptions/refresh-all', {
+        method: 'POST'
       });
       if (res.ok) {
         showToast('success', $t('app.success'));
@@ -940,7 +936,8 @@
       } else {
         showToast('error', $t('app.error'));
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('app.error'));
     } finally {
       loading = false;
@@ -953,7 +950,6 @@
       return;
     }
 
-    const csrfToken = localStorage.getItem('csrf_token');
     const payload = {
       id: editingSub ? editingSub.id : '',
       name: formName,
@@ -975,11 +971,10 @@
       const url = editingSub
         ? `/api/subscriptions/update?id=${encodeURIComponent(editingSub.id)}`
         : '/api/subscriptions/add';
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       });
@@ -993,7 +988,8 @@
         const parsedErr = parseValidationError(text, $currentLang === 'ru' ? 'ru' : 'en');
         showToast('error', parsedErr || $t('app.error'));
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('app.error'));
     }
   }
@@ -1016,11 +1012,9 @@
     )
       return;
 
-    const csrfToken = localStorage.getItem('csrf_token');
     try {
-      const res = await fetch(`/api/subscriptions/delete?id=${id}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch(`/api/subscriptions/delete?id=${id}`, {
+        method: 'POST'
       });
       if (res.ok) {
         showToast('success', $t('app.success'));
@@ -1028,7 +1022,8 @@
       } else {
         showToast('error', $t('app.error'));
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('app.error'));
     }
   }
@@ -1110,11 +1105,12 @@
   async function loadNodes(subId: string) {
     subNodesLoading[subId] = true;
     try {
-      const res = await fetch(`/api/subscriptions/nodes?id=${subId}`);
+      const res = await apiFetch(`/api/subscriptions/nodes?id=${subId}`);
       if (res.ok) {
         subNodes[subId] = await res.json();
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       // Ignore
     } finally {
       subNodesLoading[subId] = false;
@@ -1131,7 +1127,7 @@
     subNodesLoading[subId] = true;
     subNodesError[subId] = false;
     try {
-      const res = await fetch(`/api/proxy-providers/${sub.mihomo_provider.name}/nodes`);
+      const res = await apiFetch(`/api/proxy-providers/${sub.mihomo_provider.name}/nodes`);
       if (res.ok) {
         const data: {
           tag: string;
@@ -1157,7 +1153,8 @@
       } else {
         subNodesError[subId] = true;
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       subNodesError[subId] = true;
     } finally {
       subNodesLoading[subId] = false;
@@ -1197,11 +1194,9 @@
     }
 
     try {
-      const csrfToken = localStorage.getItem('csrf_token') || '';
       const targetURL = `/api/mihomo/proxy/proxies/${encodeURIComponent(nodeTag)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`;
-      const res = await fetch(targetURL, {
-        method: 'GET',
-        headers: { 'X-CSRF-Token': csrfToken }
+      const res = await apiFetch(targetURL, {
+        method: 'GET'
       });
       if (res.ok) {
         const health = await res.json();
@@ -1214,18 +1209,17 @@
       } else {
         if (res.status === 404) {
           // Fallback: если прокси не подключен к группе, запускаем проверку здоровья всего провайдера
-          const hcRes = await fetch(
+          const hcRes = await apiFetch(
             `/api/mihomo/proxy/providers/proxies/${encodeURIComponent(providerName)}/healthcheck`,
             {
-              method: 'GET',
-              headers: { 'X-CSRF-Token': csrfToken }
+              method: 'GET'
             }
           );
           if (hcRes.ok || hcRes.status === 204) {
             // Даем Mihomo время на выполнение пинга
             await new Promise((resolve) => setTimeout(resolve, 800));
             // Загружаем ноды заново, чтобы получить обновленные задержки
-            const nodesRes = await fetch(
+            const nodesRes = await apiFetch(
               `/api/proxy-providers/${encodeURIComponent(providerName)}/nodes`
             );
             if (nodesRes.ok) {
@@ -1252,7 +1246,8 @@
           setNodeHealthFailed();
         }
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       setNodeHealthFailed();
     } finally {
       checkingNodes[subId][nodeTag] = false;
@@ -1272,7 +1267,7 @@
     if (!checkingNodes[subId]) checkingNodes[subId] = {};
     checkingNodes[subId][nodeTag] = true;
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/subscriptions/health?id=${subId}&tag=${encodeURIComponent(nodeTag)}`
       );
       if (res.ok) {
@@ -1280,7 +1275,8 @@
         if (!subHealth[subId]) subHealth[subId] = {};
         subHealth[subId][nodeTag] = health;
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       // Ignore
     } finally {
       checkingNodes[subId][nodeTag] = false;
@@ -1288,13 +1284,11 @@
   }
 
   async function setActiveNode(subId: string, nodeTag: string) {
-    const csrfToken = localStorage.getItem('csrf_token');
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/subscriptions/active?id=${subId}&tag=${encodeURIComponent(nodeTag)}`,
         {
-          method: 'POST',
-          headers: { 'X-CSRF-Token': csrfToken || '' }
+          method: 'POST'
         }
       );
       if (res.ok) {

@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { t, currentLang } from './i18n';
   import { capabilities, fetchCapabilities, showToast } from './stores';
+  import { apiFetch } from './lib/api';
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
@@ -39,12 +40,13 @@
     error = '';
 
     try {
-      const res = await fetch('/api/mihomo/proxy/rules');
+      const res = await apiFetch('/api/mihomo/proxy/rules');
       if (!res.ok) throw new Error('Failed to load rules');
 
       const data = await res.json();
       rules = data.rules || [];
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
     } finally {
       loading = false;
@@ -54,7 +56,7 @@
   async function fetchRuleProviders() {
     loadingProviders = true;
     try {
-      const res = await fetch('/api/mihomo/proxy/providers/rules');
+      const res = await apiFetch('/api/mihomo/proxy/providers/rules');
       if (!res.ok) throw new Error('Failed to load rule providers');
       const data = await res.json();
       // API возвращает { providers: { "name": { ... }, ... } }
@@ -62,6 +64,7 @@
       ruleProviders = Object.values(providersMap) as RuleProvider[];
     } catch (e: any) {
       ruleProviders = [];
+      if (e?.status === 401) return;
       showToast('error', e.message);
     } finally {
       loadingProviders = false;
@@ -71,18 +74,15 @@
   async function updateProvider(name: string) {
     updatingProvider = name;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(name)}`, {
-        method: 'PUT',
-        headers: {
-          'X-CSRF-Token': csrfToken || ''
-        }
+      const res = await apiFetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(name)}`, {
+        method: 'PUT'
       });
       if (!res.ok) throw new Error(`Failed to update provider: ${name}`);
       showToast('success', $t('rules.update_success'));
       // Re-fetch чтобы обновить updatedAt и ruleCount
       await fetchRuleProviders();
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
     } finally {
       updatingProvider = null;
@@ -92,12 +92,10 @@
   async function updateAllProviders() {
     updatingAll = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
       const beforeTimestamps = new Map(ruleProviders.map((p) => [p.name, p.updatedAt]));
       for (const provider of ruleProviders) {
-        await fetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(provider.name)}`, {
-          method: 'PUT',
-          headers: { 'X-CSRF-Token': csrfToken || '' }
+        await apiFetch(`/api/mihomo/proxy/providers/rules/${encodeURIComponent(provider.name)}`, {
+          method: 'PUT'
         });
       }
       await fetchRuleProviders();
@@ -111,6 +109,7 @@
         }
       }
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
     } finally {
       updatingAll = false;
@@ -189,12 +188,10 @@
   async function launchMihomo() {
     mihomoLaunching = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/mihomo/control', {
+      const res = await apiFetch('/api/mihomo/control', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ action: 'start' })
       });
@@ -208,6 +205,7 @@
         }
       }, 2500);
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
       mihomoLaunching = false;
     }

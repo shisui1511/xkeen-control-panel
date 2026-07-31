@@ -4,6 +4,9 @@
   import { t } from './i18n';
   import PageHeader from './PageHeader.svelte';
 
+  import { showToast } from './stores';
+  import { apiFetch } from './lib/api';
+
   export let onSwitchTab: (tab: string) => void = () => {};
 
   interface CommandDef {
@@ -25,7 +28,7 @@
   }
 
   let categories: CommandCategory[] = [];
-  let loading = false;
+  let loading = true;
   let error = '';
   let executing = '';
   let output = '';
@@ -37,10 +40,12 @@
   async function fetchCommands() {
     loading = true;
     try {
-      const res = await fetch('/api/console/commands');
+      const res = await apiFetch('/api/console/commands');
       if (!res.ok) throw new Error($t('console.load_error'));
       categories = await res.json();
     } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
       error = e.message;
     } finally {
       loading = false;
@@ -53,12 +58,10 @@
     error = '';
     confirmPending = null;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/console/execute', {
+      const res = await apiFetch('/api/console/execute', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ command })
       });
@@ -70,6 +73,8 @@
         error = result.error || $t('app.error');
       }
     } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
       error = e.message;
       output = e.message;
     } finally {
@@ -357,50 +362,6 @@
     font-size: var(--font-size-xs, 11px);
     color: var(--fg-dim);
     line-height: 1.3;
-  }
-
-  .cmd-row {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: none;
-    border: none;
-    font-family: inherit;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border-light);
-    cursor: pointer;
-    transition: background var(--transition-fast);
-  }
-
-  .cmd-row:hover:not(:disabled) {
-    background: var(--hover);
-  }
-
-  .cmd-row:disabled {
-    cursor: not-allowed;
-    opacity: 0.6;
-  }
-
-  .cmd-row:last-child {
-    border-bottom: 0;
-  }
-
-  .cmd-row .cmd-name {
-    color: var(--fg-primary);
-    font-weight: 600;
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-  }
-
-  .cmd-row .cmd-name.dangerous-text {
-    color: var(--danger);
-  }
-
-  .cmd-row .cmd-desc {
-    color: var(--fg-dim);
-    font-size: 11.5px;
-    margin-top: 2px;
   }
 
   .term-output {
