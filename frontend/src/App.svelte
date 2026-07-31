@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t, i18nReady } from './i18n';
+  import { apiFetch } from './lib/api';
   import Login from './Login.svelte';
   import Setup from './Setup.svelte';
   import Dashboard from './Dashboard.svelte';
@@ -16,7 +17,10 @@
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
-      const res = await fetch('/api/auth/me', { signal: controller.signal });
+      const res = await apiFetch('/api/auth/me', {
+        signal: controller.signal,
+        skip401Redirect: true
+      });
       clearTimeout(timeoutId);
 
       if (!res.ok) {

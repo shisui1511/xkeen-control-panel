@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t } from './i18n';
+  import { apiFetch } from './lib/api';
 
   let password = $state('');
   let error = $state('');
@@ -9,7 +10,7 @@
 
   async function fetchVersion() {
     try {
-      const res = await fetch('/api/version');
+      const res = await apiFetch('/api/version');
       const data = await res.json();
       version = data.panel_version || '';
     } catch (e) {
@@ -27,10 +28,11 @@
     error = '';
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
+        body: JSON.stringify({ password }),
+        skip401Redirect: true
       });
 
       if (!res.ok) {
@@ -50,10 +52,6 @@
           );
         }
 
-        if (res.status === 401) {
-          throw new Error($t('auth.invalid_password'));
-        }
-
         throw new Error($t('auth.login_error'));
       }
 
@@ -63,7 +61,11 @@
       // Redirect to dashboard
       window.location.href = '/';
     } catch (e: any) {
-      error = e.message;
+      if (e?.status === 401) {
+        error = $t('auth.invalid_password');
+      } else {
+        error = e.message;
+      }
     } finally {
       loading = false;
     }
@@ -73,6 +75,13 @@
     if (e.key === 'Enter') {
       handleLogin();
     }
+  }
+
+  // Свелте-экшен вместо HTML-атрибута autofocus: сохраняет автофокус на поле
+  // пароля, но не триггерит a11y-предупреждение svelte/valid-compile
+  // (autofocus-атрибут в HTML некорректен с точки зрения a11y-линта).
+  function autofocusAction(node: HTMLElement) {
+    node.focus();
   }
 
   onMount(fetchVersion);
@@ -122,7 +131,7 @@
         placeholder={$t('auth.enter_password')}
         disabled={loading}
         autocomplete="current-password"
-        autofocus
+        use:autofocusAction
       />
       {#if error}
         <div class="alert alert-error" style="margin-top:10px;margin-bottom:0;">{error}</div>
