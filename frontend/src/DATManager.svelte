@@ -4,8 +4,13 @@
   import { t, currentLang, pluralize } from './i18n';
   import Icon from './lib/components/Icon.svelte';
   import { showToast, capabilities } from './stores';
+  import { apiFetch, apiFetchJSON } from './lib/api';
 
-  export let onSwitchTab: (tab: string) => void = () => {};
+  export const onSwitchTab: (tab: string) => void = () => {};
+
+  function autofocusAction(node: HTMLElement) {
+    node.focus();
+  }
 
   interface DATFile {
     name: string;
@@ -75,7 +80,7 @@
   async function fetchFiles() {
     loading = true;
     try {
-      const res = await fetch('/api/dat/list');
+      const res = await apiFetch('/api/dat/list');
       if (!res.ok) throw new Error('Failed to load DAT files');
 
       let data = await res.json();
@@ -85,6 +90,7 @@
         return a.name.localeCompare(b.name);
       });
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
     } finally {
       loading = false;
@@ -99,15 +105,12 @@
     }
     error = '';
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
       const body = filename ? JSON.stringify({ file: filename }) : undefined;
-      const headers: Record<string, string> = {
-        'X-CSRF-Token': csrfToken || ''
-      };
+      const headers: Record<string, string> = {};
       if (body) {
         headers['Content-Type'] = 'application/json';
       }
-      const res = await fetch('/api/dat/update', {
+      const res = await apiFetch('/api/dat/update', {
         method: 'POST',
         headers,
         body
@@ -118,6 +121,7 @@
       }
       await fetchFiles();
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
     } finally {
       globalUpdating = false;
@@ -129,10 +133,8 @@
     rollbacking = true;
     error = '';
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/dat/rollback', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch('/api/dat/rollback', {
+        method: 'POST'
       });
       if (!res.ok) {
         const text = await res.text();
@@ -141,6 +143,7 @@
       showToast('success', $t('dat.rollback_success'));
       await fetchFiles();
     } catch (e: any) {
+      if (e?.status === 401) return;
       error = e.message;
       showToast('error', `${$t('dat.rollback_error')}: ${e.message}`);
     } finally {
@@ -151,11 +154,12 @@
   async function openTagBrowser(file: DATFile) {
     tagDrawer = { open: true, file, tags: [], loading: true, error: '', search: '', copied: '' };
     try {
-      const res = await fetch(`/api/dat/tags?name=${encodeURIComponent(file.name)}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to load tags');
+      const json = await apiFetchJSON<{ tags: DATTag[] }>(
+        `/api/dat/tags?name=${encodeURIComponent(file.name)}`
+      );
       tagDrawer = { ...tagDrawer, loading: false, tags: json.tags || [] };
     } catch (e: any) {
+      if (e?.status === 401) return;
       tagDrawer = { ...tagDrawer, loading: false, error: e.message };
     }
   }
@@ -190,9 +194,7 @@
     entryDrawer.error = '';
     try {
       const url = `/api/dat/search?name=${encodeURIComponent(entryDrawer.file.name)}&tag=${encodeURIComponent(entryDrawer.tag)}&query=${encodeURIComponent(entryDrawer.search)}&page=${entryDrawer.page}`;
-      const res = await fetch(url);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to search DAT tag');
+      const json = await apiFetchJSON<{ entries: string[]; total: number; has_more: boolean }>(url);
 
       if (replace) {
         entryDrawer.entries = json.entries || [];
@@ -202,6 +204,7 @@
       entryDrawer.total = json.total || 0;
       entryDrawer.hasMore = json.has_more || false;
     } catch (e: any) {
+      if (e?.status === 401) return;
       entryDrawer.error = e.message;
     } finally {
       entryDrawer.loading = false;
@@ -896,7 +899,7 @@
           placeholder={$t('dat.search_entries')}
           bind:value={entryDrawer.search}
           oninput={handleEntrySearch}
-          autofocus
+          use:autofocusAction
         />
         {#if entryDrawer.search}
           <button
@@ -1025,7 +1028,7 @@
           type="text"
           placeholder={$currentLang === 'ru' ? 'Поиск тега...' : 'Search tag...'}
           bind:value={tagDrawer.search}
-          autofocus
+          use:autofocusAction
         />
         {#if tagDrawer.search}
           <button class="td-clear" onclick={() => (tagDrawer = { ...tagDrawer, search: '' })}
@@ -1448,37 +1451,6 @@
     padding: 8px 0;
   }
 
-  .td-tag {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 20px;
-    background: none;
-    border: none;
-    cursor: pointer;
-    text-align: left;
-    transition: background var(--transition-fast);
-    color: var(--fg-primary);
-  }
-
-  .td-tag:hover {
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .td-tag:hover .td-tag-copy {
-    opacity: 1;
-  }
-
-  .td-tag.copied {
-    background: rgba(70, 209, 138, 0.07);
-  }
-
-  .td-tag.copied .td-tag-copy {
-    opacity: 1;
-    color: var(--success);
-  }
-
   .td-tag-name {
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     font-size: 13px;
@@ -1497,17 +1469,6 @@
     padding: 1px 7px;
     flex-shrink: 0;
     font-variant-numeric: tabular-nums;
-  }
-
-  .td-tag-copy {
-    opacity: 0;
-    color: var(--fg-dim);
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    transition:
-      opacity var(--transition-fast),
-      color var(--transition-fast);
   }
 
   /* ── Entry Browser & Tag Browser Row Updates ── */

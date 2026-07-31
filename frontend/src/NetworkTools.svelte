@@ -4,8 +4,10 @@
   import { t } from './i18n';
   import PageHeader from './PageHeader.svelte';
   import Icon from './lib/components/Icon.svelte';
+  import { showToast } from './stores';
+  import { apiFetch } from './lib/api';
 
-  export let onSwitchTab: (tab: string) => void = () => {};
+  export const onSwitchTab: (tab: string) => void = () => {};
 
   interface ToolResult {
     success: boolean;
@@ -182,7 +184,7 @@
   // Fetch Mihomo proxies to populate proxy selection dropdown
   async function fetchClashProxies() {
     try {
-      const res = await fetch('/api/mihomo/proxy/proxies');
+      const res = await apiFetch('/api/mihomo/proxy/proxies');
       if (res.ok) {
         const data = await res.json();
         const groups: string[] = [];
@@ -203,8 +205,8 @@
         mihomoGroups = groups.sort();
         mihomoProxies = proxies.sort();
       }
-    } catch (e) {
-      // ignore
+    } catch (e: any) {
+      if (e?.status === 401) return;
     }
   }
 
@@ -234,10 +236,9 @@
     activeTool = 'ping';
     result = null;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/network/ping', {
+      const res = await apiFetch('/api/network/ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ host: pingHost, count })
       });
       const data = await res.json();
@@ -249,8 +250,11 @@
           params: { host: pingHost }
         });
       }
-    } catch (e) {
-      result = { success: false, error: 'Request failed' };
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
+      result = { success: false, error: e.message || 'Request failed' };
+      showToast('error', e.message || 'Request failed');
     } finally {
       loading = false;
     }
@@ -266,10 +270,9 @@
     activeTool = 'traceroute';
     result = null;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/network/traceroute', {
+      const res = await apiFetch('/api/network/traceroute', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ host: tracerouteHost, max_hops: maxHops })
       });
       const data = await res.json();
@@ -281,8 +284,11 @@
           params: { host: tracerouteHost }
         });
       }
-    } catch (e) {
-      result = { success: false, error: 'Request failed' };
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
+      result = { success: false, error: e.message || 'Request failed' };
+      showToast('error', e.message || 'Request failed');
     } finally {
       loading = false;
     }
@@ -298,10 +304,9 @@
     activeTool = 'dns';
     result = null;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/network/dns', {
+      const res = await apiFetch('/api/network/dns', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ host: dnsHost, record_type: recordType })
       });
       const data = await res.json();
@@ -313,8 +318,11 @@
           params: { host: dnsHost, record_type: recordType }
         });
       }
-    } catch (e) {
-      result = { success: false, error: 'Request failed' };
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
+      result = { success: false, error: e.message || 'Request failed' };
+      showToast('error', e.message || 'Request failed');
     } finally {
       loading = false;
     }
@@ -330,10 +338,9 @@
     activeTool = 'http';
     result = null;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/network/http', {
+      const res = await apiFetch('/api/network/http', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, timeout })
       });
       const data = await res.json();
@@ -345,8 +352,11 @@
           params: { url }
         });
       }
-    } catch (e) {
-      result = { success: false, error: 'Request failed' };
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
+      result = { success: false, error: e.message || 'Request failed' };
+      showToast('error', e.message || 'Request failed');
     } finally {
       loading = false;
     }
@@ -364,10 +374,9 @@
     activeTool = 'proxy';
     result = null;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/network/proxy-test', {
+      const res = await apiFetch('/api/network/proxy-test', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ proxy_name: selectedProxy, url: target, timeout: proxyTimeout })
       });
       const data = await res.json();
@@ -389,8 +398,11 @@
           output: data.output
         };
       }
-    } catch (e) {
-      result = { success: false, error: 'Request failed' };
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
+      result = { success: false, error: e.message || 'Request failed' };
+      showToast('error', e.message || 'Request failed');
     } finally {
       loading = false;
     }
@@ -410,10 +422,9 @@
     activeTool = 'port';
     result = null;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/network/port-check', {
+      const res = await apiFetch('/api/network/port-check', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ host: portHost, port: portNumber, timeout: portTimeout })
       });
       const data = await res.json();
@@ -436,8 +447,11 @@
           output: data.output
         };
       }
-    } catch (e) {
-      result = { success: false, error: 'Request failed' };
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
+      result = { success: false, error: e.message || 'Request failed' };
+      showToast('error', e.message || 'Request failed');
     } finally {
       loading = false;
     }
@@ -445,13 +459,13 @@
 
   async function fetchIP() {
     try {
-      const res = await fetch('/api/network/ip');
+      const res = await apiFetch('/api/network/ip');
       const data = await res.json();
       if (data.success) {
         publicIP = data.ip;
       }
-    } catch (e) {
-      // ignore
+    } catch (e: any) {
+      if (e?.status === 401) return;
     }
   }
 
