@@ -1471,12 +1471,14 @@
         body: JSON.stringify({ links: lines })
       });
 
-      if (data.data && data.data.length > 0) {
+      const parsedItems = (Array.isArray(data) ? data : data?.data) || [];
+
+      if (parsedItems.length > 0) {
         const newImportNodes = [];
         const existingTags = [...outboundTags];
 
-        for (let i = 0; i < data.data.length; i++) {
-          const result = data.data[i];
+        for (let i = 0; i < parsedItems.length; i++) {
+          const result = parsedItems[i];
           if (result.outbound) {
             const baseTag = result.outbound.tag || 'node';
             const uniqueTag = generateUniqueTag(baseTag, existingTags);

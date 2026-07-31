@@ -137,7 +137,7 @@ test.describe('Lazy tab loading (Logs)', () => {
       await expect(navItem).toHaveAttribute('aria-current', 'page');
       // Дожидаемся исчезновения Skeleton (чанк успешно загружен) и появления
       // реального содержимого вкладки (не пустой контейнер).
-      await expect(page.locator('.skeleton-card')).not.toBeVisible({ timeout: 10000 });
+      await expect(page.locator('.skeleton-card')).toHaveCount(0, { timeout: 10000 });
       await expect(page.locator('.main-content')).not.toBeEmpty();
     });
   }

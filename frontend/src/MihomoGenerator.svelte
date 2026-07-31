@@ -129,7 +129,9 @@
   }
 
   // State
-  let activeSection = $state<'proxies' | 'groups' | 'rules' | 'dns' | 'tun' | 'rulesets'>('proxies');
+  let activeSection = $state<'proxies' | 'groups' | 'rules' | 'dns' | 'tun' | 'rulesets'>(
+    'proxies'
+  );
   let proxies: Proxy[] = $state([]);
   let groups: ProxyGroup[] = $state([]);
   let rules: Rule[] = $state([]);
@@ -255,7 +257,8 @@
   let importTag = $state('');
   let importStep = $state(1); // 1: Input link, 2: Preview & Confirm tag
   let importLoading = $state(false);
-  let importNodes: { link: string; outbound: any; tag: string; rowError?: string | null }[] = $state([]);
+  let importNodes: { link: string; outbound: any; tag: string; rowError?: string | null }[] =
+    $state([]);
   let importErrorMsg = $state('');
 
   // Form visibility
@@ -822,12 +825,14 @@
         body: JSON.stringify({ links: lines })
       });
 
-      if (data.data && data.data.length > 0) {
+      const parsedItems = (Array.isArray(data) ? data : data?.data) || [];
+
+      if (parsedItems.length > 0) {
         const newImportNodes = [];
         const existingNames = proxies.map((p) => p.name);
 
-        for (let i = 0; i < data.data.length; i++) {
-          const result = data.data[i];
+        for (let i = 0; i < parsedItems.length; i++) {
+          const result = parsedItems[i];
           if (result.outbound) {
             const baseName = result.outbound.tag || 'proxy';
             const uniqueName = generateUniqueProxyName(baseName, existingNames);
