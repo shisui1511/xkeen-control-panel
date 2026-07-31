@@ -27,12 +27,21 @@
   import GroupForm from './components/mihomo/GroupForm.svelte';
   import RuleForm from './components/mihomo/RuleForm.svelte';
 
-  export let onSwitchTab: (tab: string) => void = () => {};
-  export let selectedFile: string = '';
-  export let onInsertIntoEditor: (content: string) => void = () => {};
-  export let embedded: boolean = false;
-  export const initialPreset: string = '';
-  export let invalidateCache: boolean = false;
+  let {
+    onSwitchTab = () => {},
+    selectedFile = '',
+    onInsertIntoEditor = () => {},
+    embedded = false,
+    initialPreset = '',
+    invalidateCache = false
+  }: {
+    onSwitchTab?: (tab: string) => void;
+    selectedFile?: string;
+    onInsertIntoEditor?: (content: string) => void;
+    embedded?: boolean;
+    initialPreset?: string;
+    invalidateCache?: boolean;
+  } = $props();
 
   type ProxyType = 'vless' | 'hysteria2' | 'tuic' | 'ss' | 'vmess';
   type GroupType = 'select' | 'url-test' | 'fallback' | 'load-balance';
@@ -120,15 +129,15 @@
   }
 
   // State
-  let activeSection: 'proxies' | 'groups' | 'rules' | 'dns' | 'tun' | 'rulesets' = 'proxies';
-  let proxies: Proxy[] = [];
-  let groups: ProxyGroup[] = [];
-  let rules: Rule[] = [];
-  let activePreset: string = '';
-  let activeRuleProvider: 'none' | 'zkeen' | 'metacubex' = 'none';
-  let subscriptions: any[] = [];
-  let mihomoProviders: any[] = [];
-  let lastParsedProviders: any[] = [];
+  let activeSection = $state<'proxies' | 'groups' | 'rules' | 'dns' | 'tun' | 'rulesets'>('proxies');
+  let proxies: Proxy[] = $state([]);
+  let groups: ProxyGroup[] = $state([]);
+  let rules: Rule[] = $state([]);
+  let activePreset: string = $state('');
+  let activeRuleProvider = $state<'none' | 'zkeen' | 'metacubex'>('none');
+  let subscriptions: any[] = $state([]);
+  let mihomoProviders: any[] = $state([]);
+  let lastParsedProviders: any[] = $state([]);
 
   function mergeMihomoProviders(dbSubs: any[], parsedProviders: any[]) {
     const dbMapByUrl = new Map<string, any>();
@@ -185,75 +194,79 @@
     return merged;
   }
 
-  $: hasXraySubscriptions = subscriptions.some((s) => s.enable_xray);
-  $: hasMihomoProviders = mihomoProviders.length > 0;
-  let hasZkeenGeodata = false;
-  let existingTproxyPort: number | null = null;
-  let existingRedirPort: number | null = null;
-  let dns: DNSConfig = {
+  let hasXraySubscriptions = $derived(subscriptions.some((s) => s.enable_xray));
+  let hasMihomoProviders = $derived(mihomoProviders.length > 0);
+  let hasZkeenGeodata = $state(false);
+  let existingTproxyPort: number | null = $state(null);
+  let existingRedirPort: number | null = $state(null);
+  let dns: DNSConfig = $state({
     enabled: false,
     nameservers: ['https://doh.pub/dns-query', '223.5.5.5'],
     fallback: ['https://8.8.8.8/dns-query', '1.1.1.1'],
     enhancedMode: 'fake-ip',
     fakeIPRange: '198.18.0.1/16'
-  };
-  let tun: TUNConfig = {
+  });
+  let tun: TUNConfig = $state({
     enabled: false,
     stack: 'mixed',
     autoRoute: true,
     autoDetectInterface: true,
     dnsHijack: ['any:53']
-  };
-  let preservedKeys: string[] = [];
-  let dismissMergeWarning = false;
+  });
+  let preservedKeys: string[] = $state([]);
+  let dismissMergeWarning = $state(false);
   let lastPreservedKeysStr = '';
-  $: if (preservedKeys.join(',') !== lastPreservedKeysStr) {
-    lastPreservedKeysStr = preservedKeys.join(',');
-    const dismissed = localStorage.getItem('xcp:dismissed_warning:preserved_keys');
-    dismissMergeWarning = dismissed === lastPreservedKeysStr;
-  }
-
-  let dismissZkeenGeodataWarning = false;
-  let lastActivePreset = '';
-  $: if (activePreset !== lastActivePreset) {
-    if (lastActivePreset && activePreset !== lastActivePreset) {
-      localStorage.removeItem('xcp:dismissed_warning:zkeen_geodata');
+  $effect(() => {
+    if (preservedKeys.join(',') !== lastPreservedKeysStr) {
+      lastPreservedKeysStr = preservedKeys.join(',');
+      const dismissed = localStorage.getItem('xcp:dismissed_warning:preserved_keys');
+      dismissMergeWarning = dismissed === lastPreservedKeysStr;
     }
-    lastActivePreset = activePreset;
-    const dismissed = localStorage.getItem('xcp:dismissed_warning:zkeen_geodata');
-    dismissZkeenGeodataWarning = dismissed === activePreset;
-  }
+  });
 
-  let sniffer = {
+  let dismissZkeenGeodataWarning = $state(false);
+  let lastActivePreset = '';
+  $effect(() => {
+    if (activePreset !== lastActivePreset) {
+      if (lastActivePreset && activePreset !== lastActivePreset) {
+        localStorage.removeItem('xcp:dismissed_warning:zkeen_geodata');
+      }
+      lastActivePreset = activePreset;
+      const dismissed = localStorage.getItem('xcp:dismissed_warning:zkeen_geodata');
+      dismissZkeenGeodataWarning = dismissed === activePreset;
+    }
+  });
+
+  let sniffer = $state({
     enabled: false,
     sniffHttp: true,
     sniffTls: true,
     sniffQuic: true
-  };
-  let canUndo = false;
-  let isDirty = false;
+  });
+  let canUndo = $state(false);
+  let isDirty = $state(false);
   function checkUndo() {
     canUndo = !!localStorage.getItem('xcp_prev_mihomo_yaml');
   }
 
   // Import Node states
-  let showImportModal = false;
-  let importLink = '';
-  let importTag = '';
-  let importStep = 1; // 1: Input link, 2: Preview & Confirm tag
-  let importLoading = false;
-  let importNodes: { link: string; outbound: any; tag: string; rowError?: string | null }[] = [];
-  let importErrorMsg = '';
+  let showImportModal = $state(false);
+  let importLink = $state('');
+  let importTag = $state('');
+  let importStep = $state(1); // 1: Input link, 2: Preview & Confirm tag
+  let importLoading = $state(false);
+  let importNodes: { link: string; outbound: any; tag: string; rowError?: string | null }[] = $state([]);
+  let importErrorMsg = $state('');
 
   // Form visibility
-  let showProxyForm = false;
-  let showGroupForm = false;
-  let showRuleForm = false;
-  let editingProxyId: string | null = null;
-  let editingGroupId: string | null = null;
+  let showProxyForm = $state(false);
+  let showGroupForm = $state(false);
+  let showRuleForm = $state(false);
+  let editingProxyId: string | null = $state(null);
+  let editingGroupId: string | null = $state(null);
 
   // New proxy form
-  let np: Omit<Proxy, 'id'> = newProxyDefaults('vless');
+  let np: Omit<Proxy, 'id'> = $state(newProxyDefaults('vless'));
   function newProxyDefaults(type: ProxyType): Omit<Proxy, 'id'> {
     return {
       name: '',
@@ -279,13 +292,15 @@
     };
   }
   let lastType = 'vless';
-  $: if (np.type && np.type !== lastType) {
-    lastType = np.type;
-    np = { ...newProxyDefaults(np.type), name: np.name, server: np.server, port: np.port };
-  }
+  $effect(() => {
+    if (np.type && np.type !== lastType) {
+      lastType = np.type;
+      np = { ...newProxyDefaults(np.type), name: np.name, server: np.server, port: np.port };
+    }
+  });
 
   // New group form
-  let ng: Omit<ProxyGroup, 'id'> = {
+  let ng: Omit<ProxyGroup, 'id'> = $state({
     name: '',
     type: 'select',
     proxies: [],
@@ -294,19 +309,19 @@
     interval: 300,
     useProviders: [],
     strategy: undefined
-  };
+  });
 
   // New rule form
-  let nr: Omit<Rule, 'id'> = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
+  let nr: Omit<Rule, 'id'> = $state({ type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' });
 
   // Moved state variables to prevent duplicate declarations and temporal dead zone (TDZ) issues
-  let validationError = '';
-  let schema: any = null;
-  let schemaLoading = true;
-  let schemaError = '';
-  let showApplyConfirm = false;
-  let applyLoading = false;
-  let dnsRedirectLoading = false;
+  let validationError = $state('');
+  let schema: any = $state(null);
+  let schemaLoading = $state(true);
+  let schemaError = $state('');
+  let showApplyConfirm = $state(false);
+  let applyLoading = $state(false);
+  let dnsRedirectLoading = $state(false);
 
   const RULE_PROVIDERS: Record<
     string,
@@ -517,7 +532,7 @@
     ]
   };
 
-  let selectedMetaRuleSets: Map<string, string> = new Map();
+  let selectedMetaRuleSets: Map<string, string> = $state(new Map());
 
   const META_BASE_URL = 'https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo';
 
@@ -1050,20 +1065,22 @@
     checkUndo();
   });
 
-  $: {
+  $effect(() => {
     if (selectedFile) {
       loadConfig(selectedFile);
     }
-  }
+  });
 
   let prevInvalidateCache = false;
-  $: if (invalidateCache && !prevInvalidateCache) {
-    prevInvalidateCache = true;
-    configLoadedForPath = '';
-    loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
-  } else if (!invalidateCache) {
-    prevInvalidateCache = false;
-  }
+  $effect(() => {
+    if (invalidateCache && !prevInvalidateCache) {
+      prevInvalidateCache = true;
+      configLoadedForPath = '';
+      loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
+    } else if (!invalidateCache) {
+      prevInvalidateCache = false;
+    }
+  });
 
   function sanitizeProxyName(name: string): { name: string; sanitized: boolean } {
     const original = name;
@@ -1213,9 +1230,8 @@
     });
   }
 
-  let yaml = '';
-  $: {
-    // Explicit deps so Svelte 5 legacy mode tracks them across the function call
+  let yaml = $derived.by(() => {
+    // Explicit deps so Svelte 5 tracks them across the function call
     void proxies;
     void groups;
     void rules;
@@ -1233,8 +1249,8 @@
     void sniffer.sniffHttp;
     void sniffer.sniffTls;
     void sniffer.sniffQuic;
-    yaml = generateYAML();
-  }
+    return generateYAML();
+  });
 
   async function copyYAML() {
     await navigator.clipboard.writeText(yaml);
@@ -1297,35 +1313,36 @@
   ];
   const CIPHERS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-poly1305', '2022-blake3-aes-256-gcm'];
 
-  let allProxyNames: string[] = [];
-  $: allProxyNames = [
+  let allProxyNames: string[] = $derived([
     'DIRECT',
     'REJECT',
     ...proxies.map((p) => p.name),
     ...groups.map((g) => g.name)
-  ];
+  ]);
 
   // Dynamic tabs calculation and auto-switch
-  $: tabs = [
+  let tabs = $derived([
     ['proxies', ru ? 'Прокси' : 'Proxies'],
     ['groups', ru ? 'Группы' : 'Groups'],
     ...(activeRuleProvider === 'metacubex' ? [['rulesets', ru ? 'Наборы' : 'Rule Sets']] : []),
     ['rules', ru ? 'Правила' : 'Rules'],
     ['dns', 'DNS'],
     ['tun', 'TUN']
-  ];
+  ]);
 
-  $: if (
-    activeRuleProvider === 'metacubex' &&
-    activeSection !== 'rulesets' &&
-    activeSection !== 'proxies' &&
-    activeSection !== 'groups' &&
-    activeSection !== 'rules' &&
-    activeSection !== 'dns' &&
-    activeSection !== 'tun'
-  ) {
-    activeSection = 'rulesets';
-  }
+  $effect(() => {
+    if (
+      activeRuleProvider === 'metacubex' &&
+      activeSection !== 'rulesets' &&
+      activeSection !== 'proxies' &&
+      activeSection !== 'groups' &&
+      activeSection !== 'rules' &&
+      activeSection !== 'dns' &&
+      activeSection !== 'tun'
+    ) {
+      activeSection = 'rulesets';
+    }
+  });
 
   // extractSection is imported from './lib/mihomoYaml'
 
@@ -1344,10 +1361,11 @@
     }
   }
 
-  $: ruleProviders =
+  let ruleProviders = $derived(
     schema && schema.mihomo && schema.mihomo.rule_providers
       ? schema.mihomo.rule_providers
-      : ZKEEN_RULE_PROVIDERS;
+      : ZKEEN_RULE_PROVIDERS
+  );
 
   // findTopLevelSection and replaceMihomoTopLevelSection are imported from './lib/mihomoYaml'
 
