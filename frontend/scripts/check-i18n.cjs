@@ -1,11 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 
-const repoRoot = path.resolve(__dirname, '..');
-const i18nPath = path.join(repoRoot, 'frontend/src/i18n.ts');
-const ruJsonPath = path.join(repoRoot, 'frontend/src/locales/ru.json');
-const enJsonPath = path.join(repoRoot, 'frontend/src/locales/en.json');
-const srcDir = path.join(repoRoot, 'frontend/src');
+// Determine frontend root and src directory
+const frontendDir = path.resolve(__dirname, '..');
+const i18nPath = path.join(frontendDir, 'src/i18n.ts');
+const ruJsonPath = path.join(frontendDir, 'src/locales/ru.json');
+const enJsonPath = path.join(frontendDir, 'src/locales/en.json');
+const srcDir = path.join(frontendDir, 'src');
 
 const content = fs.readFileSync(i18nPath, 'utf8');
 
@@ -113,22 +114,30 @@ try {
 
   for (const f of svelteFiles) {
     const txt = fs.readFileSync(f, 'utf8');
-    const relativePath = path.relative(repoRoot, f);
+    const relativePath = path.relative(frontendDir, f);
 
+    // Extract used keys
     let m;
     while ((m = keyRe.exec(txt)) !== null) {
       usedKeys.add(m[1]);
     }
 
     const lines = txt.split('\n');
+    let inHTMLComment = false;
+    let inJSBlockComment = false;
+
     lines.forEach((line, index) => {
       const lineNum = index + 1;
 
+      // Check fallback pattern $t(...) || 'кириллица'
       if (fallbackRe.test(line)) {
         fallbackErrors.push({ file: relativePath, line: lineNum, text: line.trim() });
       }
 
+      // Clean line from comments for Cyrillic check
       let cleaned = line;
+
+      // Simple comment filtering
       cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '');
       cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
       cleaned = cleaned.replace(/\/\/.*/, '');
@@ -139,6 +148,7 @@ try {
     });
   }
 
+  // Verify key presence
   const missingInRu = [];
   const missingInEn = [];
   for (const k of usedKeys) {
@@ -165,7 +175,9 @@ try {
   }
 
   if (cyrillicErrors.length > 0) {
-    console.error(`\n❌ Error: ${cyrillicErrors.length} hardcoded Cyrillic string(s) detected in .svelte components:`);
+    console.error(
+      `\n❌ Error: ${cyrillicErrors.length} hardcoded Cyrillic string(s) detected in .svelte components:`
+    );
     cyrillicErrors.slice(0, 30).forEach((e) => console.error(`  ${e.file}:${e.line} -> ${e.text}`));
     if (cyrillicErrors.length > 30) {
       console.error(`  ... and ${cyrillicErrors.length - 30} more`);

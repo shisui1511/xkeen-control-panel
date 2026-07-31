@@ -51,6 +51,23 @@ export default ts.config(
     }
   },
   {
+    files: ['src/**/*.svelte'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/[\\u0400-\\u04FF]/]',
+          message:
+            'Hardcoded Cyrillic strings are forbidden in Svelte components. Extract to i18n locales.'
+        },
+        {
+          selector: 'SvelteText[value=/[\\u0400-\\u04FF]/]',
+          message: 'Hardcoded Cyrillic text is forbidden in Svelte components. Use $t(...) instead.'
+        }
+      ]
+    }
+  },
+  {
     ignores: ['build/', 'dist/', '.svelte-kit/', 'node_modules/']
   }
 );
