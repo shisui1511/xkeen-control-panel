@@ -42,7 +42,7 @@ export default ts.config(
     ignores: ['src/lib/api.ts'],
     rules: {
       'no-restricted-syntax': [
-        'warn', // flip to 'error' in the final migration wave
+        'error',
         {
           selector: "CallExpression[callee.name='fetch']",
           message: 'Use apiFetch/apiFetchJSON from lib/api.ts instead of bare fetch().'
