@@ -197,7 +197,7 @@ export async function fetchDevMode(): Promise<void> {
 
 export async function setDevMode(enabled: boolean): Promise<void> {
   try {
-    await apiFetchJSON<{ dev_mode: boolean }>('/api/settings/dev-mode', {
+    await apiFetchJSON('/api/settings/dev-mode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled })
