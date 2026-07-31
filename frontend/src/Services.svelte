@@ -10,8 +10,9 @@
   } from './stores';
   import { usePoller } from './lib/poller';
   import Skeleton from './components/Skeleton.svelte';
+  import { apiFetch, apiFetchJSON } from './lib/api';
 
-  export let onSwitchTab: (tab: string) => void = () => {};
+  export const onSwitchTab: (tab: string) => void = () => {};
 
   interface Kernel {
     name: string;
@@ -68,9 +69,11 @@
 
   async function fetchRestartLog() {
     try {
-      const res = await fetch('/api/service/restart-log');
+      const res = await apiFetch('/api/service/restart-log');
       if (res.ok) restartLog = await res.json();
-    } catch (_) {}
+    } catch (e: any) {
+      if (e?.status === 401) return;
+    }
   }
 
   function formatAction(action: string): string {
@@ -111,7 +114,7 @@
 
   async function fetchStatus(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/service/status', { signal });
+      const res = await apiFetch('/api/service/status', { signal });
       if (res.ok) {
         const text = await res.text();
         try {
@@ -149,7 +152,9 @@
           raw: $t('app.error')
         };
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
       xkeenStatus = $t('app.unavailable');
       xkeenInfo = {
         isRunning: false,
@@ -159,6 +164,7 @@
         binaryPath: '',
         raw: $t('app.unavailable')
       };
+      throw e;
     }
   }
 
@@ -188,7 +194,7 @@
 
   async function fetchKernels(signal?: AbortSignal) {
     try {
-      const res = await fetch('/api/kernels', { signal });
+      const res = await apiFetch('/api/kernels', { signal });
       if (res.ok) {
         const envelope = await res.json();
         const list = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
@@ -199,7 +205,10 @@
           }
         });
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      if (e?.status === 401) return;
+      throw e;
     } finally {
       kernelsLoaded = true;
     }
@@ -221,7 +230,7 @@
                 ? 'mihomo'
                 : 'xray';
         try {
-          const pfRes = await fetch(`/api/config/preflight?kernel=${kernel}`, {
+          const pfRes = await apiFetch(`/api/config/preflight?kernel=${kernel}`, {
             signal: AbortSignal.timeout(3000)
           });
           if (pfRes.ok) {
@@ -249,10 +258,8 @@
           // Network/timeout error — fall through to silent start
         }
       }
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/service/control?action=${action}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch(`/api/service/control?action=${action}`, {
+        method: 'POST'
       });
       const text = await res.text();
       if (!res.ok) throw new Error(text);
@@ -260,6 +267,7 @@
       await fetchCapabilities();
       fetchRestartLog();
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', `${$t('svc.action_error')}: ${e.message}`);
       fetchRestartLog();
     } finally {
@@ -272,10 +280,8 @@
     switchingKernelTo = kernel;
     actionLoading[`switch-${kernel}`] = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/service/control?action=switch_kernel&kernel=${kernel}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch(`/api/service/control?action=switch_kernel&kernel=${kernel}`, {
+        method: 'POST'
       });
       const text = await res.text();
       if (!res.ok) throw new Error(text);
@@ -283,6 +289,7 @@
       await fetchKernels();
       await fetchCapabilities();
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', `${$t('svc.action_error')}: ${e.message}`);
     } finally {
       actionLoading[`switch-${kernel}`] = false;
@@ -298,16 +305,15 @@
       kernels = [...kernels];
     }
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/kernels/${name}/check`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch(`/api/kernels/${name}/check`, {
+        method: 'POST'
       });
       if (!res.ok) {
         throw new Error(await res.text());
       }
       startPolling(name);
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', `${$t('svc.action_error')}: ${e.message || e}`);
       const idx = kernels.findIndex((k) => k.name === name);
       if (idx >= 0) {
@@ -319,16 +325,15 @@
 
   async function installKernel(name: string) {
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/kernels/${name}/install`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const res = await apiFetch(`/api/kernels/${name}/install`, {
+        method: 'POST'
       });
       if (!res.ok) {
         throw new Error(await res.text());
       }
       startPolling(name);
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', `${$t('svc.action_error')}: ${e.message || e}`);
     }
   }
@@ -344,14 +349,15 @@
 
   async function setKernelChannel(name: string, channel: string) {
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      await fetch(`/api/kernels/${name}/channel`, {
+      await apiFetch(`/api/kernels/${name}/channel`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channel })
       });
       await fetchKernels();
-    } catch (e) {}
+    } catch (e: any) {
+      if (e?.status === 401) return;
+    }
   }
 
   function checkIfFinishedChecking() {
@@ -364,7 +370,7 @@
 
   async function fetchKernelStatus(name: string) {
     try {
-      const res = await fetch(`/api/kernels/${name}/status`);
+      const res = await apiFetch(`/api/kernels/${name}/status`);
       if (res.ok) {
         const envelope = await res.json();
         const data = envelope.data ?? envelope;
@@ -385,25 +391,21 @@
         const idx = kernels.findIndex((k) => k.name === name);
         if (
           idx >= 0 &&
-          (kernels[idx].status === 'checking' ||
-            kernels[idx].status === 'downloading' ||
-            kernels[idx].status === 'installing')
+          kernels[idx].status !== 'idle' &&
+          kernels[idx].status !== 'done' &&
+          kernels[idx].status !== 'failed'
         ) {
           kernels[idx] = { ...kernels[idx], status: 'failed' };
           kernels = [...kernels];
         }
         checkIfFinishedChecking();
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       clearInterval(statusIntervals[name]);
       delete statusIntervals[name];
       const idx = kernels.findIndex((k) => k.name === name);
-      if (
-        idx >= 0 &&
-        (kernels[idx].status === 'checking' ||
-          kernels[idx].status === 'downloading' ||
-          kernels[idx].status === 'installing')
-      ) {
+      if (idx >= 0) {
         kernels[idx] = { ...kernels[idx], status: 'failed' };
         kernels = [...kernels];
       }
@@ -1260,27 +1262,6 @@
   .field-row .ctrl {
     display: flex;
     align-items: center;
-  }
-  .card-title-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
-  }
-  .card-title-row .card-title {
-    margin-bottom: 0;
-  }
-  .btn-sm {
-    padding: 4px 10px;
-    font-size: 12px;
-  }
-  .btn-ghost {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--fg-secondary);
-  }
-  .btn-ghost:hover {
-    background: var(--bg-hover);
   }
   .restart-log {
     display: flex;
