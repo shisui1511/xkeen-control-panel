@@ -13,8 +13,9 @@
     setDevMode,
     showConfirm
   } from './stores';
+  import { apiFetch, apiFetchJSON } from './lib/api';
 
-  export let onSwitchTab: (tab: string) => void = () => {};
+  export const onSwitchTab: (tab: string) => void = () => {};
 
   let checkingConnection = false;
   let secretVisible = false;
@@ -62,15 +63,11 @@
     }
     uploading = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
       const formData = new FormData();
       formData.append('backup', file);
 
-      const res = await fetch('/api/snapshots/upload', {
+      const res = await apiFetch('/api/snapshots/upload', {
         method: 'POST',
-        headers: {
-          'X-CSRF-Token': csrfToken || ''
-        },
         body: formData
       });
 
@@ -82,6 +79,7 @@
         showToast('error', $t('settings.snapshot_restore_error', { error: errMsg }));
       }
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', $t('settings.snapshot_restore_error', { error: e.message }));
     } finally {
       uploading = false;
@@ -117,7 +115,7 @@
   async function downloadDiagnostics() {
     downloadingDiagnostics = true;
     try {
-      const res = await fetch('/api/system/diagnostics');
+      const res = await apiFetch('/api/system/diagnostics');
       if (!res.ok) {
         showToast('error', await res.text());
         return;
@@ -130,6 +128,7 @@
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e instanceof Error ? e.message : String(e));
     } finally {
       downloadingDiagnostics = false;
@@ -138,13 +137,9 @@
 
   async function fetchSnapshots() {
     try {
-      const res = await fetch('/api/snapshots/list');
-      if (res.ok) {
-        snapshots = (await res.json()) ?? [];
-      } else {
-        showToast('error', await res.text());
-      }
-    } catch (e) {
+      snapshots = (await apiFetchJSON<any[]>('/api/snapshots/list')) ?? [];
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e instanceof Error ? e.message : String(e));
     }
   }
@@ -152,20 +147,16 @@
   async function createSnapshot() {
     creatingSnapshot = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/snapshots/create', {
+      await apiFetchJSON('/api/snapshots/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ label: snapshotLabel })
       });
-      if (res.ok) {
-        snapshotLabel = '';
-        showToast('success', $t('settings.snapshot_created'));
-        fetchSnapshots();
-      } else {
-        showToast('error', await res.text());
-      }
+      snapshotLabel = '';
+      showToast('success', $t('settings.snapshot_created'));
+      fetchSnapshots();
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
     } finally {
       creatingSnapshot = false;
@@ -188,17 +179,12 @@
       return;
     restoringSnapshot = id;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/snapshots/${id}/restore`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      await apiFetchJSON(`/api/snapshots/${id}/restore`, {
+        method: 'POST'
       });
-      if (res.ok) {
-        showToast('success', $t('settings.snapshot_restored'));
-      } else {
-        showToast('error', await res.text());
-      }
+      showToast('success', $t('settings.snapshot_restored'));
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
     } finally {
       restoringSnapshot = '';
@@ -220,18 +206,13 @@
     )
       return;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/snapshots/${id}/delete`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      await apiFetchJSON(`/api/snapshots/${id}/delete`, {
+        method: 'POST'
       });
-      if (res.ok) {
-        showToast('success', $t('settings.snapshot_deleted'));
-        fetchSnapshots();
-      } else {
-        showToast('error', await res.text());
-      }
+      showToast('success', $t('settings.snapshot_deleted'));
+      fetchSnapshots();
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
     }
   }
@@ -244,8 +225,8 @@
 
   async function loadConfigFiles() {
     try {
-      const xrayRes = await fetch('/api/config/list?dir=/opt/etc/xray/configs');
-      const mihomoRes = await fetch('/api/config/list?dir=/opt/etc/mihomo');
+      const xrayRes = await apiFetch('/api/config/list?dir=/opt/etc/xray/configs');
+      const mihomoRes = await apiFetch('/api/config/list?dir=/opt/etc/mihomo');
 
       let files: string[] = [];
       if (xrayRes.ok) {
@@ -264,7 +245,8 @@
         selectedFile = configFiles[0];
         fetchBackups();
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       configFiles = [];
       showToast(
         'error',
@@ -278,7 +260,7 @@
     if (!selectedFile) return;
     loadingBackups = true;
     try {
-      const res = await fetch(`/api/config/backups?path=${encodeURIComponent(selectedFile)}`);
+      const res = await apiFetch(`/api/config/backups?path=${encodeURIComponent(selectedFile)}`);
       if (res.ok) {
         backups = (await res.json()) ?? [];
       } else {
@@ -287,7 +269,8 @@
         showToast('error', `${$t('settings.backups_fetch_error')}: ${txt}`);
         console.error(new Error(`Failed to fetch backups: ${txt}`));
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       backups = [];
       showToast(
         'error',
@@ -316,7 +299,7 @@
     const targetFile = selectedFile; // capture before any await to prevent TOCTOU race
     if (!targetFile) return;
     try {
-      const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
+      const readRes = await apiFetch(`/api/config/read?path=${encodeURIComponent(backupPath)}`);
       if (!readRes.ok) {
         const txt = await readRes.text();
         showToast('error', `${$t('settings.backup_read_error')}: ${txt}`);
@@ -324,12 +307,10 @@
       }
       const data = await readRes.text();
 
-      const csrfToken = localStorage.getItem('csrf_token');
-      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(targetFile)}`, {
+      const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(targetFile)}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: data
       });
@@ -341,6 +322,7 @@
         showToast('error', `${$t('settings.backup_restore_error')}: ${txt}`);
       }
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
     }
   }
@@ -360,12 +342,8 @@
     )
       return;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/config/delete?path=${encodeURIComponent(backupPath)}`, {
-        method: 'POST',
-        headers: {
-          'X-CSRF-Token': csrfToken || ''
-        }
+      const res = await apiFetch(`/api/config/delete?path=${encodeURIComponent(backupPath)}`, {
+        method: 'POST'
       });
       if (res.ok) {
         showToast('success', $t('settings.backup_delete_success'));
@@ -375,28 +353,24 @@
         showToast('error', `${$t('settings.backup_delete_error')}: ${txt}`);
       }
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
     }
   }
 
   async function createBackup() {
     if (!selectedFile) return;
-    // Backup is created as a side-effect of ConfigSave (internal/handlers/config.go):
-    // the handler always writes a timestamped .backup-* file before overwriting.
-    // There is no dedicated POST /api/config/backup endpoint.
     try {
-      const readRes = await fetch(`/api/config/read?path=${encodeURIComponent(selectedFile)}`);
+      const readRes = await apiFetch(`/api/config/read?path=${encodeURIComponent(selectedFile)}`);
       if (!readRes.ok) {
         showToast('error', await readRes.text());
         return;
       }
       const data = await readRes.text();
-      const csrfToken = localStorage.getItem('csrf_token');
-      const saveRes = await fetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
+      const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(selectedFile)}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-CSRF-Token': csrfToken || ''
+          'Content-Type': 'application/json'
         },
         body: data
       });
@@ -407,6 +381,7 @@
         showToast('error', await saveRes.text());
       }
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
     }
   }
@@ -481,10 +456,9 @@
     }
     passwordChanging = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/auth/change-password', {
+      const res = await apiFetch('/api/auth/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
       });
       if (res.ok) {
@@ -497,6 +471,7 @@
         passwordError = text || $t('settings.password_error');
       }
     } catch (e: any) {
+      if (e?.status === 401) return;
       passwordError = e.message;
     } finally {
       passwordChanging = false;
@@ -518,46 +493,39 @@
 
   async function fetchUpdateChannel() {
     try {
-      const res = await fetch('/api/update/channel');
-      if (res.ok) {
-        const data = await res.json();
-        updateChannel = data.channel ?? 'stable';
-      }
-    } catch (_) {}
+      const data = await apiFetchJSON<{ channel?: 'stable' | 'beta' }>('/api/update/channel');
+      updateChannel = data.channel ?? 'stable';
+    } catch (_: any) {}
   }
 
   async function saveUpdateChannel(ch: 'stable' | 'beta') {
     const prev = updateChannel;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/update/channel', {
+      await apiFetchJSON('/api/update/channel', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken || '' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ channel: ch })
       });
-      if (res.ok) {
-        updateChannel = ch;
-        showToast('success', $t('settings.channel_saved'));
-      } else {
-        updateChannel = prev;
-        showToast('error', await res.text());
-      }
-    } catch (e) {
+      updateChannel = ch;
+      showToast('success', $t('settings.channel_saved'));
+    } catch (e: any) {
       updateChannel = prev;
+      if (e?.status === 401) return;
       showToast('error', e instanceof Error ? e.message : String(e));
     }
   }
 
   async function fetchVersion() {
     try {
-      const res = await fetch('/api/version');
+      const res = await apiFetch('/api/version');
       if (!res.ok) {
         version = $t('app.unavailable');
         return;
       }
       const data = await res.json();
       version = data.panel_version || data.version || $t('app.unavailable');
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       version = $t('app.unavailable');
     }
   }
@@ -570,18 +538,12 @@
   async function checkUpdate(channel: string = updateChannel) {
     updateChecking = true;
     try {
-      const res = await fetch(`/api/update/check?channel=${channel}`);
-      if (res.ok) {
-        const envelope = await res.json();
-        // UpdateCheck uses JSONSuccess envelope: {success, data: {...}}
-        updateInfo = envelope.data ?? envelope;
-        if (updateInfo?.has_update && updateInfo?.latest_version) {
-          await fetchChangelog(updateInfo.latest_version);
-        }
-      } else {
-        showToast('error', await res.text());
+      updateInfo = await apiFetchJSON(`/api/update/check?channel=${channel}`);
+      if (updateInfo?.has_update && updateInfo?.latest_version) {
+        await fetchChangelog(updateInfo.latest_version);
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e instanceof Error ? e.message : String(e));
     } finally {
       updateChecking = false;
@@ -590,11 +552,14 @@
 
   async function fetchChangelog(version: string) {
     try {
-      const res = await fetch(`/api/update/changelog?version=${version}`);
-      if (res.ok && updateInfo) {
-        updateInfo.changelog = await res.text();
+      const data = await apiFetchJSON<{ changelog?: string }>(
+        `/api/update/changelog?version=${version}`
+      );
+      if (updateInfo) {
+        updateInfo.changelog = typeof data === 'string' ? data : data?.changelog || '';
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       // ignore
     }
   }
@@ -629,14 +594,14 @@
     reconnectTimer = setTimeout(async () => {
       reconnectAttempt++;
       try {
-        const res = await fetch('/api/version', { cache: 'no-store' });
+        const res = await apiFetch('/api/version', { cache: 'no-store' });
         if (res.ok) {
           // New server is up — reload the page
           stopReconnectPolling();
           window.location.reload();
           return;
         }
-      } catch (_) {
+      } catch (_: any) {
         // Server not yet up — continue polling
       }
       if (reconnectAttempt < RECONNECT_MAX_ATTEMPTS) {
@@ -699,19 +664,13 @@
   async function installUpdate(channel: string = updateChannel) {
     updateInstalling = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch(`/api/update/install?channel=${channel}`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      await apiFetchJSON(`/api/update/install?channel=${channel}`, {
+        method: 'POST'
       });
-      if (res.ok) {
-        startStatusSSE();
-      } else {
-        updateInstalling = false;
-        showToast('error', await res.text());
-      }
-    } catch (e) {
+      startStatusSSE();
+    } catch (e: any) {
       updateInstalling = false;
+      if (e?.status === 401) return;
       showToast('error', e instanceof Error ? e.message : String(e));
     }
   }
@@ -719,34 +678,25 @@
   async function rollbackUpdate() {
     updateInstalling = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/update/rollback', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      await apiFetchJSON('/api/update/rollback', {
+        method: 'POST'
       });
-      if (res.ok) {
-        startStatusSSE();
-      } else {
-        updateInstalling = false;
-        showToast('error', await res.text());
-      }
-    } catch (e) {
+      startStatusSSE();
+    } catch (e: any) {
       updateInstalling = false;
+      if (e?.status === 401) return;
       showToast('error', e instanceof Error ? e.message : String(e));
     }
   }
 
   async function fetchStatus() {
     try {
-      const res = await fetch('/api/update/status');
-      if (res.ok) {
-        const envelope = await res.json();
-        updateStatus = envelope.data ?? envelope;
-        if (updateStatus?.status === 'done' || updateStatus?.status === 'failed') {
-          updateInstalling = false;
-        }
+      updateStatus = await apiFetchJSON<any>('/api/update/status');
+      if (updateStatus?.status === 'done' || updateStatus?.status === 'failed') {
+        updateInstalling = false;
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.status === 401) return;
       updateInstalling = false;
     }
   }
@@ -762,46 +712,36 @@
 
   async function fetchTemplatesStatus() {
     try {
-      const res = await fetch('/api/templates/status');
-      if (res.ok) {
-        const data = await res.json();
-        templatesVersion = data.current_version || '';
-        templatesRepoUrl = data.templates_repo_url || '';
-        templatesHasUpdate = data.has_update || false;
-        templatesIncompatible = data.incompatible || false;
-        templatesWarningMessage = data.warning_message || '';
-        if (data.last_check && data.last_check !== '0001-01-01T00:00:00Z') {
-          const date = new Date(data.last_check);
-          templatesLastCheck = date.toLocaleString();
-        } else {
-          templatesLastCheck = '';
-        }
+      const data = await apiFetchJSON<any>('/api/templates/status');
+      templatesVersion = data.current_version || '';
+      templatesRepoUrl = data.templates_repo_url || '';
+      templatesHasUpdate = data.has_update || false;
+      templatesIncompatible = data.incompatible || false;
+      templatesWarningMessage = data.warning_message || '';
+      if (data.last_check && data.last_check !== '0001-01-01T00:00:00Z') {
+        const date = new Date(data.last_check);
+        templatesLastCheck = date.toLocaleString();
+      } else {
+        templatesLastCheck = '';
       }
-    } catch (_) {}
+    } catch (_: any) {}
   }
 
   async function checkTemplatesUpdates() {
     checkingTemplates = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/templates/check', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      const data = await apiFetchJSON<{ has_update?: boolean }>('/api/templates/check', {
+        method: 'POST'
       });
-      if (res.ok) {
-        const data = await res.json();
-        templatesHasUpdate = data.has_update || false;
-        await fetchTemplatesStatus();
-        if (templatesHasUpdate) {
-          showToast('info', $t('editor.update_available') || 'Update available');
-        } else {
-          showToast('success', $t('editor.up_to_date') || 'Up to date');
-        }
+      templatesHasUpdate = data.has_update || false;
+      await fetchTemplatesStatus();
+      if (templatesHasUpdate) {
+        showToast('info', $t('editor.update_available') || 'Update available');
       } else {
-        showToast('error', await res.text());
-        await fetchTemplatesStatus();
+        showToast('success', $t('editor.up_to_date') || 'Up to date');
       }
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
       await fetchTemplatesStatus();
     } finally {
@@ -812,20 +752,13 @@
   async function installTemplatesUpdates() {
     updatingTemplates = true;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/templates/update', {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken || '' }
+      await apiFetchJSON('/api/templates/update', {
+        method: 'POST'
       });
-      if (res.ok) {
-        const data = await res.json();
-        showToast('success', $t('editor.templates_updated') || 'Templates updated');
-        await fetchTemplatesStatus();
-      } else {
-        showToast('error', await res.text());
-        await fetchTemplatesStatus();
-      }
+      showToast('success', $t('editor.templates_updated') || 'Templates updated');
+      await fetchTemplatesStatus();
     } catch (e: any) {
+      if (e?.status === 401) return;
       showToast('error', e.message);
       await fetchTemplatesStatus();
     } finally {
