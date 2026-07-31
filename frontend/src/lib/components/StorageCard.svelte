@@ -21,7 +21,6 @@
         return;
       }
       console.error('Failed to fetch disk stats:', e);
-      throw e;
     }
   }
 
