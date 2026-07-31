@@ -71,7 +71,7 @@
 
     <div class="form-group">
       <span class="form-label" style="display: block; margin-bottom: 6px;"
-        >{$currentLang === 'ru' ? 'Интеграция в ядра' : 'Kernel Integration'}</span
+        >{$t('subscr.modal.kernel_integration')}</span
       >
       <div style="display: flex; gap: 20px; margin-bottom: 12px;">
         <label
@@ -92,7 +92,7 @@
           class="alert alert-danger"
           style="margin-top: 8px; margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm); border: 1px solid var(--danger); background: rgba(220, 38, 38, 0.1); color: var(--danger);"
         >
-          <strong>{$currentLang === 'ru' ? 'Внимание:' : 'Attention:'}</strong>
+          <strong>{$t('subscr.modal.attention')}</strong>
           <span>{$t('subscr.no_kernel_warning')}</span>
         </div>
       {/if}
@@ -111,7 +111,7 @@
 
     <div class="form-group">
       <label for="form-interval" class="form-label"
-        >{$t('subscr.interval')} ({$currentLang === 'ru' ? 'часов' : 'hours'})</label
+        >{$t('subscr.interval')} ({$t('subscr.modal.hours')})</label
       >
       <input
         id="form-interval"
@@ -126,7 +126,7 @@
     {#if formEnableXray}
       <div class="form-group">
         <span class="form-label" style="display: block; margin-bottom: 6px;"
-          >{$currentLang === 'ru' ? 'Режим маршрутизации XRay' : 'XRay Routing Mode'}</span
+          >{$t('subscr.modal.xray_routing_mode')}</span
         >
         <div class="seg-btn" style="margin-bottom: 12px;">
           <button
@@ -136,7 +136,7 @@
             aria-pressed={formRoutingMode === 'manual'}
             onclick={() => (formRoutingMode = 'manual')}
           >
-            {$currentLang === 'ru' ? 'Ручной' : 'Manual'}
+            {$t('subscr.modal.manual')}
           </button>
           <button
             type="button"
@@ -145,7 +145,7 @@
             aria-pressed={formRoutingMode === 'auto'}
             onclick={() => (formRoutingMode = 'auto')}
           >
-            {$currentLang === 'ru' ? 'Автоматический (!CN)' : 'Automatic (!CN)'}
+            {$t('subscr.modal.auto_cn')}
           </button>
         </div>
       </div>
@@ -156,7 +156,7 @@
         onclick={() => (showAdvanced = !showAdvanced)}
       >
         <span class="arrow">{showAdvanced ? '▼' : '►'}</span>
-        <span>{$t('subscr.advanced_params') || 'Дополнительные параметры'}</span>
+        <span>{$t('subscr.advanced_params')}</span>
       </button>
 
       {#if showAdvanced}
@@ -213,9 +213,7 @@
     {#if formEnableMihomo}
       <div class="form-group">
         <span class="form-label" style="display: block; margin-bottom: 6px;"
-          >{$currentLang === 'ru'
-            ? 'Интегрировать в группы Mihomo'
-            : 'Integrate into Mihomo groups'}</span
+          >{$t('subscr.modal.integrate_mihomo_groups')}</span
         >
 
         {#if $capabilities?.active_kernel === 'xray'}
@@ -223,11 +221,9 @@
             class="alert alert-warning"
             style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);"
           >
-            <strong>{$currentLang === 'ru' ? 'Внимание:' : 'Attention:'}</strong>
+            <strong>{$t('subscr.modal.attention')}</strong>
             <span>
-              {$currentLang === 'ru'
-                ? ' сейчас запущено ядро Xray, настройки интеграции вступят в силу при переключении на Mihomo'
-                : ' Xray core is currently running, integration settings will take effect when switching to Mihomo'}
+              {$t('subscr.modal.xray_active_notice')}
             </span>
           </div>
         {/if}
@@ -238,9 +234,7 @@
             style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);"
           >
             <span>
-              {$currentLang === 'ru'
-                ? 'Не удалось найти группы в config.yaml Mihomo. Перейдите в '
-                : 'Could not find any groups in Mihomo config.yaml. Please go to the '}
+              {$t('subscr.modal.no_mihomo_groups_prefix')}
               <a
                 href="#/constructor"
                 onclick={(e) => {
@@ -250,9 +244,9 @@
                 }}
                 style="text-decoration: underline; color: var(--accent);"
               >
-                {$currentLang === 'ru' ? 'визуальный конструктор' : 'visual constructor'}
+                {$t('subscr.modal.visual_constructor')}
               </a>
-              {$currentLang === 'ru' ? ' или ' : ' or '}
+              {$t('app.or')}
               <a
                 href="#/editor"
                 onclick={(e) => {
@@ -262,9 +256,9 @@
                 }}
                 style="text-decoration: underline; color: var(--accent);"
               >
-                {$currentLang === 'ru' ? 'текстовый редактор' : 'text editor'}
+                {$t('subscr.modal.text_editor')}
               </a>
-              {$currentLang === 'ru' ? ' для создания групп.' : ' to create groups.'}
+              {$t('subscr.modal.no_mihomo_groups_suffix')}
             </span>
           </div>
         {/if}

@@ -243,7 +243,7 @@
 
   function copyPayload(rule: Rule) {
     if (!rule.payload) return;
-    copyToClipboard(rule.payload, $currentLang === 'ru' ? 'Payload скопирован' : 'Payload copied');
+    copyToClipboard(rule.payload, $t('rules.payload_copied'));
     closeDropdowns();
   }
 
@@ -252,7 +252,7 @@
       rule.type.toUpperCase() === 'MATCH'
         ? `${rule.type},${rule.proxy}`
         : `${rule.type},${rule.payload},${rule.proxy}`;
-    copyToClipboard(text, $currentLang === 'ru' ? 'Правило скопировано' : 'Rule copied');
+    copyToClipboard(text, $t('rules.rule_copied'));
     closeDropdowns();
   }
 
@@ -381,10 +381,8 @@
       </div>
 
       <div class="stats mb-2">
-        <span class="stat"><b>{rules.length}</b> {$currentLang === 'ru' ? 'всего' : 'total'}</span>
-        <span class="stat"
-          ><b>{filteredRules.length}</b> {$currentLang === 'ru' ? 'показано' : 'shown'}</span
-        >
+        <span class="stat"><b>{rules.length}</b> {$t('rules.total')}</span>
+        <span class="stat"><b>{filteredRules.length}</b> {$t('rules.shown')}</span>
       </div>
 
       <div class="table-container">

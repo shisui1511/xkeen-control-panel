@@ -187,17 +187,11 @@
         body: JSON.stringify({ enabled: true })
       });
       if (res.ok) {
-        showToast(
-          'success',
-          ru ? 'Перехват DNS успешно включен' : 'DNS Interception enabled successfully'
-        );
+        showToast('success', $t('mihomo.dns_intercept_enabled'));
         await fetchCapabilities();
       } else {
         const text = await res.text();
-        showToast(
-          'error',
-          text || (ru ? 'Не удалось включить перехват DNS' : 'Failed to enable DNS Interception')
-        );
+        showToast('error', text || $t('mihomo.dns_intercept_error'));
       }
     } catch (err: any) {
       if (err?.status === 401) return;
@@ -645,12 +639,7 @@
 
   function saveOutbound() {
     if (!outboundForm.tag.trim() || !outboundForm.address.trim() || !outboundForm.port) {
-      showToast(
-        'error',
-        ru
-          ? 'Заполните обязательные поля (Тег, Адрес, Порт)'
-          : 'Please fill required fields (Tag, Address, Port)'
-      );
+      showToast('error', $t('xray.fill_required_fields'));
       return;
     }
 
@@ -665,12 +654,7 @@
         customOutbounds.some((o) => o.tag === outboundObj.tag) ||
         ['direct', 'block', 'dns-out'].includes(outboundObj.tag);
       if (exists) {
-        showToast(
-          'error',
-          ru
-            ? 'Исходящий узел с таким тегом уже существует'
-            : 'Outbound with this tag already exists'
-        );
+        showToast('error', $t('xray.outbound_tag_exists'));
         return;
       }
       customOutbounds = [...customOutbounds, outboundObj];
@@ -826,12 +810,10 @@
     if (!showApplyConfirm && customOutbounds.length === 0) {
       if (
         !(await showConfirm({
-          title: $t('editor.empty_proxies_title') || 'Отсутствуют прокси-серверы',
-          consequence:
-            $t('editor.empty_proxies_warning') ||
-            'В вашей конфигурации нет ни одного прокси-сервера. Вы уверены, что хотите применить её?',
+          title: $t('editor.empty_proxies_title'),
+          consequence: $t('editor.empty_proxies_warning'),
           variant: 'warning',
-          confirmLabel: $t('app.continue') || 'Продолжить'
+          confirmLabel: $t('app.continue')
         }))
       ) {
         applyLoading = false;
@@ -883,13 +865,12 @@
 
       if (
         !(await showConfirm({
-          title: $t('editor.port_collision_title') || 'Конфликт портов',
+          title: $t('editor.port_collision_title'),
           message: details,
-          consequence: ru
-            ? 'Продолжение может вызвать сбой в работе служб.'
-            : 'Proceeding may cause service disruption.',
+          consequence:
+            $t('editor.port_collision_warning') || 'Proceeding may cause service disruption.',
           variant: 'danger',
-          confirmLabel: $t('app.continue') || 'Продолжить'
+          confirmLabel: $t('app.continue')
         }))
       ) {
         applyLoading = false;
@@ -1563,23 +1544,19 @@
       <p style="color: var(--danger); margin-bottom: 16px;">
         {$t('editor.definition_load_error', { error: schemaError })}
       </p>
-      <button class="btn btn-secondary" onclick={loadSchema}
-        >{ru ? 'Повторить попытку' : 'Retry'}</button
-      >
+      <button class="btn btn-secondary" onclick={loadSchema}>{$t('app.retry')}</button>
     </div>
   {:else}
     {#if !embedded}
       <div class="page-head">
         <div>
           <div class="crumbs">
-            {ru ? 'Сервисы' : 'Services'} <span class="crumb-sep">/</span>
-            {ru ? 'Пресеты Xray' : 'Xray Presets'}
+            {$t('nav.group_services')} <span class="crumb-sep">/</span>
+            {$t('xray.breadcrumb_presets')}
           </div>
-          <h1>{ru ? 'Визуальные пресеты Xray' : 'Xray Visual Presets'}</h1>
+          <h1>{$t('xray.presets_h1')}</h1>
           <p class="sub">
-            {ru
-              ? 'Настройка логирования, DNS, inbounds, outbounds, routing и policy для Xray.'
-              : 'Configure logging, DNS, inbounds, outbounds, routing and policy for Xray.'}
+            {$t('xray.presets_sub')}
           </p>
         </div>
         <div class="ph-actions">
@@ -1597,9 +1574,9 @@
               /></svg
             >
             {#if selectedFile}
-              {ru ? 'Вставить в редактор' : 'Insert into Editor'}
+              {$t('mihomo.insert_editor')}
             {:else}
-              {ru ? 'Открыть в редакторе' : 'Open in Editor'}
+              {$t('mihomo.open_editor')}
             {/if}
           </button>
           {#if canUndo}
@@ -1617,7 +1594,7 @@
             data-testid="apply-changes-btn"
             onclick={handleApplyChanges}
           >
-            {ru ? 'Применить изменения' : 'Apply Changes'}
+            {$t('mihomo.apply_changes')}
           </button>
         </div>
       </div>
@@ -1634,7 +1611,7 @@
               <button class="scenario-chip" onclick={() => applyPreset(p.id)}>{$t(p.name)}</button>
             {/each}
           {:else}
-            {#each [['selective-routing', $t('editor.scenario_rule_based')], ['all-proxy-routing', $t('editor.scenario_global_proxy')], ['selective-no-quic', ru ? 'Блокировка QUIC' : 'Block QUIC'], ['only-blocked-routing', $t('preset.only-blocked-routing')]] as [id, label]}
+            {#each [['selective-routing', $t('editor.scenario_rule_based')], ['all-proxy-routing', $t('editor.scenario_global_proxy')], ['selective-no-quic', $t('xray.preset_block_quic')], ['only-blocked-routing', $t('preset.only-blocked-routing')]] as [id, label]}
               <button class="scenario-chip" onclick={() => applyPreset(id as any)}>{label}</button>
             {/each}
           {/if}
@@ -1642,9 +1619,7 @@
 
         <!-- Outbound Tag selection -->
         <div class="rule-providers-row">
-          <label class="form-label" for="proxy-tag-select"
-            >{ru ? 'Основной прокси-выход' : 'Main proxy outbound'}:</label
-          >
+          <label class="form-label" for="proxy-tag-select">{$t('xray.main_proxy_outbound')}:</label>
           <select
             id="proxy-tag-select"
             class="form-select"
@@ -1666,7 +1641,7 @@
 
         <!-- Section tabs -->
         <div class="sec-tabs" data-testid="xray-section-tabs">
-          {#each [['routing', ru ? 'Маршрутизация' : 'Routing'], ['inbounds', ru ? 'Входящие' : 'Inbounds'], ['dns', 'DNS'], ['outbounds', ru ? 'Исходящие' : 'Outbounds'], ['log', ru ? 'Логирование' : 'Log'], ['policy', ru ? 'Политики' : 'Policy']] as [id, label]}
+          {#each [['routing', $t('xray.tab_routing')], ['inbounds', $t('xray.tab_inbounds')], ['dns', 'DNS'], ['outbounds', $t('xray.tab_outbounds')], ['log', $t('xray.tab_log')], ['policy', $t('xray.tab_policy')]] as [id, label]}
             <button
               class="sec-tab"
               class:active={activeSection === id}
@@ -1708,10 +1683,10 @@
             <!-- Filter rules -->
             <div class="form-row" style="margin-bottom: 12px;">
               <label class="form-label" for="rule-filter-select"
-                >{ru ? 'Фильтр по исходящему тегу' : 'Filter by outbound tag'}:</label
+                >{$t('xray.filter_by_outbound_tag')}:</label
               >
               <select id="rule-filter-select" class="form-select" bind:value={ruleFilterTag}>
-                <option value="">{ru ? 'Все правила' : 'All rules'}</option>
+                <option value="">{$t('xray.all_rules')}</option>
                 {#each outboundTags as tag}
                   <option value={tag}>{tag}</option>
                 {/each}
@@ -1745,7 +1720,7 @@
                   <div class="rule-details">
                     {#if rule.inboundTag && rule.inboundTag.length > 0}
                       <div class="rule-detail-item">
-                        <strong>{ru ? 'Входящие теги' : 'Inbound Tags'}:</strong>
+                        <strong>{$t('xray.inbound_tags')}:</strong>
                         <span class="rule-chips">
                           {#each rule.inboundTag as ib}
                             <span class="chip chip-ip">{ib}</span>
@@ -1756,7 +1731,7 @@
 
                     {#if rule.domain && rule.domain.length > 0}
                       <div class="rule-detail-item">
-                        <strong>{ru ? 'Домены' : 'Domains'}:</strong>
+                        <strong>{$t('xray.domains')}:</strong>
                         <span class="rule-chips">
                           {#each rule.domain as d}
                             <span class="chip chip-domain">{d}</span>
@@ -1778,13 +1753,13 @@
 
                     {#if rule.port}
                       <div class="rule-detail-item">
-                        <strong>{ru ? 'Порты' : 'Ports'}:</strong> <code>{rule.port}</code>
+                        <strong>{$t('xray.ports')}:</strong> <code>{rule.port}</code>
                       </div>
                     {/if}
 
                     {#if rule.network}
                       <div class="rule-detail-item">
-                        <strong>{ru ? 'Сеть' : 'Network'}:</strong>
+                        <strong>{$t('xray.network')}:</strong>
                         <span class="badge">{rule.network}</span>
                       </div>
                     {/if}
@@ -1814,9 +1789,7 @@
 
                 <div class="form-row">
                   <label class="form-label" for="rule-inbounds"
-                    >{ru
-                      ? 'Входящие теги (через запятую)'
-                      : 'Inbound tags (comma separated)'}</label
+                    >{$t('xray.inbound_tags_placeholder')}</label
                   >
                   <input
                     id="rule-inbounds"
@@ -1828,9 +1801,7 @@
 
                 <div class="form-row">
                   <label class="form-label" for="rule-domains"
-                    >{$t('editor.xray_domain_list')} ({ru
-                      ? 'через запятую'
-                      : 'comma separated'})</label
+                    >{$t('editor.xray_domain_list')} ({$t('xray.comma_separated')})</label
                   >
                   <input
                     id="rule-domains"
@@ -1843,7 +1814,7 @@
 
                 <div class="form-row">
                   <label class="form-label" for="rule-ips"
-                    >{$t('editor.xray_ip_list')} ({ru ? 'через запятую' : 'comma separated'})</label
+                    >{$t('editor.xray_ip_list')} ({$t('xray.comma_separated')})</label
                   >
                   <input
                     id="rule-ips"
@@ -1911,7 +1882,7 @@
                 <div class="form-row2" style="margin-top:var(--spacing-2, 8px)">
                   <div class="form-col">
                     <label class="form-label" for="xray-inbound-port-{inbound.tag}"
-                      >{ru ? 'Порт входящего' : 'Inbound port'}</label
+                      >{$t('xray.inbound_port')}</label
                     >
                     <input
                       id="xray-inbound-port-{inbound.tag}"
@@ -1925,7 +1896,7 @@
                   </div>
                   <div class="form-col">
                     <label class="form-label" for="xray-inbound-listen-{inbound.tag}"
-                      >{ru ? 'Адрес прослушивания' : 'Listen address'}</label
+                      >{$t('xray.listen_address')}</label
                     >
                     <input
                       id="xray-inbound-listen-{inbound.tag}"
@@ -1941,7 +1912,7 @@
             {#if showInboundForm}
               <div class="form-card">
                 <div class="form-row">
-                  <label class="form-label" for="xray-new-inbound-tag">{ru ? 'Тег' : 'Tag'}</label>
+                  <label class="form-label" for="xray-new-inbound-tag">{$t('xray.tag')}</label>
                   <input
                     id="xray-new-inbound-tag"
                     class="form-input"
@@ -1951,9 +1922,7 @@
                 </div>
                 <div class="form-row2">
                   <div class="form-col">
-                    <label class="form-label" for="xray-new-inbound-port"
-                      >{ru ? 'Порт' : 'Port'}</label
-                    >
+                    <label class="form-label" for="xray-new-inbound-port">{$t('xray.port')}</label>
                     <input
                       id="xray-new-inbound-port"
                       class="form-input"
@@ -1963,7 +1932,7 @@
                   </div>
                   <div class="form-col">
                     <label class="form-label" for="xray-new-inbound-protocol"
-                      >{ru ? 'Протокол' : 'Protocol'}</label
+                      >{$t('xray.protocol')}</label
                     >
                     <select
                       id="xray-new-inbound-protocol"
@@ -1980,7 +1949,7 @@
                     <label class="checkbox-container">
                       <input type="checkbox" bind:checked={newInbound.udp} />
                       <span class="checkmark"></span>
-                      Включить UDP в Socks
+                      {$t('xray.enable_udp_socks')}
                     </label>
                   </div>
                 {/if}
@@ -1993,7 +1962,7 @@
               </div>
             {:else}
               <button class="add-btn" onclick={() => (showInboundForm = true)}>
-                + {ru ? 'Добавить входящее соединение' : 'Add Inbound'}
+                + {$t('xray.add_inbound')}
               </button>
             {/if}
           </div>
@@ -2031,7 +2000,7 @@
 
             <div class="form-row">
               <label class="form-label" for="dns-query-strategy"
-                >{ru ? 'Стратегия запросов DNS' : 'DNS Query Strategy'}</label
+                >{$t('xray.dns_query_strategy')}</label
               >
               <select
                 id="dns-query-strategy"
@@ -2097,7 +2066,7 @@
               <div class="form-card">
                 <div class="form-row">
                   <label class="form-label" for="xray-new-dns-address"
-                    >{ru ? 'Адрес сервера' : 'Server address'}</label
+                    >{$t('xray.server_address')}</label
                   >
                   <input
                     id="xray-new-dns-address"
@@ -2108,7 +2077,7 @@
                 </div>
                 <div class="form-row2">
                   <div class="form-col">
-                    <label class="form-label" for="xray-new-dns-port">{ru ? 'Порт' : 'Port'}</label>
+                    <label class="form-label" for="xray-new-dns-port">{$t('xray.port')}</label>
                     <input
                       id="xray-new-dns-port"
                       class="form-input"
@@ -2118,7 +2087,7 @@
                   </div>
                   <div class="form-col">
                     <label class="form-label" for="xray-new-dns-tag"
-                      >{ru ? 'Тег (опционально)' : 'Tag (optional)'}</label
+                      >{$t('xray.tag_optional')}</label
                     >
                     <input
                       id="xray-new-dns-tag"
@@ -2131,7 +2100,7 @@
                 {#if newDns.tag.trim()}
                   <div class="form-row">
                     <label class="form-label" for="xray-new-dns-domains"
-                      >{ru ? 'Домены для перенаправления' : 'Domains for redirect'}</label
+                      >{$t('xray.redirect_domains')}</label
                     >
                     <input
                       id="xray-new-dns-domains"
@@ -2157,7 +2126,7 @@
               </div>
             {:else}
               <button class="add-btn" onclick={() => (showDnsForm = true)}>
-                + {ru ? 'Добавить DNS-сервер' : 'Add DNS Server'}
+                + {$t('xray.add_dns_server')}
               </button>
             {/if}
 
@@ -2177,9 +2146,7 @@
               <div class="form-card" style="margin-top: 8px;">
                 <div class="form-row2">
                   <div class="form-col">
-                    <label class="form-label" for="xray-new-host-domain"
-                      >{ru ? 'Домен' : 'Domain'}</label
-                    >
+                    <label class="form-label" for="xray-new-host-domain">{$t('xray.domain')}</label>
                     <input
                       id="xray-new-host-domain"
                       class="form-input"
@@ -2210,7 +2177,7 @@
                 style="margin-top: 8px;"
                 onclick={() => (showHostForm = true)}
               >
-                + {ru ? 'Добавить Host' : 'Add Host'}
+                + {$t('xray.add_host')}
               </button>
             {/if}
           </div>
@@ -2263,7 +2230,7 @@
                     <button
                       class="rule-move"
                       onclick={() => openEditOutbound(idx)}
-                      title={ru ? 'Редактировать' : 'Edit'}
+                      title={$t('app.edit')}
                       style="font-size: 12px;"
                     >
                       ✏️
@@ -2271,7 +2238,7 @@
                     <button
                       class="rule-del"
                       onclick={() => removeOutbound(idx)}
-                      title={ru ? 'Удалить' : 'Remove'}
+                      title={$t('app.delete')}
                     >
                       ✕
                     </button>
@@ -2298,21 +2265,11 @@
                     {/if}
                   </div>
                   <span class="tag-desc" style="font-size: 0.8125rem; color: var(--fg-secondary);">
-                    {item.tag === 'direct'
-                      ? ru
-                        ? 'Прямое подключение (freedom)'
-                        : 'Direct connection (freedom)'
-                      : ''}
-                    {item.tag === 'block'
-                      ? ru
-                        ? 'Блокировка трафика (blackhole)'
-                        : 'Block traffic (blackhole)'
-                      : ''}
-                    {item.tag === 'dns-out' ? (ru ? 'Запросы DNS' : 'DNS requests') : ''}
+                    {item.tag === 'direct' ? $t('xray.direct_freedom') : ''}
+                    {item.tag === 'block' ? $t('xray.block_blackhole') : ''}
+                    {item.tag === 'dns-out' ? $t('xray.dns_requests') : ''}
                     {!['direct', 'block', 'dns-out'].includes(item.tag)
-                      ? ru
-                        ? 'Подписка'
-                        : 'Subscription'
+                      ? $t('xray.subscription')
                       : ''}
                   </span>
                 </div>
@@ -2321,18 +2278,14 @@
 
             {#if !showOutboundForm}
               <button class="add-btn" onclick={openAddOutbound}>
-                + {ru
-                  ? 'Добавить исходящее соединение (VLESS / VMess)'
-                  : 'Add Outbound (VLESS / VMess)'}
+                + {$t('xray.add_outbound_vless_vmess')}
               </button>
             {/if}
 
             {#if showOutboundForm}
               <div class="form-card" style="margin-top: 12px;">
                 <div class="form-row">
-                  <label class="form-label" for="outbound-tag"
-                    >{ru ? 'Тег (название)' : 'Tag (name)'} *</label
-                  >
+                  <label class="form-label" for="outbound-tag">{$t('xray.tag_name')} *</label>
                   <input
                     id="outbound-tag"
                     class="form-input"
@@ -2342,9 +2295,7 @@
                 </div>
                 <div class="form-row2">
                   <div class="form-col">
-                    <label class="form-label" for="outbound-protocol"
-                      >{ru ? 'Протокол' : 'Protocol'}</label
-                    >
+                    <label class="form-label" for="outbound-protocol">{$t('xray.protocol')}</label>
                     <select
                       id="outbound-protocol"
                       class="form-select"
@@ -2356,7 +2307,7 @@
                   </div>
                   <div class="form-col">
                     <label class="form-label" for="outbound-address"
-                      >{ru ? 'Адрес сервера' : 'Server address'} *</label
+                      >{$t('xray.server_address')} *</label
                     >
                     <input
                       id="outbound-address"
@@ -2368,7 +2319,7 @@
                 </div>
                 <div class="form-row2">
                   <div class="form-col">
-                    <label class="form-label" for="outbound-port">{ru ? 'Порт' : 'Port'} *</label>
+                    <label class="form-label" for="outbound-port">{$t('xray.port')} *</label>
                     <input
                       id="outbound-port"
                       class="form-input"
@@ -2400,20 +2351,16 @@
 
                 {#if outboundForm.protocol === 'vless'}
                   <div class="form-row">
-                    <label class="form-label" for="outbound-flow"
-                      >{ru ? 'Flow (поток)' : 'Flow'}</label
-                    >
+                    <label class="form-label" for="outbound-flow">{$t('xray.flow')}</label>
                     <select id="outbound-flow" class="form-select" bind:value={outboundForm.flow}>
-                      <option value="">{ru ? 'Нет' : 'None'}</option>
+                      <option value="">{$t('app.none')}</option>
                       <option value="xtls-rprx-vision">xtls-rprx-vision</option>
                     </select>
                   </div>
                 {:else if outboundForm.protocol === 'vmess'}
                   <div class="form-row2">
                     <div class="form-col">
-                      <label class="form-label" for="outbound-cipher"
-                        >{ru ? 'Шифрование' : 'Cipher'}</label
-                      >
+                      <label class="form-label" for="outbound-cipher">{$t('xray.cipher')}</label>
                       <select
                         id="outbound-cipher"
                         class="form-select"
@@ -2441,9 +2388,7 @@
                 <!-- Security Settings -->
                 <div class="form-row2">
                   <div class="form-col">
-                    <label class="form-label" for="outbound-security"
-                      >{ru ? 'Безопасность (Security)' : 'Security'}</label
-                    >
+                    <label class="form-label" for="outbound-security">{$t('xray.security')}</label>
                     <select
                       id="outbound-security"
                       class="form-select"
@@ -2508,7 +2453,7 @@
                 <div class="form-row2">
                   <div class="form-col">
                     <label class="form-label" for="outbound-network"
-                      >{ru ? 'Транспорт (Network)' : 'Network'}</label
+                      >{$t('xray.network_transport')}</label
                     >
                     <select
                       id="outbound-network"
@@ -2550,13 +2495,7 @@
                     {$t('app.cancel')}
                   </button>
                   <button class="btn btn-primary" onclick={saveOutbound} type="button">
-                    {editingOutboundIndex !== null
-                      ? ru
-                        ? 'Сохранить'
-                        : 'Save'
-                      : ru
-                        ? 'Добавить'
-                        : 'Add'}
+                    {editingOutboundIndex !== null ? $t('app.save') : $t('app.add')}
                   </button>
                 </div>
               </div>
@@ -2570,9 +2509,7 @@
             <div class="section-title">{$t('editor.xray_section_log')}</div>
 
             <div class="form-row">
-              <label class="form-label" for="log-level"
-                >{ru ? 'Уровень логирования' : 'Loglevel'}</label
-              >
+              <label class="form-label" for="log-level">{$t('xray.loglevel')}</label>
               <select
                 id="log-level"
                 class="form-select"
@@ -2595,14 +2532,14 @@
                   onchange={() => (isDirty = true)}
                 />
                 <span class="checkmark"></span>
-                {ru ? 'Включить логирование DNS' : 'Enable DNS Logging'}
+                {$t('xray.enable_dns_logging')}
               </label>
             </div>
 
             {#if xrayFiles['01_log.json']?.log?.access || xrayFiles['01_log.json']?.log?.error}
               <div class="logs-paths card" style="margin-top: 12px; padding: 12px;">
                 <h4 style="margin: 0 0 8px 0; font-size: 0.875rem;">
-                  {ru ? 'Пути к логам:' : 'Logs paths:'}
+                  {$t('xray.logs_paths')}
                 </h4>
                 {#if xrayFiles['01_log.json']?.log?.access}
                   <div style="font-size: 0.8125rem;">
@@ -2704,7 +2641,7 @@
       <!-- Right Panel (Preview) -->
       <div class="gen-right">
         <div class="preview-header">
-          <span class="preview-title">JSON {ru ? 'превью' : 'preview'}</span>
+          <span class="preview-title">JSON {$t('mihomo.preview')}</span>
         </div>
         <pre class="constructor-preview-panel" data-testid="xray-json-preview">{previewJson}</pre>
 
@@ -2719,7 +2656,7 @@
             <div
               style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;"
             >
-              {parseValidationError(validationError, ru ? 'ru' : 'en')}
+              {parseValidationError(validationError, $currentLang)}
             </div>
             <details>
               <summary style="cursor: pointer; font-size: 12px; opacity: 0.8; user-select: none;"
@@ -2747,9 +2684,9 @@
                 /></svg
               >
               {#if selectedFile}
-                {ru ? 'Вставить в редактор' : 'Insert into Editor'}
+                {$t('mihomo.insert_editor')}
               {:else}
-                {ru ? 'Открыть в редакторе' : 'Open in Editor'}
+                {$t('mihomo.open_editor')}
               {/if}
             </button>
             {#if canUndo}
@@ -2768,7 +2705,7 @@
               onclick={handleApplyChanges}
               style="flex: 1;"
             >
-              {ru ? 'Применить изменения' : 'Apply Changes'}
+              {$t('mihomo.apply_changes')}
             </button>
           </div>
         {/if}
@@ -2785,7 +2722,7 @@
 >
   <p>{$t('editor.apply_confirm_body')}</p>
   <div class="changed-files-list" style="margin-top: 12px;">
-    <strong>{ru ? 'Будут изменены файлы:' : 'Files to be modified:'}</strong>
+    <strong>{$t('xray.files_to_modify')}</strong>
     <ul style="margin: 8px 0 0 0; padding-left: 20px;">
       {#each filesToModify as file}
         {#if file.changesCount > 0}
@@ -2795,20 +2732,16 @@
               class="badge"
               style="background-color: var(--color-warning-bg); color: var(--color-warning-fg);"
             >
-              {ru
-                ? `Изменено ${file.changesCount} секций`
-                : `Modified ${file.changesCount} sections`}
+              {$t('xray.sections_modified', { count: file.changesCount })}
             </span>
           </li>
         {:else}
-          <li><code>{file.name}</code>: {ru ? 'Без изменений' : 'No changes'}</li>
+          <li><code>{file.name}</code>: {$t('xray.no_changes')}</li>
         {/if}
       {/each}
     </ul>
     <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
-      {ru
-        ? '* Автоматически будет создана резервная копия (хранится до 5 последних бэкапов)'
-        : '* A backup will be created automatically (up to 5 copies stored)'}
+      {$t('mihomo.backup_notice')}
     </p>
   </div>
   <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
@@ -2940,7 +2873,7 @@
           {#if importLoading}
             <span class="spinner-xs" style="margin-right: 6px;"></span>
           {/if}
-          {ru ? `Импортировать (${importNodes.length})` : `Import (${importNodes.length})`}
+          {$t('mihomo.import_count', { count: importNodes.length })}
         </button>
       {/if}
     </div>

@@ -61,13 +61,13 @@
 
     <div class="confirm-actions">
       <Button variant="secondary" onclick={cancel}>
-        {$confirmStore.cancelLabel || $t('app.cancel') || 'Отмена'}
+        {$confirmStore.cancelLabel || $t('app.cancel')}
       </Button>
       <Button
         variant={variant === 'danger' ? 'danger' : variant === 'warning' ? 'warning' : 'primary'}
         onclick={confirm}
       >
-        {$confirmStore.confirmLabel || $t('app.confirm') || 'Подтвердить'}
+        {$confirmStore.confirmLabel || $t('app.confirm')}
       </Button>
     </div>
   {/if}

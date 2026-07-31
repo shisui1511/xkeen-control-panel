@@ -286,51 +286,51 @@
   const flagMap: Record<string, string> = {
     RU: '🇷🇺',
     Russia: '🇷🇺',
-    Россия: '🇷🇺',
+    '\u0420\u043E\u0441\u0441\u0438\u044F': '🇷🇺',
     US: '🇺🇸',
     USA: '🇺🇸',
-    США: '🇺🇸',
+    '\u0421\u0428\u0410': '🇺🇸',
     GB: '🇬🇧',
     UK: '🇬🇧',
     'United Kingdom': '🇬🇧',
-    Англия: '🇬🇧',
+    '\u0410\u043D\u0433\u043B\u0438\u044F': '🇬🇧',
     DE: '🇩🇪',
     Germany: '🇩🇪',
-    Германия: '🇩🇪',
+    '\u0413\u0435\u0440\u043C\u0430\u043D\u0438\u044F': '🇩🇪',
     NL: '🇳🇱',
     Netherlands: '🇳🇱',
-    Нидерланды: '🇳🇱',
+    '\u041D\u0438\u0434\u0435\u0440\u043B\u0430\u043D\u0434\u044B': '🇳🇱',
     FR: '🇫🇷',
     France: '🇫🇷',
-    Франция: '🇫🇷',
+    '\u0424\u0440\u0430\u043D\u0446\u0438\u044F': '🇫🇷',
     FI: '🇫🇮',
     Finland: '🇫🇮',
-    Финляндия: '🇫🇮',
+    '\u0424\u0438\u043D\u043B\u044F\u043D\u0434\u0438\u044F': '🇫🇮',
     TR: '🇹🇷',
     Turkey: '🇹🇷',
-    Турция: '🇹🇷',
+    '\u0422\u0443\u0440\u0446\u0438\u044F': '🇹🇷',
     SG: '🇸🇬',
     Singapore: '🇸🇬',
-    Сингапур: '🇸🇬',
+    '\u0421\u0438\u043D\u0433\u0430\u04FF\u0443\u0440': '🇸🇬',
     JP: '🇯🇵',
     Japan: '🇯🇵',
-    Япония: '🇯🇵',
+    '\u042F\u043F\u043E\u043D\u0438\u044F': '🇯🇵',
     HK: '🇭🇰',
     'Hong Kong': '🇭🇰',
-    Гонконг: '🇭🇰',
+    '\u0413\u043E\u043D\u043A\u043E\u043D\u0433': '🇭🇰',
     TW: '🇹🇼',
     Taiwan: '🇹🇼',
-    Тайвань: '🇹🇼',
+    '\u0422\u0430\u0439\u0432\u0430\u043D\u044C': '🇹🇼',
     KR: '🇰🇷',
     'South Korea': '🇰🇷',
-    Корея: '🇰🇷',
+    '\u041A\u043E\u0440\u0435\u044F': '🇰🇷',
     Seoul: '🇰🇷',
     IN: '🇮🇳',
     India: '🇮🇳',
-    Индия: '🇮🇳',
+    '\u0418\u043D\u0434\u0438\u044F': '🇮🇳',
     BR: '🇧🇷',
     Brazil: '🇧🇷',
-    Бразилия: '🇧🇷'
+    '\u0411\u0440\u0430\u0437\u0438\u043B\u0438\u044F': '🇧🇷'
   };
 
   function getCountryFlag(nodeName: string): string {
@@ -735,7 +735,7 @@
       if (minNext !== Infinity) {
         const diffHours = Math.floor(minNext / (3600 * 1000));
         const diffMins = Math.floor((minNext % (3600 * 1000)) / (60 * 1000));
-        nextStr = `${diffHours}ч ${diffMins}м`;
+        nextStr = `${diffHours}${$t('conn.hrs')} ${diffMins}${$t('conn.min')}`;
       }
       return {
         total: subscriptions.length,
@@ -1001,13 +1001,11 @@
 
     if (
       !(await showConfirm({
-        title: $t('subscr.delete_title') || 'Удаление подписки',
+        title: $t('subscr.delete_title'),
         objectName: subName,
-        consequence:
-          $t('subscr.delete_consequence') ||
-          'Подписка и все связанные прокси будут удалены из конфигурации.',
+        consequence: $t('subscr.delete_consequence'),
         variant: 'danger',
-        confirmLabel: $t('app.delete') || 'Удалить'
+        confirmLabel: $t('app.delete')
       }))
     )
       return;
@@ -1404,7 +1402,7 @@
             <polyline points="18 15 12 9 6 15" />
             <polyline points="18 20 12 14 6 20" />
           </svg>
-          {$t('proxies.collapse_all') || 'Свернуть все'}
+          {$t('proxies.collapse_all')}
         </button>
         <button class="btn btn-secondary" onclick={expandAll} title={$t('proxies.expand_all')}>
           <svg
@@ -1419,7 +1417,7 @@
             <polyline points="6 9 12 15 18 9" />
             <polyline points="6 4 12 10 18 4" />
           </svg>
-          {$t('proxies.expand_all') || 'Развернуть все'}
+          {$t('proxies.expand_all')}
         </button>
 
         <input
@@ -1465,7 +1463,7 @@
             stroke-width="2"
             style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
           >
-          {$t('subscr.refresh_all') || 'Обновить всё'}
+          {$t('subscr.refresh_all')}
         </button>
 
         <button class="btn btn-primary" onclick={openAddModal}>
@@ -1478,7 +1476,7 @@
             stroke-width="2"
             style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
           >
-          {$t('subscr.add') || 'Добавить подписку'}
+          {$t('subscr.add')}
         </button>
       </div>
     {/if}
@@ -1491,14 +1489,14 @@
       class:active={activeTab === 'groups'}
       onclick={() => (activeTab = 'groups')}
     >
-      {$t('proxies.tab_groups') || 'Группы'}
+      {$t('proxies.tab_groups')}
     </button>
     <button
       class="tab-btn"
       class:active={activeTab === 'providers'}
       onclick={() => (activeTab = 'providers')}
     >
-      {$t('proxies.tab_providers') || 'Провайдеры'}
+      {$t('proxies.tab_providers')}
     </button>
   </div>
 
@@ -1638,10 +1636,10 @@
                 <div class="gc-head-row2">
                   <span class="gc-count-text"
                     >{group.all.length}
-                    {$t('proxies.obs_unreachable_sub') ? 'узлов' : 'nodes'}</span
+                    {$t('proxies.nodes_label')}</span
                   >
                   <span class="gc-separator">·</span>
-                  <span class="gc-active-label">{$t('proxies.active') || 'Активен'}:</span>
+                  <span class="gc-active-label">{$t('proxies.active')}:</span>
 
                   {#each getSelectionChain(group.name) as item, index}
                     {@const itemFlag = !item.isGroup ? getCountryFlag(item.name) : null}
@@ -1796,7 +1794,7 @@
           style="padding: 3rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;"
         >
           <p style="color: var(--fg-secondary); margin: 0;">
-            {$t('subscr.empty') || 'Список подписок пуст'}
+            {$t('subscr.empty')}
           </p>
           <button class="btn btn-primary" onclick={openAddModal}>
             <svg
@@ -1811,7 +1809,7 @@
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
-            {$t('subscr.add_first') || 'Добавить первую подписку'}
+            {$t('subscr.add_first')}
           </button>
         </div>
       {:else}

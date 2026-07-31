@@ -76,9 +76,9 @@
   ];
 
   $: periods = [
-    { label: $t('trafficquotas.period_daily') || 'Ежедневно', value: 'daily' },
-    { label: $t('trafficquotas.period_weekly') || 'Еженедельно', value: 'weekly' },
-    { label: $t('trafficquotas.period_monthly') || 'Ежемесячно', value: 'monthly' }
+    { label: $t('trafficquotas.period_daily'), value: 'daily' },
+    { label: $t('trafficquotas.period_weekly'), value: 'weekly' },
+    { label: $t('trafficquotas.period_monthly'), value: 'monthly' }
   ];
 
   $: activeQuotas = quotas.filter((q) => q.enabled);
@@ -212,13 +212,11 @@
     const q = quotas.find((item) => item.id === id);
     if (
       !(await showConfirm({
-        title: $t('trafficquotas.delete_title') || 'Удаление квоты трафика',
+        title: $t('trafficquotas.delete_title'),
         objectName: q ? q.name : id,
-        consequence:
-          $t('trafficquotas.delete_consequence') ||
-          'Правило ограничения трафика будет безвозвратно удалено.',
+        consequence: $t('trafficquotas.delete_consequence'),
         variant: 'danger',
-        confirmLabel: $t('app.delete') || 'Удалить'
+        confirmLabel: $t('app.delete')
       }))
     )
       return;
@@ -610,7 +608,7 @@
                       class="toggle-switch"
                       class:loading={togglingQuotas[q.id]}
                       style="margin-right: 12px;"
-                      title="Включить/выключить лимит"
+                      title={$t('trafficquotas.toggle_limit')}
                     >
                       <input
                         type="checkbox"

@@ -172,7 +172,7 @@
             onCheckNodeHealth(subId, node.tag);
           }}
           disabled={checkingNodes[node.tag]}
-          title="Проверить пинг"
+          title={$t('subscr.check_ping')}
         >
           {#if checkingNodes[node.tag]}
             <span class="spinner-xs"></span>

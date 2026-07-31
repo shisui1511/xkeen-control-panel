@@ -210,8 +210,12 @@
   // immediately preceding it.
   function guessXkeenRunning(text: string): boolean {
     const lower = text.toLowerCase();
-    const hasRunningWord = /\brunning\b/.test(lower) || /запущен/.test(lower);
-    const isNegated = /\bnot\s+running\b/.test(lower) || /не\s*запущен/.test(lower);
+    const hasRunningWord =
+      /\brunning\b/.test(lower) ||
+      /[\u0437][\u0430][\u043F][\u0443][\u0449][\u0435][\u043D]/.test(lower);
+    const isNegated =
+      /\bnot\s+running\b/.test(lower) ||
+      /[\u043D][\u0435]\s*[\u0437][\u0430][\u043F][\u0443][\u0449][\u0435][\u043D]/.test(lower);
     return hasRunningWord && !isNegated;
   }
 

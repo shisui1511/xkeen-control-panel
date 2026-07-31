@@ -225,18 +225,11 @@
           isDirty = true;
         }
       }
-      showToast(
-        'success',
-        $t('editor.yaml_inserted') || 'Конфигурация вставлена в редактор. Не забудьте сохранить её!'
-      );
+      showToast('success', $t('editor.yaml_inserted'));
     } else {
       activeTab = 'files';
       window.location.hash = '#/editor';
-      showToast(
-        'info',
-        $t('editor.select_file_warn') ||
-          'Пожалуйста, выберите файл в панели слева для вставки YAML.'
-      );
+      showToast('info', $t('editor.select_file_for_yaml'));
     }
   }
 
@@ -270,10 +263,10 @@
 
   async function confirmUnsaved(): Promise<boolean> {
     return await showConfirm({
-      title: $t('editor.unsaved_changes_title') || 'Несохраненные изменения',
+      title: $t('editor.unsaved_changes_title'),
       message: $t('editor.unsaved_warning') || 'Unsaved changes will be lost. Proceed?',
       variant: 'warning',
-      confirmLabel: $t('app.continue') || 'Продолжить'
+      confirmLabel: $t('app.continue')
     });
   }
 
@@ -790,7 +783,7 @@
     if (!selectedFile || !editorView) return;
     applyLoading = true;
     await tick();
-    backgroundStatusText = $t('editor.saving') || 'Сохранение...';
+    backgroundStatusText = $t('editor.saving');
 
     try {
       const content = editorView.state.doc.toString();
@@ -827,7 +820,7 @@
       await loadBackups(selectedFile);
 
       // 2. POST /api/service/control?action=restart
-      backgroundStatusText = $t('editor.restarting') || 'Перезапуск службы...';
+      backgroundStatusText = $t('editor.restarting');
       const restartRes = await apiFetch('/api/service/control?action=restart', {
         method: 'POST'
       });
@@ -851,11 +844,11 @@
     const maxAttempts = 12;
     const intervalTime = 1500;
 
-    backgroundStatusText = `${$t('editor.checking_status') || 'Проверка статуса...'} (1/${maxAttempts})`;
+    backgroundStatusText = `${$t('editor.checking_status')} (1/${maxAttempts})`;
 
     const interval = setInterval(async () => {
       attempts++;
-      backgroundStatusText = `${$t('editor.checking_status') || 'Проверка статуса...'} (${attempts}/${maxAttempts})`;
+      backgroundStatusText = `${$t('editor.checking_status')} (${attempts}/${maxAttempts})`;
 
       try {
         const res = await apiFetch('/api/service/status');
@@ -863,10 +856,7 @@
           const parsed = await res.json();
           if (parsed && parsed.success && parsed.data && parsed.data.is_running === true) {
             clearInterval(interval);
-            showToast(
-              'success',
-              $t('editor.apply_success') || 'Конфигурация успешно применилась, служба запущена!'
-            );
+            showToast('success', $t('editor.apply_success'));
             applyLoading = false;
             backgroundStatusText = '';
             return;
@@ -882,10 +872,7 @@
 
       if (attempts >= maxAttempts) {
         clearInterval(interval);
-        showToast(
-          'error',
-          $t('editor.apply_timeout') || 'Служба не запустилась вовремя. Проверьте логи.'
-        );
+        showToast('error', $t('editor.apply_timeout'));
         applyLoading = false;
         backgroundStatusText = '';
       }
@@ -896,12 +883,11 @@
     const filename = backupPath.split('/').pop() || backupPath;
     if (
       !(await showConfirm({
-        title: $t('editor.restore_backup_title') || 'Восстановление бэкапа',
+        title: $t('editor.restore_backup_title'),
         objectName: filename,
-        consequence:
-          $t('editor.restore_confirm') || 'Текущее содержимое редактора будет заменено бэкапом.',
+        consequence: $t('editor.restore_confirm'),
         variant: 'warning',
-        confirmLabel: $t('editor.restore') || 'Восстановить'
+        confirmLabel: $t('editor.restore')
       }))
     )
       return;
@@ -1051,7 +1037,7 @@
           if (!fixed.includes('proxy-groups:')) {
             fixed =
               fixed +
-              '\nproxy-groups:\n  - name: Выбор прокси\n    type: select\n    proxies:\n      - DIRECT\n';
+              '\nproxy-groups:\n  - name: Proxy Selection\n    type: select\n    proxies:\n      - DIRECT\n';
             fixesApplied++;
           }
         }
@@ -1157,12 +1143,11 @@
     if (isDirty && !(await confirmUnsaved())) return;
     if (
       !(await showConfirm({
-        title: $t('editor.template_apply_title') || 'Применение шаблона',
+        title: $t('editor.template_apply_title'),
         objectName: template.name,
-        consequence:
-          $t('editor.confirm_template') || 'Текущие несохраненные изменения будут потеряны.',
+        consequence: $t('editor.confirm_template'),
         variant: 'warning',
-        confirmLabel: $t('editor.apply') || 'Применить'
+        confirmLabel: $t('editor.apply')
       }))
     )
       return;
@@ -1293,15 +1278,10 @@
         {/if}
       </div>
       <h1>
-        {activeTab === 'constructor'
-          ? $t('editor.constructor_title') || 'Конструктор конфигурации'
-          : $t('editor.h1') || 'Конфигурация'}
+        {activeTab === 'constructor' ? $t('editor.constructor_title') : $t('editor.h1')}
       </h1>
       <p class="sub">
-        {activeTab === 'constructor'
-          ? $t('editor.constructor_subtitle') || 'Пошаговое создание конфигураций'
-          : $t('editor.h1_sub') ||
-            'YAML / JSON конфиги с подсветкой, валидацией по схеме и автодополнением.'}
+        {activeTab === 'constructor' ? $t('editor.constructor_subtitle') : $t('editor.h1_sub')}
       </p>
     </div>
     {#if activeTab === 'files'}
@@ -1458,7 +1438,7 @@
                   d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
                 /></svg
               >
-              {$t('editor.show_files') || 'Показать файлы'}
+              {$t('editor.show_files')}
             </button>
           {/if}
         </div>
@@ -1489,8 +1469,8 @@
               class="btn btn-secondary"
               style="padding: 6px 10px; margin-right: 8px;"
               onclick={() => (showSidebar = !showSidebar)}
-              title={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
-              aria-label={showSidebar ? 'Скрыть сайдбар' : 'Показать сайдбар'}
+              title={showSidebar ? $t('editor.hide_sidebar') : $t('editor.show_sidebar')}
+              aria-label={showSidebar ? $t('editor.hide_sidebar') : $t('editor.show_sidebar')}
             >
               {#if showSidebar}
                 <svg
@@ -1535,13 +1515,13 @@
                   style="font-size: 12px; display: flex; align-items: center; gap: 4px;"
                 >
                   <span class="tab-dirty-dot" style="margin:0">●</span>
-                  {$t('editor.has_draft') || 'Черновик'}
+                  {$t('editor.has_draft')}
                 </span>
                 <button class="btn btn-xs btn-primary" onclick={restoreDraft}>
-                  {$t('editor.restore_draft') || 'Восстановить'}
+                  {$t('editor.restore_draft')}
                 </button>
                 <button class="btn btn-xs btn-secondary" onclick={discardDraft}>
-                  {$t('editor.discard_draft') || 'Сбросить'}
+                  {$t('editor.discard_draft')}
                 </button>
               </div>
             {/if}
@@ -1551,7 +1531,7 @@
                 class="btn btn-secondary"
                 style="padding: 6px 10px;"
                 onclick={toggleKebab}
-                aria-label="Дополнительные действия"
+                aria-label={$t('editor.more_actions')}
               >
                 <svg
                   width="14"
@@ -1572,7 +1552,7 @@
                 <div class="kebab-dropdown" transition:fade={{ duration: 100 }}>
                   <button class="kebab-item" onclick={downloadFile}>
                     <Icon name="download" size={14} />
-                    Скачать файл
+                    {$t('editor.download_file')}
                   </button>
                   <button
                     class="kebab-item"
@@ -1582,26 +1562,26 @@
                     }}
                   >
                     <Icon name="edit" size={14} />
-                    {$t('app.rename') || 'Переименовать'}
+                    {$t('app.rename')}
                   </button>
                   <button class="kebab-item" onclick={openTemplatesModal}>
                     <Icon name="settings" size={14} />
-                    Шаблоны
+                    {$t('editor.templates')}
                   </button>
                   {#if fileType === 'JSON'}
                     <button class="kebab-item" onclick={() => (showGeneratorModal = true)}>
                       <Icon name="settings" size={14} />
-                      Генератор исходящих
+                      {$t('editor.generator')}
                     </button>
                   {/if}
                   <button class="kebab-item" onclick={applyQuickFixes}>
                     <Icon name="settings" size={14} />
-                    Быстрые исправления
+                    {$t('editor.quick_fixes')}
                   </button>
                   <div class="kebab-divider"></div>
                   <button class="kebab-item danger" onclick={deleteFile}>
                     <Icon name="trash" size={14} />
-                    {$t('app.delete') || 'Удалить'}
+                    {$t('app.delete')}
                   </button>
                 </div>
               {/if}
@@ -1657,7 +1637,7 @@
           <div class="editor-statusbar">
             <span class="status-indicator" class:status-dirty={isDirty} style="margin-right: 14px;">
               <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
-              {isDirty ? $t('editor.unsaved') || 'Изменён' : $t('editor.saved') || 'Сохранён'}
+              {isDirty ? $t('editor.unsaved') : $t('editor.saved')}
             </span>
             <span>Ln {cursorLine}, Col {cursorCol}</span>
             <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
@@ -1670,7 +1650,7 @@
                   onchange={toggleSchema}
                   style="margin:0;width:12px;height:12px;"
                 />
-                Схема
+                {$t('editor.tab_schema')}
               </label>
               <label
                 style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"
@@ -1681,7 +1661,7 @@
                   onchange={toggleExpertMode}
                   style="margin:0;width:12px;height:12px;"
                 />
-                Эксперт
+                {$t('editor.tab_expert')}
               </label>
 
               {#if applyLoading && backgroundStatusText}
@@ -1713,14 +1693,14 @@
                   >
                     <polyline points="18 15 12 9 6 15"></polyline>
                   </svg>
-                  {$t('editor.backups') || 'Бэкапы'} ({backups.length})
+                  {$t('editor.backups')} ({backups.length})
                 </button>
               {/if}
 
               <span
                 class="status-tip status-shortcut-tip"
                 style="border-left: 1px solid var(--border); padding-left: 12px;"
-                >Ctrl+S — сохранить</span
+                >Ctrl+S — {$t('editor.to_save')}</span
               >
             </div>
           </div>
@@ -1820,7 +1800,7 @@
 
 <Modal
   isOpen={showTemplatesModal}
-  title={$t('editor.templates') || 'Шаблоны'}
+  title={$t('editor.templates')}
   maxWidth="900px"
   class="templates-wide-modal"
   onclose={() => (showTemplatesModal = false)}
@@ -1830,18 +1810,18 @@
       style="margin-top: -10px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;"
     >
       <p class="templates-modal-subtitle" style="margin: 0;">
-        {$t('editor.templates_desc') || 'Шаблоны конфигураций'}
+        {$t('editor.templates_desc')}
       </p>
       <div style="display: flex; align-items: center; gap: 8px;">
         {#if templateStatus.has_update}
           <span class="templates-badge update-available">
             <span class="pulse-dot"></span>
-            {$t('editor.update_available') || 'Доступно обновление'} (v{templateStatus.current_version})
+            {$t('editor.update_available')} (v{templateStatus.current_version})
           </span>
         {:else if templateStatus.current_version}
           <span class="templates-badge up-to-date">
             <span class="dot"></span>
-            {$t('editor.up_to_date') || 'Обновлено'} (v{templateStatus.current_version})
+            {$t('editor.up_to_date')} (v{templateStatus.current_version})
           </span>
         {/if}
         <button
@@ -1854,7 +1834,7 @@
           <span class="templates-update-icon" class:spinning={updatingTemplates}>
             <Icon name="refresh" size={12} />
           </span>
-          {$t('editor.templates_update') || 'Обновить'}
+          {$t('editor.templates_update')}
         </button>
       </div>
     </div>
@@ -1954,14 +1934,14 @@
 
 <Modal
   isOpen={showGeneratorModal}
-  title={$t('editor.generator') || 'Генератор исходящих'}
+  title={$t('editor.generator')}
   onclose={() => (showGeneratorModal = false)}
 >
   <div class="form-group" style="margin-bottom: 12px;">
     <label
       for="gen-protocol"
       style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-      >{$t('editor.protocol') || 'Протокол'}</label
+      >{$t('editor.protocol')}</label
     >
     <select id="gen-protocol" bind:value={genProtocol} class="input" style="width: 100%;">
       <option value="vless">VLESS</option>
@@ -1977,7 +1957,7 @@
       <label
         for="gen-address"
         style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-        >{$t('editor.address') || 'Адрес'}</label
+        >{$t('editor.address')}</label
       >
       <input
         id="gen-address"
@@ -1992,7 +1972,7 @@
       <label
         for="gen-port"
         style="display: block; font-size: 12px; color: var(--fg-dim); margin-bottom: 4px;"
-        >{$t('editor.port') || 'Порт'}</label
+        >{$t('editor.port')}</label
       >
       <input id="gen-port" type="number" bind:value={genPort} class="input" style="width: 100%;" />
     </div>
@@ -2075,21 +2055,21 @@
       {$t('app.cancel')}
     </button>
     <button onclick={generateOutbound} class="btn btn-primary">
-      {$t('app.generate') || 'Сгенерировать'}
+      {$t('app.generate')}
     </button>
   </div>
 </Modal>
 
 <Modal
   isOpen={showSaveConfirmModal}
-  title={$t('editor.confirm_save_title') || 'Confirm Save'}
+  title={$t('editor.confirm_save_title')}
   maxWidth="700px"
   onclose={() => (showSaveConfirmModal = false)}
 >
   <!-- Diff Preview -->
   <div class="diff-preview" style="margin-top: 12px;">
     <div class="diff-preview-title">
-      {$t('editor.diff_preview') || 'Предпросмотр изменений'}
+      {$t('editor.diff_preview')}
     </div>
     <div class="diff-preview-body" style="max-height: 40vh; overflow-y: auto;">
       {#each getDiffGroups(originalContent, editorView ? editorView.state.doc.toString() : '') as group}
