@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const fs = require('fs');
 const path = require('path');
 
@@ -122,28 +123,26 @@ try {
       usedKeys.add(m[1]);
     }
 
-    const lines = txt.split('\n');
-    let inHTMLComment = false;
-    let inJSBlockComment = false;
+    // Clean multiline HTML and JS comments before splitting into lines
+    const cleanedTxt = txt.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+
+    const lines = cleanedTxt.split('\n');
+    const rawLines = txt.split('\n');
 
     lines.forEach((line, index) => {
       const lineNum = index + 1;
+      const rawLine = rawLines[index] || line;
 
       // Check fallback pattern $t(...) || 'кириллица'
       if (fallbackRe.test(line)) {
-        fallbackErrors.push({ file: relativePath, line: lineNum, text: line.trim() });
+        fallbackErrors.push({ file: relativePath, line: lineNum, text: rawLine.trim() });
       }
 
-      // Clean line from comments for Cyrillic check
-      let cleaned = line;
-
-      // Simple comment filtering
-      cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '');
-      cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, '');
-      cleaned = cleaned.replace(/\/\/.*/, '');
+      // Clean single-line comments
+      let cleaned = line.replace(/\/\/.*/, '');
 
       if (cyrillicCharRe.test(cleaned)) {
-        cyrillicErrors.push({ file: relativePath, line: lineNum, text: line.trim() });
+        cyrillicErrors.push({ file: relativePath, line: lineNum, text: rawLine.trim() });
       }
     });
   }

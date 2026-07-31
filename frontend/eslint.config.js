@@ -38,8 +38,8 @@ export default ts.config(
     }
   },
   {
-    files: ['src/**/*.{svelte,ts}'],
-    ignores: ['src/lib/api.ts'],
+    files: ['src/**/*.ts'],
+    ignores: ['src/lib/api.ts', 'src/locales/**'],
     rules: {
       'no-restricted-syntax': [
         'error',
@@ -52,16 +52,21 @@ export default ts.config(
   },
   {
     files: ['src/**/*.svelte'],
+    ignores: ['src/lib/api.ts'],
     rules: {
       'no-restricted-syntax': [
         'error',
+        {
+          selector: "CallExpression[callee.name='fetch']",
+          message: 'Use apiFetch/apiFetchJSON from lib/api.ts instead of bare fetch().'
+        },
         {
           selector: 'Literal[value=/[\\u0400-\\u04FF]/]',
           message:
             'Hardcoded Cyrillic strings are forbidden in Svelte components. Extract to i18n locales.'
         },
         {
-          selector: 'SvelteText[value=/[\\u0400-\\u04FF]/]',
+          selector: 'SvelteElement SvelteText[value=/[\\u0400-\\u04FF]/]',
           message: 'Hardcoded Cyrillic text is forbidden in Svelte components. Use $t(...) instead.'
         }
       ]

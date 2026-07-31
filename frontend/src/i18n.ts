@@ -132,7 +132,7 @@ export const t = derived([currentLang, translationsStore], ([$lang, $translation
 
     if (params) {
       Object.entries(params).forEach(([k, v]) => {
-        text = text.replace(new RegExp(`{${k}}`, 'g'), String(v));
+        text = text.replace(new RegExp(`{${k}}`, 'g'), () => String(v));
       });
     }
 
