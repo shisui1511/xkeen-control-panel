@@ -1249,7 +1249,7 @@
     }
   }
 
-  $: ru = $currentLang === 'ru';
+  let ru = $derived($currentLang === 'ru');
 
   async function enableDNSRedirect() {
     dnsRedirectLoading = true;
