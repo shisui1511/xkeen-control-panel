@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { t, currentLang } from './i18n';
   import { showToast, showConfirm } from './stores';
+  import { apiFetchJSON } from './lib/api';
 
   interface TrafficPoint {
     up: number;
@@ -199,34 +200,25 @@
     )
       return;
     try {
-      const csrfToken = localStorage.getItem('csrf_token');
-      const res = await fetch('/api/traffic/reset', {
-        method: 'POST',
-        headers: {
-          'X-CSRF-Token': csrfToken || ''
-        }
-      });
-      if (res.ok) {
-        sessionUp = 0;
-        sessionDown = 0;
-        trafficData = [];
-        peaks = {
-          peak_hour_up: 0,
-          peak_hour_down: 0,
-          peak_day_up: 0,
-          peak_day_down: 0,
-          peak_week_up: 0,
-          peak_week_down: 0,
-          hour_start: 0,
-          day_start: 0,
-          week_start: 0
-        };
-        showToast('success', $t('app.success') || 'Success');
-      } else {
-        showToast('error', 'Failed to reset statistics');
-      }
+      await apiFetchJSON('/api/traffic/reset', { method: 'POST' });
+      sessionUp = 0;
+      sessionDown = 0;
+      trafficData = [];
+      peaks = {
+        peak_hour_up: 0,
+        peak_hour_down: 0,
+        peak_day_up: 0,
+        peak_day_down: 0,
+        peak_week_up: 0,
+        peak_week_down: 0,
+        hour_start: 0,
+        day_start: 0,
+        week_start: 0
+      };
+      showToast('success', $t('app.success') || 'Success');
     } catch (e: any) {
-      showToast('error', e.message);
+      if (e?.status === 401) return;
+      showToast('error', e instanceof Error ? e.message : String(e));
     }
   }
 
