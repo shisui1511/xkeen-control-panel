@@ -130,4 +130,26 @@ describe('apiFetch', () => {
     fetchMock.mockResolvedValueOnce(makeResponse(200, { success: false, error: 'boom' }));
     await expect(apiFetchJSON('/api/fail')).rejects.toThrow('boom');
   });
+
+  it('scenario 6: apiFetchJSON handles raw non-enveloped JSON, non-JSON errors, and non-ok statuses', async () => {
+    const { apiFetchJSON } = await loadFreshApi();
+
+    // Raw array response (non-enveloped)
+    fetchMock.mockResolvedValueOnce(makeResponse(200, [{ name: 'proxy-1' }]));
+    await expect(apiFetchJSON('/api/proxy-providers')).resolves.toEqual([{ name: 'proxy-1' }]);
+
+    // Non-JSON 502 Bad Gateway response
+    const badGatewayResponse = {
+      status: 502,
+      ok: false,
+      json: () => Promise.reject(new SyntaxError('Unexpected token < in JSON at position 0')),
+      text: () => Promise.resolve('<html>502 Bad Gateway</html>')
+    } as unknown as Response;
+    fetchMock.mockResolvedValueOnce(badGatewayResponse);
+    await expect(apiFetchJSON('/api/broken')).rejects.toThrow('HTTP 502');
+
+    // Non-ok response with JSON error message
+    fetchMock.mockResolvedValueOnce(makeResponse(400, { error: 'Bad Request Parameter' }));
+    await expect(apiFetchJSON('/api/bad-param')).rejects.toThrow('Bad Request Parameter');
+  });
 });

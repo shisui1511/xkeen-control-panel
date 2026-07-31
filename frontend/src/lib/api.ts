@@ -81,9 +81,30 @@ export async function apiFetchJSON<T = unknown>(
   options: ApiFetchOptions = {}
 ): Promise<T> {
   const res = await apiFetch(url, options);
-  const envelope: APIResponse<T> = await res.json();
-  if (!envelope.success) {
-    throw new Error(envelope.error ?? `HTTP ${res.status}`);
+  let payload: any;
+  try {
+    payload = await res.json();
+  } catch {
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    throw new Error('Invalid JSON response');
   }
-  return envelope.data as T;
+
+  if (!res.ok) {
+    const errorMsg =
+      payload && typeof payload === 'object' && payload.error
+        ? payload.error
+        : `HTTP ${res.status}`;
+    throw new Error(errorMsg);
+  }
+
+  if (payload && typeof payload === 'object' && 'success' in payload) {
+    if (!payload.success) {
+      throw new Error(payload.error ?? `HTTP ${res.status}`);
+    }
+    return (payload.data !== undefined ? payload.data : payload) as T;
+  }
+
+  return payload as T;
 }
