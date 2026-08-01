@@ -43,6 +43,24 @@ function extractKeys(lang) {
   return keys;
 }
 
+function stripHtmlComments(input) {
+  let previous;
+  do {
+    previous = input;
+    input = input.replace(/<!--[\s\S]*?-->/g, '');
+  } while (input !== previous);
+  return input;
+}
+
+function stripBlockComments(input) {
+  let previous;
+  do {
+    previous = input;
+    input = input.replace(/\/\*[\s\S]*?\*\//g, '');
+  } while (input !== previous);
+  return input;
+}
+
 try {
   let hasError = false;
 
@@ -124,12 +142,7 @@ try {
     }
 
     // Clean multiline HTML and JS comments before splitting into lines
-    let cleanedTxt = txt;
-    let prevTxt;
-    do {
-      prevTxt = cleanedTxt;
-      cleanedTxt = cleanedTxt.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
-    } while (cleanedTxt !== prevTxt);
+    const cleanedTxt = stripBlockComments(stripHtmlComments(txt));
 
     const lines = cleanedTxt.split('\n');
     const rawLines = txt.split('\n');
