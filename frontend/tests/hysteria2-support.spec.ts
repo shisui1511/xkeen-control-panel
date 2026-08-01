@@ -122,7 +122,7 @@ test.describe('Mihomo Generator Hysteria 2 Support and Validation', () => {
     await obfsPasswordInput.fill(''); // Clear it
 
     // Try to save
-    const saveBtn = page.locator('button:has-text("Добавить")');
+    const saveBtn = page.locator('button.btn-primary').filter({ hasText: /Создать|Добавить/ });
     await saveBtn.click();
 
     // Toast error should appear

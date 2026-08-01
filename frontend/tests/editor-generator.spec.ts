@@ -190,7 +190,10 @@ test.describe('Editor & Constructor integration test suite', () => {
     await page.locator('button.add-btn:has-text("Добавить прокси")').click();
     await page.locator('input.form-input[placeholder="my-proxy"]').fill('test-reality-proxy');
     await page.locator('input.form-input[placeholder="example.com"]').fill('reality-server.com');
-    await page.locator('button.btn-primary:has-text("Добавить")').click();
+    await page
+      .locator('button.btn-primary')
+      .filter({ hasText: /Создать|Добавить/ })
+      .click();
 
     // Кнопка должна называться "Вставить в редактор", так как файл открыт
     const actionBtn = page.locator('button.btn-secondary:has-text("Вставить в редактор")');
@@ -228,7 +231,7 @@ test.describe('Editor & Constructor integration test suite', () => {
     await expect(picker).toBeVisible({ timeout: 5000 });
 
     // Проверяем наличие категорий
-    await expect(picker).toContainText('Социальные сети');
+    await expect(picker).toContainText(/Social Networks|Социальные сети/);
 
     // Находим чекбокс с YouTube или другим правилом и отмечаем его
     const youtubeCheckbox = page
