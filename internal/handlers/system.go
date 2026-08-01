@@ -431,16 +431,19 @@ func getPrimaryLANIP() string {
 }
 
 func getSystemTimezone() string {
-	// /etc/TZ is common on OpenWrt/Keenetic (e.g. "MSK-3")
-	if data, err := os.ReadFile("/etc/TZ"); err == nil {
-		tz := strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", ""))
-		if tz != "" {
-			_, offset := time.Now().Zone()
-			hours := offset / 3600
-			if hours >= 0 {
-				return fmt.Sprintf("%s · UTC+%d", tz, hours)
+	// Check standard OpenWrt/Keenetic/Entware timezone files (e.g. "MSK-3")
+	tzPaths := []string{"/etc/TZ", "/opt/etc/TZ", "/etc/timezone"}
+	for _, p := range tzPaths {
+		if data, err := os.ReadFile(p); err == nil {
+			tz := strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", ""))
+			if tz != "" {
+				_, offset := time.Now().Zone()
+				hours := offset / 3600
+				if hours >= 0 {
+					return fmt.Sprintf("%s · UTC+%d", tz, hours)
+				}
+				return fmt.Sprintf("%s · UTC%d", tz, hours)
 			}
-			return fmt.Sprintf("%s · UTC%d", tz, hours)
 		}
 	}
 	name, offset := time.Now().Zone()
