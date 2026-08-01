@@ -522,7 +522,7 @@
   "settings.storage_free_of": "{free} free of {total}",
   "settings.storage_used": "Used: {used}",
   "settings.timezone": "Timezone",
-  "settings.timezone_desc": "Used in logs and schedules",
+  "settings.timezone_desc": "Automatically detected from router (Entware) system settings",
   "settings.section_appearance": "APPEARANCE",
   "settings.theme": "Theme",
   "settings.theme_desc": "Light / dark / automatic per system",

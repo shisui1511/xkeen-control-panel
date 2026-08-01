@@ -518,7 +518,7 @@
   "settings.storage_free_of": "{free} свободно из {total}",
   "settings.storage_used": "Использовано: {used}",
   "settings.timezone": "Часовой пояс",
-  "settings.timezone_desc": "Используется в логах и расписаниях",
+  "settings.timezone_desc": "Автоматически определяется из системных настроек роутера (Entware)",
   "settings.section_appearance": "ВНЕШНИЙ ВИД",
   "settings.theme": "Тема",
   "settings.theme_desc": "Светлая / тёмная / автоматически по системе",

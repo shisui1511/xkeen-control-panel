@@ -607,6 +607,7 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 	var cmd *exec.Cmd
 	if kernelType == "xray" {
 		cmd = exec.Command(binaryPath, "-test", "-confdir", tempDir)
+		setupXrayCmdEnv(cmd, tempDir)
 	} else {
 		cmd = exec.Command(binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, filename))
 	}
@@ -781,6 +782,7 @@ func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data 
 
 	if kernelType == "xray" {
 		cmd = exec.CommandContext(ctx, binaryPath, "-test", "-confdir", tempDir)
+		setupXrayCmdEnv(cmd, tempDir)
 	} else {
 		cmd = exec.CommandContext(ctx, binaryPath, "-t", "-d", tempDir, "-f", filepath.Join(tempDir, filename))
 	}

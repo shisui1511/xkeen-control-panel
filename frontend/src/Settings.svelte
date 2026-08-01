@@ -15,7 +15,7 @@
   } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
 
-  export const onSwitchTab: (tab: string) => void = () => {};
+  let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
   let checkingConnection = false;
   let secretVisible = false;
@@ -378,28 +378,37 @@
     }
   }
 
-  $: if (activeTab === 'backups' && !backupsLoaded) {
-    backupsLoaded = true;
-    loadConfigFiles();
-    fetchSnapshots();
-  }
-  $: if (activeTab !== 'backups') {
-    backupsLoaded = false;
-  }
+  $effect(() => {
+    if (activeTab === 'backups' && !backupsLoaded) {
+      backupsLoaded = true;
+      loadConfigFiles();
+      fetchSnapshots();
+    } else if (activeTab !== 'backups') {
+      backupsLoaded = false;
+    }
+  });
 
   // Appearance & Behavior settings (persisted in localStorage)
   let selectedTheme: 'light' | 'dark' | 'auto' = 'auto';
-  let timezone = 'UTC';
+  let systemTimezone = $state('—');
   let animationsEnabled = true;
   let autoRefresh = true;
   let confirmDangerous = true;
   let notificationSound = false;
 
+  async function loadSystemTimezone() {
+    try {
+      const stats = await apiFetchJSON<{ timezone?: string }>('/api/system/stats');
+      if (stats?.timezone) {
+        systemTimezone = stats.timezone;
+      }
+    } catch {}
+  }
+
   function loadAppearanceSettings() {
     try {
       const saved = localStorage.getItem('theme') || '';
       selectedTheme = saved === 'light' || saved === 'dark' ? saved : 'auto';
-      timezone = localStorage.getItem('timezone') || 'UTC';
       animationsEnabled = localStorage.getItem('animations') !== 'false';
       autoRefresh = localStorage.getItem('autoRefresh') !== 'false';
       confirmDangerous = localStorage.getItem('confirmDangerous') !== 'false';
@@ -763,6 +772,7 @@
     fetchCapabilities();
     fetchDevMode();
     loadAppearanceSettings();
+    loadSystemTimezone();
     fetchUpdateChannel();
     fetchTemplatesStatus();
 
@@ -849,21 +859,9 @@
             <span class="field-row-name">{$t('settings.timezone')}</span>
             <div class="field-row-desc">{$t('settings.timezone_desc')}</div>
           </div>
-          <select
-            class="field-select"
-            bind:value={timezone}
-            onchange={() => saveSetting('timezone', timezone)}
-            title={$t('settings.timezone')}
-          >
-            <option value="UTC">UTC</option>
-            <option value="Europe/Moscow">Europe/Moscow (UTC+3)</option>
-            <option value="Europe/London">Europe/London</option>
-            <option value="Europe/Berlin">Europe/Berlin</option>
-            <option value="America/New_York">America/New_York</option>
-            <option value="America/Los_Angeles">America/Los_Angeles</option>
-            <option value="Asia/Tokyo">Asia/Tokyo</option>
-            <option value="Asia/Shanghai">Asia/Shanghai</option>
-          </select>
+          <div class="field-value-badge" title={$t('settings.timezone')}>
+            {systemTimezone}
+          </div>
         </div>
       </div>
     </div>
@@ -1745,6 +1743,18 @@
     color: var(--fg-primary);
     cursor: pointer;
     min-width: 120px;
+  }
+
+  .field-value-badge {
+    font-size: 13px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-card);
+    color: var(--fg-primary);
+    font-family: var(--font-mono, monospace);
+    display: inline-flex;
+    align-items: center;
   }
 
   .field-input {
