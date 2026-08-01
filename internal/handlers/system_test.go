@@ -185,4 +185,3 @@ func TestCheckActiveConfigsInvalid(t *testing.T) {
 		t.Errorf("expected checkActiveConfigsInvalid to be false for empty valid dirs, got %v", invalid)
 	}
 }
-

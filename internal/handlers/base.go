@@ -196,4 +196,3 @@ func (a *API) getActiveKernelName() string {
 	}
 	return active
 }
-
