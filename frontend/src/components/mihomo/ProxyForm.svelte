@@ -56,8 +56,10 @@
       <label class="form-label" for="proxy-vless-uuid">UUID</label>
       <div class="input-with-btn">
         <input id="proxy-vless-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
-        <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
-          >⟳</button
+        <button
+          class="btn-gen"
+          onclick={() => (np.uuid = crypto.randomUUID())}
+          title={$t('app.generate')}>⟳</button
         >
       </div>
     </div>

@@ -1426,8 +1426,7 @@
         !(await showConfirm({
           title: $t('editor.port_collision_title'),
           message: details,
-          consequence:
-            $t('editor.port_collision_warning') || 'Proceeding may cause service disruption.',
+          consequence: $t('editor.port_collision_warning'),
           variant: 'danger',
           confirmLabel: $t('app.continue')
         }))
@@ -1565,7 +1564,7 @@
 
       await fetchCapabilities();
 
-      showToast('success', $t('editor.undo_success') || 'Last change reverted successfully');
+      showToast('success', $t('editor.undo_success'));
       checkUndo();
     } catch (e: any) {
       if (e?.status === 401) return;
@@ -1666,7 +1665,7 @@
             dismissMergeWarning = true;
             localStorage.setItem('xcp:dismissed_warning:preserved_keys', preservedKeys.join(','));
           }}
-          aria-label={$t('app.close') || 'Close'}>&times;</button
+          aria-label={$t('app.close')}>&times;</button
         >
       </div>
     {/if}
@@ -1741,7 +1740,7 @@
                 dismissZkeenGeodataWarning = true;
                 localStorage.setItem('xcp:dismissed_warning:zkeen_geodata', activePreset);
               }}
-              aria-label={$t('app.close') || 'Close'}>&times;</button
+              aria-label={$t('app.close')}>&times;</button
             >
           </div>
         {/if}
@@ -2379,7 +2378,11 @@
         <div class="preview-header">
           <span class="preview-title">YAML {$t('mihomo.preview')}</span>
           {#if yaml}
-            <button class="btn btn-secondary btn-sm" onclick={copyYAML} aria-label="Copy YAML">
+            <button
+              class="btn btn-secondary btn-sm"
+              onclick={copyYAML}
+              aria-label={$t('mihomo.copy_yaml')}
+            >
               <svg
                 width="12"
                 height="12"

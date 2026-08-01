@@ -244,7 +244,7 @@
     });
     isDirty = true;
     hasDraft = false;
-    showToast('success', $t('editor.draft_restored') || 'Draft restored');
+    showToast('success', $t('editor.draft_restored'));
   }
 
   function discardDraft() {
@@ -252,7 +252,7 @@
       localStorage.removeItem('editor.draft.' + selectedFile);
       hasDraft = false;
       draftContent = '';
-      showToast('info', $t('editor.draft_discarded') || 'Draft discarded');
+      showToast('info', $t('editor.draft_discarded'));
     }
   }
 
@@ -264,7 +264,7 @@
   async function confirmUnsaved(): Promise<boolean> {
     return await showConfirm({
       title: $t('editor.unsaved_changes_title'),
-      message: $t('editor.unsaved_warning') || 'Unsaved changes will be lost. Proceed?',
+      message: $t('editor.unsaved_warning'),
       variant: 'warning',
       confirmLabel: $t('app.continue')
     });
@@ -734,7 +734,7 @@
     diffChanges = getDiff(originalContent, content);
 
     if (diffChanges.filter((c) => c.type !== 'unchanged').length === 0) {
-      showToast('info', $t('editor.no_changes') || 'No changes to save');
+      showToast('info', $t('editor.no_changes'));
       return;
     }
 
@@ -1165,13 +1165,10 @@
       });
       isDirty = true;
       showTemplatesModal = false;
-      showToast('success', $t('editor.template_applied') || 'Template applied successfully');
+      showToast('success', $t('editor.template_applied'));
     } catch (e: any) {
       if (e?.status === 401) return;
-      showToast(
-        'error',
-        ($t('editor.template_error') || 'Failed to apply template') + ': ' + e.message
-      );
+      showToast('error', $t('editor.template_error') + ': ' + e.message);
     } finally {
       templateLoading = false;
     }
@@ -1857,7 +1854,7 @@
             if (first) await loadTemplatePreview(first);
           }}
         >
-          {$t('editor.templates_tab_xray') || 'Xray'}
+          {$t('editor.templates_tab_xray')}
         </button>
         <button
           class="tab-btn"
@@ -1871,7 +1868,7 @@
             if (first) await loadTemplatePreview(first);
           }}
         >
-          {$t('editor.templates_tab_mihomo') || 'Mihomo'}
+          {$t('editor.templates_tab_mihomo')}
         </button>
       </div>
 

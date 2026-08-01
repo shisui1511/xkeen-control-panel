@@ -728,9 +728,9 @@
       templatesHasUpdate = data.has_update || false;
       await fetchTemplatesStatus();
       if (templatesHasUpdate) {
-        showToast('info', $t('editor.update_available') || 'Update available');
+        showToast('info', $t('editor.update_available'));
       } else {
-        showToast('success', $t('editor.up_to_date') || 'Up to date');
+        showToast('success', $t('editor.up_to_date'));
       }
     } catch (e: any) {
       if (e?.status === 401) return;
@@ -747,7 +747,7 @@
       await apiFetchJSON('/api/templates/update', {
         method: 'POST'
       });
-      showToast('success', $t('editor.templates_updated') || 'Templates updated');
+      showToast('success', $t('editor.templates_updated'));
       await fetchTemplatesStatus();
     } catch (e: any) {
       if (e?.status === 401) return;

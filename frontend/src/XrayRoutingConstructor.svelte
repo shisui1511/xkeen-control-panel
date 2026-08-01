@@ -707,7 +707,7 @@
         throw new Error('Failed to restart service');
       }
 
-      showToast('success', $t('editor.undo_success') || 'Last change reverted successfully');
+      showToast('success', $t('editor.undo_success'));
       checkUndo();
     } catch (e: any) {
       if (e?.status === 401) return;
@@ -867,8 +867,7 @@
         !(await showConfirm({
           title: $t('editor.port_collision_title'),
           message: details,
-          consequence:
-            $t('editor.port_collision_warning') || 'Proceeding may cause service disruption.',
+          consequence: $t('editor.port_collision_warning'),
           variant: 'danger',
           confirmLabel: $t('app.continue')
         }))
@@ -2342,7 +2341,7 @@
                         class="btn btn-secondary"
                         style="padding: 0 8px; min-height: 36px;"
                         onclick={() => (outboundForm.uuid = crypto.randomUUID())}
-                        title="Generate"
+                        title={$t('app.generate')}
                         type="button">⟳</button
                       >
                     </div>

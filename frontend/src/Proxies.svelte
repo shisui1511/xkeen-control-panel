@@ -884,7 +884,7 @@
 
   async function saveSubscription() {
     if (!formURL.trim()) {
-      showToast('error', $t('subscr.fill_url') || 'Please fill in the URL field');
+      showToast('error', $t('subscr.fill_url'));
       return;
     }
 
@@ -1521,7 +1521,7 @@
       {:else if groups.length === 0}
         <EmptyState
           title={$t('proxies.no_proxies')}
-          description={$t('proxies.no_proxies_desc') || ''}
+          description={$t('proxies.no_proxies_desc')}
           icon={WarningIcon}
           ctaText={$t('app.refresh')}
           oncta={fetchProxies}

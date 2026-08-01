@@ -213,7 +213,7 @@
         day_start: 0,
         week_start: 0
       };
-      showToast('success', $t('app.success') || 'Success');
+      showToast('success', $t('app.success'));
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', e instanceof Error ? e.message : String(e));

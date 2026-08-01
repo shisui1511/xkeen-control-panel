@@ -19,6 +19,7 @@
   "app.delete": "Delete",
   "app.remove": "Remove",
   "app.dismiss": "Dismiss notification",
+  "app.notifications": "Notifications",
   "app.rename": "Rename",
   "app.refresh": "Refresh",
   "app.edit": "Edit",
