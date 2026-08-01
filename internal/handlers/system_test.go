@@ -164,3 +164,25 @@ func TestSystemStats_SSLCertDays(t *testing.T) {
 		t.Errorf("expected SSLCertDays around 365, got %d", stats3.SSLCertDays)
 	}
 }
+
+func TestCheckActiveConfigsInvalid(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		XRayConfigDir:   filepath.Join(tmpDir, "xray"),
+		MihomoConfigDir: filepath.Join(tmpDir, "mihomo"),
+		AllowedRoots:    []string{tmpDir},
+	}
+	_ = os.MkdirAll(cfg.XRayConfigDir, 0755)
+	_ = os.MkdirAll(cfg.MihomoConfigDir, 0755)
+
+	api := &API{
+		cfg:     cfg,
+		pathVal: utils.NewPathValidator(cfg.AllowedRoots),
+	}
+
+	// Should default to false when no binary errors out or no running kernel active
+	if invalid := api.checkActiveConfigsInvalid(); invalid {
+		t.Errorf("expected checkActiveConfigsInvalid to be false for empty valid dirs, got %v", invalid)
+	}
+}
+

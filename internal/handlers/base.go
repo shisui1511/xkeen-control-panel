@@ -3,6 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -136,3 +140,60 @@ func (a *API) jsonResponse(w http.ResponseWriter, v interface{}) {
 func (a *API) errorResponse(w http.ResponseWriter, message string, status int) {
 	JSONError(w, status, message)
 }
+
+// setupXrayCmdEnv configures XRAY_LOCATION_ASSET environment variable for xray -test commands
+// to ensure Xray can find geodata (.dat) files during syntax validation.
+func setupXrayCmdEnv(cmd *exec.Cmd, configDir string) {
+	env := os.Environ()
+	for _, e := range env {
+		if strings.HasPrefix(e, "XRAY_LOCATION_ASSET=") {
+			cmd.Env = env
+			return
+		}
+	}
+	candidates := []string{
+		"/opt/etc/xray/dat",
+		"/opt/share/xray",
+		"/opt/etc/xray",
+	}
+	if configDir != "" {
+		candidates = append(candidates, filepath.Dir(configDir), configDir)
+	}
+	for _, dir := range candidates {
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			cmd.Env = append(env, "XRAY_LOCATION_ASSET="+dir)
+			return
+		}
+	}
+	cmd.Env = env
+}
+
+// getActiveKernelName returns the name of the currently running active kernel ("mihomo", "xray", "both", or "none").
+func (a *API) getActiveKernelName() string {
+	var active string
+	if a.kernelSvc != nil {
+		for _, info := range a.kernelSvc.List() {
+			if info.ProcessStatus == "running" {
+				active = info.Name
+				break
+			}
+		}
+	}
+	if active == "" && a.xkeenSvc != nil {
+		if status, err := a.xkeenSvc.Status(); err == nil {
+			lower := strings.ToLower(status)
+			if strings.Contains(lower, "xray") && strings.Contains(lower, "mihomo") {
+				active = "both"
+			} else if strings.Contains(lower, "xray") {
+				active = "xray"
+			} else if strings.Contains(lower, "mihomo") {
+				active = "mihomo"
+			}
+		}
+	}
+	if active == "" {
+		active = "none"
+	}
+	return active
+}
+

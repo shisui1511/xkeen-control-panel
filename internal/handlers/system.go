@@ -332,25 +332,52 @@ func (a *API) checkActiveConfigsInvalid() bool {
 	}
 
 	invalid := false
+	activeKernel := a.getActiveKernelName()
 
-	// Check Xray configuration
-	xrayBin := a.getBinaryPath("xray")
-	if xrayBin != "" {
-		if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
-			cmd := exec.Command(xrayBin, "-test", "-confdir", a.cfg.XRayConfigDir)
-			if err := cmd.Run(); err != nil {
-				invalid = true
+	checkXray := func() bool {
+		xrayBin := a.getBinaryPath("xray")
+		if xrayBin != "" {
+			if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
+				cmd := exec.Command(xrayBin, "-test", "-confdir", a.cfg.XRayConfigDir)
+				setupXrayCmdEnv(cmd, a.cfg.XRayConfigDir)
+				if err := cmd.Run(); err != nil {
+					return true
+				}
 			}
 		}
+		return false
 	}
 
-	// Check Mihomo configuration if Xray is valid (or if we need to check both)
-	if !invalid {
+	checkMihomo := func() bool {
 		mihomoBin := a.getBinaryPath("mihomo")
 		if mihomoBin != "" {
 			if _, err := os.Stat(a.cfg.MihomoConfigDir); err == nil {
 				cmd := exec.Command(mihomoBin, "-t", "-d", a.cfg.MihomoConfigDir)
 				if err := cmd.Run(); err != nil {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	switch activeKernel {
+	case "xray":
+		invalid = checkXray()
+	case "mihomo":
+		invalid = checkMihomo()
+	case "both":
+		invalid = checkXray() || checkMihomo()
+	default:
+		// If no kernel is currently running, validate installed kernels that have configs
+		if _, err := os.Stat(a.cfg.MihomoConfigDir); err == nil {
+			if checkMihomo() {
+				invalid = true
+			}
+		}
+		if !invalid {
+			if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
+				if checkXray() {
 					invalid = true
 				}
 			}
