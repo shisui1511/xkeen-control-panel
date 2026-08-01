@@ -124,7 +124,12 @@ try {
     }
 
     // Clean multiline HTML and JS comments before splitting into lines
-    const cleanedTxt = txt.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    let cleanedTxt = txt;
+    let prevTxt;
+    do {
+      prevTxt = cleanedTxt;
+      cleanedTxt = cleanedTxt.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    } while (cleanedTxt !== prevTxt);
 
     const lines = cleanedTxt.split('\n');
     const rawLines = txt.split('\n');
