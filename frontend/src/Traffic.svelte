@@ -190,12 +190,10 @@
   async function resetStatistics() {
     if (
       !(await showConfirm({
-        title: $t('traffic.reset_title') || 'Сброс статистики',
-        consequence:
-          $t('traffic.reset_confirm') ||
-          'Вся накопленная статистика использования трафика будет сброшена.',
+        title: $t('traffic.reset_title'),
+        consequence: $t('traffic.reset_confirm'),
         variant: 'danger',
-        confirmLabel: $t('app.reset') || 'Сбросить'
+        confirmLabel: $t('app.reset')
       }))
     )
       return;
@@ -215,7 +213,7 @@
         day_start: 0,
         week_start: 0
       };
-      showToast('success', $t('app.success') || 'Success');
+      showToast('success', $t('app.success'));
     } catch (e: any) {
       if (e?.status === 401) return;
       showToast('error', e instanceof Error ? e.message : String(e));

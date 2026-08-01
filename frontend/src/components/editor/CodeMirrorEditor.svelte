@@ -294,12 +294,10 @@
       type="button"
       class="editor-cm-tool-btn"
       onclick={toggleFullscreen}
-      title={isFullscreen
-        ? $translate('editor.exit_fullscreen') || 'Свернуть'
-        : $translate('editor.fullscreen') || 'Во весь экран'}
+      title={isFullscreen ? $translate('editor.exit_fullscreen') : $translate('editor.fullscreen')}
       aria-label={isFullscreen
-        ? $translate('editor.exit_fullscreen') || 'Свернуть'
-        : $translate('editor.fullscreen') || 'Во весь экран'}
+        ? $translate('editor.exit_fullscreen')
+        : $translate('editor.fullscreen')}
     >
       {#if isFullscreen}
         <svg

@@ -56,7 +56,7 @@
             class="btn btn-sm btn-secondary restore-inline-btn"
             onclick={() => onRestoreBackup(backup)}
           >
-            Восстановить
+            {$t('settings.restore')}
           </button>
         </div>
       {/each}
@@ -67,7 +67,9 @@
       {#if selectedBackup}
         <div class="diff-viewer-container">
           <div class="diff-header">
-            <span>Сравнение с бэкапом от {formatBackupDate(selectedBackup)}</span>
+            <span
+              >{$t('editor.compare_with_backup', { date: formatBackupDate(selectedBackup) })}</span
+            >
           </div>
           <div class="diff-body">
             {#if backupLoading}
@@ -96,7 +98,7 @@
           </div>
         </div>
       {:else}
-        <div class="drawer-empty-state">Выберите резервную копию слева для сравнения изменений</div>
+        <div class="drawer-empty-state">{$t('editor.select_backup_hint')}</div>
       {/if}
     </div>
   </div>

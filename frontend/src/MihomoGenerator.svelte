@@ -342,7 +342,7 @@
 
   const ZKEEN_16_GROUPS: Omit<ProxyGroup, 'id'>[] = [
     {
-      name: 'Заблок. сервисы',
+      name: 'Blocked Services',
       type: 'select',
       includeAll: true,
       proxies: ['Fallback', 'Fastest'] as string[],
@@ -374,35 +374,35 @@
       name: 'YouTube',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png'
     },
     {
       name: 'Discord',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png'
     },
     {
       name: 'Twitch',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
+      proxies: ['DIRECT', 'Blocked Services', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png'
     },
     {
       name: 'Reddit',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
+      proxies: ['DIRECT', 'Blocked Services', 'Fallback', 'Fastest'],
       icon: 'https://www.redditstatic.com/shreddit/assets/favicon/192x192.png'
     },
     {
       name: 'Meta',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png'
     },
     {
@@ -410,49 +410,49 @@
       type: 'select',
       includeAll: true,
       excludeFilter: '🇷🇺',
-      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png'
     },
     {
       name: 'Speedtest',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png'
     },
     {
       name: 'Telegram',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png'
     },
     {
       name: 'Steam',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
+      proxies: ['DIRECT', 'Blocked Services', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png'
     },
     {
       name: 'CDN',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://www.svgrepo.com/show/396567/globe-with-meridians.svg'
     },
     {
       name: 'Google',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
+      proxies: ['DIRECT', 'Blocked Services', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png'
     },
     {
       name: 'GitHub',
       type: 'select',
       includeAll: true,
-      proxies: ['DIRECT', 'Заблок. сервисы', 'Fallback', 'Fastest'],
+      proxies: ['DIRECT', 'Blocked Services', 'Fallback', 'Fastest'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png'
     },
     {
@@ -460,21 +460,21 @@
       type: 'select',
       includeAll: true,
       excludeFilter: '🇷🇺',
-      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png'
     },
     {
       name: 'Twitter',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png'
     },
     {
       name: 'TikTok',
       type: 'select',
       includeAll: true,
-      proxies: ['Заблок. сервисы', 'Fallback', 'Fastest', 'DIRECT'],
+      proxies: ['Blocked Services', 'Fallback', 'Fastest', 'DIRECT'],
       icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/TikTok.png'
     }
   ];
@@ -483,7 +483,7 @@
     string,
     Array<{ id: string; label: string; type: 'geosite' | 'geoip'; defaultOutbound: string }>
   > = {
-    'Социальные сети': [
+    'Social Networks': [
       { id: 'youtube', label: 'YouTube', type: 'geosite', defaultOutbound: 'Proxy' },
       { id: 'telegram', label: 'Telegram', type: 'geosite', defaultOutbound: 'Proxy' },
       { id: 'discord', label: 'Discord', type: 'geosite', defaultOutbound: 'Proxy' },
@@ -495,7 +495,7 @@
       { id: 'twitch', label: 'Twitch', type: 'geosite', defaultOutbound: 'Proxy' },
       { id: 'facebook', label: 'Facebook', type: 'geosite', defaultOutbound: 'Proxy' }
     ],
-    Сервисы: [
+    Services: [
       { id: 'spotify', label: 'Spotify', type: 'geosite', defaultOutbound: 'Proxy' },
       { id: 'steam', label: 'Steam', type: 'geosite', defaultOutbound: 'Proxy' },
       { id: 'github', label: 'GitHub', type: 'geosite', defaultOutbound: 'Proxy' },
@@ -505,7 +505,7 @@
       { id: 'amazon', label: 'Amazon', type: 'geosite', defaultOutbound: 'Proxy' },
       { id: 'speedtest', label: 'Speedtest', type: 'geosite', defaultOutbound: 'Proxy' }
     ],
-    'Сети/CDN': [
+    'Networks/CDN': [
       { id: 'cloudflare', label: 'Cloudflare', type: 'geosite', defaultOutbound: 'DIRECT' },
       { id: 'akamai', label: 'Akamai', type: 'geosite', defaultOutbound: 'DIRECT' },
       { id: 'fastly', label: 'Fastly', type: 'geosite', defaultOutbound: 'DIRECT' },
@@ -513,7 +513,7 @@
       { id: 'private', label: 'Private Network', type: 'geoip', defaultOutbound: 'DIRECT' },
       { id: 'telegram', label: 'Telegram IP', type: 'geoip', defaultOutbound: 'Proxy' }
     ],
-    Блокировки: [
+    Blocked: [
       {
         id: 'category-ads-all',
         label: 'Ads & Trackers',
@@ -1010,12 +1010,7 @@
         applyPreset('zkeen-selective', true);
       }
     } catch (err: any) {
-      showToast(
-        'warning',
-        $currentLang === 'ru'
-          ? 'Не удалось прочитать существующий config.yaml. Начинаем с чистого листа.'
-          : 'Could not parse existing config.yaml. Starting fresh.'
-      );
+      showToast('warning', $t('mihomo.read_config_fallback'));
       applyPreset('zkeen-selective', true);
     }
   }
@@ -1040,7 +1035,7 @@
       populateMihomoFromYAML(text);
     } catch (e: any) {
       if (e?.status === 401) return;
-      showToast('error', `Ошибка загрузки конфига: ${e.message}`);
+      showToast('error', $t('mihomo.config_load_error', { err: e.message }));
     }
     await loadSubscriptions();
   }
@@ -1099,18 +1094,12 @@
   function addProxy() {
     if (!np.name.trim() || !np.server.trim()) return;
     if (np.type === 'hysteria2' && np.obfsType === 'simple' && !np.obfsPassword?.trim()) {
-      const isRu = $currentLang === 'ru';
-      showToast(
-        'error',
-        isRu
-          ? 'Пароль обфускации обязателен при типе simple'
-          : 'Obfuscation password is required when type is simple'
-      );
+      showToast('error', $t('mihomo.simple_obfs_pass_required'));
       return;
     }
     const { name: cleanName, sanitized } = sanitizeProxyName(np.name);
     if (sanitized) {
-      showToast('info', $t('editor.proxy_name_sanitized') || 'Имя прокси очищено от спецсимволов');
+      showToast('info', $t('editor.proxy_name_sanitized'));
     }
     if (editingProxyId) {
       proxies = proxies.map((p) =>
@@ -1259,7 +1248,7 @@
 
   async function copyYAML() {
     await navigator.clipboard.writeText(yaml);
-    showToast('success', $currentLang === 'ru' ? 'YAML скопирован' : 'YAML copied');
+    showToast('success', $t('mihomo.yaml_copied'));
   }
 
   function openInEditor() {
@@ -1283,17 +1272,11 @@
         body: JSON.stringify({ enabled: true })
       });
       if (res.ok) {
-        showToast(
-          'success',
-          ru ? 'Перехват DNS успешно включен' : 'DNS Interception enabled successfully'
-        );
+        showToast('success', $t('mihomo.dns_intercept_enabled'));
         await fetchCapabilities();
       } else {
         const text = await res.text();
-        showToast(
-          'error',
-          text || (ru ? 'Не удалось включить перехват DNS' : 'Failed to enable DNS Interception')
-        );
+        showToast('error', text || $t('mihomo.dns_intercept_error'));
       }
     } catch (err: any) {
       if (err?.status === 401) return;
@@ -1327,10 +1310,10 @@
 
   // Dynamic tabs calculation and auto-switch
   let tabs = $derived([
-    ['proxies', ru ? 'Прокси' : 'Proxies'],
-    ['groups', ru ? 'Группы' : 'Groups'],
-    ...(activeRuleProvider === 'metacubex' ? [['rulesets', ru ? 'Наборы' : 'Rule Sets']] : []),
-    ['rules', ru ? 'Правила' : 'Rules'],
+    ['proxies', $t('mihomo.tab_proxies')],
+    ['groups', $t('mihomo.tab_groups')],
+    ...(activeRuleProvider === 'metacubex' ? [['rulesets', $t('mihomo.tab_rulesets')]] : []),
+    ['rules', $t('mihomo.tab_rules')],
     ['dns', 'DNS'],
     ['tun', 'TUN']
   ]);
@@ -1378,12 +1361,10 @@
     if (!showApplyConfirm && proxies.length === 0) {
       if (
         !(await showConfirm({
-          title: $t('editor.empty_proxies_title') || 'Отсутствуют прокси-серверы',
-          consequence:
-            $t('editor.empty_proxies_warning') ||
-            'В вашей конфигурации нет ни одного прокси-сервера. Вы уверены, что хотите применить её?',
+          title: $t('editor.empty_proxies_title'),
+          consequence: $t('editor.empty_proxies_warning'),
           variant: 'warning',
-          confirmLabel: $t('app.continue') || 'Продолжить'
+          confirmLabel: $t('app.continue')
         }))
       ) {
         return;
@@ -1443,13 +1424,11 @@
 
       if (
         !(await showConfirm({
-          title: $t('editor.port_collision_title') || 'Конфликт портов',
+          title: $t('editor.port_collision_title'),
           message: details,
-          consequence: ru
-            ? 'Продолжение может вызвать сбой в работе служб.'
-            : 'Proceeding may cause service disruption.',
+          consequence: $t('editor.port_collision_warning'),
           variant: 'danger',
-          confirmLabel: $t('app.continue') || 'Продолжить'
+          confirmLabel: $t('app.continue')
         }))
       ) {
         applyLoading = false;
@@ -1506,12 +1485,10 @@
       if (activeKernel && activeKernel !== 'mihomo') {
         if (
           await showConfirm({
-            title: $t('editor.switch_kernel_title') || 'Переключение ядра',
-            consequence: ru
-              ? `Активным ядром сейчас является '${activeKernel}'. Переключить его на 'mihomo'?`
-              : `Active kernel is currently '${activeKernel}'. Switch to 'mihomo'?`,
+            title: $t('editor.switch_kernel_title'),
+            consequence: $t('editor.switch_kernel_confirm', { kernel: activeKernel }),
             variant: 'primary',
-            confirmLabel: $t('editor.switch') || 'Переключить'
+            confirmLabel: $t('editor.switch')
           })
         ) {
           restartUrl = '/api/service/control?action=switch_kernel&kernel=mihomo';
@@ -1528,16 +1505,11 @@
 
       await fetchCapabilities();
 
-      showToast(
-        'success',
-        ru
-          ? 'Конфигурация Mihomo обновлена и перезапущена'
-          : 'Mihomo configuration updated and restarted'
-      );
+      showToast('success', $t('mihomo.config_applied'));
     } catch (err: any) {
       if (err?.status === 401) return;
       console.error(err);
-      showToast('error', err.message || (ru ? 'Ошибка сохранения' : 'Save error'));
+      showToast('error', err.message || $t('mihomo.save_error'));
     } finally {
       applyLoading = false;
     }
@@ -1573,12 +1545,10 @@
       if (activeKernel && activeKernel !== 'mihomo') {
         if (
           await showConfirm({
-            title: $t('editor.switch_kernel_title') || 'Переключение ядра',
-            consequence: ru
-              ? `Активным ядром сейчас является '${activeKernel}'. Переключить его на 'mihomo'?`
-              : `Active kernel is currently '${activeKernel}'. Switch to 'mihomo'?`,
+            title: $t('editor.switch_kernel_title'),
+            consequence: $t('editor.switch_kernel_confirm', { kernel: activeKernel }),
             variant: 'primary',
-            confirmLabel: $t('editor.switch') || 'Переключить'
+            confirmLabel: $t('editor.switch')
           })
         ) {
           restartUrl = '/api/service/control?action=switch_kernel&kernel=mihomo';
@@ -1594,7 +1564,7 @@
 
       await fetchCapabilities();
 
-      showToast('success', $t('editor.undo_success') || 'Last change reverted successfully');
+      showToast('success', $t('editor.undo_success'));
       checkUndo();
     } catch (e: any) {
       if (e?.status === 401) return;
@@ -1625,23 +1595,19 @@
       <p style="color: var(--danger); margin-bottom: 16px;">
         {$t('editor.definition_load_error', { error: schemaError })}
       </p>
-      <button class="btn btn-secondary" onclick={loadSchema}
-        >{ru ? 'Повторить попытку' : 'Retry'}</button
-      >
+      <button class="btn btn-secondary" onclick={loadSchema}>{$t('app.retry')}</button>
     </div>
   {:else}
     {#if !embedded}
       <div class="page-head">
         <div>
           <div class="crumbs">
-            {ru ? 'Сервисы' : 'Services'} <span class="crumb-sep">/</span>
-            {ru ? 'Генератор Mihomo' : 'Mihomo Generator'}
+            {$t('nav.group_services')} <span class="crumb-sep">/</span>
+            {$t('mihomo.breadcrumb_generator')}
           </div>
-          <h1>{ru ? 'Визуальный генератор Mihomo' : 'Mihomo Visual Generator'}</h1>
+          <h1>{$t('mihomo.h1')}</h1>
           <p class="sub">
-            {ru
-              ? 'Сборка proxy, proxy-group, rules, DNS и TUN без ручного редактирования YAML.'
-              : 'Build proxy, proxy-group, rules, DNS and TUN without hand-editing YAML.'}
+            {$t('mihomo.h1_sub')}
           </p>
         </div>
         <div class="ph-actions">
@@ -1659,9 +1625,9 @@
               /></svg
             >
             {#if selectedFile}
-              {ru ? 'Вставить в редактор' : 'Insert into Editor'}
+              {$t('mihomo.insert_editor')}
             {:else}
-              {ru ? 'Открыть в редакторе' : 'Open in Editor'}
+              {$t('mihomo.open_editor')}
             {/if}
           </button>
           <button class="btn btn-primary" onclick={copyYAML} disabled={!yaml}>
@@ -1677,7 +1643,7 @@
                 d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
               /></svg
             >
-            {ru ? 'Копировать YAML' : 'Copy YAML'}
+            {$t('mihomo.copy_yaml')}
           </button>
         </div>
       </div>
@@ -1699,7 +1665,7 @@
             dismissMergeWarning = true;
             localStorage.setItem('xcp:dismissed_warning:preserved_keys', preservedKeys.join(','));
           }}
-          aria-label={$t('app.close') || 'Close'}>&times;</button
+          aria-label={$t('app.close')}>&times;</button
         >
       </div>
     {/if}
@@ -1774,7 +1740,7 @@
                 dismissZkeenGeodataWarning = true;
                 localStorage.setItem('xcp:dismissed_warning:zkeen_geodata', activePreset);
               }}
-              aria-label={$t('app.close') || 'Close'}>&times;</button
+              aria-label={$t('app.close')}>&times;</button
             >
           </div>
         {/if}
@@ -1839,15 +1805,11 @@
                 <span class="item-badge type-{p.type}">{p.type}</span>
                 <span class="item-name">{p.name}</span>
                 <span class="item-meta">{p.server}:{p.port}</span>
-                <button
-                  class="item-edit"
-                  onclick={() => editProxy(p)}
-                  title={ru ? 'Редактировать' : 'Edit'}>✎</button
+                <button class="item-edit" onclick={() => editProxy(p)} title={$t('app.edit')}
+                  >✎</button
                 >
-                <button
-                  class="item-del"
-                  onclick={() => removeProxy(p.id)}
-                  title={ru ? 'Удалить' : 'Remove'}>✕</button
+                <button class="item-del" onclick={() => removeProxy(p.id)} title={$t('app.delete')}
+                  >✕</button
                 >
               </div>
             {/each}
@@ -1869,9 +1831,7 @@
                   class="sec-subtitle"
                   style="margin-top: 16px; margin-bottom: 8px; border-top: 1px solid var(--border); padding-top: 12px; font-weight: 600; font-size: 13px; color: var(--fg-secondary);"
                 >
-                  {ru
-                    ? 'Провайдеры подписок (proxy-providers)'
-                    : 'Subscription providers (proxy-providers)'}
+                  {$t('mihomo.proxy_providers_hint')}
                 </div>
                 {#each mihomoProviders as sub}
                   <div class="item-row" style="border-left: 3px solid var(--success);">
@@ -1898,7 +1858,7 @@
                   style="flex: 1; min-width: 120px;"
                   onclick={() => (showProxyForm = true)}
                 >
-                  + {ru ? 'Добавить прокси' : 'Add proxy'}
+                  + {$t('mihomo.add_proxy')}
                 </button>
                 <button
                   class="add-btn import-btn"
@@ -1906,12 +1866,8 @@
                   onclick={loadSubscriptionProxies}
                   disabled={!hasXraySubscriptions}
                   title={hasXraySubscriptions
-                    ? $currentLang === 'ru'
-                      ? 'Импортировать прокси-серверы из существующих активных Xray-подписок. Mihomo использует нативные proxy-providers для собственных подписок.'
-                      : 'Import proxy servers from existing active Xray subscriptions. Mihomo uses native proxy-providers for its own subscriptions.'
-                    : $currentLang === 'ru'
-                      ? 'Нет доступных активных Xray-подписок для импорта. Создайте или включите Xray-подписку в разделе «Подписки».'
-                      : 'No active Xray subscriptions available for import. Create or enable an Xray subscription in the "Subscriptions" section.'}
+                    ? $t('mihomo.import_xray_desc')
+                    : $t('mihomo.no_xray_subs')}
                 >
                   ↓ {$t('editor.constructor_import_proxies')}
                 </button>
@@ -2003,7 +1959,7 @@
                           for="mihomo-group-default-outbound-{g.name}"
                           class="form-label"
                           style="font-size: 11px; margin-bottom: 2px;"
-                          >{ru ? 'Исходящий канал по умолчанию' : 'Default outbound'}</label
+                          >{$t('mihomo.default_outbound')}</label
                         >
                         <select
                           id="mihomo-group-default-outbound-{g.name}"
@@ -2052,11 +2008,9 @@
                       >{g.strategy}</span
                     >
                   {/if}
-                  <span class="item-meta">{g.proxies.length} {ru ? 'прокси' : 'proxies'}</span>
-                  <button
-                    class="item-edit"
-                    onclick={() => editGroup(g)}
-                    title={ru ? 'Редактировать' : 'Edit'}>✎</button
+                  <span class="item-meta">{g.proxies.length} {$t('mihomo.proxies_count')}</span>
+                  <button class="item-edit" onclick={() => editGroup(g)} title={$t('app.edit')}
+                    >✎</button
                   >
                   <button class="item-del" onclick={() => removeGroup(g.id)}>✕</button>
                 </div>
@@ -2087,7 +2041,7 @@
               {:else}
                 <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
                   <button class="add-btn" style="flex: 1;" onclick={() => (showGroupForm = true)}>
-                    + {ru ? 'Добавить группу' : 'Add group'}
+                    + {$t('mihomo.add_group')}
                   </button>
                 </div>
               {/if}
@@ -2107,9 +2061,7 @@
                   class="sub"
                   style="margin-top:0; margin-bottom:16px; font-size:12px; color:var(--fg-dim);"
                 >
-                  {ru
-                    ? 'Выберите наборы правил и укажите группу для каждого.'
-                    : 'Select rule sets and assign a group for each.'}
+                  {$t('mihomo.rule_sets_hint')}
                 </p>
               </div>
 
@@ -2235,7 +2187,7 @@
               />
             {:else}
               <button class="add-btn" onclick={() => (showRuleForm = true)}>
-                + {ru ? 'Добавить правило' : 'Add rule'}
+                + {$t('mihomo.add_rule')}
               </button>
             {/if}
           </div>
@@ -2247,7 +2199,7 @@
             <div class="toggle-row">
               <label class="toggle-label">
                 <input type="checkbox" bind:checked={dns.enabled} />
-                <span>{ru ? 'Включить DNS' : 'Enable DNS'}</span>
+                <span>{$t('mihomo.enable_dns')}</span>
               </label>
             </div>
             {#if dns.enabled}
@@ -2279,7 +2231,7 @@
               {/if}
               <div class="form-row">
                 <label class="form-label" for="mihomo-dns-enhanced-mode"
-                  >{ru ? 'Режим' : 'Enhanced mode'}</label
+                  >{$t('mihomo.enhanced_mode')}</label
                 >
                 <select
                   id="mihomo-dns-enhanced-mode"
@@ -2331,7 +2283,7 @@
             <div class="toggle-row">
               <label class="toggle-label">
                 <input type="checkbox" bind:checked={tun.enabled} />
-                <span>{ru ? 'Включить TUN' : 'Enable TUN'}</span>
+                <span>{$t('mihomo.enable_tun')}</span>
               </label>
             </div>
             {#if tun.enabled}
@@ -2424,9 +2376,13 @@
       <!-- Right: YAML preview -->
       <div class="gen-right">
         <div class="preview-header">
-          <span class="preview-title">YAML {ru ? 'превью' : 'preview'}</span>
+          <span class="preview-title">YAML {$t('mihomo.preview')}</span>
           {#if yaml}
-            <button class="btn btn-secondary btn-sm" onclick={copyYAML} aria-label="Copy YAML">
+            <button
+              class="btn btn-secondary btn-sm"
+              onclick={copyYAML}
+              aria-label={$t('mihomo.copy_yaml')}
+            >
               <svg
                 width="12"
                 height="12"
@@ -2441,10 +2397,7 @@
             </button>
           {/if}
         </div>
-        <pre class="yaml-preview">{yaml ||
-            (ru
-              ? '# Добавьте элементы слева\n# чтобы сгенерировать YAML'
-              : '# Add elements on the left\n# to generate YAML')}</pre>
+        <pre class="yaml-preview">{yaml || $t('mihomo.empty_yaml_hint')}</pre>
 
         {#if validationError}
           <div
@@ -2489,9 +2442,9 @@
                   /></svg
                 >
                 {#if selectedFile}
-                  {ru ? 'Вставить в редактор' : 'Insert into Editor'}
+                  {$t('mihomo.insert_editor')}
                 {:else}
-                  {ru ? 'Открыть в редакторе' : 'Open in Editor'}
+                  {$t('mihomo.open_editor')}
                 {/if}
               </button>
               <button
@@ -2501,13 +2454,7 @@
                 disabled={applyLoading || !yaml}
                 style="flex: 1;"
               >
-                {applyLoading
-                  ? ru
-                    ? 'Сохранение...'
-                    : 'Saving...'
-                  : ru
-                    ? 'Применить изменения'
-                    : 'Apply Changes'}
+                {applyLoading ? $t('mihomo.saving') : $t('mihomo.apply_changes')}
               </button>
             </div>
             {#if canUndo}
@@ -2535,7 +2482,7 @@
 >
   <p>{$t('editor.apply_confirm_body')}</p>
   <div class="changed-files-list" style="margin-top: 12px;">
-    <strong>{ru ? 'Будут обновлены секции в файле:' : 'Sections to be updated in file:'}</strong>
+    <strong>{$t('mihomo.sections_to_update')}</strong>
     <div style="margin: 8px 0; font-family: monospace; font-size: 13px;">
       <code>{selectedFile || '/opt/etc/mihomo/config.yaml'}</code>
     </div>
@@ -2545,9 +2492,7 @@
       <li><code>rules</code></li>
     </ul>
     <p style="margin-top: 12px; font-size: 0.8125rem; color: var(--fg-secondary);">
-      {ru
-        ? '* Автоматически будет создана резервная копия (хранится до 5 последних бэкапов)'
-        : '* A backup will be created automatically (up to 5 copies stored)'}
+      {$t('mihomo.backup_notice')}
     </p>
   </div>
   <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
@@ -2679,7 +2624,7 @@
           {#if importLoading}
             <span class="spinner-xs" style="margin-right: 6px;"></span>
           {/if}
-          {ru ? `Импортировать (${importNodes.length})` : `Import (${importNodes.length})`}
+          {$t('mihomo.import_count', { count: importNodes.length })}
         </button>
       {/if}
     </div>

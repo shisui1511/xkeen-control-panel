@@ -136,21 +136,14 @@
     const isRu = $currentLang === 'ru';
     if (diff <= 0) {
       return {
-        text: isRu ? 'Срок действия истек' : 'Expired',
+        text: $t('subscr.expired'),
         days: 0,
         expired: true
       };
     }
     const days = Math.ceil(diff / (1000 * 3600 * 24));
-    if (isRu) {
-      return {
-        text: `Осталось ${days} ${pluralize(days, 'день', 'дня', 'дней')}`,
-        days,
-        expired: false
-      };
-    }
     return {
-      text: `${days} ${days === 1 ? 'day' : 'days'} left`,
+      text: $t('subscr.days_left', { days: String(days) }),
       days,
       expired: false
     };
@@ -176,32 +169,25 @@
 
   function formatUpdateDate(dateStr: string): string {
     if (!dateStr || dateStr.startsWith('0001')) {
-      return $currentLang === 'ru' ? 'Не обновлялось' : 'Never updated';
+      return $t('subscr.never_updated');
     }
     try {
       const d = new Date(dateStr);
       const now = new Date();
       const diffMs = now.getTime() - d.getTime();
       const diffMin = Math.floor(diffMs / 60000);
-      const isRu = $currentLang === 'ru';
 
-      if (diffMin < 1) return isRu ? 'только что' : 'just now';
+      if (diffMin < 1) return $t('subscr.just_now');
       if (diffMin < 60) {
-        return isRu
-          ? `${diffMin} ${pluralize(diffMin, 'минуту', 'минуты', 'минут')} назад`
-          : `${diffMin} ${diffMin === 1 ? 'min' : 'mins'} ago`;
+        return $t('subscr.mins_ago', { count: String(diffMin) });
       }
       const diffHours = Math.floor(diffMin / 60);
       if (diffHours < 24) {
-        return isRu
-          ? `${diffHours} ${pluralize(diffHours, 'час', 'часа', 'часов')} назад`
-          : `${diffHours} ${diffHours === 1 ? 'hour' : 'hours'} ago`;
+        return $t('subscr.hours_ago', { count: String(diffHours) });
       }
       const diffDays = Math.floor(diffHours / 24);
       if (diffDays < 7) {
-        return isRu
-          ? `${diffDays} ${pluralize(diffDays, 'день', 'дня', 'дней')} назад`
-          : `${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago`;
+        return $t('subscr.days_ago', { count: String(diffDays) });
       }
 
       return d.toLocaleDateString();
@@ -299,7 +285,7 @@
   </span>
   <span class="chip chip-default">
     <b>{stats.nodes}</b>
-    {$currentLang === 'ru' ? 'узлов суммарно' : 'nodes total'}
+    {$t('subscr.nodes_total_label')}
   </span>
   {#if stats.next !== '—'}
     <span class="chip chip-default chip--icon">
@@ -315,7 +301,7 @@
         <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
       </svg>
       <span>
-        {$currentLang === 'ru' ? 'след. обновление через' : 'next update in'}
+        {$t('subscr.next_update_in')}
         <b>{stats.next}</b>
       </span>
     </span>
@@ -362,7 +348,7 @@
           </h2>
           {#if isFormatError(sub.last_error)}
             <span class="badge badge-error" style="margin-left: 8px;">
-              {$currentLang === 'ru' ? 'Ошибка формата' : 'Format Error'}
+              {$t('subscr.format_error')}
             </span>
           {/if}
         </div>
@@ -506,7 +492,7 @@
               )}
             </span>
           {:else}
-            <span class="mihomo-integrated-badge" title="Не интегрировано в Mihomo config.yaml"
+            <span class="mihomo-integrated-badge" title={$t('subscr.not_integrated_tip')}
               >Mihomo —</span
             >
           {/if}
@@ -566,7 +552,7 @@
                 <line x1="22" y1="2" x2="11" y2="13"></line>
                 <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
               </svg>
-              <span>{$currentLang === 'ru' ? 'Поддержка' : 'Support'}</span>
+              <span>{$t('subscr.support')}</span>
             </a>
           {/if}
 
@@ -584,7 +570,7 @@
                 >
                   <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
                 </svg>
-                <span>{$currentLang === 'ru' ? 'Объявление' : 'Announcement'}</span>
+                <span>{$t('subscr.announcement')}</span>
               </button>
 
               <div class="announcement-popover">
@@ -657,7 +643,7 @@
           {:else}
             {#if !subNodes[sub.id] || subNodes[sub.id].length === 0}
               <div class="empty-nodes">
-                {$t('subscr.detail.no_nodes') || 'Нет узлов'}
+                {$t('subscr.detail.no_nodes')}
               </div>
             {:else}
               <NodeList

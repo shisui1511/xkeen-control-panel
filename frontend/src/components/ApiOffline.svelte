@@ -14,9 +14,9 @@
 
   // Format last-seen into a human-readable string
   function formatLastSeen(secs: number): string {
-    if (secs < 60) return `${secs} сек назад`;
-    if (secs < 3600) return `${Math.floor(secs / 60)} мин назад`;
-    return `${Math.floor(secs / 3600)} ч назад`;
+    if (secs < 60) return `${secs} ${$t('apioffline.sec_ago')}`;
+    if (secs < 3600) return `${Math.floor(secs / 60)} ${$t('apioffline.min_ago')}`;
+    return `${Math.floor(secs / 3600)} ${$t('apioffline.hour_ago')}`;
   }
 
   // Retry countdown (8 seconds, resets on each prop update)
@@ -38,18 +38,6 @@
   });
 </script>
 
-<!--
-  ApiOffline — system-state indicator shown ONLY when Mihomo API is unreachable.
-  Distinct from a generic <Alert>: this is a persistent connection-state UI,
-  not a one-off notification. Place it at the top of the main content area in
-  Dashboard.svelte, Proxies.svelte, Connections.svelte and Rules.svelte.
-
-  Usage:
-    import ApiOffline from './components/ApiOffline.svelte'
-    {#if !mihomoReachable}
-      <ApiOffline endpoint="127.0.0.1:9090" lastSeenSeconds={240} onRetry={checkApi} />
-    {/if}
--->
 <div class="api-offline" role="status" aria-live="polite">
   <span class="api-offline-led" aria-hidden="true"></span>
 
@@ -72,29 +60,29 @@
         <circle cx="12" cy="19" r="1" fill="currentColor" />
         <path d="M3 3l18 18" stroke-width="2.6" />
       </svg>
-      Mihomo API · offline
+      {$t('apioffline.title')}
     </div>
     <div class="api-offline-desc">
       <span class="api-endpoint">{endpoint}</span>
-      не отвечает. Прокси, подключения и правила недоступны до восстановления связи.
+      {$t('apioffline.desc')}
     </div>
   </div>
 
   <div class="api-offline-meta">
     {#if lastSeenSeconds > 0}
       <span class="api-offline-tag">
-        последний ответ <b>{formatLastSeen(lastSeenSeconds)}</b>
+        {$t('apioffline.last_seen')} <b>{formatLastSeen(lastSeenSeconds)}</b>
       </span>
     {/if}
     <span class="api-offline-tag retry">
-      повтор через {countdown}с
+      {$t('apioffline.retry_countdown', { countdown: String(countdown) })}
     </span>
   </div>
 
   <button
     class="btn btn-secondary api-offline-action"
     onclick={onRetry}
-    title="Переподключить сейчас"
+    title={$t('apioffline.retry_title')}
   >
     <svg
       width="13"
@@ -110,6 +98,6 @@
       <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
       <path d="M21 3v5h-5" />
     </svg>
-    Переподключить
+    {$t('apioffline.retry')}
   </button>
 </div>

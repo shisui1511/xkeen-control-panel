@@ -130,7 +130,12 @@
             };
 
             const lower = xkeenInfo.raw.toLowerCase();
-            if (lower.includes('не запущен') || lower.includes('not running')) {
+            if (
+              /[\u043D][\u0435]\s*[\u0437][\u0430][\u043F][\u0443][\u0449][\u0435][\u043D]/.test(
+                lower
+              ) ||
+              lower.includes('not running')
+            ) {
               xkeenStatus = $t('svc.kernel_not_selected');
             } else {
               xkeenStatus = xkeenInfo.raw;
@@ -170,7 +175,9 @@
 
   function parseRawText(text: string) {
     const lower = text.toLowerCase();
-    const isRunning = lower.includes('running') || lower.includes('запущен');
+    const isRunning =
+      lower.includes('running') ||
+      /[\u0437][\u0430][\u043F][\u0443][\u0449][\u0435][\u043D]/.test(lower);
     xkeenInfo = {
       isRunning: isRunning,
       activeKernel: isRunning
@@ -185,7 +192,10 @@
       binaryPath: '',
       raw: text
     };
-    if (lower.includes('не запущен') || lower.includes('not running')) {
+    if (
+      /[\u043D][\u0435]\s*[\u0437][\u0430][\u043F][\u0443][\u0449][\u0435][\u043D]/.test(lower) ||
+      lower.includes('not running')
+    ) {
       xkeenStatus = $t('svc.kernel_not_selected');
     } else {
       xkeenStatus = text;

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from '../../i18n';
+
   interface EditorTab {
     path: string;
     name: string;
@@ -44,8 +46,8 @@
           type="button"
           class="tab-close-btn"
           onclick={() => onCloseTab(tab.path)}
-          title="Закрыть"
-          aria-label="Закрыть"
+          title={$t('app.close')}
+          aria-label={$t('app.close')}
         >
           <svg
             width="8"

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { t } from '../i18n';
 
   let {
     isOpen = false,
@@ -110,7 +111,12 @@
     >
       <header class="modal-header">
         <h2 id="modal-title" class="modal-title">{title}</h2>
-        <button class="modal-close-btn" onclick={onclose} aria-label="Close" title="Close">
+        <button
+          class="modal-close-btn"
+          onclick={onclose}
+          aria-label={$t('app.close')}
+          title={$t('app.close')}
+        >
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="16"

@@ -298,12 +298,9 @@
 
   function getStatusBadge(file: DATFile): { cls: string; label: string } {
     const s = getFileStatus(file);
-    if (s === 'missing')
-      return { cls: 'badge badge-error', label: $currentLang === 'ru' ? 'НЕТ ФАЙЛА' : 'MISSING' };
-    if (s === 'outdated')
-      return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕЛО' : 'OUTDATED' };
-    if (s === 'warning')
-      return { cls: 'badge badge-warning', label: $currentLang === 'ru' ? 'УСТАРЕВАЕТ' : 'AGING' };
+    if (s === 'missing') return { cls: 'badge badge-error', label: $t('dat.status_missing') };
+    if (s === 'outdated') return { cls: 'badge badge-warning', label: $t('dat.status_outdated') };
+    if (s === 'warning') return { cls: 'badge badge-warning', label: $t('dat.status_warning') };
     return { cls: 'badge badge-success', label: 'OK' };
   }
 
@@ -331,18 +328,9 @@
   function formatRelativeDate(ts: number): string {
     if (!ts) return '-';
     const diffSec = Math.floor(Date.now() / 1000 - ts);
-    if (diffSec < 3600)
-      return $currentLang === 'ru'
-        ? `${Math.floor(diffSec / 60)} мин назад`
-        : `${Math.floor(diffSec / 60)} min ago`;
-    if (diffSec < 86400)
-      return $currentLang === 'ru'
-        ? `${Math.floor(diffSec / 3600)} ч назад`
-        : `${Math.floor(diffSec / 3600)} h ago`;
-    if (diffSec < 86400 * 30)
-      return $currentLang === 'ru'
-        ? `${Math.floor(diffSec / 86400)} д назад`
-        : `${Math.floor(diffSec / 86400)} d ago`;
+    if (diffSec < 3600) return $t('dat.min_ago', { count: Math.floor(diffSec / 60) });
+    if (diffSec < 86400) return $t('dat.hours_ago', { count: Math.floor(diffSec / 3600) });
+    if (diffSec < 86400 * 30) return $t('dat.days_ago', { count: Math.floor(diffSec / 86400) });
     return formatDate(ts);
   }
 
@@ -380,9 +368,7 @@
         class="btn btn-secondary"
         onclick={rollbackAll}
         disabled={rollbacking || loading || globalUpdating || updatingFile !== null}
-        title={$currentLang === 'ru'
-          ? 'Откатить DAT-файлы из бэкапа'
-          : 'Rollback DAT files from backup'}
+        title={$t('dat.rollback_title')}
       >
         <svg
           width="14"
@@ -398,13 +384,11 @@
           <polyline points="3 7 3 12 8 12" />
           <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
         </svg>
-        {rollbacking
-          ? $currentLang === 'ru'
-            ? 'Откат...'
-            : 'Rolling...'
-          : $currentLang === 'ru'
-            ? 'Откатить'
-            : 'Rollback'}
+        {#if rollbacking}
+          {$t('dat.rolling')}
+        {:else}
+          {$t('dat.rollback')}
+        {/if}
       </button>
       <button
         class="btn btn-primary"
@@ -444,15 +428,15 @@
       <span class="stat"><b>{displayedFiles.length}</b> {$t('dat.total_files')}</span>
       <span class="stat"
         ><b>{actualCount}</b>
-        {$currentLang === 'ru' ? 'актуальных' : 'active'}</span
+        {$t('dat.active_count')}</span
       >
       {#if missingCount > 0}
         <span class="stat" style="color: var(--warning);"
-          ><b>{missingCount}</b> {$currentLang === 'ru' ? 'отсутствует' : 'missing'}</span
+          ><b>{missingCount}</b> {$t('dat.missing_count')}</span
         >
       {/if}
       <span class="stat"
-        >{$currentLang === 'ru' ? 'общий размер' : 'total size'}
+        >{$t('dat.total_size')}
         <b>{formatSize(totalSize)}</b></span
       >
     </div>
@@ -508,10 +492,10 @@
                 <div class="dr-meta">
                   {formatSize(file.size)} ·
                   {#if file.is_symlink}
-                    {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
+                    {$t('dat.symlink')} → {file.symlink_to} ·
                   {/if}
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
-                    {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
+                    {file.tag_count} {$t('dat.categories')} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
                     {pluralize(
                       file.record_count,
@@ -542,7 +526,7 @@
                   <button
                     class="btn btn-secondary"
                     onclick={() => openTagBrowser(file)}
-                    title={$currentLang === 'ru' ? 'Просмотр тегов' : 'Browse tags'}
+                    title={$t('dat.browse_tags')}
                   >
                     <svg
                       width="13"
@@ -554,7 +538,7 @@
                       style="margin-right:5px"
                       ><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg
                     >
-                    {$currentLang === 'ru' ? 'Теги' : 'Tags'}
+                    {$t('dat.tags')}
                   </button>
                 {/if}
                 {#if getFileStatus(file) === 'outdated' || getFileStatus(file) === 'warning'}
@@ -563,12 +547,12 @@
                     class:btn-loading={updatingFile === file.name}
                     onclick={() => updateAll(file.name)}
                     disabled={globalUpdating || updatingFile !== null}
-                    title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
+                    title={$t('dat.update_file')}
                   >
                     {#if updatingFile === file.name}
-                      {$currentLang === 'ru' ? 'Обновление...' : 'Updating...'}
+                      {$t('dat.updating')}
                     {:else}
-                      {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                      {$t('dat.update')}
                     {/if}
                   </button>
                 {:else}
@@ -638,10 +622,10 @@
                 <div class="dr-meta">
                   {formatSize(file.size)} ·
                   {#if file.is_symlink}
-                    {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
+                    {$t('dat.symlink')} → {file.symlink_to} ·
                   {/if}
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
-                    {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
+                    {file.tag_count} {$t('dat.categories')} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
                     {pluralize(
                       file.record_count,
@@ -672,7 +656,7 @@
                   <button
                     class="btn btn-secondary"
                     onclick={() => openTagBrowser(file)}
-                    title={$currentLang === 'ru' ? 'Просмотр тегов' : 'Browse tags'}
+                    title={$t('dat.browse_tags')}
                   >
                     <svg
                       width="13"
@@ -684,7 +668,7 @@
                       style="margin-right:5px"
                       ><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg
                     >
-                    {$currentLang === 'ru' ? 'Теги' : 'Tags'}
+                    {$t('dat.tags')}
                   </button>
                 {/if}
                 {#if getFileStatus(file) === 'outdated' || getFileStatus(file) === 'warning'}
@@ -693,12 +677,12 @@
                     class:btn-loading={updatingFile === file.name}
                     onclick={() => updateAll(file.name)}
                     disabled={globalUpdating || updatingFile !== null}
-                    title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
+                    title={$t('dat.update_file')}
                   >
                     {#if updatingFile === file.name}
-                      {$currentLang === 'ru' ? 'Обновление...' : 'Updating...'}
+                      {$t('dat.updating')}
                     {:else}
-                      {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                      {$t('dat.update')}
                     {/if}
                   </button>
                 {:else}
@@ -727,7 +711,7 @@
     {#if otherFiles.length > 0}
       <div class="card card-tight mb-3">
         <h2 class="card-title" style="padding: 20px 24px 8px 24px;">
-          {$currentLang === 'ru' ? 'Прочие файлы' : 'Other files'}
+          {$t('dat.other_files')}
         </h2>
         <div class="dat-list">
           {#each otherFiles as file}
@@ -754,10 +738,10 @@
                 <div class="dr-meta">
                   {formatSize(file.size)} · {file.path} ·
                   {#if file.is_symlink}
-                    {$currentLang === 'ru' ? 'симлинк' : 'symlink'} → {file.symlink_to} ·
+                    {$t('dat.symlink')} → {file.symlink_to} ·
                   {/if}
                   {#if file.name.toLowerCase().includes('geosite') && file.tag_count}
-                    {file.tag_count} {$currentLang === 'ru' ? 'категорий' : 'categories'} ·
+                    {file.tag_count} {$t('dat.categories')} ·
                   {:else if file.name.toLowerCase().includes('geoip') && file.record_count}
                     {pluralize(
                       file.record_count,
@@ -790,12 +774,12 @@
                     class:btn-loading={updatingFile === file.name}
                     onclick={() => updateAll(file.name)}
                     disabled={globalUpdating || updatingFile !== null}
-                    title={$currentLang === 'ru' ? 'Обновить файл' : 'Update file'}
+                    title={$t('dat.update_file')}
                   >
                     {#if updatingFile === file.name}
-                      {$currentLang === 'ru' ? 'Обновление...' : 'Updating...'}
+                      {$t('dat.updating')}
                     {:else}
-                      {$currentLang === 'ru' ? 'Обновить' : 'Update'}
+                      {$t('dat.update')}
                     {/if}
                   </button>
                 {:else}
@@ -878,7 +862,7 @@
 
       <div class="td-hint">
         {#if entryDrawer.file}
-          {$currentLang === 'ru' ? 'Категория:' : 'Category:'}
+          {$t('dat.category')}
           <code class="td-format">{getTagPrefix(entryDrawer.file)}:{entryDrawer.tag}</code>
         {/if}
       </div>
@@ -933,7 +917,7 @@
                 <button
                   class="td-entry-copy-btn"
                   onclick={() => copyEntry(entry)}
-                  title={$currentLang === 'ru' ? 'Копировать запись' : 'Copy entry'}
+                  title={$t('dat.copy_entry')}
                 >
                   {#if isCopied}
                     <svg
@@ -998,9 +982,7 @@
           >
           <span>{tagDrawer.file?.name}</span>
           {#if !tagDrawer.loading && tagDrawer.tags.length > 0}
-            <span class="td-count"
-              >{tagDrawer.tags.length} {$currentLang === 'ru' ? 'тегов' : 'tags'}</span
-            >
+            <span class="td-count">{$t('dat.tags_count', { count: tagDrawer.tags.length })}</span>
           {/if}
         </div>
         <button class="td-close" onclick={closeTagBrowser} aria-label={$t('app.close')}>✕</button>
@@ -1008,7 +990,7 @@
 
       <div class="td-hint">
         {#if tagDrawer.file}
-          {$currentLang === 'ru' ? 'Формат для routing rule:' : 'Routing rule format:'}
+          {$t('dat.routing_rule_format')}
           <code class="td-format">{getTagPrefix(tagDrawer.file)}:TAGNAME</code>
         {/if}
       </div>
@@ -1026,7 +1008,7 @@
         <input
           class="td-search-input"
           type="text"
-          placeholder={$currentLang === 'ru' ? 'Поиск тега...' : 'Search tag...'}
+          placeholder={$t('dat.search_tag')}
           bind:value={tagDrawer.search}
           use:autofocusAction
         />
@@ -1047,7 +1029,7 @@
           <div class="td-state td-state-error">{tagDrawer.error}</div>
         {:else if filteredTags.length === 0}
           <div class="td-state">
-            {$currentLang === 'ru' ? 'Ничего не найдено' : 'No tags found'}
+            {$t('dat.no_tags_found')}
           </div>
         {:else}
           <div class="td-list">
@@ -1058,7 +1040,7 @@
                 <button
                   class="td-tag-btn"
                   onclick={() => tagDrawer.file && openEntryBrowser(tagDrawer.file, tag.tag)}
-                  title={$currentLang === 'ru' ? 'Показать записи' : 'Show entries'}
+                  title={$t('dat.show_entries')}
                 >
                   <span class="td-tag-name">{tag.tag}</span>
                   {#if tag.count > 0}
@@ -1068,7 +1050,7 @@
                 <button
                   class="td-tag-copy-btn"
                   onclick={() => tagDrawer.file && copyTag(tagDrawer.file, tag.tag)}
-                  title={$currentLang === 'ru' ? `Копировать: ${ruleValue}` : `Copy: ${ruleValue}`}
+                  title={$t('dat.copy_rule_value', { val: ruleValue })}
                 >
                   {#if isCopied}
                     <svg

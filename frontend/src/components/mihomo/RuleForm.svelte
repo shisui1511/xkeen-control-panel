@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentLang } from '../../i18n';
+  import { t } from '../../i18n';
 
   let {
     nr = $bindable(),
@@ -12,8 +12,6 @@
     onSave: () => void;
     onCancel: () => void;
   } = $props();
-
-  const ru = $derived($currentLang === 'ru');
 
   const RULE_TYPES = [
     'DOMAIN-SUFFIX',
@@ -31,13 +29,13 @@
 <div class="form-card">
   <div class="form-row2">
     <div class="form-col">
-      <label class="form-label" for="rule-type">{ru ? 'Тип правила' : 'Rule type'}</label>
+      <label class="form-label" for="rule-type">{$t('rules.rule_type')}</label>
       <select id="rule-type" class="form-select" bind:value={nr.type}>
         {#each RULE_TYPES as t}<option value={t}>{t}</option>{/each}
       </select>
     </div>
     <div class="form-col">
-      <label class="form-label" for="rule-outbound">{ru ? 'Исходящий' : 'Outbound'}</label>
+      <label class="form-label" for="rule-outbound">{$t('rules.outbound')}</label>
       <select id="rule-outbound" class="form-select" bind:value={nr.outbound}>
         {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
       </select>
@@ -45,7 +43,7 @@
   </div>
   {#if nr.type !== 'MATCH'}
     <div class="form-row">
-      <label class="form-label" for="rule-value">{ru ? 'Значение' : 'Value'}</label>
+      <label class="form-label" for="rule-value">{$t('rules.value')}</label>
       <input
         id="rule-value"
         class="form-input"
@@ -61,8 +59,8 @@
     </div>
   {/if}
   <div class="form-actions">
-    <button class="btn btn-secondary" onclick={onCancel}>{ru ? 'Отмена' : 'Cancel'}</button>
-    <button class="btn btn-primary" onclick={onSave}>{ru ? 'Добавить' : 'Add'}</button>
+    <button class="btn btn-secondary" onclick={onCancel}>{$t('app.cancel')}</button>
+    <button class="btn btn-primary" onclick={onSave}>{$t('app.create')}</button>
   </div>
 </div>
 

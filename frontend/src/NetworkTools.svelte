@@ -551,8 +551,10 @@
         >
           {loading && activeTool === 'ping' ? $t('net.running') : $t('net.run')}
         </button>
-        <button class="btn btn-secondary" onclick={() => toggleSettings('ping')} title="Настройки"
-          >⋯</button
+        <button
+          class="btn btn-secondary"
+          onclick={() => toggleSettings('ping')}
+          title={$t('nav.settings')}>⋯</button
         >
       </div>
     </div>
@@ -604,7 +606,7 @@
         <button
           class="btn btn-secondary"
           onclick={() => toggleSettings('traceroute')}
-          title="Настройки">⋯</button
+          title={$t('nav.settings')}>⋯</button
         >
       </div>
     </div>
@@ -650,8 +652,10 @@
         >
           {loading && activeTool === 'dns' ? $t('net.running') : $t('net.run')}
         </button>
-        <button class="btn btn-secondary" onclick={() => toggleSettings('dns')} title="Настройки"
-          >⋯</button
+        <button
+          class="btn btn-secondary"
+          onclick={() => toggleSettings('dns')}
+          title={$t('nav.settings')}>⋯</button
         >
       </div>
     </div>
@@ -703,8 +707,10 @@
         >
           {loading && activeTool === 'http' ? $t('net.running') : $t('net.run')}
         </button>
-        <button class="btn btn-secondary" onclick={() => toggleSettings('http')} title="Настройки"
-          >⋯</button
+        <button
+          class="btn btn-secondary"
+          onclick={() => toggleSettings('http')}
+          title={$t('nav.settings')}>⋯</button
         >
       </div>
     </div>
@@ -762,7 +768,7 @@
           <option value="https://www.youtube.com">YouTube</option>
           <option value="https://chatgpt.com">ChatGPT</option>
           <option value="https://github.com">GitHub</option>
-          <option value="custom">{$t('net.presets')}: Свой URL...</option>
+          <option value="custom">{$t('net.presets')}: {$t('net.custom_url')}</option>
         </select>
       </div>
 
@@ -805,7 +811,7 @@
         <button
           class="btn btn-secondary"
           onclick={() => (showProxySettings = !showProxySettings)}
-          title="Настройки"
+          title={$t('nav.settings')}
         >
           ⋯
         </button>
@@ -914,7 +920,7 @@
         <button
           class="btn btn-secondary"
           onclick={() => (showPortSettings = !showPortSettings)}
-          title="Настройки"
+          title={$t('nav.settings')}
         >
           ⋯
         </button>

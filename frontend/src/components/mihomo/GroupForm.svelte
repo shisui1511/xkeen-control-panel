@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentLang } from '../../i18n';
+  import { t } from '../../i18n';
   import { slugifyProviderName } from '../../lib/mihomoYaml';
 
   let {
@@ -18,7 +18,6 @@
     isEdit?: boolean;
   } = $props();
 
-  const ru = $derived($currentLang === 'ru');
   const hasMihomoProviders = $derived(mihomoProviders.length > 0);
 
   let ngProxyInput = $state('');
@@ -35,20 +34,23 @@
 
 <div class="form-card">
   <div class="form-row">
-    <label class="form-label" for="group-type">{ru ? 'Тип' : 'Type'}</label>
+    <label class="form-label" for="group-type">{$t('groups.type')}</label>
     <select id="group-type" class="form-select" bind:value={ng.type}>
       {#each GROUP_TYPES as t}<option value={t}>{t}</option>{/each}
     </select>
   </div>
   <div class="form-row">
-    <label class="form-label" for="group-name">{ru ? 'Имя группы' : 'Group name'}</label>
-    <input id="group-name" class="form-input" bind:value={ng.name} placeholder="Выбор прокси" />
+    <label class="form-label" for="group-name">{$t('groups.group_name')}</label>
+    <input
+      id="group-name"
+      class="form-input"
+      bind:value={ng.name}
+      placeholder={$t('groups.select_proxy_placeholder')}
+    />
   </div>
   {#if hasMihomoProviders}
     <div class="form-row">
-      <label class="form-label" for="group-use-providers"
-        >{ru ? 'Провайдеры подписок (use:)' : 'Subscription providers (use:)'}</label
-      >
+      <label class="form-label" for="group-use-providers">{$t('groups.use_providers')}</label>
       <div class="tag-input-wrap">
         {#each ng.useProviders || [] as p}
           <span
@@ -78,7 +80,7 @@
             e.currentTarget.value = '';
           }}
         >
-          <option value="">+ {ru ? 'добавить провайдер' : 'add provider'}...</option>
+          <option value="">+ {$t('groups.add_provider')}...</option>
           {#each mihomoProviders as sub}
             {@const slug = slugifyProviderName(
               sub.profile_title || '',
@@ -94,11 +96,9 @@
   {/if}
   {#if ng.type === 'load-balance'}
     <div class="form-row">
-      <label class="form-label" for="group-strategy"
-        >{ru ? 'Стратегия балансировки' : 'Load-balance strategy'}</label
-      >
+      <label class="form-label" for="group-strategy">{$t('groups.strategy')}</label>
       <select id="group-strategy" class="form-select" bind:value={ng.strategy}>
-        <option value={undefined}>-- {ru ? 'выберите стратегию' : 'select strategy'} --</option>
+        <option value={undefined}>-- {$t('groups.select_strategy')} --</option>
         <option value="round-robin">round-robin</option>
         <option value="consistent-hashing">consistent-hashing</option>
         <option value="sticky-sessions">sticky-sessions</option>
@@ -111,11 +111,11 @@
       style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;"
     >
       <input type="checkbox" bind:checked={ng.includeAll} />
-      <span>{ru ? 'Включить все провайдеры (include-all)' : 'Include all providers'}</span>
+      <span>{$t('groups.include_all')}</span>
     </label>
   </div>
   <div class="form-row">
-    <label class="form-label" for="group-proxies">{ru ? 'Прокси' : 'Proxies'}</label>
+    <label class="form-label" for="group-proxies">{$t('groups.proxies')}</label>
     <div class="tag-input-wrap">
       {#each ng.proxies as p}
         <span class="tag-pill">
@@ -133,7 +133,7 @@
         bind:value={ngProxyInput}
         onchange={addGroupProxy}
       >
-        <option value="">+ {ru ? 'добавить' : 'add'}...</option>
+        <option value="">+ {$t('groups.add')}...</option>
         {#each allProxyNames as n}<option value={n}>{n}</option>{/each}
       </select>
     </div>
@@ -145,16 +145,15 @@
         <input id="group-url" class="form-input" bind:value={ng.url} />
       </div>
       <div class="form-col form-col-sm">
-        <label class="form-label" for="group-interval">{ru ? 'Интервал (с)' : 'Interval (s)'}</label
-        >
+        <label class="form-label" for="group-interval">{$t('groups.interval_sec')}</label>
         <input id="group-interval" class="form-input" type="number" bind:value={ng.interval} />
       </div>
     </div>
   {/if}
   <div class="form-actions">
-    <button class="btn btn-secondary" onclick={onCancel}>{ru ? 'Отмена' : 'Cancel'}</button>
+    <button class="btn btn-secondary" onclick={onCancel}>{$t('app.cancel')}</button>
     <button class="btn btn-primary" onclick={onSave}
-      >{isEdit ? (ru ? 'Сохранить' : 'Save') : ru ? 'Добавить' : 'Add'}</button
+      >{isEdit ? $t('app.save') : $t('app.create')}</button
     >
   </div>
 </div>

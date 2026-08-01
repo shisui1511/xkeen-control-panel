@@ -5,6 +5,7 @@
   import { capabilities, fetchCapabilities, showToast, devMode, showConfirm } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
+  import { getCountryFlag } from './lib/countryFlags';
   import Skeleton from './components/Skeleton.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
@@ -280,69 +281,6 @@
       }
     }
     return null;
-  }
-
-  // Country Flag Emoji definitions
-  const flagMap: Record<string, string> = {
-    RU: '🇷🇺',
-    Russia: '🇷🇺',
-    Россия: '🇷🇺',
-    US: '🇺🇸',
-    USA: '🇺🇸',
-    США: '🇺🇸',
-    GB: '🇬🇧',
-    UK: '🇬🇧',
-    'United Kingdom': '🇬🇧',
-    Англия: '🇬🇧',
-    DE: '🇩🇪',
-    Germany: '🇩🇪',
-    Германия: '🇩🇪',
-    NL: '🇳🇱',
-    Netherlands: '🇳🇱',
-    Нидерланды: '🇳🇱',
-    FR: '🇫🇷',
-    France: '🇫🇷',
-    Франция: '🇫🇷',
-    FI: '🇫🇮',
-    Finland: '🇫🇮',
-    Финляндия: '🇫🇮',
-    TR: '🇹🇷',
-    Turkey: '🇹🇷',
-    Турция: '🇹🇷',
-    SG: '🇸🇬',
-    Singapore: '🇸🇬',
-    Сингапур: '🇸🇬',
-    JP: '🇯🇵',
-    Japan: '🇯🇵',
-    Япония: '🇯🇵',
-    HK: '🇭🇰',
-    'Hong Kong': '🇭🇰',
-    Гонконг: '🇭🇰',
-    TW: '🇹🇼',
-    Taiwan: '🇹🇼',
-    Тайвань: '🇹🇼',
-    KR: '🇰🇷',
-    'South Korea': '🇰🇷',
-    Корея: '🇰🇷',
-    Seoul: '🇰🇷',
-    IN: '🇮🇳',
-    India: '🇮🇳',
-    Индия: '🇮🇳',
-    BR: '🇧🇷',
-    Brazil: '🇧🇷',
-    Бразилия: '🇧🇷'
-  };
-
-  function getCountryFlag(nodeName: string): string {
-    const lower = nodeName.toLowerCase();
-    for (const [key, emoji] of Object.entries(flagMap)) {
-      const escapedKey = key.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-      const regex = new RegExp(`\\b${escapedKey}\\b|${escapedKey}`, 'i');
-      if (regex.test(lower)) {
-        return emoji;
-      }
-    }
-    return '';
   }
 
   let searchDebouncedQuery = $state('');
@@ -735,7 +673,7 @@
       if (minNext !== Infinity) {
         const diffHours = Math.floor(minNext / (3600 * 1000));
         const diffMins = Math.floor((minNext % (3600 * 1000)) / (60 * 1000));
-        nextStr = `${diffHours}ч ${diffMins}м`;
+        nextStr = `${diffHours}${$t('conn.hrs')} ${diffMins}${$t('conn.min')}`;
       }
       return {
         total: subscriptions.length,
@@ -946,7 +884,7 @@
 
   async function saveSubscription() {
     if (!formURL.trim()) {
-      showToast('error', $t('subscr.fill_url') || 'Please fill in the URL field');
+      showToast('error', $t('subscr.fill_url'));
       return;
     }
 
@@ -1001,13 +939,11 @@
 
     if (
       !(await showConfirm({
-        title: $t('subscr.delete_title') || 'Удаление подписки',
+        title: $t('subscr.delete_title'),
         objectName: subName,
-        consequence:
-          $t('subscr.delete_consequence') ||
-          'Подписка и все связанные прокси будут удалены из конфигурации.',
+        consequence: $t('subscr.delete_consequence'),
         variant: 'danger',
-        confirmLabel: $t('app.delete') || 'Удалить'
+        confirmLabel: $t('app.delete')
       }))
     )
       return;
@@ -1404,7 +1340,7 @@
             <polyline points="18 15 12 9 6 15" />
             <polyline points="18 20 12 14 6 20" />
           </svg>
-          {$t('proxies.collapse_all') || 'Свернуть все'}
+          {$t('proxies.collapse_all')}
         </button>
         <button class="btn btn-secondary" onclick={expandAll} title={$t('proxies.expand_all')}>
           <svg
@@ -1419,7 +1355,7 @@
             <polyline points="6 9 12 15 18 9" />
             <polyline points="6 4 12 10 18 4" />
           </svg>
-          {$t('proxies.expand_all') || 'Развернуть все'}
+          {$t('proxies.expand_all')}
         </button>
 
         <input
@@ -1465,7 +1401,7 @@
             stroke-width="2"
             style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
           >
-          {$t('subscr.refresh_all') || 'Обновить всё'}
+          {$t('subscr.refresh_all')}
         </button>
 
         <button class="btn btn-primary" onclick={openAddModal}>
@@ -1478,7 +1414,7 @@
             stroke-width="2"
             style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
           >
-          {$t('subscr.add') || 'Добавить подписку'}
+          {$t('subscr.add')}
         </button>
       </div>
     {/if}
@@ -1491,14 +1427,14 @@
       class:active={activeTab === 'groups'}
       onclick={() => (activeTab = 'groups')}
     >
-      {$t('proxies.tab_groups') || 'Группы'}
+      {$t('proxies.tab_groups')}
     </button>
     <button
       class="tab-btn"
       class:active={activeTab === 'providers'}
       onclick={() => (activeTab = 'providers')}
     >
-      {$t('proxies.tab_providers') || 'Провайдеры'}
+      {$t('proxies.tab_providers')}
     </button>
   </div>
 
@@ -1585,7 +1521,7 @@
       {:else if groups.length === 0}
         <EmptyState
           title={$t('proxies.no_proxies')}
-          description={$t('proxies.no_proxies_desc') || ''}
+          description={$t('proxies.no_proxies_desc')}
           icon={WarningIcon}
           ctaText={$t('app.refresh')}
           oncta={fetchProxies}
@@ -1638,10 +1574,10 @@
                 <div class="gc-head-row2">
                   <span class="gc-count-text"
                     >{group.all.length}
-                    {$t('proxies.obs_unreachable_sub') ? 'узлов' : 'nodes'}</span
+                    {$t('proxies.nodes_label')}</span
                   >
                   <span class="gc-separator">·</span>
-                  <span class="gc-active-label">{$t('proxies.active') || 'Активен'}:</span>
+                  <span class="gc-active-label">{$t('proxies.active')}:</span>
 
                   {#each getSelectionChain(group.name) as item, index}
                     {@const itemFlag = !item.isGroup ? getCountryFlag(item.name) : null}
@@ -1796,7 +1732,7 @@
           style="padding: 3rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem;"
         >
           <p style="color: var(--fg-secondary); margin: 0;">
-            {$t('subscr.empty') || 'Список подписок пуст'}
+            {$t('subscr.empty')}
           </p>
           <button class="btn btn-primary" onclick={openAddModal}>
             <svg
@@ -1811,7 +1747,7 @@
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
             </svg>
-            {$t('subscr.add_first') || 'Добавить первую подписку'}
+            {$t('subscr.add_first')}
           </button>
         </div>
       {:else}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentLang, t } from '../../i18n';
+  import { t } from '../../i18n';
 
   let {
     np = $bindable(),
@@ -13,26 +13,24 @@
     isEdit?: boolean;
   } = $props();
 
-  const ru = $derived($currentLang === 'ru');
-
   const PROXY_TYPES = ['vless', 'hysteria2', 'tuic', 'ss', 'vmess', 'trojan', 'socks', 'http'];
   const CIPHERS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-poly1305', '2022-blake3-aes-256-gcm'];
 </script>
 
 <div class="form-card">
   <div class="form-row">
-    <label class="form-label" for="proxy-type">{ru ? 'Тип' : 'Type'}</label>
+    <label class="form-label" for="proxy-type">{$t('proxies.type')}</label>
     <select id="proxy-type" class="form-select" bind:value={np.type}>
       {#each PROXY_TYPES as pt}<option value={pt}>{pt}</option>{/each}
     </select>
   </div>
   <div class="form-row">
-    <label class="form-label" for="proxy-name">{ru ? 'Имя' : 'Name'}</label>
+    <label class="form-label" for="proxy-name">{$t('subscr.name')}</label>
     <input id="proxy-name" class="form-input" bind:value={np.name} placeholder="my-proxy" />
   </div>
   <div class="form-row2">
     <div class="form-col">
-      <label class="form-label" for="proxy-server">{ru ? 'Сервер' : 'Server'}</label>
+      <label class="form-label" for="proxy-server">{$t('proxies.server')}</label>
       <input
         id="proxy-server"
         class="form-input"
@@ -41,7 +39,7 @@
       />
     </div>
     <div class="form-col form-col-sm">
-      <label class="form-label" for="proxy-port">{ru ? 'Порт' : 'Port'}</label>
+      <label class="form-label" for="proxy-port">{$t('proxies.port')}</label>
       <input
         id="proxy-port"
         class="form-input"
@@ -58,8 +56,10 @@
       <label class="form-label" for="proxy-vless-uuid">UUID</label>
       <div class="input-with-btn">
         <input id="proxy-vless-uuid" class="form-input" bind:value={np.uuid} placeholder="uuid" />
-        <button class="btn-gen" onclick={() => (np.uuid = crypto.randomUUID())} title="Generate"
-          >⟳</button
+        <button
+          class="btn-gen"
+          onclick={() => (np.uuid = crypto.randomUUID())}
+          title={$t('app.generate')}>⟳</button
         >
       </div>
     </div>
@@ -94,7 +94,7 @@
     </div>
   {:else if np.type === 'hysteria2'}
     <div class="form-row">
-      <label class="form-label" for="proxy-hysteria2-password">{ru ? 'Пароль' : 'Password'}</label>
+      <label class="form-label" for="proxy-hysteria2-password">{$t('proxies.password')}</label>
       <input
         id="proxy-hysteria2-password"
         class="form-input"
@@ -151,7 +151,7 @@
       </div>
     </div>
     <div class="form-row">
-      <label class="form-label" for="proxy-tuic-password">{ru ? 'Пароль' : 'Password'}</label>
+      <label class="form-label" for="proxy-tuic-password">{$t('proxies.password')}</label>
       <input
         id="proxy-tuic-password"
         class="form-input"
@@ -171,7 +171,7 @@
       </select>
     </div>
     <div class="form-row">
-      <label class="form-label" for="proxy-ss-password">{ru ? 'Пароль' : 'Password'}</label>
+      <label class="form-label" for="proxy-ss-password">{$t('proxies.password')}</label>
       <input
         id="proxy-ss-password"
         class="form-input"
@@ -222,7 +222,7 @@
     {/if}
   {:else if np.type === 'trojan'}
     <div class="form-row">
-      <label class="form-label" for="proxy-trojan-password">{ru ? 'Пароль' : 'Password'}</label>
+      <label class="form-label" for="proxy-trojan-password">{$t('proxies.password')}</label>
       <input
         id="proxy-trojan-password"
         class="form-input"
@@ -270,9 +270,7 @@
     </div>
   {:else if np.type === 'socks'}
     <div class="form-row">
-      <label class="form-label" for="proxy-socks-username"
-        >{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label
-      >
+      <label class="form-label" for="proxy-socks-username">{$t('proxies.username_optional')}</label>
       <input
         id="proxy-socks-username"
         class="form-input"
@@ -281,9 +279,7 @@
       />
     </div>
     <div class="form-row">
-      <label class="form-label" for="proxy-socks-password"
-        >{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label
-      >
+      <label class="form-label" for="proxy-socks-password">{$t('proxies.password_optional')}</label>
       <input
         id="proxy-socks-password"
         class="form-input"
@@ -293,9 +289,7 @@
     </div>
   {:else if np.type === 'http'}
     <div class="form-row">
-      <label class="form-label" for="proxy-http-username"
-        >{ru ? 'Имя пользователя (опционально)' : 'Username (optional)'}</label
-      >
+      <label class="form-label" for="proxy-http-username">{$t('proxies.username_optional')}</label>
       <input
         id="proxy-http-username"
         class="form-input"
@@ -304,9 +298,7 @@
       />
     </div>
     <div class="form-row">
-      <label class="form-label" for="proxy-http-password"
-        >{ru ? 'Пароль (опционально)' : 'Password (optional)'}</label
-      >
+      <label class="form-label" for="proxy-http-password">{$t('proxies.password_optional')}</label>
       <input
         id="proxy-http-password"
         class="form-input"
@@ -337,9 +329,9 @@
   {/if}
 
   <div class="form-actions">
-    <button class="btn btn-secondary" onclick={onCancel}>{ru ? 'Отмена' : 'Cancel'}</button>
+    <button class="btn btn-secondary" onclick={onCancel}>{$t('app.cancel')}</button>
     <button class="btn btn-primary" onclick={onSave}
-      >{isEdit ? (ru ? 'Сохранить' : 'Save') : ru ? 'Добавить' : 'Add'}</button
+      >{isEdit ? $t('app.save') : $t('app.create')}</button
     >
   </div>
 </div>

@@ -167,13 +167,11 @@
     const snap = snapshots.find((s) => s.id === id);
     if (
       !(await showConfirm({
-        title: $t('settings.snapshot_restore_title') || 'Восстановление снапшота',
+        title: $t('settings.snapshot_restore_title'),
         objectName: snap ? snap.label || snap.id : id,
-        consequence:
-          $t('settings.snapshot_restore_confirm') ||
-          'Текущая конфигурация системы будет заменена данными снапшота.',
+        consequence: $t('settings.snapshot_restore_confirm'),
         variant: 'warning',
-        confirmLabel: $t('settings.restore') || 'Восстановить'
+        confirmLabel: $t('settings.restore')
       }))
     )
       return;
@@ -195,13 +193,11 @@
     const snap = snapshots.find((s) => s.id === id);
     if (
       !(await showConfirm({
-        title: $t('settings.snapshot_delete_title') || 'Удаление снапшота',
+        title: $t('settings.snapshot_delete_title'),
         objectName: snap ? snap.label || snap.id : id,
-        consequence:
-          $t('settings.snapshot_delete_confirm') ||
-          'Снапшот будет удален без возможности восстановления.',
+        consequence: $t('settings.snapshot_delete_confirm'),
         variant: 'danger',
-        confirmLabel: $t('app.delete') || 'Удалить'
+        confirmLabel: $t('app.delete')
       }))
     )
       return;
@@ -286,13 +282,11 @@
     const filename = backupPath.split('/').pop() || backupPath;
     if (
       !(await showConfirm({
-        title: $t('settings.backup_restore_title') || 'Восстановление резервной копии',
+        title: $t('settings.backup_restore_title'),
         objectName: filename,
-        consequence:
-          $t('settings.backup_restore_confirm') ||
-          'Файл конфигурации будет заменен резервной копией.',
+        consequence: $t('settings.backup_restore_confirm'),
         variant: 'warning',
-        confirmLabel: $t('settings.restore') || 'Восстановить'
+        confirmLabel: $t('settings.restore')
       }))
     )
       return;
@@ -331,13 +325,11 @@
     const filename = backupPath.split('/').pop() || backupPath;
     if (
       !(await showConfirm({
-        title: $t('settings.backup_delete_title') || 'Удаление резервной копии',
+        title: $t('settings.backup_delete_title'),
         objectName: filename,
-        consequence:
-          $t('settings.backup_delete_confirm') ||
-          'Резервная копия будет удалена без возможности восстановления.',
+        consequence: $t('settings.backup_delete_confirm'),
         variant: 'danger',
-        confirmLabel: $t('app.delete') || 'Удалить'
+        confirmLabel: $t('app.delete')
       }))
     )
       return;
@@ -736,9 +728,9 @@
       templatesHasUpdate = data.has_update || false;
       await fetchTemplatesStatus();
       if (templatesHasUpdate) {
-        showToast('info', $t('editor.update_available') || 'Update available');
+        showToast('info', $t('editor.update_available'));
       } else {
-        showToast('success', $t('editor.up_to_date') || 'Up to date');
+        showToast('success', $t('editor.up_to_date'));
       }
     } catch (e: any) {
       if (e?.status === 401) return;
@@ -755,7 +747,7 @@
       await apiFetchJSON('/api/templates/update', {
         method: 'POST'
       });
-      showToast('success', $t('editor.templates_updated') || 'Templates updated');
+      showToast('success', $t('editor.templates_updated'));
       await fetchTemplatesStatus();
     } catch (e: any) {
       if (e?.status === 401) return;
@@ -1315,17 +1307,17 @@
                   >ID</th
                 >
                 <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500;"
-                  >Комментарий</th
+                  >{$t('settings.comment')}</th
                 >
                 <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 12%;"
-                  >Размер</th
+                  >{$t('settings.size')}</th
                 >
                 <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 22%;"
-                  >Дата создания</th
+                  >{$t('settings.created_at')}</th
                 >
                 <th
                   style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 25%; text-align: right;"
-                  >Действия</th
+                  >{$t('settings.actions')}</th
                 >
               </tr>
             </thead>
@@ -1425,12 +1417,10 @@
             <Icon name="upload" size={32} color={isDragOver ? '#29c2f0' : 'var(--fg-dim)'} />
           </span>
           <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
-            {isDragOver
-              ? 'Отпустите файл для загрузки'
-              : 'Выберите или перетащите файл резервной копии (.tar.gz) сюда'}
+            {isDragOver ? $t('settings.drop_file_to_upload') : $t('settings.select_or_drag_file')}
           </div>
           <div style="color: var(--fg-dim); font-size: 11px;">
-            Поддерживаются файлы .tar.gz размером до 15 МБ
+            {$t('settings.supported_file_types')}
           </div>
         {/if}
       </button>

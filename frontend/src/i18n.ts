@@ -87,6 +87,9 @@ function detectLanguage(): Lang {
 }
 
 const initialLang = detectLanguage();
+if (typeof document !== 'undefined') {
+  document.documentElement.lang = initialLang;
+}
 export const currentLang = writable<Lang>(initialLang);
 
 // Async function to load locale dictionary and merge it with built-in base keys
@@ -129,7 +132,7 @@ export const t = derived([currentLang, translationsStore], ([$lang, $translation
 
     if (params) {
       Object.entries(params).forEach(([k, v]) => {
-        text = text.replace(new RegExp(`{${k}}`, 'g'), String(v));
+        text = text.replace(new RegExp(`{${k}}`, 'g'), () => String(v));
       });
     }
 
@@ -169,6 +172,9 @@ export function pluralize(
 export async function setLang(lang: Lang) {
   await loadLanguage(lang);
   currentLang.set(lang);
+  if (typeof document !== 'undefined') {
+    document.documentElement.lang = lang;
+  }
   try {
     localStorage.setItem('lang', lang);
   } catch (e) {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { toastStore, type ToastItem } from '../stores';
   import Icon from '../lib/components/Icon.svelte';
+  import { t } from '../i18n';
 
   function dismiss(id: number) {
     toastStore.update((items) => items.filter((t) => t.id !== id));
@@ -15,7 +16,7 @@
 </script>
 
 {#if $toastStore.length > 0}
-  <div class="toast-container" role="region" aria-label="Notifications">
+  <div class="toast-container" role="region" aria-label={$t('app.notifications')}>
     {#each $toastStore as toast (toast.id)}
       <div class="toast toast--{toast.type}" role="alert">
         <span class="toast__icon">
@@ -33,8 +34,10 @@
             {toast.action.label}
           </button>
         {/if}
-        <button class="toast__close" onclick={() => dismiss(toast.id)} aria-label="Dismiss"
-          >×</button
+        <button
+          class="toast__close"
+          onclick={() => dismiss(toast.id)}
+          aria-label={$t('app.dismiss')}>×</button
         >
       </div>
     {/each}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t, currentLang } from '../i18n';
+  import { t } from '../i18n';
 
   export let sub: {
     type?: string;
@@ -63,7 +63,7 @@
       <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
     </svg>
     {#if sub.use_provider_interval && sub.profile_update_hours && sub.profile_update_hours > 0}
-      {$currentLang === 'ru' ? 'Пров:' : 'Prov:'} {sub.profile_update_hours}h
+      {$t('subscr.prov_abbr')} {sub.profile_update_hours}h
     {:else}
       {sub.interval}h
     {/if}

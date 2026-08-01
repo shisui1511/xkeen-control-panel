@@ -218,8 +218,8 @@
     const confirmed = await showConfirm(
       $t('conn.close_all'),
       $t('conn.close_all_confirm'),
-      $t('app.yes') || 'Да',
-      $t('app.no') || 'Нет'
+      $t('app.yes'),
+      $t('app.no')
     );
     if (!confirmed) return;
     try {
@@ -273,13 +273,13 @@
       const start = new Date(startStr);
       if (isNaN(start.getTime())) return '—';
       const diffMs = Date.now() - start.getTime();
-      if (diffMs < 0) return '0с';
+      if (diffMs < 0) return `0${$t('conn.sec')}`;
       const diffSec = Math.floor(diffMs / 1000);
-      if (diffSec < 60) return `${diffSec}с`;
+      if (diffSec < 60) return `${diffSec}${$t('conn.sec')}`;
       const diffMin = Math.floor(diffSec / 60);
-      if (diffMin < 60) return `${diffMin}м`;
+      if (diffMin < 60) return `${diffMin}${$t('conn.min')}`;
       const diffHrs = Math.floor(diffMin / 60);
-      return `${diffHrs}ч ${diffMin % 60}м`;
+      return `${diffHrs}${$t('conn.hrs')} ${diffMin % 60}${$t('conn.min')}`;
     } catch (_) {
       return '—';
     }

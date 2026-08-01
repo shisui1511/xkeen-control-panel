@@ -50,14 +50,14 @@
       type="text"
       class="input"
       style="width: 100%; padding: 7px 10px; font-size: 12.5px;"
-      placeholder={$t('app.search') || 'Поиск файлов...'}
+      placeholder={$t('editor.search_files')}
       bind:value={fileSearchQuery}
     />
     {#if fileSearchQuery}
       <button
         onclick={() => (fileSearchQuery = '')}
         class="file-tree-search-clear"
-        title="Очистить"
+        title={$t('app.clear')}
       >
         ×
       </button>
