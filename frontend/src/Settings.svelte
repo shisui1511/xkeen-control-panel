@@ -15,7 +15,7 @@
   } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
 
-  export const onSwitchTab: (tab: string) => void = () => {};
+  let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
   let checkingConnection = false;
   let secretVisible = false;
