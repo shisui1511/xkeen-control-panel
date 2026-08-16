@@ -53,6 +53,8 @@ func NewPTYService() *PTYService {
 func (s *PTYService) detectShell() string {
 	candidates := []string{
 		"/opt/bin/bash",
+		"/opt/bin/sh",
+		"/opt/bin/ash",
 		"/bin/bash",
 		"/bin/sh",
 		"/bin/ash",
@@ -111,7 +113,12 @@ func (s *PTYService) StartSession(cols, rows int) (*PTYSession, error) {
 		rows = 24
 	}
 
-	cmd := exec.Command(shellPath, "-l")
+	var cmd *exec.Cmd
+	if shellPath != "/bin/sh" {
+		cmd = exec.Command(shellPath, "-l")
+	} else {
+		cmd = exec.Command(shellPath)
+	}
 	cmd.Env = s.buildEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,

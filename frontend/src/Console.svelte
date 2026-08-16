@@ -1,13 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Modal from './components/Modal.svelte';
+  import Terminal from './components/Terminal.svelte';
   import { t } from './i18n';
   import PageHeader from './PageHeader.svelte';
-
   import { showToast } from './stores';
   import { apiFetch } from './lib/api';
 
-  export let onSwitchTab: (tab: string) => void = () => {};
+  interface Props {
+    onSwitchTab?: (tab: string) => void;
+  }
+
+  let { onSwitchTab = () => {} }: Props = $props();
 
   interface CommandDef {
     name: string;
@@ -27,15 +31,16 @@
     error: string;
   }
 
-  let categories: CommandCategory[] = [];
-  let loading = true;
-  let error = '';
-  let executing = '';
-  let output = '';
-  let history: { command: string; output: string; success: boolean }[] = [];
+  let activeTab = $state<'terminal' | 'commands'>('terminal');
+  let categories = $state<CommandCategory[]>([]);
+  let loading = $state(true);
+  let error = $state('');
+  let executing = $state('');
+  let output = $state('');
+  let history = $state<{ command: string; output: string; success: boolean }[]>([]);
 
   // Confirmation modal state
-  let confirmPending: CommandDef | null = null;
+  let confirmPending = $state<CommandDef | null>(null);
 
   async function fetchCommands() {
     loading = true;
@@ -122,153 +127,175 @@
     hideHome={true}
   />
 
-  {#if error}
-    <div class="alert alert-error mb-2">{error}</div>
-  {/if}
+  <!-- Tab Navigation -->
+  <div class="settings-tabs">
+    <button
+      class="stab"
+      class:active={activeTab === 'terminal'}
+      onclick={() => (activeTab = 'terminal')}
+    >
+      {$t('console.tab_terminal')}
+    </button>
+    <button
+      class="stab"
+      class:active={activeTab === 'commands'}
+      onclick={() => (activeTab = 'commands')}
+    >
+      {$t('console.tab_commands')}
+    </button>
+  </div>
 
-  <div class="console-grid">
-    <div>
-      {#if loading}
-        <div class="loading">{$t('app.loading')}</div>
-      {:else}
-        {#each categories as category}
-          <div class="cmd-list mb-3">
-            <div class="cmd-cat-head">
-              {$t(`console.cat_${category.name}`) || category.name}
-            </div>
-            <div class="cmd-tile-grid">
-              {#each category.commands as cmd}
-                <button
-                  class="cmd-tile"
-                  onclick={() => handleCommandClick(cmd)}
-                  disabled={executing !== ''}
-                  title={cmd.description}
-                >
-                  <div class="tile-name" class:dangerous-text={cmd.dangerous}>
-                    {#if cmd.command === '-start'}
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
-                        style="margin-right:8px;flex-shrink:0;"
-                        ><polygon points="5 3 19 12 5 21 5 3" /></svg
-                      >
-                    {:else if cmd.command === '-stop'}
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
-                        style="margin-right:8px;flex-shrink:0;"
-                        ><rect x="6" y="5" width="4" height="14" /><rect
-                          x="14"
-                          y="5"
-                          width="4"
-                          height="14"
-                        /></svg
-                      >
-                    {:else if cmd.command === '-restart'}
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        style="margin-right:8px;flex-shrink:0;"
-                        ><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-                      >
-                    {:else if cmd.command === '-status'}
-                      <svg
-                        width="13"
-                        height="13"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        style="margin-right:8px;flex-shrink:0;"><path d="M3 12h18" /></svg
-                      >
-                    {/if}
-                    xkeen {cmd.command}
-                  </div>
-                  <div class="tile-desc">{cmd.description}</div>
-                </button>
-              {/each}
-            </div>
-          </div>
-        {/each}
-      {/if}
-    </div>
+  {#if activeTab === 'terminal'}
+    <Terminal />
+  {:else}
+    {#if error}
+      <div class="alert alert-error mb-2">{error}</div>
+    {/if}
 
-    <div>
-      <div class="toolbar mb-2">
-        <div class="toolbar-left">
-          <span style="font-family:var(--font-family-mono);font-size:13px;color:var(--accent);"
-            >root@xkeen ~ #</span
-          >
-        </div>
-        <div class="toolbar-right">
-          <button
-            class="btn btn-secondary btn-sm"
-            onclick={clearOutput}
-            disabled={!output && !executing}
-          >
-            {$t('console.clear')}
-          </button>
-          <button class="btn btn-secondary btn-sm" onclick={copyOutput} disabled={!output}>
-            {$t('console.copy')}
-          </button>
-        </div>
-      </div>
-
-      <div class="term-output">
-        {#if executing}
-          <span class="prompt">root@xkeen:~# xkeen {executing}</span><br />
-          <span style="color:var(--fg-dim);">Running...</span>
-        {:else if output}
-          <span class="prompt">root@xkeen:~# xkeen {history[0]?.command || ''}</span><br />
-          {output}
+    <div class="console-grid">
+      <div>
+        {#if loading}
+          <div class="loading">{$t('app.loading')}</div>
         {:else}
-          <span class="prompt">root@xkeen:~# _</span>
+          {#each categories as category}
+            <div class="cmd-list mb-3">
+              <div class="cmd-cat-head">
+                {$t(`console.cat_${category.name}`) || category.name}
+              </div>
+              <div class="cmd-tile-grid">
+                {#each category.commands as cmd}
+                  <button
+                    class="cmd-tile"
+                    onclick={() => handleCommandClick(cmd)}
+                    disabled={executing !== ''}
+                    title={cmd.description}
+                  >
+                    <div class="tile-name" class:dangerous-text={cmd.dangerous}>
+                      {#if cmd.command === '-start'}
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          style="margin-right:8px;flex-shrink:0;"
+                          ><polygon points="5 3 19 12 5 21 5 3" /></svg
+                        >
+                      {:else if cmd.command === '-stop'}
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          style="margin-right:8px;flex-shrink:0;"
+                          ><rect x="6" y="5" width="4" height="14" /><rect
+                            x="14"
+                            y="5"
+                            width="4"
+                            height="14"
+                          /></svg
+                        >
+                      {:else if cmd.command === '-restart'}
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          style="margin-right:8px;flex-shrink:0;"
+                          ><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+                        >
+                      {:else if cmd.command === '-status'}
+                        <svg
+                          width="13"
+                          height="13"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          style="margin-right:8px;flex-shrink:0;"><path d="M3 12h18" /></svg
+                        >
+                      {/if}
+                      xkeen {cmd.command}
+                    </div>
+                    <div class="tile-desc">{cmd.description}</div>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/each}
         {/if}
       </div>
 
-      {#if history.length > 0}
-        <h4
-          class="mt-3"
-          style="font-size: 11px; font-weight: 700; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.18em; padding: 0 4px;"
-        >
-          {$t('console.history')}
-        </h4>
-        <div class="history-list">
-          {#each history as entry}
-            <button
-              class="history-item"
-              class:error={!entry.success}
-              onclick={() => {
-                output = entry.output;
-              }}
-              title={entry.command}
+      <div>
+        <div class="toolbar mb-2">
+          <div class="toolbar-left">
+            <span style="font-family:var(--font-family-mono);font-size:13px;color:var(--accent);"
+              >root@xkeen ~ #</span
             >
-              <span class="history-cmd">xkeen {entry.command}</span>
-              <span class="history-status" class:error-text={!entry.success}>
-                {#if entry.success}
-                  SUCCESS
-                {:else}
-                  ERROR
-                {/if}
-              </span>
+          </div>
+          <div class="toolbar-right">
+            <button
+              class="btn btn-secondary btn-sm"
+              onclick={clearOutput}
+              disabled={!output && !executing}
+            >
+              {$t('console.clear')}
             </button>
-          {/each}
+            <button class="btn btn-secondary btn-sm" onclick={copyOutput} disabled={!output}>
+              {$t('console.copy')}
+            </button>
+          </div>
         </div>
-      {/if}
+
+        <div class="term-output">
+          {#if executing}
+            <span class="prompt">root@xkeen:~# xkeen {executing}</span><br />
+            <span style="color:var(--fg-dim);">Running...</span>
+          {:else if output}
+            <span class="prompt">root@xkeen:~# xkeen {history[0]?.command || ''}</span><br />
+            {output}
+          {:else}
+            <span class="prompt">root@xkeen:~# _</span>
+          {/if}
+        </div>
+
+        {#if history.length > 0}
+          <h4
+            class="mt-3"
+            style="font-size: 11px; font-weight: 700; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.18em; padding: 0 4px;"
+          >
+            {$t('console.history')}
+          </h4>
+          <div class="history-list">
+            {#each history as entry}
+              <button
+                class="history-item"
+                class:error={!entry.success}
+                onclick={() => {
+                  output = entry.output;
+                }}
+                title={entry.command}
+              >
+                <span class="history-cmd">xkeen {entry.command}</span>
+                <span class="history-status" class:error-text={!entry.success}>
+                  {#if entry.success}
+                    SUCCESS
+                  {:else}
+                    ERROR
+                  {/if}
+                </span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
     </div>
-  </div>
+  {/if}
 </div>
 
 <Modal isOpen={!!confirmPending} title={$t('console.confirm_title')} onclose={cancelConfirm}>
@@ -288,6 +315,39 @@
 </Modal>
 
 <style>
+  .settings-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+
+  .stab {
+    padding: 8px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--fg-secondary);
+    cursor: pointer;
+    border-radius: 4px 4px 0 0;
+    transition:
+      color 0.15s,
+      border-color 0.15s;
+  }
+
+  .stab:hover {
+    color: var(--fg-primary);
+  }
+
+  .stab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+
   .console-grid {
     display: grid;
     grid-template-columns: 2fr 3fr;
