@@ -36,10 +36,10 @@
     const warning = styles.getPropertyValue('--warning').trim() || '#f0b450';
 
     return {
-      background: '#050d16',
+      background: bgDeep,
       foreground: fgPrimary,
       cursor: accent,
-      cursorAccent: '#050d16',
+      cursorAccent: bgDeep,
       selectionBackground: 'rgba(41, 194, 240, 0.3)',
       black: '#0c2237',
       red: danger,
@@ -109,7 +109,7 @@
               term?.writeln(`\r\n\x1b[31m[ERROR] ${msg.message}\x1b[0m`);
               return;
             } else if (msg.type === 'exit') {
-              term?.writeln(`\r\n\x1b[33m[Процесс завершен]\x1b[0m`);
+              term?.writeln(`\r\n\x1b[33m[${$t('console.terminal_process_terminated')}]\x1b[0m`);
               status = 'disconnected';
               return;
             }
@@ -290,7 +290,7 @@
       <div class="terminal-title">
         <Icon name="console" size={16} />
         <span class="title-text">root@xkeen</span>
-        <span class="shell-badge">ash</span>
+        <span class="shell-badge">sh</span>
       </div>
 
       <div class="status-pill {status}">

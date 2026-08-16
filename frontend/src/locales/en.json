@@ -976,6 +976,7 @@
   "console.terminal_hint_ctrl_l": "Clear screen",
   "console.terminal_hint_tab": "Autocomplete",
   "console.terminal_session_limit": "Active sessions limit reached (max 2)",
+  "console.terminal_process_terminated": "Process terminated",
   "xkeen.h": "XKeen Help",
   "editor.back_to_dashboard": "Back to Dashboard",
   "editor.templates": "Templates",

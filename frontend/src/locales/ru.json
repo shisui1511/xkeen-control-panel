@@ -975,6 +975,7 @@
   "console.terminal_hint_ctrl_l": "Очистить экран",
   "console.terminal_hint_tab": "Автодополнение",
   "console.terminal_session_limit": "Достигнут лимит активных сессий (максимум 2)",
+  "console.terminal_process_terminated": "Процесс завершен",
   "xkeen.h": "Справка XKeen",
   "editor.back_to_dashboard": "Вернуться на Dashboard",
   "editor.templates": "Шаблоны",
