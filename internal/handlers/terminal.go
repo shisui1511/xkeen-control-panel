@@ -142,7 +142,7 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 
 			n, err := session.Read(buf)
 			if n > 0 {
-				if err := safeWriteMessage(websocket.TextMessage, buf[:n]); err != nil {
+				if err := safeWriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
 					return
 				}
 			}
