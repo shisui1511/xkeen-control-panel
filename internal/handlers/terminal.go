@@ -2,10 +2,13 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -144,7 +147,8 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if err != nil {
-				if err == io.EOF {
+				var pathErr *os.PathError
+				if errors.Is(err, io.EOF) || errors.Is(err, syscall.EIO) || (errors.As(err, &pathErr) && errors.Is(pathErr.Err, syscall.EIO)) {
 					_ = safeWriteJSON(map[string]interface{}{
 						"type": "exit",
 						"code": 0,
