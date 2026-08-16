@@ -23,11 +23,23 @@
   import ApiOffline from './components/ApiOffline.svelte';
   import EmptyState from './components/EmptyState.svelte';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
+  import UnsavedChangesModal from './components/UnsavedChangesModal.svelte';
+  import {
+    isAnySourceDirty,
+    getDirtySources,
+    saveAllDirtySources,
+    hasUnsavedChanges
+  } from './lib/dirtyRegistry';
 
   let version = $state($t('app.loading'));
   let panelVersion = $state($t('app.loading'));
   let loading = $state(false);
   let showMihomoMigrateModal = $state(false);
+  let showUnsavedModal = $state(false);
+  let pendingTargetTab = $state<string | null>(null);
+  let pendingTargetHash = $state<string | null>(null);
+  let isSavingAndNavigating = $state(false);
+  let dirtySourceNames = $state<string[]>([]);
   let currentTab = $state('dashboard');
   const mihomoDependentTabs = [
     'proxies',
@@ -440,7 +452,69 @@
   }
 
   function handleHashChange() {
-    currentTab = getTabFromHash();
+    const targetTab = getTabFromHash();
+    if (targetTab !== currentTab && isAnySourceDirty()) {
+      pendingTargetTab = targetTab;
+      pendingTargetHash = window.location.hash;
+      dirtySourceNames = getDirtySources().map((s) => s.source.name || s.id);
+
+      // Revert hash in URL to currentTab without re-triggering hashchange handling
+      history.replaceState(null, '', `/#/${currentTab}`);
+      showUnsavedModal = true;
+      return;
+    }
+    currentTab = targetTab;
+  }
+
+  async function handleSaveAndLeave() {
+    isSavingAndNavigating = true;
+    try {
+      const ok = await saveAllDirtySources();
+      if (ok) {
+        showUnsavedModal = false;
+        const target = pendingTargetTab;
+        const hash = pendingTargetHash;
+        pendingTargetTab = null;
+        pendingTargetHash = null;
+        if (target) {
+          currentTab = target;
+          window.location.hash = hash || '#/' + target;
+        }
+      } else {
+        showToast('error', $t('nav.save_error'));
+      }
+    } catch (e: any) {
+      console.error('Save error during navigation:', e);
+      showToast('error', $t('nav.save_error'));
+    } finally {
+      isSavingAndNavigating = false;
+    }
+  }
+
+  function handleLeaveWithoutSaving() {
+    showUnsavedModal = false;
+    const target = pendingTargetTab;
+    const hash = pendingTargetHash;
+    pendingTargetTab = null;
+    pendingTargetHash = null;
+    if (target) {
+      currentTab = target;
+      window.location.hash = hash || '#/' + target;
+    }
+  }
+
+  function handleStay() {
+    showUnsavedModal = false;
+    pendingTargetTab = null;
+    pendingTargetHash = null;
+  }
+
+  function handleBeforeUnload(e: BeforeUnloadEvent) {
+    if (isAnySourceDirty()) {
+      e.preventDefault();
+      e.returnValue = '';
+      return '';
+    }
   }
 
   function getDrawerFocusables(): HTMLElement[] {
@@ -641,12 +715,14 @@
       reportChunkError((event as Event & { payload?: unknown }).payload);
     };
     window.addEventListener('vite:preloadError', handlePreloadError);
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       window.removeEventListener('hashchange', handleHashChange);
       mobileMql.removeEventListener('change', handleMobileMqlChange);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('vite:preloadError', handlePreloadError);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   });
 </script>
@@ -1652,6 +1728,14 @@
   bind:open={showMihomoMigrateModal}
   onclose={() => (showMihomoMigrateModal = false)}
   onsuccess={handleRefresh}
+/>
+<UnsavedChangesModal
+  isOpen={showUnsavedModal}
+  dirtySources={dirtySourceNames}
+  isSaving={isSavingAndNavigating}
+  onSaveAndLeave={handleSaveAndLeave}
+  onLeaveWithoutSaving={handleLeaveWithoutSaving}
+  onStay={handleStay}
 />
 
 <style>

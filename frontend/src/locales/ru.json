@@ -1387,7 +1387,13 @@
   "unsaved.modal_message": "У вас есть несохраненные данные. Что вы хотите сделать?",
   "unsaved.save_and_leave": "Сохранить и перейти",
   "unsaved.discard_and_leave": "Уйти без сохранения",
-  "unsaved.stay": "Остаться",
   "service.restarting": "Перезапуск службы...",
-  "service.restarting_wait": "Пожалуйста, подождите, служба перезапускается"
+  "service.restarting_wait": "Пожалуйста, подождите, служба перезапускается",
+  "nav.unsaved_title": "Несохраненные изменения",
+  "nav.unsaved_message": "У вас есть несохраненные данные. Если вы уйдете со страницы без сохранения, внесенные изменения будут потеряны.",
+  "nav.unsaved_sources": "Измененные разделы: {sources}",
+  "nav.save_and_leave": "Сохранить и перейти",
+  "nav.leave_without_saving": "Уйти без сохранения",
+  "nav.stay": "Остаться",
+  "nav.save_error": "Не удалось сохранить изменения"
 }

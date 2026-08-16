@@ -1388,7 +1388,13 @@
   "unsaved.modal_message": "You have unsaved changes. What would you like to do?",
   "unsaved.save_and_leave": "Save and leave",
   "unsaved.discard_and_leave": "Leave without saving",
-  "unsaved.stay": "Stay",
   "service.restarting": "Restarting service...",
-  "service.restarting_wait": "Please wait, the service is restarting"
+  "service.restarting_wait": "Please wait, the service is restarting",
+  "nav.unsaved_title": "Unsaved Changes",
+  "nav.unsaved_message": "You have unsaved changes. If you leave this page without saving, your modifications will be lost.",
+  "nav.unsaved_sources": "Modified sections: {sources}",
+  "nav.save_and_leave": "Save & Leave",
+  "nav.leave_without_saving": "Leave without saving",
+  "nav.stay": "Stay",
+  "nav.save_error": "Failed to save changes"
 }
