@@ -3,6 +3,7 @@
   import Modal from './components/Modal.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
+  import { activateRestartGrace } from './lib/serviceGrace';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
@@ -1559,6 +1560,7 @@
         }
       }
 
+      activateRestartGrace(6000);
       const restartRes = await apiFetch(restartUrl, {
         method: 'POST'
       });

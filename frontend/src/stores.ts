@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { apiFetchJSON } from './lib/api';
+import { isServiceRestarting, clearRestartGrace } from './lib/serviceGrace';
 
 // --- Capabilities store ---
 
@@ -40,10 +41,16 @@ export const isKernelChecking = writable(false);
 export const mihomoApiAvailable = writable<boolean>(false);
 
 let lastValidActiveKernel = '';
+let consecutiveCapabilitiesFailures = 0;
 
 export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
   try {
     const data = await apiFetchJSON<CapabilitiesData>('/api/capabilities', { signal });
+
+    consecutiveCapabilitiesFailures = 0;
+    if (get(isServiceRestarting) && data.mihomo?.api_reachable) {
+      clearRestartGrace();
+    }
 
     if (data.active_kernel) {
       lastValidActiveKernel = data.active_kernel;
@@ -75,12 +82,13 @@ export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
     // wiping capabilities state here would just flash stale UI before the
     // navigation completes.
     if (e?.status === 401) return;
-    // Any other failure (network error, non-OK response, etc.) — capabilities
-    // are stale/unknown, do not keep reporting a possibly-outdated "API
-    // reachable" state (WR-03). No toast here: this is a background poll every
-    // 10s, not a user action — a deliberate departure from D-03, documented in
-    // 75-01-SUMMARY.md.
-    mihomoApiAvailable.set(false);
+
+    consecutiveCapabilitiesFailures++;
+    // Debounce network blips: during active service restart or for a single intermittent failure,
+    // do not instantly set mihomoApiAvailable to false to avoid UI flickering.
+    if (!get(isServiceRestarting) && consecutiveCapabilitiesFailures >= 2) {
+      mihomoApiAvailable.set(false);
+    }
   }
 }
 

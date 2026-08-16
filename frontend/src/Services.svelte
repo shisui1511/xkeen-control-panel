@@ -11,6 +11,7 @@
   import { usePoller } from './lib/poller';
   import Skeleton from './components/Skeleton.svelte';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
 
   let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
@@ -271,6 +272,9 @@
           // Network/timeout error — fall through to silent start
         }
       }
+      if (action === 'restart' || action === 'switch_kernel' || action === 'start') {
+        activateRestartGrace(6000);
+      }
       const res = await apiFetch(`/api/service/control?action=${action}`, {
         method: 'POST'
       });
@@ -292,6 +296,7 @@
     isKernelChecking.set(false);
     switchingKernelTo = kernel;
     actionLoading[`switch-${kernel}`] = true;
+    activateRestartGrace(6000);
     try {
       const res = await apiFetch(`/api/service/control?action=switch_kernel&kernel=${kernel}`, {
         method: 'POST'

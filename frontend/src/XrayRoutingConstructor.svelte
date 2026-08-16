@@ -3,6 +3,7 @@
   import Modal from './components/Modal.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
+  import { activateRestartGrace } from './lib/serviceGrace';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
@@ -764,6 +765,7 @@
       await loadXrayOutboundTags();
       isDirty = false;
 
+      activateRestartGrace(6000);
       const restartRes = await apiFetch('/api/service/control?action=restart', {
         method: 'POST'
       });
@@ -980,6 +982,7 @@
       }
 
       // 2. Рестарт XKeen
+      activateRestartGrace(6000);
       const restartRes = await apiFetch('/api/service/control?action=restart', {
         method: 'POST'
       });

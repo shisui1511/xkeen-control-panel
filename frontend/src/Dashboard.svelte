@@ -12,6 +12,7 @@
   } from './stores';
   import { usePoller } from './lib/poller';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import { isServiceRestarting, activateRestartGrace } from './lib/serviceGrace';
   import Sidebar from './components/Sidebar.svelte';
   import Toast from './components/Toast.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -573,6 +574,7 @@
   }
 
   async function restartXkeen() {
+    activateRestartGrace(6000);
     try {
       const res = await apiFetch('/api/service/control?action=restart', {
         method: 'POST'
@@ -709,15 +711,28 @@
     class:rail={$isSidebarCollapsed}
     inert={drawerIsModal}
   >
-    <!-- Mihomo offline warning banner -->
+    <!-- Mihomo offline warning banner / Restarting notice -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
-      <div style="margin: 12px 16px 0;">
-        <ApiOffline
-          endpoint={$capabilities.mihomo.discovered_secret ? 'Mihomo API' : '127.0.0.1:9090'}
-          lastSeenSeconds={0}
-          onRetry={fetchCapabilities}
-        />
-      </div>
+      {#if $isServiceRestarting}
+        <div
+          class="service-restarting-banner"
+          style="margin: 12px 16px 0; padding: 12px 18px; background: rgba(56, 189, 248, 0.1); border: 1px solid var(--accent); border-radius: var(--radius-md); display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--fg-primary);"
+        >
+          <span
+            class="spinner"
+            style="width: 16px; height: 16px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; flex-shrink: 0;"
+          ></span>
+          <span>{$t('service.restarting_wait')}</span>
+        </div>
+      {:else}
+        <div style="margin: 12px 16px 0;">
+          <ApiOffline
+            endpoint={$capabilities.mihomo.discovered_secret ? 'Mihomo API' : '127.0.0.1:9090'}
+            lastSeenSeconds={0}
+            onRetry={fetchCapabilities}
+          />
+        </div>
+      {/if}
     {/if}
 
     {#key chunkReloadKey}

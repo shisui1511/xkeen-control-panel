@@ -22,6 +22,7 @@
   import Modal from './components/Modal.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
+  import { activateRestartGrace } from './lib/serviceGrace';
 
   interface Template {
     name: string;
@@ -822,6 +823,7 @@
       await loadBackups(selectedFile);
 
       // 2. POST /api/service/control?action=restart
+      activateRestartGrace(6000);
       backgroundStatusText = $t('editor.restarting');
       const restartRes = await apiFetch('/api/service/control?action=restart', {
         method: 'POST'
