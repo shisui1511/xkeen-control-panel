@@ -611,6 +611,8 @@ export interface MihomoConfigState {
   preservedKeys: string[];
   existingTproxyPort: number | null;
   existingRedirPort: number | null;
+  externalControllerType?: 'unix' | 'tcp';
+  externalControllerTarget?: string;
   subscriptions: any[];
   mihomoProviders?: any[];
   capabilities?: any;
@@ -693,8 +695,12 @@ export function slugifyProviderName(
 export function generateYAML(state: MihomoConfigState): string {
   const lines: string[] = [];
 
-  // external-controller must be first field (required for Clash API on port 9090)
-  lines.push('external-controller: 0.0.0.0:9090');
+  // external-controller or external-controller-unix (defaults to Unix Domain Socket)
+  if (state.externalControllerType === 'tcp' && state.externalControllerTarget) {
+    lines.push(`external-controller: ${state.externalControllerTarget}`);
+  } else {
+    lines.push('external-controller-unix: /opt/var/run/mihomo.sock');
+  }
   lines.push('');
 
   // System ports from XKeen (preserve existing values, fall back to defaults)
@@ -1114,6 +1120,8 @@ export interface ParsedMihomoConfig {
   preservedKeys: string[];
   existingTproxyPort: number | null;
   existingRedirPort: number | null;
+  externalControllerType?: 'unix' | 'tcp';
+  externalControllerTarget?: string;
   mihomoProviders: any[];
 }
 
@@ -1147,6 +1155,8 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     preservedKeys: [],
     existingTproxyPort: null,
     existingRedirPort: null,
+    externalControllerType: 'unix',
+    externalControllerTarget: '/opt/var/run/mihomo.sock',
     mihomoProviders: []
   };
 
@@ -1205,6 +1215,7 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
             sec !== 'tproxy-port' &&
             sec !== 'redir-port' &&
             sec !== 'external-controller' &&
+            sec !== 'external-controller-unix' &&
             sec !== 'proxy-providers'
           ) {
             if (!parsed.preservedKeys.includes(sec)) {
@@ -1218,6 +1229,18 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           } else if (sec === 'redir-port') {
             const valMatch = line.match(/redir-port:\s*["']?(\d+)["']?/);
             if (valMatch) parsed.existingRedirPort = parseInt(valMatch[1], 10);
+          } else if (sec === 'external-controller-unix') {
+            const valMatch = line.match(/external-controller-unix:\s*["']?([^#"']+)["']?/);
+            if (valMatch) {
+              parsed.externalControllerType = 'unix';
+              parsed.externalControllerTarget = valMatch[1].trim();
+            }
+          } else if (sec === 'external-controller') {
+            const valMatch = line.match(/external-controller:\s*["']?([^#"']+)["']?/);
+            if (valMatch) {
+              parsed.externalControllerType = 'tcp';
+              parsed.externalControllerTarget = valMatch[1].trim();
+            }
           }
         }
 

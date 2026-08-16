@@ -137,6 +137,8 @@
   let rules: Rule[] = $state([]);
   let activePreset: string = $state('');
   let activeRuleProvider = $state<'none' | 'zkeen' | 'metacubex'>('none');
+  let externalControllerType = $state<'unix' | 'tcp'>('unix');
+  let externalControllerTarget = $state<string>('127.0.0.1:9090');
   let subscriptions: any[] = $state([]);
   let mihomoProviders: any[] = $state([]);
   let lastParsedProviders: any[] = $state([]);
@@ -999,6 +1001,8 @@
       preservedKeys = res.preservedKeys;
       existingTproxyPort = res.existingTproxyPort;
       existingRedirPort = res.existingRedirPort;
+      externalControllerType = res.externalControllerType || 'unix';
+      externalControllerTarget = res.externalControllerTarget || '127.0.0.1:9090';
 
       lastParsedProviders = res.mihomoProviders || [];
       mihomoProviders = mergeMihomoProviders(
@@ -1181,10 +1185,15 @@
   }
 
   function addRule() {
-    if (nr.type !== 'MATCH' && !nr.value.trim()) return;
-    rules = [...rules, { ...nr, id: crypto.randomUUID() }];
-    showRuleForm = false;
-    nr = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
+    rules = [
+      ...rules,
+      {
+        id: crypto.randomUUID(),
+        type: 'DOMAIN-SUFFIX',
+        value: '',
+        outbound: 'DIRECT'
+      }
+    ];
   }
 
   function removeRule(id: string) {
@@ -1216,6 +1225,8 @@
       preservedKeys,
       existingTproxyPort,
       existingRedirPort,
+      externalControllerType,
+      externalControllerTarget,
       subscriptions,
       mihomoProviders,
       capabilities: $capabilities,
@@ -1233,6 +1244,8 @@
     void selectedMetaRuleSets;
     void subscriptions;
     void mihomoProviders;
+    void externalControllerType;
+    void externalControllerTarget;
     void dns.enabled;
     void dns.nameservers;
     void dns.fallback;
@@ -2368,6 +2381,53 @@
                   <span>Sniff QUIC (ports 443, 8443)</span>
                 </label>
               </div>
+            {/if}
+
+            <div
+              class="form-row"
+              style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px;"
+            >
+              <label class="form-label" for="mihomo-ctrl-type">{$t('mihomo.controller_type')}</label
+              >
+              <select id="mihomo-ctrl-type" class="form-select" bind:value={externalControllerType}>
+                <option value="unix">{$t('mihomo.controller_unix_label')}</option>
+                <option value="tcp">{$t('mihomo.controller_tcp_label')}</option>
+              </select>
+            </div>
+            {#if externalControllerType === 'tcp'}
+              <div class="form-row">
+                <label class="form-label" for="mihomo-ctrl-target"
+                  >{$t('mihomo.controller_tcp_address')}</label
+                >
+                <input
+                  id="mihomo-ctrl-target"
+                  class="form-input"
+                  bind:value={externalControllerTarget}
+                  placeholder="127.0.0.1:9090"
+                />
+              </div>
+              {#if externalControllerTarget.startsWith('0.0.0.0:') || externalControllerTarget.startsWith(':') || externalControllerTarget === '0.0.0.0'}
+                <div
+                  class="inline-warning"
+                  style="margin-top: 6px; font-size: 12px; color: var(--color-warning, #f59e0b); display: flex; align-items: center; gap: 6px;"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+                    />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span>{$t('mihomo.insecure_lan_warning')}</span>
+                </div>
+              {/if}
             {/if}
           </div>
         {/if}

@@ -5,7 +5,7 @@ tproxy-port: 5001
 routing-mark: 255
 find-process-mode: off
 unified-delay: true
-external-controller: 0.0.0.0:9090
+external-controller-unix: /opt/var/run/mihomo.sock
 profile: { store-selected: true }
 
 dns:
