@@ -291,7 +291,7 @@
     if (detectedDraft?.data) {
       const d = detectedDraft.data;
       if (d.xrayFiles) xrayFiles = d.xrayFiles;
-      if (d.rules) rules = d.rules;
+      if (d.routingRules || d.rules) routingRules = d.routingRules || d.rules;
       if (d.dnsConfig) dnsConfig = d.dnsConfig;
       if (d.logConfig) logConfig = d.logConfig;
       if (d.inbounds) inbounds = d.inbounds;
@@ -324,12 +324,12 @@
       name: $t('editor.tab_constructor') || 'Xray Constructor',
       isDirty: () => isDirty,
       onSave: async () => {
-        await handleSaveAndApply();
+        await handleApplyChanges(true);
         return !isDirty;
       },
       getDraft: () => ({
         xrayFiles,
-        rules,
+        routingRules,
         dnsConfig,
         logConfig,
         inbounds,
@@ -858,8 +858,8 @@
     return list;
   }
 
-  async function handleApplyChanges() {
-    if (!showApplyConfirm) {
+  async function handleApplyChanges(skipConfirm = false) {
+    if (!skipConfirm && !showApplyConfirm) {
       showApplyConfirm = true;
       return;
     }
