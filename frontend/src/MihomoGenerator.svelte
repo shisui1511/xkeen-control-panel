@@ -1099,7 +1099,7 @@
       name: $t('editor.tab_constructor') || 'Mihomo Generator',
       isDirty: () => isDirty,
       onSave: async () => {
-        await handleApply();
+        await handleApplyMihomo(true);
         return !isDirty;
       },
       getDraft: () => ({
@@ -1422,8 +1422,9 @@
 
   // findTopLevelSection and replaceMihomoTopLevelSection are imported from './lib/mihomoYaml'
 
-  async function handleApplyMihomo() {
-    if (!showApplyConfirm && proxies.length === 0) {
+  async function handleApplyMihomo(skipConfirm: boolean | unknown = false) {
+    const shouldSkipConfirm = skipConfirm === true;
+    if (!shouldSkipConfirm && !showApplyConfirm && proxies.length === 0) {
       if (
         !(await showConfirm({
           title: $t('editor.empty_proxies_title'),
@@ -1435,7 +1436,7 @@
         return;
       }
     }
-    if (!showApplyConfirm) {
+    if (!shouldSkipConfirm && !showApplyConfirm) {
       showApplyConfirm = true;
       return;
     }
@@ -1571,6 +1572,7 @@
 
       await fetchCapabilities();
 
+      isDirty = false;
       showToast('success', $t('mihomo.config_applied'));
     } catch (err: any) {
       if (err?.status === 401) return;
