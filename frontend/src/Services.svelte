@@ -11,8 +11,11 @@
   import { usePoller } from './lib/poller';
   import Skeleton from './components/Skeleton.svelte';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
 
   export const onSwitchTab: (tab: string) => void = () => {};
+
+  let showMihomoMigrateModal = $state(false);
 
   interface Kernel {
     name: string;
@@ -39,22 +42,22 @@
     raw: string;
   }
 
-  let xkeenInfo: XKeenStatusInfo = {
+  let xkeenInfo = $state<XKeenStatusInfo>({
     isRunning: false,
     activeKernel: '',
     pid: 0,
     uptime: '',
     binaryPath: '',
     raw: ''
-  };
+  });
 
-  let xkeenStatus = '';
-  let loading = false;
-  let actionLoading: Record<string, boolean> = {};
+  let xkeenStatus = $state('');
+  let loading = $state(false);
+  let actionLoading = $state<Record<string, boolean>>({});
 
-  let kernels: Kernel[] = [];
-  let kernelsLoaded = false;
-  let statusIntervals: Record<string, ReturnType<typeof setInterval>> = {};
+  let kernels = $state<Kernel[]>([]);
+  let kernelsLoaded = $state(false);
+  let statusIntervals = $state<Record<string, ReturnType<typeof setInterval>>>({});
 
   // Restart log
   interface RestartLogEntry {
@@ -64,8 +67,8 @@
     exit_code: number;
     output: string;
   }
-  let restartLog: RestartLogEntry[] = [];
-  let restartLogExpanded = false;
+  let restartLog = $state<RestartLogEntry[]>([]);
+  let restartLogExpanded = $state(false);
 
   async function fetchRestartLog() {
     try {
@@ -93,9 +96,9 @@
   }
 
   // Auto-start toggles (localStorage-persisted until backend API exists)
-  let autostartKeenetic = localStorage.getItem('autostart_keenetic') !== 'false';
-  let watchdogEnabled = localStorage.getItem('watchdog_enabled') !== 'false';
-  let refreshingStatus = false;
+  let autostartKeenetic = $state(localStorage.getItem('autostart_keenetic') !== 'false');
+  let watchdogEnabled = $state(localStorage.getItem('watchdog_enabled') !== 'false');
+  let refreshingStatus = $state(false);
 
   function toggleAutostart(key: string, value: boolean) {
     localStorage.setItem(key, String(value));
@@ -433,12 +436,14 @@
     return Array.isArray(kernels) ? kernels.find((k) => k.name === name) : undefined;
   }
 
-  $: xray = Array.isArray(kernels) ? kernels.find((k) => k.name === 'xray') : undefined;
-  $: mihomo = Array.isArray(kernels) ? kernels.find((k) => k.name === 'mihomo') : undefined;
-  $: isAnyKernelChecking = Array.isArray(kernels)
-    ? kernels.some((k) => k.status === 'checking')
-    : false;
-  $: activeKernel = (() => {
+  let xray = $derived(Array.isArray(kernels) ? kernels.find((k) => k.name === 'xray') : undefined);
+  let mihomo = $derived(
+    Array.isArray(kernels) ? kernels.find((k) => k.name === 'mihomo') : undefined
+  );
+  let isAnyKernelChecking = $derived(
+    Array.isArray(kernels) ? kernels.some((k) => k.status === 'checking') : false
+  );
+  let activeKernel = $derived.by(() => {
     if (xray?.process_status === 'running') return 'xray';
     if (mihomo?.process_status === 'running') return 'mihomo';
     const lastSwitch = Array.isArray(restartLog)
@@ -448,11 +453,13 @@
       return lastSwitch.action.split(':')[1];
     }
     return xkeenInfo.activeKernel || 'none';
-  })();
-  $: isRunning = xray?.process_status === 'running' || mihomo?.process_status === 'running';
+  });
+  let isRunning = $derived(
+    xray?.process_status === 'running' || mihomo?.process_status === 'running'
+  );
 
   // Optimistic UI: при переключении/смене ядра подсвечиваем спиннером целевую кнопку
-  let switchingKernelTo: string | null = null;
+  let switchingKernelTo = $state<string | null>(null);
 
   onMount(() => {
     fetchRestartLog();
@@ -903,6 +910,16 @@
                 style="text-decoration:none;">{$t('svc.mihomo_api_unavailable')}</a
               >
             {/if}
+            {#if $capabilities?.mihomo?.is_insecure_lan}
+              <button
+                class="badge badge-warning"
+                style="cursor:pointer;border:none;"
+                onclick={() => (showMihomoMigrateModal = true)}
+                title={$t('mihomo.migrate_banner_body')}
+              >
+                {$t('mihomo.controller_mode_insecure')}
+              </button>
+            {/if}
           {:else}
             <span class="status-badge stopped"
               ><span class="status-dot error" style="margin:0;"></span>{$t(
@@ -1098,6 +1115,16 @@
     </div>
   {/if}
 </div>
+
+<MihomoSocketMigrateModal
+  bind:open={showMihomoMigrateModal}
+  onclose={() => (showMihomoMigrateModal = false)}
+  onsuccess={() => {
+    fetchStatus();
+    fetchKernels();
+    fetchCapabilities();
+  }}
+/>
 
 <style>
   .page-head {

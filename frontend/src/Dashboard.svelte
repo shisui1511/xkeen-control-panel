@@ -21,10 +21,12 @@
   import Skeleton from './components/Skeleton.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
 
   let version = $state($t('app.loading'));
   let panelVersion = $state($t('app.loading'));
   let loading = $state(false);
+  let showMihomoMigrateModal = $state(false);
   let currentTab = $state('dashboard');
   const mihomoDependentTabs = [
     'proxies',
@@ -892,7 +894,7 @@
           {/if}
 
           <!-- Problems Panel (conditional) -->
-          {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running) || ($capabilities !== null && !$capabilities.kernels?.xray?.installed && !$capabilities.kernels?.mihomo?.installed) || isKernelCrashed || isDiskLow || isSSLExpiring}
+          {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running) || ($capabilities !== null && !$capabilities.kernels?.xray?.installed && !$capabilities.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring}
             <div style="margin-bottom: 18px;">
               <Card title={$t('dash.problems_panel')}>
                 <div class="problems-list">
@@ -1008,6 +1010,22 @@
                       </Button>
                     </div>
                   {/if}
+                  {#if $capabilities !== null && $capabilities.mihomo?.is_insecure_lan}
+                    <div class="problem-item alert-warning">
+                      <div class="problem-content">
+                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                        <div>
+                          <strong class="problem-title"
+                            >{$t('dash.problems.mihomo_insecure_title')}</strong
+                          >
+                          <div class="problem-desc">{$t('dash.problems.mihomo_insecure_desc')}</div>
+                        </div>
+                      </div>
+                      <Button variant="secondary" onclick={() => (showMihomoMigrateModal = true)}>
+                        {$t('mihomo.migrate_btn')}
+                      </Button>
+                    </div>
+                  {/if}
                 </div>
               </Card>
             </div>
@@ -1087,6 +1105,16 @@
                       </span>
                       {#if serviceStatus.mihomoVersion && serviceStatus.mihomo !== 'not_installed'}
                         <span class="version-badge">{serviceStatus.mihomoVersion}</span>
+                      {/if}
+                      {#if $capabilities?.mihomo?.is_insecure_lan}
+                        <button
+                          class="badge badge-warning"
+                          style="margin-left: 6px; cursor: pointer; border: none; font-size: 11px; padding: 2px 6px;"
+                          onclick={() => (showMihomoMigrateModal = true)}
+                          title={$t('mihomo.migrate_banner_body')}
+                        >
+                          {$t('mihomo.controller_mode_insecure')}
+                        </button>
                       {/if}
                     </span>
                   </div>
@@ -1605,6 +1633,11 @@
 
 <Toast />
 <ConfirmDialog />
+<MihomoSocketMigrateModal
+  bind:open={showMihomoMigrateModal}
+  onclose={() => (showMihomoMigrateModal = false)}
+  onsuccess={handleRefresh}
+/>
 
 <style>
   /* Status badges — matches reference: flush grid inside card with dividers */

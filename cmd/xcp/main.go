@@ -263,7 +263,7 @@ func main() {
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
 	subscriptionSvc.SetPanelAddress(cfg.Port, cfg.HTTPS.Enabled, cfg.LoopbackPort)
 	subscriptionSvc.SetConsoleService(consoleSvc)
-	subscriptionSvc.SetMihomoService(mihomoSvc)
+	subscriptionSvc.SetMihomoService(api.MihomoService())
 	subscriptionSvc.SetMihomoAPI(cfg.MihomoAPIURL, cfg.MihomoSecret)
 	// Fallback-резолвер секрета Clash API: при пустом MihomoSecret в конфиге
 	// панели секрет читается из config.yaml Mihomo (как у остальных

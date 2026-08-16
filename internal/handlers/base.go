@@ -92,6 +92,10 @@ func (a *API) GetAssetsService() *assets.AssetsService {
 	return a.assetsSvc
 }
 
+func (a *API) MihomoService() *services.MihomoService {
+	return a.mihomoSvc
+}
+
 func (a *API) SetKernelService(svc *services.KernelService) {
 	a.kernelSvc = svc
 }

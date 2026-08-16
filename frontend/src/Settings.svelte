@@ -14,11 +14,13 @@
     showConfirm
   } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
-  let checkingConnection = false;
-  let secretVisible = false;
+  let showMihomoMigrateModal = $state(false);
+  let checkingConnection = $state(false);
+  let secretVisible = $state(false);
 
   async function recheckConnection() {
     checkingConnection = true;
@@ -29,17 +31,18 @@
     }
   }
 
-  let version = '...';
+  let version = $state('...');
   let langs = getAvailableLangs();
-  let activeTab: 'general' | 'updates' | 'security' | 'connection' | 'backups' | 'about' =
-    'general';
+  let activeTab = $state<'general' | 'updates' | 'security' | 'connection' | 'backups' | 'about'>(
+    'general'
+  );
 
   // Backups state variables
-  let configFiles: string[] = [];
-  let selectedFile = '';
-  let backups: string[] = [];
-  let loadingBackups = false;
-  let backupsLoaded = false;
+  let configFiles = $state<string[]>([]);
+  let selectedFile = $state('');
+  let backups = $state<string[]>([]);
+  let loadingBackups = $state(false);
+  let backupsLoaded = $state(false);
 
   // Snapshots state
   interface SnapshotMeta {
@@ -48,12 +51,12 @@
     created_at: number;
     size_bytes: number;
   }
-  let snapshots: SnapshotMeta[] = [];
-  let snapshotLabel = '';
-  let creatingSnapshot = false;
-  let restoringSnapshot = '';
-  let uploading = false;
-  let isDragOver = false;
+  let snapshots = $state<SnapshotMeta[]>([]);
+  let snapshotLabel = $state('');
+  let creatingSnapshot = $state(false);
+  let restoringSnapshot = $state('');
+  let uploading = $state(false);
+  let isDragOver = $state(false);
 
   async function uploadBackup(file: File) {
     if (!file) return;
@@ -110,7 +113,7 @@
     }
   }
 
-  let downloadingDiagnostics = false;
+  let downloadingDiagnostics = $state(false);
 
   async function downloadDiagnostics() {
     downloadingDiagnostics = true;
@@ -389,12 +392,12 @@
   });
 
   // Appearance & Behavior settings (persisted in localStorage)
-  let selectedTheme: 'light' | 'dark' | 'auto' = 'auto';
+  let selectedTheme = $state<'light' | 'dark' | 'auto'>('auto');
   let systemTimezone = $state('—');
-  let animationsEnabled = true;
-  let autoRefresh = true;
-  let confirmDangerous = true;
-  let notificationSound = false;
+  let animationsEnabled = $state(true);
+  let autoRefresh = $state(true);
+  let confirmDangerous = $state(true);
+  let notificationSound = $state(false);
 
   async function loadSystemTimezone() {
     try {
@@ -437,12 +440,12 @@
   }
 
   // Change password
-  let currentPassword = '';
-  let newPassword = '';
-  let confirmPassword = '';
-  let passwordChanging = false;
-  let passwordError = '';
-  let passwordSuccess = false;
+  let currentPassword = $state('');
+  let newPassword = $state('');
+  let confirmPassword = $state('');
+  let passwordChanging = $state(false);
+  let passwordError = $state('');
+  let passwordSuccess = $state(false);
 
   async function changePassword() {
     passwordError = '';
@@ -480,17 +483,17 @@
   }
 
   // Update state
-  let updateInfo: {
+  let updateInfo = $state<{
     current_version: string;
     latest_version: string;
     has_update: boolean;
     channel: string;
     changelog?: string;
-  } | null = null;
-  let updateStatus: { status: string; message: string; progress: number } | null = null;
-  let updateChecking = false;
-  let updateInstalling = false;
-  let updateChannel: 'stable' | 'beta' = 'stable';
+  } | null>(null);
+  let updateStatus = $state<{ status: string; message: string; progress: number } | null>(null);
+  let updateChecking = $state(false);
+  let updateInstalling = $state(false);
+  let updateChannel = $state<'stable' | 'beta'>('stable');
 
   async function fetchUpdateChannel() {
     try {
@@ -566,11 +569,11 @@
   }
 
   let sseSource: EventSource | null = null;
-  let showConfirmUpdateModal = false;
+  let showConfirmUpdateModal = $state(false);
 
   // Reconnect/polling state after update restart
-  let reconnecting = false;
-  let reconnectAttempt = 0;
+  let reconnecting = $state(false);
+  let reconnectAttempt = $state(0);
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const RECONNECT_INTERVAL_MS = 1500;
   const RECONNECT_MAX_ATTEMPTS = 40; // 40 × 1.5s = 60s max
@@ -702,14 +705,14 @@
     }
   }
 
-  let templatesVersion = '';
-  let templatesRepoUrl = '';
-  let templatesLastCheck = '';
-  let templatesHasUpdate = false;
-  let checkingTemplates = false;
-  let updatingTemplates = false;
-  let templatesIncompatible = false;
-  let templatesWarningMessage = '';
+  let templatesVersion = $state('');
+  let templatesRepoUrl = $state('');
+  let templatesLastCheck = $state('');
+  let templatesHasUpdate = $state(false);
+  let checkingTemplates = $state(false);
+  let updatingTemplates = $state(false);
+  let templatesIncompatible = $state(false);
+  let templatesWarningMessage = $state('');
 
   async function fetchTemplatesStatus() {
     try {
@@ -1445,6 +1448,28 @@
           </div>
         {/if}
         <div class="field-row">
+          <span class="field-row-name">{$t('mihomo.controller_type')}</span>
+          <span class="field-row-val" style="display:flex;align-items:center;gap:8px;">
+            {#if $capabilities?.mihomo?.controller_type === 'unix'}
+              <span class="status-ok">● {$t('mihomo.controller_mode_unix')}</span>
+            {:else if $capabilities?.mihomo?.is_insecure_lan}
+              <span class="status-err"
+                >▲ {$capabilities?.mihomo?.controller_target || '0.0.0.0:9090'} ({$t(
+                  'mihomo.controller_mode_insecure'
+                )})</span
+              >
+              <button
+                class="btn btn-warning btn-sm"
+                onclick={() => (showMihomoMigrateModal = true)}
+              >
+                {$t('mihomo.migrate_btn')}
+              </button>
+            {:else}
+              <span class="status-ok">● {$capabilities?.mihomo?.controller_target || 'TCP'}</span>
+            {/if}
+          </span>
+        </div>
+        <div class="field-row">
           <span class="field-row-name">{$t('settings.mihomo_status')}</span>
           <span class="field-row-val">
             {#if $capabilities?.mihomo.process_running}
@@ -1610,6 +1635,12 @@
     </div>
   {/if}
 </div>
+
+<MihomoSocketMigrateModal
+  bind:open={showMihomoMigrateModal}
+  onclose={() => (showMihomoMigrateModal = false)}
+  onsuccess={recheckConnection}
+/>
 
 <style>
   .page-head {
