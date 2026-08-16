@@ -770,6 +770,15 @@
       showToast('success', $t('editor.file_saved'));
       originalContent = content;
       isDirty = false;
+
+      // Update tab state
+      const activeT = tabs.find((t) => t.path === selectedFile);
+      if (activeT) {
+        activeT.isDirty = false;
+        activeT.originalContent = content;
+        tabs = [...tabs];
+      }
+
       localStorage.removeItem(`editor.draft.${selectedFile}`);
       hasDraft = false;
       draftContent = '';
