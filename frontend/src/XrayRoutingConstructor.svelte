@@ -858,8 +858,9 @@
     return list;
   }
 
-  async function handleApplyChanges(skipConfirm = false) {
-    if (!skipConfirm && !showApplyConfirm) {
+  async function handleApplyChanges(skipConfirm: boolean | unknown = false) {
+    const shouldSkipConfirm = skipConfirm === true;
+    if (!shouldSkipConfirm && !showApplyConfirm) {
       showApplyConfirm = true;
       return;
     }
