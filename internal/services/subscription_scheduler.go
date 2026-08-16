@@ -41,6 +41,10 @@ func (s *SubscriptionService) SetKernelService(svc KernelStatusProvider) {
 	s.kernelSvc = svc
 }
 
+func (s *SubscriptionService) SetMihomoService(svc *MihomoService) {
+	s.mihomoSvc = svc
+}
+
 func (s *SubscriptionService) SetMihomoAPI(apiURL, secret string) {
 	s.mihomoAPIURL = apiURL
 	s.mihomoSecret = secret
@@ -443,13 +447,35 @@ func (s *SubscriptionService) UnlockMihomo() {
 }
 
 func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) error {
-	if s.mihomoAPIURL == "" {
-		return ErrMihomoAPINotConfigured
+	var client *http.Client
+	var reqURL string
+
+	if s.mihomoSvc != nil {
+		info, err := s.mihomoSvc.ParseControllerConfig()
+		if err == nil && info.Type == "unix" && info.Target != "" {
+			client = s.mihomoSvc.GetHTTPClient()
+			reqURL = fmt.Sprintf("http://localhost/providers/proxies/%s", url.PathEscape(providerName))
+		} else if err == nil && info.Type == "tcp" && info.Target != "" {
+			client = s.mihomoSvc.GetHTTPClient()
+			t := info.Target
+			if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") {
+				t = "http://" + t
+			}
+			reqURL = fmt.Sprintf("%s/providers/proxies/%s", strings.TrimRight(t, "/"), url.PathEscape(providerName))
+		}
 	}
+
+	if client == nil {
+		if s.mihomoAPIURL == "" {
+			return ErrMihomoAPINotConfigured
+		}
+		client = s.localHTTPClient
+		reqURL = fmt.Sprintf("%s/providers/proxies/%s", s.mihomoAPIURL, url.PathEscape(providerName))
+	}
+
 	// PathEscape — защита в глубину: имя валидируется на уровне handler,
 	// но экранирование гарантирует, что спецсимволы не изменят путь/query
 	// исходящего запроса.
-	reqURL := fmt.Sprintf("%s/providers/proxies/%s", s.mihomoAPIURL, url.PathEscape(providerName))
 	req, err := http.NewRequest(http.MethodPut, reqURL, nil)
 	if err != nil {
 		return fmt.Errorf("request init failed: %w", err)
@@ -461,7 +487,7 @@ func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) e
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
 	}
-	resp, err := s.localHTTPClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("API PUT failed: %w", err)
 	}

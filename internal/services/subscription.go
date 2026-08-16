@@ -219,6 +219,7 @@ type SubscriptionService struct {
 	kernelSvc       KernelStatusProvider // для получения реальных версий ядер
 	hwid            string               // постоянный UUID устройства, передаётся как x-hwid
 	deviceInfo      *DeviceInfo          // модель/ОС роутера для x-device-* заголовков (см. task 60-01-05)
+	mihomoSvc       *MihomoService
 	mihomoAPIURL    string
 	mihomoSecret    string
 	// mihomoSecretResolver — fallback-резолвер секрета Clash API (например,

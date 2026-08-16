@@ -73,6 +73,22 @@ func (a *API) ProxyProvidersRouter(w http.ResponseWriter, r *http.Request) {
 	a.errorResponse(w, "Not Found", http.StatusNotFound)
 }
 
+func (a *API) getMihomoHTTPClientAndBaseURL() (*http.Client, string) {
+	if a.mihomoSvc != nil {
+		info, err := a.mihomoSvc.ParseControllerConfig()
+		if err == nil && info.Type == "unix" && info.Target != "" {
+			return a.mihomoSvc.GetHTTPClient(), "http://localhost"
+		} else if err == nil && info.Type == "tcp" && info.Target != "" {
+			t := info.Target
+			if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") {
+				t = "http://" + t
+			}
+			return a.mihomoSvc.GetHTTPClient(), strings.TrimRight(t, "/")
+		}
+	}
+	return &http.Client{Timeout: 3 * time.Second}, strings.TrimRight(a.cfg.MihomoAPIURL, "/")
+}
+
 func (a *API) ProxyProvidersList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -94,15 +110,15 @@ func (a *API) ProxyProvidersList(w http.ResponseWriter, r *http.Request) {
 	if running {
 		// 2. Fetch providers from Clash API
 		secret := a.ResolveMihomoSecret()
+		client, baseURL := a.getMihomoHTTPClientAndBaseURL()
 
-		req, err := http.NewRequest(http.MethodGet, a.cfg.MihomoAPIURL+"/providers/proxies", nil)
+		req, err := http.NewRequest(http.MethodGet, baseURL+"/providers/proxies", nil)
 		if err != nil {
 			log.Printf("[ProxyProviders] Error creating request: %v", err)
 		} else {
 			if secret != "" {
 				req.Header.Set("Authorization", "Bearer "+secret)
 			}
-			client := &http.Client{Timeout: 3 * time.Second}
 			resp, err := client.Do(req)
 			if err != nil {
 				log.Printf("[ProxyProviders] Warning: failed to fetch proxy providers from Clash API: %v", err)
@@ -207,7 +223,8 @@ func (a *API) ProxyProviderNodes(w http.ResponseWriter, r *http.Request, name st
 	}
 
 	secret := a.ResolveMihomoSecret()
-	targetURL := fmt.Sprintf("%s/providers/proxies/%s", a.cfg.MihomoAPIURL, url.PathEscape(name))
+	client, baseURL := a.getMihomoHTTPClientAndBaseURL()
+	targetURL := fmt.Sprintf("%s/providers/proxies/%s", baseURL, url.PathEscape(name))
 
 	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
 	if err != nil {
@@ -220,7 +237,6 @@ func (a *API) ProxyProviderNodes(w http.ResponseWriter, r *http.Request, name st
 		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 
-	client := &http.Client{Timeout: 3 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("[ProxyProviders] Error fetching nodes from Clash API: %v", err)

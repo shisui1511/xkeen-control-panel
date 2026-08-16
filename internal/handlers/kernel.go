@@ -17,8 +17,8 @@ func (a *API) KernelList(w http.ResponseWriter, r *http.Request) {
 		if list[i].Name == "mihomo" {
 			addr := a.cfg.MihomoAPIURL
 			if a.mihomoSvc != nil {
-				if parsedController, _, err := a.mihomoSvc.ParseConfig(); err == nil && parsedController != "" {
-					addr = parsedController
+				if ctrl, err := a.mihomoSvc.ParseControllerConfig(); err == nil && ctrl.Target != "" {
+					addr = ctrl.Target
 				}
 			}
 			addr = strings.TrimPrefix(addr, "http://")
@@ -100,8 +100,8 @@ func (a *API) KernelStatus(w http.ResponseWriter, r *http.Request) {
 	if k.Name == "mihomo" {
 		addr := a.cfg.MihomoAPIURL
 		if a.mihomoSvc != nil {
-			if parsedController, _, err := a.mihomoSvc.ParseConfig(); err == nil && parsedController != "" {
-				addr = parsedController
+			if ctrl, err := a.mihomoSvc.ParseControllerConfig(); err == nil && ctrl.Target != "" {
+				addr = ctrl.Target
 			}
 		}
 		addr = strings.TrimPrefix(addr, "http://")

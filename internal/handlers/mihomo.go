@@ -32,32 +32,58 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target, err := url.Parse(a.cfg.MihomoAPIURL)
-	if err != nil {
-		a.errorResponse(w, a.t(r, "mihomo.api_error"), http.StatusInternalServerError)
-		return
+	var target *url.URL
+	var secret string
+	var transport *http.Transport
+
+	if a.mihomoSvc != nil {
+		info, err := a.mihomoSvc.ParseControllerConfig()
+		if err == nil && info.Type == "unix" && info.Target != "" {
+			target, _ = url.Parse("http://localhost")
+			transport = a.mihomoSvc.GetHTTPTransport()
+			secret = info.Secret
+		} else if err == nil && info.Type == "tcp" && info.Target != "" {
+			tStr := info.Target
+			if !strings.HasPrefix(tStr, "http://") && !strings.HasPrefix(tStr, "https://") {
+				tStr = "http://" + tStr
+			}
+			target, _ = url.Parse(tStr)
+			transport = a.mihomoSvc.GetHTTPTransport()
+			secret = info.Secret
+		}
+	}
+
+	if target == nil {
+		var err error
+		target, err = url.Parse(a.cfg.MihomoAPIURL)
+		if err != nil {
+			a.errorResponse(w, a.t(r, "mihomo.api_error"), http.StatusInternalServerError)
+			return
+		}
+		transport = &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 30 * time.Second,
+			}).DialContext,
+			ResponseHeaderTimeout: 30 * time.Second,
+		}
+	}
+
+	if secret == "" {
+		secret = a.cfg.MihomoSecret
+		if secret == "" && a.mihomoSvc != nil {
+			if _, parsedSecret, err := a.mihomoSvc.ParseConfig(); err == nil && parsedSecret != "" {
+				secret = parsedSecret
+			}
+		}
 	}
 
 	proxy := httputil.NewSingleHostReverseProxy(target)
-
-	// T033: 30s timeouts for dial and response header
-	proxy.Transport = &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout: 30 * time.Second,
-		}).DialContext,
-		ResponseHeaderTimeout: 30 * time.Second,
-	}
+	proxy.Transport = transport
 
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		a.errorResponse(w, a.t(r, "mihomo.not_running")+": "+err.Error(), http.StatusBadGateway)
 	}
 
-	secret := a.cfg.MihomoSecret
-	if secret == "" {
-		if _, parsedSecret, err := a.mihomoSvc.ParseConfig(); err == nil && parsedSecret != "" {
-			secret = parsedSecret
-		}
-	}
 	proxy.Director = func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
