@@ -33,6 +33,7 @@ type API struct {
 	datSvc                *services.DATManagerService
 	snapshotSvc           *services.SnapshotService
 	consoleSvc            *services.ConsoleService
+	ptySvc                *services.PTYService
 	templateSvc           *services.TemplateService
 	assetsSvc             *assets.AssetsService
 	pathVal               *utils.PathValidator
@@ -78,6 +79,10 @@ func (a *API) SetSnapshotService(svc *services.SnapshotService) {
 
 func (a *API) SetConsoleService(svc *services.ConsoleService) {
 	a.consoleSvc = svc
+}
+
+func (a *API) SetPTYService(svc *services.PTYService) {
+	a.ptySvc = svc
 }
 
 func (a *API) SetTemplateService(svc *services.TemplateService) {

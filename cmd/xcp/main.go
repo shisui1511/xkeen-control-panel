@@ -240,6 +240,12 @@ func main() {
 	srv.HandleProtected("/api/console/commands", api.ConsoleListCommands)
 	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)
 
+	// Interactive PTY Terminal
+	ptySvc := services.NewPTYService()
+	api.SetPTYService(ptySvc)
+	defer ptySvc.CloseAll()
+	srv.HandleProtected("/api/terminal/ws", api.TerminalWebSocket)
+
 	// Assets Service
 	srv.HandleProtected("/api/assets/definition", api.AssetsDefinition)
 
