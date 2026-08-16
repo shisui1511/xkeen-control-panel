@@ -95,6 +95,9 @@ func (s *MihomoService) ParseControllerConfig() (ControllerInfo, error) {
 		if strings.HasPrefix(line, "external-controller-unix:") {
 			val := strings.TrimPrefix(line, "external-controller-unix:")
 			unixCtrl = cleanYamlValue(val)
+			if unixCtrl != "" && !filepath.IsAbs(unixCtrl) {
+				unixCtrl = filepath.Clean(filepath.Join(s.ConfigDir, unixCtrl))
+			}
 		} else if strings.HasPrefix(line, "external-controller:") {
 			val := strings.TrimPrefix(line, "external-controller:")
 			tcpCtrl = cleanYamlValue(val)

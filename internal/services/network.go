@@ -18,12 +18,17 @@ import (
 // NetworkToolsService provides network diagnostic tools
 type NetworkToolsService struct {
 	mihomoAPIURL string
+	mihomoSvc    *MihomoService
 }
 
 func NewNetworkToolsService(mihomoAPIURL string) *NetworkToolsService {
 	return &NetworkToolsService{
 		mihomoAPIURL: mihomoAPIURL,
 	}
+}
+
+func (s *NetworkToolsService) SetMihomoService(svc *MihomoService) {
+	s.mihomoSvc = svc
 }
 
 // PingResult holds ping output
@@ -308,17 +313,36 @@ func (s *NetworkToolsService) ProxyDelayTest(proxyName, targetURL string, timeou
 		URL:       targetURL,
 	}
 
+	client := &http.Client{
+		Timeout: time.Duration(timeoutMs+1000) * time.Millisecond,
+	}
+	baseURL := strings.TrimSuffix(s.mihomoAPIURL, "/")
+	var secret string
+
+	if s.mihomoSvc != nil {
+		info, err := s.mihomoSvc.ParseControllerConfig()
+		if err == nil && info.Type == "unix" && info.Target != "" {
+			client.Transport = s.mihomoSvc.GetHTTPTransport()
+			baseURL = "http://localhost"
+			secret = info.Secret
+		} else if err == nil && info.Type == "tcp" && info.Target != "" {
+			client.Transport = s.mihomoSvc.GetHTTPTransport()
+			t := info.Target
+			if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") {
+				t = "http://" + t
+			}
+			baseURL = strings.TrimRight(t, "/")
+			secret = info.Secret
+		}
+	}
+
 	escapedProxy := url.PathEscape(proxyName)
 	apiURL := fmt.Sprintf("%s/proxies/%s/delay?url=%s&timeout=%d",
-		strings.TrimSuffix(s.mihomoAPIURL, "/"),
+		baseURL,
 		escapedProxy,
 		url.QueryEscape(targetURL),
 		timeoutMs,
 	)
-
-	client := &http.Client{
-		Timeout: time.Duration(timeoutMs+1000) * time.Millisecond,
-	}
 
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
@@ -326,6 +350,9 @@ func (s *NetworkToolsService) ProxyDelayTest(proxyName, targetURL string, timeou
 		result.Error = err.Error()
 		result.Output = fmt.Sprintf("Failed to create HTTP request: %s", err.Error())
 		return result, nil
+	}
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 
 	resp, err := client.Do(req)

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,6 +48,7 @@ type SmartProxyService struct {
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
 	httpClient *http.Client
+	mihomoSvc  *MihomoService
 }
 
 // ProfileStore is the on-disk format
@@ -64,6 +66,10 @@ func NewSmartProxyService(dataDir, mihomoURL string) *SmartProxyService {
 	}
 	svc.load()
 	return svc
+}
+
+func (s *SmartProxyService) SetMihomoService(svc *MihomoService) {
+	s.mihomoSvc = svc
 }
 
 func (s *SmartProxyService) Start() {
@@ -255,7 +261,28 @@ func (s *SmartProxyService) evaluateTimeBased(p *Profile) {
 }
 
 func (s *SmartProxyService) applyProxyToGroup(groupName, proxyName string) error {
-	url := fmt.Sprintf("%s/proxies/%s", s.mihomoURL, groupName)
+	client := s.httpClient
+	baseURL := strings.TrimRight(s.mihomoURL, "/")
+	var secret string
+
+	if s.mihomoSvc != nil {
+		info, err := s.mihomoSvc.ParseControllerConfig()
+		if err == nil && info.Type == "unix" && info.Target != "" {
+			client = s.mihomoSvc.GetHTTPClient()
+			baseURL = "http://localhost"
+			secret = info.Secret
+		} else if err == nil && info.Type == "tcp" && info.Target != "" {
+			client = s.mihomoSvc.GetHTTPClient()
+			t := info.Target
+			if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") {
+				t = "http://" + t
+			}
+			baseURL = strings.TrimRight(t, "/")
+			secret = info.Secret
+		}
+	}
+
+	url := fmt.Sprintf("%s/proxies/%s", baseURL, groupName)
 	bodyMap := map[string]string{"name": proxyName}
 	bodyBytes, err := json.Marshal(bodyMap)
 	if err != nil {
@@ -267,8 +294,11 @@ func (s *SmartProxyService) applyProxyToGroup(groupName, proxyName string) error
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

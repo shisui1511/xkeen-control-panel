@@ -254,6 +254,17 @@ port: 7890
 			wantSecret:   "",
 			wantInsecure: false,
 		},
+		{
+			name: "relative unix domain socket resolves to config dir",
+			yaml: `
+external-controller-unix: ./mihomo-api.sock
+secret: "sec123"
+`,
+			wantType:     "unix",
+			wantTarget:   "__CONFIG_DIR__/mihomo-api.sock",
+			wantSecret:   "sec123",
+			wantInsecure: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -265,6 +276,11 @@ port: 7890
 				t.Fatalf("failed to write config.yaml: %v", err)
 			}
 
+			wantTarget := tt.wantTarget
+			if strings.HasPrefix(wantTarget, "__CONFIG_DIR__") {
+				wantTarget = filepath.Join(tmpDir, strings.TrimPrefix(wantTarget, "__CONFIG_DIR__/"))
+			}
+
 			svc := NewMihomoService("", "", tmpDir)
 			info, err := svc.ParseControllerConfig()
 			if (err != nil) != tt.wantErr {
@@ -273,8 +289,8 @@ port: 7890
 			if info.Type != tt.wantType {
 				t.Errorf("Type = %q, want %q", info.Type, tt.wantType)
 			}
-			if info.Target != tt.wantTarget {
-				t.Errorf("Target = %q, want %q", info.Target, tt.wantTarget)
+			if info.Target != wantTarget {
+				t.Errorf("Target = %q, want %q", info.Target, wantTarget)
 			}
 			if info.Secret != tt.wantSecret {
 				t.Errorf("Secret = %q, want %q", info.Secret, tt.wantSecret)

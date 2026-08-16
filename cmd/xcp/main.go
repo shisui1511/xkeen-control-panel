@@ -198,11 +198,13 @@ func main() {
 
 	// Start background services
 	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, cfg.MihomoAPIURL)
+	smartProxySvc.SetMihomoService(api.MihomoService())
 	smartProxySvc.Start()
 	api.SetSmartProxyService(smartProxySvc)
 	defer smartProxySvc.Stop()
 
 	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL, cfg.MihomoSecret)
+	trafficQuotaSvc.SetMihomoService(api.MihomoService())
 	trafficQuotaSvc.Start()
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
@@ -301,6 +303,7 @@ func main() {
 
 	// Network Tools
 	networkSvc := services.NewNetworkToolsService(cfg.MihomoAPIURL)
+	networkSvc.SetMihomoService(api.MihomoService())
 	api.SetNetworkToolsService(networkSvc)
 
 	// Kernels

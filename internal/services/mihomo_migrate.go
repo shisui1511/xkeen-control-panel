@@ -57,6 +57,9 @@ func (s *MihomoService) GetMigrationPreview() (*MigrationPreview, error) {
 
 		if strings.HasPrefix(trimmed, "external-controller-unix:") {
 			val := cleanYamlValue(strings.TrimPrefix(trimmed, "external-controller-unix:"))
+			if val != "" && !filepath.IsAbs(val) {
+				val = filepath.Clean(filepath.Join(s.ConfigDir, val))
+			}
 			currentCtrl = val
 			currentType = "unix"
 			alreadyMigrated = true
