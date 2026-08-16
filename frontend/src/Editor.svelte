@@ -20,6 +20,8 @@
   import CodeMirrorEditor from './components/editor/CodeMirrorEditor.svelte';
   import BackupSidebar from './components/editor/BackupSidebar.svelte';
   import Modal from './components/Modal.svelte';
+  import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
+  import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
 
   interface Template {
     name: string;
@@ -1249,15 +1251,94 @@
   );
   let fileLineEndings = $derived(originalContent?.includes('\r\n') ? 'CRLF' : 'LF');
 
+  let detectedDraft = $state<DraftRecord | null>(null);
+  let unregisterDirty: (() => void) | null = null;
+
+  function handleRestoreSessionDraft() {
+    if (!detectedDraft?.data) return;
+    const draftData = detectedDraft.data;
+    if (Array.isArray(draftData.tabs) && draftData.tabs.length > 0) {
+      tabs = draftData.tabs.map((t: any) => ({
+        path: t.path,
+        name: t.name || t.path.split('/').pop() || '',
+        isDirty: t.isDirty !== undefined ? t.isDirty : true,
+        isPreview: false,
+        originalContent: t.originalContent || '',
+        currentContent: t.currentContent || ''
+      }));
+      if (draftData.selectedFile) {
+        selectedFile = draftData.selectedFile;
+        activeTabPath = draftData.activeTabPath || draftData.selectedFile;
+        const cur = tabs.find((t) => t.path === selectedFile);
+        if (cur && editorView) {
+          editorView.dispatch({
+            changes: { from: 0, to: editorView.state.doc.length, insert: cur.currentContent }
+          });
+        }
+      }
+      isDirty = tabs.some((t) => t.isDirty);
+    }
+    clearDraft('editor');
+    detectedDraft = null;
+    showToast('success', $t('draft.restored_toast'));
+  }
+
+  function handleDiscardSessionDraft() {
+    clearDraft('editor');
+    detectedDraft = null;
+    showToast('info', $t('draft.discarded_toast'));
+  }
+
   onMount(() => {
     loadFiles();
     loadTemplates();
     checkHashTab();
     window.addEventListener('hashchange', checkHashTab);
+
+    const draft = getDraft('editor');
+    if (draft) {
+      detectedDraft = draft;
+    }
+
+    unregisterDirty = registerDirtySource('editor', {
+      name: $t('nav.editor') || 'Editor',
+      isDirty: () => isDirty || tabs.some((t) => t.isDirty),
+      onSave: async () => {
+        if (selectedFile && editorView) {
+          await confirmSave();
+          return !isDirty;
+        }
+        return true;
+      },
+      getDraft: () => ({
+        selectedFile,
+        activeTabPath,
+        tabs: tabs.map((t) => ({
+          path: t.path,
+          name: t.name,
+          currentContent:
+            t.path === selectedFile && editorView
+              ? editorView.state.doc.toString()
+              : t.currentContent,
+          originalContent: t.originalContent,
+          isDirty: t.isDirty
+        }))
+      }),
+      restoreDraft: (draftRecord) => {
+        if (draftRecord?.data) {
+          detectedDraft = draftRecord;
+          handleRestoreSessionDraft();
+        }
+      }
+    });
   });
 
   onDestroy(() => {
     window.removeEventListener('hashchange', checkHashTab);
+    if (unregisterDirty) {
+      unregisterDirty();
+      unregisterDirty = null;
+    }
   });
 </script>
 
@@ -1380,6 +1461,14 @@
       </div>
     {/if}
   </div>
+
+  {#if detectedDraft}
+    <DraftRestoreBanner
+      timestamp={detectedDraft.timestamp}
+      onRestore={handleRestoreSessionDraft}
+      onDiscard={handleDiscardSessionDraft}
+    />
+  {/if}
 
   <div class="editor-tabs">
     <button class="tab-btn" class:active={activeTab === 'files'} onclick={() => setTab('files')}>

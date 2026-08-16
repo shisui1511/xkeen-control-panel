@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import Modal from './components/Modal.svelte';
+  import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
+  import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
@@ -1062,11 +1064,60 @@
     }
   }
 
+  let detectedDraft = $state<DraftRecord | null>(null);
+  let unregisterDirty: (() => void) | null = null;
+
+  function handleRestoreDraft() {
+    if (detectedDraft?.data?.yaml) {
+      populateMihomoFromYAML(detectedDraft.data.yaml);
+      isDirty = true;
+      clearDraft('mihomo_generator');
+      detectedDraft = null;
+      showToast('success', $t('draft.restored_toast'));
+    }
+  }
+
+  function handleDiscardDraft() {
+    clearDraft('mihomo_generator');
+    detectedDraft = null;
+    showToast('info', $t('draft.discarded_toast'));
+  }
+
   onMount(async () => {
     await loadSchema();
     await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
     await checkZkeenGeodata();
     checkUndo();
+
+    const draft = getDraft('mihomo_generator');
+    if (draft) {
+      detectedDraft = draft;
+    }
+
+    unregisterDirty = registerDirtySource('mihomo_generator', {
+      name: $t('editor.tab_constructor') || 'Mihomo Generator',
+      isDirty: () => isDirty,
+      onSave: async () => {
+        await handleApply();
+        return !isDirty;
+      },
+      getDraft: () => ({
+        yaml: generateYAML()
+      }),
+      restoreDraft: (draftRecord) => {
+        if (draftRecord?.data?.yaml) {
+          detectedDraft = draftRecord;
+          handleRestoreDraft();
+        }
+      }
+    });
+  });
+
+  onDestroy(() => {
+    if (unregisterDirty) {
+      unregisterDirty();
+      unregisterDirty = null;
+    }
   });
 
   $effect(() => {
@@ -1589,6 +1640,14 @@
 </script>
 
 <div class="container">
+  {#if detectedDraft}
+    <DraftRestoreBanner
+      timestamp={detectedDraft.timestamp}
+      onRestore={handleRestoreDraft}
+      onDiscard={handleDiscardDraft}
+    />
+  {/if}
+
   {#if schemaLoading}
     <div
       class="loading-state-block"

@@ -1377,5 +1377,17 @@
   "settings.drop_file_to_upload": "Отпустите файл для загрузки",
   "settings.select_or_drag_file": "Выберите или перетащите файл резервной копии (.tar.gz) сюда",
   "settings.supported_file_types": "Поддерживаются файлы .tar.gz размером до 15 МБ",
-  "proxies.nodes_label": "узлов"
+  "proxies.nodes_label": "узлов",
+  "draft.detected": "Обнаружен несохраненный черновик от {time}",
+  "draft.restore": "Восстановить",
+  "draft.discard": "Сбросить",
+  "draft.restored_toast": "Черновик успешно восстановлен",
+  "draft.discarded_toast": "Черновик удален",
+  "unsaved.modal_title": "Несохраненные изменения",
+  "unsaved.modal_message": "У вас есть несохраненные данные. Что вы хотите сделать?",
+  "unsaved.save_and_leave": "Сохранить и перейти",
+  "unsaved.discard_and_leave": "Уйти без сохранения",
+  "unsaved.stay": "Остаться",
+  "service.restarting": "Перезапуск службы...",
+  "service.restarting_wait": "Пожалуйста, подождите, служба перезапускается"
 }

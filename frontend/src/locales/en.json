@@ -1378,5 +1378,17 @@
   "settings.drop_file_to_upload": "Release file to upload",
   "settings.select_or_drag_file": "Select or drag a backup file (.tar.gz) here",
   "settings.supported_file_types": "Supports .tar.gz files up to 15 MB",
-  "proxies.nodes_label": "nodes"
+  "proxies.nodes_label": "nodes",
+  "draft.detected": "Unsaved draft detected from {time}",
+  "draft.restore": "Restore",
+  "draft.discard": "Discard",
+  "draft.restored_toast": "Draft successfully restored",
+  "draft.discarded_toast": "Draft discarded",
+  "unsaved.modal_title": "Unsaved Changes",
+  "unsaved.modal_message": "You have unsaved changes. What would you like to do?",
+  "unsaved.save_and_leave": "Save and leave",
+  "unsaved.discard_and_leave": "Leave without saving",
+  "unsaved.stay": "Stay",
+  "service.restarting": "Restarting service...",
+  "service.restarting_wait": "Please wait, the service is restarting"
 }

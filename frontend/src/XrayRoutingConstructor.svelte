@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import Modal from './components/Modal.svelte';
+  import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
+  import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
@@ -281,10 +283,72 @@
     '06_policy.json'
   ];
 
+  let detectedDraft = $state<DraftRecord | null>(null);
+  let unregisterDirty: (() => void) | null = null;
+
+  function handleRestoreDraft() {
+    if (detectedDraft?.data) {
+      const d = detectedDraft.data;
+      if (d.xrayFiles) xrayFiles = d.xrayFiles;
+      if (d.rules) rules = d.rules;
+      if (d.dnsConfig) dnsConfig = d.dnsConfig;
+      if (d.logConfig) logConfig = d.logConfig;
+      if (d.inbounds) inbounds = d.inbounds;
+      if (d.customOutbounds) customOutbounds = d.customOutbounds;
+      if (d.routingConfig) routingConfig = d.routingConfig;
+      isDirty = true;
+      clearDraft('xray_constructor');
+      detectedDraft = null;
+      showToast('success', $t('draft.restored_toast'));
+    }
+  }
+
+  function handleDiscardDraft() {
+    clearDraft('xray_constructor');
+    detectedDraft = null;
+    showToast('info', $t('draft.discarded_toast'));
+  }
+
   onMount(async () => {
     await loadSchema();
     await loadAllConfigs();
     checkUndo();
+
+    const draft = getDraft('xray_constructor');
+    if (draft) {
+      detectedDraft = draft;
+    }
+
+    unregisterDirty = registerDirtySource('xray_constructor', {
+      name: $t('editor.tab_constructor') || 'Xray Constructor',
+      isDirty: () => isDirty,
+      onSave: async () => {
+        await handleSaveAndApply();
+        return !isDirty;
+      },
+      getDraft: () => ({
+        xrayFiles,
+        rules,
+        dnsConfig,
+        logConfig,
+        inbounds,
+        customOutbounds,
+        routingConfig
+      }),
+      restoreDraft: (draftRecord) => {
+        if (draftRecord?.data) {
+          detectedDraft = draftRecord;
+          handleRestoreDraft();
+        }
+      }
+    });
+  });
+
+  onDestroy(() => {
+    if (unregisterDirty) {
+      unregisterDirty();
+      unregisterDirty = null;
+    }
   });
 
   async function loadAllConfigs() {
@@ -1524,6 +1588,14 @@
 </script>
 
 <div class="container">
+  {#if detectedDraft}
+    <DraftRestoreBanner
+      timestamp={detectedDraft.timestamp}
+      onRestore={handleRestoreDraft}
+      onDiscard={handleDiscardDraft}
+    />
+  {/if}
+
   {#if schemaLoading}
     <div
       class="loading-state-block"
