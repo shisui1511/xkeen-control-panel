@@ -164,6 +164,18 @@ describe('dirtyRegistry', () => {
 
       unreg();
     });
+
+    it('returns false if a dirty source lacks an onSave handler', async () => {
+      const unreg = registerDirtySource('no-save-src', {
+        name: 'NoSave',
+        isDirty: () => true
+      });
+
+      const res = await saveAllDirtySources();
+      expect(res).toBe(false);
+
+      unreg();
+    });
   });
 
   describe('Draft Serialization & sessionStorage', () => {

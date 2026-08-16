@@ -95,6 +95,9 @@ export async function saveAllDirtySources(): Promise<boolean> {
         console.error(`[dirtyRegistry] Error saving dirty source ${item.id}:`, e);
         return false;
       }
+    } else {
+      console.warn(`[dirtyRegistry] Dirty source ${item.id} has no onSave handler`);
+      return false;
     }
   }
   updateDirtyStore();
