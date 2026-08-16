@@ -108,9 +108,13 @@ func (s *PTYService) StartSession(cols, rows int) (*PTYSession, error) {
 	shellPath := s.detectShell()
 	if cols <= 0 {
 		cols = 80
+	} else if cols > 1000 {
+		cols = 1000
 	}
 	if rows <= 0 {
 		rows = 24
+	} else if rows > 500 {
+		rows = 500
 	}
 
 	var cmd *exec.Cmd
@@ -171,6 +175,12 @@ func (s *PTYSession) Write(p []byte) (n int, err error) {
 func (s *PTYSession) Resize(cols, rows int) error {
 	if cols <= 0 || rows <= 0 {
 		return errors.New("invalid terminal dimensions")
+	}
+	if cols > 1000 {
+		cols = 1000
+	}
+	if rows > 500 {
+		rows = 500
 	}
 
 	s.service.mu.Lock()

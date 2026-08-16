@@ -72,6 +72,20 @@ func TestPTYService_Resize(t *testing.T) {
 	if err := sess.Resize(0, 0); err == nil {
 		t.Error("expected error when resizing to invalid dimensions")
 	}
+
+	// Large dimensions should be clamped without error
+	if err := sess.Resize(70000, 1000); err != nil {
+		t.Fatalf("expected oversized resize to be clamped, got error: %v", err)
+	}
+}
+
+func TestPTYService_StartSession_OversizedDimensions(t *testing.T) {
+	svc := NewPTYService()
+	sess, err := svc.StartSession(70000, 1000)
+	if err != nil {
+		t.Fatalf("failed to start session with oversized dimensions: %v", err)
+	}
+	defer sess.Close()
 }
 
 func TestPTYService_MaxSessionsLimit(t *testing.T) {

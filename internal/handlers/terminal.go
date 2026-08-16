@@ -44,10 +44,21 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 			cols = c
 		}
 	}
+	if cols <= 0 {
+		cols = 80
+	} else if cols > 1000 {
+		cols = 1000
+	}
+
 	if qRows := r.URL.Query().Get("rows"); qRows != "" {
 		if rowVal, err := strconv.Atoi(qRows); err == nil && rowVal > 0 {
 			rows = rowVal
 		}
+	}
+	if rows <= 0 {
+		rows = 24
+	} else if rows > 500 {
+		rows = 500
 	}
 
 	session, err := a.ptySvc.StartSession(cols, rows)
@@ -178,8 +189,16 @@ func (a *API) TerminalWebSocket(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(p, &clientMsg); err == nil && clientMsg.Type != "" {
 				switch clientMsg.Type {
 				case "resize":
-					if clientMsg.Cols > 0 && clientMsg.Rows > 0 {
-						_ = session.Resize(clientMsg.Cols, clientMsg.Rows)
+					cols := clientMsg.Cols
+					rows := clientMsg.Rows
+					if cols > 0 && rows > 0 {
+						if cols > 1000 {
+							cols = 1000
+						}
+						if rows > 500 {
+							rows = 500
+						}
+						_ = session.Resize(cols, rows)
 					}
 				case "stdin":
 					if _, err := session.Write([]byte(clientMsg.Data)); err != nil {
