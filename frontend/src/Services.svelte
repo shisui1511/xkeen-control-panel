@@ -13,7 +13,7 @@
   import { apiFetch, apiFetchJSON } from './lib/api';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
 
-  export const onSwitchTab: (tab: string) => void = () => {};
+  let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
 
   let showMihomoMigrateModal = $state(false);
 

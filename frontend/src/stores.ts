@@ -20,6 +20,9 @@ export interface CapabilitiesData {
     api_authenticated: boolean;
     api_url?: string;
     discovered_secret?: string;
+    controller_type?: string;
+    controller_target?: string;
+    is_insecure_lan?: boolean;
   };
   xray?: {
     conf_dir: string;
