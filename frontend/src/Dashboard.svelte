@@ -1938,6 +1938,38 @@
     color: var(--fg-primary);
     font-family: var(--font-family-mono);
     font-size: 13px;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+
+  @media (max-width: 768px) {
+    .info-rows {
+      grid-template-columns: 1fr;
+    }
+
+    .info-row {
+      border-right: 0 !important;
+      padding: 10px 14px;
+      gap: 10px;
+    }
+
+    .info-row:nth-last-child(-n + 2) {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .info-row:last-child {
+      border-bottom: 0;
+    }
+
+    .info-row .lbl {
+      min-width: 110px;
+      font-size: 12px;
+    }
+
+    .info-row .val {
+      font-size: 12px;
+    }
   }
 
   /* Page header — title left, buttons top-right */

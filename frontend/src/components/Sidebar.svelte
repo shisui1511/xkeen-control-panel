@@ -219,7 +219,10 @@
   </span>
 </div>
 
-<nav style="flex: 1; overflow-y: auto; padding: 4px 0 10px; scrollbar-width: none;">
+<nav
+  class="sidebar-nav"
+  style="flex: 1; overflow-y: auto; padding: 4px 0 10px; scrollbar-width: none;"
+>
   <!-- Overview group -->
   <details class="nav-group" bind:open={groupOpen.overview}>
     <summary>
@@ -533,7 +536,10 @@
   </div>
 {/if}
 
-<div style="border-top: 1px solid var(--border); padding: 0.5rem 0; background: var(--bg-card);">
+<div
+  class="sidebar-footer"
+  style="border-top: 1px solid var(--border); padding: 0.5rem 0; background: var(--bg-card);"
+>
   {#if pwaInstallPrompt}
     <button
       class="nav-item"
@@ -603,6 +609,16 @@
   }
   :global(.collapse-toggle-icon.is-expanded) {
     transform: rotate(180deg);
+  }
+
+  @media (max-width: 768px) {
+    :global(.nav-group summary) {
+      padding: 8px 14px 6px !important;
+    }
+    :global(.nav-item) {
+      padding: 9px 14px !important;
+      min-height: 40px;
+    }
   }
 
   /* CR-01: portaled to <body> (see portalToBody in <script>) so it paints
