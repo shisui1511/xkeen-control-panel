@@ -52,7 +52,7 @@ export function formatTrafficSpeed(bytesPerSec: number): string {
   const k = 1024;
   const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
   const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
-  const clampedIdx = Math.min(i, sizes.length - 1);
+  const clampedIdx = Math.max(0, Math.min(i, sizes.length - 1));
   const val = parseFloat((bytesPerSec / Math.pow(k, clampedIdx)).toFixed(1));
   return `${val} ${sizes[clampedIdx]}`;
 }

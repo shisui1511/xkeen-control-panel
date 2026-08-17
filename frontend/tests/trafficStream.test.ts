@@ -52,6 +52,7 @@ describe('trafficStream', () => {
     });
 
     it('formats bytes correctly', () => {
+      expect(formatTrafficSpeed(0.5)).toBe('0.5 B/s');
       expect(formatTrafficSpeed(500)).toBe('500 B/s');
     });
 
