@@ -1,7 +1,9 @@
 <script lang="ts">
   import { t } from '../i18n';
   import { isSidebarOpen, isSidebarCollapsed, capabilities, mihomoApiAvailable } from '../stores';
+  import { capsuleConfigStore } from '../lib/capsuleSettings';
   import Icon from '../lib/components/Icon.svelte';
+  import SystemStatusCapsule from './status/SystemStatusCapsule.svelte';
 
   let {
     currentTab = 'dashboard',
@@ -11,7 +13,9 @@
     onLogout = () => {},
     loading = false,
     pwaInstallPrompt = null,
-    onInstallPWA = () => {}
+    onInstallPWA = () => {},
+    systemStats = null,
+    isXkeenRunning = true
   }: {
     currentTab?: string;
     onSwitchTab?: (tab: string) => void;
@@ -21,6 +25,8 @@
     loading?: boolean;
     pwaInstallPrompt?: unknown;
     onInstallPWA?: () => void;
+    systemStats?: any;
+    isXkeenRunning?: boolean;
   } = $props();
 
   type GroupKey = 'overview' | 'proxy_subs' | 'routing' | 'observability' | 'system';
@@ -514,6 +520,18 @@
     </a>
   </details>
 </nav>
+
+{#if $capsuleConfigStore.visible}
+  <div class="sidebar-status-section" class:rail={$isSidebarCollapsed}>
+    <SystemStatusCapsule
+      variant={$isSidebarCollapsed ? 'rail' : 'sidebar'}
+      {systemStats}
+      activeKernel={$capabilities?.active_kernel}
+      {isXkeenRunning}
+      {onSwitchTab}
+    />
+  </div>
+{/if}
 
 <div style="border-top: 1px solid var(--border); padding: 0.5rem 0; background: var(--bg-card);">
   {#if pwaInstallPrompt}

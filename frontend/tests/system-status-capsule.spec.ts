@@ -132,36 +132,36 @@ async function setupMocks(page: Page) {
   });
 }
 
-test.describe('System Status Capsule and Quick Actions', () => {
+test.describe('System Status and Quick Actions in Sidebar', () => {
   test.beforeEach(async ({ page }) => {
     await disableServiceWorker(page);
     await setupMocks(page);
   });
 
-  test('displays segmented status capsule in desktop topbar', async ({ page }) => {
+  test('displays status card in expanded sidebar', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/#/dashboard');
 
-    const capsule = page.locator('.topbar .system-status-capsule');
-    await expect(capsule).toBeVisible({ timeout: 5000 });
+    const statusCard = page.locator('.sidebar .sidebar-status-card');
+    await expect(statusCard).toBeVisible({ timeout: 5000 });
 
     // Check kernel name
-    await expect(page.locator('.topbar .kernel-name')).toContainText('Mihomo');
+    await expect(page.locator('.sidebar .kernel-name')).toContainText('Mihomo');
 
     // Check resources segment
-    await expect(page.locator('.topbar .resource-segment')).toContainText('CPU');
-    await expect(page.locator('.topbar .resource-segment')).toContainText('RAM');
+    await expect(page.locator('.sidebar .sidebar-metric-row')).toContainText('CPU');
+    await expect(page.locator('.sidebar .sidebar-metric-row')).toContainText('RAM');
 
     // Check traffic segment
-    await expect(page.locator('.topbar .traffic-segment')).toBeVisible();
-    await expect(page.locator('.topbar .traffic-segment')).toContainText('MB/s');
+    await expect(page.locator('.sidebar .sidebar-traffic-row')).toBeVisible();
+    await expect(page.locator('.sidebar .sidebar-traffic-row')).toContainText('MB/s');
   });
 
-  test('opens quick actions popover menu on kernel click', async ({ page }) => {
+  test('opens quick actions popover menu on kernel click in sidebar', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/#/dashboard');
 
-    const kernelBtn = page.locator('.topbar .kernel-segment');
+    const kernelBtn = page.locator('.sidebar .sidebar-kernel-row');
     await expect(kernelBtn).toBeVisible({ timeout: 5000 });
     await kernelBtn.click();
 
@@ -174,19 +174,19 @@ test.describe('System Status Capsule and Quick Actions', () => {
     await expect(actionBtns).toHaveCount(3);
   });
 
-  test('navigates to traffic and dashboard upon segment clicks', async ({ page }) => {
+  test('navigates to traffic and dashboard upon row clicks in sidebar', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/#/dashboard');
 
-    const trafficSegment = page.locator('.topbar .traffic-segment');
-    await expect(trafficSegment).toBeVisible({ timeout: 5000 });
-    await trafficSegment.click();
+    const trafficRow = page.locator('.sidebar .sidebar-traffic-row');
+    await expect(trafficRow).toBeVisible({ timeout: 5000 });
+    await trafficRow.click();
 
     await expect(page).toHaveURL(/#\/traffic/);
 
-    const resSegment = page.locator('.topbar .resource-segment');
-    await expect(resSegment).toBeVisible({ timeout: 5000 });
-    await resSegment.click();
+    const resRow = page.locator('.sidebar .sidebar-metric-row');
+    await expect(resRow).toBeVisible({ timeout: 5000 });
+    await resRow.click();
 
     await expect(page).toHaveURL(/#\/dashboard/);
   });
@@ -201,7 +201,7 @@ test.describe('System Status Capsule and Quick Actions', () => {
 
     // Tap opens quick actions popover
     await mobileCapsule.click();
-    const quickMenu = page.locator('.mobile-header .system-quick-menu');
+    const quickMenu = page.locator('.system-quick-menu');
     await expect(quickMenu).toBeVisible();
   });
 

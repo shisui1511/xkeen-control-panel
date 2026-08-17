@@ -789,6 +789,8 @@
       {loading}
       {pwaInstallPrompt}
       onInstallPWA={installPWA}
+      {systemStats}
+      isXkeenRunning={serviceStatus.xkeen === 'running'}
     />
   </div>
 
@@ -799,20 +801,6 @@
     class:rail={$isSidebarCollapsed}
     inert={drawerIsModal}
   >
-    {#if $capsuleConfigStore.visible}
-      <div class="topbar" class:rail={$isSidebarCollapsed} class:hidden={currentTab === 'editor'}>
-        <div class="topbar-left"></div>
-        <div class="topbar-right">
-          <SystemStatusCapsule
-            variant="desktop"
-            {systemStats}
-            activeKernel={$capabilities?.active_kernel}
-            isXkeenRunning={serviceStatus.xkeen === 'running'}
-            onSwitchTab={switchTab}
-          />
-        </div>
-      </div>
-    {/if}
     <!-- Mihomo offline warning banner / Restarting notice -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
       {#if $isServiceRestarting}

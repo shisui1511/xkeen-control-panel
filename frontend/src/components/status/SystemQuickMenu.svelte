@@ -11,12 +11,14 @@
     isOpen = false,
     activeKernel = '',
     isXkeenRunning = true,
+    anchorEl = null,
     onClose,
     onSwitchTab
   } = $props<{
     isOpen: boolean;
     activeKernel?: string;
     isXkeenRunning?: boolean;
+    anchorEl?: HTMLElement | null;
     onClose: () => void;
     onSwitchTab: (tab: string) => void;
   }>();
@@ -25,6 +27,51 @@
   let isRestartingXkeen = $state(false);
   let isTogglingService = $state(false);
   let menuEl = $state<HTMLElement | null>(null);
+  let menuPos = $state<{ top: number; left: number } | null>(null);
+
+  function portalToBody(node: HTMLElement) {
+    document.body.appendChild(node);
+    return {
+      destroy() {
+        node.remove();
+      }
+    };
+  }
+
+  function updatePosition() {
+    if (!anchorEl) {
+      menuPos = null;
+      return;
+    }
+    const rect = anchorEl.getBoundingClientRect();
+    const menuWidth = 250;
+    const menuHeight = 270;
+    const vpW = window.innerWidth;
+    const vpH = window.innerHeight;
+
+    let left = rect.right + 8;
+    let top = rect.top;
+
+    if (vpW <= 768) {
+      left = Math.max(12, (vpW - menuWidth) / 2);
+      top = rect.bottom + 8;
+    } else {
+      if (left + menuWidth > vpW) {
+        left = Math.max(12, rect.left - menuWidth - 8);
+      }
+      if (top + menuHeight > vpH) {
+        top = Math.max(12, vpH - menuHeight - 12);
+      }
+    }
+
+    menuPos = { top, left };
+  }
+
+  $effect(() => {
+    if (isOpen) {
+      updatePosition();
+    }
+  });
 
   async function handleRestartKernel() {
     if (isRestartingKernel) return;
@@ -143,7 +190,9 @@
 
   function handleDocumentClick(e: MouseEvent) {
     if (!isOpen || !menuEl) return;
-    if (!menuEl.contains(e.target as Node)) {
+    const target = e.target as Node;
+    if (anchorEl && anchorEl.contains(target)) return;
+    if (!menuEl.contains(target)) {
       onClose();
     }
   }
@@ -167,7 +216,9 @@
 {#if isOpen}
   <div
     bind:this={menuEl}
+    use:portalToBody
     class="system-quick-menu"
+    style={menuPos ? `top: ${menuPos.top}px; left: ${menuPos.left}px; position: fixed;` : ''}
     role="menu"
     aria-label={$t('capsule.quick_actions')}
     tabindex="-1"
@@ -274,14 +325,11 @@
 
 <style>
   .system-quick-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    min-width: 250px;
+    width: 250px;
     background: var(--bg-card, #16202c);
     border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
     border-radius: var(--radius-md, 10px);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
     padding: 6px;
