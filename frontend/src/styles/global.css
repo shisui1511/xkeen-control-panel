@@ -870,14 +870,12 @@ input[type='number'] {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 0 24px;
-  margin-bottom: -52px;
-  pointer-events: none;
+  padding: 0 36px;
+  background: rgba(12, 34, 55, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-light);
   transition: all var(--transition-fast);
-}
-
-.topbar > * {
-  pointer-events: auto;
 }
 
 .topbar.hidden {
