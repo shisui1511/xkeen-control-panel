@@ -21,6 +21,7 @@
   import BackupSidebar from './components/editor/BackupSidebar.svelte';
   import Modal from './components/Modal.svelte';
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
+  import EditorKernelWidget from './components/status/EditorKernelWidget.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { activateRestartGrace } from './lib/serviceGrace';
 
@@ -1623,65 +1624,68 @@
               </div>
             {/if}
 
-            <div class="kebab-wrap" style="margin-left: auto;">
-              <button
-                class="btn btn-secondary"
-                style="padding: 6px 10px;"
-                onclick={toggleKebab}
-                aria-label={$t('editor.more_actions')}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
+            <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+              <EditorKernelWidget activeKernel={$capabilities?.active_kernel} />
+              <div class="kebab-wrap">
+                <button
+                  class="btn btn-secondary"
+                  style="padding: 6px 10px;"
+                  onclick={toggleKebab}
+                  aria-label={$t('editor.more_actions')}
                 >
-                  <circle cx="12" cy="12" r="1" />
-                  <circle cx="12" cy="5" r="1" />
-                  <circle cx="12" cy="19" r="1" />
-                </svg>
-              </button>
-              {#if showKebabMenu}
-                <div class="kebab-dropdown" transition:fade={{ duration: 100 }}>
-                  <button class="kebab-item" onclick={downloadFile}>
-                    <Icon name="download" size={14} />
-                    {$t('editor.download_file')}
-                  </button>
-                  <button
-                    class="kebab-item"
-                    onclick={() => {
-                      showRenameModal = true;
-                      renameTarget = selectedFile.split('/').pop() || '';
-                    }}
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
                   >
-                    <Icon name="edit" size={14} />
-                    {$t('app.rename')}
-                  </button>
-                  <button class="kebab-item" onclick={openTemplatesModal}>
-                    <Icon name="settings" size={14} />
-                    {$t('editor.templates')}
-                  </button>
-                  {#if fileType === 'JSON'}
-                    <button class="kebab-item" onclick={() => (showGeneratorModal = true)}>
-                      <Icon name="settings" size={14} />
-                      {$t('editor.generator')}
+                    <circle cx="12" cy="12" r="1" />
+                    <circle cx="12" cy="5" r="1" />
+                    <circle cx="12" cy="19" r="1" />
+                  </svg>
+                </button>
+                {#if showKebabMenu}
+                  <div class="kebab-dropdown" transition:fade={{ duration: 100 }}>
+                    <button class="kebab-item" onclick={downloadFile}>
+                      <Icon name="download" size={14} />
+                      {$t('editor.download_file')}
                     </button>
-                  {/if}
-                  <button class="kebab-item" onclick={applyQuickFixes}>
-                    <Icon name="settings" size={14} />
-                    {$t('editor.quick_fixes')}
-                  </button>
-                  <div class="kebab-divider"></div>
-                  <button class="kebab-item danger" onclick={deleteFile}>
-                    <Icon name="trash" size={14} />
-                    {$t('app.delete')}
-                  </button>
-                </div>
-              {/if}
+                    <button
+                      class="kebab-item"
+                      onclick={() => {
+                        showRenameModal = true;
+                        renameTarget = selectedFile.split('/').pop() || '';
+                      }}
+                    >
+                      <Icon name="edit" size={14} />
+                      {$t('app.rename')}
+                    </button>
+                    <button class="kebab-item" onclick={openTemplatesModal}>
+                      <Icon name="settings" size={14} />
+                      {$t('editor.templates')}
+                    </button>
+                    {#if fileType === 'JSON'}
+                      <button class="kebab-item" onclick={() => (showGeneratorModal = true)}>
+                        <Icon name="settings" size={14} />
+                        {$t('editor.generator')}
+                      </button>
+                    {/if}
+                    <button class="kebab-item" onclick={applyQuickFixes}>
+                      <Icon name="settings" size={14} />
+                      {$t('editor.quick_fixes')}
+                    </button>
+                    <div class="kebab-divider"></div>
+                    <button class="kebab-item danger" onclick={deleteFile}>
+                      <Icon name="trash" size={14} />
+                      {$t('app.delete')}
+                    </button>
+                  </div>
+                {/if}
+              </div>
             </div>
           </div>
 

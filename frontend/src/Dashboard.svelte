@@ -24,6 +24,8 @@
   import EmptyState from './components/EmptyState.svelte';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import UnsavedChangesModal from './components/UnsavedChangesModal.svelte';
+  import SystemStatusCapsule from './components/status/SystemStatusCapsule.svelte';
+  import { capsuleConfigStore } from './lib/capsuleSettings';
   import {
     isAnySourceDirty,
     getDirtySources,
@@ -743,7 +745,17 @@
       </svg>
     </button>
     <span id="mobile-header-title" style="font-weight: 600; font-size: 16px;">XKeen CP</span>
-    <span style="width: 34px;"></span>
+    {#if $capsuleConfigStore.visible}
+      <SystemStatusCapsule
+        variant="mobile"
+        {systemStats}
+        activeKernel={$capabilities?.active_kernel}
+        isXkeenRunning={serviceStatus.xkeen === 'running'}
+        onSwitchTab={switchTab}
+      />
+    {:else}
+      <span style="width: 34px;"></span>
+    {/if}
   </header>
 
   <!-- Off-canvas overlay (mobile only) -->
@@ -787,6 +799,20 @@
     class:rail={$isSidebarCollapsed}
     inert={drawerIsModal}
   >
+    {#if $capsuleConfigStore.visible}
+      <div class="topbar" class:rail={$isSidebarCollapsed} class:hidden={currentTab === 'editor'}>
+        <div class="topbar-left"></div>
+        <div class="topbar-right">
+          <SystemStatusCapsule
+            variant="desktop"
+            {systemStats}
+            activeKernel={$capabilities?.active_kernel}
+            isXkeenRunning={serviceStatus.xkeen === 'running'}
+            onSwitchTab={switchTab}
+          />
+        </div>
+      </div>
+    {/if}
     <!-- Mihomo offline warning banner / Restarting notice -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
       {#if $isServiceRestarting}

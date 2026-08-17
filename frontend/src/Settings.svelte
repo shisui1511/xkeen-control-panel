@@ -15,6 +15,7 @@
   } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
+  import { capsuleConfigStore, updateCapsuleConfig } from './lib/capsuleSettings';
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -911,6 +912,59 @@
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
         </div>
+      </div>
+    </div>
+
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.section_capsule')}</div>
+      <div class="field-group">
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.capsule_visible')}</span>
+            <div class="field-row-desc">{$t('settings.capsule_visible_desc')}</div>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              checked={$capsuleConfigStore.visible}
+              onchange={(e) =>
+                updateCapsuleConfig({ visible: (e.target as HTMLInputElement).checked })}
+            />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          </label>
+        </div>
+        {#if $capsuleConfigStore.visible}
+          <div class="field-row">
+            <div>
+              <span class="field-row-name">{$t('settings.capsule_traffic')}</span>
+              <div class="field-row-desc">{$t('settings.capsule_traffic_desc')}</div>
+            </div>
+            <label class="toggle">
+              <input
+                type="checkbox"
+                checked={$capsuleConfigStore.showTraffic}
+                onchange={(e) =>
+                  updateCapsuleConfig({ showTraffic: (e.target as HTMLInputElement).checked })}
+              />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+          </div>
+          <div class="field-row">
+            <div>
+              <span class="field-row-name">{$t('settings.capsule_resources')}</span>
+              <div class="field-row-desc">{$t('settings.capsule_resources_desc')}</div>
+            </div>
+            <label class="toggle">
+              <input
+                type="checkbox"
+                checked={$capsuleConfigStore.showResources}
+                onchange={(e) =>
+                  updateCapsuleConfig({ showResources: (e.target as HTMLInputElement).checked })}
+              />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+          </div>
+        {/if}
       </div>
     </div>
 
