@@ -1418,11 +1418,11 @@
   "capsule.offline": "Offline",
   "capsule.load_avg": "Load Average: {l1} · {l2} · {l3}",
   "capsule.ram_details": "Used {used} of {total} ({free} free)",
-  "settings.section_capsule": "System Status Capsule",
-  "settings.capsule_visible": "Show capsule in top bar",
-  "settings.capsule_visible_desc": "Pinned widget with kernel status, resources, and live traffic",
+  "settings.section_capsule": "System Status Widget",
+  "settings.capsule_visible": "Show status in sidebar",
+  "settings.capsule_visible_desc": "Sidebar widget with kernel status, system resources, and live traffic",
   "settings.capsule_traffic": "Show traffic speed",
-  "settings.capsule_traffic_desc": "Live download and upload rate in capsule",
+  "settings.capsule_traffic_desc": "Live download and upload rate in the status widget",
   "settings.capsule_resources": "Show CPU & RAM usage",
-  "settings.capsule_resources_desc": "Processor and memory indicators"
+  "settings.capsule_resources_desc": "Processor and memory usage indicators"
 }

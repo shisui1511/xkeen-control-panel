@@ -1417,11 +1417,11 @@
   "capsule.offline": "Офлайн",
   "capsule.load_avg": "Load Average: {l1} · {l2} · {l3}",
   "capsule.ram_details": "Использовано {used} из {total} (свободно {free})",
-  "settings.section_capsule": "Капсула статуса системы",
-  "settings.capsule_visible": "Отображать капсулу в шапке",
-  "settings.capsule_visible_desc": "Закрепленный виджет со статусом ядра, ресурсов и трафика",
+  "settings.section_capsule": "Виджет статуса системы",
+  "settings.capsule_visible": "Отображать статус в боковой панели",
+  "settings.capsule_visible_desc": "Виджет со статусом ядра, системных ресурсов и живого трафика",
   "settings.capsule_traffic": "Показывать скорость трафика",
-  "settings.capsule_traffic_desc": "Живая скорость входящего и исходящего трафика в капсуле",
+  "settings.capsule_traffic_desc": "Живая скорость входящего и исходящего трафика в виджете",
   "settings.capsule_resources": "Показывать нагрузку CPU и RAM",
-  "settings.capsule_resources_desc": "Индикаторы процессора и оперативной памяти"
+  "settings.capsule_resources_desc": "Индикаторы нагрузки процессора и оперативной памяти"
 }

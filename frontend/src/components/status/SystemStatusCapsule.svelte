@@ -178,11 +178,12 @@
         <span class="kernel-name">{kernelDisplayName}</span>
       </div>
       <div class="kernel-right">
-        <span class="quick-ctrl-hint">
+        <span class="quick-ctrl-badge">
           <Icon name="zap" size={11} />
-        </span>
-        <span class="chevron-icon" class:open={isMenuOpen}>
-          <Icon name="chevronDown" size={11} />
+          <span>{$t('capsule.quick_actions')}</span>
+          <span class="chevron-icon" class:open={isMenuOpen}>
+            <Icon name="chevronDown" size={10} />
+          </span>
         </span>
       </div>
     </button>
@@ -224,6 +225,7 @@
               <span class="arr">↓</span>
               <span class="val">{downSpeedFormatted}</span>
             </span>
+            <span class="traffic-divider">·</span>
             <span class="traffic-speed up">
               <span class="arr">↑</span>
               <span class="val">{upSpeedFormatted}</span>
@@ -319,15 +321,22 @@
 <style>
   /* ==================== Sidebar Card Variant ==================== */
   .sidebar-status-card {
-    background: rgba(7, 24, 42, 0.75);
-    border: 1px solid var(--border, #1c3e5c);
-    border-radius: var(--radius-md, 6px);
-    margin: 6px 12px 10px;
+    background: rgba(7, 24, 42, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-md, 8px);
+    margin: 6px 12px 8px;
     padding: 8px 10px;
     display: flex;
     flex-direction: column;
     gap: 6px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    transition:
+      border-color var(--transition-fast),
+      background var(--transition-fast);
+  }
+
+  .sidebar-status-card:hover {
+    border-color: rgba(41, 194, 240, 0.2);
+    background: rgba(7, 24, 42, 0.6);
   }
 
   .sidebar-kernel-row {
@@ -337,7 +346,7 @@
     width: 100%;
     background: transparent;
     border: none;
-    padding: 2px 0;
+    padding: 2px 2px;
     cursor: pointer;
     color: var(--fg-primary, #d9e7f4);
     border-radius: 4px;
@@ -345,7 +354,7 @@
   }
 
   .sidebar-kernel-row:hover {
-    opacity: 0.9;
+    opacity: 0.95;
   }
 
   .kernel-left {
@@ -355,23 +364,35 @@
   }
 
   .kernel-name {
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 700;
-    letter-spacing: 0.02em;
+    letter-spacing: -0.01em;
+    color: #fff;
   }
 
   .kernel-right {
     display: flex;
     align-items: center;
     gap: 4px;
-    color: var(--fg-secondary, #8aa0b7);
   }
 
-  .quick-ctrl-hint {
+  .quick-ctrl-badge {
     display: inline-flex;
     align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(41, 194, 240, 0.12);
+    border: 1px solid rgba(41, 194, 240, 0.25);
     color: var(--accent, #29c2f0);
-    opacity: 0.8;
+    font-size: 10px;
+    font-weight: 700;
+    transition: all var(--transition-fast);
+  }
+
+  .sidebar-kernel-row:hover .quick-ctrl-badge {
+    background: rgba(41, 194, 240, 0.2);
+    border-color: var(--accent, #29c2f0);
   }
 
   .sidebar-metrics-block {
@@ -388,10 +409,10 @@
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid transparent;
-    border-radius: 4px;
-    padding: 3px 6px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 5px;
+    padding: 4px 8px;
     color: var(--fg-secondary, #8aa0b7);
     font-size: 11px;
     cursor: pointer;
@@ -427,6 +448,10 @@
   .traffic-speed.up .arr {
     color: #a78bfa;
     font-weight: 700;
+  }
+
+  .traffic-divider {
+    color: var(--fg-faint, #3e5774);
   }
 
   .res-item {

@@ -226,8 +226,8 @@ test.describe('System Status and Quick Actions in Sidebar', () => {
     await page.goto('/#/settings');
 
     const capsuleSection = page
-      .locator('.card', { hasText: 'Капсула статуса системы' })
-      .or(page.locator('.card', { hasText: 'System Status Capsule' }));
+      .locator('.card', { hasText: 'Виджет статуса системы' })
+      .or(page.locator('.card', { hasText: 'System Status Widget' }));
     await expect(capsuleSection).toBeVisible({ timeout: 5000 });
 
     const toggles = capsuleSection.locator('input[type="checkbox"]');
