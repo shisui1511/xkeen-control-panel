@@ -141,7 +141,7 @@ export class TrafficStreamManager {
           let sessionDown = this.state.sessionDown;
 
           if (this.lastTickTime > 0) {
-            const elapsedSec = (now - this.lastTickTime) / 1000;
+            const elapsedSec = Math.min((now - this.lastTickTime) / 1000, 2.5);
             sessionUp += upSpeed * elapsedSec;
             sessionDown += downSpeed * elapsedSec;
           }
@@ -166,6 +166,7 @@ export class TrafficStreamManager {
       };
 
       this.ws.onclose = () => {
+        this.lastTickTime = 0;
         this.updateState({ connected: false });
         if (this.subscribers.size > 0) {
           this.scheduleReconnect();
@@ -173,9 +174,11 @@ export class TrafficStreamManager {
       };
 
       this.ws.onerror = () => {
+        this.lastTickTime = 0;
         this.updateState({ connected: false });
       };
     } catch {
+      this.lastTickTime = 0;
       this.updateState({ connected: false });
       if (this.subscribers.size > 0) {
         this.scheduleReconnect();

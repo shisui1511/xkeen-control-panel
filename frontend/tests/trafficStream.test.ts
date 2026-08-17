@@ -143,5 +143,34 @@ describe('trafficStream', () => {
       vi.advanceTimersByTime(5100);
       expect(wsInstance.readyState).toBe(3); // CLOSED
     });
+
+    it('caps session traffic delta to prevent massive spikes after pause or sleep', () => {
+      const unsub = trafficStream.subscribe(() => {});
+      vi.advanceTimersByTime(20);
+
+      const wsInstance = MockWebSocket.instances[0];
+      expect(wsInstance).toBeDefined();
+
+      // First tick
+      wsInstance.onmessage?.({
+        data: JSON.stringify({ up: 1000, down: 2000 })
+      });
+      expect(trafficStream.getState().sessionUp).toBe(0);
+      expect(trafficStream.getState().sessionDown).toBe(0);
+
+      // Advance time by 60 seconds (simulating tab suspension)
+      vi.advanceTimersByTime(60000);
+
+      // Next tick with 1000 B/s up, 2000 B/s down
+      wsInstance.onmessage?.({
+        data: JSON.stringify({ up: 1000, down: 2000 })
+      });
+
+      // Delta should be capped at 2.5 seconds (not 60 seconds)
+      expect(trafficStream.getState().sessionUp).toBe(1000 * 2.5);
+      expect(trafficStream.getState().sessionDown).toBe(2000 * 2.5);
+
+      unsub();
+    });
   });
 });
