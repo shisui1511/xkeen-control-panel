@@ -281,7 +281,7 @@
     // Upload path
     let uLinePath = `M ${getX(0)} ${getUploadY(points[0].up, points[0].down)}`;
     for (let i = 1; i < points.length; i++) {
-      uLinePath += ` L ${getX(i)} ${getUploadY(points[0].up, points[0].down)}`;
+      uLinePath += ` L ${getX(i)} ${getUploadY(points[i].up, points[i].down)}`;
     }
     const uAreaPath = `${uLinePath} L ${getX(points.length - 1)} ${height} L ${getX(0)} ${height} Z`;
 
