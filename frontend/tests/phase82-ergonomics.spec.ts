@@ -447,10 +447,10 @@ test.describe('Phase 82: Ergonomics and UX improvements', () => {
       expect(text.trim()).not.toBe(':');
     }
 
-    // 1.1 Check device name badge rendered for 192.168.1.55
-    const deviceBadge = page.locator('.badge-client');
-    await expect(deviceBadge).toBeVisible();
-    await expect(deviceBadge).toContainText('Iphone 12');
+    // 1.1 Check device name rendered for 192.168.1.55
+    const deviceName = page.locator('.src-name');
+    await expect(deviceName).toBeVisible();
+    await expect(deviceName).toContainText('Iphone 12');
 
     // 1.2 Check source filtering by device name
     const filterInput = page.locator('#filter-source');

@@ -70,15 +70,10 @@
   let filterRule = $state('');
   let filterProxy = $state('');
 
-  // Source-name toggle
-  let showProcessName = $state(false);
-  let processModePatchPending = $state(false);
-
   let uniqueRules = $derived([...new Set(connections.map((c) => c.rule).filter(Boolean))].sort());
   let uniqueChains = $derived(
     [...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort()
   );
-  let isMihomoActive = $derived($capabilities === null || $capabilities.mihomo.reachable);
 
   async function loadClients() {
     try {
@@ -89,40 +84,6 @@
       }
     } catch (e: any) {
       if (e?.status === 401) return;
-    }
-  }
-
-  async function loadProcessMode() {
-    try {
-      const res = await apiFetch('/api/mihomo/proxy/configs');
-      if (res.ok) {
-        const cfg = await res.json();
-        showProcessName = cfg['find-process-mode'] === 'always';
-      }
-    } catch (e: any) {
-      if (e?.status === 401) return;
-    }
-  }
-
-  async function onToggleProcessName() {
-    if (processModePatchPending) return;
-    processModePatchPending = true;
-    try {
-      const res = await apiFetch('/api/mihomo/proxy/configs', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ 'find-process-mode': showProcessName ? 'always' : 'off' })
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (e: any) {
-      // Revert on network error or non-2xx HTTP response
-      showProcessName = !showProcessName;
-      if (e?.status === 401) return;
-      showToast('error', e instanceof Error ? e.message : String(e));
-    } finally {
-      processModePatchPending = false;
     }
   }
 
@@ -296,9 +257,14 @@
   }
 
   function getSourceName(conn: Connection): string {
-    if (showProcessName && conn.metadata.process) return conn.metadata.process;
     const client = getClientForConn(conn);
     const endpoint = formatEndpoint(conn);
+    if (conn.metadata.process) {
+      if (client && client.display_name && client.display_name !== client.ip) {
+        return `${client.display_name} (${conn.metadata.process}) ${endpoint}`;
+      }
+      return `${conn.metadata.process} (${endpoint})`;
+    }
     if (client && client.display_name && client.display_name !== client.ip) {
       return `${client.display_name} (${endpoint})`;
     }
@@ -403,7 +369,6 @@
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       loading = true;
       connectWS();
-      loadProcessMode();
     }
   });
 
@@ -435,26 +400,6 @@
       <p class="sub">{$t('conn.active')}</p>
     </div>
     <div class="ph-actions">
-      <label
-        class="toggle-label"
-        class:disabled={!isMihomoActive}
-        title={!isMihomoActive
-          ? $t('conn.process_mode_disabled_hint')
-          : $t('conn.process_mode_hint')}
-        for="show-process-name-toggle"
-      >
-        <label class="toggle-switch">
-          <input
-            id="show-process-name-toggle"
-            type="checkbox"
-            bind:checked={showProcessName}
-            onchange={onToggleProcessName}
-            disabled={!isMihomoActive || processModePatchPending}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-        {$t('conn.show_process_name')}
-      </label>
       <button
         class="btn btn-secondary"
         style="color:var(--danger);"
@@ -585,28 +530,33 @@
           {:else}
             {#each filteredConnections as conn (conn.id)}
               {@const speed = connectionSpeeds.get(conn.id)}
+              {@const client = getClientForConn(conn)}
               <tr class="conn-row">
                 <td class="col-src">
                   <div class="src-cell">
-                    {#if showProcessName && conn.metadata.process}
-                      <span
-                        class="badge badge-process"
-                        title={`${$t('conn.process_name')}: ${conn.metadata.process}`}
+                    {#if client && client.display_name && client.display_name !== client.ip}
+                      <div
+                        class="src-main"
+                        title={`${client.display_name}${client.mac ? ' (' + client.mac + ')' : ''}`}
                       >
-                        {conn.metadata.process}
-                      </span>
-                      <span class="mono src-endpoint-sub">{formatEndpoint(conn)}</span>
+                        <span class="src-name">{client.display_name}</span>
+                        {#if conn.metadata.process}
+                          <span
+                            class="badge-process-mini"
+                            title={`${$t('conn.process_name')}: ${conn.metadata.process}`}
+                          >
+                            {conn.metadata.process}
+                          </span>
+                        {/if}
+                      </div>
+                      <span class="mono src-sub">{formatEndpoint(conn)}</span>
+                    {:else if conn.metadata.process}
+                      <div class="src-main">
+                        <span class="badge-process-mini">{conn.metadata.process}</span>
+                      </div>
+                      <span class="mono src-sub">{formatEndpoint(conn)}</span>
                     {:else}
-                      {@const client = getClientForConn(conn)}
-                      <span class="mono src-endpoint">{formatEndpoint(conn)}</span>
-                      {#if client && client.display_name && client.display_name !== client.ip}
-                        <span
-                          class="badge badge-client"
-                          title={`${client.display_name}${client.mac ? ' (' + client.mac + ')' : ''}`}
-                        >
-                          {client.display_name}
-                        </span>
-                      {/if}
+                      <span class="mono src-main-ip">{formatEndpoint(conn)}</span>
                     {/if}
                   </div>
                 </td>
@@ -727,13 +677,6 @@
     margin-top: 2px;
   }
 
-  /* Toggle disabled state */
-  .toggle-label.disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-    pointer-events: none;
-  }
-
   /* Live indicator */
   .live-indicator {
     display: inline-flex;
@@ -834,52 +777,60 @@
     border: 1px solid rgba(167, 139, 250, 0.25);
   }
 
-  /* Source cell with client device badges and process names */
+  /* Source cell with client device names and process info */
   .src-cell {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
     align-items: flex-start;
+    justify-content: center;
+    min-width: 120px;
+    max-width: 220px;
   }
-  .src-endpoint {
+  .src-main {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+  }
+  .src-name {
     font-size: 13px;
-    line-height: 1.2;
+    font-weight: 600;
+    color: var(--fg-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
   }
-  .src-endpoint-sub {
+  .src-main-ip {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--fg-primary);
+    line-height: 1.25;
+  }
+  .src-sub {
     font-size: 11px;
     color: var(--fg-dim);
     line-height: 1.2;
+    letter-spacing: 0.01em;
+    opacity: 0.85;
   }
-  .badge-client {
+  .badge-process-mini {
     display: inline-flex;
     align-items: center;
-    max-width: 170px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: rgba(41, 194, 240, 0.12);
-    color: var(--accent, #29c2f0);
-    border: 1px solid rgba(41, 194, 240, 0.25);
-    letter-spacing: 0.02em;
-  }
-  .badge-process {
-    display: inline-flex;
-    align-items: center;
-    max-width: 170px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 1px 6px;
+    line-height: 1;
+    padding: 2px 5px;
     border-radius: 4px;
     background: rgba(167, 139, 250, 0.15);
-    color: #a78bfa;
+    color: #c4b5fd;
     border: 1px solid rgba(167, 139, 250, 0.25);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 110px;
   }
 
   /* Column priority — hide tier-2/3 columns on mobile */

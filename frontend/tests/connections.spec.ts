@@ -185,9 +185,9 @@ test.describe('Connections page — reconnect scenario', () => {
   });
 });
 
-// Тест тоггла — отдельная группа с capabilities.reachable: false
-test.describe('Connections page — toggle disabled when Mihomo offline', () => {
-  test('process-name toggle is disabled when Mihomo offline', async ({ page }) => {
+// Тест оффлайн состояния — отдельная группа с capabilities.reachable: false
+test.describe('Connections page — offline state when Mihomo offline', () => {
+  test('shows empty state when Mihomo offline', async ({ page }) => {
     await disableServiceWorker(page);
     // Настраиваем capabilities с mihomo.reachable: false
     await setupRestMocks(page, false);
@@ -198,9 +198,6 @@ test.describe('Connections page — toggle disabled when Mihomo offline', () => 
     });
 
     await page.goto('/#/connections');
-    await page.waitForSelector('.connections-table, .ph-actions', { timeout: 5000 });
-
-    // isMihomoActive = false → тоггл disabled
-    await expect(page.locator('.toggle-label input[type=checkbox]')).toBeDisabled();
+    await expect(page.locator('.empty-state')).toBeVisible({ timeout: 5000 });
   });
 });
