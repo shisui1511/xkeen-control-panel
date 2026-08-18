@@ -574,7 +574,7 @@
   {:else}
     <div class="profile-grid">
       {#each profiles as p}
-        {@const isActive = p.enabled && status?.active.some((a) => a.id === p.id)}
+        {@const isActive = p.enabled && status?.active?.some((a) => a.id === p.id)}
         <div class="card profile-card" class:active={isActive}>
           <div class="profile-card-header">
             <span class="profile-card-name">{p.name}</span>
