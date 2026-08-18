@@ -198,9 +198,6 @@ func main() {
 	srv.HandleProtected("/api/mihomo/connections/ws", api.ConnectionsWebSocket)
 
 	// Start background services
-	clientResolver := services.NewClientResolver()
-	api.SetClientResolver(clientResolver)
-
 	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, cfg.MihomoAPIURL)
 	smartProxySvc.SetMihomoService(api.MihomoService())
 	smartProxySvc.Start()
