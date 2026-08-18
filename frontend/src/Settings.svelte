@@ -891,19 +891,25 @@
             <span class="field-row-name">{$t('settings.theme')}</span>
             <div class="field-row-desc">{$t('settings.theme_desc')}</div>
           </div>
-          <div class="seg-btn">
+          <div class="seg-btn" role="radiogroup" aria-label={$t('settings.theme')}>
             <button
               class="seg-opt"
+              role="radio"
+              aria-checked={selectedTheme === 'light'}
               class:seg-active={selectedTheme === 'light'}
               onclick={() => setTheme('light')}>{$t('settings.theme_light_btn')}</button
             >
             <button
               class="seg-opt"
+              role="radio"
+              aria-checked={selectedTheme === 'dark'}
               class:seg-active={selectedTheme === 'dark'}
               onclick={() => setTheme('dark')}>{$t('settings.theme_dark_btn')}</button
             >
             <button
               class="seg-opt"
+              role="radio"
+              aria-checked={selectedTheme === 'auto'}
               class:seg-active={selectedTheme === 'auto'}
               onclick={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button
             >
@@ -914,20 +920,26 @@
             <span class="field-row-name">{$t('settings.density')}</span>
             <div class="field-row-desc">{$t('settings.density_desc')}</div>
           </div>
-          <div class="seg-btn">
+          <div class="seg-btn" role="radiogroup" aria-label={$t('settings.density')}>
             <button
               class="seg-opt"
+              role="radio"
+              aria-checked={selectedDensity === 'comfortable'}
               class:seg-active={selectedDensity === 'comfortable'}
               onclick={() => setDensity('comfortable')}
               >{$t('settings.density_comfortable_btn')}</button
             >
             <button
               class="seg-opt"
+              role="radio"
+              aria-checked={selectedDensity === 'compact'}
               class:seg-active={selectedDensity === 'compact'}
               onclick={() => setDensity('compact')}>{$t('settings.density_compact_btn')}</button
             >
             <button
               class="seg-opt"
+              role="radio"
+              aria-checked={selectedDensity === 'auto'}
               class:seg-active={selectedDensity === 'auto'}
               onclick={() => setDensity('auto')}>{$t('settings.density_auto_btn')}</button
             >
@@ -1346,7 +1358,6 @@
         <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
           <input
             class="input"
-            style="width: 100%; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.2); color: var(--fg-primary);"
             type="text"
             placeholder={$t('settings.snapshot_label_placeholder')}
             bind:value={snapshotLabel}
@@ -1354,15 +1365,15 @@
           />
         </div>
         <button
-          class="btn"
-          style="background: #29c2f0; color: #fff; border: none; display: flex; align-items: center; gap: 8px; font-weight: 500; min-width: 150px; justify-content: center; transition: all 0.2s;"
+          class="btn btn-primary"
+          style="min-width: 150px;"
           onclick={createSnapshot}
           disabled={creatingSnapshot || uploading || restoringSnapshot !== ''}
         >
           {#if creatingSnapshot}
             <span
               class="spinner"
-              style="border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid #fff; border-radius: 50%; width: 14px; height: 14px; display: inline-block; animation: spin 1s linear infinite;"
+              style="border: 2px solid color-mix(in srgb, currentColor 30%, transparent); border-top: 2px solid currentColor; border-radius: 50%; width: 14px; height: 14px; display: inline-block; animation: spin 1s linear infinite;"
             ></span>
             <span>{$t('app.loading')}</span>
           {:else}
@@ -1373,10 +1384,7 @@
       </div>
 
       <!-- Interactive backup table -->
-      <div
-        class="table-container"
-        style="margin-bottom: 20px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.15);"
-      >
+      <div class="table-container" style="margin-bottom: 20px;">
         {#if snapshots.length === 0}
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; gap: 12px;"
@@ -1392,7 +1400,7 @@
         {:else}
           <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">
             <thead>
-              <tr style="background: rgba(0, 0, 0, 0.3); border-bottom: 1px solid var(--border);">
+              <tr style="background: rgba(0, 0, 0, 0.18); border-bottom: 1px solid var(--border);">
                 <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 18%;"
                   >ID</th
                 >
@@ -1415,7 +1423,7 @@
               {#each snapshots as snap}
                 <tr
                   class="backup-tr"
-                  style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.2s ease;"
+                  style="border-bottom: 1px solid var(--border-light); transition: background 0.2s ease;"
                 >
                   <td
                     style="padding: 12px 16px; font-family: var(--font-mono); color: var(--fg-primary);"
@@ -1451,7 +1459,7 @@
                         {#if restoringSnapshot === snap.id}
                           <span
                             class="spinner"
-                            style="border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid var(--fg-primary); border-radius: 50%; width: 12px; height: 12px; display: inline-block; animation: spin 1s linear infinite;"
+                            style="border: 2px solid color-mix(in srgb, currentColor 30%, transparent); border-top: 2px solid currentColor; border-radius: 50%; width: 12px; height: 12px; display: inline-block; animation: spin 1s linear infinite;"
                           ></span>
                           <span>{$t('app.loading')}</span>
                         {:else}
@@ -1483,10 +1491,10 @@
         class="backup-dropzone {isDragOver ? 'drag-over' : ''} {uploading ? 'uploading' : ''}"
         disabled={uploading}
         style="width: 100%; border-radius: var(--radius-md); padding: 30px 20px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px dashed {isDragOver
-          ? '#29c2f0'
+          ? 'var(--accent)'
           : 'var(--border)'}; background: {isDragOver
-          ? 'rgba(41, 194, 240, 0.08)'
-          : 'rgba(0, 0, 0, 0.2)'}; font: inherit; color: inherit; gap: 8px; transition: all 0.3s ease; position: relative;"
+          ? 'var(--accent-soft)'
+          : 'var(--bg-elevated)'}; font: inherit; color: inherit; gap: 8px; transition: all 0.3s ease; position: relative;"
         ondragover={handleDragOver}
         ondragleave={handleDragLeave}
         ondrop={handleDrop}
@@ -1497,14 +1505,14 @@
         {#if uploading}
           <span
             class="spinner"
-            style="border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #29c2f0; border-radius: 50%; width: 30px; height: 30px; display: inline-block; animation: spin 1s linear infinite; margin-bottom: 8px;"
+            style="border: 3px solid var(--border); border-top: 3px solid var(--accent); border-radius: 50%; width: 30px; height: 30px; display: inline-block; animation: spin 1s linear infinite; margin-bottom: 8px;"
           ></span>
           <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
             {$t('settings.snapshot_uploading')}
           </div>
         {:else}
           <span style="transition: color 0.3s; margin-bottom: 4px; display: inline-flex;">
-            <Icon name="upload" size={32} color={isDragOver ? '#29c2f0' : 'var(--fg-dim)'} />
+            <Icon name="upload" size={32} color={isDragOver ? 'var(--accent)' : 'var(--fg-dim)'} />
           </span>
           <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
             {isDragOver ? $t('settings.drop_file_to_upload') : $t('settings.select_or_drag_file')}
