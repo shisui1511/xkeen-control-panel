@@ -448,7 +448,7 @@
       {#if trafficData.length < 2}
         <div class="chart-empty" style="flex-direction: column; gap: 8px;">
           <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-            <span class="spinner">...</span>
+            <span class="spinner" style="--spinner-size: 14px;"></span>
             <span style="font-weight: 700;">{$t('traffic.waiting')}</span>
           </div>
           <p style="font-size: 14px; color: var(--fg-dim); margin: 0;">

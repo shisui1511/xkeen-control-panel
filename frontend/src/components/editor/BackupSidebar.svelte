@@ -74,7 +74,7 @@
           <div class="diff-body">
             {#if backupLoading}
               <div style="display:grid;place-items:center;height:100px;">
-                <div class="spinner"></div>
+                <div class="spinner" style="--spinner-size: 24px;"></div>
               </div>
             {:else}
               {#each diffGroups as group}
@@ -279,20 +279,5 @@
     height: 100%;
     color: var(--fg-faint);
     font-size: 12px;
-  }
-
-  .spinner {
-    width: 24px;
-    height: 24px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

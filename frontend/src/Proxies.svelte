@@ -1863,9 +1863,10 @@
                           title={$t('proxies.test_single')}
                         >
                           {#if testingProxy === proxyName}
-                            <span class="spinner" style="font-size: 10px; font-family: monospace;"
-                              >...</span
-                            >
+                            <span
+                              class="spinner"
+                              style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
+                            ></span>
                           {:else}
                             <svg
                               width="12"

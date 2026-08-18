@@ -1133,7 +1133,10 @@
 
       {#if reconnecting}
         <div class="reconnect-overlay">
-          <div class="reconnect-spinner"></div>
+          <div
+            class="spinner"
+            style="--spinner-size: 28px; --spinner-w: 3px; --spinner-track: color-mix(in srgb, var(--accent) 25%, transparent);"
+          ></div>
           <div class="reconnect-text">
             <span>{$t('settings.update_reconnecting')}</span>
             <span class="reconnect-dots"></span>
@@ -1373,7 +1376,7 @@
           {#if creatingSnapshot}
             <span
               class="spinner"
-              style="border: 2px solid color-mix(in srgb, currentColor 30%, transparent); border-top: 2px solid currentColor; border-radius: 50%; width: 14px; height: 14px; display: inline-block; animation: spin 1s linear infinite;"
+              style="--spinner-size: 14px; --spinner-track: color-mix(in srgb, currentColor 30%, transparent); --spinner-color: currentColor;"
             ></span>
             <span>{$t('app.loading')}</span>
           {:else}
@@ -1459,7 +1462,7 @@
                         {#if restoringSnapshot === snap.id}
                           <span
                             class="spinner"
-                            style="border: 2px solid color-mix(in srgb, currentColor 30%, transparent); border-top: 2px solid currentColor; border-radius: 50%; width: 12px; height: 12px; display: inline-block; animation: spin 1s linear infinite;"
+                            style="--spinner-size: 12px; --spinner-track: color-mix(in srgb, currentColor 30%, transparent); --spinner-color: currentColor;"
                           ></span>
                           <span>{$t('app.loading')}</span>
                         {:else}
@@ -1503,9 +1506,7 @@
         }}
       >
         {#if uploading}
-          <span
-            class="spinner"
-            style="border: 3px solid var(--border); border-top: 3px solid var(--accent); border-radius: 50%; width: 30px; height: 30px; display: inline-block; animation: spin 1s linear infinite; margin-bottom: 8px;"
+          <span class="spinner" style="--spinner-size: 30px; --spinner-w: 3px; margin-bottom: 8px;"
           ></span>
           <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
             {$t('settings.snapshot_uploading')}
@@ -2054,22 +2055,6 @@
     border-radius: var(--radius-md, 8px);
   }
 
-  .reconnect-spinner {
-    width: 28px;
-    height: 28px;
-    border: 3px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    flex-shrink: 0;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   .reconnect-text {
     display: flex;
     align-items: center;
@@ -2209,21 +2194,8 @@
     font-size: 12px;
   }
 
-  .backup-tr:hover {
-    background: rgba(255, 255, 255, 0.03) !important;
-  }
-
   .backup-dropzone:hover {
-    border-color: #29c2f0 !important;
-    background: rgba(41, 194, 240, 0.04) !important;
-  }
-
-  @keyframes spin {
-    0% {
-      transform: rotate(0deg);
-    }
-    100% {
-      transform: rotate(360deg);
-    }
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
 </style>

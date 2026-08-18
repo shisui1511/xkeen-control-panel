@@ -103,7 +103,7 @@
 
     {#if previewLoading}
       <div class="loading-state">
-        <div class="spinner"></div>
+        <div class="spinner" style="--spinner-size: 20px;"></div>
         <span>{$t('app.loading')}</span>
       </div>
     {:else if errorMessage}
@@ -205,7 +205,7 @@
 
     {#if loading}
       <div class="step-progress">
-        <div class="spinner-small"></div>
+        <div class="spinner" style="--spinner-size: 14px;"></div>
         <span>{stepMessage}</span>
       </div>
     {/if}
@@ -266,30 +266,6 @@
     padding: 30px 0;
     color: var(--fg-dim);
     font-size: 13px;
-  }
-
-  .spinner {
-    width: 20px;
-    height: 20px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  .spinner-small {
-    width: 14px;
-    height: 14px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   .diff-container {

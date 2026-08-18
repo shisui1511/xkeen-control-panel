@@ -813,12 +813,6 @@
     vertical-align: middle;
   }
 
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   .empty-providers {
     display: flex;
     flex-direction: column;

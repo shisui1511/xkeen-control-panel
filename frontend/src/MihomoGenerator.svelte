@@ -1657,10 +1657,7 @@
       class="loading-state-block"
       style="padding: 48px; text-align: center; color: var(--fg-secondary);"
     >
-      <div
-        class="spinner"
-        style="width: 24px; height: 24px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 12px;"
-      ></div>
+      <div class="spinner" style="--spinner-size: 24px; margin: 0 auto 12px;"></div>
       <p>{$t('editor.loading_definition')}</p>
     </div>
   {:else if schemaError}
@@ -2304,7 +2301,7 @@
                     {#if dnsRedirectLoading}
                       <span
                         class="spinner"
-                        style="display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"
+                        style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
                       ></span>
                     {/if}
                     {$t('editor.dns_intercept_enable')}
@@ -3430,11 +3427,5 @@
 
   .slider.round:before {
     border-radius: 50%;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

@@ -1695,7 +1695,7 @@
               <div
                 style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:rgba(5,13,22,0.7);z-index:10;"
               >
-                <div class="spinner"></div>
+                <div class="spinner" style="--spinner-size: 24px;"></div>
               </div>
             {/if}
             {#each tabs as tab (tab.path)}
@@ -2466,15 +2466,6 @@
     animation: spin 0.8s linear infinite;
   }
 
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   .templates-body-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -2678,21 +2669,6 @@
 
   .diff-line-unchanged {
     color: var(--fg-secondary);
-  }
-
-  .spinner {
-    width: 24px;
-    height: 24px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   .btn-accent {

@@ -415,7 +415,10 @@
         title={$t('dat.update_all')}
       >
         {#if globalUpdating}
-          <span class="spinner" style="margin-right: 6px;">...</span>
+          <span
+            class="spinner"
+            style="--spinner-size: 13px; --spinner-track: currentColor; --spinner-color: transparent; margin-right: 6px;"
+          ></span>
           {$t('app.loading')}
         {:else}
           <svg
@@ -1254,17 +1257,6 @@
     line-height: 1;
     font-size: 14px;
     height: auto;
-  }
-
-  .spinner {
-    display: inline-block;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   /* ── Tag Browser Modal (Right-docked Drawer) ── */

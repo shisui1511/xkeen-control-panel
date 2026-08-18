@@ -428,6 +428,25 @@ h2.card-title {
   color: #fff;
 }
 
+/* ------------ Spinner ------------- */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spinner {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+  width: var(--spinner-size, 16px);
+  height: var(--spinner-size, 16px);
+  border: var(--spinner-w, 2px) solid var(--spinner-track, var(--border));
+  border-top-color: var(--spinner-color, var(--accent));
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
 /* ------------ Input ------------- */
 .input {
   width: 100%;
