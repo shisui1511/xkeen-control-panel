@@ -79,7 +79,7 @@ func (r *ClientResolver) SetRCIURL(url string) {
 // GetClients возвращает карту IP -> ClientInfo.
 func (r *ClientResolver) GetClients() map[string]ClientInfo {
 	r.mu.RLock()
-	if r.cache != nil && time.Since(r.lastFetch) < r.ttl {
+	if !r.lastFetch.IsZero() && time.Since(r.lastFetch) < r.ttl {
 		copied := copyClientMap(r.cache)
 		r.mu.RUnlock()
 		return copied
@@ -90,14 +90,14 @@ func (r *ClientResolver) GetClients() map[string]ClientInfo {
 	defer r.mu.Unlock()
 
 	// Двойная проверка после взятия write lock
-	if r.cache != nil && time.Since(r.lastFetch) < r.ttl {
+	if !r.lastFetch.IsZero() && time.Since(r.lastFetch) < r.ttl {
 		return copyClientMap(r.cache)
 	}
 
 	clients := r.fetchClients()
+	r.lastFetch = time.Now()
 	if len(clients) > 0 {
 		r.cache = clients
-		r.lastFetch = time.Now()
 		return copyClientMap(r.cache)
 	}
 

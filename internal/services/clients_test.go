@@ -208,3 +208,45 @@ host:
 		t.Fatalf("fallback to ndmc failed: %+v", clients3)
 	}
 }
+
+func TestClientResolverNegativeCaching(t *testing.T) {
+	ndmcCalls := 0
+	resolver := NewClientResolver()
+	resolver.SetRCIURL("http://127.0.0.1:1/invalid")
+	resolver.SetTTL(50 * time.Millisecond)
+	resolver.execNdmc = func(ctx context.Context) ([]byte, error) {
+		ndmcCalls++
+		return nil, context.DeadlineExceeded
+	}
+	resolver.readArp = func() ([]byte, error) {
+		return nil, context.DeadlineExceeded
+	}
+
+	// First call -> fails, but updates lastFetch
+	clients1 := resolver.GetClients()
+	if len(clients1) != 0 {
+		t.Fatalf("expected empty map, got %v", clients1)
+	}
+	if ndmcCalls != 1 {
+		t.Fatalf("expected ndmcCalls=1, got %d", ndmcCalls)
+	}
+
+	// Second call within TTL -> negative cached, should not call ndmc again
+	clients2 := resolver.GetClients()
+	if len(clients2) != 0 {
+		t.Fatalf("expected empty map, got %v", clients2)
+	}
+	if ndmcCalls != 1 {
+		t.Fatalf("expected ndmcCalls=1 (negative cached), got %d", ndmcCalls)
+	}
+
+	// Wait for TTL to expire
+	time.Sleep(60 * time.Millisecond)
+
+	// Third call after TTL -> attempts fetch again
+	resolver.GetClients()
+	if ndmcCalls != 2 {
+		t.Fatalf("expected ndmcCalls=2 after TTL expiry, got %d", ndmcCalls)
+	}
+}
+
