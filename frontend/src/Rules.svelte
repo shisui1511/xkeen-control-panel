@@ -7,6 +7,12 @@
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
 
+  interface Props {
+    onSwitchTab?: (tab: string) => void;
+  }
+
+  let { onSwitchTab = () => {} }: Props = $props();
+
   interface Rule {
     type: string;
     payload: string;
@@ -22,18 +28,18 @@
     vehicleType: string;
   }
 
-  let rules: Rule[] = [];
-  let loading = false;
-  let error = '';
-  let searchQuery = '';
-  let typeFilter = '';
-  let proxyFilter = '';
-  let activeTab: 'rules' | 'providers' = 'rules';
+  let rules: Rule[] = $state([]);
+  let loading = $state(false);
+  let error = $state('');
+  let searchQuery = $state('');
+  let typeFilter = $state('');
+  let proxyFilter = $state('');
+  let activeTab: 'rules' | 'providers' = $state('rules');
 
-  let ruleProviders: RuleProvider[] = [];
-  let loadingProviders = false;
-  let updatingProvider: string | null = null;
-  let updatingAll = false;
+  let ruleProviders: RuleProvider[] = $state([]);
+  let loadingProviders = $state(false);
+  let updatingProvider: string | null = $state(null);
+  let updatingAll = $state(false);
 
   async function fetchRules() {
     loading = true;
@@ -178,7 +184,7 @@
     return 'status-badge';
   }
 
-  let mihomoLaunching = false;
+  let mihomoLaunching = $state(false);
   let _launchTimer: ReturnType<typeof setTimeout> | null = null;
 
   onDestroy(() => {
@@ -211,7 +217,7 @@
     }
   }
 
-  let activeDropdownRule: Rule | null = null;
+  let activeDropdownRule: Rule | null = $state(null);
 
   function toggleDropdown(event: MouseEvent, rule: Rule) {
     event.stopPropagation();
@@ -256,24 +262,28 @@
     closeDropdowns();
   }
 
-  $: filteredRules = rules.filter((rule) => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      if (!rule.payload.toLowerCase().includes(q) && !rule.proxy.toLowerCase().includes(q))
-        return false;
-    }
-    if (typeFilter && rule.type !== typeFilter) return false;
-    if (proxyFilter && rule.proxy !== proxyFilter) return false;
-    return true;
-  });
-  $: nonMatchRules = filteredRules.filter((r) => r.type.toUpperCase() !== 'MATCH');
-  $: matchRules = filteredRules.filter((r) => r.type.toUpperCase() === 'MATCH');
+  let filteredRules = $derived(
+    rules.filter((rule) => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        if (!rule.payload.toLowerCase().includes(q) && !rule.proxy.toLowerCase().includes(q))
+          return false;
+      }
+      if (typeFilter && rule.type !== typeFilter) return false;
+      if (proxyFilter && rule.proxy !== proxyFilter) return false;
+      return true;
+    })
+  );
+  let nonMatchRules = $derived(filteredRules.filter((r) => r.type.toUpperCase() !== 'MATCH'));
+  let matchRules = $derived(filteredRules.filter((r) => r.type.toUpperCase() === 'MATCH'));
 
   let _didFetchProviders = false;
-  $: if ($capabilities?.mihomo.reachable && !_didFetchProviders) {
-    _didFetchProviders = true;
-    fetchRuleProviders();
-  }
+  $effect(() => {
+    if ($capabilities?.mihomo?.reachable && !_didFetchProviders) {
+      _didFetchProviders = true;
+      fetchRuleProviders();
+    }
+  });
 
   onMount(() => {
     if ($capabilities === null || $capabilities.mihomo.reachable) {

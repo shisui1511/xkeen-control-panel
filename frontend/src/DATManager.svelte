@@ -6,7 +6,11 @@
   import { showToast, capabilities } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
 
-  export const onSwitchTab: (tab: string) => void = () => {};
+  interface Props {
+    onSwitchTab?: (tab: string) => void;
+  }
+
+  let { onSwitchTab = () => {} }: Props = $props();
 
   function autofocusAction(node: HTMLElement) {
     node.focus();
@@ -32,12 +36,12 @@
     count: number;
   }
 
-  let files: DATFile[] = [];
-  let loading = false;
-  let error = '';
-  let globalUpdating = false;
-  let rollbacking = false;
-  let updatingFile: string | null = null;
+  let files: DATFile[] = $state([]);
+  let loading = $state(false);
+  let error = $state('');
+  let globalUpdating = $state(false);
+  let rollbacking = $state(false);
+  let updatingFile: string | null = $state(null);
 
   // Tag browser state
   let tagDrawer: {
@@ -48,7 +52,15 @@
     error: string;
     search: string;
     copied: string;
-  } = { open: false, file: null, tags: [], loading: false, error: '', search: '', copied: '' };
+  } = $state({
+    open: false,
+    file: null,
+    tags: [],
+    loading: false,
+    error: '',
+    search: '',
+    copied: ''
+  });
 
   // Entry browser state
   let entryDrawer: {
@@ -63,7 +75,7 @@
     error: string;
     search: string;
     copied: string;
-  } = {
+  } = $state({
     open: false,
     file: null,
     tag: '',
@@ -75,7 +87,7 @@
     error: '',
     search: '',
     copied: ''
-  };
+  });
 
   async function fetchFiles() {
     loading = true;
@@ -261,9 +273,11 @@
     }, 1500);
   }
 
-  $: filteredTags = tagDrawer.search.trim()
-    ? tagDrawer.tags.filter((t) => t.tag.toLowerCase().includes(tagDrawer.search.toLowerCase()))
-    : tagDrawer.tags;
+  let filteredTags = $derived(
+    tagDrawer.search.trim()
+      ? tagDrawer.tags.filter((t) => t.tag.toLowerCase().includes(tagDrawer.search.toLowerCase()))
+      : tagDrawer.tags
+  );
 
   function formatSize(b: number): string {
     if (b >= 1024 * 1024) return (b / (1024 * 1024)).toFixed(2) + ' MB';
@@ -334,21 +348,25 @@
     return formatDate(ts);
   }
 
-  $: xrayFiles = files.filter((f) => f.type === 'xray');
-  $: mihomoFiles = files.filter((f) => f.type === 'mihomo');
-  $: otherFiles = files.filter((f) => f.type !== 'xray' && f.type !== 'mihomo');
+  let xrayFiles = $derived(files.filter((f) => f.type === 'xray'));
+  let mihomoFiles = $derived(files.filter((f) => f.type === 'mihomo'));
+  let otherFiles = $derived(files.filter((f) => f.type !== 'xray' && f.type !== 'mihomo'));
 
-  $: activeKernel = $capabilities?.active_kernel || null;
-  $: displayedFiles = files.filter((f) => {
-    if (f.type === 'xray') return activeKernel === null || activeKernel === 'xray';
-    if (f.type === 'mihomo') return activeKernel === null || activeKernel === 'mihomo';
-    return true; // Прочие файлы всегда показываются
-  });
+  let activeKernel = $derived($capabilities?.active_kernel || null);
+  let displayedFiles = $derived(
+    files.filter((f) => {
+      if (f.type === 'xray') return activeKernel === null || activeKernel === 'xray';
+      if (f.type === 'mihomo') return activeKernel === null || activeKernel === 'mihomo';
+      return true; // Прочие файлы всегда показываются
+    })
+  );
 
-  $: actualCount = displayedFiles.filter((f) => getFileStatus(f) === 'ok').length;
-  $: missingCount = displayedFiles.filter((f) => !f.exists).length;
-  $: totalSize = displayedFiles.reduce((sum, f) => sum + (f.size || 0), 0);
-  $: lastUpdated = displayedFiles.reduce((max, f) => Math.max(max, f.last_update || 0), 0);
+  let actualCount = $derived(displayedFiles.filter((f) => getFileStatus(f) === 'ok').length);
+  let missingCount = $derived(displayedFiles.filter((f) => !f.exists).length);
+  let totalSize = $derived(displayedFiles.reduce((sum, f) => sum + (f.size || 0), 0));
+  let lastUpdated = $derived(
+    displayedFiles.reduce((max, f) => Math.max(max, f.last_update || 0), 0)
+  );
 
   onMount(fetchFiles);
 </script>

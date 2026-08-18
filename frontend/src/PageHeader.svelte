@@ -1,12 +1,27 @@
 <script lang="ts">
   import { t } from './i18n';
+  import type { Snippet } from 'svelte';
   import Breadcrumbs from './Breadcrumbs.svelte';
 
-  export let title: string;
-  export let subtitle: string = '';
-  export let breadcrumbs: { label: string; tab?: string }[] = [];
-  export let onSwitchTab: (tab: string) => void = () => {};
-  export let hideHome: boolean = false;
+  interface Props {
+    title: string;
+    subtitle?: string;
+    breadcrumbs?: { label: string; tab?: string }[];
+    onSwitchTab?: (tab: string) => void;
+    hideHome?: boolean;
+    actions?: Snippet;
+    children?: Snippet;
+  }
+
+  let {
+    title,
+    subtitle = '',
+    breadcrumbs = [],
+    onSwitchTab = () => {},
+    hideHome = false,
+    actions,
+    children
+  }: Props = $props();
 </script>
 
 <!-- Styles live in global.css under .page-header / .page-header-content / .page-header-actions -->
@@ -19,8 +34,15 @@
         <p class="text-secondary" style="margin: 6px 0 0;">{subtitle}</p>
       {/if}
     </div>
-    <div class="page-header-actions">
-      <slot name="actions" />
-    </div>
+    {#if actions || children}
+      <div class="page-header-actions">
+        {#if actions}
+          {@render actions()}
+        {/if}
+        {#if children}
+          {@render children()}
+        {/if}
+      </div>
+    {/if}
   </div>
 </div>

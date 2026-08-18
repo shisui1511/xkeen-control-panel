@@ -238,16 +238,12 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     const largeGroup = page.locator('.group-card').filter({ hasText: 'LargeGroup' }).first();
     await expect(largeGroup).toBeVisible();
 
-    // Свёрнутая группа показывает dot-container и не показывает proxy-grid
-    const dotContainer = largeGroup.locator('.dot-container');
-    await expect(dotContainer).toBeVisible();
+    // Свёрнутая группа показывает health-bar и не показывает proxy-grid
+    const healthBar = largeGroup.locator('.health-bar');
+    await expect(healthBar).toBeVisible();
 
     const proxyGrid = largeGroup.locator('.proxy-grid');
     await expect(proxyGrid).toBeHidden();
-
-    // Количество dot-индикаторов должно быть равно 12
-    const dotsCount = await largeGroup.locator('.dot-indicator').count();
-    expect(dotsCount).toBe(12);
   });
 
   // D-05: Toggle — клик по gc-head разворачивает/сворачивает группу
@@ -270,12 +266,13 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     await expect(largeGroup.locator('.proxy-grid')).toBeHidden();
   });
 
-  // D-07: Клик по dot-indicator переключает активный прокси
+  // D-07: Клик по прокси в Selector-группе переключает активный прокси
   test('D-07: клик по .dot-indicator в Selector-группе переключает активный прокси', async ({
     page
   }) => {
     const largeGroup = page.locator('.group-card').filter({ hasText: 'LargeGroup' }).first();
-    const dots = largeGroup.locator('.dot-indicator');
+    const gcHead = largeGroup.locator('.gc-head').first();
+    await gcHead.click();
 
     // Перехватываем PUT-запрос
     let putRequest: any = null;
@@ -290,8 +287,9 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
       });
     });
 
-    // Кликаем по второй точке (proxy-02)
-    await dots.nth(1).click();
+    // Кликаем по второй карточке (proxy-02)
+    const cards = largeGroup.locator('.proxy-card');
+    await cards.nth(1).click();
 
     expect(putRequest).not.toBeNull();
     expect(putRequest.name).toBe('proxy-02');

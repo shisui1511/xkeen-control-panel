@@ -260,7 +260,7 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     const gcHead = ytGroup.locator('.gc-head').first();
 
     // Check if collapsed initially and expand
-    const isCollapsed = await ytGroup.locator('.dot-container').isVisible();
+    const isCollapsed = await ytGroup.locator('.health-bar').isVisible();
     if (isCollapsed) {
       await gcHead.click();
     }
@@ -286,18 +286,13 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
       await gcHead.click();
     }
 
-    // Verify dot indicators container
-    const dotContainer = ytGroup.locator('.dot-container');
-    await expect(dotContainer).toBeVisible();
+    // Verify health bar container
+    const healthBar = ytGroup.locator('.health-bar');
+    await expect(healthBar).toBeVisible();
 
-    // Verify dots are rendered (12 dots for 12 proxies)
-    const dots = dotContainer.locator('.dot-indicator');
-    await expect(dots).toHaveCount(12);
-
-    // Verify some tooltips
-    const firstDot = dots.first();
-    const title = await firstDot.getAttribute('title');
-    expect(title).toContain('RU-Node-01: 45'); // name + delay
+    // Verify segments exist
+    const segments = healthBar.locator('.health-segment');
+    await expect(segments.first()).toBeVisible();
   });
 
   test('Brand icons - YouTube group displays branding', async ({ page }) => {
@@ -312,7 +307,7 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     const gcHead = ytGroup.locator('.gc-head').first();
 
     // Ensure expanded
-    const isCollapsed = await ytGroup.locator('.dot-container').isVisible();
+    const isCollapsed = await ytGroup.locator('.health-bar').isVisible();
     if (isCollapsed) {
       await gcHead.click();
     }
@@ -332,7 +327,7 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     const gcHead = ytGroup.locator('.gc-head').first();
 
     // Ensure expanded
-    if (await ytGroup.locator('.dot-container').isVisible()) {
+    if (await ytGroup.locator('.health-bar').isVisible()) {
       await gcHead.click();
     }
 
@@ -356,7 +351,7 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     await expect(fastGroup).toBeVisible();
 
     // Inside YouTube, only US-Node-02 card should be visible
-    if (await ytGroup.locator('.dot-container').isVisible()) {
+    if (await ytGroup.locator('.health-bar').isVisible()) {
       await ytGroup.locator('.gc-head').click();
     }
     const visibleCards = ytGroup.locator('.proxy-card');
@@ -381,8 +376,8 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
 
     const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
     const fastGroup = page.locator('.group-card').filter({ hasText: 'FastGroup' }).first();
-    await expect(ytGroup.locator('.dot-container')).toBeVisible();
-    await expect(fastGroup.locator('.dot-container')).toBeVisible();
+    await expect(ytGroup.locator('.health-bar')).toBeVisible();
+    await expect(fastGroup.locator('.health-bar')).toBeVisible();
 
     // Click expand all
     await expandAllBtn.click();
@@ -392,7 +387,7 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
 
   test('Node Switch PUT API - click changes node and calls API', async ({ page }) => {
     const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
-    if (await ytGroup.locator('.dot-container').isVisible()) {
+    if (await ytGroup.locator('.health-bar').isVisible()) {
       await ytGroup.locator('.gc-head').click();
     }
 

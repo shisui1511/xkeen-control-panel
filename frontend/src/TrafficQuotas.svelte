@@ -9,7 +9,11 @@
   import Icon from './lib/components/Icon.svelte';
   import { apiFetch, apiFetchJSON } from './lib/api';
 
-  export const onSwitchTab: (tab: string) => void = () => {};
+  interface Props {
+    onSwitchTab?: (tab: string) => void;
+  }
+
+  let { onSwitchTab = () => {} }: Props = $props();
 
   interface Quota {
     id: string;
@@ -41,34 +45,34 @@
     timestamp: number;
   }
 
-  let quotas: Quota[] = [];
-  let stats: any = null;
-  let alerts: Alert[] = [];
-  let loading = true;
-  let error = '';
-  let activeTab: 'quotas' | 'stats' | 'alerts' = 'quotas';
-  let togglingQuotas: Record<string, boolean> = {};
+  let quotas: Quota[] = $state([]);
+  let stats: any = $state(null);
+  let alerts: Alert[] = $state([]);
+  let loading = $state(true);
+  let error = $state('');
+  let activeTab: 'quotas' | 'stats' | 'alerts' = $state('quotas');
+  let togglingQuotas: Record<string, boolean> = $state({});
 
   // Forecast state
-  let selectedForecastPeriod: 'daily' | 'weekly' | 'monthly' = 'monthly';
-  let forecastValue: number | null = null;
-  let showForecastCalculating = false;
+  let selectedForecastPeriod: 'daily' | 'weekly' | 'monthly' = $state('monthly');
+  let forecastValue: number | null = $state(null);
+  let showForecastCalculating = $state(false);
 
   // Form state
-  let showForm = false;
-  let editingQuota: Quota | null = null;
-  let formName = '';
-  let formTargetType: 'global' | 'proxy' | 'ip' | 'mac' | 'user' | string = 'global';
-  let formTargetID = '';
-  let formLimitValue = 10;
-  let formLimitUnit = 'GB';
-  let formPeriod: 'daily' | 'weekly' | 'monthly' | string = 'monthly';
-  let formAlertThreshold = 80;
+  let showForm = $state(false);
+  let editingQuota: Quota | null = $state(null);
+  let formName = $state('');
+  let formTargetType: 'global' | 'proxy' | 'ip' | 'mac' | 'user' | string = $state('global');
+  let formTargetID = $state('');
+  let formLimitValue = $state(10);
+  let formLimitUnit = $state('GB');
+  let formPeriod: 'daily' | 'weekly' | 'monthly' | string = $state('monthly');
+  let formAlertThreshold = $state(80);
   let formAction: 'notify' | 'block' | 'throttle' | 'log_only' | 'redirect_direct' | string =
-    'notify';
-  let formEnabled = true;
-  let activeDropdownId: string | null = null;
-  let dismissedBanner = false;
+    $state('notify');
+  let formEnabled = $state(true);
+  let activeDropdownId: string | null = $state(null);
+  let dismissedBanner = $state(false);
 
   const units = [
     { label: 'MB', value: 'MB', bytes: 1024 * 1024 },
@@ -76,16 +80,18 @@
     { label: 'TB', value: 'TB', bytes: 1024 * 1024 * 1024 * 1024 }
   ];
 
-  $: periods = [
+  let periods = $derived([
     { label: $t('trafficquotas.period_daily'), value: 'daily' },
     { label: $t('trafficquotas.period_weekly'), value: 'weekly' },
     { label: $t('trafficquotas.period_monthly'), value: 'monthly' }
-  ];
+  ]);
 
-  $: activeQuotas = quotas.filter((q) => q.enabled);
-  $: totalUsed = quotas.reduce((s, q) => s + (q.used_bytes || q.current_bytes || 0), 0);
-  $: sumQuotaLimit = activeQuotas.reduce((s, q) => s + q.limit_bytes, 0);
-  $: totalPct = sumQuotaLimit > 0 ? Math.min(100, ((stats?.total || 0) / sumQuotaLimit) * 100) : 0;
+  let activeQuotas = $derived(quotas.filter((q) => q.enabled));
+  let totalUsed = $derived(quotas.reduce((s, q) => s + (q.used_bytes || q.current_bytes || 0), 0));
+  let sumQuotaLimit = $derived(activeQuotas.reduce((s, q) => s + q.limit_bytes, 0));
+  let totalPct = $derived(
+    sumQuotaLimit > 0 ? Math.min(100, ((stats?.total || 0) / sumQuotaLimit) * 100) : 0
+  );
 
   async function fetchQuotas(signal?: AbortSignal) {
     if (quotas.length === 0) {
@@ -344,7 +350,7 @@
     localStorage.setItem('tq_banner_dismissed', 'true');
   }
 
-  $: {
+  $effect(() => {
     if (stats && stats.reset_time) {
       const nowSec = Math.floor(Date.now() / 1000);
       const duration = nowSec - stats.reset_time;
@@ -364,7 +370,7 @@
       showForecastCalculating = false;
       forecastValue = null;
     }
-  }
+  });
 
   onMount(() => {
     dismissedBanner = localStorage.getItem('tq_banner_dismissed') === 'true';

@@ -6,7 +6,11 @@
   import { showConfirm, showToast } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
 
-  export const onSwitchTab: (tab: string) => void = () => {};
+  interface Props {
+    onSwitchTab?: (tab: string) => void;
+  }
+
+  let { onSwitchTab = () => {} }: Props = $props();
 
   interface Profile {
     id: string;
@@ -31,33 +35,33 @@
     day: number;
   }
 
-  let profiles: Profile[] = [];
-  let status: Status | null = null;
-  let loading = false;
-  let error = '';
-  let activeDropdownId: string | null = null;
+  let profiles: Profile[] = $state([]);
+  let status: Status | null = $state(null);
+  let loading = $state(false);
+  let error = $state('');
+  let activeDropdownId: string | null = $state(null);
 
   // Clash proxies
-  let mihomoGroups: string[] = [];
-  let mihomoProxies: string[] = [];
+  let mihomoGroups: string[] = $state([]);
+  let mihomoProxies: string[] = $state([]);
 
   // Form & Wizard state
-  let showForm = false;
-  let currentStep = 1;
-  let editingProfile: Profile | null = null;
+  let showForm = $state(false);
+  let currentStep = $state(1);
+  let editingProfile: Profile | null = $state(null);
 
-  let formName = '';
-  let formEnabled = true;
-  let formMode = 'time-based';
-  let formGroupName = '';
-  let formProxyName = '';
-  let formSchedule: boolean[][] = Array.from({ length: 7 }, () => Array(24).fill(false));
+  let formName = $state('');
+  let formEnabled = $state(true);
+  let formMode = $state('time-based');
+  let formGroupName = $state('');
+  let formProxyName = $state('');
+  let formSchedule: boolean[][] = $state(Array.from({ length: 7 }, () => Array(24).fill(false)));
 
   // Click-and-drag drawing state
-  let isDrawing = false;
-  let drawMode = true; // true to draw, false to erase
+  let isDrawing = $state(false);
+  let drawMode = $state(true); // true to draw, false to erase
 
-  $: dayNames = $t('smartproxy.days').split(',');
+  let dayNames = $derived($t('smartproxy.days').split(','));
   const displayDayIndices = [1, 2, 3, 4, 5, 6, 0];
 
   async function fetchProfiles() {
