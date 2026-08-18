@@ -162,10 +162,19 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 		resp.GlobalHwid = a.subscriptionSvc.GetHWID()
 	}
 
-	a.capsCacheMutex.Lock()
-	a.capsCache = resp
-	a.capsCacheTime = time.Now()
-	a.capsCacheMutex.Unlock()
+	// Не кэшируем "рваное" состояние (процесс жив, но API не отвечает):
+	// под конкурентной нагрузкой на старте страницы (десяток параллельных
+	// запросов на слабом роутере) единичная проба может не уложиться в
+	// таймаут, и без этой проверки такой случайный сбой на все 3 секунды
+	// TTL транслируется в интерфейс как "Mihomo недоступен" всем поллерам
+	// сразу — хотя реальный сервис в порядке. Следующий запрос просто
+	// пробует живьём ещё раз, не дожидаясь протухания кэша.
+	if !(resp.Mihomo.ProcessRunning && !resp.Mihomo.APIReachable) {
+		a.capsCacheMutex.Lock()
+		a.capsCache = resp
+		a.capsCacheTime = time.Now()
+		a.capsCacheMutex.Unlock()
+	}
 
 	JSONSuccess(w, resp)
 }
