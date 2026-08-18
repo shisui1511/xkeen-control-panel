@@ -1210,9 +1210,9 @@
 
   <!-- Backups tab -->
   {#if activeTab === 'backups'}
-    <div class="card settings-card" style="margin-bottom:18px;padding:0;">
+    <div class="card settings-card" style="margin-bottom:18px;">
+      <div class="card-label">{$t('settings.section_file_backups')}</div>
       <div class="field-group">
-        <div class="field-group-head">{$t('settings.section_file_backups')}</div>
         <div class="field-row">
           <div>
             <div class="lbl">{$t('settings.backup_file')}</div>
@@ -1286,7 +1286,7 @@
     <!-- Section 2: Snapshots -->
     <div
       class="card premium-backup-card"
-      style="margin-top: 0; background: #102a44; border: 1px solid var(--border); transition: all 0.3s ease;"
+      style="margin-top: 0; background: var(--bg-card); border: 1px solid var(--border); transition: all 0.3s ease;"
     >
       <div
         class="card-title-row"

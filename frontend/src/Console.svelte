@@ -42,6 +42,34 @@
   // Confirmation modal state
   let confirmPending = $state<CommandDef | null>(null);
 
+  const DIAG_CMD_MAP: Record<string, string> = {
+    '__diag:ping': 'ping -c 4 cloudflare.com',
+    '__diag:curl': 'curl -s --max-time 5 ifconfig.me',
+    '__diag:tracert': 'traceroute -m 15 cloudflare.com',
+    '__diag:nslookup': 'nslookup openai.com'
+  };
+
+  function formatCommandLine(cmd: string): string {
+    if (!cmd) return '';
+    if (cmd.startsWith('__diag:') && DIAG_CMD_MAP[cmd]) {
+      return DIAG_CMD_MAP[cmd];
+    }
+    return `xkeen ${cmd}`;
+  }
+
+  function getCmdClass(cmd: CommandDef): string {
+    const c = cmd.command;
+    if (cmd.dangerous || c === '-stop' || c === '-xray' || c === '-mihomo' || c.endsWith('br')) {
+      return 'cmd-tile--danger';
+    }
+    if (c === '-start' || c === '-status' || c === '-auto') return 'cmd-tile--success';
+    if (c === '-restart' || c.startsWith('-u')) return 'cmd-tile--warning';
+    if (c === '-diag' || c === '-tp' || c.startsWith('__diag:') || c.endsWith('b')) {
+      return 'cmd-tile--accent';
+    }
+    return '';
+  }
+
   async function fetchCommands() {
     loading = true;
     try {
@@ -165,7 +193,7 @@
               <div class="cmd-tile-grid">
                 {#each category.commands as cmd}
                   <button
-                    class="cmd-tile"
+                    class="cmd-tile {getCmdClass(cmd)}"
                     onclick={() => handleCommandClick(cmd)}
                     disabled={executing !== ''}
                     title={cmd.description}
@@ -220,7 +248,11 @@
                           style="margin-right:8px;flex-shrink:0;"><path d="M3 12h18" /></svg
                         >
                       {/if}
-                      xkeen {cmd.command}
+                      {#if cmd.command.startsWith('__diag:')}
+                        {cmd.name}
+                      {:else}
+                        xkeen {cmd.command}
+                      {/if}
                     </div>
                     <div class="tile-desc">{cmd.description}</div>
                   </button>
@@ -254,10 +286,11 @@
 
         <div class="term-output">
           {#if executing}
-            <span class="prompt">root@xkeen:~# xkeen {executing}</span><br />
+            <span class="prompt">root@xkeen:~# {formatCommandLine(executing)}</span><br />
             <span style="color:var(--fg-dim);">Running...</span>
           {:else if output}
-            <span class="prompt">root@xkeen:~# xkeen {history[0]?.command || ''}</span><br />
+            <span class="prompt">root@xkeen:~# {formatCommandLine(history[0]?.command || '')}</span
+            ><br />
             {output}
           {:else}
             <span class="prompt">root@xkeen:~# _</span>
@@ -281,7 +314,7 @@
                 }}
                 title={entry.command}
               >
-                <span class="history-cmd">xkeen {entry.command}</span>
+                <span class="history-cmd">{formatCommandLine(entry.command)}</span>
                 <span class="history-status" class:error-text={!entry.success}>
                   {#if entry.success}
                     SUCCESS
@@ -301,7 +334,7 @@
 <Modal isOpen={!!confirmPending} title={$t('console.confirm_title')} onclose={cancelConfirm}>
   {#if confirmPending}
     <p style="margin: 0; line-height: 1.5; color: var(--fg-secondary);">
-      {$t('console.confirm_desc', { name: 'xkeen ' + confirmPending.command })}
+      {$t('console.confirm_desc', { name: formatCommandLine(confirmPending.command) })}
     </p>
     <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 16px;">
       <button class="btn btn-secondary" onclick={cancelConfirm} title={$t('app.cancel')}>
@@ -398,6 +431,22 @@
   .cmd-tile:hover:not(:disabled) {
     background: var(--hover);
     border-color: var(--accent-line);
+  }
+
+  .cmd-tile--success {
+    border-left: 3px solid var(--success);
+  }
+
+  .cmd-tile--danger {
+    border-left: 3px solid var(--danger);
+  }
+
+  .cmd-tile--warning {
+    border-left: 3px solid var(--warning);
+  }
+
+  .cmd-tile--accent {
+    border-left: 3px solid var(--accent);
   }
 
   .cmd-tile:disabled {

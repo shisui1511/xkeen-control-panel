@@ -990,8 +990,14 @@
 
       <div class="td-hint">
         {#if tagDrawer.file}
-          {$t('dat.routing_rule_format')}
-          <code class="td-format">{getTagPrefix(tagDrawer.file)}:TAGNAME</code>
+          {@const pfx = getTagPrefix(tagDrawer.file)}
+          {#if pfx === 'geoip'}
+            {$t('dat.geoip_rule_format')}
+            <code class="td-format">geoip:TAGNAME</code>
+          {:else}
+            {$t('dat.geosite_rule_format')}
+            <code class="td-format">geosite:TAGNAME</code>
+          {/if}
         {/if}
       </div>
 
@@ -1044,7 +1050,16 @@
                 >
                   <span class="td-tag-name">{tag.tag}</span>
                   {#if tag.count > 0}
-                    <span class="td-tag-count">{tag.count.toLocaleString()}</span>
+                    <span class="td-tag-count">
+                      {tag.count.toLocaleString()}
+                      {pluralize(
+                        tag.count,
+                        $t('dat.record_one'),
+                        $t('dat.record_few'),
+                        $t('dat.record_many'),
+                        $currentLang
+                      )}
+                    </span>
                   {/if}
                 </button>
                 <button
