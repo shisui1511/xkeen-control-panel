@@ -259,7 +259,10 @@ function setupApiRoutes(page: Page, options: { emptyQuotas?: boolean } = {}) {
         contentType: 'application/json',
         body: JSON.stringify(MOCK_SUBSCRIPTIONS)
       });
-    } else if (url.includes('/api/mihomo/proxy/connections') || url.includes('/api/mihomo/connections')) {
+    } else if (
+      url.includes('/api/mihomo/proxy/connections') ||
+      url.includes('/api/mihomo/connections')
+    ) {
       if (method === 'DELETE') {
         await route.fulfill({
           status: 200,
