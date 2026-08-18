@@ -1059,8 +1059,12 @@ body.drawer-locked {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 0;
-  margin: -18px -24px -24px;
+  margin: -18px calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad));
   border-top: 1px solid var(--border);
+}
+
+[data-density='compact'] .status-badges-row {
+  margin-top: -12px;
 }
 
 .status-badge-item {
@@ -1126,8 +1130,12 @@ body.drawer-locked {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 0;
-  margin: -18px -24px -24px;
+  margin: -18px calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad));
   border-top: 1px solid var(--border);
+}
+
+[data-density='compact'] .stats-grid {
+  margin-top: -12px;
 }
 
 .stat-box {

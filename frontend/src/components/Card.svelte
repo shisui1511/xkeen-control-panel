@@ -37,7 +37,7 @@
       linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 60%), var(--bg-card);
     border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: var(--radius-lg);
-    padding: 24px;
+    padding: var(--card-pad);
     box-shadow: var(--shadow);
   }
   .card-flat {
@@ -47,7 +47,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin: -24px -24px 18px;
+    margin: calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad)) 18px;
     padding: 16px 22px 12px;
     font-size: 11.5px;
     font-weight: 700;
@@ -55,6 +55,10 @@
     text-transform: uppercase;
     color: var(--fg-secondary);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+  :global([data-density='compact']) .card-title {
+    padding: 10px 14px 8px;
+    margin-bottom: 12px;
   }
   .card-actions {
     display: flex;
