@@ -190,7 +190,7 @@
   --cm-border: #e1e7ef;
 }
 
-/* ------------ Density Modes ------------- */
+/* ------------ Density Modes (Theme-agnostic: applies orthogonally to dark and light themes) ------------- */
 [data-density='compact'] {
   --card-pad: 14px;
   --input-h: 32px;
@@ -199,6 +199,16 @@
   --grid-gap: 10px;
   --row-gap: 8px;
   --font-size-table: 0.78125rem;
+}
+
+[data-density='comfortable'] {
+  --card-pad: 20px;
+  --input-h: 38px;
+  --btn-h: 38px;
+  --table-row-h: 44px;
+  --grid-gap: 16px;
+  --row-gap: 12px;
+  --font-size-table: 0.8125rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2266,14 +2276,14 @@ a.chip:hover {
   }
 
   .card {
-    padding: 12px 14px;
+    padding: var(--card-pad);
     border-radius: 12px;
     margin-bottom: 12px;
   }
 
   .card .card-title,
   h2.card-title {
-    margin: -12px -14px 12px;
+    margin: calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad)) 12px;
     padding: 12px 14px 10px;
     font-size: 11px;
     letter-spacing: 0.12em;
