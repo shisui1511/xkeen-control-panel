@@ -2073,14 +2073,14 @@
                   {#if g.useProviders && g.useProviders.length > 0}
                     <span
                       class="item-badge"
-                      style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; text-transform: none;"
+                      style="background: color-mix(in srgb, var(--success) 20%, transparent); color: var(--success); font-size: 10px; text-transform: none;"
                       title={g.useProviders.join(', ')}>use: {g.useProviders.length}</span
                     >
                   {/if}
                   {#if g.type === 'load-balance' && g.strategy}
                     <span
                       class="item-badge"
-                      style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10px; text-transform: none;"
+                      style="background: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning); font-size: 10px; text-transform: none;"
                       >{g.strategy}</span
                     >
                   {/if}
@@ -2088,7 +2088,11 @@
                   <button class="item-edit" onclick={() => editGroup(g)} title={$t('app.edit')}
                     >✎</button
                   >
-                  <button class="item-del" onclick={() => removeGroup(g.id)}>✕</button>
+                  <button
+                    class="item-del"
+                    onclick={() => removeGroup(g.id)}
+                    title={$t('app.delete')}>✕</button
+                  >
                 </div>
               {/each}
 
@@ -2250,7 +2254,9 @@
                   <span class="item-name rule-value">{r.value}</span>
                 {/if}
                 <span class="item-meta">→ {r.outbound}</span>
-                <button class="item-del" onclick={() => removeRule(r.id)}>✕</button>
+                <button class="item-del" onclick={() => removeRule(r.id)} title={$t('app.delete')}
+                  >✕</button
+                >
               </div>
             {/each}
 
