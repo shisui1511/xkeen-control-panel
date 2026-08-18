@@ -154,7 +154,7 @@ const MOCK_SUB_NODES = [
   }
 ];
 
-const MOCK_CONNECTIONS = {
+const MOCK_CONNECTIONS_WS = {
   downloadTotal: 1024000,
   uploadTotal: 512000,
   connections: [
@@ -182,8 +182,8 @@ const MOCK_CONNECTIONS = {
       metadata: {
         network: 'tcp',
         type: 'HTTPS',
-        sourceIP: '',
-        sourcePort: 0,
+        sourceIP: '192.168.1.55',
+        sourcePort: 49152,
         destinationIP: '8.8.8.8',
         destinationPort: 443,
         host: 'dns.google',
@@ -259,7 +259,7 @@ function setupApiRoutes(page: Page, options: { emptyQuotas?: boolean } = {}) {
         contentType: 'application/json',
         body: JSON.stringify(MOCK_SUBSCRIPTIONS)
       });
-    } else if (url.includes('/api/mihomo/proxy/connections')) {
+    } else if (url.includes('/api/mihomo/proxy/connections') || url.includes('/api/mihomo/connections')) {
       if (method === 'DELETE') {
         await route.fulfill({
           status: 200,
@@ -270,7 +270,7 @@ function setupApiRoutes(page: Page, options: { emptyQuotas?: boolean } = {}) {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify(MOCK_CONNECTIONS)
+          body: JSON.stringify(MOCK_CONNECTIONS_WS)
         });
       }
     } else if (url.includes('/api/traffic/quotas') || url.includes('/api/trafficquotas')) {
@@ -279,13 +279,28 @@ function setupApiRoutes(page: Page, options: { emptyQuotas?: boolean } = {}) {
         contentType: 'application/json',
         body: JSON.stringify(
           options.emptyQuotas
-            ? { quotas: [], alerts: [], stats: { total_upload: 0, total_download: 0 } }
-            : {
-                quotas: [{ id: 'q1', name: 'Limit', ip: '192.168.1.50' }],
-                alerts: [],
-                stats: { total_upload: 0, total_download: 0 }
-              }
+            ? []
+            : [
+                {
+                  id: 'q1',
+                  name: 'Daily Limit',
+                  target_type: 'ip',
+                  target_id: '192.168.1.50',
+                  limit_bytes: 1073741824,
+                  period: 'daily',
+                  enabled: true,
+                  alert_threshold: 80,
+                  current_bytes: 524288000,
+                  last_reset: Date.now()
+                }
+              ]
         )
+      });
+    } else if (url.includes('/api/traffic/stats')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ total: 524288000, upload: 100000000, download: 424288000 })
       });
     } else {
       await route.fulfill({
@@ -393,6 +408,10 @@ test.describe('Phase 82: Ergonomics and UX improvements', () => {
 
   test('Connections source and danger confirm', async ({ page }) => {
     await setupApiRoutes(page);
+    await page.routeWebSocket('**/api/mihomo/connections/ws', async (ws) => {
+      ws.send(JSON.stringify(MOCK_CONNECTIONS_WS));
+    });
+
     await page.goto('/#/connections');
 
     // Check table loaded
@@ -401,6 +420,7 @@ test.describe('Phase 82: Ergonomics and UX improvements', () => {
     // 1. Check source column does not contain :0 or bare :
     const srcCells = page.locator('.col-src, .source-col');
     const count = await srcCells.count();
+    expect(count).toBeGreaterThan(0);
     for (let i = 0; i < count; i++) {
       const text = await srcCells.nth(i).innerText();
       expect(text.trim()).not.toBe(':0');
@@ -409,19 +429,18 @@ test.describe('Phase 82: Ergonomics and UX improvements', () => {
 
     // 2. Click "Закрыть все" -> should show ConfirmDialog modal
     const closeAllBtn = page.locator('button:has-text("Закрыть все")');
-    if ((await closeAllBtn.count()) > 0) {
-      await closeAllBtn.click();
+    await expect(closeAllBtn).toBeEnabled();
+    await closeAllBtn.click();
 
-      // Modal must be visible
-      const modal = page.locator('.modal-container, .confirm-modal, [role="alertdialog"]');
-      await expect(modal).toBeVisible();
-      await expect(modal).toContainText('Закрыть');
+    // Modal must be visible
+    const modal = page.locator('.modal-container, .confirm-modal, [role="alertdialog"]');
+    await expect(modal).toBeVisible();
+    await expect(modal).toContainText('Закрыть');
 
-      // Cancel modal
-      const cancelBtn = modal.locator('button:has-text("Отмена")');
-      await cancelBtn.click();
-      await expect(modal).not.toBeVisible();
-    }
+    // Cancel modal
+    const cancelBtn = modal.locator('button:has-text("Отмена")');
+    await cancelBtn.click();
+    await expect(modal).not.toBeVisible();
   });
 
   test('Traffic quotas empty state', async ({ page }) => {

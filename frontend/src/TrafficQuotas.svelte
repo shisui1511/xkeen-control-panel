@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Modal from './components/Modal.svelte';
+  import EmptyState from './components/EmptyState.svelte';
   import { t, currentLang } from './i18n';
   import { showConfirm, showToast } from './stores';
   import { usePoller } from './lib/poller';
@@ -92,7 +93,10 @@
     }
     try {
       const res = await apiFetch('/api/traffic/quotas', { signal });
-      if (res.ok) quotas = await res.json();
+      if (res.ok) {
+        const data = await res.json();
+        quotas = Array.isArray(data) ? data : data?.quotas || [];
+      }
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       if (e?.status === 401) return;
@@ -513,8 +517,13 @@
     <h2 class="card-title" style="padding: 20px 24px 8px 24px;">{$t('trafficquotas.quotas')}</h2>
 
     {#if quotas.length === 0}
-      <div style="padding: 24px; text-align: center; color: var(--fg-faint);">
-        {$t('trafficquotas.no_quotas')}
+      <div style="padding: 16px 24px 24px;">
+        <EmptyState
+          title={$t('trafficquotas.empty_title')}
+          description={$t('trafficquotas.empty_desc')}
+          ctaText={$t('trafficquotas.empty_cta')}
+          oncta={startCreate}
+        />
       </div>
     {:else}
       <div class="table-responsive">

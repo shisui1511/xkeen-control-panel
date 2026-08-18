@@ -215,12 +215,15 @@
   }
 
   async function closeAllConnections() {
-    const confirmed = await showConfirm(
-      $t('conn.close_all'),
-      $t('conn.close_all_confirm'),
-      $t('app.yes'),
-      $t('app.no')
-    );
+    const count = connections.length;
+    const confirmed = await showConfirm({
+      title: $t('conn.close_all_title'),
+      message: $t('conn.close_all_desc', { count }),
+      consequence: $t('conn.close_all_consequence'),
+      variant: 'danger',
+      confirmLabel: $t('conn.close_all_confirm_btn'),
+      cancelLabel: $t('app.cancel')
+    });
     if (!confirmed) return;
     try {
       const res = await apiFetch('/api/mihomo/proxy/connections', {
@@ -252,7 +255,14 @@
 
   function getSourceName(conn: Connection): string {
     if (showProcessName && conn.metadata.process) return conn.metadata.process;
-    return `${conn.metadata.sourceIP}:${conn.metadata.sourcePort}`;
+    const ip = (conn.metadata.sourceIP || '').trim();
+    const port = conn.metadata.sourcePort;
+    const hasValidPort = port !== undefined && port !== null && Number(port) > 0;
+
+    if (!ip) {
+      return hasValidPort ? `localhost:${port}` : 'localhost';
+    }
+    return hasValidPort ? `${ip}:${port}` : ip;
   }
 
   function getHostTooltip(conn: Connection): string {
