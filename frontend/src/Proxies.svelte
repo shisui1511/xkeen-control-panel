@@ -457,8 +457,10 @@
       });
     } else if (filter === 'latency') {
       list.sort((a, b) => {
-        const delayA = getProxyDelay(a) ?? 99999;
-        const delayB = getProxyDelay(b) ?? 99999;
+        const pA = proxies[a];
+        const pB = proxies[b];
+        const delayA = pA && isProxyAlive(pA) && getLastDelay(pA) ? getLastDelay(pA)! : 99999;
+        const delayB = pB && isProxyAlive(pB) && getLastDelay(pB) ? getLastDelay(pB)! : 99999;
         return delayA - delayB;
       });
     }
