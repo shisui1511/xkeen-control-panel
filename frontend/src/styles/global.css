@@ -693,7 +693,7 @@ input[type='number'] {
   font-size: 17px;
   font-weight: 700;
   letter-spacing: -0.005em;
-  color: #fff;
+  color: var(--fg-primary);
 }
 
 .sidebar-logo .brand-text .b1 > span.x {

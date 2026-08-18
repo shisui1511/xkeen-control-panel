@@ -321,8 +321,8 @@
 <style>
   /* ==================== Sidebar Card Variant ==================== */
   .sidebar-status-card {
-    background: rgba(7, 24, 42, 0.45);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
     border-radius: var(--radius-md, 8px);
     margin: 6px 12px 8px;
     padding: 8px 10px;
@@ -335,8 +335,7 @@
   }
 
   .sidebar-status-card:hover {
-    border-color: rgba(41, 194, 240, 0.2);
-    background: rgba(7, 24, 42, 0.6);
+    border-color: var(--accent-line);
   }
 
   .sidebar-kernel-row {
@@ -367,7 +366,7 @@
     font-size: 13px;
     font-weight: 700;
     letter-spacing: -0.01em;
-    color: #fff;
+    color: var(--fg-primary);
   }
 
   .kernel-right {
@@ -399,7 +398,7 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    border-top: 1px solid var(--border-light);
     padding-top: 5px;
   }
 
@@ -409,8 +408,8 @@
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    background: var(--surface-tint);
+    border: 1px solid var(--border-light);
     border-radius: 5px;
     padding: 4px 8px;
     color: var(--fg-secondary, #8aa0b7);
@@ -493,7 +492,7 @@
     align-items: center;
     justify-content: center;
     gap: 3px;
-    background: rgba(7, 24, 42, 0.75);
+    background: var(--bg-elevated);
     border: 1px solid var(--border, #1c3e5c);
     border-radius: var(--radius-md, 6px);
     cursor: pointer;
@@ -607,7 +606,10 @@
     -webkit-backdrop-filter: blur(8px);
     border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
     border-radius: 9999px;
-    color: var(--text, #e2e8f0);
+    /* Pill background stays a fixed dark glass regardless of site theme
+       (matches the always-dark mobile header), so its text stays fixed
+       light too instead of flipping with theme tokens. */
+    color: #e2e8f0;
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
@@ -623,7 +625,7 @@
 
   .mobile-traffic {
     font-family: var(--font-family-mono, monospace);
-    color: var(--fg-secondary, #94a3b8);
+    color: #94a3b8;
     font-size: 10px;
   }
 
