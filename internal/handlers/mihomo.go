@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -30,6 +33,29 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 	default:
 		a.errorResponse(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
+	}
+
+	if a.delayGuard != nil && (strings.Contains(r.URL.Path, "/delay") || strings.Contains(r.URL.Path, "/healthcheck")) {
+		release, err := a.delayGuard.Acquire(r.Context())
+		if err != nil {
+			if errors.Is(err, ErrQueueFull) || errors.Is(err, ErrWaitTimeout) {
+				w.Header().Set("Retry-After", "2")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"error":       "Too many requests to Mihomo core",
+					"retry_after": 2,
+					"code":        "busy",
+				})
+				return
+			}
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer release()
 	}
 
 	var target *url.URL

@@ -113,4 +113,28 @@ describe('usePoller', () => {
 
     poller.stop();
   });
+
+  it('pauses and resumes polling correctly via pause() and resume()', async () => {
+    const pollFn = vi.fn().mockResolvedValue(undefined);
+    const poller = usePoller(pollFn, 1000);
+
+    expect(pollFn).toHaveBeenCalledTimes(1);
+    expect(poller.isPaused()).toBe(false);
+
+    poller.pause();
+    expect(poller.isPaused()).toBe(true);
+
+    // Advanced time while paused — no new calls should happen
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(pollFn).toHaveBeenCalledTimes(1);
+
+    poller.resume();
+    expect(poller.isPaused()).toBe(false);
+    expect(pollFn).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(pollFn).toHaveBeenCalledTimes(3);
+
+    poller.stop();
+  });
 });

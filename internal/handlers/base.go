@@ -38,6 +38,7 @@ type API struct {
 	clientResolver        *services.ClientResolver
 	assetsSvc             *assets.AssetsService
 	pathVal               *utils.PathValidator
+	delayGuard            *DelayGuard
 	configValCache        bool
 	configValCacheTime    time.Time
 	configValCacheMutex   sync.Mutex
@@ -60,6 +61,7 @@ func NewAPI(cfg *config.Config, srv *server.Server) *API {
 		clientResolver: services.NewClientResolver(),
 		assetsSvc:      assetsSvc,
 		pathVal:        utils.NewPathValidator(cfg.AllowedRoots),
+		delayGuard:     NewDelayGuard(32, 15*time.Second),
 	}
 }
 
