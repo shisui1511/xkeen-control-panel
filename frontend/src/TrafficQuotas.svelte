@@ -881,13 +881,13 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: var(--font-size-table, 0.8125rem);
     color: var(--fg-secondary);
   }
 
   th {
     text-align: left;
-    padding: 12px 24px;
+    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 20px;
     font-weight: 600;
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
@@ -897,7 +897,7 @@
   }
 
   td {
-    padding: 16px 24px;
+    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 20px;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
   }

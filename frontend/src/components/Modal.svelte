@@ -162,6 +162,7 @@
     width: 100%;
     max-width: 520px;
     max-height: 90vh;
+    max-height: 90dvh;
     display: flex;
     flex-direction: column;
     outline: none;
@@ -205,5 +206,23 @@
     overflow-y: auto;
     color: var(--fg-primary);
     font-size: 14px;
+  }
+
+  @media (max-width: 480px) {
+    .modal-backdrop {
+      padding: 8px;
+    }
+    .modal-container {
+      width: calc(100% - 16px);
+      margin: 8px auto;
+      max-height: calc(100dvh - 16px);
+      border-radius: 12px;
+    }
+    .modal-header {
+      padding: 12px 14px;
+    }
+    .modal-content {
+      padding: 14px 16px;
+    }
   }
 </style>

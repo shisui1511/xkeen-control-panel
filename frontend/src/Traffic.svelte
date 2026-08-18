@@ -585,14 +585,20 @@
 <style>
   .traffic-stats-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+    gap: var(--grid-gap, 14px);
   }
 
   @media (max-width: 768px) {
     .traffic-stats-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  :global([data-density='compact']) .stat-card-spark,
+  :global([data-density='compact']) .stat-card-normal {
+    padding: 12px 14px;
+    height: 100px;
   }
 
   .stat-card-spark,
@@ -716,6 +722,10 @@
     border-radius: var(--radius-md);
     background: rgba(0, 0, 0, 0.15);
     overflow: hidden;
+  }
+
+  :global([data-density='compact']) .chart-area-wrapper {
+    height: 140px;
   }
 
   .chart-empty {

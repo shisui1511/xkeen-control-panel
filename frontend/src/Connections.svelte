@@ -627,7 +627,7 @@
   .filters .filter-select {
     flex: 1;
     min-width: 140px;
-    height: 34px;
+    height: var(--input-h, 34px);
     padding: 6px 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm, 6px);
@@ -689,8 +689,10 @@
 
   .conn-table-container {
     overflow-x: auto;
+    width: 100%;
   }
   .connections-table {
+    width: 100%;
     min-width: 800px;
   }
   .rule-payload {
@@ -730,7 +732,7 @@
   /* Host cell */
   .host-cell {
     display: inline-block;
-    max-width: 200px;
+    max-width: min(40vw, 420px);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -769,7 +771,7 @@
     align-items: flex-start;
     justify-content: center;
     min-width: 120px;
-    max-width: 220px;
+    max-width: min(30vw, 320px);
   }
   .src-main {
     display: inline-flex;

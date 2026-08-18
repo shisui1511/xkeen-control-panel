@@ -2042,9 +2042,10 @@
 
   .group-grid {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+    gap: var(--grid-gap, 16px);
     margin-bottom: 30px;
+    align-items: start;
   }
   .group-card {
     background: var(--bg-card);
@@ -2233,7 +2234,7 @@
 
   .proxy-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 8px;
     padding: 12px;
     content-visibility: auto;

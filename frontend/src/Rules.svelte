@@ -563,11 +563,11 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: var(--font-size-table, 0.8125rem);
   }
 
   th {
-    padding: 12px 18px;
+    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 16px;
     text-align: left;
     font-weight: 600;
     color: var(--fg-secondary);
@@ -576,7 +576,7 @@
   }
 
   td {
-    padding: 11px 18px;
+    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 16px;
     border-bottom: 1px solid var(--border-light);
     color: var(--fg-primary);
   }

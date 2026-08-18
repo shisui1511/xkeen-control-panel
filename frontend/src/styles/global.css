@@ -2264,6 +2264,43 @@ a.chip:hover {
   .container {
     padding: 12px 10px 32px;
   }
+
+  .card {
+    padding: 12px 14px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+  }
+
+  .card .card-title,
+  h2.card-title {
+    margin: -12px -14px 12px;
+    padding: 12px 14px 10px;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+  }
+
+  .card-label {
+    font-size: 11px;
+    letter-spacing: 0.05em;
+  }
+
+  .filters,
+  .ph-actions,
+  .btn-group,
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+  }
+
+  .form-group {
+    margin-bottom: 0.75rem;
+  }
+
+  .page-head {
+    margin-bottom: 14px;
+    gap: 10px;
+  }
 }
 
 /* ------------ Fullscreen Editor Mode Layout (REQ-3) ------------- */
