@@ -1663,17 +1663,14 @@
         <div class="group-grid">
           {#each filteredGroups as group}
             {@const isCollapsed = collapsedGroups.has(group.name)}
-            {@const collapsible = group.all.length > 8}
             {@const nodes = getFilteredNodes(group, searchDebouncedQuery)}
             {@const icon = getGroupIcon(group.name)}
             <div class="group-card">
               <button
                 type="button"
-                class="gc-head"
-                class:collapsible
-                disabled={!collapsible}
-                aria-expanded={collapsible ? !isCollapsed : undefined}
-                onclick={() => collapsible && toggleCollapse(group.name)}
+                class="gc-head collapsible"
+                aria-expanded={!isCollapsed}
+                onclick={() => toggleCollapse(group.name)}
               >
                 <div class="gc-head-row1">
                   {#if icon}
@@ -1694,14 +1691,12 @@
                     <div class="gc-lat-box {latencyClass}">{latencyText}</div>
                   {/if}
 
-                  {#if collapsible}
-                    <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
-                      <ChevronDown
-                        size={14}
-                        color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
-                      />
-                    </span>
-                  {/if}
+                  <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
+                    <ChevronDown
+                      size={14}
+                      color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
+                    />
+                  </span>
                 </div>
 
                 <div class="gc-head-row2">
@@ -2085,9 +2080,6 @@
     font: inherit;
     color: inherit;
     text-align: left;
-  }
-  .group-card .gc-head:disabled {
-    cursor: default;
   }
   .group-card .gc-head::before {
     content: '';
