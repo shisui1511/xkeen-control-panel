@@ -11,7 +11,9 @@
     devMode,
     fetchDevMode,
     setDevMode,
-    showConfirm
+    showConfirm,
+    type ThemeDensity,
+    applyDensity
   } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
@@ -394,6 +396,7 @@
 
   // Appearance & Behavior settings (persisted in localStorage)
   let selectedTheme = $state<'light' | 'dark' | 'auto'>('auto');
+  let selectedDensity = $state<ThemeDensity>('auto');
   let systemTimezone = $state('—');
   let animationsEnabled = $state(true);
   let autoRefresh = $state(true);
@@ -413,6 +416,9 @@
     try {
       const saved = localStorage.getItem('theme') || '';
       selectedTheme = saved === 'light' || saved === 'dark' ? saved : 'auto';
+      const savedDensity = localStorage.getItem('theme_density');
+      selectedDensity =
+        savedDensity === 'comfortable' || savedDensity === 'compact' ? savedDensity : 'auto';
       animationsEnabled = localStorage.getItem('animations') !== 'false';
       autoRefresh = localStorage.getItem('autoRefresh') !== 'false';
       confirmDangerous = localStorage.getItem('confirmDangerous') !== 'false';
@@ -432,6 +438,11 @@
         document.documentElement.setAttribute('data-theme', t);
       }
     } catch {}
+  }
+
+  function setDensity(d: ThemeDensity) {
+    selectedDensity = d;
+    applyDensity(d);
   }
 
   function saveSetting(key: string, value: string) {
@@ -895,6 +906,30 @@
               class="seg-opt"
               class:seg-active={selectedTheme === 'auto'}
               onclick={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button
+            >
+          </div>
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.density')}</span>
+            <div class="field-row-desc">{$t('settings.density_desc')}</div>
+          </div>
+          <div class="seg-btn">
+            <button
+              class="seg-opt"
+              class:seg-active={selectedDensity === 'comfortable'}
+              onclick={() => setDensity('comfortable')}
+              >{$t('settings.density_comfortable_btn')}</button
+            >
+            <button
+              class="seg-opt"
+              class:seg-active={selectedDensity === 'compact'}
+              onclick={() => setDensity('compact')}>{$t('settings.density_compact_btn')}</button
+            >
+            <button
+              class="seg-opt"
+              class:seg-active={selectedDensity === 'auto'}
+              onclick={() => setDensity('auto')}>{$t('settings.density_auto_btn')}</button
             >
           </div>
         </div>

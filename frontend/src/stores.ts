@@ -219,3 +219,56 @@ export async function setDevMode(enabled: boolean): Promise<void> {
     showToast('error', e instanceof Error ? e.message : String(e));
   }
 }
+
+// --- Theme density store (DENS-01) ---
+
+export type ThemeDensity = 'auto' | 'comfortable' | 'compact';
+
+function readInitialDensity(): ThemeDensity {
+  try {
+    const saved = localStorage.getItem('theme_density');
+    if (saved === 'comfortable' || saved === 'compact') {
+      return saved;
+    }
+  } catch (e) {
+    // localStorage unavailable
+  }
+  return 'auto';
+}
+
+export const themeDensity = writable<ThemeDensity>(readInitialDensity());
+
+export function applyDensity(mode: ThemeDensity): void {
+  try {
+    if (mode === 'auto') {
+      localStorage.removeItem('theme_density');
+      const isMobile =
+        typeof window !== 'undefined' && window.matchMedia('(max-width: 1024px)').matches;
+      if (typeof document !== 'undefined') {
+        document.documentElement.setAttribute('data-density', isMobile ? 'compact' : 'comfortable');
+      }
+    } else {
+      localStorage.setItem('theme_density', mode);
+      if (typeof document !== 'undefined') {
+        document.documentElement.setAttribute('data-density', mode);
+      }
+    }
+  } catch (e) {
+    // localStorage or DOM unavailable
+  }
+  themeDensity.set(mode);
+}
+
+if (typeof window !== 'undefined') {
+  const mql = window.matchMedia('(max-width: 1024px)');
+  const handleMediaChange = (e: MediaQueryListEvent | MediaQueryList) => {
+    if (get(themeDensity) === 'auto' && typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-density', e.matches ? 'compact' : 'comfortable');
+    }
+  };
+  if (mql.addEventListener) {
+    mql.addEventListener('change', handleMediaChange);
+  } else if ((mql as any).addListener) {
+    (mql as any).addListener(handleMediaChange);
+  }
+}

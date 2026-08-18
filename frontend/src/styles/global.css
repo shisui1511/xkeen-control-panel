@@ -105,6 +105,15 @@
   --rail-w: 64px;
   --topbar-h: 64px;
 
+  /* Density Tokens — Default (Comfortable) */
+  --card-pad: 20px;
+  --input-h: 38px;
+  --btn-h: 38px;
+  --table-row-h: 44px;
+  --grid-gap: 16px;
+  --row-gap: 12px;
+  --font-size-table: 0.8125rem;
+
   /* CodeMirror tokens */
   --cm-bg: #050d16;
   --cm-keyword: #29c2f0;
@@ -179,6 +188,17 @@
   --cm-bracket: #0c2237;
   --cm-active-line: #f0f4f9;
   --cm-border: #e1e7ef;
+}
+
+/* ------------ Density Modes ------------- */
+[data-density='compact'] {
+  --card-pad: 14px;
+  --input-h: 32px;
+  --btn-h: 32px;
+  --table-row-h: 32px;
+  --grid-gap: 10px;
+  --row-gap: 8px;
+  --font-size-table: 0.78125rem;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -264,7 +284,7 @@ p {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 60%), var(--bg-card);
   border: 1px solid var(--line-soft, rgba(255, 255, 255, 0.05));
   border-radius: var(--radius-lg);
-  padding: 24px;
+  padding: var(--card-pad);
   box-shadow: var(--shadow);
 }
 
@@ -276,7 +296,7 @@ h2.card-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: -24px -24px 18px;
+  margin: calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad)) 18px;
   padding: 16px 22px 12px;
   font-size: 11.5px;
   font-weight: 700;
@@ -285,6 +305,12 @@ h2.card-title {
   color: var(--fg-secondary);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   border-bottom: 0;
+}
+
+[data-density='compact'] .card .card-title,
+[data-density='compact'] h2.card-title {
+  padding: 10px 14px 8px;
+  margin-bottom: 12px;
 }
 
 .card .card-title .ct-actions {
@@ -330,12 +356,15 @@ h2.card-title {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 9px 14px;
+  min-height: var(--btn-h);
+  height: var(--btn-h);
+  padding: 0 14px;
   border-radius: var(--radius-md);
   font-family: var(--font-family-sans);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  box-sizing: border-box;
   transition:
     background-color var(--transition-fast),
     border-color var(--transition-fast),
@@ -349,24 +378,26 @@ h2.card-title {
 }
 
 .btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+  pointer-events: none;
 }
 
 .btn-primary {
-  background: linear-gradient(180deg, var(--accent), var(--accent-2));
-  color: var(--btn-primary-text, #03182a);
-  box-shadow: 0 6px 18px -8px var(--accent);
+  background: var(--accent);
+  color: var(--btn-primary-text);
+  border-color: var(--accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .btn-primary:hover:not(:disabled) {
-  filter: brightness(1.07);
-  color: var(--btn-primary-text, #03182a);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 .btn-secondary {
-  background: transparent;
-  border: 1px solid var(--border);
+  background: var(--surface-tint);
+  border-color: var(--border);
   color: var(--fg-primary);
 }
 
@@ -390,12 +421,15 @@ h2.card-title {
 /* ------------ Input ------------- */
 .input {
   width: 100%;
-  padding: 9px 12px;
+  min-height: var(--input-h);
+  height: var(--input-h);
+  padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   font-size: 13px;
   color: var(--fg-primary);
   background: var(--bg-elevated);
+  box-sizing: border-box;
   transition:
     border-color var(--transition-fast),
     box-shadow var(--transition-fast);
@@ -538,9 +572,17 @@ input[type='number'] {
 }
 
 .container {
-  max-width: 1320px;
+  max-width: min(100%, 1920px);
   margin: 0 auto;
-  padding: 28px 36px 60px;
+  padding: clamp(16px, 1.8vw, 36px) clamp(16px, 2.2vw, 40px) 60px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (min-width: 2560px) {
+  .container {
+    max-width: 2400px;
+  }
 }
 
 .center-container {
@@ -1335,7 +1377,10 @@ body.drawer-locked {
 .filter-input,
 .source-select,
 select.input {
-  padding: 7px 11px;
+  min-height: var(--input-h);
+  height: var(--input-h);
+  padding: 0 11px;
+  box-sizing: border-box;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -1401,7 +1446,7 @@ select.input:focus {
 table.data-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--font-size-table, 13px);
 }
 
 .table-container thead th,
@@ -1419,7 +1464,8 @@ table.data-table thead th {
 
 .table-container tbody td,
 table.data-table tbody td {
-  padding: 12px 14px;
+  padding: calc(max(4px, (var(--table-row-h) - 20px) / 2)) 14px;
+  min-height: var(--table-row-h);
   border-bottom: 1px solid var(--border-light);
   color: var(--fg-primary);
   vertical-align: middle;
@@ -2211,6 +2257,12 @@ a.chip:hover {
      inside the mobile drawer and must not be shown there. */
   .sidebar-collapse-toggle {
     display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding: 12px 10px 32px;
   }
 }
 
