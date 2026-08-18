@@ -936,6 +936,7 @@
   "xray.inbound_port": "Inbound port",
   "xray.listen_address": "Listen address",
   "xray.tag": "Tag",
+  "xray.skip_fallback": "Skip fallback",
   "xray.port": "Port",
   "xray.protocol": "Protocol",
   "xray.enable_udp_socks": "Enable UDP in Socks",

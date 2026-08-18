@@ -935,6 +935,7 @@
   "xray.inbound_port": "Порт входящего",
   "xray.listen_address": "Адрес прослушивания",
   "xray.tag": "Тег",
+  "xray.skip_fallback": "Пропустить fallback",
   "xray.port": "Порт",
   "xray.protocol": "Протокол",
   "xray.enable_udp_socks": "Включить UDP в Socks",

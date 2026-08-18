@@ -1788,7 +1788,11 @@
                         disabled={routingRules.findIndex((r) => r.id === rule.id) ===
                           routingRules.length - 1}>▼</button
                       >
-                      <button class="rule-del" onclick={() => removeRule(rule.id)}>✕</button>
+                      <button
+                        class="rule-del"
+                        onclick={() => removeRule(rule.id)}
+                        title={$t('app.delete')}>✕</button
+                      >
                     </div>
                   </div>
 
@@ -2124,15 +2128,18 @@
                         {srv.address}:{srv.port || 53}
                       </div>
                       <div style="font-size: 0.75rem; color: var(--fg-secondary);">
-                        Tag: <span class="badge">{srv.tag}</span> | Domains: {srv.domains?.join(
-                          ', '
-                        ) || 'none'}
+                        {$t('xray.tag')}: <span class="badge">{srv.tag}</span>
+                        | {$t('xray.domains')}: {srv.domains?.join(', ') || $t('app.none')}
                         {#if srv.skipFallback}
-                          | <span class="badge">Skip Fallback</span>{/if}
+                          | <span class="badge">{$t('xray.skip_fallback')}</span>{/if}
                       </div>
                     </div>
                   {/if}
-                  <button class="item-del" onclick={() => removeDNSServer(idx)}>✕</button>
+                  <button
+                    class="item-del"
+                    onclick={() => removeDNSServer(idx)}
+                    title={$t('app.delete')}>✕</button
+                  >
                 </div>
               {/each}
             </div>
@@ -2188,7 +2195,7 @@
                     <label class="checkbox-container">
                       <input type="checkbox" bind:checked={newDns.skipFallback} />
                       <span class="checkmark"></span>
-                      Skip Fallback
+                      {$t('xray.skip_fallback')}
                     </label>
                   </div>
                 {/if}
@@ -2212,7 +2219,11 @@
                   <div style="flex: 1;">
                     <code>{domain}</code> &rarr; <code>{ip}</code>
                   </div>
-                  <button class="item-del" onclick={() => removeHost(domain)}>✕</button>
+                  <button
+                    class="item-del"
+                    onclick={() => removeHost(domain)}
+                    title={$t('app.delete')}>✕</button
+                  >
                 </div>
               {/each}
             </div>
