@@ -55,8 +55,23 @@
 
   // Forecast state
   let selectedForecastPeriod: 'daily' | 'weekly' | 'monthly' = $state('monthly');
-  let forecastValue: number | null = $state(null);
-  let showForecastCalculating = $state(false);
+  let forecastData = $derived.by(() => {
+    if (stats && stats.reset_time) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const duration = nowSec - stats.reset_time;
+      if (duration > 0) {
+        if (duration < 600) {
+          return { calculating: true, value: null };
+        }
+        return { calculating: false, value: (stats.total / duration) * 30 * 24 * 3600 };
+      }
+      return { calculating: true, value: null };
+    }
+    return { calculating: false, value: null };
+  });
+
+  let showForecastCalculating = $derived(forecastData.calculating);
+  let forecastValue = $derived(forecastData.value);
 
   // Form state
   let showForm = $state(false);
@@ -349,28 +364,6 @@
     dismissedBanner = true;
     localStorage.setItem('tq_banner_dismissed', 'true');
   }
-
-  $effect(() => {
-    if (stats && stats.reset_time) {
-      const nowSec = Math.floor(Date.now() / 1000);
-      const duration = nowSec - stats.reset_time;
-      if (duration > 0) {
-        if (duration < 600) {
-          showForecastCalculating = true;
-          forecastValue = null;
-        } else {
-          showForecastCalculating = false;
-          forecastValue = (stats.total / duration) * 30 * 24 * 3600;
-        }
-      } else {
-        showForecastCalculating = true;
-        forecastValue = null;
-      }
-    } else {
-      showForecastCalculating = false;
-      forecastValue = null;
-    }
-  });
 
   onMount(() => {
     dismissedBanner = localStorage.getItem('tq_banner_dismissed') === 'true';
