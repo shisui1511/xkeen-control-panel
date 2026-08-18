@@ -679,8 +679,8 @@
           <thead>
             <tr>
               <th>{$t('trafficquotas.proxy_name')}</th>
-              <th>Upload</th>
-              <th>Download</th>
+              <th>{$t('traffic.upload')}</th>
+              <th>{$t('traffic.download')}</th>
               <th>{$t('trafficquotas.total')}</th>
             </tr>
           </thead>

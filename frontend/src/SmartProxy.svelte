@@ -58,7 +58,7 @@
   let drawMode = true; // true to draw, false to erase
 
   $: dayNames = $t('smartproxy.days').split(',');
-  const allDays = [0, 1, 2, 3, 4, 5, 6];
+  const displayDayIndices = [1, 2, 3, 4, 5, 6, 0];
 
   async function fetchProfiles() {
     loading = true;
@@ -242,7 +242,7 @@
     formSchedule = [...formSchedule];
   }
 
-  // Click-and-drag handlers
+  // Click-and-drag handlers & Touch handlers
   function handleCellMouseDown(day: number, hour: number) {
     isDrawing = true;
     drawMode = !formSchedule[day][hour];
@@ -258,6 +258,38 @@
   }
 
   function handleMouseUp() {
+    isDrawing = false;
+  }
+
+  function handleTouchStart(day: number, hour: number, e: TouchEvent) {
+    isDrawing = true;
+    drawMode = !formSchedule[day][hour];
+    formSchedule[day][hour] = drawMode;
+    formSchedule = [...formSchedule];
+  }
+
+  function handleTouchMove(e: TouchEvent) {
+    if (!isDrawing || !e.touches || e.touches.length === 0) return;
+    const touch = e.touches[0];
+    const target = document
+      .elementFromPoint(touch.clientX, touch.clientY)
+      ?.closest('.grid-cell') as HTMLElement | null;
+    if (target && target.dataset.day !== undefined && target.dataset.hour !== undefined) {
+      const day = parseInt(target.dataset.day, 10);
+      const hour = parseInt(target.dataset.hour, 10);
+      if (
+        !isNaN(day) &&
+        !isNaN(hour) &&
+        formSchedule[day] &&
+        formSchedule[day][hour] !== drawMode
+      ) {
+        formSchedule[day][hour] = drawMode;
+        formSchedule = [...formSchedule];
+      }
+    }
+  }
+
+  function handleTouchEnd() {
     isDrawing = false;
   }
 
@@ -364,11 +396,15 @@
     window.addEventListener('click', handleClickOutside);
     window.addEventListener('keydown', handleKeydown);
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('touchend', handleTouchEnd);
+    window.addEventListener('touchcancel', handleTouchEnd);
     return () => {
       statusPoller.stop();
       window.removeEventListener('click', handleClickOutside);
       window.removeEventListener('keydown', handleKeydown);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('touchcancel', handleTouchEnd);
     };
   });
 </script>
@@ -688,7 +724,7 @@
     <!-- STEP 2: Targets Selection -->
     {#if currentStep === 2}
       <div class="form-group">
-        <label for="sp-group" class="form-label">{$t('smartproxy.proxy_group')} *</label>
+        <label for="sp-group" class="form-label">{$t('smartproxy.form_proxy_group')} *</label>
         {#if mihomoGroups.length > 0}
           <select id="sp-group" class="input" bind:value={formGroupName}>
             <option value="">-- {$t('smartproxy.select_group')} --</option>
@@ -708,7 +744,7 @@
       </div>
 
       <div class="form-group">
-        <label for="sp-proxy" class="form-label">{$t('smartproxy.proxy')} *</label>
+        <label for="sp-proxy" class="form-label">{$t('smartproxy.form_target_proxy')} *</label>
         {#if mihomoProxies.length > 0}
           <select id="sp-proxy" class="input" bind:value={formProxyName}>
             <option value="">-- {$t('smartproxy.select_proxy')} --</option>
@@ -748,7 +784,12 @@
       </p>
 
       <!-- 7x24 Grid Container with thin scrollbar -->
-      <div class="grid-scrollbar-container">
+      <div
+        class="grid-scrollbar-container"
+        ontouchmove={handleTouchMove}
+        role="region"
+        aria-label={$t('smartproxy.schedule_slots')}
+      >
         <div class="schedule-grid-table">
           <!-- Top Hour Headers -->
           <div class="grid-row-header">
@@ -758,8 +799,8 @@
             {/each}
           </div>
 
-          <!-- Grid Rows per Day -->
-          {#each allDays as d}
+          <!-- Grid Rows per Day (Mon to Sun) -->
+          {#each displayDayIndices as d}
             <div class="grid-row-day">
               <div class="day-label-sticky">{dayNames[d]}</div>
               {#each Array(24) as _, h}
@@ -767,11 +808,14 @@
                 <div
                   class="grid-cell"
                   class:active={isCellActive}
+                  data-day={d}
+                  data-hour={h}
                   onmousedown={(e) => {
                     e.preventDefault();
                     handleCellMouseDown(d, h);
                   }}
                   onmouseenter={() => handleCellMouseEnter(d, h)}
+                  ontouchstart={(e) => handleTouchStart(d, h, e)}
                   role="presentation"
                 ></div>
               {/each}
@@ -966,12 +1010,16 @@
     border-radius: var(--radius-md);
     background: var(--bg-card);
     scrollbar-width: thin;
+    touch-action: none;
+    -webkit-overflow-scrolling: touch;
   }
 
   .schedule-grid-table {
     display: flex;
     flex-direction: column;
     min-width: 600px;
+    user-select: none;
+    touch-action: none;
   }
 
   .grid-row-header,
@@ -1014,6 +1062,7 @@
     border-right: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
     cursor: crosshair;
+    touch-action: none;
     background: rgba(255, 255, 255, 0.02);
     transition: background var(--transition-fast);
   }

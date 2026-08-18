@@ -1456,7 +1456,7 @@
                   <span
                     ><b>{$t('nav.subscriptions')}</b><span class="s"
                       >{totalSubsCount > 0
-                        ? `${$t('dash.subs_count', { count: totalSubsCount })}${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
+                        ? `${totalSubsCount} ${pluralize(totalSubsCount, $t('dash.source_one'), $t('dash.source_few'), $t('dash.source_many'), $currentLang)}${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
                         : $t('dash.subs_empty')}</span
                     ></span
                   >
