@@ -2259,6 +2259,34 @@
 
   /* Mobile: proxy cards stack, observatory stats handled globally at 768px */
   @media (max-width: 640px) {
+    .ph-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    .ph-actions .group-search {
+      order: -1;
+      flex: 1 1 100%;
+      width: 100%;
+      min-width: 100%;
+      font-size: 13px;
+      padding: 8px 12px;
+    }
+
+    .ph-actions .btn {
+      flex: 1 1 calc(50% - 4px);
+      justify-content: center;
+      padding: 8px 10px;
+      font-size: 12px;
+      min-height: 40px;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
+    }
+
     .group-grid {
       gap: 10px;
     }

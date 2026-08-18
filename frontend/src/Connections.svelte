@@ -675,9 +675,30 @@
     color: var(--fg-dim);
     margin-top: 3px;
   }
-  .conn-row:hover {
-    background: var(--bg-hover, rgba(255, 255, 255, 0.02));
+  .btn-close-conn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast);
   }
+
+  /* Расширенный сенсорный хитбокс 44x44px без изменения визуального размера строки */
+  .btn-close-conn::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: var(--radius-sm);
+  }
+
   .btn-close-conn:hover {
     background: var(--danger) !important;
     color: white !important;

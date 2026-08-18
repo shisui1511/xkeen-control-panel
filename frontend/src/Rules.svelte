@@ -363,7 +363,6 @@
             placeholder={$t('rules.search')}
             bind:value={searchQuery}
             class="filter-input"
-            style="flex: 1;"
           />
           <select bind:value={typeFilter} class="source-select">
             <option value="">{$t('rules.all_types')}</option>
@@ -829,6 +828,26 @@
 
   /* Column priority on mobile — hide # index, truncate payload */
   @media (max-width: 640px) {
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .filters .filter-input {
+      flex: 1 1 100%;
+      width: 100%;
+      min-width: 100%;
+    }
+
+    .filters .source-select {
+      flex: 1 1 calc(50% - 4px);
+      width: calc(50% - 4px);
+      min-width: 0;
+      padding: 8px 10px;
+    }
+
     .col-num {
       display: none;
     }

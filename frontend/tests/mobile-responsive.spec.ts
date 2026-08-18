@@ -220,7 +220,7 @@ async function setupMocks(page: Page) {
     );
   });
 
-  await page.routeWebSocket('**/api/mihomo/proxy/connections', async (ws) => {
+  await page.routeWebSocket('**/api/mihomo/connections/ws', async (ws) => {
     ws.send(MOCK_CONNECTIONS_WS);
   });
 }
@@ -354,7 +354,7 @@ test.describe('Mobile Responsiveness and Layout (Phase 81)', () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto('/#/proxies');
 
-    const actions = page.locator('.ph-actions');
+    const actions = page.locator('.ph-actions').filter({ has: page.locator('.group-search') });
     await expect(actions).toBeVisible({ timeout: 5000 });
 
     const groupSearch = actions.locator('.group-search');
