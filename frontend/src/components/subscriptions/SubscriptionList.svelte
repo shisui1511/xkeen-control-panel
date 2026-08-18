@@ -766,31 +766,6 @@
     color: var(--accent);
   }
 
-  /* Быстрая кнопка карандаша */
-  .edit-icon-btn {
-    background: transparent;
-    border: none;
-    padding: 4px;
-    color: var(--fg-dim);
-    cursor: pointer;
-    border-radius: 4px;
-    display: grid;
-    place-items: center;
-    opacity: 0;
-    transition:
-      opacity var(--transition-fast),
-      color var(--transition-fast),
-      background var(--transition-fast);
-  }
-  .sub-header-left:hover .edit-icon-btn,
-  .edit-icon-btn:focus {
-    opacity: 1;
-  }
-  .edit-icon-btn:hover {
-    color: var(--accent);
-    background: rgba(255, 255, 255, 0.04);
-  }
-
   .sub-header-right {
     display: flex;
     align-items: center;
@@ -895,10 +870,6 @@
     letter-spacing: 0.08em;
     font-weight: 700;
     color: var(--fg-faint);
-  }
-
-  .mihomo-integrated-badge.active {
-    color: var(--success);
   }
 
   .mihomo-provider-chip {

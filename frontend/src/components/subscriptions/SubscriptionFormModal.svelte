@@ -377,45 +377,6 @@
     margin-bottom: 12px;
   }
 
-  .textarea-link {
-    min-height: 90px;
-  }
-  .preview-section {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .preview-title {
-    margin: 0 0 4px 0;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--fg-secondary);
-  }
-  .preview-table {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    background: rgba(0, 0, 0, 0.15);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 12px 16px;
-  }
-  .preview-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 13px;
-  }
-  .preview-label {
-    color: var(--fg-secondary);
-  }
-  .preview-value {
-    color: var(--fg-primary);
-  }
-  .preview-value.code {
-    font-family: var(--font-family-mono, monospace);
-    font-size: 12px;
-  }
   .seg-btn {
     display: flex;
     border: 1px solid var(--border);
