@@ -123,7 +123,7 @@
   }
 
   function formatRelativeTime(isoDate: string): string {
-    if (!isoDate) return '—';
+    if (!isoDate || isoDate.startsWith('0001')) return $t('rules.time_never');
     try {
       const date = new Date(isoDate);
       const now = new Date();

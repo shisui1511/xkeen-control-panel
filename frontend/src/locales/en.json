@@ -764,6 +764,7 @@
   "rules.time_min_ago": "{n} min ago",
   "rules.time_h_ago": "{n} h ago",
   "rules.time_d_ago": "{n} d ago",
+  "rules.time_never": "—",
   "subscr.fill_url": "Please fill in the URL field",
   "subscr.load_error": "Failed to load subscriptions",
   "traffic.title": "Traffic",
