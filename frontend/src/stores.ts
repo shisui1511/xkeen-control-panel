@@ -224,6 +224,26 @@ export async function setDevMode(enabled: boolean): Promise<void> {
 
 export type ThemeDensity = 'auto' | 'comfortable' | 'compact';
 
+export function resolveDensityAttr(mode?: ThemeDensity): 'comfortable' | 'compact' {
+  let densityMode = mode;
+  if (!densityMode) {
+    try {
+      const saved = localStorage.getItem('theme_density');
+      if (saved === 'comfortable' || saved === 'compact') {
+        densityMode = saved;
+      }
+    } catch (_) {}
+  }
+  if (densityMode === 'compact' || densityMode === 'comfortable') {
+    return densityMode;
+  }
+  const isMobile =
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(max-width: 1024px)').matches;
+  return isMobile ? 'compact' : 'comfortable';
+}
+
 function readInitialDensity(): ThemeDensity {
   try {
     const saved = localStorage.getItem('theme_density');
@@ -242,16 +262,11 @@ export function applyDensity(mode: ThemeDensity): void {
   try {
     if (mode === 'auto') {
       localStorage.removeItem('theme_density');
-      const isMobile =
-        typeof window !== 'undefined' && window.matchMedia('(max-width: 1024px)').matches;
-      if (typeof document !== 'undefined') {
-        document.documentElement.setAttribute('data-density', isMobile ? 'compact' : 'comfortable');
-      }
     } else {
       localStorage.setItem('theme_density', mode);
-      if (typeof document !== 'undefined') {
-        document.documentElement.setAttribute('data-density', mode);
-      }
+    }
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-density', resolveDensityAttr(mode));
     }
   } catch (e) {
     // localStorage or DOM unavailable
@@ -259,16 +274,30 @@ export function applyDensity(mode: ThemeDensity): void {
   themeDensity.set(mode);
 }
 
-if (typeof window !== 'undefined') {
-  const mql = window.matchMedia('(max-width: 1024px)');
-  const handleMediaChange = (e: MediaQueryListEvent | MediaQueryList) => {
-    if (get(themeDensity) === 'auto' && typeof document !== 'undefined') {
-      document.documentElement.setAttribute('data-density', e.matches ? 'compact' : 'comfortable');
+let densityMql: MediaQueryList | null = null;
+let handleDensityMediaChange: ((e: MediaQueryListEvent) => void) | null = null;
+
+export function initDensity(): () => void {
+  if (typeof document !== 'undefined') {
+    document.documentElement.setAttribute('data-density', resolveDensityAttr());
+  }
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && !densityMql) {
+    densityMql = window.matchMedia('(max-width: 1024px)');
+    handleDensityMediaChange = (e: MediaQueryListEvent) => {
+      if (get(themeDensity) === 'auto' && typeof document !== 'undefined') {
+        document.documentElement.setAttribute(
+          'data-density',
+          e.matches ? 'compact' : 'comfortable'
+        );
+      }
+    };
+    densityMql.addEventListener('change', handleDensityMediaChange);
+  }
+  return () => {
+    if (densityMql && handleDensityMediaChange) {
+      densityMql.removeEventListener('change', handleDensityMediaChange);
+      densityMql = null;
+      handleDensityMediaChange = null;
     }
   };
-  if (mql.addEventListener) {
-    mql.addEventListener('change', handleMediaChange);
-  } else if ((mql as any).addListener) {
-    (mql as any).addListener(handleMediaChange);
-  }
 }
