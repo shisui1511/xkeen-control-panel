@@ -127,6 +127,7 @@
   let totalSubsCount = $state(0);
   let hasSubscription = $state(false);
   let subsLastUpdated = $state('');
+  let subsSummaryLoaded = $state(false);
   let totalProxiesCount = $state(0);
   let activeProxiesCount = $state(0);
   let subscriptionProxiesCount = $state(0);
@@ -198,6 +199,8 @@
       if (e?.name === 'AbortError') return;
       if (e?.status === 401) return;
       console.error('fetchSubscriptionSummary failed:', e);
+    } finally {
+      subsSummaryLoaded = true;
     }
   }
 
@@ -859,8 +862,11 @@
             </div>
           </div>
 
-          <!-- Quickstart Checklist (Mihomo only, auto-hides when all steps complete) -->
-          {#if $capabilities?.active_kernel === 'mihomo' && !allQuickstartComplete}
+          <!-- Quickstart Checklist (Mihomo only, auto-hides when all steps complete).
+               Gated on statusLoading/subsSummaryLoaded so it doesn't flash "incomplete"
+               using each store's not-yet-fetched default before the first poll round
+               of fetchLiveStatus/fetchSubscriptionSummary actually lands. -->
+          {#if $capabilities?.active_kernel === 'mihomo' && !statusLoading && subsSummaryLoaded && !allQuickstartComplete}
             <div style="margin-bottom: 18px;">
               <Card title={$t('dash.quickstart.title')}>
                 {#snippet actions()}
