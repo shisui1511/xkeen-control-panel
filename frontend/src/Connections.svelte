@@ -7,7 +7,6 @@
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
-  import Icon from './lib/components/Icon.svelte';
 
   interface Connection {
     id: string;
@@ -254,21 +253,6 @@
       return hasValidPort ? `localhost:${port}` : 'localhost';
     }
     return hasValidPort ? `${ip}:${port}` : ip;
-  }
-
-  function getSourceName(conn: Connection): string {
-    const client = getClientForConn(conn);
-    const endpoint = formatEndpoint(conn);
-    if (conn.metadata.process) {
-      if (client && client.display_name && client.display_name !== client.ip) {
-        return `${client.display_name} (${conn.metadata.process}) ${endpoint}`;
-      }
-      return `${conn.metadata.process} (${endpoint})`;
-    }
-    if (client && client.display_name && client.display_name !== client.ip) {
-      return `${client.display_name} (${endpoint})`;
-    }
-    return endpoint;
   }
 
   function getHostTooltip(conn: Connection): string {
