@@ -1221,8 +1221,7 @@
                     </span>
                   </div>
                   <div class="status-badge-item">
-                    <span class="status-dot {serviceStatus.connections > 0 ? 'success' : 'warning'}"
-                    ></span>
+                    <span class="status-dot neutral"></span>
                     <span class="svc-cell-stack">
                       <span class="status-badge-label">{$t('dash.connections')}</span>
                       <span class="lbl">{$t('dash.connections_sub')}</span>

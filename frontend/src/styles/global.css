@@ -1062,6 +1062,11 @@ body.drawer-locked {
   color: var(--warning);
 }
 
+.status-dot.neutral {
+  background: var(--fg-dim);
+  color: var(--fg-dim);
+}
+
 @keyframes ledPulse {
   0%,
   100% {
@@ -1198,7 +1203,7 @@ body.drawer-locked {
 .stat-bar {
   margin-top: 14px;
   height: 4px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--border);
   border-radius: 2px;
   overflow: hidden;
 }
