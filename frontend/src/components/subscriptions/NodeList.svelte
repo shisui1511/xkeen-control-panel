@@ -53,11 +53,12 @@
   let availableCountries = $derived.by(() => {
     const counts = new Map<string, { code: string; flag?: string; count: number }>();
     for (const node of nodes) {
-      if (!node.country) continue;
+      if (!node || !node.country) continue;
       const code = node.country.toUpperCase();
       const existing = counts.get(code);
       if (existing) {
         existing.count++;
+        if (!existing.flag && node.flag) existing.flag = node.flag;
       } else {
         counts.set(code, { code, flag: node.flag, count: 1 });
       }
@@ -68,7 +69,7 @@
   let availableProtocols = $derived.by(() => {
     const counts = new Map<string, number>();
     for (const node of nodes) {
-      if (!node.protocol) continue;
+      if (!node || !node.protocol) continue;
       const proto = node.protocol.toUpperCase();
       counts.set(proto, (counts.get(proto) || 0) + 1);
     }
@@ -80,6 +81,7 @@
   let filteredNodes = $derived.by(() => {
     const q = searchQuery.trim().toLowerCase();
     return nodes.filter((node) => {
+      if (!node) return false;
       // 1. Country filter
       if (
         selectedCountry &&
