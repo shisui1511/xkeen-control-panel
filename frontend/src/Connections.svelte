@@ -465,10 +465,7 @@
       </div>
     </div>
 
-    <div
-      class="stats mb-2"
-      style="display: flex; gap: 16px; font-size: 13px; color: var(--fg-dim); align-items: center;"
-    >
+    <div class="stats mb-2">
       <span class="stat"
         ><b>{connections.length}</b>
         {$t('conn.total', { count: '' }).replace(/:\s*$/, '').trim()}</span
