@@ -11,6 +11,16 @@
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
   import ChevronDown from './lib/components/icons/ChevronDown.svelte';
+  import FloatingProgress from './components/FloatingProgress.svelte';
+  import LatencyHistoryPopover from './components/LatencyHistoryPopover.svelte';
+  import PingTargetQuickMenu from './components/PingTargetQuickMenu.svelte';
+  import {
+    BatchLatencyTester,
+    type BatchProgressState,
+    formatTimeAgo
+  } from './lib/batchLatencyTester';
+  import { getTargetUrl, getCurrentPingConfig } from './lib/pingTargetStore';
+  import type { PollerControls } from './lib/poller';
 
   // Subcomponents for providers (subscriptions)
   import SubscriptionList from './components/subscriptions/SubscriptionList.svelte';
@@ -139,6 +149,17 @@
   let filterQuery = $state('');
   let seenGroups = $state(new Set<string>());
   const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
+
+  // Batch testing & latency history state
+  let poller = $state<PollerControls | null>(null);
+  const batchTester = new BatchLatencyTester();
+  let batchProgress = $state<BatchProgressState | null>(null);
+  let activePopover = $state<{
+    name: string;
+    history: { time: string; delay: number }[];
+    el: HTMLElement;
+  } | null>(null);
+  let popoverHoverTimeout: ReturnType<typeof setTimeout> | null = null;
 
   // Subscription state variables
   let subscriptions = $state<Subscription[]>([]);
@@ -648,56 +669,255 @@
     }
   }
 
+  function isLatencyStale(proxyName: string): boolean {
+    const proxy = proxies[proxyName];
+    if (!proxy || !proxy.history || proxy.history.length === 0) return false;
+    const lastItem = proxy.history[proxy.history.length - 1];
+    if (!lastItem.time) return false;
+    const timestamp = new Date(lastItem.time).getTime();
+    if (isNaN(timestamp)) return false;
+    return Date.now() - timestamp > 300000; // 5 minutes TTL
+  }
+
+  function getProxyLastTime(proxyName: string): number | null {
+    const proxy = proxies[proxyName];
+    if (!proxy || !proxy.history || proxy.history.length === 0) return null;
+    const lastItem = proxy.history[proxy.history.length - 1];
+    if (!lastItem.time) return null;
+    const timestamp = new Date(lastItem.time).getTime();
+    return isNaN(timestamp) ? null : timestamp;
+  }
+
+  function getLatencyTitle(proxyName: string): string {
+    if (isLatencyStale(proxyName)) {
+      const tMs = getProxyLastTime(proxyName);
+      if (tMs) {
+        return $t('proxies.stale_tooltip', { timeAgo: formatTimeAgo(tMs, $t) });
+      }
+    }
+    return '';
+  }
+
+  function handleBadgeMouseEnter(e: MouseEvent, proxyName: string) {
+    if (popoverHoverTimeout) clearTimeout(popoverHoverTimeout);
+    const target = e.currentTarget as HTMLElement;
+    popoverHoverTimeout = setTimeout(() => {
+      const p = proxies[proxyName];
+      if (p) {
+        activePopover = {
+          name: proxyName,
+          history: p.history || [],
+          el: target
+        };
+      }
+    }, 200);
+  }
+
+  function handleBadgeMouseLeave() {
+    if (popoverHoverTimeout) {
+      clearTimeout(popoverHoverTimeout);
+      popoverHoverTimeout = null;
+    }
+  }
+
+  function handleBadgeClick(e: MouseEvent, proxyName: string) {
+    e.stopPropagation();
+    if (popoverHoverTimeout) {
+      clearTimeout(popoverHoverTimeout);
+      popoverHoverTimeout = null;
+    }
+    const target = e.currentTarget as HTMLElement;
+    const p = proxies[proxyName];
+    if (p) {
+      if (activePopover?.name === proxyName) {
+        activePopover = null;
+      } else {
+        activePopover = {
+          name: proxyName,
+          history: p.history || [],
+          el: target
+        };
+      }
+    }
+  }
+
   async function testLatency() {
+    if (batchTester.isActive()) return;
     testingLatency = true;
     error = '';
-    try {
-      const urlTestGroups = groups.filter((g) => g.type === 'URLTest');
-      if (urlTestGroups.length > 0) {
-        await Promise.all(
-          urlTestGroups.map((g) =>
-            apiFetch(
-              `/api/mihomo/proxy/group/${encodeURIComponent(g.name)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`,
-              {
-                method: 'GET'
-              }
-            )
-          )
-        );
-      } else {
-        const res = await apiFetch(
-          '/api/mihomo/proxy/proxies/delay?url=http://www.gstatic.com/generate_204&timeout=5000',
-          {
-            method: 'GET'
+
+    const nodeSet = new Set<string>();
+    for (const g of groups) {
+      for (const node of g.all) {
+        const p = proxies[node];
+        if (
+          node &&
+          !['DIRECT', 'REJECT'].includes(node.toUpperCase()) &&
+          p?.type !== 'Direct' &&
+          p?.type !== 'Reject'
+        ) {
+          if (isLatencyStale(node) || getProxyDelay(node) === undefined) {
+            nodeSet.add(node);
           }
-        );
-        if (!res.ok) throw new Error($t('proxies.load_error'));
+        }
       }
-      safeTimeout(async () => {
-        await fetchProxies();
-        testingLatency = false;
-      }, 2000);
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e.message);
+    }
+
+    if (nodeSet.size === 0) {
+      for (const g of groups) {
+        for (const node of g.all) {
+          const p = proxies[node];
+          if (
+            node &&
+            !['DIRECT', 'REJECT'].includes(node.toUpperCase()) &&
+            p?.type !== 'Direct' &&
+            p?.type !== 'Reject'
+          ) {
+            nodeSet.add(node);
+          }
+        }
+      }
+    }
+
+    const nodes = Array.from(nodeSet);
+    if (nodes.length === 0) {
       testingLatency = false;
+      return;
+    }
+
+    poller?.pause();
+    const pingConfig = getCurrentPingConfig();
+    const targetUrl = getTargetUrl(pingConfig);
+    const timeoutMs = pingConfig.timeoutMs;
+
+    try {
+      await batchTester.run({
+        nodes,
+        targetUrl,
+        timeoutMs,
+        onProgressChange: (state) => {
+          batchProgress = state;
+          testingLatency = state.running;
+        },
+        onNodeComplete: (node, delay, rawHistoryItem) => {
+          if (proxies[node]) {
+            const currentHist = proxies[node].history ? [...proxies[node].history!] : [];
+            if (rawHistoryItem) {
+              currentHist.push(rawHistoryItem);
+            }
+            proxies[node] = {
+              ...proxies[node],
+              delay: delay ?? 0,
+              alive: (delay ?? 0) > 0,
+              history: currentHist
+            };
+          }
+        }
+      });
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        showToast('error', err?.message || 'Error running batch latency test');
+      }
+    } finally {
+      testingLatency = false;
+      batchProgress = null;
+      poller?.resume();
+    }
+  }
+
+  async function testGroupLatency(group: ProxyGroup) {
+    if (batchTester.isActive()) return;
+    testingLatency = true;
+
+    const nodeSet = new Set<string>();
+    for (const node of group.all) {
+      const p = proxies[node];
+      if (
+        node &&
+        !['DIRECT', 'REJECT'].includes(node.toUpperCase()) &&
+        p?.type !== 'Direct' &&
+        p?.type !== 'Reject'
+      ) {
+        nodeSet.add(node);
+      }
+    }
+
+    const nodes = Array.from(nodeSet);
+    if (nodes.length === 0) {
+      testingLatency = false;
+      return;
+    }
+
+    poller?.pause();
+    const pingConfig = getCurrentPingConfig();
+    const targetUrl = getTargetUrl(pingConfig);
+    const timeoutMs = pingConfig.timeoutMs;
+
+    try {
+      await batchTester.run({
+        nodes,
+        targetUrl,
+        timeoutMs,
+        onProgressChange: (state) => {
+          batchProgress = state;
+          testingLatency = state.running;
+        },
+        onNodeComplete: (node, delay, rawHistoryItem) => {
+          if (proxies[node]) {
+            const currentHist = proxies[node].history ? [...proxies[node].history!] : [];
+            if (rawHistoryItem) {
+              currentHist.push(rawHistoryItem);
+            }
+            proxies[node] = {
+              ...proxies[node],
+              delay: delay ?? 0,
+              alive: (delay ?? 0) > 0,
+              history: currentHist
+            };
+          }
+        }
+      });
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        showToast('error', err?.message || 'Error testing group');
+      }
+    } finally {
+      testingLatency = false;
+      batchProgress = null;
+      poller?.resume();
     }
   }
 
   async function testProxyLatency(proxyName: string) {
     testingProxy = proxyName;
+    const pingConfig = getCurrentPingConfig();
+    const targetUrl = getTargetUrl(pingConfig);
+    const timeoutMs = pingConfig.timeoutMs;
+
     try {
       const res = await apiFetch(
-        `/api/mihomo/proxy/proxies/${encodeURIComponent(proxyName)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`,
+        `/api/mihomo/proxy/proxies/${encodeURIComponent(proxyName)}/delay?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
         {
           method: 'GET'
         }
       );
       if (!res.ok) throw new Error($t('proxies.load_error'));
-      safeTimeout(async () => {
-        await fetchProxies();
-        testingProxy = '';
-      }, 1500);
+      const data = await res.json();
+      const delay = typeof data?.delay === 'number' ? data.delay : 0;
+      if (proxies[proxyName]) {
+        const currentHist = proxies[proxyName].history ? [...proxies[proxyName].history!] : [];
+        currentHist.push({
+          time: new Date().toISOString(),
+          delay
+        });
+        proxies[proxyName] = {
+          ...proxies[proxyName],
+          delay,
+          alive: delay > 0,
+          history: currentHist
+        };
+      }
+      testingProxy = '';
     } catch (e: any) {
       showToast('error', e.message);
       testingProxy = '';
@@ -729,9 +949,18 @@
     )
       return 'lat dim';
     const delay = getProxyDelay(proxyName);
-    if (delay === undefined || delay === 0 || delay >= 800) return 'lat bad';
-    if (delay < 300) return 'lat ok';
-    return 'lat mid';
+    let baseClass = 'lat';
+    if (delay === undefined || delay === 0 || delay >= 800) {
+      baseClass += ' bad';
+    } else if (delay < 300) {
+      baseClass += ' ok';
+    } else {
+      baseClass += ' mid';
+    }
+    if (isLatencyStale(proxyName)) {
+      baseClass += ' latency-stale';
+    }
+    return baseClass;
   }
 
   function getLatencyText(proxyName: string): string {
@@ -744,7 +973,8 @@
       return '—';
     const delay = getProxyDelay(proxyName);
     if (delay === undefined || delay === 0 || delay >= 800) return 'timeout';
-    return `${delay} ${$t('app.ms')}`;
+    const prefix = isLatencyStale(proxyName) ? '~' : '';
+    return `${prefix}${delay} ${$t('app.ms')}`;
   }
 
   let mihomoLaunching = $state(false);
@@ -1420,7 +1650,7 @@
       activeTab = 'providers';
     }
 
-    const poller = usePoller(async (signal) => {
+    poller = usePoller(async (signal) => {
       await fetchProxies(signal);
       await loadSubscriptions(signal);
       checkAutoExpand();
@@ -1439,7 +1669,9 @@
     window.addEventListener('click', handleClickOutside);
 
     return () => {
-      poller.stop();
+      poller?.stop();
+      batchTester.cancel();
+      if (popoverHoverTimeout) clearTimeout(popoverHoverTimeout);
       if (loadTimeoutId) clearTimeout(loadTimeoutId);
       pendingTimeouts.forEach(clearTimeout);
       window.removeEventListener('hashchange', handleHashChange);
@@ -1519,8 +1751,9 @@
             fill="currentColor"
             style="margin-right: 6px;"><polygon points="5 3 19 12 5 21 5 3" /></svg
           >
-          {testingLatency ? $t('proxies.testing') : $t('proxies.test_latency')}
+          {testingLatency ? $t('proxies.testing') : $t('proxies.test_all_nodes')}
         </button>
+        <PingTargetQuickMenu />
       </div>
     {:else}
       <div class="ph-actions">
@@ -1809,6 +2042,27 @@
                   >
                     {$t('proxies.filter_by_latency')}
                   </button>
+
+                  <div class="group-actions-spacer"></div>
+
+                  <button
+                    type="button"
+                    class="filter-chip group-test-btn"
+                    onclick={() => testGroupLatency(group)}
+                    disabled={testingLatency || batchProgress?.running}
+                    title={$t('proxies.test_group')}
+                  >
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      style="margin-right: 4px;"
+                    >
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                    {$t('proxies.test_group')}
+                  </button>
                 </div>
 
                 {@const filteredNodesList = getFilteredGroupNodes(group.name, nodes)}
@@ -1840,7 +2094,28 @@
                         </div>
 
                         <div class="p-footer">
-                          <span class={healthClass}>{healthText}</span>
+                          {#if (batchProgress?.running && batchProgress?.currentNode === proxyName) || testingProxy === proxyName}
+                            <span class="lat dim">
+                              <span class="lat-spinner"></span>
+                            </span>
+                          {:else}
+                            <span
+                              class={healthClass}
+                              title={getLatencyTitle(proxyName)}
+                              onmouseenter={(e) => handleBadgeMouseEnter(e, proxyName)}
+                              onmouseleave={handleBadgeMouseLeave}
+                              onclick={(e) => handleBadgeClick(e, proxyName)}
+                              role="button"
+                              tabindex="0"
+                              onkeydown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  handleBadgeClick(e as any, proxyName);
+                                }
+                              }}
+                            >
+                              {healthText}
+                            </span>
+                          {/if}
                           {#if group.type === 'Selector'}
                             <span class="selector-dot" class:active={isActive}
                               >{isActive ? '●' : '○'}</span
@@ -1988,6 +2263,19 @@
   onClose={closeDiagnosticModal}
   onTabChange={(tab) => (diagnosticTab = tab)}
 />
+
+{#if batchProgress?.running}
+  <FloatingProgress progress={batchProgress} onCancel={() => batchTester.cancel()} />
+{/if}
+
+{#if activePopover}
+  <LatencyHistoryPopover
+    proxyName={activePopover.name}
+    history={activePopover.history}
+    anchorEl={activePopover.el}
+    onClose={() => (activePopover = null)}
+  />
+{/if}
 
 <style>
   /* Tabs styles */
@@ -2399,6 +2687,27 @@
   .filter-chip .filter-count {
     font-size: 10px;
     opacity: 0.7;
+  }
+
+  .group-actions-spacer {
+    flex: 1;
+  }
+
+  .group-test-btn {
+    margin-left: auto;
+    color: var(--accent);
+    border-color: rgba(41, 194, 240, 0.3);
+  }
+
+  .group-test-btn:hover {
+    background: rgba(41, 194, 240, 0.15);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .group-test-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .selector-dot {

@@ -2543,3 +2543,133 @@ a.chip:hover {
   min-height: 0 !important;
   overflow: auto !important;
 }
+
+/* ============================================================
+   Phase 85: Floating Progress Bar, Latency History & Stale Status
+   ============================================================ */
+
+.floating-progress-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 18px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow:
+    0 12px 36px -8px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(41, 194, 240, 0.15);
+  backdrop-filter: blur(12px);
+  min-width: 320px;
+  max-width: 90vw;
+  animation: floatSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes floatSlideUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+.floating-progress-bar .progress-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.floating-progress-bar .progress-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.floating-progress-bar .progress-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--fg-primary);
+  white-space: nowrap;
+}
+
+.floating-progress-bar .progress-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.floating-progress-bar .progress-track {
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.floating-progress-bar .progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.15s ease-out;
+}
+
+.floating-progress-bar .progress-retry-badge {
+  font-size: var(--font-size-xs);
+  color: var(--warning);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.floating-progress-bar .btn-cancel {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: var(--font-size-xs);
+  color: var(--danger);
+  border: 1px solid rgba(244, 112, 127, 0.35);
+  background: rgba(244, 112, 127, 0.08);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.floating-progress-bar .btn-cancel:hover {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+/* Stale Latency Indication */
+.latency-stale {
+  color: var(--fg-dim) !important;
+  opacity: 0.75;
+  cursor: help;
+}
+
+/* Mini Latency Spinner */
+.lat-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(41, 194, 240, 0.25);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+}

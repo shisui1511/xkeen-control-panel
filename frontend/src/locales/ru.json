@@ -1473,6 +1473,7 @@
   "proxies.rate_limit_retry": "Слишком много запросов к ядру. Повторная попытка через {seconds} с...",
   "settings.ping_target_title": "Цель проверки задержки (Ping Target)",
   "settings.ping_target_desc": "Настройка URL-адреса и времени ожидания ответа при тестировании прокси-узлов",
+  "settings.ping_preset_label": "Пресет",
   "settings.ping_preset_google": "Google 204",
   "settings.ping_preset_cloudflare": "Cloudflare",
   "settings.ping_preset_yandex": "Яндекс",

@@ -18,6 +18,7 @@
   import { apiFetch, apiFetchJSON } from './lib/api';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import { capsuleConfigStore, updateCapsuleConfig } from './lib/capsuleSettings';
+  import PingTargetSettingsCard from './components/PingTargetSettingsCard.svelte';
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
@@ -1076,6 +1077,8 @@
         </div>
       </div>
     </div>
+
+    <PingTargetSettingsCard />
   {/if}
 
   <!-- Updates tab -->
