@@ -276,6 +276,23 @@ function setupApiRoutes(page: Page, options: { emptyQuotas?: boolean } = {}) {
           body: JSON.stringify(MOCK_CONNECTIONS_WS)
         });
       }
+    } else if (url.includes('/api/system/clients')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          clients: {
+            '192.168.1.55': {
+              ip: '192.168.1.55',
+              mac: 'f8:4d:89:bf:ce:5b',
+              name: 'Iphone 12',
+              hostname: 'avolkov',
+              display_name: 'Iphone 12',
+              active: true
+            }
+          }
+        })
+      });
     } else if (url.includes('/api/traffic/quotas') || url.includes('/api/trafficquotas')) {
       await route.fulfill({
         status: 200,
@@ -429,6 +446,20 @@ test.describe('Phase 82: Ergonomics and UX improvements', () => {
       expect(text.trim()).not.toBe(':0');
       expect(text.trim()).not.toBe(':');
     }
+
+    // 1.1 Check device name badge rendered for 192.168.1.55
+    const deviceBadge = page.locator('.badge-client');
+    await expect(deviceBadge).toBeVisible();
+    await expect(deviceBadge).toContainText('Iphone 12');
+
+    // 1.2 Check source filtering by device name
+    const filterInput = page.locator('#filter-source');
+    await filterInput.fill('Iphone');
+    await expect(page.locator('.conn-row')).toHaveCount(1);
+    await expect(page.locator('.conn-row .col-src')).toContainText('Iphone 12');
+
+    await filterInput.fill('');
+    await expect(page.locator('.conn-row')).toHaveCount(2);
 
     // 2. Click "Закрыть все" -> should show ConfirmDialog modal
     const closeAllBtn = page.locator('button:has-text("Закрыть все")');

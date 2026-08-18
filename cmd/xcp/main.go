@@ -134,6 +134,7 @@ func main() {
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
+	srv.HandleProtected("/api/system/clients", api.SystemClients)
 	srv.HandleProtected("/api/system/diagnostics", api.DiagnosticsDownload)
 
 	// Update endpoints
@@ -197,6 +198,9 @@ func main() {
 	srv.HandleProtected("/api/mihomo/connections/ws", api.ConnectionsWebSocket)
 
 	// Start background services
+	clientResolver := services.NewClientResolver()
+	api.SetClientResolver(clientResolver)
+
 	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, cfg.MihomoAPIURL)
 	smartProxySvc.SetMihomoService(api.MihomoService())
 	smartProxySvc.Start()

@@ -29,7 +29,20 @@
     rulePayload: string;
   }
 
+  interface ClientInfo {
+    ip: string;
+    mac: string;
+    name?: string;
+    hostname?: string;
+    display_name: string;
+    active: boolean;
+    link?: string;
+    interface?: string;
+  }
+
   let connections = $state<Connection[]>([]);
+  let clients = $state<Record<string, ClientInfo>>({});
+  let clientsRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
   interface TrafficHistory {
     upload: number;
@@ -66,6 +79,18 @@
     [...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort()
   );
   let isMihomoActive = $derived($capabilities === null || $capabilities.mihomo.reachable);
+
+  async function loadClients() {
+    try {
+      const res = await apiFetch('/api/system/clients');
+      if (res.ok) {
+        const data = await res.json();
+        clients = data.clients || {};
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+    }
+  }
 
   async function loadProcessMode() {
     try {
@@ -253,8 +278,13 @@
     return conn.metadata.host || conn.metadata.destinationIP;
   }
 
-  function getSourceName(conn: Connection): string {
-    if (showProcessName && conn.metadata.process) return conn.metadata.process;
+  function getClientForConn(conn: Connection): ClientInfo | undefined {
+    const ip = (conn.metadata.sourceIP || '').trim();
+    if (!ip) return undefined;
+    return clients[ip];
+  }
+
+  function formatEndpoint(conn: Connection): string {
     const ip = (conn.metadata.sourceIP || '').trim();
     const port = conn.metadata.sourcePort;
     const hasValidPort = port !== undefined && port !== null && Number(port) > 0;
@@ -263,6 +293,16 @@
       return hasValidPort ? `localhost:${port}` : 'localhost';
     }
     return hasValidPort ? `${ip}:${port}` : ip;
+  }
+
+  function getSourceName(conn: Connection): string {
+    if (showProcessName && conn.metadata.process) return conn.metadata.process;
+    const client = getClientForConn(conn);
+    const endpoint = formatEndpoint(conn);
+    if (client && client.display_name && client.display_name !== client.ip) {
+      return `${client.display_name} (${endpoint})`;
+    }
+    return endpoint;
   }
 
   function getHostTooltip(conn: Connection): string {
@@ -328,8 +368,22 @@
   let filteredConnections = $derived(
     connections.filter((conn) => {
       if (filterSource) {
-        const sourceName = getSourceName(conn);
-        if (!sourceName.toLowerCase().includes(filterSource.toLowerCase())) return false;
+        const q = filterSource.toLowerCase();
+        const endpoint = formatEndpoint(conn).toLowerCase();
+        const process = (conn.metadata.process || '').toLowerCase();
+        const client = getClientForConn(conn);
+        const clientName = (client?.display_name || '').toLowerCase();
+        const clientHost = (client?.hostname || '').toLowerCase();
+        const clientMac = (client?.mac || '').toLowerCase();
+
+        const matches =
+          endpoint.includes(q) ||
+          process.includes(q) ||
+          clientName.includes(q) ||
+          clientHost.includes(q) ||
+          clientMac.includes(q);
+
+        if (!matches) return false;
       }
       if (
         filterDest &&
@@ -344,6 +398,8 @@
   );
 
   onMount(() => {
+    loadClients();
+    clientsRefreshTimer = setInterval(loadClients, 20000);
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       loading = true;
       connectWS();
@@ -353,6 +409,10 @@
 
   onDestroy(() => {
     destroyed = true;
+    if (clientsRefreshTimer) {
+      clearInterval(clientsRefreshTimer);
+      clientsRefreshTimer = null;
+    }
     disconnectWS();
   });
 </script>
@@ -378,7 +438,9 @@
       <label
         class="toggle-label"
         class:disabled={!isMihomoActive}
-        title={!isMihomoActive ? $t('conn.process_mode_disabled_hint') : ''}
+        title={!isMihomoActive
+          ? $t('conn.process_mode_disabled_hint')
+          : $t('conn.process_mode_hint')}
         for="show-process-name-toggle"
       >
         <label class="toggle-switch">
@@ -433,7 +495,7 @@
         <input
           id="filter-source"
           type="text"
-          placeholder={$t('conn.source') + ' (IP)...'}
+          placeholder={$t('conn.source_filter_placeholder')}
           bind:value={filterSource}
           class="filter-input filter-src"
           title={$t('conn.source')}
@@ -524,7 +586,30 @@
             {#each filteredConnections as conn (conn.id)}
               {@const speed = connectionSpeeds.get(conn.id)}
               <tr class="conn-row">
-                <td class="mono col-src">{getSourceName(conn)}</td>
+                <td class="col-src">
+                  <div class="src-cell">
+                    {#if showProcessName && conn.metadata.process}
+                      <span
+                        class="badge badge-process"
+                        title={`${$t('conn.process_name')}: ${conn.metadata.process}`}
+                      >
+                        {conn.metadata.process}
+                      </span>
+                      <span class="mono src-endpoint-sub">{formatEndpoint(conn)}</span>
+                    {:else}
+                      {@const client = getClientForConn(conn)}
+                      <span class="mono src-endpoint">{formatEndpoint(conn)}</span>
+                      {#if client && client.display_name && client.display_name !== client.ip}
+                        <span
+                          class="badge badge-client"
+                          title={`${client.display_name}${client.mac ? ' (' + client.mac + ')' : ''}`}
+                        >
+                          {client.display_name}
+                        </span>
+                      {/if}
+                    {/if}
+                  </div>
+                </td>
                 <td class="mono col-host">
                   <span title={getHostTooltip(conn)} class="host-cell">
                     {getHost(conn)}
@@ -744,6 +829,54 @@
     border: 1px solid rgba(56, 189, 248, 0.25);
   }
   .net-udp {
+    background: rgba(167, 139, 250, 0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(167, 139, 250, 0.25);
+  }
+
+  /* Source cell with client device badges and process names */
+  .src-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    align-items: flex-start;
+  }
+  .src-endpoint {
+    font-size: 13px;
+    line-height: 1.2;
+  }
+  .src-endpoint-sub {
+    font-size: 11px;
+    color: var(--fg-dim);
+    line-height: 1.2;
+  }
+  .badge-client {
+    display: inline-flex;
+    align-items: center;
+    max-width: 170px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(41, 194, 240, 0.12);
+    color: var(--accent, #29c2f0);
+    border: 1px solid rgba(41, 194, 240, 0.25);
+    letter-spacing: 0.02em;
+  }
+  .badge-process {
+    display: inline-flex;
+    align-items: center;
+    max-width: 170px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
     background: rgba(167, 139, 250, 0.15);
     color: #a78bfa;
     border: 1px solid rgba(167, 139, 250, 0.25);

@@ -35,6 +35,7 @@ type API struct {
 	consoleSvc            *services.ConsoleService
 	ptySvc                *services.PTYService
 	templateSvc           *services.TemplateService
+	clientResolver        *services.ClientResolver
 	assetsSvc             *assets.AssetsService
 	pathVal               *utils.PathValidator
 	configValCache        bool
@@ -51,14 +52,23 @@ type API struct {
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
 	assetsSvc := assets.NewService(cfg.DataDir)
 	return &API{
-		cfg:       cfg,
-		srv:       srv,
-		xkeenSvc:  services.NewXKeenService(cfg.XKeenBinary, cfg.DataDir),
-		mihomoSvc: services.NewMihomoService(cfg.MihomoBinary, cfg.XKeenBinary, cfg.MihomoConfigDir),
-		configSvc: services.NewConfigService(cfg.XRayConfigDir, cfg.AllowedRoots),
-		assetsSvc: assetsSvc,
-		pathVal:   utils.NewPathValidator(cfg.AllowedRoots),
+		cfg:            cfg,
+		srv:            srv,
+		xkeenSvc:       services.NewXKeenService(cfg.XKeenBinary, cfg.DataDir),
+		mihomoSvc:      services.NewMihomoService(cfg.MihomoBinary, cfg.XKeenBinary, cfg.MihomoConfigDir),
+		configSvc:      services.NewConfigService(cfg.XRayConfigDir, cfg.AllowedRoots),
+		clientResolver: services.NewClientResolver(),
+		assetsSvc:      assetsSvc,
+		pathVal:        utils.NewPathValidator(cfg.AllowedRoots),
 	}
+}
+
+func (a *API) SetClientResolver(svc *services.ClientResolver) {
+	a.clientResolver = svc
+}
+
+func (a *API) ClientResolver() *services.ClientResolver {
+	return a.clientResolver
 }
 
 func (a *API) SetSmartProxyService(svc *services.SmartProxyService) {
