@@ -364,41 +364,170 @@
     collapsedGroups = next;
   }
 
+  let groupFilters = $state<Record<string, 'all' | 'working' | 'timeouts' | 'latency'>>({});
+
+  interface GroupHealthStats {
+    fast: number;
+    mid: number;
+    bad: number;
+    unchecked: number;
+    total: number;
+    fastPct: number;
+    midPct: number;
+    badPct: number;
+    uncheckedPct: number;
+    tooltip: string;
+  }
+
+  function getGroupHealthStats(nodeNames: string[]): GroupHealthStats {
+    let fast = 0;
+    let mid = 0;
+    let bad = 0;
+    let unchecked = 0;
+
+    for (const name of nodeNames) {
+      const p = proxies[name];
+      if (!p) {
+        unchecked++;
+        continue;
+      }
+      if (
+        ['DIRECT', 'REJECT'].includes(name.toUpperCase()) ||
+        ['Direct', 'Reject', 'Compatible'].includes(p.type || '')
+      ) {
+        unchecked++;
+        continue;
+      }
+      const delay = getLastDelay(p);
+      const alive = isProxyAlive(p);
+      if (!p.history || p.history.length === 0 || delay === undefined) {
+        unchecked++;
+      } else if (!alive || delay === 0 || delay > 400) {
+        bad++;
+      } else if (delay < 150) {
+        fast++;
+      } else {
+        mid++;
+      }
+    }
+
+    const total = nodeNames.length || 1;
+    const fastPct = (fast / total) * 100;
+    const midPct = (mid / total) * 100;
+    const badPct = (bad / total) * 100;
+    const uncheckedPct = (unchecked / total) * 100;
+
+    const tooltip = $t('proxies.health_tooltip', {
+      fast,
+      mid,
+      bad,
+      unchecked
+    });
+
+    return {
+      fast,
+      mid,
+      bad,
+      unchecked,
+      total: nodeNames.length,
+      fastPct,
+      midPct,
+      badPct,
+      uncheckedPct,
+      tooltip
+    };
+  }
+
+  function getFilteredGroupNodes(groupName: string, allNodes: string[]): string[] {
+    const filter = groupFilters[groupName] || 'all';
+    let list = [...allNodes];
+    if (filter === 'working') {
+      list = list.filter((name) => {
+        const p = proxies[name];
+        if (!p) return false;
+        const delay = getLastDelay(p);
+        return isProxyAlive(p) && delay !== undefined && delay > 0 && delay <= 800;
+      });
+    } else if (filter === 'timeouts') {
+      list = list.filter((name) => {
+        const p = proxies[name];
+        if (!p) return true;
+        const delay = getLastDelay(p);
+        return !isProxyAlive(p) || delay === 0 || delay === undefined || delay > 800;
+      });
+    } else if (filter === 'latency') {
+      list.sort((a, b) => {
+        const delayA = getProxyDelay(a) ?? 99999;
+        const delayB = getProxyDelay(b) ?? 99999;
+        return delayA - delayB;
+      });
+    }
+    return list;
+  }
+
   function computeStats(): ObservatoryStats {
-    const proxyList = Object.values(proxies).filter((p) => {
+    const uniqueNodes = new Map<string, { alive: boolean; delay?: number }>();
+
+    // 1. Root proxies from Mihomo
+    for (const p of Object.values(proxies)) {
       const typeLower = (p.type || '').toLowerCase();
       const nameLower = (p.name || '').toLowerCase();
 
       // Исключаем группы прокси
       if (['selector', 'urltest', 'fallback', 'loadbalance', 'relay'].includes(typeLower)) {
-        return false;
+        continue;
       }
       // Исключаем системные/встроенные прокси
       if (['direct', 'reject', 'compatible', 'pass'].includes(typeLower)) {
-        return false;
+        continue;
       }
       if (['direct', 'reject', 'compatible', 'pass', 'global'].includes(nameLower)) {
-        return false;
+        continue;
       }
 
-      return true;
-    });
-    const total = proxyList.length;
-    const healthy = proxyList.filter(
-      (p) => isProxyAlive(p) && (getLastDelay(p) || 0) > 0 && (getLastDelay(p) || 0) < 300
-    ).length;
-    const degraded = proxyList.filter(
-      (p) => isProxyAlive(p) && (getLastDelay(p) || 0) >= 300 && (getLastDelay(p) || 0) < 800
-    ).length;
-    const down = proxyList.filter(
-      (p) => !isProxyAlive(p) || (getLastDelay(p) || 0) === 0 || (getLastDelay(p) || 0) >= 800
-    ).length;
+      const delay = getLastDelay(p);
+      const alive = isProxyAlive(p);
+      uniqueNodes.set(p.name, { alive, delay });
+    }
 
-    const activeList = proxyList.filter((p) => isProxyAlive(p) && (getLastDelay(p) || 0) > 0);
-    const avg =
-      activeList.length > 0
-        ? activeList.reduce((sum, p) => sum + (getLastDelay(p) || 0), 0) / activeList.length
-        : 0;
+    // 2. External subscription nodes (subNodes)
+    for (const [subId, nodesList] of Object.entries(subNodes)) {
+      if (!Array.isArray(nodesList)) continue;
+      const healthMap = subHealth[subId] || {};
+      for (const n of nodesList) {
+        if (!n || (!n.tag && !n.name)) continue;
+        const key = n.tag || n.name || '';
+        if (uniqueNodes.has(key)) continue;
+
+        const h = healthMap[key];
+        const alive = h ? h.alive : true;
+        const delay = h?.tested && h?.delay !== undefined ? h.delay : undefined;
+        uniqueNodes.set(key, { alive, delay });
+      }
+    }
+
+    const total = uniqueNodes.size;
+    let healthy = 0;
+    let degraded = 0;
+    let down = 0;
+    let activeCount = 0;
+    let activeDelaySum = 0;
+
+    for (const { alive, delay } of uniqueNodes.values()) {
+      if (alive && delay !== undefined && delay > 0 && delay < 300) {
+        healthy++;
+        activeCount++;
+        activeDelaySum += delay;
+      } else if (alive && delay !== undefined && delay >= 300 && delay < 800) {
+        degraded++;
+        activeCount++;
+        activeDelaySum += delay;
+      } else if (!alive || delay === 0 || (delay !== undefined && delay >= 800)) {
+        down++;
+      }
+    }
+
+    const avg = activeCount > 0 ? activeDelaySum / activeCount : 0;
 
     return {
       totalProxies: total,
@@ -408,6 +537,8 @@
       avgLatency: Math.round(avg)
     };
   }
+
+  let observatoryStats = $derived(computeStats());
 
   async function fetchProxies(signal?: AbortSignal) {
     const reqSignal = signal instanceof AbortSignal ? signal : undefined;
@@ -1463,7 +1594,7 @@
     {:else}
       <!-- Observatory statistics -->
       {#if groups.length > 0 && $capabilities?.mihomo?.reachable}
-        {@const stats = computeStats()}
+        {@const stats = observatoryStats}
         <div class="card" style="margin-bottom:18px;">
           <h2 class="card-title" style="margin-top: 0;">{$t('proxies.observatory_title')}</h2>
           <div class="stats-grid">
@@ -1610,32 +1741,82 @@
               </button>
 
               {#if isCollapsed}
-                <div class="dot-container">
-                  {#each nodes as proxyName}
-                    {@const healthClass = getLatencyClass(proxyName)}
-                    {@const healthText = getLatencyText(proxyName)}
-                    {@const isActive = group.now === proxyName}
-                    <button
-                      class="dot-indicator {healthClass}"
-                      class:now={isActive}
-                      title={group.type === 'Selector'
-                        ? `${proxyName}: ${healthText}`
-                        : $t('proxies.managed_automatically')}
-                      aria-label="{proxyName}: {healthText}"
-                      style={group.type === 'Selector' ? 'cursor: pointer;' : 'cursor: default;'}
-                      onclick={(e) => {
-                        e.stopPropagation();
-                        if (group.type === 'Selector') {
-                          selectProxy(group.name, proxyName);
-                          toggleCollapse(group.name);
-                        }
-                      }}
-                    ></button>
-                  {/each}
+                {@const hStats = getGroupHealthStats(nodes)}
+                <div
+                  class="health-bar"
+                  title={hStats.tooltip}
+                  aria-label={hStats.tooltip}
+                  role="img"
+                >
+                  {#if hStats.fast > 0}
+                    <div
+                      class="health-segment fast"
+                      style="width: {hStats.fastPct}%;"
+                      title="{$t('proxies.health_fast')}: {hStats.fast}"
+                    ></div>
+                  {/if}
+                  {#if hStats.mid > 0}
+                    <div
+                      class="health-segment mid"
+                      style="width: {hStats.midPct}%;"
+                      title="{$t('proxies.health_mid')}: {hStats.mid}"
+                    ></div>
+                  {/if}
+                  {#if hStats.bad > 0}
+                    <div
+                      class="health-segment bad"
+                      style="width: {hStats.badPct}%;"
+                      title="{$t('proxies.health_bad')}: {hStats.bad}"
+                    ></div>
+                  {/if}
+                  {#if hStats.unchecked > 0}
+                    <div
+                      class="health-segment unchecked"
+                      style="width: {hStats.uncheckedPct}%;"
+                      title="{$t('proxies.health_unchecked')}: {hStats.unchecked}"
+                    ></div>
+                  {/if}
                 </div>
               {:else}
+                <div class="group-filters">
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={(groupFilters[group.name] || 'all') === 'all'}
+                    onclick={() => (groupFilters[group.name] = 'all')}
+                  >
+                    {$t('proxies.filter_all')}
+                    <span class="filter-count">{nodes.length}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={groupFilters[group.name] === 'working'}
+                    onclick={() => (groupFilters[group.name] = 'working')}
+                  >
+                    {$t('proxies.filter_working')}
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={groupFilters[group.name] === 'timeouts'}
+                    onclick={() => (groupFilters[group.name] = 'timeouts')}
+                  >
+                    {$t('proxies.filter_timeouts')}
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={groupFilters[group.name] === 'latency'}
+                    onclick={() => (groupFilters[group.name] = 'latency')}
+                  >
+                    {$t('proxies.filter_by_latency')}
+                  </button>
+                </div>
+
+                {@const filteredNodesList = getFilteredGroupNodes(group.name, nodes)}
                 <div class="proxy-grid">
-                  {#each nodes as proxyName}
+                  {#each filteredNodesList as proxyName}
                     {@const isActive = group.now === proxyName}
                     {@const healthClass = getLatencyClass(proxyName)}
                     {@const healthText = getLatencyText(proxyName)}
@@ -2053,6 +2234,8 @@
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 8px;
     padding: 12px;
+    content-visibility: auto;
+    contain-intrinsic-size: 80px;
   }
 
   .proxy-card {
@@ -2155,42 +2338,71 @@
     background: rgba(255, 255, 255, 0.05);
   }
 
-  .dot-container {
+  .health-bar {
+    display: flex;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-xs, 2px);
+    overflow: hidden;
+    margin: 4px 18px 12px;
+    transition: height 0.15s ease;
+  }
+  .health-bar:hover {
+    height: 6px;
+  }
+  .health-segment {
+    height: 100%;
+    transition: width 0.3s ease;
+  }
+  .health-segment.fast {
+    background: var(--success, #46d18a);
+  }
+  .health-segment.mid {
+    background: var(--warning, #f0b450);
+  }
+  .health-segment.bad {
+    background: var(--danger, #f4707f);
+  }
+  .health-segment.unchecked {
+    background: var(--fg-dim, #869cb3);
+    opacity: 0.4;
+  }
+
+  .group-filters {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 6px;
-    padding: 10px 18px 14px;
+    padding: 8px 16px 10px;
+    border-bottom: 1px solid var(--border);
   }
-  .dot-indicator {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    border: none;
-    padding: 0;
-    background: var(--fg-dim);
-    transition:
-      transform 0.2s,
-      box-shadow 0.2s;
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: var(--radius-full, 9999px);
+    font-size: 11px;
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--fg-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
   }
-  .dot-indicator:hover {
-    transform: scale(1.4);
+  .filter-chip:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--fg-primary);
   }
-  .dot-indicator.now {
-    box-shadow:
-      0 0 0 2px var(--bg-card),
-      0 0 0 4px var(--accent);
+  .filter-chip.active {
+    background: rgba(41, 194, 240, 0.12);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
   }
-  .dot-indicator.ok {
-    background: var(--success);
-  }
-  .dot-indicator.mid {
-    background: var(--warning);
-  }
-  .dot-indicator.bad {
-    background: var(--danger);
-  }
-  .dot-indicator.dim {
-    background: var(--fg-dim);
+  .filter-chip .filter-count {
+    font-size: 10px;
+    opacity: 0.7;
   }
 
   .selector-dot {
