@@ -566,6 +566,7 @@
                     style="padding: 4px 8px; color: var(--danger); border-color: transparent;"
                     onclick={() => closeConnection(conn.id)}
                     title={$t('app.close')}
+                    aria-label={$t('app.close')}
                   >
                     ×
                   </button>

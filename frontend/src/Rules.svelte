@@ -826,6 +826,10 @@
     padding: 60px 20px;
   }
 
+  .filters .filter-input {
+    flex: 1;
+  }
+
   /* Column priority on mobile — hide # index, truncate payload */
   @media (max-width: 640px) {
     .filters {
