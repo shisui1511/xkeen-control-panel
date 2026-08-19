@@ -249,4 +249,3 @@ func TestClientResolverNegativeCaching(t *testing.T) {
 		t.Fatalf("expected ndmcCalls=2 after TTL expiry, got %d", ndmcCalls)
 	}
 }
-

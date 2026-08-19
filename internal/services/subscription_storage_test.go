@@ -424,4 +424,3 @@ func TestLoadOrGenerateHWID_ExistingFile(t *testing.T) {
 		t.Fatalf("expected 123456789ABC from file, got %s", hwid)
 	}
 }
-
