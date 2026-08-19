@@ -20,12 +20,16 @@ export interface PollerOptions {
 export interface PollerControls {
   refetch: () => Promise<void>;
   stop: () => void;
+  pause: () => void;
+  resume: () => void;
+  isPaused: () => boolean;
 }
 
 /**
  * Svelte 5 friendly poller helper with visibility handling, AbortController cancellation,
- * exponential backoff, and automatic cleanup on unmount. Session-expiry handling is
- * centralized in lib/api.ts's apiFetch — this poller has no auth-status-specific logic.
+ * exponential backoff, pause/resume capabilities, and automatic cleanup on unmount.
+ * Session-expiry handling is centralized in lib/api.ts's apiFetch — this poller has no
+ * auth-status-specific logic.
  */
 export function usePoller(
   pollFn: (signal: AbortSignal) => Promise<void>,
@@ -36,6 +40,7 @@ export function usePoller(
   let inFlightController: AbortController | null = null;
   let backoffMs = activeIntervalMs;
   let isStopped = false;
+  let isPaused = false;
 
   function clearTimer() {
     if (timer !== null) {
@@ -45,7 +50,7 @@ export function usePoller(
   }
 
   async function executePoll() {
-    if (isStopped) return;
+    if (isStopped || isPaused) return;
     clearTimer();
 
     if (inFlightController) {
@@ -66,14 +71,14 @@ export function usePoller(
       // Exponential backoff up to 60000 ms
       backoffMs = Math.min(backoffMs * 2, 60000);
     } finally {
-      if (!isStopped) {
+      if (!isStopped && !isPaused) {
         scheduleNext();
       }
     }
   }
 
   function scheduleNext() {
-    if (isStopped) return;
+    if (isStopped || isPaused) return;
     clearTimer();
 
     const isHidden = typeof document !== 'undefined' && document.hidden;
@@ -87,7 +92,7 @@ export function usePoller(
   }
 
   function handleVisibilityChange() {
-    if (isStopped) return;
+    if (isStopped || isPaused) return;
     if (!document.hidden) {
       // Tab became visible: immediately refetch and reset backoff
       backoffMs = activeIntervalMs;
@@ -107,6 +112,23 @@ export function usePoller(
   }
 
   if (options.immediate !== false) {
+    executePoll();
+  }
+
+  function pause() {
+    if (isPaused || isStopped) return;
+    isPaused = true;
+    clearTimer();
+    if (inFlightController) {
+      inFlightController.abort();
+      inFlightController = null;
+    }
+  }
+
+  function resume() {
+    if (!isPaused || isStopped) return;
+    isPaused = false;
+    backoffMs = activeIntervalMs;
     executePoll();
   }
 
@@ -130,6 +152,9 @@ export function usePoller(
 
   return {
     refetch: executePoll,
-    stop
+    stop,
+    pause,
+    resume,
+    isPaused: () => isPaused
   };
 }

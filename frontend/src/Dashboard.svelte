@@ -12,6 +12,7 @@
   } from './stores';
   import { usePoller } from './lib/poller';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import { isServiceRestarting, activateRestartGrace } from './lib/serviceGrace';
   import Sidebar from './components/Sidebar.svelte';
   import Toast from './components/Toast.svelte';
   import ConfirmDialog from './components/ConfirmDialog.svelte';
@@ -21,10 +22,26 @@
   import Skeleton from './components/Skeleton.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
+  import UnsavedChangesModal from './components/UnsavedChangesModal.svelte';
+  import SystemStatusCapsule from './components/status/SystemStatusCapsule.svelte';
+  import { capsuleConfigStore } from './lib/capsuleSettings';
+  import {
+    isAnySourceDirty,
+    getDirtySources,
+    saveAllDirtySources,
+    hasUnsavedChanges
+  } from './lib/dirtyRegistry';
 
   let version = $state($t('app.loading'));
   let panelVersion = $state($t('app.loading'));
   let loading = $state(false);
+  let showMihomoMigrateModal = $state(false);
+  let showUnsavedModal = $state(false);
+  let pendingTargetTab = $state<string | null>(null);
+  let pendingTargetHash = $state<string | null>(null);
+  let isSavingAndNavigating = $state(false);
+  let dirtySourceNames = $state<string[]>([]);
   let currentTab = $state('dashboard');
   const mihomoDependentTabs = [
     'proxies',
@@ -110,6 +127,7 @@
   let totalSubsCount = $state(0);
   let hasSubscription = $state(false);
   let subsLastUpdated = $state('');
+  let subsSummaryLoaded = $state(false);
   let totalProxiesCount = $state(0);
   let activeProxiesCount = $state(0);
   let subscriptionProxiesCount = $state(0);
@@ -181,6 +199,8 @@
       if (e?.name === 'AbortError') return;
       if (e?.status === 401) return;
       console.error('fetchSubscriptionSummary failed:', e);
+    } finally {
+      subsSummaryLoaded = true;
     }
   }
 
@@ -437,7 +457,69 @@
   }
 
   function handleHashChange() {
-    currentTab = getTabFromHash();
+    const targetTab = getTabFromHash();
+    if (targetTab !== currentTab && isAnySourceDirty()) {
+      pendingTargetTab = targetTab;
+      pendingTargetHash = window.location.hash;
+      dirtySourceNames = getDirtySources().map((s) => s.source.name || s.id);
+
+      // Revert hash in URL to currentTab without re-triggering hashchange handling
+      history.replaceState(null, '', `/#/${currentTab}`);
+      showUnsavedModal = true;
+      return;
+    }
+    currentTab = targetTab;
+  }
+
+  async function handleSaveAndLeave() {
+    isSavingAndNavigating = true;
+    try {
+      const ok = await saveAllDirtySources();
+      if (ok) {
+        showUnsavedModal = false;
+        const target = pendingTargetTab;
+        const hash = pendingTargetHash;
+        pendingTargetTab = null;
+        pendingTargetHash = null;
+        if (target) {
+          currentTab = target;
+          window.location.hash = hash || '#/' + target;
+        }
+      } else {
+        showToast('error', $t('nav.save_error'));
+      }
+    } catch (e: any) {
+      console.error('Save error during navigation:', e);
+      showToast('error', $t('nav.save_error'));
+    } finally {
+      isSavingAndNavigating = false;
+    }
+  }
+
+  function handleLeaveWithoutSaving() {
+    showUnsavedModal = false;
+    const target = pendingTargetTab;
+    const hash = pendingTargetHash;
+    pendingTargetTab = null;
+    pendingTargetHash = null;
+    if (target) {
+      currentTab = target;
+      window.location.hash = hash || '#/' + target;
+    }
+  }
+
+  function handleStay() {
+    showUnsavedModal = false;
+    pendingTargetTab = null;
+    pendingTargetHash = null;
+  }
+
+  function handleBeforeUnload(e: BeforeUnloadEvent) {
+    if (isAnySourceDirty()) {
+      e.preventDefault();
+      e.returnValue = '';
+      return '';
+    }
   }
 
   function getDrawerFocusables(): HTMLElement[] {
@@ -571,6 +653,7 @@
   }
 
   async function restartXkeen() {
+    activateRestartGrace(6000);
     try {
       const res = await apiFetch('/api/service/control?action=restart', {
         method: 'POST'
@@ -637,12 +720,14 @@
       reportChunkError((event as Event & { payload?: unknown }).payload);
     };
     window.addEventListener('vite:preloadError', handlePreloadError);
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       window.removeEventListener('hashchange', handleHashChange);
       mobileMql.removeEventListener('change', handleMobileMqlChange);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('vite:preloadError', handlePreloadError);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   });
 </script>
@@ -663,7 +748,17 @@
       </svg>
     </button>
     <span id="mobile-header-title" style="font-weight: 600; font-size: 16px;">XKeen CP</span>
-    <span style="width: 34px;"></span>
+    {#if $capsuleConfigStore.visible}
+      <SystemStatusCapsule
+        variant="mobile"
+        {systemStats}
+        activeKernel={$capabilities?.active_kernel}
+        isXkeenRunning={serviceStatus.xkeen === 'running'}
+        onSwitchTab={switchTab}
+      />
+    {:else}
+      <span style="width: 34px;"></span>
+    {/if}
   </header>
 
   <!-- Off-canvas overlay (mobile only) -->
@@ -697,6 +792,8 @@
       {loading}
       {pwaInstallPrompt}
       onInstallPWA={installPWA}
+      {systemStats}
+      isXkeenRunning={serviceStatus.xkeen === 'running'}
     />
   </div>
 
@@ -707,15 +804,25 @@
     class:rail={$isSidebarCollapsed}
     inert={drawerIsModal}
   >
-    <!-- Mihomo offline warning banner -->
+    <!-- Mihomo offline warning banner / Restarting notice -->
     {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
-      <div style="margin: 12px 16px 0;">
-        <ApiOffline
-          endpoint={$capabilities.mihomo.discovered_secret ? 'Mihomo API' : '127.0.0.1:9090'}
-          lastSeenSeconds={0}
-          onRetry={fetchCapabilities}
-        />
-      </div>
+      {#if $isServiceRestarting}
+        <div
+          class="service-restarting-banner"
+          style="margin: 12px 16px 0; padding: 12px 18px; background: rgba(56, 189, 248, 0.1); border: 1px solid var(--accent); border-radius: var(--radius-md); display: flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--fg-primary);"
+        >
+          <span class="spinner"></span>
+          <span>{$t('service.restarting_wait')}</span>
+        </div>
+      {:else}
+        <div style="margin: 12px 16px 0;">
+          <ApiOffline
+            endpoint={$capabilities.mihomo.discovered_secret ? 'Mihomo API' : '127.0.0.1:9090'}
+            lastSeenSeconds={0}
+            onRetry={fetchCapabilities}
+          />
+        </div>
+      {/if}
     {/if}
 
     {#key chunkReloadKey}
@@ -755,8 +862,11 @@
             </div>
           </div>
 
-          <!-- Quickstart Checklist (Mihomo only, auto-hides when all steps complete) -->
-          {#if $capabilities?.active_kernel === 'mihomo' && !allQuickstartComplete}
+          <!-- Quickstart Checklist (Mihomo only, auto-hides when all steps complete).
+               Gated on statusLoading/subsSummaryLoaded so it doesn't flash "incomplete"
+               using each store's not-yet-fetched default before the first poll round
+               of fetchLiveStatus/fetchSubscriptionSummary actually lands. -->
+          {#if $capabilities?.active_kernel === 'mihomo' && !statusLoading && subsSummaryLoaded && !allQuickstartComplete}
             <div style="margin-bottom: 18px;">
               <Card title={$t('dash.quickstart.title')}>
                 {#snippet actions()}
@@ -892,7 +1002,7 @@
           {/if}
 
           <!-- Problems Panel (conditional) -->
-          {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running) || ($capabilities !== null && !$capabilities.kernels?.xray?.installed && !$capabilities.kernels?.mihomo?.installed) || isKernelCrashed || isDiskLow || isSSLExpiring}
+          {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running) || ($capabilities !== null && !$capabilities.kernels?.xray?.installed && !$capabilities.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring}
             <div style="margin-bottom: 18px;">
               <Card title={$t('dash.problems_panel')}>
                 <div class="problems-list">
@@ -1008,6 +1118,22 @@
                       </Button>
                     </div>
                   {/if}
+                  {#if $capabilities !== null && $capabilities.mihomo?.is_insecure_lan}
+                    <div class="problem-item alert-warning">
+                      <div class="problem-content">
+                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                        <div>
+                          <strong class="problem-title"
+                            >{$t('dash.problems.mihomo_insecure_title')}</strong
+                          >
+                          <div class="problem-desc">{$t('dash.problems.mihomo_insecure_desc')}</div>
+                        </div>
+                      </div>
+                      <Button variant="secondary" onclick={() => (showMihomoMigrateModal = true)}>
+                        {$t('mihomo.migrate_btn')}
+                      </Button>
+                    </div>
+                  {/if}
                 </div>
               </Card>
             </div>
@@ -1088,11 +1214,20 @@
                       {#if serviceStatus.mihomoVersion && serviceStatus.mihomo !== 'not_installed'}
                         <span class="version-badge">{serviceStatus.mihomoVersion}</span>
                       {/if}
+                      {#if $capabilities?.mihomo?.is_insecure_lan}
+                        <button
+                          class="badge badge-warning"
+                          style="margin-left: 6px; cursor: pointer; border: none; font-size: 11px; padding: 2px 6px;"
+                          onclick={() => (showMihomoMigrateModal = true)}
+                          title={$t('mihomo.migrate_banner_body')}
+                        >
+                          {$t('mihomo.controller_mode_insecure')}
+                        </button>
+                      {/if}
                     </span>
                   </div>
                   <div class="status-badge-item">
-                    <span class="status-dot {serviceStatus.connections > 0 ? 'success' : 'warning'}"
-                    ></span>
+                    <span class="status-dot neutral"></span>
                     <span class="svc-cell-stack">
                       <span class="status-badge-label">{$t('dash.connections')}</span>
                       <span class="lbl">{$t('dash.connections_sub')}</span>
@@ -1106,255 +1241,262 @@
             </Card>
           </div>
 
-          <!-- System Resources -->
-          {#if systemStats}
-            <div style="margin-bottom: 18px;">
-              <Card title={$t('dash.system_stats')}>
-                <div class="stats-grid">
-                  {#if systemStats.disk}
+          <!-- Dashboard Grid for secondary widgets (GRID-01) -->
+          <div class="dashboard-grid">
+            <!-- System Resources -->
+            {#if systemStats}
+              <div class="dash-card-wrapper">
+                <Card title={$t('dash.system_stats')}>
+                  <div class="stats-grid">
+                    {#if systemStats.disk}
+                      <div class="stat-box">
+                        <div class="stat-label">{$t('dash.disk')}</div>
+                        <div class="stat-value">
+                          {formatBytes(systemStats.disk.free)}
+                        </div>
+                        <div class="res-sub">
+                          {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })}
+                          {$t('dash.disk_of_total_pct', {
+                            total: formatBytes(systemStats.disk.total),
+                            pct: ((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)
+                          })}
+                        </div>
+                        <div class="stat-bar">
+                          <div
+                            class="stat-bar-fill"
+                            style="width: {(
+                              (systemStats.disk.used / systemStats.disk.total) *
+                              100
+                            ).toFixed(1)}%; background: {getDiskBarColor(
+                              systemStats
+                            )}; box-shadow: 0 0 8px {getDiskBarColor(systemStats)};"
+                          ></div>
+                        </div>
+                      </div>
+                    {/if}
                     <div class="stat-box">
-                      <div class="stat-label">{$t('dash.disk')}</div>
+                      <div class="stat-label">{$t('dash.ram')}</div>
                       <div class="stat-value">
-                        {formatBytes(systemStats.disk.free)}
+                        {(systemStats.memory.used / 1024 / 1024).toFixed(2)}<span
+                          style="color:var(--fg-secondary);font-size:14px;font-weight:500;margin-left:6px;"
+                          >{$t('dash.unit_mb')}</span
+                        >
                       </div>
                       <div class="res-sub">
-                        {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })}
-                        {$t('dash.disk_of_total_pct', {
-                          total: formatBytes(systemStats.disk.total),
-                          pct: ((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)
+                        {$t('dash.ram_of_total_pct', {
+                          total: (systemStats.memory.total / 1024 / 1024).toFixed(2),
+                          pct: ((systemStats.memory.used / systemStats.memory.total) * 100).toFixed(
+                            1
+                          )
                         })}
                       </div>
                       <div class="stat-bar">
                         <div
                           class="stat-bar-fill"
                           style="width: {(
-                            (systemStats.disk.used / systemStats.disk.total) *
+                            (systemStats.memory.used / systemStats.memory.total) *
                             100
-                          ).toFixed(1)}%; background: {getDiskBarColor(
-                            systemStats
-                          )}; box-shadow: 0 0 8px {getDiskBarColor(systemStats)};"
+                          ).toFixed(1)}%"
                         ></div>
                       </div>
                     </div>
-                  {/if}
-                  <div class="stat-box">
-                    <div class="stat-label">{$t('dash.ram')}</div>
-                    <div class="stat-value">
-                      {(systemStats.memory.used / 1024 / 1024).toFixed(2)}<span
-                        style="color:var(--fg-secondary);font-size:14px;font-weight:500;margin-left:6px;"
-                        >{$t('dash.unit_mb')}</span
-                      >
-                    </div>
-                    <div class="res-sub">
-                      {$t('dash.ram_of_total_pct', {
-                        total: (systemStats.memory.total / 1024 / 1024).toFixed(2),
-                        pct: ((systemStats.memory.used / systemStats.memory.total) * 100).toFixed(1)
-                      })}
-                    </div>
-                    <div class="stat-bar">
-                      <div
-                        class="stat-bar-fill"
-                        style="width: {(
-                          (systemStats.memory.used / systemStats.memory.total) *
-                          100
-                        ).toFixed(1)}%"
-                      ></div>
-                    </div>
-                  </div>
-                  <div class="stat-box">
-                    <div class="stat-label">{$t('dash.load')}</div>
-                    <div class="stat-value">{systemStats.load[0].toFixed(2)}</div>
-                    <div class="res-sub">
-                      {$t('dash.load_avg_line', {
-                        v1: systemStats.load[0].toFixed(2),
-                        v2: systemStats.load[1].toFixed(2),
-                        v3: systemStats.load[2].toFixed(2)
-                      })}
-                    </div>
-                    {#if sparklineData}
-                      <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
-                        <defs>
-                          <linearGradient id="sg1" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stop-color="#29c2f0" stop-opacity=".5" />
-                            <stop offset="100%" stop-color="#29c2f0" stop-opacity="0" />
-                          </linearGradient>
-                        </defs>
-                        <path d={sparklineData.fill} fill="url(#sg1)" />
-                        <path
-                          d={sparklineData.line}
-                          fill="none"
-                          stroke="#29c2f0"
-                          stroke-width="1.5"
-                        />
-                      </svg>
-                    {/if}
-                  </div>
-                  <div class="stat-box">
-                    <div class="stat-label">{$t('dash.uptime')}</div>
-                    <div class="stat-value">
-                      {$t('dash.uptime_dhm', {
-                        days: systemStats.uptime.days,
-                        hours: systemStats.uptime.hours,
-                        minutes: systemStats.uptime.minutes
-                      })}
-                    </div>
-                    {#if systemStats.boot_time}
+                    <div class="stat-box">
+                      <div class="stat-label">{$t('dash.load')}</div>
+                      <div class="stat-value">{systemStats.load[0].toFixed(2)}</div>
                       <div class="res-sub">
-                        {$t('dash.uptime_since', { time: systemStats.boot_time })}
+                        {$t('dash.load_avg_line', {
+                          v1: systemStats.load[0].toFixed(2),
+                          v2: systemStats.load[1].toFixed(2),
+                          v3: systemStats.load[2].toFixed(2)
+                        })}
                       </div>
-                    {/if}
-                    <div class="stats" style="margin-top:10px;">
-                      <span class="stat">{$t('dash.uptime_stable')}</span>
+                      {#if sparklineData}
+                        <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
+                          <defs>
+                            <linearGradient id="sg1" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stop-color="#29c2f0" stop-opacity=".5" />
+                              <stop offset="100%" stop-color="#29c2f0" stop-opacity="0" />
+                            </linearGradient>
+                          </defs>
+                          <path d={sparklineData.fill} fill="url(#sg1)" />
+                          <path
+                            d={sparklineData.line}
+                            fill="none"
+                            stroke="#29c2f0"
+                            stroke-width="1.5"
+                          />
+                        </svg>
+                      {/if}
+                    </div>
+                    <div class="stat-box">
+                      <div class="stat-label">{$t('dash.uptime')}</div>
+                      <div class="stat-value">
+                        {$t('dash.uptime_dhm', {
+                          days: systemStats.uptime.days,
+                          hours: systemStats.uptime.hours,
+                          minutes: systemStats.uptime.minutes
+                        })}
+                      </div>
+                      {#if systemStats.boot_time}
+                        <div class="res-sub">
+                          {$t('dash.uptime_since', { time: systemStats.boot_time })}
+                        </div>
+                      {/if}
+                      <div class="stats" style="margin-top:10px;">
+                        <span class="stat">{$t('dash.uptime_stable')}</span>
+                      </div>
+                    </div>
+                    <div class="stat-box">
+                      <div class="stat-label">{$t('dash.goroutines')}</div>
+                      <div class="stat-value">{systemStats.go_runtime.goroutines}</div>
+                      <div class="res-sub">
+                        {$t('dash.goroutines_heap_gc', {
+                          heap: (systemStats.go_runtime.heap_alloc / 1024 / 1024).toFixed(1),
+                          gc: systemStats.go_runtime.num_gc
+                        })}
+                      </div>
+                      {#if systemStats.go_runtime.go_version || systemStats.go_runtime.goarch}
+                        <div class="stats" style="margin-top:10px;">
+                          {#if systemStats.go_runtime.gomaxprocs}
+                            <span class="stat"
+                              >{systemStats.go_runtime.gomaxprocs}
+                              {systemStats.go_runtime.go_version}</span
+                            >
+                          {/if}
+                          {#if systemStats.go_runtime.goarch}
+                            <span class="stat">{systemStats.go_runtime.goarch}</span>
+                          {/if}
+                        </div>
+                      {/if}
                     </div>
                   </div>
-                  <div class="stat-box">
-                    <div class="stat-label">{$t('dash.goroutines')}</div>
-                    <div class="stat-value">{systemStats.go_runtime.goroutines}</div>
-                    <div class="res-sub">
-                      {$t('dash.goroutines_heap_gc', {
-                        heap: (systemStats.go_runtime.heap_alloc / 1024 / 1024).toFixed(1),
-                        gc: systemStats.go_runtime.num_gc
-                      })}
+                </Card>
+              </div>
+            {/if}
+
+            <!-- System Info -->
+            <div class="dash-card-wrapper">
+              <Card title={$t('dash.system_info')}>
+                <div class="info-rows">
+                  <div class="info-row">
+                    <div class="lbl">{$t('dash.info_version')}</div>
+                    <div class="val">{version}</div>
+                  </div>
+                  <div class="info-row">
+                    <div class="lbl">{$t('dash.info_version_panel')}</div>
+                    <div class="val">{panelVersion}</div>
+                  </div>
+                  <div class="info-row">
+                    <div class="lbl">{$t('dash.info_platform')}</div>
+                    <div class="val">{systemStats?.platform || '—'}</div>
+                  </div>
+                  <div class="info-row">
+                    <div class="lbl">{$t('dash.info_kernel')}</div>
+                    <div class="val">{systemStats?.kernel_version || '—'}</div>
+                  </div>
+                  <div class="info-row">
+                    <div class="lbl">{$t('dash.info_host')}</div>
+                    <div class="val">{systemStats?.hostname || '—'}</div>
+                  </div>
+                  <div class="info-row">
+                    <div class="lbl">{$t('dash.info_ip')}</div>
+                    <div class="val">{systemStats?.ip_interface || '—'}</div>
+                  </div>
+                  <div class="info-row">
+                    <div class="lbl">{$t('dash.info_timezone')}</div>
+                    <div class="val">{systemStats?.timezone || '—'}</div>
+                  </div>
+                  <div class="info-row">
+                    <div class="lbl">{$t('dash.info_config')}</div>
+                    <div class="val">
+                      {systemStats?.config_path || '/opt/etc/xkeen/'}
+                      {#if systemStats?.config_lines}
+                        <span class="info-badge info-badge-orange"
+                          >{pluralize(
+                            systemStats.config_lines,
+                            $t('dash.info_lines_one', { count: String(systemStats.config_lines) }),
+                            $t('dash.info_lines_few', { count: String(systemStats.config_lines) }),
+                            $t('dash.info_lines_many', { count: String(systemStats.config_lines) }),
+                            $currentLang
+                          )}</span
+                        >
+                      {/if}
                     </div>
-                    {#if systemStats.go_runtime.go_version || systemStats.go_runtime.goarch}
-                      <div class="stats" style="margin-top:10px;">
-                        {#if systemStats.go_runtime.gomaxprocs}
-                          <span class="stat"
-                            >{systemStats.go_runtime.gomaxprocs}
-                            {systemStats.go_runtime.go_version}</span
-                          >
-                        {/if}
-                        {#if systemStats.go_runtime.goarch}
-                          <span class="stat">{systemStats.go_runtime.goarch}</span>
-                        {/if}
-                      </div>
-                    {/if}
+                  </div>
+                  <div class="info-row">
+                    <div class="lbl">{$t('dash.info_updated')}</div>
+                    <div class="val">{statsLastFetched || '—'}</div>
                   </div>
                 </div>
               </Card>
             </div>
-          {/if}
 
-          <!-- System Info -->
-          <div style="margin-bottom: 18px;">
-            <Card title={$t('dash.system_info')}>
-              <div class="info-rows">
-                <div class="info-row">
-                  <div class="lbl">{$t('dash.info_version')}</div>
-                  <div class="val">{version}</div>
-                </div>
-                <div class="info-row">
-                  <div class="lbl">{$t('dash.info_version_panel')}</div>
-                  <div class="val">{panelVersion}</div>
-                </div>
-                <div class="info-row">
-                  <div class="lbl">{$t('dash.info_platform')}</div>
-                  <div class="val">{systemStats?.platform || '—'}</div>
-                </div>
-                <div class="info-row">
-                  <div class="lbl">{$t('dash.info_kernel')}</div>
-                  <div class="val">{systemStats?.kernel_version || '—'}</div>
-                </div>
-                <div class="info-row">
-                  <div class="lbl">{$t('dash.info_host')}</div>
-                  <div class="val">{systemStats?.hostname || '—'}</div>
-                </div>
-                <div class="info-row">
-                  <div class="lbl">{$t('dash.info_ip')}</div>
-                  <div class="val">{systemStats?.ip_interface || '—'}</div>
-                </div>
-                <div class="info-row">
-                  <div class="lbl">{$t('dash.info_timezone')}</div>
-                  <div class="val">{systemStats?.timezone || '—'}</div>
-                </div>
-                <div class="info-row">
-                  <div class="lbl">{$t('dash.info_config')}</div>
-                  <div class="val">
-                    {systemStats?.config_path || '/opt/etc/xkeen/'}
-                    {#if systemStats?.config_lines}
-                      <span class="info-badge info-badge-orange"
-                        >{pluralize(
-                          systemStats.config_lines,
-                          $t('dash.info_lines_one', { count: String(systemStats.config_lines) }),
-                          $t('dash.info_lines_few', { count: String(systemStats.config_lines) }),
-                          $t('dash.info_lines_many', { count: String(systemStats.config_lines) }),
-                          $currentLang
-                        )}</span
-                      >
-                    {/if}
-                  </div>
-                </div>
-                <div class="info-row">
-                  <div class="lbl">{$t('dash.info_updated')}</div>
-                  <div class="val">{statsLastFetched || '—'}</div>
-                </div>
-              </div>
-            </Card>
-          </div>
-
-          <!-- Quick Actions -->
-          <div style="margin-bottom: 8px;">
-            <Card title={$t('dash.quick_actions')}>
-              <div class="qa-grid-mini">
-                <button type="button" class="qa-mini" onclick={() => switchTab('proxies')}>
-                  <span class="qa-mini-ico"><Icon name="proxies" size={18} /></span>
-                  <span
-                    ><b>{$t('nav.proxies')}</b><span class="s"
-                      >{totalProxiesCount > 0
-                        ? $t('dash.proxies_summary', {
-                            total: totalProxiesCount,
-                            active: activeProxiesCount
-                          })
-                        : subscriptionProxiesCount > 0
-                          ? $t('dash.proxies_from_subs', { count: subscriptionProxiesCount })
-                          : $t('dash.proxies_placeholder')}</span
-                    ></span
+            <!-- Quick Actions -->
+            <div class="dash-card-wrapper">
+              <Card title={$t('dash.quick_actions')}>
+                <div class="qa-grid-mini">
+                  <button type="button" class="qa-mini" onclick={() => switchTab('proxies')}>
+                    <span class="qa-mini-ico"><Icon name="proxies" size={18} /></span>
+                    <span
+                      ><b>{$t('nav.proxies')}</b><span class="s"
+                        >{totalProxiesCount > 0
+                          ? $t('dash.proxies_summary', {
+                              total: totalProxiesCount,
+                              active: activeProxiesCount
+                            })
+                          : subscriptionProxiesCount > 0
+                            ? $t('dash.proxies_from_subs', { count: subscriptionProxiesCount })
+                            : $t('dash.proxies_placeholder')}</span
+                      ></span
+                    >
+                  </button>
+                  <button
+                    type="button"
+                    class="qa-mini"
+                    onclick={() => {
+                      switchTab('proxies');
+                      window.location.hash = '#/proxies?tab=providers';
+                    }}
                   >
-                </button>
-                <button
-                  type="button"
-                  class="qa-mini"
-                  onclick={() => {
-                    switchTab('proxies');
-                    window.location.hash = '#/proxies?tab=providers';
-                  }}
-                >
-                  <span class="qa-mini-ico"><Icon name="subscriptions" size={18} /></span>
-                  <span
-                    ><b>{$t('nav.subscriptions')}</b><span class="s"
-                      >{totalSubsCount > 0
-                        ? `${$t('dash.subs_count', { count: totalSubsCount })}${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
-                        : $t('dash.subs_empty')}</span
-                    ></span
-                  >
-                </button>
-                <button type="button" class="qa-mini" onclick={() => switchTab('editor')}>
-                  <span class="qa-mini-ico"><Icon name="editor" size={18} /></span>
-                  <span
-                    ><b>{$t('nav.editor')}</b><span class="s">{$t('dash.editor_subtitle')}</span
-                    ></span
-                  >
-                </button>
-                <button type="button" class="qa-mini" onclick={() => switchTab('logs')}>
-                  <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
-                  <span
-                    ><b>{$t('nav.logs')}</b><span class="s">{$t('dash.logs_subtitle')}</span></span
-                  >
-                </button>
-                <button type="button" class="qa-mini" onclick={() => switchTab('dat')}>
-                  <span class="qa-mini-ico"><Icon name="dat" size={18} /></span>
-                  <span><b>{$t('nav.dat')}</b><span class="s">{$t('dash.dat_subtitle')}</span></span
-                  >
-                </button>
-                <button type="button" class="qa-mini" onclick={() => switchTab('console')}>
-                  <span class="qa-mini-ico"><Icon name="console" size={18} /></span>
-                  <span
-                    ><b>{$t('nav.console')}</b><span class="s">{$t('dash.console_subtitle')}</span
-                    ></span
-                  >
-                </button>
-              </div>
-            </Card>
+                    <span class="qa-mini-ico"><Icon name="subscriptions" size={18} /></span>
+                    <span
+                      ><b>{$t('nav.subscriptions')}</b><span class="s"
+                        >{totalSubsCount > 0
+                          ? `${totalSubsCount} ${pluralize(totalSubsCount, $t('dash.source_one'), $t('dash.source_few'), $t('dash.source_many'), $currentLang)}${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
+                          : $t('dash.subs_empty')}</span
+                      ></span
+                    >
+                  </button>
+                  <button type="button" class="qa-mini" onclick={() => switchTab('editor')}>
+                    <span class="qa-mini-ico"><Icon name="editor" size={18} /></span>
+                    <span
+                      ><b>{$t('nav.editor')}</b><span class="s">{$t('dash.editor_subtitle')}</span
+                      ></span
+                    >
+                  </button>
+                  <button type="button" class="qa-mini" onclick={() => switchTab('logs')}>
+                    <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
+                    <span
+                      ><b>{$t('nav.logs')}</b><span class="s">{$t('dash.logs_subtitle')}</span
+                      ></span
+                    >
+                  </button>
+                  <button type="button" class="qa-mini" onclick={() => switchTab('dat')}>
+                    <span class="qa-mini-ico"><Icon name="dat" size={18} /></span>
+                    <span
+                      ><b>{$t('nav.dat')}</b><span class="s">{$t('dash.dat_subtitle')}</span></span
+                    >
+                  </button>
+                  <button type="button" class="qa-mini" onclick={() => switchTab('console')}>
+                    <span class="qa-mini-ico"><Icon name="console" size={18} /></span>
+                    <span
+                      ><b>{$t('nav.console')}</b><span class="s">{$t('dash.console_subtitle')}</span
+                      ></span
+                    >
+                  </button>
+                </div>
+              </Card>
+            </div>
           </div>
         </div>
       {:else if currentTab === 'editor'}
@@ -1605,15 +1747,45 @@
 
 <Toast />
 <ConfirmDialog />
+<MihomoSocketMigrateModal
+  bind:open={showMihomoMigrateModal}
+  onclose={() => (showMihomoMigrateModal = false)}
+  onsuccess={handleRefresh}
+/>
+<UnsavedChangesModal
+  isOpen={showUnsavedModal}
+  dirtySources={dirtySourceNames}
+  isSaving={isSavingAndNavigating}
+  onSaveAndLeave={handleSaveAndLeave}
+  onLeaveWithoutSaving={handleLeaveWithoutSaving}
+  onStay={handleStay}
+/>
 
 <style>
+  .dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+    gap: var(--grid-gap, 16px);
+    margin-top: 18px;
+    align-items: start;
+  }
+
+  .dash-card-wrapper {
+    min-width: 0;
+    width: 100%;
+  }
+
   /* Status badges — matches reference: flush grid inside card with dividers */
   .status-badges-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
     gap: 0;
-    margin: -18px -24px -24px;
+    margin: -18px calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad));
     border-top: 1px solid var(--border);
+  }
+
+  :global([data-density='compact']) .status-badges-row {
+    margin-top: -12px;
   }
 
   .status-badge-item {
@@ -1705,8 +1877,8 @@
   /* Quick actions grid */
   .qa-grid-mini {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+    gap: var(--grid-gap, 12px);
   }
 
   .qa-mini {
@@ -1761,9 +1933,13 @@
   /* Info rows */
   .info-rows {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    margin: -18px -24px -24px;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    margin: -18px calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad));
     border-top: 1px solid var(--border);
+  }
+
+  :global([data-density='compact']) .info-rows {
+    margin-top: -12px;
   }
 
   .info-row {
@@ -1792,6 +1968,38 @@
     color: var(--fg-primary);
     font-family: var(--font-family-mono);
     font-size: 13px;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    min-width: 0;
+  }
+
+  @media (max-width: 768px) {
+    .info-rows {
+      grid-template-columns: 1fr;
+    }
+
+    .info-row {
+      border-right: 0 !important;
+      padding: 10px 14px;
+      gap: 10px;
+    }
+
+    .info-row:nth-last-child(-n + 2) {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .info-row:last-child {
+      border-bottom: 0;
+    }
+
+    .info-row .lbl {
+      min-width: 110px;
+      font-size: 12px;
+    }
+
+    .info-row .val {
+      font-size: 12px;
+    }
   }
 
   /* Page header — title left, buttons top-right */

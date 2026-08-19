@@ -22,26 +22,32 @@
     week_start: number;
   }
 
-  let trafficData: TrafficPoint[] = [];
+  interface Props {
+    onSwitchTab?: (tab: string) => void;
+  }
+
+  let { onSwitchTab = () => {} }: Props = $props();
+
+  let trafficData: TrafficPoint[] = $state([]);
   let maxPoints = 60; // 60 points = 60 seconds (1 message/sec)
   let ws: WebSocket | null = null;
-  let connected = false;
-  let totalUp = 0;
-  let totalDown = 0;
-  let sessionUp = 0;
-  let sessionDown = 0;
+  let connected = $state(false);
+  let totalUp = $state(0);
+  let totalDown = $state(0);
+  let sessionUp = $state(0);
+  let sessionDown = $state(0);
   let lastTickTime = 0;
 
   // Active connections
-  let activeConnectionsCount = 0;
-  let tcpConnectionsCount = 0;
-  let udpConnectionsCount = 0;
+  let activeConnectionsCount = $state(0);
+  let tcpConnectionsCount = $state(0);
+  let udpConnectionsCount = $state(0);
 
   // Connection history for stats
   const CONN_HISTORY_MAX = 3600; // 1 hour at 1 sample/sec
-  let connHistory: { ts: number; count: number }[] = [];
+  let connHistory: { ts: number; count: number }[] = $state([]);
 
-  let peaks: Peaks = {
+  let peaks: Peaks = $state({
     peak_hour_up: 0,
     peak_hour_down: 0,
     peak_day_up: 0,
@@ -51,9 +57,9 @@
     hour_start: 0,
     day_start: 0,
     week_start: 0
-  };
+  });
 
-  $: connDeltaPerMin = (() => {
+  let connDeltaPerMin = $derived.by(() => {
     if (connHistory.length < 2) return null;
     const now = connHistory[connHistory.length - 1];
     if (now.ts - connHistory[0].ts < 60000) return null;
@@ -65,9 +71,9 @@
       }
     }
     return now.count - minuteAgo.count;
-  })();
+  });
 
-  $: connPeakHour = connHistory.reduce((max, h) => (h.count > max ? h.count : max), 0);
+  let connPeakHour = $derived(connHistory.reduce((max, h) => (h.count > max ? h.count : max), 0));
 
   function formatSpeed(bytesPerSecond: number): string {
     if (bytesPerSecond === 0) return '0 B/s';
@@ -237,7 +243,7 @@
   });
 
   // SVG Chart path generators
-  $: chartData = (() => {
+  let chartData = $derived.by(() => {
     if (trafficData.length < 2) {
       return {
         dLine: '',
@@ -286,10 +292,10 @@
       uArea: uAreaPath,
       maxSpeed: formatSpeed(maxVal)
     };
-  })();
+  });
 
   // Card Sparkline generators (last 20 points)
-  $: sparklines = (() => {
+  let sparklines = $derived.by(() => {
     const points = trafficData.slice(-20);
     if (points.length < 2) {
       return { uLine: '', uArea: '', dLine: '', dArea: '' };
@@ -318,7 +324,7 @@
     const dArea = `${dLine} L 200 42 L ${startX} 42 Z`;
 
     return { uLine, uArea, dLine, dArea };
-  })();
+  });
 </script>
 
 <div class="container">
@@ -442,7 +448,7 @@
       {#if trafficData.length < 2}
         <div class="chart-empty" style="flex-direction: column; gap: 8px;">
           <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-            <span class="spinner">...</span>
+            <span class="spinner" style="--spinner-size: 14px;"></span>
             <span style="font-weight: 700;">{$t('traffic.waiting')}</span>
           </div>
           <p style="font-size: 14px; color: var(--fg-dim); margin: 0;">
@@ -579,14 +585,20 @@
 <style>
   .traffic-stats-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+    gap: var(--grid-gap, 14px);
   }
 
   @media (max-width: 768px) {
     .traffic-stats-grid {
       grid-template-columns: 1fr;
     }
+  }
+
+  :global([data-density='compact']) .stat-card-spark,
+  :global([data-density='compact']) .stat-card-normal {
+    padding: 12px 14px;
+    height: 100px;
   }
 
   .stat-card-spark,
@@ -710,6 +722,10 @@
     border-radius: var(--radius-md);
     background: rgba(0, 0, 0, 0.15);
     overflow: hidden;
+  }
+
+  :global([data-density='compact']) .chart-area-wrapper {
+    height: 140px;
   }
 
   .chart-empty {

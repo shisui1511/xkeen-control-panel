@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { apiFetchJSON } from './lib/api';
+import { isServiceRestarting, clearRestartGrace } from './lib/serviceGrace';
 
 // --- Capabilities store ---
 
@@ -20,6 +21,9 @@ export interface CapabilitiesData {
     api_authenticated: boolean;
     api_url?: string;
     discovered_secret?: string;
+    controller_type?: string;
+    controller_target?: string;
+    is_insecure_lan?: boolean;
   };
   xray?: {
     conf_dir: string;
@@ -37,10 +41,16 @@ export const isKernelChecking = writable(false);
 export const mihomoApiAvailable = writable<boolean>(false);
 
 let lastValidActiveKernel = '';
+let consecutiveCapabilitiesFailures = 0;
 
 export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
   try {
     const data = await apiFetchJSON<CapabilitiesData>('/api/capabilities', { signal });
+
+    consecutiveCapabilitiesFailures = 0;
+    if (get(isServiceRestarting) && data.mihomo?.api_reachable) {
+      clearRestartGrace();
+    }
 
     if (data.active_kernel) {
       lastValidActiveKernel = data.active_kernel;
@@ -72,12 +82,13 @@ export async function fetchCapabilities(signal?: AbortSignal): Promise<void> {
     // wiping capabilities state here would just flash stale UI before the
     // navigation completes.
     if (e?.status === 401) return;
-    // Any other failure (network error, non-OK response, etc.) — capabilities
-    // are stale/unknown, do not keep reporting a possibly-outdated "API
-    // reachable" state (WR-03). No toast here: this is a background poll every
-    // 10s, not a user action — a deliberate departure from D-03, documented in
-    // 75-01-SUMMARY.md.
-    mihomoApiAvailable.set(false);
+
+    consecutiveCapabilitiesFailures++;
+    // Debounce network blips: during active service restart or for a single intermittent failure,
+    // do not instantly set mihomoApiAvailable to false to avoid UI flickering.
+    if (!get(isServiceRestarting) && consecutiveCapabilitiesFailures >= 2) {
+      mihomoApiAvailable.set(false);
+    }
   }
 }
 
@@ -207,4 +218,86 @@ export async function setDevMode(enabled: boolean): Promise<void> {
     devMode.set(!enabled);
     showToast('error', e instanceof Error ? e.message : String(e));
   }
+}
+
+// --- Theme density store (DENS-01) ---
+
+export type ThemeDensity = 'auto' | 'comfortable' | 'compact';
+
+export function resolveDensityAttr(mode?: ThemeDensity): 'comfortable' | 'compact' {
+  let densityMode = mode;
+  if (!densityMode) {
+    try {
+      const saved = localStorage.getItem('theme_density');
+      if (saved === 'comfortable' || saved === 'compact') {
+        densityMode = saved;
+      }
+    } catch (_) {}
+  }
+  if (densityMode === 'compact' || densityMode === 'comfortable') {
+    return densityMode;
+  }
+  const isMobile =
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(max-width: 1024px)').matches;
+  return isMobile ? 'compact' : 'comfortable';
+}
+
+function readInitialDensity(): ThemeDensity {
+  try {
+    const saved = localStorage.getItem('theme_density');
+    if (saved === 'comfortable' || saved === 'compact') {
+      return saved;
+    }
+  } catch (e) {
+    // localStorage unavailable
+  }
+  return 'auto';
+}
+
+export const themeDensity = writable<ThemeDensity>(readInitialDensity());
+
+export function applyDensity(mode: ThemeDensity): void {
+  try {
+    if (mode === 'auto') {
+      localStorage.removeItem('theme_density');
+    } else {
+      localStorage.setItem('theme_density', mode);
+    }
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-density', resolveDensityAttr(mode));
+    }
+  } catch (e) {
+    // localStorage or DOM unavailable
+  }
+  themeDensity.set(mode);
+}
+
+let densityMql: MediaQueryList | null = null;
+let handleDensityMediaChange: ((e: MediaQueryListEvent) => void) | null = null;
+
+export function initDensity(): () => void {
+  if (typeof document !== 'undefined') {
+    document.documentElement.setAttribute('data-density', resolveDensityAttr());
+  }
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && !densityMql) {
+    densityMql = window.matchMedia('(max-width: 1024px)');
+    handleDensityMediaChange = (e: MediaQueryListEvent) => {
+      if (get(themeDensity) === 'auto' && typeof document !== 'undefined') {
+        document.documentElement.setAttribute(
+          'data-density',
+          e.matches ? 'compact' : 'comfortable'
+        );
+      }
+    };
+    densityMql.addEventListener('change', handleDensityMediaChange);
+  }
+  return () => {
+    if (densityMql && handleDensityMediaChange) {
+      densityMql.removeEventListener('change', handleDensityMediaChange);
+      densityMql = null;
+      handleDensityMediaChange = null;
+    }
+  };
 }

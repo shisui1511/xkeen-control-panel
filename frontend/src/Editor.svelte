@@ -20,6 +20,10 @@
   import CodeMirrorEditor from './components/editor/CodeMirrorEditor.svelte';
   import BackupSidebar from './components/editor/BackupSidebar.svelte';
   import Modal from './components/Modal.svelte';
+  import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
+  import EditorKernelWidget from './components/status/EditorKernelWidget.svelte';
+  import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
+  import { activateRestartGrace } from './lib/serviceGrace';
 
   interface Template {
     name: string;
@@ -767,6 +771,15 @@
       showToast('success', $t('editor.file_saved'));
       originalContent = content;
       isDirty = false;
+
+      // Update tab state
+      const activeT = tabs.find((t) => t.path === selectedFile);
+      if (activeT) {
+        activeT.isDirty = false;
+        activeT.originalContent = content;
+        tabs = [...tabs];
+      }
+
       localStorage.removeItem(`editor.draft.${selectedFile}`);
       hasDraft = false;
       draftContent = '';
@@ -820,6 +833,7 @@
       await loadBackups(selectedFile);
 
       // 2. POST /api/service/control?action=restart
+      activateRestartGrace(6000);
       backgroundStatusText = $t('editor.restarting');
       const restartRes = await apiFetch('/api/service/control?action=restart', {
         method: 'POST'
@@ -1249,15 +1263,94 @@
   );
   let fileLineEndings = $derived(originalContent?.includes('\r\n') ? 'CRLF' : 'LF');
 
+  let detectedDraft = $state<DraftRecord | null>(null);
+  let unregisterDirty: (() => void) | null = null;
+
+  function handleRestoreSessionDraft() {
+    if (!detectedDraft?.data) return;
+    const draftData = detectedDraft.data;
+    if (Array.isArray(draftData.tabs) && draftData.tabs.length > 0) {
+      tabs = draftData.tabs.map((t: any) => ({
+        path: t.path,
+        name: t.name || t.path.split('/').pop() || '',
+        isDirty: t.isDirty !== undefined ? t.isDirty : true,
+        isPreview: false,
+        originalContent: t.originalContent || '',
+        currentContent: t.currentContent || ''
+      }));
+      if (draftData.selectedFile) {
+        selectedFile = draftData.selectedFile;
+        activeTabPath = draftData.activeTabPath || draftData.selectedFile;
+        const cur = tabs.find((t) => t.path === selectedFile);
+        if (cur && editorView) {
+          editorView.dispatch({
+            changes: { from: 0, to: editorView.state.doc.length, insert: cur.currentContent }
+          });
+        }
+      }
+      isDirty = tabs.some((t) => t.isDirty);
+    }
+    clearDraft('editor');
+    detectedDraft = null;
+    showToast('success', $t('draft.restored_toast'));
+  }
+
+  function handleDiscardSessionDraft() {
+    clearDraft('editor');
+    detectedDraft = null;
+    showToast('info', $t('draft.discarded_toast'));
+  }
+
   onMount(() => {
     loadFiles();
     loadTemplates();
     checkHashTab();
     window.addEventListener('hashchange', checkHashTab);
+
+    const draft = getDraft('editor');
+    if (draft) {
+      detectedDraft = draft;
+    }
+
+    unregisterDirty = registerDirtySource('editor', {
+      name: $t('nav.editor') || 'Editor',
+      isDirty: () => isDirty || tabs.some((t) => t.isDirty),
+      onSave: async () => {
+        if (selectedFile && editorView) {
+          await confirmSave();
+          return !isDirty;
+        }
+        return true;
+      },
+      getDraft: () => ({
+        selectedFile,
+        activeTabPath,
+        tabs: tabs.map((t) => ({
+          path: t.path,
+          name: t.name,
+          currentContent:
+            t.path === selectedFile && editorView
+              ? editorView.state.doc.toString()
+              : t.currentContent,
+          originalContent: t.originalContent,
+          isDirty: t.isDirty
+        }))
+      }),
+      restoreDraft: (draftRecord) => {
+        if (draftRecord?.data) {
+          detectedDraft = draftRecord;
+          handleRestoreSessionDraft();
+        }
+      }
+    });
   });
 
   onDestroy(() => {
     window.removeEventListener('hashchange', checkHashTab);
+    if (unregisterDirty) {
+      unregisterDirty();
+      unregisterDirty = null;
+    }
   });
 </script>
 
@@ -1380,6 +1473,14 @@
       </div>
     {/if}
   </div>
+
+  {#if detectedDraft}
+    <DraftRestoreBanner
+      timestamp={detectedDraft.timestamp}
+      onRestore={handleRestoreSessionDraft}
+      onDiscard={handleDiscardSessionDraft}
+    />
+  {/if}
 
   <div class="editor-tabs">
     <button class="tab-btn" class:active={activeTab === 'files'} onclick={() => setTab('files')}>
@@ -1523,65 +1624,68 @@
               </div>
             {/if}
 
-            <div class="kebab-wrap" style="margin-left: auto;">
-              <button
-                class="btn btn-secondary"
-                style="padding: 6px 10px;"
-                onclick={toggleKebab}
-                aria-label={$t('editor.more_actions')}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
+            <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+              <EditorKernelWidget activeKernel={$capabilities?.active_kernel} />
+              <div class="kebab-wrap">
+                <button
+                  class="btn btn-secondary"
+                  style="padding: 6px 10px;"
+                  onclick={toggleKebab}
+                  aria-label={$t('editor.more_actions')}
                 >
-                  <circle cx="12" cy="12" r="1" />
-                  <circle cx="12" cy="5" r="1" />
-                  <circle cx="12" cy="19" r="1" />
-                </svg>
-              </button>
-              {#if showKebabMenu}
-                <div class="kebab-dropdown" transition:fade={{ duration: 100 }}>
-                  <button class="kebab-item" onclick={downloadFile}>
-                    <Icon name="download" size={14} />
-                    {$t('editor.download_file')}
-                  </button>
-                  <button
-                    class="kebab-item"
-                    onclick={() => {
-                      showRenameModal = true;
-                      renameTarget = selectedFile.split('/').pop() || '';
-                    }}
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
                   >
-                    <Icon name="edit" size={14} />
-                    {$t('app.rename')}
-                  </button>
-                  <button class="kebab-item" onclick={openTemplatesModal}>
-                    <Icon name="settings" size={14} />
-                    {$t('editor.templates')}
-                  </button>
-                  {#if fileType === 'JSON'}
-                    <button class="kebab-item" onclick={() => (showGeneratorModal = true)}>
-                      <Icon name="settings" size={14} />
-                      {$t('editor.generator')}
+                    <circle cx="12" cy="12" r="1" />
+                    <circle cx="12" cy="5" r="1" />
+                    <circle cx="12" cy="19" r="1" />
+                  </svg>
+                </button>
+                {#if showKebabMenu}
+                  <div class="kebab-dropdown" transition:fade={{ duration: 100 }}>
+                    <button class="kebab-item" onclick={downloadFile}>
+                      <Icon name="download" size={14} />
+                      {$t('editor.download_file')}
                     </button>
-                  {/if}
-                  <button class="kebab-item" onclick={applyQuickFixes}>
-                    <Icon name="settings" size={14} />
-                    {$t('editor.quick_fixes')}
-                  </button>
-                  <div class="kebab-divider"></div>
-                  <button class="kebab-item danger" onclick={deleteFile}>
-                    <Icon name="trash" size={14} />
-                    {$t('app.delete')}
-                  </button>
-                </div>
-              {/if}
+                    <button
+                      class="kebab-item"
+                      onclick={() => {
+                        showRenameModal = true;
+                        renameTarget = selectedFile.split('/').pop() || '';
+                      }}
+                    >
+                      <Icon name="edit" size={14} />
+                      {$t('app.rename')}
+                    </button>
+                    <button class="kebab-item" onclick={openTemplatesModal}>
+                      <Icon name="settings" size={14} />
+                      {$t('editor.templates')}
+                    </button>
+                    {#if fileType === 'JSON'}
+                      <button class="kebab-item" onclick={() => (showGeneratorModal = true)}>
+                        <Icon name="settings" size={14} />
+                        {$t('editor.generator')}
+                      </button>
+                    {/if}
+                    <button class="kebab-item" onclick={applyQuickFixes}>
+                      <Icon name="settings" size={14} />
+                      {$t('editor.quick_fixes')}
+                    </button>
+                    <div class="kebab-divider"></div>
+                    <button class="kebab-item danger" onclick={deleteFile}>
+                      <Icon name="trash" size={14} />
+                      {$t('app.delete')}
+                    </button>
+                  </div>
+                {/if}
+              </div>
             </div>
           </div>
 
@@ -1591,7 +1695,7 @@
               <div
                 style="display:grid;place-items:center;height:100%;position:absolute;inset:0;background:rgba(5,13,22,0.7);z-index:10;"
               >
-                <div class="spinner"></div>
+                <div class="spinner" style="--spinner-size: 24px;"></div>
               </div>
             {/if}
             {#each tabs as tab (tab.path)}
@@ -2362,15 +2466,6 @@
     animation: spin 0.8s linear infinite;
   }
 
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   .templates-body-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -2574,21 +2669,6 @@
 
   .diff-line-unchanged {
     color: var(--fg-secondary);
-  }
-
-  .spinner {
-    width: 24px;
-    height: 24px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   .btn-accent {

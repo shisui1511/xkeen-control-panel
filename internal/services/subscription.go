@@ -204,6 +204,43 @@ type KernelStatusProvider interface {
 	Get(name string) *KernelInfo
 }
 
+type singleflightCall struct {
+	wg      sync.WaitGroup
+	val     []byte
+	headers http.Header
+	err     error
+}
+
+type singleflightGroup struct {
+	mu sync.Mutex
+	m  map[string]*singleflightCall
+}
+
+func (g *singleflightGroup) Do(key string, fn func() ([]byte, http.Header, error)) ([]byte, http.Header, error) {
+	g.mu.Lock()
+	if g.m == nil {
+		g.m = make(map[string]*singleflightCall)
+	}
+	if c, ok := g.m[key]; ok {
+		g.mu.Unlock()
+		c.wg.Wait()
+		return c.val, c.headers, c.err
+	}
+	c := new(singleflightCall)
+	c.wg.Add(1)
+	g.m[key] = c
+	g.mu.Unlock()
+
+	c.val, c.headers, c.err = fn()
+	c.wg.Done()
+
+	g.mu.Lock()
+	delete(g.m, key)
+	g.mu.Unlock()
+
+	return c.val, c.headers, c.err
+}
+
 // SubscriptionService manages subscriptions
 type SubscriptionService struct {
 	dataDir         string
@@ -214,11 +251,13 @@ type SubscriptionService struct {
 	mihomoMu        sync.Mutex // Mutex для синхронизации записи config.yaml Mihomo
 	ongoing         sync.Map   // Map of ID -> struct{}{} to track active refreshes
 	retries         sync.Map   // ID -> *retryState for exponential backoff
+	fetchFlight     singleflightGroup
 	httpClient      *http.Client
 	consoleSvc      *ConsoleService
 	kernelSvc       KernelStatusProvider // для получения реальных версий ядер
 	hwid            string               // постоянный UUID устройства, передаётся как x-hwid
 	deviceInfo      *DeviceInfo          // модель/ОС роутера для x-device-* заголовков (см. task 60-01-05)
+	mihomoSvc       *MihomoService
 	mihomoAPIURL    string
 	mihomoSecret    string
 	// mihomoSecretResolver — fallback-резолвер секрета Clash API (например,
@@ -285,6 +324,11 @@ func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscr
 	if https {
 		sb.WriteString("    skip-cert-verify: true\n")
 	}
+	// override.udp — страховка для узлов, у которых провайдер не прислал
+	// udp: true. Без него Mihomo не проксирует UDP (QUIC/HTTP3, игры,
+	// DNS-over-QUIC уходят мимо туннеля).
+	sb.WriteString("    override:\n")
+	sb.WriteString("      udp: true\n")
 	sb.WriteString("    health-check:\n")
 	sb.WriteString("      enable: true\n")
 	sb.WriteString("      url: http://www.gstatic.com/generate_204\n")

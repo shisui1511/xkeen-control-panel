@@ -33,9 +33,12 @@ type API struct {
 	datSvc                *services.DATManagerService
 	snapshotSvc           *services.SnapshotService
 	consoleSvc            *services.ConsoleService
+	ptySvc                *services.PTYService
 	templateSvc           *services.TemplateService
+	clientResolver        *services.ClientResolver
 	assetsSvc             *assets.AssetsService
 	pathVal               *utils.PathValidator
+	delayGuard            *DelayGuard
 	configValCache        bool
 	configValCacheTime    time.Time
 	configValCacheMutex   sync.Mutex
@@ -50,14 +53,24 @@ type API struct {
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
 	assetsSvc := assets.NewService(cfg.DataDir)
 	return &API{
-		cfg:       cfg,
-		srv:       srv,
-		xkeenSvc:  services.NewXKeenService(cfg.XKeenBinary, cfg.DataDir),
-		mihomoSvc: services.NewMihomoService(cfg.MihomoBinary, cfg.XKeenBinary, cfg.MihomoConfigDir),
-		configSvc: services.NewConfigService(cfg.XRayConfigDir, cfg.AllowedRoots),
-		assetsSvc: assetsSvc,
-		pathVal:   utils.NewPathValidator(cfg.AllowedRoots),
+		cfg:            cfg,
+		srv:            srv,
+		xkeenSvc:       services.NewXKeenService(cfg.XKeenBinary, cfg.DataDir),
+		mihomoSvc:      services.NewMihomoService(cfg.MihomoBinary, cfg.XKeenBinary, cfg.MihomoConfigDir),
+		configSvc:      services.NewConfigService(cfg.XRayConfigDir, cfg.AllowedRoots),
+		clientResolver: services.NewClientResolver(),
+		assetsSvc:      assetsSvc,
+		pathVal:        utils.NewPathValidator(cfg.AllowedRoots),
+		delayGuard:     NewDelayGuard(32, 15*time.Second),
 	}
+}
+
+func (a *API) SetClientResolver(svc *services.ClientResolver) {
+	a.clientResolver = svc
+}
+
+func (a *API) ClientResolver() *services.ClientResolver {
+	return a.clientResolver
 }
 
 func (a *API) SetSmartProxyService(svc *services.SmartProxyService) {
@@ -80,6 +93,10 @@ func (a *API) SetConsoleService(svc *services.ConsoleService) {
 	a.consoleSvc = svc
 }
 
+func (a *API) SetPTYService(svc *services.PTYService) {
+	a.ptySvc = svc
+}
+
 func (a *API) SetTemplateService(svc *services.TemplateService) {
 	a.templateSvc = svc
 }
@@ -90,6 +107,10 @@ func (a *API) SetAssetsService(svc *assets.AssetsService) {
 
 func (a *API) GetAssetsService() *assets.AssetsService {
 	return a.assetsSvc
+}
+
+func (a *API) MihomoService() *services.MihomoService {
+	return a.mihomoSvc
 }
 
 func (a *API) SetKernelService(svc *services.KernelService) {

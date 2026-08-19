@@ -197,10 +197,52 @@ func TestApplySubscriptionHeaders_Base64Prefix(t *testing.T) {
 	}
 }
 
-func TestSubscriptionUserAgent(t *testing.T) {
-	// Единый UA для всех запросов подписок: разные UA приводили к тому, что
-	// провайдеры отдавали разные наборы нод для Xray- и Mihomo-путей.
-	if subscriptionUserAgent != "Happ/1.0" {
-		t.Errorf("subscription User-Agent must be Happ/1.0, got %q", subscriptionUserAgent)
+func TestSubscriptionUserAgentXray(t *testing.T) {
+	// По UA Happ провайдеры отдают xray-json / share-links — форматы, которые
+	// парсер Xray-пути понимает нативно.
+	if subscriptionUserAgentXray != "Happ/1.0" {
+		t.Errorf("Xray subscription User-Agent must be Happ/1.0, got %q", subscriptionUserAgentXray)
 	}
+}
+
+func TestMihomoUserAgent(t *testing.T) {
+	// По UA Mihomo провайдеры отдают готовый Clash YAML, который уходит в
+	// Mihomo без конвертации. Версия подставляется из установленного ядра.
+	t.Run("fallback without kernel service", func(t *testing.T) {
+		svc := &SubscriptionService{}
+		want := "ClashMeta/" + mihomoUserAgentFallbackVersion + "; mihomo/" + mihomoUserAgentFallbackVersion
+		if got := svc.mihomoUserAgent(); got != want {
+			t.Errorf("expected %q, got %q", want, got)
+		}
+	})
+
+	t.Run("uses installed kernel version", func(t *testing.T) {
+		svc := &SubscriptionService{kernelSvc: stubKernelStatus{version: "v1.19.38"}}
+		want := "ClashMeta/1.19.38; mihomo/1.19.38"
+		if got := svc.mihomoUserAgent(); got != want {
+			t.Errorf("expected %q, got %q", want, got)
+		}
+	})
+
+	t.Run("falls back on unparseable version", func(t *testing.T) {
+		svc := &SubscriptionService{kernelSvc: stubKernelStatus{version: "unknown"}}
+		want := "ClashMeta/" + mihomoUserAgentFallbackVersion + "; mihomo/" + mihomoUserAgentFallbackVersion
+		if got := svc.mihomoUserAgent(); got != want {
+			t.Errorf("expected %q, got %q", want, got)
+		}
+	})
+}
+
+// stubKernelStatus — минимальная реализация KernelStatusProvider для тестов UA.
+type stubKernelStatus struct {
+	version string
+}
+
+func (s stubKernelStatus) GetActiveKernel() string { return "mihomo" }
+
+func (s stubKernelStatus) Get(name string) *KernelInfo {
+	if name != "mihomo" {
+		return nil
+	}
+	return &KernelInfo{Name: name, CurrentVersion: s.version}
 }

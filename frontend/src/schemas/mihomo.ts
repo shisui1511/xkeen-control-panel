@@ -58,6 +58,10 @@ export const mihomoSchema = {
       type: 'string',
       description: 'REST API bind address (e.g. 127.0.0.1:9090)'
     },
+    'external-controller-unix': {
+      type: 'string',
+      description: 'Unix Domain Socket path for REST API (e.g. /opt/var/run/mihomo.sock)'
+    },
     'external-ui': {
       type: 'string',
       description: 'Path to external dashboard files'

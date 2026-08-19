@@ -11,15 +11,50 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
-// subscriptionUserAgent — единый User-Agent для всех запросов подписок.
-// Провайдеры отдают разные наборы нод в зависимости от UA клиента; разные UA
-// для Xray- и Mihomo-путей приводили к рассинхрону списков нод одной подписки.
-// По UA Happ провайдеры отдают максимально полный набор нод.
-const subscriptionUserAgent = "Happ/1.0"
+// User-Agent выбирается по целевому ядру, потому что провайдеры отдают
+// принципиально разные форматы в зависимости от клиента.
+//
+// Замер на реальной подписке (19.08.2026):
+//
+//	Happ/1.0                  → xray-json,  81 563 Б → 24 узла после конвертации
+//	ClashMeta/…; mihomo/…     → clash yaml, 30 803 Б → 51 узел без конвертации
+//
+// Единый UA Happ выбирался ради согласованности списков нод между ядрами, но
+// списки и так разные — они уходят в разные ядра, — а ценой была потеря больше
+// половины узлов Mihomo и всех транспортных полей (udp, alpn, flow,
+// packet-encoding), которые конвертер не переносит.
+const (
+	// subscriptionUserAgentXray — UA для Xray-пути: по нему провайдеры отдают
+	// xray-json / share-links, которые парсер панели понимает нативно.
+	subscriptionUserAgentXray = "Happ/1.0"
+
+	// mihomoUserAgentFallbackVersion используется, когда реальная версия ядра
+	// недоступна (Mihomo не установлен или KernelService не подключён).
+	mihomoUserAgentFallbackVersion = "1.19.0"
+)
+
+// mihomoVersionRe вычленяет числовую часть версии ядра ("v1.19.38" → "1.19.38").
+var mihomoVersionRe = regexp.MustCompile(`\d+(?:\.\d+)*`)
+
+// mihomoUserAgent возвращает User-Agent Clash/Mihomo с реальной версией
+// установленного ядра — по нему провайдеры отдают готовый Clash YAML,
+// который панель передаёт Mihomo без конвертации.
+func (s *SubscriptionService) mihomoUserAgent() string {
+	version := mihomoUserAgentFallbackVersion
+	if s.kernelSvc != nil {
+		if info := s.kernelSvc.Get("mihomo"); info != nil {
+			if m := mihomoVersionRe.FindString(info.CurrentVersion); m != "" {
+				version = m
+			}
+		}
+	}
+	return fmt.Sprintf("ClashMeta/%s; mihomo/%s", version, version)
+}
 
 func sanitizeSSRFURL(urlStr string) string {
 	b := make([]byte, len(urlStr))
@@ -105,38 +140,38 @@ func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL str
 	return s.httpClient.Do(req)
 }
 
-// DownloadRaw скачивает подписку с единым User-Agent панели
-// (subscriptionUserAgent). Экспортируется для использования из
-// ProviderFetch (loopback provider endpoint).
-func (s *SubscriptionService) DownloadRaw(ctx context.Context, subURL string, sub *Subscription) ([]byte, http.Header, error) {
-	return s.downloadRaw(ctx, subURL, sub)
-}
-
 func (s *SubscriptionService) downloadWithUA(ctx context.Context, subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
 	parsed, err := url.Parse(subURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, nil, fmt.Errorf("only http and https URLs are allowed for subscriptions")
 	}
-	resp, err := s.fetchWithUserAgent(ctx, subURL, sub, ua)
+
+	flightKey := subURL + "#" + ua
+	body, headers, err := s.fetchFlight.Do(flightKey, func() ([]byte, http.Header, error) {
+		resp, err := s.fetchWithUserAgent(ctx, subURL, sub, ua)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			statusText := http.StatusText(resp.StatusCode)
+			if statusText != "" {
+				return nil, resp.Header, fmt.Errorf("HTTP %d %s", resp.StatusCode, statusText)
+			}
+			return nil, resp.Header, fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxSubscriptionBytes))
+		if err != nil {
+			return nil, nil, err
+		}
+		return bodyBytes, resp.Header, nil
+	})
 	if err != nil {
-		return nil, nil, err
+		return nil, headers, err
 	}
-	defer resp.Body.Close()
 
-	applySubscriptionHeaders(resp.Header, sub)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSubscriptionBytes))
-	if err != nil {
-		return nil, nil, err
-	}
-	return body, resp.Header, nil
-}
-
-func (s *SubscriptionService) downloadRaw(ctx context.Context, subURL string, sub *Subscription) ([]byte, http.Header, error) {
-	return s.downloadWithUA(ctx, subURL, sub, subscriptionUserAgent)
+	return body, headers, nil
 }
 
 func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL string, sub *Subscription) (outbounds []Outbound, skips []SkipReason, bodyBytes []byte, headers http.Header, err error) {
@@ -147,7 +182,7 @@ func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL strin
 		}
 	}()
 
-	body, headers, err := s.downloadWithUA(ctx, subURL, sub, subscriptionUserAgent)
+	body, headers, err := s.downloadWithUA(ctx, subURL, sub, subscriptionUserAgentXray)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -156,6 +191,9 @@ func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL strin
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	if sub != nil && !isHTMLResponse(body, headers.Get("Content-Type")) {
+		applySubscriptionHeaders(headers, sub)
+	}
 	return outs, skipReasons, body, headers, nil
 }
 
@@ -163,6 +201,10 @@ func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL strin
 // into outbounds. It tries formats in priority order: sing-box JSON, xray JSON,
 // clash YAML, then base64/share-links.
 func parseSubscriptionBody(body []byte, contentTypeHeader string, sub *Subscription) ([]Outbound, []SkipReason, error) {
+	if isHTMLResponse(body, contentTypeHeader) {
+		return nil, nil, fmt.Errorf("Upstream returned HTML landing page instead of proxy config (check URL/token)")
+	}
+
 	contentType := strings.ToLower(contentTypeHeader)
 	content := strings.TrimSpace(string(body))
 

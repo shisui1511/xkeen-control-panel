@@ -1,15 +1,19 @@
 <script lang="ts">
   import { t } from '../i18n';
 
-  export let sub: {
-    type?: string;
-    detected_format?: string;
-    provider_type?: string;
-    profile_update_hours?: number;
-    support_url?: string;
-    interval: number;
-    use_provider_interval?: boolean;
-  };
+  interface Props {
+    sub: {
+      type?: string;
+      detected_format?: string;
+      provider_type?: string;
+      profile_update_hours?: number;
+      support_url?: string;
+      interval: number;
+      use_provider_interval?: boolean;
+    };
+  }
+
+  let { sub }: Props = $props();
 
   function getFormatBadge(): string {
     if (sub.type === 'mihomo') return 'clash · YAML';

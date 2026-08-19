@@ -41,6 +41,10 @@ func (s *SubscriptionService) SetKernelService(svc KernelStatusProvider) {
 	s.kernelSvc = svc
 }
 
+func (s *SubscriptionService) SetMihomoService(svc *MihomoService) {
+	s.mihomoSvc = svc
+}
+
 func (s *SubscriptionService) SetMihomoAPI(apiURL, secret string) {
 	s.mihomoAPIURL = apiURL
 	s.mihomoSecret = secret
@@ -81,33 +85,42 @@ func (s *SubscriptionService) Refresh(id string) error {
 		return fmt.Errorf("subscription is not enabled for any kernel")
 	}
 
-	// Download subscription once (outside of lock to avoid blocking other operations)
-	body, headers, err := s.downloadWithUA(context.Background(), subCopy.URL, &subCopy, subscriptionUserAgent)
-	if err != nil {
-		s.mu.Lock()
-		if live := s.GetLocked(safeID); live != nil {
-			live.LastError = err.Error()
-			_ = s.save()
-		}
-		s.mu.Unlock()
-		return err
-	}
-
-	subCopy.LastUpdate = time.Now()
-
 	var refreshErr error
 	xrayChanged := false
 	xraySuccess := false
+	// metadataFetched — панель сама сходила к провайдеру и получила свежие
+	// заголовки. Для Mihomo-only подписок это неверно: тело качает Mihomo
+	// через loopback-адаптер, он же сохраняет метаданные (PersistHeaderMetadata).
+	metadataFetched := false
 
+	// Тело подписки нужно только Xray-пути — его парсит панель. Для Mihomo
+	// подписку скачивает сам Mihomo по команде reload, поэтому качать её здесь
+	// ещё раз значит удваивать обращения к провайдеру и HWID-хиты на один клик.
 	if subCopy.EnableXray {
-		err := s.refreshXray(&subCopy, body, headers)
+		body, headers, err := s.downloadWithUA(context.Background(), subCopy.URL, &subCopy, subscriptionUserAgentXray)
 		if err != nil {
+			s.mu.Lock()
+			if live := s.GetLocked(safeID); live != nil {
+				live.LastError = err.Error()
+				_ = s.save()
+			}
+			s.mu.Unlock()
+			return err
+		}
+		metadataFetched = true
+		subCopy.LastUpdate = time.Now()
+		if !isHTMLResponse(body, headers.Get("Content-Type")) {
+			applySubscriptionHeaders(headers, &subCopy)
+		}
+
+		if err := s.refreshXray(&subCopy, body, headers); err != nil {
 			refreshErr = err
 		} else {
 			xrayChanged = subCopy.LastChanged
 			xraySuccess = true
 		}
 	}
+
 	if subCopy.EnableMihomo {
 		providerName := subCopy.GetProviderName()
 		activeKernel := ""
@@ -119,6 +132,13 @@ func (s *SubscriptionService) Refresh(id string) error {
 			log.Printf("[Subscriptions] Mihomo reload failed: %v", err)
 			if !subCopy.EnableXray || refreshErr == nil {
 				refreshErr = err
+			}
+			// Mihomo не поднял подписку (не запущен / API недоступен), а UI всё
+			// равно ждёт свежие срок действия и трафик. Единственный случай,
+			// когда Mihomo-only подписку качает панель.
+			if !subCopy.EnableXray && s.fetchHeadersOnly(&subCopy) {
+				metadataFetched = true
+				subCopy.LastUpdate = time.Now()
 			}
 		}
 	}
@@ -135,33 +155,41 @@ func (s *SubscriptionService) Refresh(id string) error {
 			live.LastError = ""
 		}
 
-		// Always update HTTP headers metadata as the download itself succeeded.
-		live.LastUpdate = subCopy.LastUpdate
-		live.Upload = subCopy.Upload
-		live.Download = subCopy.Download
-		live.Total = subCopy.Total
-		live.Expire = subCopy.Expire
-		live.ProfileTitle = subCopy.ProfileTitle
-		live.ProfileUpdateHours = subCopy.ProfileUpdateHours
-		live.SupportURL = subCopy.SupportURL
-		live.ProfileWebPageURL = subCopy.ProfileWebPageURL
-		live.ProviderType = subCopy.ProviderType
+		// Метаданные заголовков перезаписываем только если панель сама ходила к
+		// провайдеру. Иначе их уже сохранил loopback-адаптер, и затирать их
+		// пустыми значениями из subCopy нельзя.
+		if metadataFetched {
+			live.LastUpdate = subCopy.LastUpdate
+			live.Upload = subCopy.Upload
+			live.Download = subCopy.Download
+			live.Total = subCopy.Total
+			live.Expire = subCopy.Expire
+			live.ProfileTitle = subCopy.ProfileTitle
+			live.ProfileUpdateHours = subCopy.ProfileUpdateHours
+			live.SupportURL = subCopy.SupportURL
+			live.ProfileWebPageURL = subCopy.ProfileWebPageURL
+			live.ProviderType = subCopy.ProviderType
 
-		// Временное имя провайдера (из ID) заменяется на бренд из profile-title.
-		s.maybeRenameProviderLocked(live)
+			// Временное имя провайдера (из ID) заменяется на бренд из profile-title.
+			s.maybeRenameProviderLocked(live)
+		}
 
 		// Update Xray state if its step succeeded
 		if xraySuccess {
 			live.LastHash = subCopy.LastHash
 			live.LastSkipped = subCopy.LastSkipped
-			live.DetectedFormat = subCopy.DetectedFormat
+			if !subCopy.EnableMihomo || live.DetectedFormat == "" {
+				live.DetectedFormat = subCopy.DetectedFormat
+			}
 		}
 
 		// Update shared/derived fields based on which kernel succeeded.
 		if xraySuccess {
 			live.Nodes = subCopy.Nodes
 			live.Announcement = subCopy.Announcement
-			live.LastCount = subCopy.LastCount
+			if !subCopy.EnableMihomo || live.LastCount == 0 {
+				live.LastCount = subCopy.LastCount
+			}
 		}
 
 		live.LastChanged = xraySuccess && xrayChanged
@@ -443,13 +471,35 @@ func (s *SubscriptionService) UnlockMihomo() {
 }
 
 func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) error {
-	if s.mihomoAPIURL == "" {
-		return ErrMihomoAPINotConfigured
+	var client *http.Client
+	var reqURL string
+
+	if s.mihomoSvc != nil {
+		info, err := s.mihomoSvc.ParseControllerConfig()
+		if err == nil && info.Type == "unix" && info.Target != "" {
+			client = s.mihomoSvc.GetHTTPClient()
+			reqURL = fmt.Sprintf("http://localhost/providers/proxies/%s", url.PathEscape(providerName))
+		} else if err == nil && info.Type == "tcp" && info.Target != "" {
+			client = s.mihomoSvc.GetHTTPClient()
+			t := info.Target
+			if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") {
+				t = "http://" + t
+			}
+			reqURL = fmt.Sprintf("%s/providers/proxies/%s", strings.TrimRight(t, "/"), url.PathEscape(providerName))
+		}
 	}
+
+	if client == nil {
+		if s.mihomoAPIURL == "" {
+			return ErrMihomoAPINotConfigured
+		}
+		client = s.localHTTPClient
+		reqURL = fmt.Sprintf("%s/providers/proxies/%s", s.mihomoAPIURL, url.PathEscape(providerName))
+	}
+
 	// PathEscape — защита в глубину: имя валидируется на уровне handler,
 	// но экранирование гарантирует, что спецсимволы не изменят путь/query
 	// исходящего запроса.
-	reqURL := fmt.Sprintf("%s/providers/proxies/%s", s.mihomoAPIURL, url.PathEscape(providerName))
 	req, err := http.NewRequest(http.MethodPut, reqURL, nil)
 	if err != nil {
 		return fmt.Errorf("request init failed: %w", err)
@@ -461,7 +511,7 @@ func (s *SubscriptionService) TriggerMihomoProviderReload(providerName string) e
 	if secret != "" {
 		req.Header.Set("Authorization", "Bearer "+secret)
 	}
-	resp, err := s.localHTTPClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("API PUT failed: %w", err)
 	}

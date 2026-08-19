@@ -119,6 +119,7 @@ type TrafficQuotaService struct {
 	trafficSubsMu    sync.RWMutex
 
 	httpClient         *http.Client
+	mihomoSvc          *MihomoService
 	blockedProxies     map[string]string
 	resetTime          int64
 	trackerInitialized bool
@@ -140,6 +141,71 @@ func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaServ
 	}
 	svc.load()
 	return svc
+}
+
+func (s *TrafficQuotaService) SetMihomoService(svc *MihomoService) {
+	s.mihomoSvc = svc
+}
+
+func (s *TrafficQuotaService) getMihomoConnectionInfo() (wsURL string, header http.Header, dialer websocket.Dialer) {
+	dialer = websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	header = http.Header{}
+	secret := s.secret
+
+	if s.mihomoSvc != nil {
+		info, err := s.mihomoSvc.ParseControllerConfig()
+		if err == nil && info.Type == "unix" && info.Target != "" {
+			dialer.NetDialContext = s.mihomoSvc.GetDialContext()
+			if info.Secret != "" {
+				secret = info.Secret
+			}
+			if secret != "" {
+				header.Set("Authorization", "Bearer "+secret)
+			}
+			return "ws://localhost", header, dialer
+		} else if err == nil && info.Type == "tcp" && info.Target != "" {
+			t := info.Target
+			if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") {
+				t = "http://" + t
+			}
+			if info.Secret != "" {
+				secret = info.Secret
+			}
+			if secret != "" {
+				header.Set("Authorization", "Bearer "+secret)
+			}
+			return httpToWS(strings.TrimRight(t, "/")), header, dialer
+		}
+	}
+
+	if secret != "" {
+		header.Set("Authorization", "Bearer "+secret)
+	}
+	return httpToWS(strings.TrimRight(s.mihomoURL, "/")), header, dialer
+}
+
+func (s *TrafficQuotaService) getMihomoHTTPClientAndBaseURL() (*http.Client, string, string) {
+	if s.mihomoSvc != nil {
+		info, err := s.mihomoSvc.ParseControllerConfig()
+		if err == nil && info.Type == "unix" && info.Target != "" {
+			secret := s.secret
+			if info.Secret != "" {
+				secret = info.Secret
+			}
+			return s.mihomoSvc.GetHTTPClient(), "http://localhost", secret
+		} else if err == nil && info.Type == "tcp" && info.Target != "" {
+			t := info.Target
+			if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") {
+				t = "http://" + t
+			}
+			secret := s.secret
+			if info.Secret != "" {
+				secret = info.Secret
+			}
+			return s.mihomoSvc.GetHTTPClient(), strings.TrimRight(t, "/"), secret
+		}
+	}
+	return s.httpClient, strings.TrimRight(s.mihomoURL, "/"), s.secret
 }
 
 func (s *TrafficQuotaService) Start() {
@@ -503,14 +569,9 @@ func (s *TrafficQuotaService) connectionsWSLoop() {
 // endpoint and processes every snapshot it receives. Returns nil on graceful
 // shutdown (stopCh closed) and a non-nil error when the connection breaks.
 func (s *TrafficQuotaService) streamConnections() error {
-	wsURL := httpToWS(strings.TrimRight(s.mihomoURL, "/")) + "/connections"
+	baseWS, header, dialer := s.getMihomoConnectionInfo()
+	wsURL := baseWS + "/connections"
 
-	header := http.Header{}
-	if s.secret != "" {
-		header.Set("Authorization", "Bearer "+s.secret)
-	}
-
-	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 	conn, _, err := dialer.Dial(wsURL, header)
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", wsURL, err)
@@ -750,14 +811,9 @@ type mihomoTraffic struct {
 }
 
 func (s *TrafficQuotaService) streamTraffic() error {
-	wsURL := httpToWS(strings.TrimRight(s.mihomoURL, "/")) + "/traffic"
+	baseWS, header, dialer := s.getMihomoConnectionInfo()
+	wsURL := baseWS + "/traffic"
 
-	header := http.Header{}
-	if s.secret != "" {
-		header.Set("Authorization", "Bearer "+s.secret)
-	}
-
-	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 	conn, _, err := dialer.Dial(wsURL, header)
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", wsURL, err)
@@ -925,9 +981,9 @@ type connStats struct {
 	Download int64
 }
 
-func contains(slice []string, val string) bool {
-	for _, item := range slice {
-		if item == val {
+func contains(arr []string, target string) bool {
+	for _, item := range arr {
+		if item == target {
 			return true
 		}
 	}
@@ -942,16 +998,17 @@ type mihomoProxy struct {
 }
 
 func (s *TrafficQuotaService) getMihomoProxies() (map[string]mihomoProxy, error) {
-	url := fmt.Sprintf("%s/proxies", strings.TrimRight(s.mihomoURL, "/"))
+	client, baseURL, secret := s.getMihomoHTTPClientAndBaseURL()
+	url := fmt.Sprintf("%s/proxies", baseURL)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	if s.secret != "" {
-		req.Header.Set("Authorization", "Bearer "+s.secret)
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -971,7 +1028,8 @@ func (s *TrafficQuotaService) getMihomoProxies() (map[string]mihomoProxy, error)
 }
 
 func (s *TrafficQuotaService) applyProxyToGroup(groupName, proxyName string) error {
-	url := fmt.Sprintf("%s/proxies/%s", strings.TrimRight(s.mihomoURL, "/"), groupName)
+	client, baseURL, secret := s.getMihomoHTTPClientAndBaseURL()
+	url := fmt.Sprintf("%s/proxies/%s", baseURL, groupName)
 	bodyMap := map[string]string{"name": proxyName}
 	bodyBytes, err := json.Marshal(bodyMap)
 	if err != nil {
@@ -983,11 +1041,11 @@ func (s *TrafficQuotaService) applyProxyToGroup(groupName, proxyName string) err
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if s.secret != "" {
-		req.Header.Set("Authorization", "Bearer "+s.secret)
+	if secret != "" {
+		req.Header.Set("Authorization", "Bearer "+secret)
 	}
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

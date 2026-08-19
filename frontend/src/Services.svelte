@@ -11,8 +11,12 @@
   import { usePoller } from './lib/poller';
   import Skeleton from './components/Skeleton.svelte';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import { activateRestartGrace } from './lib/serviceGrace';
+  import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
 
-  export const onSwitchTab: (tab: string) => void = () => {};
+  let { onSwitchTab = () => {} }: { onSwitchTab?: (tab: string) => void } = $props();
+
+  let showMihomoMigrateModal = $state(false);
 
   interface Kernel {
     name: string;
@@ -39,22 +43,22 @@
     raw: string;
   }
 
-  let xkeenInfo: XKeenStatusInfo = {
+  let xkeenInfo = $state<XKeenStatusInfo>({
     isRunning: false,
     activeKernel: '',
     pid: 0,
     uptime: '',
     binaryPath: '',
     raw: ''
-  };
+  });
 
-  let xkeenStatus = '';
-  let loading = false;
-  let actionLoading: Record<string, boolean> = {};
+  let xkeenStatus = $state('');
+  let loading = $state(false);
+  let actionLoading = $state<Record<string, boolean>>({});
 
-  let kernels: Kernel[] = [];
-  let kernelsLoaded = false;
-  let statusIntervals: Record<string, ReturnType<typeof setInterval>> = {};
+  let kernels = $state<Kernel[]>([]);
+  let kernelsLoaded = $state(false);
+  let statusIntervals = $state<Record<string, ReturnType<typeof setInterval>>>({});
 
   // Restart log
   interface RestartLogEntry {
@@ -64,8 +68,8 @@
     exit_code: number;
     output: string;
   }
-  let restartLog: RestartLogEntry[] = [];
-  let restartLogExpanded = false;
+  let restartLog = $state<RestartLogEntry[]>([]);
+  let restartLogExpanded = $state(false);
 
   async function fetchRestartLog() {
     try {
@@ -93,9 +97,9 @@
   }
 
   // Auto-start toggles (localStorage-persisted until backend API exists)
-  let autostartKeenetic = localStorage.getItem('autostart_keenetic') !== 'false';
-  let watchdogEnabled = localStorage.getItem('watchdog_enabled') !== 'false';
-  let refreshingStatus = false;
+  let autostartKeenetic = $state(localStorage.getItem('autostart_keenetic') !== 'false');
+  let watchdogEnabled = $state(localStorage.getItem('watchdog_enabled') !== 'false');
+  let refreshingStatus = $state(false);
 
   function toggleAutostart(key: string, value: boolean) {
     localStorage.setItem(key, String(value));
@@ -268,6 +272,9 @@
           // Network/timeout error — fall through to silent start
         }
       }
+      if (action === 'restart' || action === 'switch_kernel' || action === 'start') {
+        activateRestartGrace(6000);
+      }
       const res = await apiFetch(`/api/service/control?action=${action}`, {
         method: 'POST'
       });
@@ -289,6 +296,7 @@
     isKernelChecking.set(false);
     switchingKernelTo = kernel;
     actionLoading[`switch-${kernel}`] = true;
+    activateRestartGrace(6000);
     try {
       const res = await apiFetch(`/api/service/control?action=switch_kernel&kernel=${kernel}`, {
         method: 'POST'
@@ -433,12 +441,14 @@
     return Array.isArray(kernels) ? kernels.find((k) => k.name === name) : undefined;
   }
 
-  $: xray = Array.isArray(kernels) ? kernels.find((k) => k.name === 'xray') : undefined;
-  $: mihomo = Array.isArray(kernels) ? kernels.find((k) => k.name === 'mihomo') : undefined;
-  $: isAnyKernelChecking = Array.isArray(kernels)
-    ? kernels.some((k) => k.status === 'checking')
-    : false;
-  $: activeKernel = (() => {
+  let xray = $derived(Array.isArray(kernels) ? kernels.find((k) => k.name === 'xray') : undefined);
+  let mihomo = $derived(
+    Array.isArray(kernels) ? kernels.find((k) => k.name === 'mihomo') : undefined
+  );
+  let isAnyKernelChecking = $derived(
+    Array.isArray(kernels) ? kernels.some((k) => k.status === 'checking') : false
+  );
+  let activeKernel = $derived.by(() => {
     if (xray?.process_status === 'running') return 'xray';
     if (mihomo?.process_status === 'running') return 'mihomo';
     const lastSwitch = Array.isArray(restartLog)
@@ -448,11 +458,13 @@
       return lastSwitch.action.split(':')[1];
     }
     return xkeenInfo.activeKernel || 'none';
-  })();
-  $: isRunning = xray?.process_status === 'running' || mihomo?.process_status === 'running';
+  });
+  let isRunning = $derived(
+    xray?.process_status === 'running' || mihomo?.process_status === 'running'
+  );
 
   // Optimistic UI: при переключении/смене ядра подсвечиваем спиннером целевую кнопку
-  let switchingKernelTo: string | null = null;
+  let switchingKernelTo = $state<string | null>(null);
 
   onMount(() => {
     fetchRestartLog();
@@ -518,258 +530,50 @@
     </div>
   </div>
 
-  <!-- XKeen main module card -->
-  <div class="card" style="margin-bottom:18px;padding:0;overflow:hidden;">
-    <h2 class="card-title" style="margin:0;padding:14px 20px;">{$t('svc.section_xkeen')}</h2>
-    <div class="kernel-card" style="border:0;border-radius:0;">
-      <div class="k-ico">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"
-          ><path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z" /></svg
-        >
-      </div>
-      <div class="k-body">
-        <div class="k-name">
-          XKeen
-          {#if isRunning}
-            <span class="status-badge running"
-              ><span class="status-dot success" style="margin:0;"></span>{$t(
-                'kernel.status.running'
-              )}</span
-            >
-          {:else}
-            <span class="status-badge stopped"
-              ><span class="status-dot error" style="margin:0;"></span>{$t(
-                'kernel.status.stopped'
-              )}</span
-            >
-          {/if}
+  <div class="services-grid">
+    <!-- XKeen main module card -->
+    <div class="card" style="padding:0;overflow:hidden;">
+      <h2 class="card-title" style="margin:0;padding:14px 20px;">{$t('svc.section_xkeen')}</h2>
+      <div class="kernel-card" style="border:0;border-radius:0;">
+        <div class="k-ico">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"
+            ><path d="M13 2 L4 14 L11 14 L10 22 L20 9 L13 9 Z" /></svg
+          >
         </div>
-        <div class="k-meta">
-          {#if isRunning}
-            {#if xkeenInfo.pid}
-              PID {xkeenInfo.pid} · uptime {xkeenInfo.uptime || '—'}
-            {:else if xkeenStatus}
-              {xkeenStatus}
+        <div class="k-body">
+          <div class="k-name">
+            XKeen
+            {#if isRunning}
+              <span class="status-badge running"
+                ><span class="status-dot success" style="margin:0;"></span>{$t(
+                  'kernel.status.running'
+                )}</span
+              >
             {:else}
-              {$t('svc.xkeen_module')}{#if activeKernel !== 'none'}
-                · {$t('svc.active_kernel')}: {activeKernel}{/if}
-            {/if}
-          {:else}
-            {$t('svc.xkeen_module')}
-          {/if}
-        </div>
-      </div>
-      <div class="k-actions">
-        {#if isRunning}
-          <button
-            class="btn btn-secondary"
-            onclick={() => controlService('stop')}
-            disabled={actionLoading['xkeen-stop']}
-            title={$t('app.stop')}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
-                x="14"
-                y="5"
-                width="4"
-                height="14"
-                rx="1"
-              /></svg
-            >
-            {$t('app.stop')}
-          </button>
-          <button
-            class="btn btn-secondary"
-            onclick={() => controlService('restart')}
-            disabled={actionLoading['xkeen-restart']}
-            title={$t('svc.restart')}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-            >
-            {$t('svc.restart')}
-          </button>
-        {:else}
-          <button
-            class="btn btn-primary"
-            onclick={() => controlService('start')}
-            disabled={actionLoading['xkeen-start']}
-            title={$t('app.start')}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
-              ><polygon points="5 3 19 12 5 21 5 3" /></svg
-            >
-            {$t('app.start')}
-          </button>
-        {/if}
-      </div>
-    </div>
-  </div>
-
-  <!-- Proxy kernels card -->
-  <div class="card" style="margin-bottom:18px;padding:0;overflow:hidden;">
-    <h2
-      class="card-title"
-      style="margin:0;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;"
-    >
-      <span>{$t('svc.section_kernels')}</span>
-      <div style="display:flex;align-items:center;gap:12px;">
-        <!-- Pill-переключатель активного ядра -->
-        {#if kernelsLoaded && (xray || mihomo)}
-          <div class="kernel-switcher" aria-label={$t('svc.active_kernel_label')} role="group">
-            {#if xray}
-              <button
-                class="ks-btn"
-                class:ks-active={activeKernel === 'xray'}
-                class:ks-switching={switchingKernelTo === 'xray'}
-                disabled={switchingKernelTo !== null || activeKernel === 'xray'}
-                onclick={() => switchKernel('xray')}
-                title={activeKernel === 'xray'
-                  ? $t('svc.active_label')
-                  : $t('svc.make_active') + ' Xray'}
+              <span class="status-badge stopped"
+                ><span class="status-dot error" style="margin:0;"></span>{$t(
+                  'kernel.status.stopped'
+                )}</span
               >
-                {#if switchingKernelTo === 'xray'}
-                  <span class="ks-dot ks-dot-spin"></span>
-                {:else if activeKernel === 'xray'}
-                  <span class="ks-dot ks-dot-running"></span>
-                {:else}
-                  <span class="ks-dot ks-dot-idle"></span>
-                {/if}
-                Xray
-              </button>
-            {/if}
-            {#if mihomo}
-              <button
-                class="ks-btn"
-                class:ks-active={activeKernel === 'mihomo'}
-                class:ks-switching={switchingKernelTo === 'mihomo'}
-                disabled={switchingKernelTo !== null || activeKernel === 'mihomo'}
-                onclick={() => switchKernel('mihomo')}
-                title={activeKernel === 'mihomo'
-                  ? $t('svc.active_label')
-                  : $t('svc.make_active') + ' Mihomo'}
-              >
-                {#if switchingKernelTo === 'mihomo'}
-                  <span class="ks-dot ks-dot-spin"></span>
-                {:else if activeKernel === 'mihomo'}
-                  <span class="ks-dot ks-dot-running"></span>
-                {:else}
-                  <span class="ks-dot ks-dot-idle"></span>
-                {/if}
-                Mihomo
-              </button>
             {/if}
           </div>
-        {/if}
-        <span
-          style="font-size:11px;color:var(--fg-dim);letter-spacing:.04em;font-weight:500;text-transform:none;display:flex;align-items:center;gap:6px;"
-        >
-          {$t('svc.channel_prefix')} ·
-          <select
-            value={xray?.channel || mihomo?.channel || 'stable'}
-            onchange={(e) => {
-              const ch = e.currentTarget.value;
-              setKernelChannel('xray', ch);
-              setKernelChannel('mihomo', ch);
-            }}
-            style="background:transparent;border:0;color:var(--accent);font-size:11px;font-weight:600;padding:0;cursor:pointer;outline:none;"
-          >
-            <option value="stable" style="background:var(--bg-card);color:var(--fg-primary);"
-              >{$t('svc.channel_stable').toLowerCase()}</option
-            >
-            <option value="preview" style="background:var(--bg-card);color:var(--fg-primary);"
-              >{$t('svc.channel_preview').toLowerCase()}</option
-            >
-          </select>
-        </span>
-      </div>
-    </h2>
-
-    <!-- Xray row -->
-    <div
-      class="kernel-card"
-      style="border-radius:0;border-top:0;border-left:0;border-right:0;border-bottom:1px solid var(--border);"
-    >
-      <div class="k-ico">
-        <svg
-          width="22"
-          height="22"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /></svg
-        >
-      </div>
-      <div class="k-body">
-        <div class="k-name">
-          Xray
-          {#if !kernelsLoaded}
-            <Skeleton type="text-line" width="60px" />
-          {:else if xray}
-            {#if xray.process_status === 'running'}
-              <span class="status-badge running"
-                ><span class="status-dot success" style="margin:0;"></span>{$t(
-                  'kernel.status.running'
-                )}</span
-              >
-            {:else}
-              <span class="status-badge stopped"
-                ><span class="status-dot error" style="margin:0;"></span>{$t(
-                  'kernel.status.stopped'
-                )}</span
-              >
-            {/if}
-            {#if xray.status === 'checking'}
-              <span class="badge badge-info">{$t('kernels.checking')}</span>
-            {:else}
-              {#if xray.has_update}
-                <span class="badge badge-warning"
-                  >{$t('svc.update_badge')} {xray.latest_version}</span
-                >
-              {:else if xray.current_version && xray.current_version !== 'not installed'}
-                <span class="badge">v{xray.current_version} · {$t('svc.actual_badge')}</span>
+          <div class="k-meta">
+            {#if isRunning}
+              {#if xkeenInfo.pid}
+                PID {xkeenInfo.pid} · uptime {xkeenInfo.uptime || '—'}
+              {:else if xkeenStatus}
+                {xkeenStatus}
+              {:else}
+                {$t('svc.xkeen_module')}{#if activeKernel !== 'none'}
+                  · {$t('svc.active_kernel')}: {activeKernel}{/if}
               {/if}
-            {/if}
-          {:else}
-            <span class="status-badge stopped"
-              ><span class="status-dot error" style="margin:0;"></span>{$t(
-                'kernel.status.not_installed'
-              )}</span
-            >
-          {/if}
-        </div>
-        <div class="k-meta">
-          {#if !kernelsLoaded}
-            <Skeleton type="text-line" width="120px" />
-          {:else if xray}
-            {#if xray.process_status === 'running'}
-              PID {xray.pid || '—'} · uptime {xray.uptime || '—'}
             {:else}
-              {#if xray.message}
-                {xray.message}
-              {/if}
+              {$t('svc.xkeen_module')}
             {/if}
-          {:else}
-            {$t('kernel.status.not_installed')}
-          {/if}
+          </div>
         </div>
-      </div>
-      <div class="k-actions">
-        {#if !kernelsLoaded}
-          <Skeleton type="text-line" width="80px" />
-        {:else if xray}
-          {#if xray.process_status === 'running'}
+        <div class="k-actions">
+          {#if isRunning}
             <button
               class="btn btn-secondary"
               onclick={() => controlService('stop')}
@@ -809,297 +613,539 @@
               >
               {$t('svc.restart')}
             </button>
-          {/if}
-          {#if xray.has_update}
+          {:else}
             <button
-              class="btn btn-secondary"
-              onclick={() => installKernel('xray')}
-              disabled={xray.status !== 'idle'}
-              title={$t('svc.install_update')}
+              class="btn btn-primary"
+              onclick={() => controlService('start')}
+              disabled={actionLoading['xkeen-start']}
+              title={$t('app.start')}
             >
-              {xray.status === 'downloading' || xray.status === 'installing'
-                ? $t('kernels.installing')
-                : $t('svc.install_update')}
-            </button>
-            <button
-              class="btn btn-secondary"
-              onclick={() => downloadKernelBinary('xray')}
-              disabled={xray.status === 'downloading' || xray.status === 'installing'}
-              title={$t('svc.download')}
-            >
-              {$t('svc.download')}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
+                ><polygon points="5 3 19 12 5 21 5 3" /></svg
+              >
+              {$t('app.start')}
             </button>
           {/if}
-          <button
-            class="btn btn-secondary"
-            onclick={() => onSwitchTab('logs')}
-            title={$t('svc.logs')}
-          >
-            {$t('svc.logs')}
-          </button>
-        {:else}
-          <button
-            class="btn btn-primary"
-            onclick={() => installKernel('xray')}
-            title={$t('svc.install_update')}
-          >
-            {$t('svc.install_update')}
-          </button>
-        {/if}
+        </div>
       </div>
     </div>
 
-    <!-- Mihomo row -->
-    <div class="kernel-card" style="border-radius:0;border:0;">
-      <div class="k-ico">
-        <svg
-          width="22"
-          height="22"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          ><circle cx="12" cy="12" r="9" /><path
-            d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"
-          /></svg
-        >
-      </div>
-      <div class="k-body">
-        <div class="k-name">
-          Mihomo
-          {#if !kernelsLoaded}
-            <Skeleton type="text-line" width="60px" />
-          {:else if mihomo}
-            {#if mihomo.process_status === 'running'}
-              <span class="status-badge running"
-                ><span class="status-dot success" style="margin:0;"></span>{$t(
-                  'kernel.status.running'
-                )}</span
-              >
-            {:else}
-              <span class="status-badge stopped"
-                ><span class="status-dot error" style="margin:0;"></span>{$t(
-                  'kernel.status.stopped'
-                )}</span
-              >
-            {/if}
-            {#if mihomo.status === 'checking'}
-              <span class="badge badge-info">{$t('kernels.checking')}</span>
-            {:else}
-              {#if mihomo.has_update}
-                <span class="badge badge-warning"
-                  >{$t('svc.update_badge')} {mihomo.latest_version}</span
+    <!-- Proxy kernels card -->
+    <div class="card" style="padding:0;overflow:hidden;">
+      <h2
+        class="card-title"
+        style="margin:0;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;"
+      >
+        <span>{$t('svc.section_kernels')}</span>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <!-- Pill-переключатель активного ядра -->
+          {#if kernelsLoaded && (xray || mihomo)}
+            <div class="kernel-switcher" aria-label={$t('svc.active_kernel_label')} role="group">
+              {#if xray}
+                <button
+                  class="ks-btn"
+                  class:ks-active={activeKernel === 'xray'}
+                  class:ks-switching={switchingKernelTo === 'xray'}
+                  disabled={switchingKernelTo !== null || activeKernel === 'xray'}
+                  onclick={() => switchKernel('xray')}
+                  title={activeKernel === 'xray'
+                    ? $t('svc.active_label')
+                    : $t('svc.make_active') + ' Xray'}
                 >
-              {:else if mihomo.current_version && mihomo.current_version !== 'not installed'}
-                <span class="badge">v{mihomo.current_version} · {$t('svc.actual_badge')}</span>
+                  {#if switchingKernelTo === 'xray'}
+                    <span class="ks-dot ks-dot-spin"></span>
+                  {:else if activeKernel === 'xray'}
+                    <span class="ks-dot ks-dot-running"></span>
+                  {:else}
+                    <span class="ks-dot ks-dot-idle"></span>
+                  {/if}
+                  Xray
+                </button>
               {/if}
-            {/if}
-            {#if mihomo.process_status === 'running' && $capabilities?.mihomo?.api_reachable === false}
-              <a
-                href="#/editor"
-                class="badge badge-warning"
-                title={$t('svc.mihomo_api_unavailable_title')}
-                aria-label={$t('svc.mihomo_api_unavailable_title')}
-                style="text-decoration:none;">{$t('svc.mihomo_api_unavailable')}</a
-              >
-            {/if}
-          {:else}
-            <span class="status-badge stopped"
-              ><span class="status-dot error" style="margin:0;"></span>{$t(
-                'kernel.status.not_installed'
-              )}</span
-            >
-          {/if}
-        </div>
-        <div class="k-meta">
-          {#if !kernelsLoaded}
-            <Skeleton type="text-line" width="120px" />
-          {:else if mihomo}
-            {#if mihomo.process_status === 'running'}
-              API {mihomo.api_addr || '127.0.0.1:9090'} · uptime {mihomo.uptime || '—'}
-            {:else}
-              {#if mihomo.message}
-                {mihomo.message}
+              {#if mihomo}
+                <button
+                  class="ks-btn"
+                  class:ks-active={activeKernel === 'mihomo'}
+                  class:ks-switching={switchingKernelTo === 'mihomo'}
+                  disabled={switchingKernelTo !== null || activeKernel === 'mihomo'}
+                  onclick={() => switchKernel('mihomo')}
+                  title={activeKernel === 'mihomo'
+                    ? $t('svc.active_label')
+                    : $t('svc.make_active') + ' Mihomo'}
+                >
+                  {#if switchingKernelTo === 'mihomo'}
+                    <span class="ks-dot ks-dot-spin"></span>
+                  {:else if activeKernel === 'mihomo'}
+                    <span class="ks-dot ks-dot-running"></span>
+                  {:else}
+                    <span class="ks-dot ks-dot-idle"></span>
+                  {/if}
+                  Mihomo
+                </button>
               {/if}
-            {/if}
-          {:else}
-            {$t('kernel.status.not_installed')}
-          {/if}
-        </div>
-      </div>
-      <div class="k-actions">
-        {#if !kernelsLoaded}
-          <Skeleton type="text-line" width="80px" />
-        {:else if mihomo}
-          {#if mihomo.process_status === 'running'}
-            <button
-              class="btn btn-secondary"
-              onclick={() => controlService('stop')}
-              disabled={actionLoading['xkeen-stop']}
-              title={$t('app.stop')}
-            >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
-                  x="14"
-                  y="5"
-                  width="4"
-                  height="14"
-                  rx="1"
-                /></svg
-              >
-              {$t('app.stop')}
-            </button>
-            <button
-              class="btn btn-secondary"
-              onclick={() => controlService('restart')}
-              disabled={actionLoading['xkeen-restart']}
-              title={$t('svc.restart')}
-            >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
-              >
-              {$t('svc.restart')}
-            </button>
-            <button
-              class="btn btn-secondary"
-              onclick={() => onSwitchTab('proxies')}
-              title={$t('svc.api_test')}
-            >
-              {$t('svc.api_test')}
-            </button>
-          {/if}
-          {#if mihomo.has_update}
-            <button
-              class="btn btn-secondary"
-              onclick={() => installKernel('mihomo')}
-              disabled={mihomo.status !== 'idle'}
-              title={$t('svc.install_update')}
-            >
-              {mihomo.status === 'downloading' || mihomo.status === 'installing'
-                ? $t('kernels.installing')
-                : $t('svc.install_update')}
-            </button>
-            <button
-              class="btn btn-secondary"
-              onclick={() => downloadKernelBinary('mihomo')}
-              disabled={mihomo.status === 'downloading' || mihomo.status === 'installing'}
-              title={$t('svc.download')}
-            >
-              {$t('svc.download')}
-            </button>
-          {/if}
-        {:else}
-          <button
-            class="btn btn-primary"
-            onclick={() => installKernel('mihomo')}
-            title={$t('svc.install_update')}
-          >
-            {$t('svc.install_update')}
-          </button>
-        {/if}
-      </div>
-    </div>
-  </div>
-
-  <!-- Auto-start card -->
-  <!-- Note: toggles below persist to localStorage only — not yet connected to backend API -->
-  <div class="card" style="margin-bottom:18px;">
-    <h2 class="card-title">{$t('svc.section_autostart')}</h2>
-    <div class="alert alert-warning mb-2" style="font-size:12px;padding:6px 10px;">
-      {$t('svc.autostart_local_only')}
-    </div>
-    <div class="field-row" style="border-bottom:1px solid var(--border-light);">
-      <div>
-        <div class="lbl">{$t('svc.autostart_keenetic_label')}</div>
-        <div class="desc">{$t('svc.autostart_keenetic_desc')}</div>
-      </div>
-      <div class="ctrl">
-        <label class="toggle-switch" title={$t('svc.autostart_keenetic_label')}>
-          <input
-            type="checkbox"
-            bind:checked={autostartKeenetic}
-            onchange={() => toggleAutostart('autostart_keenetic', autostartKeenetic)}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </div>
-    <div class="field-row" style="border-bottom:1px solid var(--border-light);">
-      <div>
-        <div class="lbl">{$t('svc.watchdog_label')}</div>
-        <div class="desc">{$t('svc.watchdog_desc')}</div>
-      </div>
-      <div class="ctrl">
-        <label class="toggle-switch" title={$t('svc.watchdog_label')}>
-          <input
-            type="checkbox"
-            bind:checked={watchdogEnabled}
-            onchange={() => toggleAutostart('watchdog_enabled', watchdogEnabled)}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-    </div>
-  </div>
-
-  <!-- Restart log card -->
-  {#if restartLog.length > 0}
-    <div class="card">
-      <h2 class="card-title">
-        {$t('svc.restart_log_title')}
-        <span class="ct-actions">
-          <button onclick={() => (restartLogExpanded = !restartLogExpanded)}>
-            {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
-          </button>
-        </span>
-      </h2>
-      <div class="restart-log">
-        {#each restartLogExpanded ? restartLog : restartLog.slice(0, 5) as entry}
-          <div class="log-entry" class:log-success={entry.success} class:log-fail={!entry.success}>
-            <div class="log-meta">
-              <span class="log-action">{formatAction(entry.action)}</span>
-              <span
-                class="log-badge"
-                class:badge-ok={entry.success}
-                class:badge-err={!entry.success}
-              >
-                {entry.success ? $t('svc.log_ok') : $t('svc.log_fail')}
-              </span>
-              <span class="log-ts">{formatTs(entry.timestamp)}</span>
             </div>
-            {#if entry.output}
-              <pre class="log-output">{entry.output}</pre>
+          {/if}
+          <span
+            style="font-size:11px;color:var(--fg-dim);letter-spacing:.04em;font-weight:500;text-transform:none;display:flex;align-items:center;gap:6px;"
+          >
+            {$t('svc.channel_prefix')} ·
+            <select
+              value={xray?.channel || mihomo?.channel || 'stable'}
+              onchange={(e) => {
+                const ch = e.currentTarget.value;
+                setKernelChannel('xray', ch);
+                setKernelChannel('mihomo', ch);
+              }}
+              style="background:transparent;border:0;color:var(--accent);font-size:11px;font-weight:600;padding:0;cursor:pointer;outline:none;"
+            >
+              <option value="stable" style="background:var(--bg-card);color:var(--fg-primary);"
+                >{$t('svc.channel_stable').toLowerCase()}</option
+              >
+              <option value="preview" style="background:var(--bg-card);color:var(--fg-primary);"
+                >{$t('svc.channel_preview').toLowerCase()}</option
+              >
+            </select>
+          </span>
+        </div>
+      </h2>
+
+      <!-- Xray row -->
+      <div
+        class="kernel-card"
+        style="border-radius:0;border-top:0;border-left:0;border-right:0;border-bottom:1px solid var(--border);"
+      >
+        <div class="k-ico">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /></svg
+          >
+        </div>
+        <div class="k-body">
+          <div class="k-name">
+            Xray
+            {#if !kernelsLoaded}
+              <Skeleton type="text-line" width="60px" />
+            {:else if xray}
+              {#if xray.process_status === 'running'}
+                <span class="status-badge running"
+                  ><span class="status-dot success" style="margin:0;"></span>{$t(
+                    'kernel.status.running'
+                  )}</span
+                >
+              {:else}
+                <span class="status-badge stopped"
+                  ><span class="status-dot error" style="margin:0;"></span>{$t(
+                    'kernel.status.stopped'
+                  )}</span
+                >
+              {/if}
+              {#if xray.status === 'checking'}
+                <span class="badge badge-info">{$t('kernels.checking')}</span>
+              {:else}
+                {#if xray.has_update}
+                  <span class="badge badge-warning"
+                    >{$t('svc.update_badge')} {xray.latest_version}</span
+                  >
+                {:else if xray.current_version && xray.current_version !== 'not installed'}
+                  <span class="badge">v{xray.current_version} · {$t('svc.actual_badge')}</span>
+                {/if}
+              {/if}
+            {:else}
+              <span class="status-badge stopped"
+                ><span class="status-dot error" style="margin:0;"></span>{$t(
+                  'kernel.status.not_installed'
+                )}</span
+              >
             {/if}
           </div>
-        {/each}
-        {#if !restartLogExpanded && restartLog.length > 5}
-          <button type="button" class="log-more" onclick={() => (restartLogExpanded = true)}>
-            {pluralize(
-              restartLog.length - 5,
-              $t('svc.log_show_more_one', { count: String(restartLog.length - 5) }),
-              $t('svc.log_show_more_few', { count: String(restartLog.length - 5) }),
-              $t('svc.log_show_more_many', { count: String(restartLog.length - 5) }),
-              $currentLang
-            )}
-          </button>
-        {/if}
+          <div class="k-meta">
+            {#if !kernelsLoaded}
+              <Skeleton type="text-line" width="120px" />
+            {:else if xray}
+              {#if xray.process_status === 'running'}
+                PID {xray.pid || '—'} · uptime {xray.uptime || '—'}
+              {:else}
+                {#if xray.message}
+                  {xray.message}
+                {/if}
+              {/if}
+            {:else}
+              {$t('kernel.status.not_installed')}
+            {/if}
+          </div>
+        </div>
+        <div class="k-actions">
+          {#if !kernelsLoaded}
+            <Skeleton type="text-line" width="80px" />
+          {:else if xray}
+            {#if xray.process_status === 'running'}
+              <button
+                class="btn btn-secondary"
+                onclick={() => controlService('stop')}
+                disabled={actionLoading['xkeen-stop']}
+                title={$t('app.stop')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
+                    x="14"
+                    y="5"
+                    width="4"
+                    height="14"
+                    rx="1"
+                  /></svg
+                >
+                {$t('app.stop')}
+              </button>
+              <button
+                class="btn btn-secondary"
+                onclick={() => controlService('restart')}
+                disabled={actionLoading['xkeen-restart']}
+                title={$t('svc.restart')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+                >
+                {$t('svc.restart')}
+              </button>
+            {/if}
+            {#if xray.has_update}
+              <button
+                class="btn btn-secondary"
+                onclick={() => installKernel('xray')}
+                disabled={xray.status !== 'idle'}
+                title={$t('svc.install_update')}
+              >
+                {xray.status === 'downloading' || xray.status === 'installing'
+                  ? $t('kernels.installing')
+                  : $t('svc.install_update')}
+              </button>
+              <button
+                class="btn btn-secondary"
+                onclick={() => downloadKernelBinary('xray')}
+                disabled={xray.status === 'downloading' || xray.status === 'installing'}
+                title={$t('svc.download')}
+              >
+                {$t('svc.download')}
+              </button>
+            {/if}
+            <button
+              class="btn btn-secondary"
+              onclick={() => onSwitchTab('logs')}
+              title={$t('svc.logs')}
+            >
+              {$t('svc.logs')}
+            </button>
+          {:else}
+            <button
+              class="btn btn-primary"
+              onclick={() => installKernel('xray')}
+              title={$t('svc.install_update')}
+            >
+              {$t('svc.install_update')}
+            </button>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Mihomo row -->
+      <div class="kernel-card" style="border-radius:0;border:0;">
+        <div class="k-ico">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            ><circle cx="12" cy="12" r="9" /><path
+              d="M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"
+            /></svg
+          >
+        </div>
+        <div class="k-body">
+          <div class="k-name">
+            Mihomo
+            {#if !kernelsLoaded}
+              <Skeleton type="text-line" width="60px" />
+            {:else if mihomo}
+              {#if mihomo.process_status === 'running'}
+                <span class="status-badge running"
+                  ><span class="status-dot success" style="margin:0;"></span>{$t(
+                    'kernel.status.running'
+                  )}</span
+                >
+              {:else}
+                <span class="status-badge stopped"
+                  ><span class="status-dot error" style="margin:0;"></span>{$t(
+                    'kernel.status.stopped'
+                  )}</span
+                >
+              {/if}
+              {#if mihomo.status === 'checking'}
+                <span class="badge badge-info">{$t('kernels.checking')}</span>
+              {:else}
+                {#if mihomo.has_update}
+                  <span class="badge badge-warning"
+                    >{$t('svc.update_badge')} {mihomo.latest_version}</span
+                  >
+                {:else if mihomo.current_version && mihomo.current_version !== 'not installed'}
+                  <span class="badge">v{mihomo.current_version} · {$t('svc.actual_badge')}</span>
+                {/if}
+              {/if}
+              {#if mihomo.process_status === 'running' && $capabilities?.mihomo?.api_reachable === false}
+                <a
+                  href="#/editor"
+                  class="badge badge-warning"
+                  title={$t('svc.mihomo_api_unavailable_title')}
+                  aria-label={$t('svc.mihomo_api_unavailable_title')}
+                  style="text-decoration:none;">{$t('svc.mihomo_api_unavailable')}</a
+                >
+              {/if}
+              {#if $capabilities?.mihomo?.is_insecure_lan}
+                <button
+                  class="badge badge-warning"
+                  style="cursor:pointer;border:none;"
+                  onclick={() => (showMihomoMigrateModal = true)}
+                  title={$t('mihomo.migrate_banner_body')}
+                >
+                  {$t('mihomo.controller_mode_insecure')}
+                </button>
+              {/if}
+            {:else}
+              <span class="status-badge stopped"
+                ><span class="status-dot error" style="margin:0;"></span>{$t(
+                  'kernel.status.not_installed'
+                )}</span
+              >
+            {/if}
+          </div>
+          <div class="k-meta">
+            {#if !kernelsLoaded}
+              <Skeleton type="text-line" width="120px" />
+            {:else if mihomo}
+              {#if mihomo.process_status === 'running'}
+                API {mihomo.api_addr || '127.0.0.1:9090'} · uptime {mihomo.uptime || '—'}
+              {:else}
+                {#if mihomo.message}
+                  {mihomo.message}
+                {/if}
+              {/if}
+            {:else}
+              {$t('kernel.status.not_installed')}
+            {/if}
+          </div>
+        </div>
+        <div class="k-actions">
+          {#if !kernelsLoaded}
+            <Skeleton type="text-line" width="80px" />
+          {:else if mihomo}
+            {#if mihomo.process_status === 'running'}
+              <button
+                class="btn btn-secondary"
+                onclick={() => controlService('stop')}
+                disabled={actionLoading['xkeen-stop']}
+                title={$t('app.stop')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
+                    x="14"
+                    y="5"
+                    width="4"
+                    height="14"
+                    rx="1"
+                  /></svg
+                >
+                {$t('app.stop')}
+              </button>
+              <button
+                class="btn btn-secondary"
+                onclick={() => controlService('restart')}
+                disabled={actionLoading['xkeen-restart']}
+                title={$t('svc.restart')}
+              >
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
+                >
+                {$t('svc.restart')}
+              </button>
+              <button
+                class="btn btn-secondary"
+                onclick={() => onSwitchTab('proxies')}
+                title={$t('svc.api_test')}
+              >
+                {$t('svc.api_test')}
+              </button>
+            {/if}
+            {#if mihomo.has_update}
+              <button
+                class="btn btn-secondary"
+                onclick={() => installKernel('mihomo')}
+                disabled={mihomo.status !== 'idle'}
+                title={$t('svc.install_update')}
+              >
+                {mihomo.status === 'downloading' || mihomo.status === 'installing'
+                  ? $t('kernels.installing')
+                  : $t('svc.install_update')}
+              </button>
+              <button
+                class="btn btn-secondary"
+                onclick={() => downloadKernelBinary('mihomo')}
+                disabled={mihomo.status === 'downloading' || mihomo.status === 'installing'}
+                title={$t('svc.download')}
+              >
+                {$t('svc.download')}
+              </button>
+            {/if}
+          {:else}
+            <button
+              class="btn btn-primary"
+              onclick={() => installKernel('mihomo')}
+              title={$t('svc.install_update')}
+            >
+              {$t('svc.install_update')}
+            </button>
+          {/if}
+        </div>
       </div>
     </div>
-  {/if}
+
+    <!-- Auto-start card -->
+    <!-- Note: toggles below persist to localStorage only — not yet connected to backend API -->
+    <div class="card">
+      <h2 class="card-title">{$t('svc.section_autostart')}</h2>
+      <div class="alert alert-warning mb-2" style="font-size:12px;padding:6px 10px;">
+        {$t('svc.autostart_local_only')}
+      </div>
+      <div class="field-row" style="border-bottom:1px solid var(--border-light);">
+        <div>
+          <div class="lbl">{$t('svc.autostart_keenetic_label')}</div>
+          <div class="desc">{$t('svc.autostart_keenetic_desc')}</div>
+        </div>
+        <div class="ctrl">
+          <label class="toggle-switch" title={$t('svc.autostart_keenetic_label')}>
+            <input
+              type="checkbox"
+              bind:checked={autostartKeenetic}
+              onchange={() => toggleAutostart('autostart_keenetic', autostartKeenetic)}
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div class="field-row" style="border-bottom:1px solid var(--border-light);">
+        <div>
+          <div class="lbl">{$t('svc.watchdog_label')}</div>
+          <div class="desc">{$t('svc.watchdog_desc')}</div>
+        </div>
+        <div class="ctrl">
+          <label class="toggle-switch" title={$t('svc.watchdog_label')}>
+            <input
+              type="checkbox"
+              bind:checked={watchdogEnabled}
+              onchange={() => toggleAutostart('watchdog_enabled', watchdogEnabled)}
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Restart log card -->
+    {#if restartLog.length > 0}
+      <div class="card">
+        <h2 class="card-title">
+          {$t('svc.restart_log_title')}
+          <span class="ct-actions">
+            <button onclick={() => (restartLogExpanded = !restartLogExpanded)}>
+              {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
+            </button>
+          </span>
+        </h2>
+        <div class="restart-log">
+          {#each restartLogExpanded ? restartLog : restartLog.slice(0, 5) as entry}
+            <div
+              class="log-entry"
+              class:log-success={entry.success}
+              class:log-fail={!entry.success}
+            >
+              <div class="log-meta">
+                <span class="log-action">{formatAction(entry.action)}</span>
+                <span
+                  class="log-badge"
+                  class:badge-ok={entry.success}
+                  class:badge-err={!entry.success}
+                >
+                  {entry.success ? $t('svc.log_ok') : $t('svc.log_fail')}
+                </span>
+                <span class="log-ts">{formatTs(entry.timestamp)}</span>
+              </div>
+              {#if entry.output}
+                <pre class="log-output">{entry.output}</pre>
+              {/if}
+            </div>
+          {/each}
+          {#if !restartLogExpanded && restartLog.length > 5}
+            <button type="button" class="log-more" onclick={() => (restartLogExpanded = true)}>
+              {pluralize(
+                restartLog.length - 5,
+                $t('svc.log_show_more_one', { count: String(restartLog.length - 5) }),
+                $t('svc.log_show_more_few', { count: String(restartLog.length - 5) }),
+                $t('svc.log_show_more_many', { count: String(restartLog.length - 5) }),
+                $currentLang
+              )}
+            </button>
+          {/if}
+        </div>
+      </div>
+    {/if}
+  </div>
 </div>
 
+<MihomoSocketMigrateModal
+  bind:open={showMihomoMigrateModal}
+  onclose={() => (showMihomoMigrateModal = false)}
+  onsuccess={() => {
+    fetchStatus();
+    fetchKernels();
+    fetchCapabilities();
+  }}
+/>
+
 <style>
+  .services-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+    gap: var(--grid-gap, 16px);
+    align-items: start;
+    margin-bottom: 24px;
+  }
+
   .page-head {
     display: flex;
     align-items: flex-start;

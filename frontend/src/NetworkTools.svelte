@@ -7,7 +7,11 @@
   import { showToast } from './stores';
   import { apiFetch } from './lib/api';
 
-  export const onSwitchTab: (tab: string) => void = () => {};
+  interface Props {
+    onSwitchTab?: (tab: string) => void;
+  }
+
+  let { onSwitchTab = () => {} }: Props = $props();
 
   interface ToolResult {
     success: boolean;
@@ -17,40 +21,40 @@
     error?: string;
   }
 
-  let activeTool = 'ping';
-  let pingHost = '';
-  let tracerouteHost = '';
-  let dnsHost = '';
-  let url = '';
-  let recordType = 'A';
-  let count = 4;
-  let maxHops = 20;
-  let timeout = 10;
-  let loading = false;
-  let result: ToolResult | null = null;
-  let publicIP = '';
+  let activeTool = $state('ping');
+  let pingHost = $state('');
+  let tracerouteHost = $state('');
+  let dnsHost = $state('');
+  let url = $state('');
+  let recordType = $state('A');
+  let count = $state(4);
+  let maxHops = $state(20);
+  let timeout = $state(10);
+  let loading = $state(false);
+  let result: ToolResult | null = $state(null);
+  let publicIP = $state('');
 
-  let showSettings: Record<string, boolean> = {
+  let showSettings: Record<string, boolean> = $state({
     ping: false,
     traceroute: false,
     dns: false,
     http: false
-  };
+  });
 
   // New tools state
-  let selectedProxy = '';
-  let proxyTargetPreset = 'https://www.google.com';
-  let customProxyURL = 'https://';
-  let proxyTimeout = 5000;
-  let showProxySettings = false;
+  let selectedProxy = $state('');
+  let proxyTargetPreset = $state('https://www.google.com');
+  let customProxyURL = $state('https://');
+  let proxyTimeout = $state(5000);
+  let showProxySettings = $state(false);
 
-  let portHost = '';
-  let portNumber: number | null = null;
-  let portTimeout = 5000;
-  let showPortSettings = false;
+  let portHost = $state('');
+  let portNumber: number | null = $state(null);
+  let portTimeout = $state(5000);
+  let showPortSettings = $state(false);
 
-  let mihomoGroups: string[] = [];
-  let mihomoProxies: string[] = [];
+  let mihomoGroups: string[] = $state([]);
+  let mihomoProxies: string[] = $state([]);
 
   // Local storage history state
   interface HistoryItem {
@@ -60,16 +64,16 @@
     timestamp: number;
   }
 
-  let historyList: HistoryItem[] = [];
+  let historyList: HistoryItem[] = $state([]);
 
   // DOM elements for focus
-  let hostInput: HTMLInputElement;
-  let tracerouteHostInput: HTMLInputElement;
-  let dnsHostInput: HTMLInputElement;
-  let urlInput: HTMLInputElement;
-  let proxyTargetInput: HTMLInputElement;
-  let portHostInput: HTMLInputElement;
-  let portNumberInput: HTMLInputElement;
+  let hostInput: HTMLInputElement | undefined = $state();
+  let tracerouteHostInput: HTMLInputElement | undefined = $state();
+  let dnsHostInput: HTMLInputElement | undefined = $state();
+  let urlInput: HTMLInputElement | undefined = $state();
+  let proxyTargetInput: HTMLInputElement | undefined = $state();
+  let portHostInput: HTMLInputElement | undefined = $state();
+  let portNumberInput: HTMLInputElement | undefined = $state();
 
   const recordTypes = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT'];
 
@@ -210,8 +214,8 @@
     }
   }
 
-  $: finalProxyURL = proxyTargetPreset === 'custom' ? customProxyURL : proxyTargetPreset;
-  $: resultTarget =
+  let finalProxyURL = $derived(proxyTargetPreset === 'custom' ? customProxyURL : proxyTargetPreset);
+  let resultTarget = $derived(
     activeTool === 'http'
       ? url
       : activeTool === 'ping'
@@ -224,7 +228,8 @@
               ? portHost
               : activeTool === 'proxy'
                 ? finalProxyURL
-                : '';
+                : ''
+  );
 
   async function runPing() {
     if (!pingHost) return;

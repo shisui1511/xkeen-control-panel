@@ -44,12 +44,15 @@
     formMihomoGroups: string[];
     formEnabled: boolean;
     formUseProviderInterval: boolean;
-    availableMihomoGroups: string[];
+    availableMihomoGroups?: string[];
     onClose: () => void;
     onSave: () => void;
   } = $props();
 
   let showAdvanced = $state(false);
+  let missingGroups = $derived(
+    (formMihomoGroups || []).filter((g) => !(availableMihomoGroups || []).includes(g))
+  );
 </script>
 
 <Modal
@@ -228,7 +231,7 @@
           </div>
         {/if}
 
-        {#if availableMihomoGroups.length === 0}
+        {#if availableMihomoGroups.length === 0 && missingGroups.length === 0}
           <div
             class="alert alert-warning"
             style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);"
@@ -263,7 +266,7 @@
           </div>
         {/if}
 
-        {#if availableMihomoGroups.length > 0}
+        {#if availableMihomoGroups.length > 0 || missingGroups.length > 0}
           <div
             class="mihomo-groups-checkboxes"
             style="display:flex; flex-direction:column; gap:8px; max-height:150px; overflow-y:auto; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background: rgba(0,0,0,0.15);"
@@ -284,6 +287,28 @@
                   }}
                 />
                 <span>{group}</span>
+              </label>
+            {/each}
+            {#each missingGroups as missingGroup}
+              <label
+                style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-muted, #888);"
+              >
+                <input
+                  type="checkbox"
+                  checked={true}
+                  onchange={(e) => {
+                    if (!e.currentTarget.checked) {
+                      formMihomoGroups = formMihomoGroups.filter((g) => g !== missingGroup);
+                    }
+                  }}
+                />
+                <span>{missingGroup}</span>
+                <span
+                  class="badge"
+                  style="font-size:10px; padding:1px 6px; background:rgba(239,68,68,0.15); color:var(--color-danger, #ef4444); border:1px solid rgba(239,68,68,0.3); border-radius:var(--radius-xs);"
+                >
+                  ({$t('subscr.modal.group_missing_in_config')})
+                </span>
               </label>
             {/each}
           </div>
@@ -377,45 +402,6 @@
     margin-bottom: 12px;
   }
 
-  .textarea-link {
-    min-height: 90px;
-  }
-  .preview-section {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-  .preview-title {
-    margin: 0 0 4px 0;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--fg-secondary);
-  }
-  .preview-table {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    background: rgba(0, 0, 0, 0.15);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 12px 16px;
-  }
-  .preview-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 13px;
-  }
-  .preview-label {
-    color: var(--fg-secondary);
-  }
-  .preview-value {
-    color: var(--fg-primary);
-  }
-  .preview-value.code {
-    font-family: var(--font-family-mono, monospace);
-    font-size: 12px;
-  }
   .seg-btn {
     display: flex;
     border: 1px solid var(--border);

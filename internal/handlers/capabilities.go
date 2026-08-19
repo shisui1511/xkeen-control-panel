@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 // CapabilitiesResponse describes which backend features are available.
@@ -41,6 +43,9 @@ type MihomoCapability struct {
 	Reachable        bool   `json:"reachable"` // backward compatibility
 	APIURL           string `json:"api_url,omitempty"`
 	DiscoveredSecret string `json:"discovered_secret,omitempty"`
+	ControllerType   string `json:"controller_type,omitempty"`   // "unix" | "tcp" | "none"
+	ControllerTarget string `json:"controller_target,omitempty"` // "/opt/var/run/mihomo.sock" | "0.0.0.0:9090"
+	IsInsecureLAN    bool   `json:"is_insecure_lan"`             // true if 0.0.0.0
 }
 
 func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
@@ -80,25 +85,42 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var ctrlInfo services.ControllerInfo
+	if a.mihomoSvc != nil {
+		if info, err := a.mihomoSvc.ParseControllerConfig(); err == nil {
+			ctrlInfo = info
+		}
+	}
+
 	var discoveredSecret string
 	secret := a.cfg.MihomoSecret
-	if secret == "" && a.mihomoSvc != nil {
-		if _, parsedSecret, err := a.mihomoSvc.ParseConfig(); err == nil && parsedSecret != "" {
-			secret = parsedSecret
-			discoveredSecret = maskSecret(parsedSecret)
-		}
+	if secret == "" && ctrlInfo.Secret != "" {
+		secret = ctrlInfo.Secret
+		discoveredSecret = maskSecret(ctrlInfo.Secret)
 	} else if secret != "" {
 		discoveredSecret = maskSecret(secret)
 	}
 
-	reachable, authenticated := probeMihomoAPI(a.cfg.MihomoAPIURL, secret)
+	var reachable, authenticated bool
+	if a.mihomoSvc != nil {
+		reachable, authenticated = a.mihomoSvc.ProbeAPI(secret)
+	} else {
+		reachable, authenticated = probeMihomoAPI(a.cfg.MihomoAPIURL, secret)
+	}
 
 	resp.Mihomo.ProcessRunning = running
 	resp.Mihomo.APIReachable = reachable
 	resp.Mihomo.APIAuthenticated = authenticated
 	resp.Mihomo.Reachable = reachable
-	resp.Mihomo.APIURL = a.cfg.MihomoAPIURL
+	if ctrlInfo.Target != "" {
+		resp.Mihomo.APIURL = ctrlInfo.Target
+	} else {
+		resp.Mihomo.APIURL = a.cfg.MihomoAPIURL
+	}
 	resp.Mihomo.DiscoveredSecret = discoveredSecret
+	resp.Mihomo.ControllerType = ctrlInfo.Type
+	resp.Mihomo.ControllerTarget = ctrlInfo.Target
+	resp.Mihomo.IsInsecureLAN = ctrlInfo.IsInsecure
 
 	// Detect which kernel is currently active
 	var activeKernel string
@@ -140,10 +162,19 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 		resp.GlobalHwid = a.subscriptionSvc.GetHWID()
 	}
 
-	a.capsCacheMutex.Lock()
-	a.capsCache = resp
-	a.capsCacheTime = time.Now()
-	a.capsCacheMutex.Unlock()
+	// Не кэшируем "рваное" состояние (процесс жив, но API не отвечает):
+	// под конкурентной нагрузкой на старте страницы (десяток параллельных
+	// запросов на слабом роутере) единичная проба может не уложиться в
+	// таймаут, и без этой проверки такой случайный сбой на все 3 секунды
+	// TTL транслируется в интерфейс как "Mihomo недоступен" всем поллерам
+	// сразу — хотя реальный сервис в порядке. Следующий запрос просто
+	// пробует живьём ещё раз, не дожидаясь протухания кэша.
+	if !(resp.Mihomo.ProcessRunning && !resp.Mihomo.APIReachable) {
+		a.capsCacheMutex.Lock()
+		a.capsCache = resp
+		a.capsCacheTime = time.Now()
+		a.capsCacheMutex.Unlock()
+	}
 
 	JSONSuccess(w, resp)
 }

@@ -91,7 +91,7 @@ func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
 				return nil // skip symlinks
 			}
 			if d.IsDir() {
-				if path == filepath.Join(s.dataDir, "snapshots") || path == filepath.Join(s.dataDir, "tmp") {
+				if path == filepath.Join(s.dataDir, "snapshots") || path == filepath.Join(s.dataDir, "tmp") || path == filepath.Join(s.dataDir, "cache") {
 					return filepath.SkipDir
 				}
 			}
@@ -373,13 +373,16 @@ func (s *SnapshotService) Restore(id string) error {
 			}
 			targetPath := filepath.Join(targetDir, rel)
 
-			// Safety: when writing to xcp/ (which is s.dataDir), do not overwrite or delete the snapshots/ folder!
+			// Safety: when writing to xcp/ (which is s.dataDir), do not overwrite or delete the snapshots/, tmp/, cache/ folders!
 			if name == filepath.Base(s.dataDir) {
 				if rel == "snapshots" || strings.HasPrefix(rel, "snapshots"+string(filepath.Separator)) {
 					return nil // do not touch target snapshots directory
 				}
 				if rel == "tmp" || strings.HasPrefix(rel, "tmp"+string(filepath.Separator)) {
 					return nil // do not touch target tmp directory
+				}
+				if rel == "cache" || strings.HasPrefix(rel, "cache"+string(filepath.Separator)) {
+					return nil // do not touch target cache directory
 				}
 			}
 

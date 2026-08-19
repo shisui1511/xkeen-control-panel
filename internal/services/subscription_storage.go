@@ -2,9 +2,12 @@ package services
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,28 +19,121 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
-// loadOrGenerateHWID читает UUID устройства из файла xcp_hwid.txt или
-// генерирует новый UUID v4 и сохраняет его для следующих запусков.
-// Используется как x-hwid header для провайдеров с HWID Device Limit.
-func loadOrGenerateHWID(dataDir string) string {
-	dir := filepath.Join(dataDir, "data")
-	path := filepath.Join(dir, "xcp_hwid.txt")
-	if data, err := os.ReadFile(path); err == nil {
-		if id := strings.TrimSpace(string(data)); len(id) == 36 {
-			return id
+var macSeparatorsRe = regexp.MustCompile(`[^0-9A-Fa-f]`)
+
+func normalizeMACtoHWID(mac string) string {
+	clean := macSeparatorsRe.ReplaceAllString(strings.TrimSpace(mac), "")
+	clean = strings.ToUpper(clean)
+	if len(clean) == 12 && clean != "000000000000" && clean != "FFFFFFFFFFFF" {
+		return clean
+	}
+	return ""
+}
+
+func detectRouterMAC() string {
+	// 1. Prefer br0 and eth0 (standard on Keenetic routers)
+	for _, iface := range []string{"br0", "eth0"} {
+		data, err := os.ReadFile(filepath.Join("/sys/class/net", iface, "address"))
+		if err == nil {
+			if hwid := normalizeMACtoHWID(string(data)); hwid != "" {
+				return hwid
+			}
 		}
 	}
-	var u [16]byte
-	if _, err := rand.Read(u[:]); err != nil {
-		return ""
+
+	// 2. Scan network interfaces in /sys/class/net
+	if entries, err := os.ReadDir("/sys/class/net"); err == nil {
+		for _, entry := range entries {
+			if entry.Name() == "lo" {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join("/sys/class/net", entry.Name(), "address"))
+			if err == nil {
+				if hwid := normalizeMACtoHWID(string(data)); hwid != "" {
+					return hwid
+				}
+			}
+		}
 	}
-	u[6] = (u[6] & 0x0f) | 0x40 // version 4
-	u[8] = (u[8] & 0x3f) | 0x80 // variant bits
-	id := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
-		u[0:4], u[4:6], u[6:8], u[8:10], u[10:16])
-	_ = os.MkdirAll(dir, 0755)
-	_ = os.WriteFile(path, []byte(id), 0600)
-	return id
+
+	// 3. Fallback to net.Interfaces()
+	if ifaces, err := net.Interfaces(); err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			if hwid := normalizeMACtoHWID(iface.HardwareAddr.String()); hwid != "" {
+				return hwid
+			}
+		}
+	}
+
+	return ""
+}
+
+// loadOrGenerateHWID определяет стабильный HWID роутера:
+// 1) переменные окружения XCP_HWID / XCP_MIHOMO_HWID / XCP_DEVICE_HWID
+// 2) валидный 12-значный MAC-адрес из xcp_hwid.txt
+// 3) аппаратный MAC-адрес сетевого интерфейса роутера (br0/eth0, в верхнем регистре без двоеточий, например 123456789ABC)
+// 4) machine-id SHA256 / случайный стабильный 12-значный hex-идентификатор
+func loadOrGenerateHWID(dataDir string) string {
+	// 1. Environment variable override
+	for _, envKey := range []string{"XCP_HWID", "XCP_MIHOMO_HWID", "XCP_DEVICE_HWID"} {
+		if val := strings.TrimSpace(os.Getenv(envKey)); val != "" {
+			if hwid := normalizeMACtoHWID(val); hwid != "" {
+				return hwid
+			}
+			if len(val) <= 128 {
+				return val
+			}
+		}
+	}
+
+	dir := filepath.Join(dataDir, "data")
+	path := filepath.Join(dir, "xcp_hwid.txt")
+
+	// 2. Check existing xcp_hwid.txt (if it's a valid 12-char hex MAC)
+	if data, err := os.ReadFile(path); err == nil {
+		trimmed := strings.TrimSpace(string(data))
+		if hwid := normalizeMACtoHWID(trimmed); hwid != "" {
+			return hwid
+		}
+		// If xcp_hwid.txt contains a legacy 36-char UUID v4, we fall through to detectRouterMAC
+		// so that routers automatically upgrade to their real hardware MAC.
+	}
+
+	// 3. Detect hardware MAC from router interfaces
+	if macHWID := detectRouterMAC(); macHWID != "" {
+		_ = os.MkdirAll(dir, 0755)
+		_ = os.WriteFile(path, []byte(macHWID), 0600)
+		return macHWID
+	}
+
+	// 5. Fallback: machine-id SHA256 (12 chars hex)
+	for _, midPath := range []string{"/etc/machine-id", "/var/lib/dbus/machine-id"} {
+		if data, err := os.ReadFile(midPath); err == nil {
+			raw := strings.TrimSpace(string(data))
+			if raw != "" {
+				sum := sha256.Sum256([]byte(raw))
+				hwid := strings.ToUpper(hex.EncodeToString(sum[:6]))
+				_ = os.MkdirAll(dir, 0755)
+				_ = os.WriteFile(path, []byte(hwid), 0600)
+				return hwid
+			}
+		}
+	}
+
+	// 6. Last resort fallback: random 12-char hex MAC
+	var u [6]byte
+	if _, err := rand.Read(u[:]); err == nil {
+		u[0] = (u[0] | 0x02) & 0xfe
+		hwid := strings.ToUpper(hex.EncodeToString(u[:]))
+		_ = os.MkdirAll(dir, 0755)
+		_ = os.WriteFile(path, []byte(hwid), 0600)
+		return hwid
+	}
+
+	return "001122334455"
 }
 
 func (s *SubscriptionService) subPath(filename string) string {
@@ -315,6 +411,12 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 						_ = os.Rename(oldPath, s.subPath(newProviderName+suffix))
 					}
 				}
+				// Файл кэша провайдера в cache/providers/
+				oldCacheFile := filepath.Join(s.dataDir, "cache", "providers", sanitizeProviderFileName(oldProviderName)+".yaml")
+				newCacheFile := filepath.Join(s.dataDir, "cache", "providers", sanitizeProviderFileName(newProviderName)+".yaml")
+				if _, err := os.Stat(oldCacheFile); err == nil {
+					_ = os.Rename(oldCacheFile, newCacheFile)
+				}
 			}
 
 			if oldProviderName != newProviderName && existing.EnableMihomo {
@@ -514,6 +616,10 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 	}
 
+	// Удалить файл кэша провайдера из изолированного каталога {dataDir}/cache/providers/
+	os.Remove(s.providerCachePath(sub))
+	os.Remove(s.legacyProviderCachePath(sub))
+
 	// Delete diagnostic files (схема по имени провайдера + legacy-схема по ID)
 	for _, base := range []string{sub.GetProviderName(), "sub_" + safeID} {
 		for _, suffix := range cacheSuffixes {
@@ -581,6 +687,12 @@ func (s *SubscriptionService) maybeRenameProviderLocked(live *Subscription) {
 		if _, err := os.Stat(oldPath); err == nil {
 			_ = os.Rename(oldPath, s.subPath(newName+suffix))
 		}
+	}
+	// Файл кэша провайдера в cache/providers/
+	oldCacheFile := filepath.Join(s.dataDir, "cache", "providers", sanitizeProviderFileName(oldName)+".yaml")
+	newCacheFile := filepath.Join(s.dataDir, "cache", "providers", sanitizeProviderFileName(newName)+".yaml")
+	if _, err := os.Stat(oldCacheFile); err == nil {
+		_ = os.Rename(oldCacheFile, newCacheFile)
 	}
 
 	live.ProviderName = newName
@@ -810,6 +922,95 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 			}
 		}
 	}
+
+	// Очистка устаревших файлов провайдеров в {dataDir}/cache/providers/
+	provDir := filepath.Join(s.dataDir, "cache", "providers")
+	if provFiles, err := os.ReadDir(provDir); err == nil {
+		activeProvBases := make(map[string]bool)
+		for _, sub := range s.subscriptions {
+			activeProvBases[sanitizeProviderFileName(sub.GetProviderName())+".yaml"] = true
+		}
+		for _, file := range provFiles {
+			if file.IsDir() || !strings.HasSuffix(file.Name(), ".yaml") {
+				continue
+			}
+			if activeProvBases[file.Name()] {
+				continue
+			}
+			if info, err := file.Info(); err == nil && time.Since(info.ModTime()) > 7*24*time.Hour {
+				log.Printf("[Cleanup] Removing orphaned provider cache file: %s", file.Name())
+				_ = os.Remove(filepath.Join(provDir, file.Name()))
+			}
+		}
+	}
+}
+
+// SyncMihomoProviderBlocks приводит блоки proxy-providers в config.yaml
+// Mihomo к текущему виду, который генерирует панель. Без этого изменения
+// формата блока (новые директивы, другой порт панели) доезжают до уже
+// настроенных подписок только когда пользователь откроет и сохранит их
+// вручную.
+//
+// Вызывается один раз при старте, после SetPanelAddress.
+func (s *SubscriptionService) SyncMihomoProviderBlocks() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	type providerUpdate struct {
+		name  string
+		block string
+	}
+	updates := make([]providerUpdate, 0, len(s.subscriptions))
+	for i := range s.subscriptions {
+		sub := &s.subscriptions[i]
+		if !sub.EnableMihomo {
+			continue
+		}
+		updates = append(updates, providerUpdate{
+			name:  sub.GetProviderName(),
+			block: s.generateMihomoProxyProviderBlockLocked(sub, s.panelPort, s.panelHTTPS, s.loopbackPort),
+		})
+	}
+	if len(updates) == 0 {
+		return
+	}
+
+	configDir := s.mihomoConfigDir
+	if configDir == "" {
+		configDir = "/opt/etc/mihomo"
+	}
+	configPath := filepath.Join(configDir, "config.yaml")
+
+	s.mihomoMu.Lock()
+	defer s.mihomoMu.Unlock()
+
+	rawConfig, err := os.ReadFile(configPath)
+	if err != nil {
+		return
+	}
+
+	newConfig := string(rawConfig)
+	for _, u := range updates {
+		// Блок дописывается только если провайдер уже есть в конфиге: подписки
+		// с выключенной интеграцией не должны воскресать при рестарте панели.
+		if !MihomoProxyProviderExists(newConfig, u.name) {
+			continue
+		}
+		newConfig = ReplaceMihomoProxyProvider(newConfig, u.name, u.block)
+	}
+
+	if newConfig == string(rawConfig) {
+		return
+	}
+	if err := backupMihomoConfig(s.dataDir, configPath); err != nil {
+		log.Printf("[Subscriptions] provider block sync: backup failed: %v", err)
+		return
+	}
+	if err := utils.AtomicWriteFile(configPath, []byte(newConfig), 0600); err != nil {
+		log.Printf("[Subscriptions] provider block sync: write failed: %v", err)
+		return
+	}
+	log.Printf("[Subscriptions] proxy-provider blocks synced to current format")
 }
 
 func (s *SubscriptionService) migrateFromMihomoConfig() bool {
@@ -944,17 +1145,31 @@ func (s *SubscriptionService) PersistHeaderMetadata(id string, subCopy *Subscrip
 		return fmt.Errorf("subscription not found")
 	}
 
-	live.Upload = subCopy.Upload
-	live.Download = subCopy.Download
-	live.Total = subCopy.Total
-	live.Expire = subCopy.Expire
-	live.ProfileTitle = subCopy.ProfileTitle
-	live.ProfileUpdateHours = subCopy.ProfileUpdateHours
-	live.SupportURL = subCopy.SupportURL
-	live.ProfileWebPageURL = subCopy.ProfileWebPageURL
-	live.ProviderType = subCopy.ProviderType
-	live.HwidLocked = subCopy.HwidLocked
-	live.LastUpdate = time.Now()
+	// Перезаписываем метаданные заголовков только если в subCopy есть непустые данные (D-15)
+	if subCopy.Upload > 0 || subCopy.Download > 0 || subCopy.Total > 0 || subCopy.Expire > 0 || subCopy.ProfileTitle != "" {
+		live.Upload = subCopy.Upload
+		live.Download = subCopy.Download
+		live.Total = subCopy.Total
+		live.Expire = subCopy.Expire
+		live.ProfileTitle = subCopy.ProfileTitle
+		live.ProfileUpdateHours = subCopy.ProfileUpdateHours
+		live.SupportURL = subCopy.SupportURL
+		live.ProfileWebPageURL = subCopy.ProfileWebPageURL
+		live.ProviderType = subCopy.ProviderType
+		live.HwidLocked = subCopy.HwidLocked
+		live.LastUpdate = time.Now()
+	}
+
+	// Формат и число узлов приходят из ProviderFetch. Нулевой счётчик не
+	// сохраняем: провайдер мог вернуть пустой/битый payload, а предыдущее
+	// значение по-прежнему описывает то, что лежит в кэше.
+	if subCopy.DetectedFormat != "" {
+		live.DetectedFormat = subCopy.DetectedFormat
+	}
+	if subCopy.LastCount > 0 {
+		live.LastCount = subCopy.LastCount
+	}
+	live.LastError = subCopy.LastError
 
 	return s.save()
 }

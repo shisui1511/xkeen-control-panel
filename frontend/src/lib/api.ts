@@ -1,6 +1,7 @@
 import { get } from 'svelte/store';
 import { showToast } from '../stores';
 import { t } from '../i18n';
+import { saveDraftsToSessionStorage } from './dirtyRegistry';
 
 /**
  * APIResponse — standard envelope returned by migrated backend handlers.
@@ -37,6 +38,11 @@ let loggingOut = false;
  * Not exported: only apiFetch's 401 branch is allowed to trigger this.
  */
 function handleUnauthorized(): void {
+  try {
+    saveDraftsToSessionStorage();
+  } catch (e) {
+    console.error('[api] Failed to auto-save drafts on 401:', e);
+  }
   localStorage.removeItem('csrf_token');
   showToast('error', get(t)('auth.session_expired'));
   window.location.href = '/';

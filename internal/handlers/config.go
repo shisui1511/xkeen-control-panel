@@ -116,7 +116,15 @@ func (a *API) ConfigRead(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
+	ext := strings.ToLower(filepath.Ext(cleanPath))
+	switch ext {
+	case ".json":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	case ".yaml", ".yml":
+		w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	default:
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}
 	w.Write(data)
 }
 

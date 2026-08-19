@@ -130,6 +130,25 @@ external-controller-secret: super_secret
 			wantSecret: "super_secret",
 		},
 		{
+			name: "unix domain socket config",
+			yaml: `
+external-controller-unix: /opt/var/run/mihomo.sock
+secret: "unix-secret"
+`,
+			wantCtrl:   "/opt/var/run/mihomo.sock",
+			wantSecret: "unix-secret",
+		},
+		{
+			name: "both unix and tcp configured - unix takes precedence",
+			yaml: `
+external-controller: 127.0.0.1:9090
+external-controller-unix: /opt/var/run/mihomo.sock
+secret: "dual-secret"
+`,
+			wantCtrl:   "/opt/var/run/mihomo.sock",
+			wantSecret: "dual-secret",
+		},
+		{
 			name: "missing keys",
 			yaml: `
 port: 7890
@@ -172,6 +191,117 @@ port: 7890
 	})
 }
 
+func TestMihomoService_ParseControllerConfig(t *testing.T) {
+	tests := []struct {
+		name         string
+		yaml         string
+		wantType     string
+		wantTarget   string
+		wantSecret   string
+		wantInsecure bool
+		wantErr      bool
+	}{
+		{
+			name: "unix domain socket",
+			yaml: `
+external-controller-unix: "/opt/var/run/mihomo.sock"
+secret: "sec123"
+`,
+			wantType:     "unix",
+			wantTarget:   "/opt/var/run/mihomo.sock",
+			wantSecret:   "sec123",
+			wantInsecure: false,
+		},
+		{
+			name: "insecure 0.0.0.0 tcp",
+			yaml: `
+external-controller: 0.0.0.0:9090
+secret: "sec123"
+`,
+			wantType:     "tcp",
+			wantTarget:   "0.0.0.0:9090",
+			wantSecret:   "sec123",
+			wantInsecure: true,
+		},
+		{
+			name: "insecure :port tcp",
+			yaml: `
+external-controller: :9090
+`,
+			wantType:     "tcp",
+			wantTarget:   ":9090",
+			wantSecret:   "",
+			wantInsecure: true,
+		},
+		{
+			name: "secure 127.0.0.1 tcp",
+			yaml: `
+external-controller: 127.0.0.1:9090
+secret: "sec123"
+`,
+			wantType:     "tcp",
+			wantTarget:   "127.0.0.1:9090",
+			wantSecret:   "sec123",
+			wantInsecure: false,
+		},
+		{
+			name: "no controller",
+			yaml: `
+port: 7890
+`,
+			wantType:     "none",
+			wantTarget:   "",
+			wantSecret:   "",
+			wantInsecure: false,
+		},
+		{
+			name: "relative unix domain socket resolves to config dir",
+			yaml: `
+external-controller-unix: ./mihomo-api.sock
+secret: "sec123"
+`,
+			wantType:     "unix",
+			wantTarget:   "__CONFIG_DIR__/mihomo-api.sock",
+			wantSecret:   "sec123",
+			wantInsecure: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			configPath := filepath.Join(tmpDir, "config.yaml")
+			err := os.WriteFile(configPath, []byte(tt.yaml), 0644)
+			if err != nil {
+				t.Fatalf("failed to write config.yaml: %v", err)
+			}
+
+			wantTarget := tt.wantTarget
+			if strings.HasPrefix(wantTarget, "__CONFIG_DIR__") {
+				wantTarget = filepath.Join(tmpDir, strings.TrimPrefix(wantTarget, "__CONFIG_DIR__/"))
+			}
+
+			svc := NewMihomoService("", "", tmpDir)
+			info, err := svc.ParseControllerConfig()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseControllerConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if info.Type != tt.wantType {
+				t.Errorf("Type = %q, want %q", info.Type, tt.wantType)
+			}
+			if info.Target != wantTarget {
+				t.Errorf("Target = %q, want %q", info.Target, wantTarget)
+			}
+			if info.Secret != tt.wantSecret {
+				t.Errorf("Secret = %q, want %q", info.Secret, tt.wantSecret)
+			}
+			if info.IsInsecure != tt.wantInsecure {
+				t.Errorf("IsInsecure = %v, want %v", info.IsInsecure, tt.wantInsecure)
+			}
+		})
+	}
+}
+
 func TestMihomoService_ValidateMihomoConfig(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -182,7 +312,7 @@ func TestMihomoService_ValidateMihomoConfig(t *testing.T) {
 		wantErr       bool
 	}{
 		{
-			name: "full valid config",
+			name: "full valid config with 127.0.0.1",
 			yaml: `
 external-controller: 127.0.0.1:9090
 proxy-groups:
@@ -200,7 +330,61 @@ proxies:
 			wantWarnCodes: []string{},
 		},
 		{
-			name: "missing external-controller",
+			name: "full valid config with unix domain socket",
+			yaml: `
+external-controller-unix: /opt/var/run/mihomo.sock
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies: []
+rules:
+  - MATCH,DIRECT
+proxies:
+  - name: test
+    type: socks5
+`,
+			wantValid:     true,
+			wantErrCodes:  []string{},
+			wantWarnCodes: []string{},
+		},
+		{
+			name: "insecure external-controller 0.0.0.0 produces warning",
+			yaml: `
+external-controller: 0.0.0.0:9090
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies: []
+rules:
+  - MATCH,DIRECT
+proxies:
+  - name: test
+    type: socks5
+`,
+			wantValid:     true,
+			wantErrCodes:  []string{},
+			wantWarnCodes: []string{"insecure_external_controller"},
+		},
+		{
+			name: "insecure external-controller :port produces warning",
+			yaml: `
+external-controller: ":9090"
+proxy-groups:
+  - name: Proxy
+    type: select
+    proxies: []
+rules:
+  - MATCH,DIRECT
+proxies:
+  - name: test
+    type: socks5
+`,
+			wantValid:     true,
+			wantErrCodes:  []string{},
+			wantWarnCodes: []string{"insecure_external_controller"},
+		},
+		{
+			name: "missing external-controller and unix socket",
 			yaml: `
 proxy-groups:
   - name: Proxy
@@ -323,4 +507,39 @@ proxies:
 			t.Error("expected error for nonexistent config, got nil")
 		}
 	})
+}
+
+func TestMihomoService_EnsureSocketDirAndCleanup(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockDir := filepath.Join(tmpDir, "run")
+	sockPath := filepath.Join(sockDir, "mihomo.sock")
+
+	configYAML := `
+external-controller-unix: ` + sockPath + `
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "config.yaml"), []byte(configYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewMihomoService("/nonexistent/bin", "", tmpDir)
+
+	if err := svc.EnsureSocketDir(); err != nil {
+		t.Fatalf("EnsureSocketDir failed: %v", err)
+	}
+	if fi, err := os.Stat(sockDir); err != nil || !fi.IsDir() {
+		t.Fatalf("expected socket dir %s to exist as directory", sockDir)
+	}
+
+	// Create dummy socket file
+	if err := os.WriteFile(sockPath, []byte("dummy"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Cleanup when process is stopped should remove socket
+	if err := svc.CleanupStaleSocket(); err != nil {
+		t.Fatalf("CleanupStaleSocket failed: %v", err)
+	}
+	if _, err := os.Stat(sockPath); !os.IsNotExist(err) {
+		t.Fatalf("expected socket file %s to be deleted", sockPath)
+	}
 }

@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Этот файл содержит text-based редактор Mihomo config.yaml и парсер метаданных прокси.
@@ -563,6 +565,23 @@ func extractProviderBlocks(lines []string, sectionStart, sectionEnd, baseIndent 
 
 // ReplaceMihomoProxyProvider добавляет или обновляет блок провайдера в секции proxy-providers:.
 // Если block пустой, провайдер удаляется.
+// MihomoProxyProviderExists сообщает, есть ли в секции proxy-providers
+// конфига блок с указанным именем. Сравнение регистронезависимое — так же,
+// как в populateMihomoIntegrated.
+func MihomoProxyProviderExists(content string, providerID string) bool {
+	lines := strings.Split(content, "\n")
+	start, end, indent := findTopLevelSection(lines, "proxy-providers")
+	if start == -1 {
+		return false
+	}
+	for _, b := range extractProviderBlocks(lines, start, end, indent) {
+		if strings.EqualFold(b.ID, providerID) {
+			return true
+		}
+	}
+	return false
+}
+
 func ReplaceMihomoProxyProvider(content string, providerID string, block string) string {
 	lines := strings.Split(content, "\n")
 	start, end, indent := findTopLevelSection(lines, "proxy-providers")
@@ -596,7 +615,7 @@ func ReplaceMihomoProxyProvider(content string, providerID string, block string)
 
 	remainingCount := 0
 	for _, b := range blocks {
-		if b.ID != providerID {
+		if !strings.EqualFold(b.ID, providerID) {
 			remainingCount++
 		}
 	}
@@ -622,7 +641,7 @@ func ReplaceMihomoProxyProvider(content string, providerID string, block string)
 
 	replaced := false
 	for _, b := range blocks {
-		if b.ID == providerID {
+		if strings.EqualFold(b.ID, providerID) {
 			if block != "" {
 				blockLines := strings.Split(strings.TrimRight(block, "\n"), "\n")
 				out = append(out, blockLines...)
@@ -785,4 +804,81 @@ func ReplaceMihomoTopLevelSection(content string, sectionName string, newContent
 		out = append(out, lines[end:]...)
 	}
 	return strings.Join(out, "\n")
+}
+
+// ExtractProxyGroupNames извлекает список имен всех прокси-групп из секции proxy-groups
+// конфигурации Mihomo (select, url-test, fallback, load-balance, relay).
+// Сохраняет порядок объявления в файле и исключает встроенные служебные группы DIRECT/REJECT.
+func ExtractProxyGroupNames(content string) ([]string, error) {
+	if strings.TrimSpace(content) == "" {
+		return []string{}, nil
+	}
+
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(content), &root); err != nil {
+		// Fallback: строковый парсинг через findTopLevelSection при синтаксических отклонениях
+		return extractProxyGroupNamesFallback(content), nil
+	}
+
+	if len(root.Content) == 0 {
+		return []string{}, nil
+	}
+
+	doc := root.Content[0]
+	if doc.Kind != yaml.MappingNode {
+		return []string{}, nil
+	}
+
+	var groups []string
+	for i := 0; i < len(doc.Content); i += 2 {
+		keyNode := doc.Content[i]
+		if keyNode.Value == "proxy-groups" && i+1 < len(doc.Content) {
+			valNode := doc.Content[i+1]
+			if valNode.Kind == yaml.SequenceNode {
+				for _, item := range valNode.Content {
+					if item.Kind == yaml.MappingNode {
+						for j := 0; j < len(item.Content); j += 2 {
+							if item.Content[j].Value == "name" && j+1 < len(item.Content) {
+								name := strings.TrimSpace(item.Content[j+1].Value)
+								if name != "" && name != "DIRECT" && name != "REJECT" {
+									groups = append(groups, name)
+								}
+								break
+							}
+						}
+					}
+				}
+			}
+			break
+		}
+	}
+
+	if groups == nil {
+		groups = []string{}
+	}
+	return groups, nil
+}
+
+func extractProxyGroupNamesFallback(content string) []string {
+	lines := strings.Split(content, "\n")
+	start, end, _ := findTopLevelSection(lines, "proxy-groups")
+	if start == -1 {
+		return []string{}
+	}
+
+	var groups []string
+	nameRe := regexp.MustCompile(`^-\s+name:\s*['"]?([^'"#\r\n]+?)['"]?\s*(?:#.*)?$`)
+	for i := start + 1; i < end; i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if m := nameRe.FindStringSubmatch(trimmed); len(m) >= 2 {
+			name := strings.TrimSpace(m[1])
+			if name != "" && name != "DIRECT" && name != "REJECT" {
+				groups = append(groups, name)
+			}
+		}
+	}
+	if groups == nil {
+		groups = []string{}
+	}
+	return groups
 }

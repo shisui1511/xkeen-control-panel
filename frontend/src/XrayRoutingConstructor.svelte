@@ -1,6 +1,9 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import Modal from './components/Modal.svelte';
+  import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
+  import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
+  import { activateRestartGrace } from './lib/serviceGrace';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { mergeXrayFile, syncDnsPipeline, substituteProxyTag } from './lib/xrayMerge';
@@ -281,10 +284,72 @@
     '06_policy.json'
   ];
 
+  let detectedDraft = $state<DraftRecord | null>(null);
+  let unregisterDirty: (() => void) | null = null;
+
+  function handleRestoreDraft() {
+    if (detectedDraft?.data) {
+      const d = detectedDraft.data;
+      if (d.xrayFiles) xrayFiles = d.xrayFiles;
+      if (d.routingRules || d.rules) routingRules = d.routingRules || d.rules;
+      if (d.dnsConfig) dnsConfig = d.dnsConfig;
+      if (d.logConfig) logConfig = d.logConfig;
+      if (d.inbounds) inbounds = d.inbounds;
+      if (d.customOutbounds) customOutbounds = d.customOutbounds;
+      if (d.routingConfig) routingConfig = d.routingConfig;
+      isDirty = true;
+      clearDraft('xray_constructor');
+      detectedDraft = null;
+      showToast('success', $t('draft.restored_toast'));
+    }
+  }
+
+  function handleDiscardDraft() {
+    clearDraft('xray_constructor');
+    detectedDraft = null;
+    showToast('info', $t('draft.discarded_toast'));
+  }
+
   onMount(async () => {
     await loadSchema();
     await loadAllConfigs();
     checkUndo();
+
+    const draft = getDraft('xray_constructor');
+    if (draft) {
+      detectedDraft = draft;
+    }
+
+    unregisterDirty = registerDirtySource('xray_constructor', {
+      name: $t('editor.tab_constructor') || 'Xray Constructor',
+      isDirty: () => isDirty,
+      onSave: async () => {
+        await handleApplyChanges(true);
+        return !isDirty;
+      },
+      getDraft: () => ({
+        xrayFiles,
+        routingRules,
+        dnsConfig,
+        logConfig,
+        inbounds,
+        customOutbounds,
+        routingConfig
+      }),
+      restoreDraft: (draftRecord) => {
+        if (draftRecord?.data) {
+          detectedDraft = draftRecord;
+          handleRestoreDraft();
+        }
+      }
+    });
+  });
+
+  onDestroy(() => {
+    if (unregisterDirty) {
+      unregisterDirty();
+      unregisterDirty = null;
+    }
   });
 
   async function loadAllConfigs() {
@@ -700,6 +765,7 @@
       await loadXrayOutboundTags();
       isDirty = false;
 
+      activateRestartGrace(6000);
       const restartRes = await apiFetch('/api/service/control?action=restart', {
         method: 'POST'
       });
@@ -792,8 +858,9 @@
     return list;
   }
 
-  async function handleApplyChanges() {
-    if (!showApplyConfirm) {
+  async function handleApplyChanges(skipConfirm: boolean | unknown = false) {
+    const shouldSkipConfirm = skipConfirm === true;
+    if (!shouldSkipConfirm && !showApplyConfirm) {
       showApplyConfirm = true;
       return;
     }
@@ -916,6 +983,7 @@
       }
 
       // 2. Рестарт XKeen
+      activateRestartGrace(6000);
       const restartRes = await apiFetch('/api/service/control?action=restart', {
         method: 'POST'
       });
@@ -1524,15 +1592,20 @@
 </script>
 
 <div class="container">
+  {#if detectedDraft}
+    <DraftRestoreBanner
+      timestamp={detectedDraft.timestamp}
+      onRestore={handleRestoreDraft}
+      onDiscard={handleDiscardDraft}
+    />
+  {/if}
+
   {#if schemaLoading}
     <div
       class="loading-state-block"
       style="padding: 48px; text-align: center; color: var(--fg-secondary);"
     >
-      <div
-        class="spinner"
-        style="width: 24px; height: 24px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 12px;"
-      ></div>
+      <div class="spinner" style="--spinner-size: 24px; margin: 0 auto 12px;"></div>
       <p>{$t('editor.loading_definition')}</p>
     </div>
   {:else if schemaError}
@@ -1712,7 +1785,11 @@
                         disabled={routingRules.findIndex((r) => r.id === rule.id) ===
                           routingRules.length - 1}>▼</button
                       >
-                      <button class="rule-del" onclick={() => removeRule(rule.id)}>✕</button>
+                      <button
+                        class="rule-del"
+                        onclick={() => removeRule(rule.id)}
+                        title={$t('app.delete')}>✕</button
+                      >
                     </div>
                   </div>
 
@@ -1989,7 +2066,7 @@
                   {#if dnsRedirectLoading}
                     <span
                       class="spinner"
-                      style="display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"
+                      style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
                     ></span>
                   {/if}
                   {$t('editor.dns_intercept_enable')}
@@ -2048,15 +2125,18 @@
                         {srv.address}:{srv.port || 53}
                       </div>
                       <div style="font-size: 0.75rem; color: var(--fg-secondary);">
-                        Tag: <span class="badge">{srv.tag}</span> | Domains: {srv.domains?.join(
-                          ', '
-                        ) || 'none'}
+                        {$t('xray.tag')}: <span class="badge">{srv.tag}</span>
+                        | {$t('xray.domains')}: {srv.domains?.join(', ') || $t('app.none')}
                         {#if srv.skipFallback}
-                          | <span class="badge">Skip Fallback</span>{/if}
+                          | <span class="badge">{$t('xray.skip_fallback')}</span>{/if}
                       </div>
                     </div>
                   {/if}
-                  <button class="item-del" onclick={() => removeDNSServer(idx)}>✕</button>
+                  <button
+                    class="item-del"
+                    onclick={() => removeDNSServer(idx)}
+                    title={$t('app.delete')}>✕</button
+                  >
                 </div>
               {/each}
             </div>
@@ -2112,7 +2192,7 @@
                     <label class="checkbox-container">
                       <input type="checkbox" bind:checked={newDns.skipFallback} />
                       <span class="checkmark"></span>
-                      Skip Fallback
+                      {$t('xray.skip_fallback')}
                     </label>
                   </div>
                 {/if}
@@ -2136,7 +2216,11 @@
                   <div style="flex: 1;">
                     <code>{domain}</code> &rarr; <code>{ip}</code>
                   </div>
-                  <button class="item-del" onclick={() => removeHost(domain)}>✕</button>
+                  <button
+                    class="item-del"
+                    onclick={() => removeHost(domain)}
+                    title={$t('app.delete')}>✕</button
+                  >
                 </div>
               {/each}
             </div>

@@ -11,14 +11,20 @@
     devMode,
     fetchDevMode,
     setDevMode,
-    showConfirm
+    showConfirm,
+    type ThemeDensity,
+    applyDensity
   } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
+  import { capsuleConfigStore, updateCapsuleConfig } from './lib/capsuleSettings';
+  import PingTargetSettingsCard from './components/PingTargetSettingsCard.svelte';
 
   let { onSwitchTab }: { onSwitchTab?: (tab: string) => void } = $props();
 
-  let checkingConnection = false;
-  let secretVisible = false;
+  let showMihomoMigrateModal = $state(false);
+  let checkingConnection = $state(false);
+  let secretVisible = $state(false);
 
   async function recheckConnection() {
     checkingConnection = true;
@@ -29,17 +35,18 @@
     }
   }
 
-  let version = '...';
+  let version = $state('...');
   let langs = getAvailableLangs();
-  let activeTab: 'general' | 'updates' | 'security' | 'connection' | 'backups' | 'about' =
-    'general';
+  let activeTab = $state<'general' | 'updates' | 'security' | 'connection' | 'backups' | 'about'>(
+    'general'
+  );
 
   // Backups state variables
-  let configFiles: string[] = [];
-  let selectedFile = '';
-  let backups: string[] = [];
-  let loadingBackups = false;
-  let backupsLoaded = false;
+  let configFiles = $state<string[]>([]);
+  let selectedFile = $state('');
+  let backups = $state<string[]>([]);
+  let loadingBackups = $state(false);
+  let backupsLoaded = $state(false);
 
   // Snapshots state
   interface SnapshotMeta {
@@ -48,12 +55,12 @@
     created_at: number;
     size_bytes: number;
   }
-  let snapshots: SnapshotMeta[] = [];
-  let snapshotLabel = '';
-  let creatingSnapshot = false;
-  let restoringSnapshot = '';
-  let uploading = false;
-  let isDragOver = false;
+  let snapshots = $state<SnapshotMeta[]>([]);
+  let snapshotLabel = $state('');
+  let creatingSnapshot = $state(false);
+  let restoringSnapshot = $state('');
+  let uploading = $state(false);
+  let isDragOver = $state(false);
 
   async function uploadBackup(file: File) {
     if (!file) return;
@@ -110,7 +117,7 @@
     }
   }
 
-  let downloadingDiagnostics = false;
+  let downloadingDiagnostics = $state(false);
 
   async function downloadDiagnostics() {
     downloadingDiagnostics = true;
@@ -389,12 +396,13 @@
   });
 
   // Appearance & Behavior settings (persisted in localStorage)
-  let selectedTheme: 'light' | 'dark' | 'auto' = 'auto';
+  let selectedTheme = $state<'light' | 'dark' | 'auto'>('auto');
+  let selectedDensity = $state<ThemeDensity>('auto');
   let systemTimezone = $state('—');
-  let animationsEnabled = true;
-  let autoRefresh = true;
-  let confirmDangerous = true;
-  let notificationSound = false;
+  let animationsEnabled = $state(true);
+  let autoRefresh = $state(true);
+  let confirmDangerous = $state(true);
+  let notificationSound = $state(false);
 
   async function loadSystemTimezone() {
     try {
@@ -409,6 +417,9 @@
     try {
       const saved = localStorage.getItem('theme') || '';
       selectedTheme = saved === 'light' || saved === 'dark' ? saved : 'auto';
+      const savedDensity = localStorage.getItem('theme_density');
+      selectedDensity =
+        savedDensity === 'comfortable' || savedDensity === 'compact' ? savedDensity : 'auto';
       animationsEnabled = localStorage.getItem('animations') !== 'false';
       autoRefresh = localStorage.getItem('autoRefresh') !== 'false';
       confirmDangerous = localStorage.getItem('confirmDangerous') !== 'false';
@@ -430,6 +441,11 @@
     } catch {}
   }
 
+  function setDensity(d: ThemeDensity) {
+    selectedDensity = d;
+    applyDensity(d);
+  }
+
   function saveSetting(key: string, value: string) {
     try {
       localStorage.setItem(key, value);
@@ -437,12 +453,12 @@
   }
 
   // Change password
-  let currentPassword = '';
-  let newPassword = '';
-  let confirmPassword = '';
-  let passwordChanging = false;
-  let passwordError = '';
-  let passwordSuccess = false;
+  let currentPassword = $state('');
+  let newPassword = $state('');
+  let confirmPassword = $state('');
+  let passwordChanging = $state(false);
+  let passwordError = $state('');
+  let passwordSuccess = $state(false);
 
   async function changePassword() {
     passwordError = '';
@@ -480,17 +496,17 @@
   }
 
   // Update state
-  let updateInfo: {
+  let updateInfo = $state<{
     current_version: string;
     latest_version: string;
     has_update: boolean;
     channel: string;
     changelog?: string;
-  } | null = null;
-  let updateStatus: { status: string; message: string; progress: number } | null = null;
-  let updateChecking = false;
-  let updateInstalling = false;
-  let updateChannel: 'stable' | 'beta' = 'stable';
+  } | null>(null);
+  let updateStatus = $state<{ status: string; message: string; progress: number } | null>(null);
+  let updateChecking = $state(false);
+  let updateInstalling = $state(false);
+  let updateChannel = $state<'stable' | 'beta'>('stable');
 
   async function fetchUpdateChannel() {
     try {
@@ -566,11 +582,11 @@
   }
 
   let sseSource: EventSource | null = null;
-  let showConfirmUpdateModal = false;
+  let showConfirmUpdateModal = $state(false);
 
   // Reconnect/polling state after update restart
-  let reconnecting = false;
-  let reconnectAttempt = 0;
+  let reconnecting = $state(false);
+  let reconnectAttempt = $state(0);
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const RECONNECT_INTERVAL_MS = 1500;
   const RECONNECT_MAX_ATTEMPTS = 40; // 40 × 1.5s = 60s max
@@ -702,14 +718,14 @@
     }
   }
 
-  let templatesVersion = '';
-  let templatesRepoUrl = '';
-  let templatesLastCheck = '';
-  let templatesHasUpdate = false;
-  let checkingTemplates = false;
-  let updatingTemplates = false;
-  let templatesIncompatible = false;
-  let templatesWarningMessage = '';
+  let templatesVersion = $state('');
+  let templatesRepoUrl = $state('');
+  let templatesLastCheck = $state('');
+  let templatesHasUpdate = $state(false);
+  let checkingTemplates = $state(false);
+  let updatingTemplates = $state(false);
+  let templatesIncompatible = $state(false);
+  let templatesWarningMessage = $state('');
 
   async function fetchTemplatesStatus() {
     try {
@@ -876,21 +892,57 @@
             <span class="field-row-name">{$t('settings.theme')}</span>
             <div class="field-row-desc">{$t('settings.theme_desc')}</div>
           </div>
-          <div class="seg-btn">
+          <div class="seg-btn" role="radiogroup" aria-label={$t('settings.theme')}>
             <button
               class="seg-opt"
+              role="radio"
+              aria-checked={selectedTheme === 'light'}
               class:seg-active={selectedTheme === 'light'}
               onclick={() => setTheme('light')}>{$t('settings.theme_light_btn')}</button
             >
             <button
               class="seg-opt"
+              role="radio"
+              aria-checked={selectedTheme === 'dark'}
               class:seg-active={selectedTheme === 'dark'}
               onclick={() => setTheme('dark')}>{$t('settings.theme_dark_btn')}</button
             >
             <button
               class="seg-opt"
+              role="radio"
+              aria-checked={selectedTheme === 'auto'}
               class:seg-active={selectedTheme === 'auto'}
               onclick={() => setTheme('auto')}>{$t('settings.theme_auto_btn')}</button
+            >
+          </div>
+        </div>
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.density')}</span>
+            <div class="field-row-desc">{$t('settings.density_desc')}</div>
+          </div>
+          <div class="seg-btn" role="radiogroup" aria-label={$t('settings.density')}>
+            <button
+              class="seg-opt"
+              role="radio"
+              aria-checked={selectedDensity === 'comfortable'}
+              class:seg-active={selectedDensity === 'comfortable'}
+              onclick={() => setDensity('comfortable')}
+              >{$t('settings.density_comfortable_btn')}</button
+            >
+            <button
+              class="seg-opt"
+              role="radio"
+              aria-checked={selectedDensity === 'compact'}
+              class:seg-active={selectedDensity === 'compact'}
+              onclick={() => setDensity('compact')}>{$t('settings.density_compact_btn')}</button
+            >
+            <button
+              class="seg-opt"
+              role="radio"
+              aria-checked={selectedDensity === 'auto'}
+              class:seg-active={selectedDensity === 'auto'}
+              onclick={() => setDensity('auto')}>{$t('settings.density_auto_btn')}</button
             >
           </div>
         </div>
@@ -908,6 +960,59 @@
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
         </div>
+      </div>
+    </div>
+
+    <div class="card mb-2">
+      <div class="card-label">{$t('settings.section_capsule')}</div>
+      <div class="field-group">
+        <div class="field-row">
+          <div>
+            <span class="field-row-name">{$t('settings.capsule_visible')}</span>
+            <div class="field-row-desc">{$t('settings.capsule_visible_desc')}</div>
+          </div>
+          <label class="toggle">
+            <input
+              type="checkbox"
+              checked={$capsuleConfigStore.visible}
+              onchange={(e) =>
+                updateCapsuleConfig({ visible: (e.target as HTMLInputElement).checked })}
+            />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          </label>
+        </div>
+        {#if $capsuleConfigStore.visible}
+          <div class="field-row">
+            <div>
+              <span class="field-row-name">{$t('settings.capsule_traffic')}</span>
+              <div class="field-row-desc">{$t('settings.capsule_traffic_desc')}</div>
+            </div>
+            <label class="toggle">
+              <input
+                type="checkbox"
+                checked={$capsuleConfigStore.showTraffic}
+                onchange={(e) =>
+                  updateCapsuleConfig({ showTraffic: (e.target as HTMLInputElement).checked })}
+              />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+          </div>
+          <div class="field-row">
+            <div>
+              <span class="field-row-name">{$t('settings.capsule_resources')}</span>
+              <div class="field-row-desc">{$t('settings.capsule_resources_desc')}</div>
+            </div>
+            <label class="toggle">
+              <input
+                type="checkbox"
+                checked={$capsuleConfigStore.showResources}
+                onchange={(e) =>
+                  updateCapsuleConfig({ showResources: (e.target as HTMLInputElement).checked })}
+              />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -972,6 +1077,8 @@
         </div>
       </div>
     </div>
+
+    <PingTargetSettingsCard />
   {/if}
 
   <!-- Updates tab -->
@@ -1029,7 +1136,10 @@
 
       {#if reconnecting}
         <div class="reconnect-overlay">
-          <div class="reconnect-spinner"></div>
+          <div
+            class="spinner"
+            style="--spinner-size: 28px; --spinner-w: 3px; --spinner-track: color-mix(in srgb, var(--accent) 25%, transparent);"
+          ></div>
           <div class="reconnect-text">
             <span>{$t('settings.update_reconnecting')}</span>
             <span class="reconnect-dots"></span>
@@ -1153,9 +1263,9 @@
 
   <!-- Backups tab -->
   {#if activeTab === 'backups'}
-    <div class="card settings-card" style="margin-bottom:18px;padding:0;">
+    <div class="card settings-card" style="margin-bottom:18px;">
+      <div class="card-label">{$t('settings.section_file_backups')}</div>
       <div class="field-group">
-        <div class="field-group-head">{$t('settings.section_file_backups')}</div>
         <div class="field-row">
           <div>
             <div class="lbl">{$t('settings.backup_file')}</div>
@@ -1229,7 +1339,7 @@
     <!-- Section 2: Snapshots -->
     <div
       class="card premium-backup-card"
-      style="margin-top: 0; background: #102a44; border: 1px solid var(--border); transition: all 0.3s ease;"
+      style="margin-top: 0; background: var(--bg-card); border: 1px solid var(--border); transition: all 0.3s ease;"
     >
       <div
         class="card-title-row"
@@ -1254,7 +1364,6 @@
         <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
           <input
             class="input"
-            style="width: 100%; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.2); color: var(--fg-primary);"
             type="text"
             placeholder={$t('settings.snapshot_label_placeholder')}
             bind:value={snapshotLabel}
@@ -1262,15 +1371,15 @@
           />
         </div>
         <button
-          class="btn"
-          style="background: #29c2f0; color: #fff; border: none; display: flex; align-items: center; gap: 8px; font-weight: 500; min-width: 150px; justify-content: center; transition: all 0.2s;"
+          class="btn btn-primary"
+          style="min-width: 150px;"
           onclick={createSnapshot}
           disabled={creatingSnapshot || uploading || restoringSnapshot !== ''}
         >
           {#if creatingSnapshot}
             <span
               class="spinner"
-              style="border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid #fff; border-radius: 50%; width: 14px; height: 14px; display: inline-block; animation: spin 1s linear infinite;"
+              style="--spinner-size: 14px; --spinner-track: color-mix(in srgb, currentColor 30%, transparent); --spinner-color: currentColor;"
             ></span>
             <span>{$t('app.loading')}</span>
           {:else}
@@ -1281,10 +1390,7 @@
       </div>
 
       <!-- Interactive backup table -->
-      <div
-        class="table-container"
-        style="margin-bottom: 20px; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border); background: rgba(0, 0, 0, 0.15);"
-      >
+      <div class="table-container" style="margin-bottom: 20px;">
         {#if snapshots.length === 0}
           <div
             style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 20px; text-align: center; gap: 12px;"
@@ -1300,7 +1406,7 @@
         {:else}
           <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">
             <thead>
-              <tr style="background: rgba(0, 0, 0, 0.3); border-bottom: 1px solid var(--border);">
+              <tr style="background: rgba(0, 0, 0, 0.18); border-bottom: 1px solid var(--border);">
                 <th style="padding: 12px 16px; color: var(--fg-dim); font-weight: 500; width: 18%;"
                   >ID</th
                 >
@@ -1323,7 +1429,7 @@
               {#each snapshots as snap}
                 <tr
                   class="backup-tr"
-                  style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.2s ease;"
+                  style="border-bottom: 1px solid var(--border-light); transition: background 0.2s ease;"
                 >
                   <td
                     style="padding: 12px 16px; font-family: var(--font-mono); color: var(--fg-primary);"
@@ -1359,7 +1465,7 @@
                         {#if restoringSnapshot === snap.id}
                           <span
                             class="spinner"
-                            style="border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid var(--fg-primary); border-radius: 50%; width: 12px; height: 12px; display: inline-block; animation: spin 1s linear infinite;"
+                            style="--spinner-size: 12px; --spinner-track: color-mix(in srgb, currentColor 30%, transparent); --spinner-color: currentColor;"
                           ></span>
                           <span>{$t('app.loading')}</span>
                         {:else}
@@ -1391,10 +1497,10 @@
         class="backup-dropzone {isDragOver ? 'drag-over' : ''} {uploading ? 'uploading' : ''}"
         disabled={uploading}
         style="width: 100%; border-radius: var(--radius-md); padding: 30px 20px; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 2px dashed {isDragOver
-          ? '#29c2f0'
+          ? 'var(--accent)'
           : 'var(--border)'}; background: {isDragOver
-          ? 'rgba(41, 194, 240, 0.08)'
-          : 'rgba(0, 0, 0, 0.2)'}; font: inherit; color: inherit; gap: 8px; transition: all 0.3s ease; position: relative;"
+          ? 'var(--accent-soft)'
+          : 'var(--bg-elevated)'}; font: inherit; color: inherit; gap: 8px; transition: all 0.3s ease; position: relative;"
         ondragover={handleDragOver}
         ondragleave={handleDragLeave}
         ondrop={handleDrop}
@@ -1403,16 +1509,14 @@
         }}
       >
         {#if uploading}
-          <span
-            class="spinner"
-            style="border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #29c2f0; border-radius: 50%; width: 30px; height: 30px; display: inline-block; animation: spin 1s linear infinite; margin-bottom: 8px;"
+          <span class="spinner" style="--spinner-size: 30px; --spinner-w: 3px; margin-bottom: 8px;"
           ></span>
           <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
             {$t('settings.snapshot_uploading')}
           </div>
         {:else}
           <span style="transition: color 0.3s; margin-bottom: 4px; display: inline-flex;">
-            <Icon name="upload" size={32} color={isDragOver ? '#29c2f0' : 'var(--fg-dim)'} />
+            <Icon name="upload" size={32} color={isDragOver ? 'var(--accent)' : 'var(--fg-dim)'} />
           </span>
           <div style="font-weight: 500; color: var(--fg-primary); font-size: 14px;">
             {isDragOver ? $t('settings.drop_file_to_upload') : $t('settings.select_or_drag_file')}
@@ -1444,6 +1548,28 @@
             <span class="field-row-val mono">{$capabilities.mihomo.api_url}</span>
           </div>
         {/if}
+        <div class="field-row">
+          <span class="field-row-name">{$t('mihomo.controller_type')}</span>
+          <span class="field-row-val" style="display:flex;align-items:center;gap:8px;">
+            {#if $capabilities?.mihomo?.controller_type === 'unix'}
+              <span class="status-ok">● {$t('mihomo.controller_mode_unix')}</span>
+            {:else if $capabilities?.mihomo?.is_insecure_lan}
+              <span class="status-err"
+                >▲ {$capabilities?.mihomo?.controller_target || '0.0.0.0:9090'} ({$t(
+                  'mihomo.controller_mode_insecure'
+                )})</span
+              >
+              <button
+                class="btn btn-warning btn-sm"
+                onclick={() => (showMihomoMigrateModal = true)}
+              >
+                {$t('mihomo.migrate_btn')}
+              </button>
+            {:else}
+              <span class="status-ok">● {$capabilities?.mihomo?.controller_target || 'TCP'}</span>
+            {/if}
+          </span>
+        </div>
         <div class="field-row">
           <span class="field-row-name">{$t('settings.mihomo_status')}</span>
           <span class="field-row-val">
@@ -1610,6 +1736,12 @@
     </div>
   {/if}
 </div>
+
+<MihomoSocketMigrateModal
+  bind:open={showMihomoMigrateModal}
+  onclose={() => (showMihomoMigrateModal = false)}
+  onsuccess={recheckConnection}
+/>
 
 <style>
   .page-head {
@@ -1926,22 +2058,6 @@
     border-radius: var(--radius-md, 8px);
   }
 
-  .reconnect-spinner {
-    width: 28px;
-    height: 28px;
-    border: 3px solid color-mix(in srgb, var(--accent) 25%, transparent);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    flex-shrink: 0;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
   .reconnect-text {
     display: flex;
     align-items: center;
@@ -2081,21 +2197,8 @@
     font-size: 12px;
   }
 
-  .backup-tr:hover {
-    background: rgba(255, 255, 255, 0.03) !important;
-  }
-
   .backup-dropzone:hover {
-    border-color: #29c2f0 !important;
-    background: rgba(41, 194, 240, 0.04) !important;
-  }
-
-  @keyframes spin {
-    0% {
-      transform: rotate(0deg);
-    }
-    100% {
-      transform: rotate(360deg);
-    }
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
 </style>

@@ -381,3 +381,110 @@ func TestMaybeRenameProviderAfterProfileTitle(t *testing.T) {
 	}
 	svc.mu.Unlock()
 }
+
+func TestNormalizeMACtoHWID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"12:34:56:78:9a:bc", "123456789ABC"},
+		{"12-34-56-78-9A-BC", "123456789ABC"},
+		{"  123456789abc \n", "123456789ABC"},
+		{"00:00:00:00:00:00", ""},
+		{"ff:ff:ff:ff:ff:ff", ""},
+		{"invalid_mac", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		got := normalizeMACtoHWID(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizeMACtoHWID(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestLoadOrGenerateHWID_EnvOverride(t *testing.T) {
+	t.Setenv("XCP_HWID", "AA:BB:CC:11:22:33")
+	tmp := t.TempDir()
+	hwid := loadOrGenerateHWID(tmp)
+	if hwid != "AABBCC112233" {
+		t.Fatalf("expected AABBCC112233 from env, got %s", hwid)
+	}
+}
+
+func TestLoadOrGenerateHWID_ExistingFile(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "data")
+	_ = os.MkdirAll(dir, 0755)
+	_ = os.WriteFile(filepath.Join(dir, "xcp_hwid.txt"), []byte("123456789ABC\n"), 0600)
+
+	hwid := loadOrGenerateHWID(tmp)
+	if hwid != "123456789ABC" {
+		t.Fatalf("expected 123456789ABC from file, got %s", hwid)
+	}
+}
+
+func TestSyncMihomoProviderBlocks(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "config.yaml")
+
+	// Блок в старом формате: без override, с чужим провайдером рядом и с
+	// подпиской, у которой интеграция Mihomo выключена.
+	oldConfig := `proxy-providers:
+  Acme:
+    type: http
+    url: 'http://127.0.0.1:8091/api/provider.yaml?url=https%3A%2F%2Fexample.com%2Fsub'
+    interval: 3600
+    path: ./proxy_providers/Acme.yaml
+  Foreign:
+    type: http
+    url: 'http://127.0.0.1:8088/other/provider.yaml'
+    interval: 43200
+proxies:
+`
+	if err := os.WriteFile(configPath, []byte(oldConfig), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	svc.SetPanelAddress(8090, false, 8091)
+	svc.subscriptions = []Subscription{
+		{ID: "sub_acme", Name: "Acme", URL: "https://example.com/sub", ProviderName: "Acme", EnableMihomo: true, Interval: 1},
+		{ID: "sub_off", Name: "Disabled", URL: "https://example.com/off", ProviderName: "Disabled", EnableMihomo: true, Interval: 1},
+	}
+
+	svc.SyncMihomoProviderBlocks()
+
+	updated, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	got := string(updated)
+
+	if !strings.Contains(got, "override:") || !strings.Contains(got, "udp: true") {
+		t.Errorf("expected override.udp in synced block, got:\n%s", got)
+	}
+	if !strings.Contains(got, "health-check:") {
+		t.Errorf("expected health-check in synced block, got:\n%s", got)
+	}
+	// Чужой провайдер трогать нельзя.
+	if !strings.Contains(got, "http://127.0.0.1:8088/other/provider.yaml") {
+		t.Errorf("foreign provider block must be preserved, got:\n%s", got)
+	}
+	// Подписка, которой нет в конфиге, не должна там появиться.
+	if strings.Contains(got, "Disabled:") {
+		t.Errorf("subscription absent from config must not be added, got:\n%s", got)
+	}
+}
+
+func TestSyncMihomoProviderBlocksNoConfig(t *testing.T) {
+	// Отсутствие config.yaml — не ошибка: Mihomo может быть не установлен.
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	svc.SetPanelAddress(8090, false, 8091)
+	svc.subscriptions = []Subscription{
+		{ID: "sub_a", Name: "A", URL: "https://example.com/a", ProviderName: "A", EnableMihomo: true},
+	}
+	svc.SyncMihomoProviderBlocks()
+}

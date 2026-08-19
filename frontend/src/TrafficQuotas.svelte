@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Modal from './components/Modal.svelte';
+  import EmptyState from './components/EmptyState.svelte';
   import { t, currentLang } from './i18n';
   import { showConfirm, showToast } from './stores';
   import { usePoller } from './lib/poller';
@@ -8,7 +9,11 @@
   import Icon from './lib/components/Icon.svelte';
   import { apiFetch, apiFetchJSON } from './lib/api';
 
-  export const onSwitchTab: (tab: string) => void = () => {};
+  interface Props {
+    onSwitchTab?: (tab: string) => void;
+  }
+
+  let { onSwitchTab = () => {} }: Props = $props();
 
   interface Quota {
     id: string;
@@ -40,34 +45,49 @@
     timestamp: number;
   }
 
-  let quotas: Quota[] = [];
-  let stats: any = null;
-  let alerts: Alert[] = [];
-  let loading = true;
-  let error = '';
-  let activeTab: 'quotas' | 'stats' | 'alerts' = 'quotas';
-  let togglingQuotas: Record<string, boolean> = {};
+  let quotas: Quota[] = $state([]);
+  let stats: any = $state(null);
+  let alerts: Alert[] = $state([]);
+  let loading = $state(true);
+  let error = $state('');
+  let activeTab: 'quotas' | 'stats' | 'alerts' = $state('quotas');
+  let togglingQuotas: Record<string, boolean> = $state({});
 
   // Forecast state
-  let selectedForecastPeriod: 'daily' | 'weekly' | 'monthly' = 'monthly';
-  let forecastValue: number | null = null;
-  let showForecastCalculating = false;
+  let selectedForecastPeriod: 'daily' | 'weekly' | 'monthly' = $state('monthly');
+  let forecastData = $derived.by(() => {
+    if (stats && stats.reset_time) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const duration = nowSec - stats.reset_time;
+      if (duration > 0) {
+        if (duration < 600) {
+          return { calculating: true, value: null };
+        }
+        return { calculating: false, value: (stats.total / duration) * 30 * 24 * 3600 };
+      }
+      return { calculating: true, value: null };
+    }
+    return { calculating: false, value: null };
+  });
+
+  let showForecastCalculating = $derived(forecastData.calculating);
+  let forecastValue = $derived(forecastData.value);
 
   // Form state
-  let showForm = false;
-  let editingQuota: Quota | null = null;
-  let formName = '';
-  let formTargetType: 'global' | 'proxy' | 'ip' | 'mac' | 'user' | string = 'global';
-  let formTargetID = '';
-  let formLimitValue = 10;
-  let formLimitUnit = 'GB';
-  let formPeriod: 'daily' | 'weekly' | 'monthly' | string = 'monthly';
-  let formAlertThreshold = 80;
+  let showForm = $state(false);
+  let editingQuota: Quota | null = $state(null);
+  let formName = $state('');
+  let formTargetType: 'global' | 'proxy' | 'ip' | 'mac' | 'user' | string = $state('global');
+  let formTargetID = $state('');
+  let formLimitValue = $state(10);
+  let formLimitUnit = $state('GB');
+  let formPeriod: 'daily' | 'weekly' | 'monthly' | string = $state('monthly');
+  let formAlertThreshold = $state(80);
   let formAction: 'notify' | 'block' | 'throttle' | 'log_only' | 'redirect_direct' | string =
-    'notify';
-  let formEnabled = true;
-  let activeDropdownId: string | null = null;
-  let dismissedBanner = false;
+    $state('notify');
+  let formEnabled = $state(true);
+  let activeDropdownId: string | null = $state(null);
+  let dismissedBanner = $state(false);
 
   const units = [
     { label: 'MB', value: 'MB', bytes: 1024 * 1024 },
@@ -75,16 +95,18 @@
     { label: 'TB', value: 'TB', bytes: 1024 * 1024 * 1024 * 1024 }
   ];
 
-  $: periods = [
+  let periods = $derived([
     { label: $t('trafficquotas.period_daily'), value: 'daily' },
     { label: $t('trafficquotas.period_weekly'), value: 'weekly' },
     { label: $t('trafficquotas.period_monthly'), value: 'monthly' }
-  ];
+  ]);
 
-  $: activeQuotas = quotas.filter((q) => q.enabled);
-  $: totalUsed = quotas.reduce((s, q) => s + (q.used_bytes || q.current_bytes || 0), 0);
-  $: sumQuotaLimit = activeQuotas.reduce((s, q) => s + q.limit_bytes, 0);
-  $: totalPct = sumQuotaLimit > 0 ? Math.min(100, ((stats?.total || 0) / sumQuotaLimit) * 100) : 0;
+  let activeQuotas = $derived(quotas.filter((q) => q.enabled));
+  let totalUsed = $derived(quotas.reduce((s, q) => s + (q.used_bytes || q.current_bytes || 0), 0));
+  let sumQuotaLimit = $derived(activeQuotas.reduce((s, q) => s + q.limit_bytes, 0));
+  let totalPct = $derived(
+    sumQuotaLimit > 0 ? Math.min(100, ((stats?.total || 0) / sumQuotaLimit) * 100) : 0
+  );
 
   async function fetchQuotas(signal?: AbortSignal) {
     if (quotas.length === 0) {
@@ -92,7 +114,10 @@
     }
     try {
       const res = await apiFetch('/api/traffic/quotas', { signal });
-      if (res.ok) quotas = await res.json();
+      if (res.ok) {
+        const data = await res.json();
+        quotas = Array.isArray(data) ? data : data?.quotas || [];
+      }
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       if (e?.status === 401) return;
@@ -340,28 +365,6 @@
     localStorage.setItem('tq_banner_dismissed', 'true');
   }
 
-  $: {
-    if (stats && stats.reset_time) {
-      const nowSec = Math.floor(Date.now() / 1000);
-      const duration = nowSec - stats.reset_time;
-      if (duration > 0) {
-        if (duration < 600) {
-          showForecastCalculating = true;
-          forecastValue = null;
-        } else {
-          showForecastCalculating = false;
-          forecastValue = (stats.total / duration) * 30 * 24 * 3600;
-        }
-      } else {
-        showForecastCalculating = true;
-        forecastValue = null;
-      }
-    } else {
-      showForecastCalculating = false;
-      forecastValue = null;
-    }
-  }
-
   onMount(() => {
     dismissedBanner = localStorage.getItem('tq_banner_dismissed') === 'true';
     document.addEventListener('click', handleDocumentClick);
@@ -513,8 +516,13 @@
     <h2 class="card-title" style="padding: 20px 24px 8px 24px;">{$t('trafficquotas.quotas')}</h2>
 
     {#if quotas.length === 0}
-      <div style="padding: 24px; text-align: center; color: var(--fg-faint);">
-        {$t('trafficquotas.no_quotas')}
+      <div style="padding: 16px 24px 24px;">
+        <EmptyState
+          title={$t('trafficquotas.empty_title')}
+          description={$t('trafficquotas.empty_desc')}
+          ctaText={$t('trafficquotas.empty_cta')}
+          oncta={startCreate}
+        />
       </div>
     {:else}
       <div class="table-responsive">
@@ -670,8 +678,8 @@
           <thead>
             <tr>
               <th>{$t('trafficquotas.proxy_name')}</th>
-              <th>Upload</th>
-              <th>Download</th>
+              <th>{$t('traffic.upload')}</th>
+              <th>{$t('traffic.download')}</th>
               <th>{$t('trafficquotas.total')}</th>
             </tr>
           </thead>
@@ -873,13 +881,13 @@
   table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: var(--font-size-table, 0.8125rem);
     color: var(--fg-secondary);
   }
 
   th {
     text-align: left;
-    padding: 12px 24px;
+    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 20px;
     font-weight: 600;
     color: var(--fg-secondary);
     border-bottom: 1px solid var(--border);
@@ -889,7 +897,7 @@
   }
 
   td {
-    padding: 16px 24px;
+    padding: calc((var(--table-row-h, 44px) - 20px) / 2) 20px;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
   }

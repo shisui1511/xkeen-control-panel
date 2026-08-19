@@ -1,6 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import Modal from './components/Modal.svelte';
+  import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
+  import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
+  import { activateRestartGrace } from './lib/serviceGrace';
   import { currentLang, t } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
@@ -137,6 +140,8 @@
   let rules: Rule[] = $state([]);
   let activePreset: string = $state('');
   let activeRuleProvider = $state<'none' | 'zkeen' | 'metacubex'>('none');
+  let externalControllerType = $state<'unix' | 'tcp'>('unix');
+  let externalControllerTarget = $state<string>('127.0.0.1:9090');
   let subscriptions: any[] = $state([]);
   let mihomoProviders: any[] = $state([]);
   let lastParsedProviders: any[] = $state([]);
@@ -999,6 +1004,8 @@
       preservedKeys = res.preservedKeys;
       existingTproxyPort = res.existingTproxyPort;
       existingRedirPort = res.existingRedirPort;
+      externalControllerType = res.externalControllerType || 'unix';
+      externalControllerTarget = res.externalControllerTarget || '127.0.0.1:9090';
 
       lastParsedProviders = res.mihomoProviders || [];
       mihomoProviders = mergeMihomoProviders(
@@ -1058,11 +1065,60 @@
     }
   }
 
+  let detectedDraft = $state<DraftRecord | null>(null);
+  let unregisterDirty: (() => void) | null = null;
+
+  function handleRestoreDraft() {
+    if (detectedDraft?.data?.yaml) {
+      populateMihomoFromYAML(detectedDraft.data.yaml);
+      isDirty = true;
+      clearDraft('mihomo_generator');
+      detectedDraft = null;
+      showToast('success', $t('draft.restored_toast'));
+    }
+  }
+
+  function handleDiscardDraft() {
+    clearDraft('mihomo_generator');
+    detectedDraft = null;
+    showToast('info', $t('draft.discarded_toast'));
+  }
+
   onMount(async () => {
     await loadSchema();
     await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
     await checkZkeenGeodata();
     checkUndo();
+
+    const draft = getDraft('mihomo_generator');
+    if (draft) {
+      detectedDraft = draft;
+    }
+
+    unregisterDirty = registerDirtySource('mihomo_generator', {
+      name: $t('editor.tab_constructor') || 'Mihomo Generator',
+      isDirty: () => isDirty,
+      onSave: async () => {
+        await handleApplyMihomo(true);
+        return !isDirty;
+      },
+      getDraft: () => ({
+        yaml: generateYAML()
+      }),
+      restoreDraft: (draftRecord) => {
+        if (draftRecord?.data?.yaml) {
+          detectedDraft = draftRecord;
+          handleRestoreDraft();
+        }
+      }
+    });
+  });
+
+  onDestroy(() => {
+    if (unregisterDirty) {
+      unregisterDirty();
+      unregisterDirty = null;
+    }
   });
 
   $effect(() => {
@@ -1181,10 +1237,15 @@
   }
 
   function addRule() {
-    if (nr.type !== 'MATCH' && !nr.value.trim()) return;
-    rules = [...rules, { ...nr, id: crypto.randomUUID() }];
-    showRuleForm = false;
-    nr = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
+    rules = [
+      ...rules,
+      {
+        id: crypto.randomUUID(),
+        type: 'DOMAIN-SUFFIX',
+        value: '',
+        outbound: 'DIRECT'
+      }
+    ];
   }
 
   function removeRule(id: string) {
@@ -1216,6 +1277,8 @@
       preservedKeys,
       existingTproxyPort,
       existingRedirPort,
+      externalControllerType,
+      externalControllerTarget,
       subscriptions,
       mihomoProviders,
       capabilities: $capabilities,
@@ -1233,6 +1296,8 @@
     void selectedMetaRuleSets;
     void subscriptions;
     void mihomoProviders;
+    void externalControllerType;
+    void externalControllerTarget;
     void dns.enabled;
     void dns.nameservers;
     void dns.fallback;
@@ -1357,8 +1422,9 @@
 
   // findTopLevelSection and replaceMihomoTopLevelSection are imported from './lib/mihomoYaml'
 
-  async function handleApplyMihomo() {
-    if (!showApplyConfirm && proxies.length === 0) {
+  async function handleApplyMihomo(skipConfirm: boolean | unknown = false) {
+    const shouldSkipConfirm = skipConfirm === true;
+    if (!shouldSkipConfirm && !showApplyConfirm && proxies.length === 0) {
       if (
         !(await showConfirm({
           title: $t('editor.empty_proxies_title'),
@@ -1370,7 +1436,7 @@
         return;
       }
     }
-    if (!showApplyConfirm) {
+    if (!shouldSkipConfirm && !showApplyConfirm) {
       showApplyConfirm = true;
       return;
     }
@@ -1495,6 +1561,7 @@
         }
       }
 
+      activateRestartGrace(6000);
       const restartRes = await apiFetch(restartUrl, {
         method: 'POST'
       });
@@ -1505,6 +1572,7 @@
 
       await fetchCapabilities();
 
+      isDirty = false;
       showToast('success', $t('mihomo.config_applied'));
     } catch (err: any) {
       if (err?.status === 401) return;
@@ -1576,15 +1644,20 @@
 </script>
 
 <div class="container">
+  {#if detectedDraft}
+    <DraftRestoreBanner
+      timestamp={detectedDraft.timestamp}
+      onRestore={handleRestoreDraft}
+      onDiscard={handleDiscardDraft}
+    />
+  {/if}
+
   {#if schemaLoading}
     <div
       class="loading-state-block"
       style="padding: 48px; text-align: center; color: var(--fg-secondary);"
     >
-      <div
-        class="spinner"
-        style="width: 24px; height: 24px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 12px;"
-      ></div>
+      <div class="spinner" style="--spinner-size: 24px; margin: 0 auto 12px;"></div>
       <p>{$t('editor.loading_definition')}</p>
     </div>
   {:else if schemaError}
@@ -1997,14 +2070,14 @@
                   {#if g.useProviders && g.useProviders.length > 0}
                     <span
                       class="item-badge"
-                      style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; text-transform: none;"
+                      style="background: color-mix(in srgb, var(--success) 20%, transparent); color: var(--success); font-size: 10px; text-transform: none;"
                       title={g.useProviders.join(', ')}>use: {g.useProviders.length}</span
                     >
                   {/if}
                   {#if g.type === 'load-balance' && g.strategy}
                     <span
                       class="item-badge"
-                      style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10px; text-transform: none;"
+                      style="background: color-mix(in srgb, var(--warning) 20%, transparent); color: var(--warning); font-size: 10px; text-transform: none;"
                       >{g.strategy}</span
                     >
                   {/if}
@@ -2012,7 +2085,11 @@
                   <button class="item-edit" onclick={() => editGroup(g)} title={$t('app.edit')}
                     >✎</button
                   >
-                  <button class="item-del" onclick={() => removeGroup(g.id)}>✕</button>
+                  <button
+                    class="item-del"
+                    onclick={() => removeGroup(g.id)}
+                    title={$t('app.delete')}>✕</button
+                  >
                 </div>
               {/each}
 
@@ -2174,7 +2251,9 @@
                   <span class="item-name rule-value">{r.value}</span>
                 {/if}
                 <span class="item-meta">→ {r.outbound}</span>
-                <button class="item-del" onclick={() => removeRule(r.id)}>✕</button>
+                <button class="item-del" onclick={() => removeRule(r.id)} title={$t('app.delete')}
+                  >✕</button
+                >
               </div>
             {/each}
 
@@ -2222,7 +2301,7 @@
                     {#if dnsRedirectLoading}
                       <span
                         class="spinner"
-                        style="display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"
+                        style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
                       ></span>
                     {/if}
                     {$t('editor.dns_intercept_enable')}
@@ -2368,6 +2447,53 @@
                   <span>Sniff QUIC (ports 443, 8443)</span>
                 </label>
               </div>
+            {/if}
+
+            <div
+              class="form-row"
+              style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px;"
+            >
+              <label class="form-label" for="mihomo-ctrl-type">{$t('mihomo.controller_type')}</label
+              >
+              <select id="mihomo-ctrl-type" class="form-select" bind:value={externalControllerType}>
+                <option value="unix">{$t('mihomo.controller_unix_label')}</option>
+                <option value="tcp">{$t('mihomo.controller_tcp_label')}</option>
+              </select>
+            </div>
+            {#if externalControllerType === 'tcp'}
+              <div class="form-row">
+                <label class="form-label" for="mihomo-ctrl-target"
+                  >{$t('mihomo.controller_tcp_address')}</label
+                >
+                <input
+                  id="mihomo-ctrl-target"
+                  class="form-input"
+                  bind:value={externalControllerTarget}
+                  placeholder="127.0.0.1:9090"
+                />
+              </div>
+              {#if externalControllerTarget.startsWith('0.0.0.0:') || externalControllerTarget.startsWith(':') || externalControllerTarget === '0.0.0.0'}
+                <div
+                  class="inline-warning"
+                  style="margin-top: 6px; font-size: 12px; color: var(--color-warning, #f59e0b); display: flex; align-items: center; gap: 6px;"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+                    />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span>{$t('mihomo.insecure_lan_warning')}</span>
+                </div>
+              {/if}
             {/if}
           </div>
         {/if}
@@ -3301,11 +3427,5 @@
 
   .slider.round:before {
     border-radius: 50%;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

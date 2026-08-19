@@ -2,9 +2,13 @@
   import { t } from './i18n';
   import Icon from './lib/components/Icon.svelte';
 
-  export let items: { label: string; tab?: string }[] = [];
-  export let onNavigate: (tab: string) => void = () => {};
-  export let hideHome: boolean = false;
+  interface Props {
+    items?: { label: string; tab?: string }[];
+    onNavigate?: (tab: string) => void;
+    hideHome?: boolean;
+  }
+
+  let { items = [], onNavigate = () => {}, hideHome = false }: Props = $props();
 </script>
 
 <!-- Visual rules live in global.css under .breadcrumbs etc. -->

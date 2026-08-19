@@ -1,7 +1,9 @@
 <script lang="ts">
   import { t } from '../i18n';
   import { isSidebarOpen, isSidebarCollapsed, capabilities, mihomoApiAvailable } from '../stores';
+  import { capsuleConfigStore } from '../lib/capsuleSettings';
   import Icon from '../lib/components/Icon.svelte';
+  import SystemStatusCapsule from './status/SystemStatusCapsule.svelte';
 
   let {
     currentTab = 'dashboard',
@@ -11,7 +13,9 @@
     onLogout = () => {},
     loading = false,
     pwaInstallPrompt = null,
-    onInstallPWA = () => {}
+    onInstallPWA = () => {},
+    systemStats = null,
+    isXkeenRunning = true
   }: {
     currentTab?: string;
     onSwitchTab?: (tab: string) => void;
@@ -21,6 +25,8 @@
     loading?: boolean;
     pwaInstallPrompt?: unknown;
     onInstallPWA?: () => void;
+    systemStats?: any;
+    isXkeenRunning?: boolean;
   } = $props();
 
   type GroupKey = 'overview' | 'proxy_subs' | 'routing' | 'observability' | 'system';
@@ -213,7 +219,7 @@
   </span>
 </div>
 
-<nav style="flex: 1; overflow-y: auto; padding: 4px 0 10px; scrollbar-width: none;">
+<nav class="sidebar-nav">
   <!-- Overview group -->
   <details class="nav-group" bind:open={groupOpen.overview}>
     <summary>
@@ -515,7 +521,19 @@
   </details>
 </nav>
 
-<div style="border-top: 1px solid var(--border); padding: 0.5rem 0; background: var(--bg-card);">
+{#if $capsuleConfigStore.visible}
+  <div class="sidebar-status-section" class:rail={$isSidebarCollapsed}>
+    <SystemStatusCapsule
+      variant={$isSidebarCollapsed ? 'rail' : 'sidebar'}
+      {systemStats}
+      activeKernel={$capabilities?.active_kernel}
+      {isXkeenRunning}
+      {onSwitchTab}
+    />
+  </div>
+{/if}
+
+<div class="sidebar-footer">
   {#if pwaInstallPrompt}
     <button
       class="nav-item"
@@ -585,6 +603,37 @@
   }
   :global(.collapse-toggle-icon.is-expanded) {
     transform: rotate(180deg);
+  }
+
+  .sidebar-nav {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0 10px;
+    scrollbar-width: none;
+  }
+
+  .sidebar-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sidebar-footer {
+    border-top: 1px solid var(--border);
+    padding: 0.5rem 0;
+    background: var(--bg-card);
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 768px) {
+    :global(.nav-group summary) {
+      padding: 8px 14px 6px !important;
+    }
+    :global(.nav-item) {
+      padding: 9px 14px !important;
+      min-height: 40px;
+    }
+    .sidebar-footer {
+      padding: 6px 0;
+    }
   }
 
   /* CR-01: portaled to <body> (see portalToBody in <script>) so it paints

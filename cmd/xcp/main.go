@@ -121,6 +121,7 @@ func main() {
 	srv.HandleProtected("/api/config/rename", api.ConfigRename)
 	srv.HandleProtected("/api/config/validate", api.ConfigValidate)
 	srv.HandleProtected("/api/config/preflight", api.ConfigPreflight)
+	srv.HandleProtected("/api/config/mihomo-migrate-socket", api.MihomoMigrateSocket)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
 	srv.HandleProtected("/api/settings/dev-mode", api.SettingsDevMode)
@@ -131,8 +132,10 @@ func main() {
 	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
 	srv.HandleProtected("/api/logs/download", api.LogsDownload)
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
+	srv.HandleProtected("/api/mihomo/groups", api.MihomoGroups)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
+	srv.HandleProtected("/api/system/clients", api.SystemClients)
 	srv.HandleProtected("/api/system/diagnostics", api.DiagnosticsDownload)
 
 	// Update endpoints
@@ -197,11 +200,13 @@ func main() {
 
 	// Start background services
 	smartProxySvc := services.NewSmartProxyService(cfg.DataDir, cfg.MihomoAPIURL)
+	smartProxySvc.SetMihomoService(api.MihomoService())
 	smartProxySvc.Start()
 	api.SetSmartProxyService(smartProxySvc)
 	defer smartProxySvc.Stop()
 
 	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL, cfg.MihomoSecret)
+	trafficQuotaSvc.SetMihomoService(api.MihomoService())
 	trafficQuotaSvc.Start()
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
@@ -237,6 +242,12 @@ func main() {
 	srv.HandleProtected("/api/console/commands", api.ConsoleListCommands)
 	srv.HandleProtected("/api/console/execute", api.ConsoleExecute)
 
+	// Interactive PTY Terminal
+	ptySvc := services.NewPTYService()
+	api.SetPTYService(ptySvc)
+	defer ptySvc.CloseAll()
+	srv.HandleProtected("/api/terminal/ws", api.TerminalWebSocket)
+
 	// Assets Service
 	srv.HandleProtected("/api/assets/definition", api.AssetsDefinition)
 
@@ -262,6 +273,7 @@ func main() {
 	subscriptionSvc := services.NewSubscriptionService(cfg.DataDir, cfg.XRayConfigDir, cfg.MihomoConfigDir)
 	subscriptionSvc.SetPanelAddress(cfg.Port, cfg.HTTPS.Enabled, cfg.LoopbackPort)
 	subscriptionSvc.SetConsoleService(consoleSvc)
+	subscriptionSvc.SetMihomoService(api.MihomoService())
 	subscriptionSvc.SetMihomoAPI(cfg.MihomoAPIURL, cfg.MihomoSecret)
 	// Fallback-резолвер секрета Clash API: при пустом MihomoSecret в конфиге
 	// панели секрет читается из config.yaml Mihomo (как у остальных
@@ -269,6 +281,11 @@ func main() {
 	// proxy-providers получает 401 на типовых развертываниях.
 	subscriptionSvc.SetMihomoSecretResolver(api.ResolveMihomoSecret)
 	api.SetSubscriptionService(subscriptionSvc)
+
+	// Привести блоки proxy-providers в config.yaml к текущему формату: без
+	// этого новые директивы блока доезжают до уже настроенных подписок только
+	// после ручного пересохранения.
+	subscriptionSvc.SyncMihomoProviderBlocks()
 
 	// Start subscription auto-refresh scheduler. It checks every 15 minutes
 	// and refreshes any subscription whose Interval has elapsed.
@@ -299,6 +316,7 @@ func main() {
 
 	// Network Tools
 	networkSvc := services.NewNetworkToolsService(cfg.MihomoAPIURL)
+	networkSvc.SetMihomoService(api.MihomoService())
 	api.SetNetworkToolsService(networkSvc)
 
 	// Kernels

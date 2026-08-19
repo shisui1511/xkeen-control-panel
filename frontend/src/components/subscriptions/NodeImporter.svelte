@@ -81,7 +81,7 @@
   <div class="diag-body">
     {#if diagnosticLoading}
       <div class="text-center" style="padding: 2rem 0; color: var(--fg-dim);">
-        <span class="spinner" style="margin-right: 8px;">...</span>
+        <span class="spinner" style="--spinner-size: 14px; margin-right: 8px;"></span>
         {$t('subscr.loading_diag')}
       </div>
     {:else if diagnosticTab === 'report'}

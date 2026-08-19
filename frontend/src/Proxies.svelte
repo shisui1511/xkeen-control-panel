@@ -11,6 +11,16 @@
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
   import ChevronDown from './lib/components/icons/ChevronDown.svelte';
+  import FloatingProgress from './components/FloatingProgress.svelte';
+  import LatencyHistoryPopover from './components/LatencyHistoryPopover.svelte';
+  import PingTargetQuickMenu from './components/PingTargetQuickMenu.svelte';
+  import {
+    BatchLatencyTester,
+    type BatchProgressState,
+    formatTimeAgo
+  } from './lib/batchLatencyTester';
+  import { getTargetUrl, getCurrentPingConfig } from './lib/pingTargetStore';
+  import type { PollerControls } from './lib/poller';
 
   // Subcomponents for providers (subscriptions)
   import SubscriptionList from './components/subscriptions/SubscriptionList.svelte';
@@ -22,6 +32,9 @@
     type: string;
     alive?: boolean;
     delay?: number;
+    now?: string;
+    all?: string[];
+    provider?: string;
     history?: { time: string; delay: number }[];
   }
 
@@ -50,6 +63,7 @@
     alive?: boolean;
     delay?: number;
     history?: { time: string; delay: number }[];
+    icon?: string;
   }
 
   interface ObservatoryStats {
@@ -140,6 +154,17 @@
   let seenGroups = $state(new Set<string>());
   const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
 
+  // Batch testing & latency history state
+  let poller = $state<PollerControls | null>(null);
+  const batchTester = new BatchLatencyTester();
+  let batchProgress = $state<BatchProgressState | null>(null);
+  let activePopover = $state<{
+    name: string;
+    history: { time: string; delay: number }[];
+    el: HTMLElement;
+  } | null>(null);
+  let popoverHoverTimeout: ReturnType<typeof setTimeout> | null = null;
+
   // Subscription state variables
   let subscriptions = $state<Subscription[]>([]);
   let expandedSubs = $state<Record<string, boolean>>({});
@@ -176,112 +201,6 @@
   let diagnosticLoading = $state(false);
   let parseReportData = $state<any>(null);
   let rawResponseData = $state<any>(null);
-
-  // Auto-branding definitions
-  const brandIcons: Record<string, { svg: string; color: string }> = {
-    youtube: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.107C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.388.511a3.003 3.003 0 0 0-2.11 2.107C0 8.053 0 12 0 12s0 3.947.502 5.837a3.003 3.003 0 0 0 2.11 2.107C4.495 20.455 12 20.455 12 20.455s7.505 0 9.388-.511a3.003 3.003 0 0 0 2.11-2.107C24 15.947 24 12 24 12s0-3.947-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`,
-      color: '#FF0000'
-    },
-    discord: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.094 13.094 0 0 1-1.873-.894.077.077 0 0 1-.008-.128c.126-.093.252-.19.372-.287a.075.075 0 0 1 .077-.011c3.92 1.793 8.18 1.793 12.061 0a.073.073 0 0 1 .078.009c.12.099.246.195.373.289a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.894.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.078.078 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.156-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.156 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.156-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.156 2.418z"/></svg>`,
-      color: '#5865F2'
-    },
-    telegram: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.017c.24-.213-.054-.334-.373-.12l-6.869 4.325-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.458c.536-.196 1.006.128.832.978z"/></svg>`,
-      color: '#26A5E4'
-    },
-    tg: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.017c.24-.213-.054-.334-.373-.12l-6.869 4.325-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.458c.536-.196 1.006.128.832.978z"/></svg>`,
-      color: '#26A5E4'
-    },
-    spotify: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.6 0 12 0zm5.5 17.3c-.2.3-.6.4-.9.2-2.3-1.4-5.3-1.8-8.8-1-.3.1-.7-.1-.8-.4-.1-.3.1-.7.4-.8 3.8-.9 7.1-.5 9.7 1.1.3.1.4.5.2.9zm1.5-3.3c-.3.4-.8.5-1.2.3-2.7-1.6-6.8-2.1-10-1.1-.4.1-.9-.1-1-.6-.1-.4.1-.9.6-1 3.7-1.1 8.2-.6 11.3 1.3.3.2.5.8.3 1.1zm.1-3.4C15.6 8.5 9.7 8.3 6.3 9.3c-.5.2-1.1-.1-1.2-.6-.2-.5.1-1.1.6-1.2 3.9-1.2 10.4-1 14.5 1.5.5.3.6 1 .3 1.5-.3.5-1 .6-1.4.3z"/></svg>`,
-      color: '#1DB954'
-    },
-    steam: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .002a11.996 11.996 0 0 0-11.968 10.74L6.16 14.9a3.298 3.298 0 0 1 3.27-2.903l2.802-4.004a3.3 3.3 0 1 1 3.3 3.3l-4.004 2.802a3.298 3.298 0 0 1-2.903 3.27l4.158 6.13A12 12 0 1 0 12 .002zm-2.57 15.6a1.65 1.65 0 1 0 0-3.3 1.65 1.65 0 0 0 0 3.3z"/></svg>`,
-      color: 'var(--fg-primary)'
-    },
-    reddit: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M24 11.5c0-1.65-1.35-3-3-3-.96 0-1.86.48-2.42 1.24-1.64-1-3.85-1.64-6.23-1.72l1.32-4.17 4.31.91c0 1.1.9 2 2 2 1.1 0 2-.9 2-2s-.9-2-2-2c-.93 0-1.7.63-1.92 1.48l-4.82-1.02c-.18-.04-.38.07-.44.25l-1.5 4.74c-2.43.06-4.67.69-6.34 1.71-.56-.74-1.46-1.22-2.42-1.22-1.65 0-3 1.35-3 3 0 1.11.61 2.08 1.51 2.6-.08.4-.12.8-.12 1.2 0 4.14 4.83 7.5 10.78 7.5s10.78-3.36 10.78-7.5c0-.4-.04-.8-.12-1.2.9-.52 1.51-1.49 1.51-2.6z"/></svg>`,
-      color: '#FF4500'
-    },
-    github: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577v-2.234c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22v3.293c0 .319.22.694.825.576C20.565 21.795 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg>`,
-      color: 'var(--fg-primary)'
-    },
-    gh: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577v-2.234c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22v3.293c0 .319.22.694.825.576C20.565 21.795 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg>`,
-      color: 'var(--fg-primary)'
-    },
-    google: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.113-5.136 4.113-3.48 0-6.3-2.82-6.3-6.3 0-3.48 2.82-6.3 6.3-6.3 1.635 0 3.118.621 4.254 1.636l3.18-3.18C19.124 2.4 15.938 1.2 12.24 1.2 6.136 1.2 1.2 6.136 1.2 1.2 12.24s4.936 11.04 11.04 11.04c6.375 0 10.596-4.485 10.596-10.785 0-.727-.067-1.425-.195-2.1H12.24z"/></svg>`,
-      color: 'var(--accent)'
-    },
-    netflix: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M15.986 0L8.014 11.562V0H4.5v24h3.514l7.972-11.562V24H19.5V0h-3.514z"/></svg>`,
-      color: '#E50914'
-    },
-    twitch: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>`,
-      color: '#9146FF'
-    },
-    meta: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M15.282 5.093c.895 0 1.706.326 2.378.96 1.233 1.157 1.83 2.766 1.83 4.887 0 2.217-.655 3.916-1.892 4.981-.663.57-1.439.865-2.316.865-.632 0-1.242-.234-1.758-.636-.263-.207-.506-.44-.725-.7l-.804.896-.06.059c-.496.438-1.12.681-1.805.681-.877 0-1.653-.295-2.316-.865-1.237-1.065-1.892-2.764-1.892-4.98 0-2.122.597-3.73 1.83-4.888.672-.634 1.483-.96 2.378-.96.637 0 1.25.234 1.769.64.258.2.496.427.712.678l.805-.898.06-.057c.49-.43 1.11-.663 1.79-.663zm0-2.093c-1.3 0-2.455.518-3.282 1.353-.827-.835-1.982-1.353-3.282-1.353-2.11 0-3.957.905-5.228 2.505C1.196 7.157.4 9.423.4 12.016c0 2.64.757 4.9 2.052 6.55 1.272 1.62 3.12 2.527 5.266 2.527 1.3 0 2.455-.518 3.282-1.353.827.835 1.982 1.353 3.282 1.353 2.147 0 3.994-.906 5.266-2.527C20.843 16.917 21.6 14.657 21.6 12.016c0-2.593-.796-4.86-2.09-6.51-1.27-1.6-3.118-2.506-5.228-2.506z"/></svg>`,
-      color: '#0668E1'
-    },
-    speedtest: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>`,
-      color: '#00F0FF'
-    },
-    ai: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>`,
-      color: 'var(--accent)'
-    },
-    openai: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>`,
-      color: 'var(--accent)'
-    },
-    chatgpt: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>`,
-      color: 'var(--accent)'
-    },
-    cdn: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25"/><path d="M8 16h.01M8 20h.01M12 18h.01M12 22h.01M16 16h.01M16 20h.01"/></svg>`,
-      color: '#A0A0A0'
-    },
-    tiktok: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12.53.07a8 8 0 0 1 .18 1.7 5.6 5.6 0 0 0 4.14 5.2 8 8 0 0 1-.22 1.6 7.1 7.1 0 0 1-3.52-1 8 8 0 0 1-.18-1.7 5.6 5.6 0 0 0-4.14-5.2v14a4.13 4.13 0 1 1-4.24-4.13h1.36v-1.6H4.15A5.73 5.73 0 1 0 9.88 20V0h2.65z"/></svg>`,
-      color: '#FE2C55'
-    },
-    direct: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`,
-      color: 'var(--success)'
-    },
-    reject: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>`,
-      color: 'var(--danger)'
-    },
-    block: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>`,
-      color: 'var(--danger)'
-    },
-    fallback: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
-      color: 'var(--warning)'
-    }
-  };
-
-  function getGroupIcon(groupName: string): { svg: string; color: string } | null {
-    const lower = groupName.toLowerCase();
-    for (const key of Object.keys(brandIcons)) {
-      if (lower.includes(key)) {
-        return brandIcons[key];
-      }
-    }
-    return null;
-  }
 
   let searchDebouncedQuery = $state('');
   let searchTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -339,6 +258,26 @@
     return proxy.alive ?? false;
   }
 
+  function getEffectiveProxy(proxyName: string): Proxy | undefined {
+    let currentName = proxyName;
+    const visited = new Set<string>();
+    while (currentName && !visited.has(currentName)) {
+      visited.add(currentName);
+      const p = proxies[currentName];
+      if (!p) break;
+      if (
+        ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'].includes(p.type || '') &&
+        p.now
+      ) {
+        if (p.now === currentName) break;
+        currentName = p.now;
+        continue;
+      }
+      return p;
+    }
+    return proxies[currentName];
+  }
+
   function updateCollapsed() {
     const current = new Set(groups.map((g) => g.name));
     const next = new Set(collapsedGroups);
@@ -346,7 +285,7 @@
       if (!current.has(name)) next.delete(name);
     }
     for (const g of groups) {
-      if (g.all.length > 8 && !seenGroups.has(g.name)) {
+      if (!seenGroups.has(g.name)) {
         next.add(g.name);
       }
       seenGroups.add(g.name);
@@ -364,41 +303,167 @@
     collapsedGroups = next;
   }
 
+  let groupFilters = $state<Record<string, 'all' | 'working' | 'timeouts' | 'latency'>>({});
+
+  interface GroupHealthStats {
+    fast: number;
+    mid: number;
+    bad: number;
+    unchecked: number;
+    total: number;
+    fastPct: number;
+    midPct: number;
+    badPct: number;
+    uncheckedPct: number;
+    tooltip: string;
+  }
+
+  function getGroupHealthStats(nodeNames: string[]): GroupHealthStats {
+    let fast = 0;
+    let mid = 0;
+    let bad = 0;
+    let unchecked = 0;
+
+    for (const name of nodeNames) {
+      const eff = getEffectiveProxy(name);
+      const p = eff || proxies[name];
+      if (!p) {
+        unchecked++;
+        continue;
+      }
+      if (
+        ['DIRECT', 'REJECT'].includes((p.name || name).toUpperCase()) ||
+        ['Direct', 'Reject', 'Compatible'].includes(p.type || '')
+      ) {
+        unchecked++;
+        continue;
+      }
+      const delay = getProxyDelay(name);
+      const alive = isProxyAlive(p);
+      if (delay === undefined) {
+        unchecked++;
+      } else if (!alive || delay === 0 || delay > 400) {
+        bad++;
+      } else if (delay < 150) {
+        fast++;
+      } else {
+        mid++;
+      }
+    }
+
+    const total = nodeNames.length || 1;
+    const fastPct = (fast / total) * 100;
+    const midPct = (mid / total) * 100;
+    const badPct = (bad / total) * 100;
+    const uncheckedPct = (unchecked / total) * 100;
+
+    const tooltip = $t('proxies.health_tooltip', {
+      fast,
+      mid,
+      bad,
+      unchecked
+    });
+
+    return {
+      fast,
+      mid,
+      bad,
+      unchecked,
+      total: nodeNames.length,
+      fastPct,
+      midPct,
+      badPct,
+      uncheckedPct,
+      tooltip
+    };
+  }
+
+  function getFilteredGroupNodes(groupName: string, allNodes: string[]): string[] {
+    const filter = groupFilters[groupName] || 'all';
+    let list = [...allNodes];
+    if (filter === 'working') {
+      list = list.filter((name) => {
+        const delay = getProxyDelay(name);
+        return delay !== undefined && delay > 0 && delay <= 800;
+      });
+    } else if (filter === 'timeouts') {
+      list = list.filter((name) => {
+        const delay = getProxyDelay(name);
+        return delay === 0 || delay === undefined || delay > 800;
+      });
+    } else if (filter === 'latency') {
+      list.sort((a, b) => {
+        const delayA = getProxyDelay(a) ?? 99999;
+        const delayB = getProxyDelay(b) ?? 99999;
+        return delayA - delayB;
+      });
+    }
+    return list;
+  }
+
   function computeStats(): ObservatoryStats {
-    const proxyList = Object.values(proxies).filter((p) => {
+    const uniqueNodes = new Map<string, { alive: boolean; delay?: number }>();
+
+    // 1. Root and Provider proxies from Mihomo
+    for (const p of Object.values(proxies)) {
       const typeLower = (p.type || '').toLowerCase();
       const nameLower = (p.name || '').toLowerCase();
 
       // Исключаем группы прокси
       if (['selector', 'urltest', 'fallback', 'loadbalance', 'relay'].includes(typeLower)) {
-        return false;
+        continue;
       }
       // Исключаем системные/встроенные прокси
       if (['direct', 'reject', 'compatible', 'pass'].includes(typeLower)) {
-        return false;
+        continue;
       }
       if (['direct', 'reject', 'compatible', 'pass', 'global'].includes(nameLower)) {
-        return false;
+        continue;
       }
 
-      return true;
-    });
-    const total = proxyList.length;
-    const healthy = proxyList.filter(
-      (p) => isProxyAlive(p) && (getLastDelay(p) || 0) > 0 && (getLastDelay(p) || 0) < 300
-    ).length;
-    const degraded = proxyList.filter(
-      (p) => isProxyAlive(p) && (getLastDelay(p) || 0) >= 300 && (getLastDelay(p) || 0) < 800
-    ).length;
-    const down = proxyList.filter(
-      (p) => !isProxyAlive(p) || (getLastDelay(p) || 0) === 0 || (getLastDelay(p) || 0) >= 800
-    ).length;
+      const delay = getLastDelay(p);
+      const alive = isProxyAlive(p);
+      uniqueNodes.set(p.name, { alive, delay });
+    }
 
-    const activeList = proxyList.filter((p) => isProxyAlive(p) && (getLastDelay(p) || 0) > 0);
-    const avg =
-      activeList.length > 0
-        ? activeList.reduce((sum, p) => sum + (getLastDelay(p) || 0), 0) / activeList.length
-        : 0;
+    // 2. External subscription nodes (subNodes)
+    for (const [subId, nodesList] of Object.entries(subNodes)) {
+      if (!Array.isArray(nodesList)) continue;
+      const healthMap = subHealth[subId] || {};
+      for (const n of nodesList) {
+        if (!n || (!n.tag && !n.name)) continue;
+        const key = n.tag || n.name || '';
+        if (uniqueNodes.has(key)) continue;
+
+        const h = healthMap[key];
+        const alive = h ? h.alive : true;
+        const delay = h?.tested && h?.delay !== undefined ? h.delay : undefined;
+        uniqueNodes.set(key, { alive, delay });
+      }
+    }
+
+    const total = uniqueNodes.size;
+    let healthy = 0;
+    let degraded = 0;
+    let down = 0;
+    let activeCount = 0;
+    let activeDelaySum = 0;
+
+    for (const { alive, delay } of uniqueNodes.values()) {
+      if (alive && delay !== undefined && delay > 0 && delay < 300) {
+        healthy++;
+        activeCount++;
+        activeDelaySum += delay;
+      } else if (alive && delay !== undefined && delay >= 300 && delay < 800) {
+        degraded++;
+        activeCount++;
+        activeDelaySum += delay;
+      } else if (!alive || delay === 0 || (delay !== undefined && delay >= 800)) {
+        down++;
+      }
+    }
+
+    const avg = activeCount > 0 ? activeDelaySum / activeCount : 0;
 
     return {
       totalProxies: total,
@@ -408,6 +473,8 @@
       avgLatency: Math.round(avg)
     };
   }
+
+  let observatoryStats = $derived(computeStats());
 
   async function fetchProxies(signal?: AbortSignal) {
     const reqSignal = signal instanceof AbortSignal ? signal : undefined;
@@ -425,14 +492,41 @@
       }
     }, 10000);
     try {
-      const data = await apiFetchJSON<{ proxies: Record<string, any> }>(
-        '/api/mihomo/proxy/proxies',
-        {
+      const [proxiesRes, providersRes] = await Promise.allSettled([
+        apiFetchJSON<{ proxies: Record<string, any> }>('/api/mihomo/proxy/proxies', {
           signal: reqSignal
+        }),
+        apiFetchJSON<{ providers: Record<string, any> }>('/api/mihomo/proxy/providers/proxies', {
+          signal: reqSignal
+        })
+      ]);
+
+      const rootProxies = proxiesRes.status === 'fulfilled' ? proxiesRes.value?.proxies || {} : {};
+      const providersMap =
+        providersRes.status === 'fulfilled' ? providersRes.value?.providers || {} : {};
+
+      const mergedProxies: Record<string, any> = { ...rootProxies };
+
+      for (const [provName, provData] of Object.entries(providersMap)) {
+        if (provData && Array.isArray((provData as any).proxies)) {
+          for (const node of (provData as any).proxies) {
+            if (!node || !node.name) continue;
+            if (!mergedProxies[node.name]) {
+              mergedProxies[node.name] = { ...node, provider: provName };
+            } else {
+              mergedProxies[node.name] = {
+                ...mergedProxies[node.name],
+                ...node,
+                provider: provName
+              };
+            }
+          }
         }
-      );
-      proxies = data.proxies || {};
-      const mappedGroups = Object.values(proxies)
+      }
+
+      proxies = mergedProxies;
+
+      const mappedGroups = Object.values(rootProxies)
         .filter((p: Proxy) => {
           return ['Selector', 'URLTest', 'Fallback', 'LoadBalance'].includes(p.type);
         })
@@ -443,7 +537,8 @@
           all: p.all || [],
           alive: p.alive,
           delay: p.history?.[p.history.length - 1]?.delay,
-          history: p.history || []
+          history: p.history || [],
+          icon: String(p.icon || '').trim()
         }));
 
       const groupNames = new Set(mappedGroups.map((g) => g.name));
@@ -466,11 +561,6 @@
       });
 
       groups = mappedGroups;
-      Object.keys(proxies).forEach((name) => {
-        if (data.proxies[name]?.history) {
-          proxies[name].history = data.proxies[name].history;
-        }
-      });
       updateCollapsed();
     } catch (e: any) {
       if (e?.name !== 'AbortError' && e?.status !== 401) {
@@ -515,58 +605,231 @@
     }
   }
 
-  async function testLatency() {
-    testingLatency = true;
-    error = '';
-    try {
-      const urlTestGroups = groups.filter((g) => g.type === 'URLTest');
-      if (urlTestGroups.length > 0) {
-        await Promise.all(
-          urlTestGroups.map((g) =>
-            apiFetch(
-              `/api/mihomo/proxy/group/${encodeURIComponent(g.name)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`,
-              {
-                method: 'GET'
-              }
-            )
-          )
-        );
-      } else {
-        const res = await apiFetch(
-          '/api/mihomo/proxy/proxies/delay?url=http://www.gstatic.com/generate_204&timeout=5000',
-          {
-            method: 'GET'
-          }
-        );
-        if (!res.ok) throw new Error($t('proxies.load_error'));
+  function isLatencyStale(proxyName: string): boolean {
+    const hist = getProxyHistory(proxyName);
+    if (!hist || hist.length === 0) return false;
+    const lastItem = hist[hist.length - 1];
+    if (!lastItem?.time) return false;
+    const timestamp = new Date(lastItem.time).getTime();
+    if (isNaN(timestamp)) return false;
+    return Date.now() - timestamp > 300000; // 5 minutes TTL
+  }
+
+  function getProxyLastTime(proxyName: string): number | null {
+    const hist = getProxyHistory(proxyName);
+    if (!hist || hist.length === 0) return null;
+    const lastItem = hist[hist.length - 1];
+    if (!lastItem?.time) return null;
+    const timestamp = new Date(lastItem.time).getTime();
+    return isNaN(timestamp) ? null : timestamp;
+  }
+
+  function getLatencyTitle(proxyName: string): string {
+    if (isLatencyStale(proxyName)) {
+      const tMs = getProxyLastTime(proxyName);
+      if (tMs) {
+        return $t('proxies.stale_tooltip', { timeAgo: formatTimeAgo(tMs, $t) });
       }
-      safeTimeout(async () => {
-        await fetchProxies();
-        testingLatency = false;
-      }, 2000);
-    } catch (e: any) {
-      if (e?.status === 401) return;
-      showToast('error', e.message);
+    }
+    return '';
+  }
+
+  function handleBadgeMouseEnter(e: MouseEvent, proxyName: string) {
+    if (popoverHoverTimeout) clearTimeout(popoverHoverTimeout);
+    const target = e.currentTarget as HTMLElement;
+    popoverHoverTimeout = setTimeout(() => {
+      const history = getProxyHistory(proxyName);
+      if (history && history.length > 0) {
+        activePopover = {
+          name: proxyName,
+          history,
+          el: target
+        };
+      }
+    }, 200);
+  }
+
+  function handleBadgeMouseLeave() {
+    if (popoverHoverTimeout) {
+      clearTimeout(popoverHoverTimeout);
+      popoverHoverTimeout = null;
+    }
+  }
+
+  function handleBadgeClick(e: MouseEvent, proxyName: string) {
+    e.stopPropagation();
+    if (popoverHoverTimeout) {
+      clearTimeout(popoverHoverTimeout);
+      popoverHoverTimeout = null;
+    }
+    const target = e.currentTarget as HTMLElement;
+    const history = getProxyHistory(proxyName);
+    if (activePopover?.name === proxyName) {
+      activePopover = null;
+    } else if (history && history.length > 0) {
+      activePopover = {
+        name: proxyName,
+        history,
+        el: target
+      };
+    }
+  }
+
+  async function testGroupLatency(group: ProxyGroup) {
+    if (batchTester.isActive()) return;
+    testingLatency = true;
+    poller?.pause();
+    const pingConfig = getCurrentPingConfig();
+    const targetUrl = getTargetUrl(pingConfig);
+    const timeoutMs = pingConfig.timeoutMs;
+
+    try {
+      const res = await apiFetch(
+        `/api/mihomo/proxy/group/${encodeURIComponent(group.name)}/delay?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
+        { method: 'GET' }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data && typeof data === 'object') {
+          for (const [nodeName, nodeDelay] of Object.entries(data)) {
+            const delayNum = typeof nodeDelay === 'number' ? nodeDelay : 0;
+            if (proxies[nodeName]) {
+              const hist = proxies[nodeName].history ? [...proxies[nodeName].history!] : [];
+              hist.push({ time: new Date().toISOString(), delay: delayNum });
+              proxies[nodeName] = {
+                ...proxies[nodeName],
+                delay: delayNum,
+                alive: delayNum > 0,
+                history: hist
+              };
+            }
+          }
+          showToast('success', $t('proxies.test_group_success'));
+          return;
+        }
+      }
+
+      // Fallback to batch tester
+      const nodeSet = new Set<string>();
+      for (const node of group.all) {
+        const p = proxies[node];
+        if (
+          node &&
+          !['DIRECT', 'REJECT'].includes(node.toUpperCase()) &&
+          p?.type !== 'Direct' &&
+          p?.type !== 'Reject'
+        ) {
+          nodeSet.add(node);
+        }
+      }
+      const nodes = Array.from(nodeSet);
+      if (nodes.length === 0) return;
+
+      await batchTester.run({
+        nodes,
+        targetUrl,
+        timeoutMs,
+        onProgressChange: (state) => {
+          batchProgress = state;
+          testingLatency = state.running;
+        },
+        onNodeComplete: (node, delay, rawHistoryItem) => {
+          if (proxies[node]) {
+            const currentHist = proxies[node].history ? [...proxies[node].history!] : [];
+            if (rawHistoryItem) {
+              currentHist.push(rawHistoryItem);
+            }
+            proxies[node] = {
+              ...proxies[node],
+              delay: delay ?? 0,
+              alive: (delay ?? 0) > 0,
+              history: currentHist
+            };
+          }
+        }
+      });
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        showToast('error', err?.message || 'Error testing group');
+      }
+    } finally {
       testingLatency = false;
+      batchProgress = null;
+      poller?.resume();
     }
   }
 
   async function testProxyLatency(proxyName: string) {
     testingProxy = proxyName;
+    const pingConfig = getCurrentPingConfig();
+    const targetUrl = getTargetUrl(pingConfig);
+    const timeoutMs = pingConfig.timeoutMs;
+
     try {
-      const res = await apiFetch(
-        `/api/mihomo/proxy/proxies/${encodeURIComponent(proxyName)}/delay?url=http://www.gstatic.com/generate_204&timeout=5000`,
-        {
-          method: 'GET'
+      const isGroup =
+        groups.some((g) => g.name === proxyName) ||
+        ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'].includes(
+          proxies[proxyName]?.type || ''
+        );
+
+      if (isGroup) {
+        const res = await apiFetch(
+          `/api/mihomo/proxy/group/${encodeURIComponent(proxyName)}/delay?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
+          { method: 'GET' }
+        );
+        if (!res.ok) throw new Error($t('proxies.load_error'));
+        const data = await res.json();
+        if (data && typeof data === 'object') {
+          for (const [nodeName, nodeDelay] of Object.entries(data)) {
+            const delayNum = typeof nodeDelay === 'number' ? nodeDelay : 0;
+            if (proxies[nodeName]) {
+              const hist = proxies[nodeName].history ? [...proxies[nodeName].history!] : [];
+              hist.push({ time: new Date().toISOString(), delay: delayNum });
+              proxies[nodeName] = {
+                ...proxies[nodeName],
+                delay: delayNum,
+                alive: delayNum > 0,
+                history: hist
+              };
+            }
+          }
         }
-      );
-      if (!res.ok) throw new Error($t('proxies.load_error'));
-      safeTimeout(async () => {
-        await fetchProxies();
-        testingProxy = '';
-      }, 1500);
+      } else {
+        const res = await apiFetch(
+          `/api/mihomo/proxy/proxies/${encodeURIComponent(proxyName)}/delay?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
+          { method: 'GET' }
+        );
+        if (!res.ok) {
+          const prov = proxies[proxyName]?.provider;
+          if (prov) {
+            await apiFetch(
+              `/api/mihomo/proxy/providers/proxies/${encodeURIComponent(prov)}/healthcheck?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
+              { method: 'GET' }
+            );
+            await fetchProxies();
+            return;
+          }
+          throw new Error($t('proxies.load_error'));
+        }
+        const data = await res.json();
+        const delay = typeof data?.delay === 'number' ? data.delay : 0;
+        if (proxies[proxyName]) {
+          const currentHist = proxies[proxyName].history ? [...proxies[proxyName].history!] : [];
+          currentHist.push({
+            time: new Date().toISOString(),
+            delay
+          });
+          proxies[proxyName] = {
+            ...proxies[proxyName],
+            delay,
+            alive: delay > 0,
+            history: currentHist
+          };
+        }
+      }
     } catch (e: any) {
       showToast('error', e.message);
+    } finally {
       testingProxy = '';
     }
   }
@@ -582,36 +845,61 @@
   }
 
   function getProxyDelay(proxyName: string): number | undefined {
+    const eff = getEffectiveProxy(proxyName);
+    if (eff) {
+      const d = getLastDelay(eff);
+      if (d !== undefined) return d;
+    }
     const proxy = proxies[proxyName];
     if (!proxy) return undefined;
     return getLastDelay(proxy);
   }
 
+  function getProxyHistory(proxyName: string): any[] {
+    const eff = getEffectiveProxy(proxyName);
+    if (eff && eff.history && eff.history.length > 0) {
+      return eff.history;
+    }
+    return proxies[proxyName]?.history || [];
+  }
+
   function getLatencyClass(proxyName: string): string {
-    const proxy = proxies[proxyName];
+    const eff = getEffectiveProxy(proxyName);
+    const proxy = eff || proxies[proxyName];
     if (!proxy) return 'lat dim';
     if (
-      ['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) ||
+      ['DIRECT', 'REJECT'].includes((proxy.name || proxyName).toUpperCase()) ||
       ['Direct', 'Reject', 'Compatible'].includes(proxy.type)
     )
       return 'lat dim';
     const delay = getProxyDelay(proxyName);
-    if (delay === undefined || delay === 0 || delay >= 800) return 'lat bad';
-    if (delay < 300) return 'lat ok';
-    return 'lat mid';
+    let baseClass = 'lat';
+    if (delay === undefined || delay === 0 || delay >= 800) {
+      baseClass += ' bad';
+    } else if (delay < 300) {
+      baseClass += ' ok';
+    } else {
+      baseClass += ' mid';
+    }
+    if (isLatencyStale(proxyName)) {
+      baseClass += ' latency-stale';
+    }
+    return baseClass;
   }
 
   function getLatencyText(proxyName: string): string {
-    const proxy = proxies[proxyName];
+    const eff = getEffectiveProxy(proxyName);
+    const proxy = eff || proxies[proxyName];
     if (!proxy) return '—';
     if (
-      ['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) ||
+      ['DIRECT', 'REJECT'].includes((proxy.name || proxyName).toUpperCase()) ||
       ['Direct', 'Reject', 'Compatible'].includes(proxy.type)
     )
       return '—';
     const delay = getProxyDelay(proxyName);
     if (delay === undefined || delay === 0 || delay >= 800) return 'timeout';
-    return `${delay} ${$t('app.ms')}`;
+    const prefix = isLatencyStale(proxyName) ? '~' : '';
+    return `${prefix}${delay} ${$t('app.ms')}`;
   }
 
   let mihomoLaunching = $state(false);
@@ -715,34 +1003,8 @@
 
   async function loadAvailableMihomoGroups() {
     try {
-      const res = await apiFetch('/api/config/read?path=%2Fopt%2Fetc%2Fmihomo%2Fconfig.yaml');
-      if (!res.ok) return;
-      const data = await res.json();
-      const yamlContent = data.content || '';
-      const groupNames: string[] = [];
-      const lines = yamlContent.split('\n');
-      let inProxyGroups = false;
-      for (let line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('proxy-groups:')) {
-          inProxyGroups = true;
-          continue;
-        }
-        if (inProxyGroups) {
-          if (line.startsWith('-') || line.startsWith(' ') || line.trim() === '') {
-            if (trimmed.startsWith('- name:')) {
-              const name = trimmed
-                .replace('- name:', '')
-                .trim()
-                .replace(/^['"]|['"]$/g, '');
-              if (name) groupNames.push(name);
-            }
-          } else {
-            break;
-          }
-        }
-      }
-      availableMihomoGroups = groupNames;
+      const res = await apiFetchJSON<{ groups: string[] }>('/api/mihomo/groups');
+      availableMihomoGroups = res?.groups || [];
     } catch (e) {
       availableMihomoGroups = [];
     }
@@ -754,6 +1016,7 @@
       loading = true;
     }
     try {
+      loadAvailableMihomoGroups();
       subscriptions = await apiFetchJSON<Subscription[]>('/api/proxy-providers', {
         signal: reqSignal
       });
@@ -1287,7 +1550,7 @@
       activeTab = 'providers';
     }
 
-    const poller = usePoller(async (signal) => {
+    poller = usePoller(async (signal) => {
       await fetchProxies(signal);
       await loadSubscriptions(signal);
       checkAutoExpand();
@@ -1306,12 +1569,22 @@
     window.addEventListener('click', handleClickOutside);
 
     return () => {
-      poller.stop();
+      poller?.stop();
+      batchTester.cancel();
+      if (popoverHoverTimeout) clearTimeout(popoverHoverTimeout);
       if (loadTimeoutId) clearTimeout(loadTimeoutId);
       pendingTimeouts.forEach(clearTimeout);
       window.removeEventListener('hashchange', handleHashChange);
       window.removeEventListener('click', handleClickOutside);
     };
+  });
+
+  onDestroy(() => {
+    poller?.stop();
+    batchTester.cancel();
+    if (popoverHoverTimeout) clearTimeout(popoverHoverTimeout);
+    if (loadTimeoutId) clearTimeout(loadTimeoutId);
+    pendingTimeouts.forEach(clearTimeout);
   });
 </script>
 
@@ -1327,21 +1600,14 @@
     </div>
     {#if activeTab === 'groups'}
       <div class="ph-actions">
-        <button class="btn btn-secondary" onclick={collapseAll} title={$t('proxies.collapse_all')}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right: 6px;"
-          >
-            <polyline points="18 15 12 9 6 15" />
-            <polyline points="18 20 12 14 6 20" />
-          </svg>
-          {$t('proxies.collapse_all')}
-        </button>
+        <input
+          class="group-search"
+          type="search"
+          bind:value={filterQuery}
+          oninput={handleSearchInput}
+          placeholder={$t('proxies.filter_placeholder')}
+          aria-label={$t('proxies.filter_placeholder')}
+        />
         <button class="btn btn-secondary" onclick={expandAll} title={$t('proxies.expand_all')}>
           <svg
             width="14"
@@ -1357,15 +1623,21 @@
           </svg>
           {$t('proxies.expand_all')}
         </button>
-
-        <input
-          class="group-search"
-          type="search"
-          bind:value={filterQuery}
-          oninput={handleSearchInput}
-          placeholder={$t('proxies.filter_placeholder')}
-          aria-label={$t('proxies.filter_placeholder')}
-        />
+        <button class="btn btn-secondary" onclick={collapseAll} title={$t('proxies.collapse_all')}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right: 6px;"
+          >
+            <polyline points="18 15 12 9 6 15" />
+            <polyline points="18 20 12 14 6 20" />
+          </svg>
+          {$t('proxies.collapse_all')}
+        </button>
         <button class="btn btn-secondary" onclick={() => fetchProxies()} disabled={loading}>
           <svg
             width="14"
@@ -1378,16 +1650,7 @@
           >
           {loading ? $t('app.loading') : $t('app.refresh')}
         </button>
-        <button class="btn btn-primary" onclick={testLatency} disabled={testingLatency}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            style="margin-right: 6px;"><polygon points="5 3 19 12 5 21 5 3" /></svg
-          >
-          {testingLatency ? $t('proxies.testing') : $t('proxies.test_latency')}
-        </button>
+        <PingTargetQuickMenu />
       </div>
     {:else}
       <div class="ph-actions">
@@ -1463,31 +1726,41 @@
     {:else}
       <!-- Observatory statistics -->
       {#if groups.length > 0 && $capabilities?.mihomo?.reachable}
-        {@const stats = computeStats()}
-        <div class="card" style="margin-bottom:18px;">
-          <h2 class="card-title" style="margin-top: 0;">{$t('proxies.observatory_title')}</h2>
-          <div class="stats-grid">
-            <div class="stat-box">
+        {@const stats = observatoryStats}
+        <div class="card obs-card">
+          <div class="obs-head">
+            <h2 class="card-title obs-title">{$t('proxies.observatory_title')}</h2>
+          </div>
+          <div class="obs-grid">
+            <div class="stat-box obs-stat-box">
               <div class="stat-label">{$t('proxies.obs_total')}</div>
-              <div class="stat-value">{stats.totalProxies}</div>
-              <div class="res-sub">
-                {$t('proxies.obs_total_sub', { groupsCount: groups.length })}
+              <div class="obs-val-row">
+                <span class="stat-value">{stats.totalProxies}</span>
+                <span class="res-sub">
+                  {$t('proxies.obs_total_sub', { groupsCount: groups.length })}
+                </span>
               </div>
             </div>
-            <div class="stat-box">
+            <div class="stat-box obs-stat-box">
               <div class="stat-label">{$t('proxies.obs_healthy')}</div>
-              <div class="stat-value" style="color:var(--success);">{stats.healthyProxies}</div>
-              <div class="res-sub">{$t('proxies.obs_healthy_sub')}</div>
+              <div class="obs-val-row">
+                <span class="stat-value ok">{stats.healthyProxies}</span>
+                <span class="res-sub">{$t('proxies.obs_healthy_sub')}</span>
+              </div>
             </div>
-            <div class="stat-box">
+            <div class="stat-box obs-stat-box">
               <div class="stat-label">{$t('proxies.obs_degraded')}</div>
-              <div class="stat-value" style="color:var(--warning);">{stats.degradedProxies}</div>
-              <div class="res-sub">{$t('proxies.obs_degraded_sub')}</div>
+              <div class="obs-val-row">
+                <span class="stat-value warn">{stats.degradedProxies}</span>
+                <span class="res-sub">{$t('proxies.obs_degraded_sub')}</span>
+              </div>
             </div>
-            <div class="stat-box">
+            <div class="stat-box obs-stat-box">
               <div class="stat-label">{$t('proxies.obs_unreachable')}</div>
-              <div class="stat-value" style="color:var(--danger);">{stats.downProxies}</div>
-              <div class="res-sub">{$t('proxies.obs_unreachable_sub')}</div>
+              <div class="obs-val-row">
+                <span class="stat-value err">{stats.downProxies}</span>
+                <span class="res-sub">{$t('proxies.obs_unreachable_sub')}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -1530,26 +1803,28 @@
         <div class="group-grid">
           {#each filteredGroups as group}
             {@const isCollapsed = collapsedGroups.has(group.name)}
-            {@const collapsible = group.all.length > 8}
             {@const nodes = getFilteredNodes(group, searchDebouncedQuery)}
-            {@const icon = getGroupIcon(group.name)}
-            <div class="group-card">
+            <div class="group-card" class:expanded={!isCollapsed}>
               <button
                 type="button"
-                class="gc-head"
-                class:collapsible
-                disabled={!collapsible}
-                aria-expanded={collapsible ? !isCollapsed : undefined}
-                onclick={() => collapsible && toggleCollapse(group.name)}
+                class="gc-head collapsible"
+                aria-expanded={!isCollapsed}
+                onclick={() => toggleCollapse(group.name)}
               >
                 <div class="gc-head-row1">
-                  {#if icon}
-                    <span
-                      class="group-icon-wrap"
-                      style="color: {icon.color}; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 6px;"
-                    >
-                      <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                      {@html icon.svg}
+                  {#if group.icon}
+                    <span class="group-icon-wrap" aria-hidden="true">
+                      <img
+                        src={group.icon}
+                        alt=""
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                        class="brand-icon"
+                        onerror={(e) => {
+                          const target = e.currentTarget as HTMLElement;
+                          if (target) target.style.display = 'none';
+                        }}
+                      />
                     </span>
                   {/if}
                   <span class="name">{group.name}</span>
@@ -1561,14 +1836,12 @@
                     <div class="gc-lat-box {latencyClass}">{latencyText}</div>
                   {/if}
 
-                  {#if collapsible}
-                    <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
-                      <ChevronDown
-                        size={14}
-                        color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
-                      />
-                    </span>
-                  {/if}
+                  <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
+                    <ChevronDown
+                      size={14}
+                      color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
+                    />
+                  </span>
                 </div>
 
                 <div class="gc-head-row2">
@@ -1610,32 +1883,103 @@
               </button>
 
               {#if isCollapsed}
-                <div class="dot-container">
-                  {#each nodes as proxyName}
-                    {@const healthClass = getLatencyClass(proxyName)}
-                    {@const healthText = getLatencyText(proxyName)}
-                    {@const isActive = group.now === proxyName}
-                    <button
-                      class="dot-indicator {healthClass}"
-                      class:now={isActive}
-                      title={group.type === 'Selector'
-                        ? `${proxyName}: ${healthText}`
-                        : $t('proxies.managed_automatically')}
-                      aria-label="{proxyName}: {healthText}"
-                      style={group.type === 'Selector' ? 'cursor: pointer;' : 'cursor: default;'}
-                      onclick={(e) => {
-                        e.stopPropagation();
-                        if (group.type === 'Selector') {
-                          selectProxy(group.name, proxyName);
-                          toggleCollapse(group.name);
-                        }
-                      }}
-                    ></button>
-                  {/each}
+                {@const hStats = getGroupHealthStats(nodes)}
+                <div
+                  class="health-bar"
+                  title={hStats.tooltip}
+                  aria-label={hStats.tooltip}
+                  role="img"
+                >
+                  {#if hStats.fast > 0}
+                    <div
+                      class="health-segment fast"
+                      style="width: {hStats.fastPct}%;"
+                      title="{$t('proxies.health_fast')}: {hStats.fast}"
+                    ></div>
+                  {/if}
+                  {#if hStats.mid > 0}
+                    <div
+                      class="health-segment mid"
+                      style="width: {hStats.midPct}%;"
+                      title="{$t('proxies.health_mid')}: {hStats.mid}"
+                    ></div>
+                  {/if}
+                  {#if hStats.bad > 0}
+                    <div
+                      class="health-segment bad"
+                      style="width: {hStats.badPct}%;"
+                      title="{$t('proxies.health_bad')}: {hStats.bad}"
+                    ></div>
+                  {/if}
+                  {#if hStats.unchecked > 0}
+                    <div
+                      class="health-segment unchecked"
+                      style="width: {hStats.uncheckedPct}%;"
+                      title="{$t('proxies.health_unchecked')}: {hStats.unchecked}"
+                    ></div>
+                  {/if}
                 </div>
               {:else}
+                <div class="group-filters">
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={(groupFilters[group.name] || 'all') === 'all'}
+                    onclick={() => (groupFilters[group.name] = 'all')}
+                  >
+                    {$t('proxies.filter_all')}
+                    <span class="filter-count">{nodes.length}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={groupFilters[group.name] === 'working'}
+                    onclick={() => (groupFilters[group.name] = 'working')}
+                  >
+                    {$t('proxies.filter_working')}
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={groupFilters[group.name] === 'timeouts'}
+                    onclick={() => (groupFilters[group.name] = 'timeouts')}
+                  >
+                    {$t('proxies.filter_timeouts')}
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={groupFilters[group.name] === 'latency'}
+                    onclick={() => (groupFilters[group.name] = 'latency')}
+                  >
+                    {$t('proxies.filter_by_latency')}
+                  </button>
+
+                  <div class="group-actions-spacer"></div>
+
+                  <button
+                    type="button"
+                    class="filter-chip group-test-btn"
+                    onclick={() => testGroupLatency(group)}
+                    disabled={testingLatency || batchProgress?.running}
+                    title={$t('proxies.test_group')}
+                  >
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      style="margin-right: 4px;"
+                    >
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                    {$t('proxies.test_group')}
+                  </button>
+                </div>
+
+                {@const filteredNodesList = getFilteredGroupNodes(group.name, nodes)}
                 <div class="proxy-grid">
-                  {#each nodes as proxyName}
+                  {#each filteredNodesList as proxyName}
                     {@const isActive = group.now === proxyName}
                     {@const healthClass = getLatencyClass(proxyName)}
                     {@const healthText = getLatencyText(proxyName)}
@@ -1643,15 +1987,22 @@
                     {@const flag = getCountryFlag(proxyName)}
 
                     <div class="proxy-card" class:now={isActive}>
-                      <button
-                        type="button"
+                      <div
                         class="proxy-select-btn"
-                        disabled={group.type !== 'Selector'}
+                        role="button"
+                        tabindex={group.type === 'Selector' ? 0 : -1}
+                        aria-disabled={group.type !== 'Selector'}
                         title={group.type !== 'Selector'
                           ? $t('proxies.managed_automatically')
                           : undefined}
                         onclick={() =>
                           group.type === 'Selector' && selectProxy(group.name, proxyName)}
+                        onkeydown={(e) => {
+                          if (group.type === 'Selector' && (e.key === 'Enter' || e.key === ' ')) {
+                            e.preventDefault();
+                            selectProxy(group.name, proxyName);
+                          }
+                        }}
                       >
                         <div class="p-header">
                           <span class="p-name">
@@ -1660,43 +2011,68 @@
                           </span>
                           <span class="p-type">{getProxyTypeLabel(proxy)}</span>
                         </div>
+                      </div>
 
-                        <div class="p-footer">
-                          <span class={healthClass}>{healthText}</span>
+                      <div class="p-footer">
+                        {#if (batchProgress?.running && batchProgress?.currentNode === proxyName) || testingProxy === proxyName}
+                          <span class="lat dim">
+                            <span class="lat-spinner"></span>
+                          </span>
+                        {:else}
+                          <button
+                            type="button"
+                            class="lat {healthClass}"
+                            title={getLatencyTitle(proxyName)}
+                            onmouseenter={(e) => handleBadgeMouseEnter(e, proxyName)}
+                            onmouseleave={handleBadgeMouseLeave}
+                            onclick={(e) => handleBadgeClick(e, proxyName)}
+                            onkeydown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleBadgeClick(e as any, proxyName);
+                              }
+                            }}
+                          >
+                            {healthText}
+                          </button>
+                        {/if}
+
+                        <div class="p-actions-wrap">
+                          {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
+                            <button
+                              type="button"
+                              class="btn-latency-test"
+                              onclick={() => testProxyLatency(proxyName)}
+                              disabled={testingProxy === proxyName}
+                              title={$t('proxies.test_single')}
+                            >
+                              {#if testingProxy === proxyName}
+                                <span
+                                  class="spinner"
+                                  style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
+                                ></span>
+                              {:else}
+                                <svg
+                                  width="12"
+                                  height="12"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  stroke-width="2"
+                                  style="opacity: 0.6;"
+                                  ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
+                                >
+                              {/if}
+                            </button>
+                          {/if}
+
                           {#if group.type === 'Selector'}
                             <span class="selector-dot" class:active={isActive}
                               >{isActive ? '●' : '○'}</span
                             >
                           {/if}
                         </div>
-                      </button>
-
-                      {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
-                        <button
-                          type="button"
-                          class="btn-latency-test"
-                          onclick={() => testProxyLatency(proxyName)}
-                          disabled={testingProxy === proxyName}
-                          title={$t('proxies.test_single')}
-                        >
-                          {#if testingProxy === proxyName}
-                            <span class="spinner" style="font-size: 10px; font-family: monospace;"
-                              >...</span
-                            >
-                          {:else}
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"
-                              style="opacity: 0.6;"
-                              ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
-                            >
-                          {/if}
-                        </button>
-                      {/if}
+                      </div>
                     </div>
                   {/each}
                 </div>
@@ -1810,6 +2186,19 @@
   onTabChange={(tab) => (diagnosticTab = tab)}
 />
 
+{#if batchProgress?.running}
+  <FloatingProgress progress={batchProgress} onCancel={() => batchTester.cancel()} />
+{/if}
+
+{#if activePopover}
+  <LatencyHistoryPopover
+    proxyName={activePopover.name}
+    history={activePopover.history}
+    anchorEl={activePopover.el}
+    onClose={() => (activePopover = null)}
+  />
+{/if}
+
 <style>
   /* Tabs styles */
   .tabs-container {
@@ -1859,9 +2248,10 @@
 
   .group-grid {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+    gap: var(--grid-gap, 16px);
     margin-bottom: 30px;
+    align-items: start;
   }
   .group-card {
     background: var(--bg-card);
@@ -1870,6 +2260,9 @@
     overflow: hidden;
     box-shadow: var(--shadow-sm);
     transition: all 0.2s ease;
+  }
+  .group-card.expanded {
+    grid-column: 1 / -1;
   }
   .group-card:hover {
     box-shadow:
@@ -1901,9 +2294,6 @@
     color: inherit;
     text-align: left;
   }
-  .group-card .gc-head:disabled {
-    cursor: default;
-  }
   .group-card .gc-head::before {
     content: '';
     position: absolute;
@@ -1925,7 +2315,7 @@
     display: flex;
     align-items: center;
     width: 100%;
-    gap: 10px;
+    gap: 8px;
   }
   .gc-head-row2 {
     display: flex;
@@ -2050,9 +2440,11 @@
 
   .proxy-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 8px;
     padding: 12px;
+    content-visibility: auto;
+    contain-intrinsic-size: 80px;
   }
 
   .proxy-card {
@@ -2061,6 +2453,8 @@
     border-radius: var(--radius-md);
     padding: 0;
     display: flex;
+    flex-direction: column;
+    justify-content: space-between;
     position: relative;
     transition: all var(--transition-fast);
     min-height: 84px;
@@ -2068,21 +2462,24 @@
   .proxy-select-btn {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
-    padding: 10px 12px;
     width: 100%;
-    height: 100%;
-    min-height: 84px;
     background: none;
     border: 0;
+    padding: 10px 12px 0;
     color: inherit;
     font: inherit;
     text-align: left;
     cursor: pointer;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    flex: 1;
   }
-  .proxy-select-btn:disabled {
+  .proxy-select-btn:disabled,
+  .proxy-select-btn[aria-disabled='true'] {
     cursor: default;
+  }
+  .proxy-select-btn:focus-visible {
+    outline: 2px solid var(--accent, #29c2f0);
+    outline-offset: -2px;
   }
   .proxy-card::after {
     content: '';
@@ -2131,17 +2528,20 @@
     align-items: center;
     justify-content: space-between;
     gap: 6px;
+    padding: 4px 12px 10px;
     margin-top: auto;
   }
   .p-actions-wrap {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
   .btn-latency-test {
     background: transparent;
     border: none;
     padding: 4px;
+    width: 24px;
+    height: 24px;
     color: var(--fg-dim);
     cursor: pointer;
     display: inline-flex;
@@ -2149,48 +2549,103 @@
     justify-content: center;
     transition: all 0.2s;
     border-radius: var(--radius-sm);
+    flex-shrink: 0;
   }
   .btn-latency-test:hover {
     color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .btn-latency-test:focus-visible {
+    outline: 2px solid var(--accent, #29c2f0);
+    outline-offset: 1px;
   }
 
-  .dot-container {
+  .health-bar {
+    display: flex;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-xs, 2px);
+    overflow: hidden;
+    margin: 4px 18px 12px;
+    transition: height 0.15s ease;
+  }
+  .health-bar:hover {
+    height: 6px;
+  }
+  .health-segment {
+    height: 100%;
+    transition: width 0.3s ease;
+  }
+  .health-segment.fast {
+    background: var(--success, #46d18a);
+  }
+  .health-segment.mid {
+    background: var(--warning, #f0b450);
+  }
+  .health-segment.bad {
+    background: var(--danger, #f4707f);
+  }
+  .health-segment.unchecked {
+    background: var(--fg-dim, #869cb3);
+    opacity: 0.4;
+  }
+
+  .group-filters {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     gap: 6px;
-    padding: 10px 18px 14px;
+    padding: 8px 16px 10px;
+    border-bottom: 1px solid var(--border);
   }
-  .dot-indicator {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    border: none;
-    padding: 0;
-    background: var(--fg-dim);
-    transition:
-      transform 0.2s,
-      box-shadow 0.2s;
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: var(--radius-full, 9999px);
+    font-size: 11px;
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--fg-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
   }
-  .dot-indicator:hover {
-    transform: scale(1.4);
+  .filter-chip:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--fg-primary);
   }
-  .dot-indicator.now {
-    box-shadow:
-      0 0 0 2px var(--bg-card),
-      0 0 0 4px var(--accent);
+  .filter-chip.active {
+    background: rgba(41, 194, 240, 0.12);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
   }
-  .dot-indicator.ok {
-    background: var(--success);
+  .filter-chip .filter-count {
+    font-size: 10px;
+    opacity: 0.7;
   }
-  .dot-indicator.mid {
-    background: var(--warning);
+
+  .group-actions-spacer {
+    flex: 1;
   }
-  .dot-indicator.bad {
-    background: var(--danger);
+
+  .group-test-btn {
+    margin-left: auto;
+    color: var(--accent);
+    border-color: rgba(41, 194, 240, 0.3);
   }
-  .dot-indicator.dim {
-    background: var(--fg-dim);
+
+  .group-test-btn:hover {
+    background: rgba(41, 194, 240, 0.15);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .group-test-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .selector-dot {
@@ -2202,10 +2657,22 @@
     color: var(--accent);
   }
 
+  .group-icon-wrap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+  }
+
   .brand-icon {
-    width: 16px;
-    height: 16px;
-    vertical-align: middle;
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    display: block;
+    flex-shrink: 0;
+    border-radius: 4px;
   }
 
   .lat {
@@ -2215,6 +2682,26 @@
     padding: 2px 6px;
     border-radius: 4px;
     white-space: nowrap;
+  }
+  button.lat {
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    font-family: var(--font-family-mono);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.15s ease;
+  }
+  button.lat:hover {
+    opacity: 0.85;
+  }
+  button.lat:focus-visible {
+    outline: 2px solid var(--accent, #29c2f0);
+    outline-offset: 1px;
   }
   .lat.ok {
     color: var(--success);
@@ -2257,8 +2744,154 @@
     transform: rotate(180deg);
   }
 
+  /* Compact Observatory Widget */
+  .obs-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg, 10px);
+    margin-bottom: 16px;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    padding: 0;
+  }
+
+  .obs-head {
+    display: flex;
+    align-items: center;
+    padding: 6px 14px;
+    background: linear-gradient(
+      135deg,
+      var(--bg-group-head-from, rgba(20, 51, 79, 0.6)),
+      var(--bg-group-head-to, rgba(16, 42, 68, 0.7))
+    );
+    border-bottom: 1px solid var(--border-strong, var(--border));
+  }
+
+  .obs-head .card-title.obs-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--fg-secondary);
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .obs-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    margin: 0;
+    border: 0;
+  }
+
+  .obs-stat-box {
+    padding: 8px 14px 10px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: transparent;
+  }
+
+  .obs-stat-box:last-child {
+    border-right: 0;
+  }
+
+  .obs-stat-box .stat-label {
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    margin-bottom: 2px;
+    line-height: 1.2;
+  }
+
+  .obs-val-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .obs-stat-box .stat-value {
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+
+  .obs-stat-box .stat-value.ok {
+    color: var(--success);
+  }
+
+  .obs-stat-box .stat-value.warn {
+    color: var(--warning);
+  }
+
+  .obs-stat-box .stat-value.err {
+    color: var(--danger);
+  }
+
+  .obs-stat-box .res-sub {
+    font-size: 11px;
+    margin-top: 0;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 768px) {
+    .obs-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .obs-stat-box:nth-child(2) {
+      border-right: 0;
+    }
+    .obs-stat-box:nth-child(1),
+    .obs-stat-box:nth-child(2) {
+      border-bottom: 1px solid var(--border);
+    }
+  }
+
+  @media (max-width: 480px) {
+    .obs-stat-box {
+      padding: 6px 10px 8px;
+    }
+    .obs-stat-box .stat-value {
+      font-size: 15px;
+    }
+    .obs-stat-box .res-sub {
+      font-size: 10px;
+    }
+  }
+
   /* Mobile: proxy cards stack, observatory stats handled globally at 768px */
   @media (max-width: 640px) {
+    .ph-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    .ph-actions .group-search {
+      order: -1;
+      flex: 1 1 100%;
+      width: 100%;
+      min-width: 100%;
+      font-size: 13px;
+      padding: 8px 12px;
+    }
+
+    .ph-actions .btn {
+      flex: 1 1 calc(50% - 4px);
+      justify-content: center;
+      padding: 8px 10px;
+      font-size: 12px;
+      min-height: 40px;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
+    }
+
     .group-grid {
       gap: 10px;
     }
@@ -2273,8 +2906,14 @@
       padding: 8px;
     }
     .proxy-card {
-      padding: 8px 10px;
+      padding: 0;
       min-height: 70px;
+    }
+    .proxy-select-btn {
+      padding: 8px 10px 0;
+    }
+    .proxy-card .p-footer {
+      padding: 2px 10px 8px;
     }
     .proxy-card .p-name {
       font-size: 12px;

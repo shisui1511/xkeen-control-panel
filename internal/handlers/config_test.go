@@ -432,28 +432,45 @@ func TestConfigRead_FileNotFound(t *testing.T) {
 	}
 }
 
-// TestConfigRead_Success verifies that ConfigRead successfully reads an existing config file.
+// TestConfigRead_Success verifies that ConfigRead successfully reads an existing config file and sets dynamic Content-Type.
 func TestConfigRead_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	api := newTestAPI(t, tmpDir)
 
-	targetPath := filepath.Join(tmpDir, "test.json")
-	content := []byte(`{"hello": "world"}`)
-	if err := os.WriteFile(targetPath, content, 0644); err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		fileName   string
+		content    string
+		expectedCT string
+	}{
+		{"test.json", `{"hello": "world"}`, "application/json; charset=utf-8"},
+		{"test.yaml", "port: 7890\nproxies: []", "text/yaml; charset=utf-8"},
+		{"test.yml", "port: 7890\nproxies: []", "text/yaml; charset=utf-8"},
+		{"test.txt", "some plain text", "text/plain; charset=utf-8"},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/config/read?path="+targetPath, nil)
-	rr := httptest.NewRecorder()
+	for _, tt := range tests {
+		targetPath := filepath.Join(tmpDir, tt.fileName)
+		if err := os.WriteFile(targetPath, []byte(tt.content), 0644); err != nil {
+			t.Fatal(err)
+		}
 
-	api.ConfigRead(rr, req)
+		req := httptest.NewRequest(http.MethodGet, "/api/config/read?path="+targetPath, nil)
+		rr := httptest.NewRecorder()
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d: %s", rr.Code, rr.Body.String())
-	}
+		api.ConfigRead(rr, req)
 
-	if rr.Body.String() != string(content) {
-		t.Errorf("expected content %q, got %q", string(content), rr.Body.String())
+		if rr.Code != http.StatusOK {
+			t.Errorf("[%s] expected status 200, got %d: %s", tt.fileName, rr.Code, rr.Body.String())
+		}
+
+		if rr.Body.String() != tt.content {
+			t.Errorf("[%s] expected content %q, got %q", tt.fileName, tt.content, rr.Body.String())
+		}
+
+		ct := rr.Header().Get("Content-Type")
+		if ct != tt.expectedCT {
+			t.Errorf("[%s] expected Content-Type %q, got %q", tt.fileName, tt.expectedCT, ct)
+		}
 	}
 }
 

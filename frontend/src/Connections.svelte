@@ -7,7 +7,6 @@
   import EmptyState from './components/EmptyState.svelte';
   import PlayIcon from './lib/components/icons/Play.svelte';
   import WarningIcon from './lib/components/icons/Warning.svelte';
-  import Icon from './lib/components/Icon.svelte';
 
   interface Connection {
     id: string;
@@ -29,7 +28,20 @@
     rulePayload: string;
   }
 
+  interface ClientInfo {
+    ip: string;
+    mac: string;
+    name?: string;
+    hostname?: string;
+    display_name: string;
+    active: boolean;
+    link?: string;
+    interface?: string;
+  }
+
   let connections = $state<Connection[]>([]);
+  let clients = $state<Record<string, ClientInfo>>({});
+  let clientsRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
   interface TrafficHistory {
     upload: number;
@@ -57,47 +69,20 @@
   let filterRule = $state('');
   let filterProxy = $state('');
 
-  // Source-name toggle
-  let showProcessName = $state(false);
-  let processModePatchPending = $state(false);
-
   let uniqueRules = $derived([...new Set(connections.map((c) => c.rule).filter(Boolean))].sort());
   let uniqueChains = $derived(
     [...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort()
   );
-  let isMihomoActive = $derived($capabilities === null || $capabilities.mihomo.reachable);
 
-  async function loadProcessMode() {
+  async function loadClients() {
     try {
-      const res = await apiFetch('/api/mihomo/proxy/configs');
+      const res = await apiFetch('/api/system/clients');
       if (res.ok) {
-        const cfg = await res.json();
-        showProcessName = cfg['find-process-mode'] === 'always';
+        const data = await res.json();
+        clients = data.clients || {};
       }
     } catch (e: any) {
       if (e?.status === 401) return;
-    }
-  }
-
-  async function onToggleProcessName() {
-    if (processModePatchPending) return;
-    processModePatchPending = true;
-    try {
-      const res = await apiFetch('/api/mihomo/proxy/configs', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ 'find-process-mode': showProcessName ? 'always' : 'off' })
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch (e: any) {
-      // Revert on network error or non-2xx HTTP response
-      showProcessName = !showProcessName;
-      if (e?.status === 401) return;
-      showToast('error', e instanceof Error ? e.message : String(e));
-    } finally {
-      processModePatchPending = false;
     }
   }
 
@@ -215,12 +200,15 @@
   }
 
   async function closeAllConnections() {
-    const confirmed = await showConfirm(
-      $t('conn.close_all'),
-      $t('conn.close_all_confirm'),
-      $t('app.yes'),
-      $t('app.no')
-    );
+    const count = connections.length;
+    const confirmed = await showConfirm({
+      title: $t('conn.close_all_title'),
+      message: $t('conn.close_all_desc', { count }),
+      consequence: $t('conn.close_all_consequence'),
+      variant: 'danger',
+      confirmLabel: $t('conn.close_all_confirm_btn'),
+      cancelLabel: $t('app.cancel')
+    });
     if (!confirmed) return;
     try {
       const res = await apiFetch('/api/mihomo/proxy/connections', {
@@ -250,9 +238,21 @@
     return conn.metadata.host || conn.metadata.destinationIP;
   }
 
-  function getSourceName(conn: Connection): string {
-    if (showProcessName && conn.metadata.process) return conn.metadata.process;
-    return `${conn.metadata.sourceIP}:${conn.metadata.sourcePort}`;
+  function getClientForConn(conn: Connection): ClientInfo | undefined {
+    const ip = (conn.metadata.sourceIP || '').trim();
+    if (!ip) return undefined;
+    return clients[ip];
+  }
+
+  function formatEndpoint(conn: Connection): string {
+    const ip = (conn.metadata.sourceIP || '').trim();
+    const port = conn.metadata.sourcePort;
+    const hasValidPort = port !== undefined && port !== null && Number(port) > 0;
+
+    if (!ip) {
+      return hasValidPort ? `localhost:${port}` : 'localhost';
+    }
+    return hasValidPort ? `${ip}:${port}` : ip;
   }
 
   function getHostTooltip(conn: Connection): string {
@@ -318,8 +318,22 @@
   let filteredConnections = $derived(
     connections.filter((conn) => {
       if (filterSource) {
-        const sourceName = getSourceName(conn);
-        if (!sourceName.toLowerCase().includes(filterSource.toLowerCase())) return false;
+        const q = filterSource.toLowerCase();
+        const endpoint = formatEndpoint(conn).toLowerCase();
+        const process = (conn.metadata.process || '').toLowerCase();
+        const client = getClientForConn(conn);
+        const clientName = (client?.display_name || '').toLowerCase();
+        const clientHost = (client?.hostname || '').toLowerCase();
+        const clientMac = (client?.mac || '').toLowerCase();
+
+        const matches =
+          endpoint.includes(q) ||
+          process.includes(q) ||
+          clientName.includes(q) ||
+          clientHost.includes(q) ||
+          clientMac.includes(q);
+
+        if (!matches) return false;
       }
       if (
         filterDest &&
@@ -334,15 +348,20 @@
   );
 
   onMount(() => {
+    loadClients();
+    clientsRefreshTimer = setInterval(loadClients, 20000);
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       loading = true;
       connectWS();
-      loadProcessMode();
     }
   });
 
   onDestroy(() => {
     destroyed = true;
+    if (clientsRefreshTimer) {
+      clearInterval(clientsRefreshTimer);
+      clientsRefreshTimer = null;
+    }
     disconnectWS();
   });
 </script>
@@ -365,24 +384,6 @@
       <p class="sub">{$t('conn.active')}</p>
     </div>
     <div class="ph-actions">
-      <label
-        class="toggle-label"
-        class:disabled={!isMihomoActive}
-        title={!isMihomoActive ? $t('conn.process_mode_disabled_hint') : ''}
-        for="show-process-name-toggle"
-      >
-        <label class="toggle-switch">
-          <input
-            id="show-process-name-toggle"
-            type="checkbox"
-            bind:checked={showProcessName}
-            onchange={onToggleProcessName}
-            disabled={!isMihomoActive || processModePatchPending}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-        {$t('conn.show_process_name')}
-      </label>
       <button
         class="btn btn-secondary"
         style="color:var(--danger);"
@@ -423,7 +424,7 @@
         <input
           id="filter-source"
           type="text"
-          placeholder={$t('conn.source') + ' (IP)...'}
+          placeholder={$t('conn.source_filter_placeholder')}
           bind:value={filterSource}
           class="filter-input filter-src"
           title={$t('conn.source')}
@@ -464,10 +465,7 @@
       </div>
     </div>
 
-    <div
-      class="stats mb-2"
-      style="display: flex; gap: 16px; font-size: 13px; color: var(--fg-dim); align-items: center;"
-    >
+    <div class="stats mb-2">
       <span class="stat"
         ><b>{connections.length}</b>
         {$t('conn.total', { count: '' }).replace(/:\s*$/, '').trim()}</span
@@ -513,8 +511,36 @@
           {:else}
             {#each filteredConnections as conn (conn.id)}
               {@const speed = connectionSpeeds.get(conn.id)}
+              {@const client = getClientForConn(conn)}
               <tr class="conn-row">
-                <td class="mono col-src">{getSourceName(conn)}</td>
+                <td class="col-src">
+                  <div class="src-cell">
+                    {#if client && client.display_name && client.display_name !== client.ip}
+                      <div
+                        class="src-main"
+                        title={`${client.display_name}${client.mac ? ' (' + client.mac + ')' : ''}`}
+                      >
+                        <span class="src-name">{client.display_name}</span>
+                        {#if conn.metadata.process}
+                          <span
+                            class="badge-process-mini"
+                            title={`${$t('conn.process_name')}: ${conn.metadata.process}`}
+                          >
+                            {conn.metadata.process}
+                          </span>
+                        {/if}
+                      </div>
+                      <span class="mono src-sub">{formatEndpoint(conn)}</span>
+                    {:else if conn.metadata.process}
+                      <div class="src-main">
+                        <span class="badge-process-mini">{conn.metadata.process}</span>
+                      </div>
+                      <span class="mono src-sub">{formatEndpoint(conn)}</span>
+                    {:else}
+                      <span class="mono src-main-ip">{formatEndpoint(conn)}</span>
+                    {/if}
+                  </div>
+                </td>
                 <td class="mono col-host">
                   <span title={getHostTooltip(conn)} class="host-cell">
                     {getHost(conn)}
@@ -566,6 +592,7 @@
                     style="padding: 4px 8px; color: var(--danger); border-color: transparent;"
                     onclick={() => closeConnection(conn.id)}
                     title={$t('app.close')}
+                    aria-label={$t('app.close')}
                   >
                     ×
                   </button>
@@ -597,7 +624,7 @@
   .filters .filter-select {
     flex: 1;
     min-width: 140px;
-    height: 34px;
+    height: var(--input-h, 34px);
     padding: 6px 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm, 6px);
@@ -631,13 +658,6 @@
     margin-top: 2px;
   }
 
-  /* Toggle disabled state */
-  .toggle-label.disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-    pointer-events: none;
-  }
-
   /* Live indicator */
   .live-indicator {
     display: inline-flex;
@@ -666,8 +686,10 @@
 
   .conn-table-container {
     overflow-x: auto;
+    width: 100%;
   }
   .connections-table {
+    width: 100%;
     min-width: 800px;
   }
   .rule-payload {
@@ -675,9 +697,30 @@
     color: var(--fg-dim);
     margin-top: 3px;
   }
-  .conn-row:hover {
-    background: var(--bg-hover, rgba(255, 255, 255, 0.02));
+  .btn-close-conn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    transition:
+      background var(--transition-fast),
+      color var(--transition-fast);
   }
+
+  /* Расширенный сенсорный хитбокс 44x44px без изменения визуального размера строки */
+  .btn-close-conn::before {
+    content: '';
+    position: absolute;
+    inset: -8px;
+    min-width: 44px;
+    min-height: 44px;
+    border-radius: var(--radius-sm);
+  }
+
   .btn-close-conn:hover {
     background: var(--danger) !important;
     color: white !important;
@@ -686,7 +729,7 @@
   /* Host cell */
   .host-cell {
     display: inline-block;
-    max-width: 200px;
+    max-width: min(40vw, 420px);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -715,6 +758,62 @@
     background: rgba(167, 139, 250, 0.15);
     color: #a78bfa;
     border: 1px solid rgba(167, 139, 250, 0.25);
+  }
+
+  /* Source cell with client device names and process info */
+  .src-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+    justify-content: center;
+    min-width: 120px;
+    max-width: min(30vw, 320px);
+  }
+  .src-main {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+  }
+  .src-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+  }
+  .src-main-ip {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--fg-primary);
+    line-height: 1.25;
+  }
+  .src-sub {
+    font-size: 11px;
+    color: var(--fg-dim);
+    line-height: 1.2;
+    letter-spacing: 0.01em;
+    opacity: 0.85;
+  }
+  .badge-process-mini {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: rgba(167, 139, 250, 0.15);
+    color: #c4b5fd;
+    border: 1px solid rgba(167, 139, 250, 0.25);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 110px;
   }
 
   /* Column priority — hide tier-2/3 columns on mobile */

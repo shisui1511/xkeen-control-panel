@@ -45,6 +45,14 @@ test.describe('Subscriptions UI Polish E2E tests', () => {
             }
           })
         });
+      } else if (url.includes('/api/mihomo/groups')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            groups: ['Selective', 'Proxy']
+          })
+        });
       } else if (url.includes('/api/config/read')) {
         // Mock config.yaml with proxy-groups
         await route.fulfill({
