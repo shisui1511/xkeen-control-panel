@@ -105,16 +105,18 @@ func (s *PTYService) StartSession(cols, rows int) (*PTYSession, error) {
 		return nil, ErrMaxSessionsReached
 	}
 
-	shellPath := s.detectShell()
-	if cols <= 0 {
-		cols = 80
+	var winCols uint16 = 80
+	if cols >= 1 && cols <= 1000 {
+		winCols = uint16(cols)
 	} else if cols > 1000 {
-		cols = 1000
+		winCols = 1000
 	}
-	if rows <= 0 {
-		rows = 24
+
+	var winRows uint16 = 24
+	if rows >= 1 && rows <= 500 {
+		winRows = uint16(rows)
 	} else if rows > 500 {
-		rows = 500
+		winRows = 500
 	}
 
 	var cmd *exec.Cmd
@@ -129,8 +131,8 @@ func (s *PTYService) StartSession(cols, rows int) (*PTYSession, error) {
 	}
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
-		Rows: uint16(rows),
-		Cols: uint16(cols),
+		Rows: winRows,
+		Cols: winCols,
 	})
 	if err != nil {
 		s.mu.Unlock()
@@ -173,14 +175,18 @@ func (s *PTYSession) Write(p []byte) (n int, err error) {
 
 // Resize updates the terminal geometry
 func (s *PTYSession) Resize(cols, rows int) error {
-	if cols <= 0 || rows <= 0 {
-		return errors.New("invalid terminal dimensions")
+	var winCols uint16 = 80
+	if cols >= 1 && cols <= 1000 {
+		winCols = uint16(cols)
+	} else if cols > 1000 {
+		winCols = 1000
 	}
-	if cols > 1000 {
-		cols = 1000
-	}
-	if rows > 500 {
-		rows = 500
+
+	var winRows uint16 = 24
+	if rows >= 1 && rows <= 500 {
+		winRows = uint16(rows)
+	} else if rows > 500 {
+		winRows = 500
 	}
 
 	s.service.mu.Lock()
@@ -191,8 +197,8 @@ func (s *PTYSession) Resize(cols, rows int) error {
 	}
 
 	return pty.Setsize(s.ptmx, &pty.Winsize{
-		Rows: uint16(rows),
-		Cols: uint16(cols),
+		Rows: winRows,
+		Cols: winCols,
 	})
 }
 
