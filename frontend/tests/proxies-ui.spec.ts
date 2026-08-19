@@ -23,7 +23,8 @@ const MOCK_PROXIES = {
         'SG-Node-11',
         'GB-Node-12'
       ],
-      alive: true
+      alive: true,
+      icon: 'https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png'
     },
     // URLTest group with 4 proxies
     FastGroup: {
@@ -297,8 +298,8 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
 
   test('Brand icons - YouTube group displays branding', async ({ page }) => {
     const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
-    // Brand icon SVG should be present in the header
-    const brandIcon = ytGroup.locator('.gc-head svg.brand-icon');
+    // Brand icon image should be present in the header
+    const brandIcon = ytGroup.locator('.gc-head img.brand-icon');
     await expect(brandIcon).toBeVisible();
   });
 

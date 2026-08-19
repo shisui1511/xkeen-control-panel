@@ -63,6 +63,7 @@
     alive?: boolean;
     delay?: number;
     history?: { time: string; delay: number }[];
+    icon?: string;
   }
 
   interface ObservatoryStats {
@@ -200,112 +201,6 @@
   let diagnosticLoading = $state(false);
   let parseReportData = $state<any>(null);
   let rawResponseData = $state<any>(null);
-
-  // Auto-branding definitions
-  const brandIcons: Record<string, { svg: string; color: string }> = {
-    youtube: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.163a3.003 3.003 0 0 0-2.11-2.107C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.388.511a3.003 3.003 0 0 0-2.11 2.107C0 8.053 0 12 0 12s0 3.947.502 5.837a3.003 3.003 0 0 0 2.11 2.107C4.495 20.455 12 20.455 12 20.455s7.505 0 9.388-.511a3.003 3.003 0 0 0 2.11-2.107C24 15.947 24 12 24 12s0-3.947-.502-5.837zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`,
-      color: '#FF0000'
-    },
-    discord: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.094 13.094 0 0 1-1.873-.894.077.077 0 0 1-.008-.128c.126-.093.252-.19.372-.287a.075.075 0 0 1 .077-.011c3.92 1.793 8.18 1.793 12.061 0a.073.073 0 0 1 .078.009c.12.099.246.195.373.289a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.894.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.078.078 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.156-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.156 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.156-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.156 2.418z"/></svg>`,
-      color: '#5865F2'
-    },
-    telegram: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.017c.24-.213-.054-.334-.373-.12l-6.869 4.325-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.458c.536-.196 1.006.128.832.978z"/></svg>`,
-      color: '#26A5E4'
-    },
-    tg: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.017c.24-.213-.054-.334-.373-.12l-6.869 4.325-2.96-.924c-.643-.204-.657-.643.136-.953l11.57-4.458c.536-.196 1.006.128.832.978z"/></svg>`,
-      color: '#26A5E4'
-    },
-    spotify: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.6 0 12 0zm5.5 17.3c-.2.3-.6.4-.9.2-2.3-1.4-5.3-1.8-8.8-1-.3.1-.7-.1-.8-.4-.1-.3.1-.7.4-.8 3.8-.9 7.1-.5 9.7 1.1.3.1.4.5.2.9zm1.5-3.3c-.3.4-.8.5-1.2.3-2.7-1.6-6.8-2.1-10-1.1-.4.1-.9-.1-1-.6-.1-.4.1-.9.6-1 3.7-1.1 8.2-.6 11.3 1.3.3.2.5.8.3 1.1zm.1-3.4C15.6 8.5 9.7 8.3 6.3 9.3c-.5.2-1.1-.1-1.2-.6-.2-.5.1-1.1.6-1.2 3.9-1.2 10.4-1 14.5 1.5.5.3.6 1 .3 1.5-.3.5-1 .6-1.4.3z"/></svg>`,
-      color: '#1DB954'
-    },
-    steam: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .002a11.996 11.996 0 0 0-11.968 10.74L6.16 14.9a3.298 3.298 0 0 1 3.27-2.903l2.802-4.004a3.3 3.3 0 1 1 3.3 3.3l-4.004 2.802a3.298 3.298 0 0 1-2.903 3.27l4.158 6.13A12 12 0 1 0 12 .002zm-2.57 15.6a1.65 1.65 0 1 0 0-3.3 1.65 1.65 0 0 0 0 3.3z"/></svg>`,
-      color: 'var(--fg-primary)'
-    },
-    reddit: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M24 11.5c0-1.65-1.35-3-3-3-.96 0-1.86.48-2.42 1.24-1.64-1-3.85-1.64-6.23-1.72l1.32-4.17 4.31.91c0 1.1.9 2 2 2 1.1 0 2-.9 2-2s-.9-2-2-2c-.93 0-1.7.63-1.92 1.48l-4.82-1.02c-.18-.04-.38.07-.44.25l-1.5 4.74c-2.43.06-4.67.69-6.34 1.71-.56-.74-1.46-1.22-2.42-1.22-1.65 0-3 1.35-3 3 0 1.11.61 2.08 1.51 2.6-.08.4-.12.8-.12 1.2 0 4.14 4.83 7.5 10.78 7.5s10.78-3.36 10.78-7.5c0-.4-.04-.8-.12-1.2.9-.52 1.51-1.49 1.51-2.6z"/></svg>`,
-      color: '#FF4500'
-    },
-    github: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577v-2.234c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22v3.293c0 .319.22.694.825.576C20.565 21.795 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg>`,
-      color: 'var(--fg-primary)'
-    },
-    gh: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.11.82-.26.82-.577v-2.234c-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22v3.293c0 .319.22.694.825.576C20.565 21.795 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg>`,
-      color: 'var(--fg-primary)'
-    },
-    google: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.113-5.136 4.113-3.48 0-6.3-2.82-6.3-6.3 0-3.48 2.82-6.3 6.3-6.3 1.635 0 3.118.621 4.254 1.636l3.18-3.18C19.124 2.4 15.938 1.2 12.24 1.2 6.136 1.2 1.2 6.136 1.2 1.2 12.24s4.936 11.04 11.04 11.04c6.375 0 10.596-4.485 10.596-10.785 0-.727-.067-1.425-.195-2.1H12.24z"/></svg>`,
-      color: 'var(--accent)'
-    },
-    netflix: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M15.986 0L8.014 11.562V0H4.5v24h3.514l7.972-11.562V24H19.5V0h-3.514z"/></svg>`,
-      color: '#E50914'
-    },
-    twitch: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg>`,
-      color: '#9146FF'
-    },
-    meta: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M15.282 5.093c.895 0 1.706.326 2.378.96 1.233 1.157 1.83 2.766 1.83 4.887 0 2.217-.655 3.916-1.892 4.981-.663.57-1.439.865-2.316.865-.632 0-1.242-.234-1.758-.636-.263-.207-.506-.44-.725-.7l-.804.896-.06.059c-.496.438-1.12.681-1.805.681-.877 0-1.653-.295-2.316-.865-1.237-1.065-1.892-2.764-1.892-4.98 0-2.122.597-3.73 1.83-4.888.672-.634 1.483-.96 2.378-.96.637 0 1.25.234 1.769.64.258.2.496.427.712.678l.805-.898.06-.057c.49-.43 1.11-.663 1.79-.663zm0-2.093c-1.3 0-2.455.518-3.282 1.353-.827-.835-1.982-1.353-3.282-1.353-2.11 0-3.957.905-5.228 2.505C1.196 7.157.4 9.423.4 12.016c0 2.64.757 4.9 2.052 6.55 1.272 1.62 3.12 2.527 5.266 2.527 1.3 0 2.455-.518 3.282-1.353.827.835 1.982 1.353 3.282 1.353 2.147 0 3.994-.906 5.266-2.527C20.843 16.917 21.6 14.657 21.6 12.016c0-2.593-.796-4.86-2.09-6.51-1.27-1.6-3.118-2.506-5.228-2.506z"/></svg>`,
-      color: '#0668E1'
-    },
-    speedtest: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>`,
-      color: '#00F0FF'
-    },
-    ai: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>`,
-      color: 'var(--accent)'
-    },
-    openai: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>`,
-      color: 'var(--accent)'
-    },
-    chatgpt: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></svg>`,
-      color: 'var(--accent)'
-    },
-    cdn: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25"/><path d="M8 16h.01M8 20h.01M12 18h.01M12 22h.01M16 16h.01M16 20h.01"/></svg>`,
-      color: '#A0A0A0'
-    },
-    tiktok: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12.53.07a8 8 0 0 1 .18 1.7 5.6 5.6 0 0 0 4.14 5.2 8 8 0 0 1-.22 1.6 7.1 7.1 0 0 1-3.52-1 8 8 0 0 1-.18-1.7 5.6 5.6 0 0 0-4.14-5.2v14a4.13 4.13 0 1 1-4.24-4.13h1.36v-1.6H4.15A5.73 5.73 0 1 0 9.88 20V0h2.65z"/></svg>`,
-      color: '#FE2C55'
-    },
-    direct: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`,
-      color: 'var(--success)'
-    },
-    reject: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>`,
-      color: 'var(--danger)'
-    },
-    block: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>`,
-      color: 'var(--danger)'
-    },
-    fallback: {
-      svg: `<svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
-      color: 'var(--warning)'
-    }
-  };
-
-  function getGroupIcon(groupName: string): { svg: string; color: string } | null {
-    const lower = groupName.toLowerCase();
-    for (const key of Object.keys(brandIcons)) {
-      if (lower.includes(key)) {
-        return brandIcons[key];
-      }
-    }
-    return null;
-  }
 
   let searchDebouncedQuery = $state('');
   let searchTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -642,7 +537,8 @@
           all: p.all || [],
           alive: p.alive,
           delay: p.history?.[p.history.length - 1]?.delay,
-          history: p.history || []
+          history: p.history || [],
+          icon: String(p.icon || '').trim()
         }));
 
       const groupNames = new Set(mappedGroups.map((g) => g.name));
@@ -2028,7 +1924,6 @@
           {#each filteredGroups as group}
             {@const isCollapsed = collapsedGroups.has(group.name)}
             {@const nodes = getFilteredNodes(group, searchDebouncedQuery)}
-            {@const icon = getGroupIcon(group.name)}
             <div class="group-card" class:expanded={!isCollapsed}>
               <button
                 type="button"
@@ -2037,13 +1932,19 @@
                 onclick={() => toggleCollapse(group.name)}
               >
                 <div class="gc-head-row1">
-                  {#if icon}
-                    <span
-                      class="group-icon-wrap"
-                      style="color: {icon.color}; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-right: 6px;"
-                    >
-                      <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                      {@html icon.svg}
+                  {#if group.icon}
+                    <span class="group-icon-wrap" aria-hidden="true">
+                      <img
+                        src={group.icon}
+                        alt=""
+                        loading="lazy"
+                        referrerpolicy="no-referrer"
+                        class="brand-icon"
+                        onerror={(e) => {
+                          const target = e.currentTarget as HTMLElement;
+                          if (target) target.style.display = 'none';
+                        }}
+                      />
                     </span>
                   {/if}
                   <span class="name">{group.name}</span>
@@ -2524,7 +2425,7 @@
     display: flex;
     align-items: center;
     width: 100%;
-    gap: 10px;
+    gap: 8px;
   }
   .gc-head-row2 {
     display: flex;
@@ -2853,10 +2754,22 @@
     color: var(--accent);
   }
 
+  .group-icon-wrap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+  }
+
   .brand-icon {
-    width: 16px;
-    height: 16px;
-    vertical-align: middle;
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    display: block;
+    flex-shrink: 0;
+    border-radius: 4px;
   }
 
   .lat {
