@@ -269,6 +269,41 @@ rules: []
 	}
 }
 
+func TestReplaceMihomoProxyProvider_CaseInsensitive(t *testing.T) {
+	yaml := `port: 7890
+proxy-providers:
+  Acme_Sub:
+    type: http
+    url: http://example.com/acme
+  Other_Sub:
+    type: http
+    url: http://example.com/other
+`
+	// Update with different casing
+	newBlock := `  acme_sub:
+    type: http
+    url: http://example.com/acme_updated`
+	result := ReplaceMihomoProxyProvider(yaml, "acme_sub", newBlock)
+	if !strings.Contains(result, "http://example.com/acme_updated") {
+		t.Error("Acme_Sub should be updated despite case difference")
+	}
+	if strings.Contains(result, "http://example.com/acme\n") {
+		t.Error("old Acme_Sub url should be replaced")
+	}
+	if strings.Count(result, "url: http://example.com/acme") != 1 {
+		t.Errorf("expected exactly 1 acme provider block, got output:\n%s", result)
+	}
+
+	// Delete with different casing
+	deleted := ReplaceMihomoProxyProvider(yaml, "ACME_SUB", "")
+	if strings.Contains(deleted, "Acme_Sub:") || strings.Contains(deleted, "ACME_SUB:") {
+		t.Errorf("Acme_Sub should be deleted case-insensitively, got:\n%s", deleted)
+	}
+	if !strings.Contains(deleted, "Other_Sub:") {
+		t.Error("Other_Sub should be preserved")
+	}
+}
+
 func TestReplaceMihomoProxyProvider_NoSection(t *testing.T) {
 	yaml := `port: 7890
 rules: []

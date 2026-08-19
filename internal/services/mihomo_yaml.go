@@ -613,7 +613,7 @@ func ReplaceMihomoProxyProvider(content string, providerID string, block string)
 
 	remainingCount := 0
 	for _, b := range blocks {
-		if b.ID != providerID {
+		if !strings.EqualFold(b.ID, providerID) {
 			remainingCount++
 		}
 	}
@@ -639,7 +639,7 @@ func ReplaceMihomoProxyProvider(content string, providerID string, block string)
 
 	replaced := false
 	for _, b := range blocks {
-		if b.ID == providerID {
+		if strings.EqualFold(b.ID, providerID) {
 			if block != "" {
 				blockLines := strings.Split(strings.TrimRight(block, "\n"), "\n")
 				out = append(out, blockLines...)
