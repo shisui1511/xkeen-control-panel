@@ -339,14 +339,27 @@
             class:mihomo={!sub.enable_xray && sub.enable_mihomo}
             class:both={sub.enable_xray && sub.enable_mihomo}
             class:disabled={!sub.enabled}
-            class:has-error={!!sub.last_error}
+            class:cached-fallback={!!sub.last_error &&
+              (sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0) > 0}
+            class:has-error={!!sub.last_error &&
+              (sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0) === 0}
             title={sub.last_error || (sub.enabled ? $t('app.active') : $t('app.disabled'))}
           ></div>
 
           <h2 class="sub-name">
             {sub.profile_title || sub.name}
           </h2>
-          {#if isFormatError(sub.last_error)}
+          {#if sub.last_error && (sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0) > 0}
+            <span
+              class="badge badge-warning"
+              style="margin-left: 8px;"
+              title={$t('subscr.cached_fallback_tooltip')
+                .replace('{date}', formatDate(sub.last_update))
+                .replace('{error}', sub.last_error)}
+            >
+              {$t('subscr.cached_fallback')}
+            </span>
+          {:else if isFormatError(sub.last_error)}
             <span class="badge badge-error" style="margin-left: 8px;">
               {$t('subscr.format_error')}
             </span>
@@ -452,11 +465,21 @@
       </div>
 
       {#if sub.last_error}
+        {@const nodeCount = sub.mihomo_provider?.node_count ?? sub.proxy_count ?? 0}
+        {@const errorColor = nodeCount > 0 ? 'var(--warning, #f0b450)' : 'var(--danger)'}
         <div
           class="sub-error-details"
-          style="font-size: 12.5px; color: var(--danger); margin: -4px 0 8px 34px; line-height: 1.4; font-family: var(--font-family-sans);"
+          style="font-size: 12.5px; color: {errorColor}; margin: -4px 0 8px 34px; line-height: 1.4; font-family: var(--font-family-sans); word-break: break-word;"
         >
-          {sub.last_error}
+          {#if sub.last_error.includes('HTML landing page')}
+            {$t('subscr.error_html_stub')}
+          {:else if sub.last_error.includes('0 valid nodes')}
+            {$t('subscr.error_zero_nodes')}
+          {:else if sub.last_error.includes('upstream unavailable') || sub.last_error.includes('Upstream unreachable')}
+            {$t('subscr.error_upstream_unreachable')}
+          {:else}
+            {sub.last_error}
+          {/if}
         </div>
       {/if}
 
@@ -742,6 +765,10 @@
   .type-dot.disabled {
     background: var(--fg-faint);
     box-shadow: none;
+  }
+  .type-dot.cached-fallback {
+    background: var(--warning, #f0b450);
+    box-shadow: 0 0 8px var(--warning, #f0b450);
   }
   .type-dot.has-error {
     background: var(--danger);
