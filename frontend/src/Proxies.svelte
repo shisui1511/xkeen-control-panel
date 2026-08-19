@@ -2029,7 +2029,7 @@
             {@const isCollapsed = collapsedGroups.has(group.name)}
             {@const nodes = getFilteredNodes(group, searchDebouncedQuery)}
             {@const icon = getGroupIcon(group.name)}
-            <div class="group-card">
+            <div class="group-card" class:expanded={!isCollapsed}>
               <button
                 type="button"
                 class="gc-head collapsible"
@@ -2469,6 +2469,9 @@
     overflow: hidden;
     box-shadow: var(--shadow-sm);
     transition: all 0.2s ease;
+  }
+  .group-card.expanded {
+    grid-column: 1 / -1;
   }
   .group-card:hover {
     box-shadow:
