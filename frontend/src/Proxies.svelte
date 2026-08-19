@@ -2036,30 +2036,61 @@
                           </span>
                           <span class="p-type">{getProxyTypeLabel(proxy)}</span>
                         </div>
+                      </div>
 
-                        <div class="p-footer">
-                          {#if (batchProgress?.running && batchProgress?.currentNode === proxyName) || testingProxy === proxyName}
-                            <span class="lat dim">
-                              <span class="lat-spinner"></span>
-                            </span>
-                          {:else}
-                            <span
-                              class={healthClass}
-                              title={getLatencyTitle(proxyName)}
-                              onmouseenter={(e) => handleBadgeMouseEnter(e, proxyName)}
-                              onmouseleave={handleBadgeMouseLeave}
-                              onclick={(e) => handleBadgeClick(e, proxyName)}
-                              role="button"
-                              tabindex="0"
-                              onkeydown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  handleBadgeClick(e as any, proxyName);
-                                }
-                              }}
+                      <div class="p-footer">
+                        {#if (batchProgress?.running && batchProgress?.currentNode === proxyName) || testingProxy === proxyName}
+                          <span class="lat dim">
+                            <span class="lat-spinner"></span>
+                          </span>
+                        {:else}
+                          <button
+                            type="button"
+                            class="lat {healthClass}"
+                            title={getLatencyTitle(proxyName)}
+                            onmouseenter={(e) => handleBadgeMouseEnter(e, proxyName)}
+                            onmouseleave={handleBadgeMouseLeave}
+                            onclick={(e) => handleBadgeClick(e, proxyName)}
+                            onkeydown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleBadgeClick(e as any, proxyName);
+                              }
+                            }}
+                          >
+                            {healthText}
+                          </button>
+                        {/if}
+
+                        <div class="p-actions-wrap">
+                          {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
+                            <button
+                              type="button"
+                              class="btn-latency-test"
+                              onclick={() => testProxyLatency(proxyName)}
+                              disabled={testingProxy === proxyName}
+                              title={$t('proxies.test_single')}
                             >
-                              {healthText}
-                            </span>
+                              {#if testingProxy === proxyName}
+                                <span
+                                  class="spinner"
+                                  style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
+                                ></span>
+                              {:else}
+                                <svg
+                                  width="12"
+                                  height="12"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  stroke-width="2"
+                                  style="opacity: 0.6;"
+                                  ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
+                                >
+                              {/if}
+                            </button>
                           {/if}
+
                           {#if group.type === 'Selector'}
                             <span class="selector-dot" class:active={isActive}
                               >{isActive ? '●' : '○'}</span
@@ -2067,34 +2098,6 @@
                           {/if}
                         </div>
                       </div>
-
-                      {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
-                        <button
-                          type="button"
-                          class="btn-latency-test"
-                          onclick={() => testProxyLatency(proxyName)}
-                          disabled={testingProxy === proxyName}
-                          title={$t('proxies.test_single')}
-                        >
-                          {#if testingProxy === proxyName}
-                            <span
-                              class="spinner"
-                              style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
-                            ></span>
-                          {:else}
-                            <svg
-                              width="12"
-                              height="12"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"
-                              style="opacity: 0.6;"
-                              ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
-                            >
-                          {/if}
-                        </button>
-                      {/if}
                     </div>
                   {/each}
                 </div>
@@ -2475,6 +2478,8 @@
     border-radius: var(--radius-md);
     padding: 0;
     display: flex;
+    flex-direction: column;
+    justify-content: space-between;
     position: relative;
     transition: all var(--transition-fast);
     min-height: 84px;
@@ -2482,18 +2487,16 @@
   .proxy-select-btn {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
-    padding: 10px 12px;
     width: 100%;
-    height: 100%;
-    min-height: 84px;
     background: none;
     border: 0;
+    padding: 10px 12px 0;
     color: inherit;
     font: inherit;
     text-align: left;
     cursor: pointer;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    flex: 1;
   }
   .proxy-select-btn:disabled,
   .proxy-select-btn[aria-disabled='true'] {
@@ -2550,17 +2553,20 @@
     align-items: center;
     justify-content: space-between;
     gap: 6px;
+    padding: 4px 12px 10px;
     margin-top: auto;
   }
   .p-actions-wrap {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
   .btn-latency-test {
     background: transparent;
     border: none;
     padding: 4px;
+    width: 24px;
+    height: 24px;
     color: var(--fg-dim);
     cursor: pointer;
     display: inline-flex;
@@ -2568,10 +2574,15 @@
     justify-content: center;
     transition: all 0.2s;
     border-radius: var(--radius-sm);
+    flex-shrink: 0;
   }
   .btn-latency-test:hover {
     color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .btn-latency-test:focus-visible {
+    outline: 2px solid var(--accent, #29c2f0);
+    outline-offset: 1px;
   }
 
   .health-bar {
@@ -2696,6 +2707,26 @@
     padding: 2px 6px;
     border-radius: 4px;
     white-space: nowrap;
+  }
+  button.lat {
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    font-family: var(--font-family-mono);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.15s ease;
+  }
+  button.lat:hover {
+    opacity: 0.85;
+  }
+  button.lat:focus-visible {
+    outline: 2px solid var(--accent, #29c2f0);
+    outline-offset: 1px;
   }
   .lat.ok {
     color: var(--success);
@@ -2900,8 +2931,14 @@
       padding: 8px;
     }
     .proxy-card {
-      padding: 8px 10px;
+      padding: 0;
       min-height: 70px;
+    }
+    .proxy-select-btn {
+      padding: 8px 10px 0;
+    }
+    .proxy-card .p-footer {
+      padding: 2px 10px 8px;
     }
     .proxy-card .p-name {
       font-size: 12px;
