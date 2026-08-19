@@ -411,6 +411,12 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 						_ = os.Rename(oldPath, s.subPath(newProviderName+suffix))
 					}
 				}
+				// Файл кэша провайдера в cache/providers/
+				oldCacheFile := filepath.Join(s.dataDir, "cache", "providers", sanitizeProviderFileName(oldProviderName)+".yaml")
+				newCacheFile := filepath.Join(s.dataDir, "cache", "providers", sanitizeProviderFileName(newProviderName)+".yaml")
+				if _, err := os.Stat(oldCacheFile); err == nil {
+					_ = os.Rename(oldCacheFile, newCacheFile)
+				}
 			}
 
 			if oldProviderName != newProviderName && existing.EnableMihomo {
@@ -610,6 +616,10 @@ func (s *SubscriptionService) Delete(id string) error {
 		}
 	}
 
+	// Удалить файл кэша провайдера из изолированного каталога {dataDir}/cache/providers/
+	os.Remove(s.providerCachePath(sub))
+	os.Remove(s.legacyProviderCachePath(sub))
+
 	// Delete diagnostic files (схема по имени провайдера + legacy-схема по ID)
 	for _, base := range []string{sub.GetProviderName(), "sub_" + safeID} {
 		for _, suffix := range cacheSuffixes {
@@ -677,6 +687,12 @@ func (s *SubscriptionService) maybeRenameProviderLocked(live *Subscription) {
 		if _, err := os.Stat(oldPath); err == nil {
 			_ = os.Rename(oldPath, s.subPath(newName+suffix))
 		}
+	}
+	// Файл кэша провайдера в cache/providers/
+	oldCacheFile := filepath.Join(s.dataDir, "cache", "providers", sanitizeProviderFileName(oldName)+".yaml")
+	newCacheFile := filepath.Join(s.dataDir, "cache", "providers", sanitizeProviderFileName(newName)+".yaml")
+	if _, err := os.Stat(oldCacheFile); err == nil {
+		_ = os.Rename(oldCacheFile, newCacheFile)
 	}
 
 	live.ProviderName = newName
@@ -906,6 +922,27 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 			}
 		}
 	}
+
+	// Очистка устаревших файлов провайдеров в {dataDir}/cache/providers/
+	provDir := filepath.Join(s.dataDir, "cache", "providers")
+	if provFiles, err := os.ReadDir(provDir); err == nil {
+		activeProvBases := make(map[string]bool)
+		for _, sub := range s.subscriptions {
+			activeProvBases[sanitizeProviderFileName(sub.GetProviderName())+".yaml"] = true
+		}
+		for _, file := range provFiles {
+			if file.IsDir() || !strings.HasSuffix(file.Name(), ".yaml") {
+				continue
+			}
+			if activeProvBases[file.Name()] {
+				continue
+			}
+			if info, err := file.Info(); err == nil && time.Since(info.ModTime()) > 7*24*time.Hour {
+				log.Printf("[Cleanup] Removing orphaned provider cache file: %s", file.Name())
+				_ = os.Remove(filepath.Join(provDir, file.Name()))
+			}
+		}
+	}
 }
 
 // SyncMihomoProviderBlocks приводит блоки proxy-providers в config.yaml
@@ -1108,17 +1145,20 @@ func (s *SubscriptionService) PersistHeaderMetadata(id string, subCopy *Subscrip
 		return fmt.Errorf("subscription not found")
 	}
 
-	live.Upload = subCopy.Upload
-	live.Download = subCopy.Download
-	live.Total = subCopy.Total
-	live.Expire = subCopy.Expire
-	live.ProfileTitle = subCopy.ProfileTitle
-	live.ProfileUpdateHours = subCopy.ProfileUpdateHours
-	live.SupportURL = subCopy.SupportURL
-	live.ProfileWebPageURL = subCopy.ProfileWebPageURL
-	live.ProviderType = subCopy.ProviderType
-	live.HwidLocked = subCopy.HwidLocked
-	live.LastUpdate = time.Now()
+	// Перезаписываем метаданные заголовков только если в subCopy есть непустые данные (D-15)
+	if subCopy.Upload > 0 || subCopy.Download > 0 || subCopy.Total > 0 || subCopy.Expire > 0 || subCopy.ProfileTitle != "" {
+		live.Upload = subCopy.Upload
+		live.Download = subCopy.Download
+		live.Total = subCopy.Total
+		live.Expire = subCopy.Expire
+		live.ProfileTitle = subCopy.ProfileTitle
+		live.ProfileUpdateHours = subCopy.ProfileUpdateHours
+		live.SupportURL = subCopy.SupportURL
+		live.ProfileWebPageURL = subCopy.ProfileWebPageURL
+		live.ProviderType = subCopy.ProviderType
+		live.HwidLocked = subCopy.HwidLocked
+		live.LastUpdate = time.Now()
+	}
 
 	// Формат и число узлов приходят из ProviderFetch. Нулевой счётчик не
 	// сохраняем: провайдер мог вернуть пустой/битый payload, а предыдущее
@@ -1129,6 +1169,7 @@ func (s *SubscriptionService) PersistHeaderMetadata(id string, subCopy *Subscrip
 	if subCopy.LastCount > 0 {
 		live.LastCount = subCopy.LastCount
 	}
+	live.LastError = subCopy.LastError
 
 	return s.save()
 }

@@ -145,22 +145,38 @@ func (s *SubscriptionService) downloadWithUA(ctx context.Context, subURL string,
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, nil, fmt.Errorf("only http and https URLs are allowed for subscriptions")
 	}
-	resp, err := s.fetchWithUserAgent(ctx, subURL, sub, ua)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer resp.Body.Close()
 
-	applySubscriptionHeaders(resp.Header, sub)
+	flightKey := subURL + "#" + ua
+	body, headers, err := s.fetchFlight.Do(flightKey, func() ([]byte, http.Header, error) {
+		resp, err := s.fetchWithUserAgent(ctx, subURL, sub, ua)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxSubscriptionBytes))
+		if resp.StatusCode != http.StatusOK {
+			statusText := http.StatusText(resp.StatusCode)
+			if statusText != "" {
+				return nil, resp.Header, fmt.Errorf("HTTP %d %s", resp.StatusCode, statusText)
+			}
+			return nil, resp.Header, fmt.Errorf("HTTP %d", resp.StatusCode)
+		}
+		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxSubscriptionBytes))
+		if err != nil {
+			return nil, nil, err
+		}
+		return bodyBytes, resp.Header, nil
+	})
 	if err != nil {
-		return nil, nil, err
+		return nil, headers, err
 	}
-	return body, resp.Header, nil
+
+	// Apply subscription headers only if not an HTML landing page
+	if !isHTMLResponse(body, headers.Get("Content-Type")) {
+		applySubscriptionHeaders(headers, sub)
+	}
+
+	return body, headers, nil
 }
 
 func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL string, sub *Subscription) (outbounds []Outbound, skips []SkipReason, bodyBytes []byte, headers http.Header, err error) {
@@ -187,6 +203,10 @@ func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL strin
 // into outbounds. It tries formats in priority order: sing-box JSON, xray JSON,
 // clash YAML, then base64/share-links.
 func parseSubscriptionBody(body []byte, contentTypeHeader string, sub *Subscription) ([]Outbound, []SkipReason, error) {
+	if isHTMLResponse(body, contentTypeHeader) {
+		return nil, nil, fmt.Errorf("Upstream returned HTML landing page instead of proxy config (check URL/token)")
+	}
+
 	contentType := strings.ToLower(contentTypeHeader)
 	content := strings.TrimSpace(string(body))
 

@@ -397,12 +397,12 @@ func (a *API) MihomoProviderAdapter(w http.ResponseWriter, r *http.Request) {
 		isAdhoc = true
 	}
 
-	// 4. Upstream fetch + конвертация + Happ fallback + кэш на диск (graceful
-	// fallback на кэш при сетевой ошибке).
+	// 4. Upstream fetch + конвертация + fallback на кэш на диске (graceful
+	// fallback на кэш при ошибке / заглушке / недоступности upstream).
 	payload, err := a.subscriptionSvc.ProviderFetchWithFallback(r.Context(), urlStr, sub)
 	if err != nil {
 		log.Printf("[Subscriptions] provider fetch failed for sub=%s: %s", sub.ID, utils.SanitizeLogInput(err.Error()))
-		http.Error(w, "Failed to fetch provider", http.StatusBadGateway)
+		http.Error(w, "Bad Gateway: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 

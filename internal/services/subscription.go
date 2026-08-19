@@ -204,6 +204,43 @@ type KernelStatusProvider interface {
 	Get(name string) *KernelInfo
 }
 
+type singleflightCall struct {
+	wg      sync.WaitGroup
+	val     []byte
+	headers http.Header
+	err     error
+}
+
+type singleflightGroup struct {
+	mu sync.Mutex
+	m  map[string]*singleflightCall
+}
+
+func (g *singleflightGroup) Do(key string, fn func() ([]byte, http.Header, error)) ([]byte, http.Header, error) {
+	g.mu.Lock()
+	if g.m == nil {
+		g.m = make(map[string]*singleflightCall)
+	}
+	if c, ok := g.m[key]; ok {
+		g.mu.Unlock()
+		c.wg.Wait()
+		return c.val, c.headers, c.err
+	}
+	c := new(singleflightCall)
+	c.wg.Add(1)
+	g.m[key] = c
+	g.mu.Unlock()
+
+	c.val, c.headers, c.err = fn()
+	c.wg.Done()
+
+	g.mu.Lock()
+	delete(g.m, key)
+	g.mu.Unlock()
+
+	return c.val, c.headers, c.err
+}
+
 // SubscriptionService manages subscriptions
 type SubscriptionService struct {
 	dataDir         string
@@ -214,6 +251,7 @@ type SubscriptionService struct {
 	mihomoMu        sync.Mutex // Mutex для синхронизации записи config.yaml Mihomo
 	ongoing         sync.Map   // Map of ID -> struct{}{} to track active refreshes
 	retries         sync.Map   // ID -> *retryState for exponential backoff
+	fetchFlight     singleflightGroup
 	httpClient      *http.Client
 	consoleSvc      *ConsoleService
 	kernelSvc       KernelStatusProvider // для получения реальных версий ядер
