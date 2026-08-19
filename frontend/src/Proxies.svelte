@@ -1678,6 +1678,14 @@
       window.removeEventListener('click', handleClickOutside);
     };
   });
+
+  onDestroy(() => {
+    poller?.stop();
+    batchTester.cancel();
+    if (popoverHoverTimeout) clearTimeout(popoverHoverTimeout);
+    if (loadTimeoutId) clearTimeout(loadTimeoutId);
+    pendingTimeouts.forEach(clearTimeout);
+  });
 </script>
 
 <div class="container">
