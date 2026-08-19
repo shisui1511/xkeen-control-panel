@@ -817,3 +817,77 @@ proxy-groups:
 		t.Errorf("expected Authorization header 'Bearer test-secret-token', got %q", authHeader)
 	}
 }
+
+func TestSubscriptionService_Refresh_DualKernel_PreserveMihomoFormat(t *testing.T) {
+	tmp := t.TempDir()
+	xrayDir := filepath.Join(tmp, "xray")
+	mihomoDir := filepath.Join(tmp, "mihomo")
+	_ = os.MkdirAll(xrayDir, 0755)
+	_ = os.MkdirAll(mihomoDir, 0755)
+
+	svc := NewSubscriptionService(tmp, xrayDir, mihomoDir)
+
+	// Server returns Clash YAML payload
+	payload := `proxies:
+  - name: test-vless
+    type: vless
+    server: 1.2.3.4
+    port: 443
+    uuid: 11111111-2222-3333-4444-555555555555
+`
+	subServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Subscription-Userinfo", "upload=100; download=200; total=1000; expire=1700000000")
+		w.Header().Set("Profile-Title", "Dual-Kernel Test")
+		w.Header().Set("Content-Type", "application/yaml")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer subServer.Close()
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Mock Mihomo PUT /providers/proxies/{name} endpoint
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer apiServer.Close()
+
+	svc.httpClient = subServer.Client()
+	svc.SetMihomoAPI(apiServer.URL, "test-secret")
+	svc.SetKernelService(&fakeKernelService{active: "mihomo"})
+
+	sub := Subscription{
+		ID:           "dual-kernel-sub",
+		Name:         "Dual Kernel Test",
+		URL:          subServer.URL,
+		EnableXray:   true,
+		EnableMihomo: true,
+		Enabled:      true,
+		Interval:     1,
+		MihomoGroups: []string{"PROXY"},
+	}
+	_ = svc.Add(&sub)
+
+	// Pre-populate Mihomo loopback metadata as if ProviderFetch already persisted it
+	_ = svc.PersistHeaderMetadata("dual-kernel-sub", &Subscription{
+		ID:             "dual-kernel-sub",
+		DetectedFormat: "yaml-full",
+		LastCount:      42,
+	})
+
+	err := svc.Refresh("dual-kernel-sub")
+	if err != nil {
+		t.Fatalf("Refresh failed: %v", err)
+	}
+
+	got := svc.Get("dual-kernel-sub")
+	if got == nil {
+		t.Fatal("subscription not found after refresh")
+	}
+
+	// Xray parsing succeeds, but Mihomo's yaml-full format and 42 count must NOT be overwritten
+	if got.DetectedFormat != "yaml-full" {
+		t.Errorf("expected DetectedFormat 'yaml-full', got %q", got.DetectedFormat)
+	}
+	if got.LastCount != 42 {
+		t.Errorf("expected LastCount 42, got %d", got.LastCount)
+	}
+}

@@ -175,14 +175,18 @@ func (s *SubscriptionService) Refresh(id string) error {
 		if xraySuccess {
 			live.LastHash = subCopy.LastHash
 			live.LastSkipped = subCopy.LastSkipped
-			live.DetectedFormat = subCopy.DetectedFormat
+			if !subCopy.EnableMihomo || live.DetectedFormat == "" {
+				live.DetectedFormat = subCopy.DetectedFormat
+			}
 		}
 
 		// Update shared/derived fields based on which kernel succeeded.
 		if xraySuccess {
 			live.Nodes = subCopy.Nodes
 			live.Announcement = subCopy.Announcement
-			live.LastCount = subCopy.LastCount
+			if !subCopy.EnableMihomo || live.LastCount == 0 {
+				live.LastCount = subCopy.LastCount
+			}
 		}
 
 		live.LastChanged = xraySuccess && xrayChanged
