@@ -11,6 +11,12 @@
   let customUrlInput = $state($pingTargetStore.customUrl);
   let customUrlTouched = $state(false);
 
+  $effect(() => {
+    if (!customUrlTouched) {
+      customUrlInput = $pingTargetStore.customUrl;
+    }
+  });
+
   let isCustom = $derived(config.preset === 'custom');
   let isCustomValid = $derived(isValidUrl(customUrlInput));
   let showCustomError = $derived(isCustom && customUrlTouched && !isCustomValid);
