@@ -1625,21 +1625,14 @@
     </div>
     {#if activeTab === 'groups'}
       <div class="ph-actions">
-        <button class="btn btn-secondary" onclick={collapseAll} title={$t('proxies.collapse_all')}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            style="margin-right: 6px;"
-          >
-            <polyline points="18 15 12 9 6 15" />
-            <polyline points="18 20 12 14 6 20" />
-          </svg>
-          {$t('proxies.collapse_all')}
-        </button>
+        <input
+          class="group-search"
+          type="search"
+          bind:value={filterQuery}
+          oninput={handleSearchInput}
+          placeholder={$t('proxies.filter_placeholder')}
+          aria-label={$t('proxies.filter_placeholder')}
+        />
         <button class="btn btn-secondary" onclick={expandAll} title={$t('proxies.expand_all')}>
           <svg
             width="14"
@@ -1655,15 +1648,21 @@
           </svg>
           {$t('proxies.expand_all')}
         </button>
-
-        <input
-          class="group-search"
-          type="search"
-          bind:value={filterQuery}
-          oninput={handleSearchInput}
-          placeholder={$t('proxies.filter_placeholder')}
-          aria-label={$t('proxies.filter_placeholder')}
-        />
+        <button class="btn btn-secondary" onclick={collapseAll} title={$t('proxies.collapse_all')}>
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="margin-right: 6px;"
+          >
+            <polyline points="18 15 12 9 6 15" />
+            <polyline points="18 20 12 14 6 20" />
+          </svg>
+          {$t('proxies.collapse_all')}
+        </button>
         <button class="btn btn-secondary" onclick={() => fetchProxies()} disabled={loading}>
           <svg
             width="14"
