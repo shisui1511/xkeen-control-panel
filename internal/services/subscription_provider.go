@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +19,17 @@ import (
 
 // providerFetchBudget — общий тайм-аут на весь цикл ProviderFetch.
 const providerFetchBudget = 20 * time.Second
+
+// Метки формата provider payload — записываются в Subscription.DetectedFormat,
+// чтобы в UI было видно, отдал ли провайдер готовый Clash YAML или payload
+// пришлось конвертировать с потерей полей.
+const (
+	providerFormatEmpty       = "empty"        // пустое тело ответа
+	providerFormatXrayJSON    = "xray-json"    // конвертировано из xray-json
+	providerFormatYAMLFull    = "yaml-full"    // полный Clash-конфиг, взята секция proxies:
+	providerFormatYAMLProxies = "yaml-proxies" // чистый proxy-provider payload
+	providerFormatRaw         = "raw"          // share-links / base64, Mihomo парсит сам
+)
 
 var (
 	// yamlTopLevelKeyRe матчит top-level ключ YAML документа: строка без
@@ -34,26 +47,37 @@ var (
 	providerURISchemeRe = regexp.MustCompile(`(?i)\b(?:vless|vmess|trojan|ss|hy2|hysteria2|hysteria|tuic|socks5?|http-proxy)://`)
 )
 
-// ProviderFetch скачивает подписку с upstream-провайдера, используя единый
-// User-Agent панели (subscriptionUserAgent), конвертирует ответ в
-// Mihomo-совместимый provider payload (только секция proxies:), кэширует
+// ProviderFetch скачивает подписку с upstream-провайдера под User-Agent
+// Mihomo (по нему провайдеры отдают готовый Clash YAML), приводит ответ к
+// Mihomo-совместимому provider payload — только секция proxies:, — кэширует
 // результат на диск и возвращает payload.
+//
+// Нативный Clash YAML передаётся байт в байт; конвертер из xray-json
+// используется только как запасной путь для провайдеров, которые
+// Clash-формат не отдают.
 func (s *SubscriptionService) ProviderFetch(ctx context.Context, upstreamURL string, sub *Subscription) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, providerFetchBudget)
 	defer cancel()
 
-	body, _, err := s.downloadWithUA(ctx, upstreamURL, sub, subscriptionUserAgent)
+	body, _, err := s.downloadWithUA(ctx, upstreamURL, sub, s.mihomoUserAgent())
 	if err != nil {
 		return nil, err
 	}
-	payload, _ := providerPayload(body)
+	payload, format := providerPayload(body)
 	if payload == nil {
 		return nil, fmt.Errorf("upstream returned empty/unparseable payload")
 	}
+	sub.DetectedFormat = format
 
-	if countProviderNodes(string(payload)) > 0 {
+	nodeCount := countProviderNodes(string(payload))
+	if nodeCount > 0 {
+		sub.LastCount = nodeCount
 		if err := s.cacheProviderPayload(sub, payload); err != nil {
 			log.Printf("[Subscriptions] Failed to cache provider payload for %s: %v", utils.SanitizeLogInput(upstreamURL), err)
+		}
+		if format == providerFormatXrayJSON {
+			log.Printf("[Subscriptions] Upstream %s returned xray-json under Mihomo UA; falling back to converter (%d nodes)",
+				utils.SanitizeLogInput(upstreamURL), nodeCount)
 		}
 	} else {
 		log.Printf("[Subscriptions] Upstream %s returned empty/unparseable payload, keeping previous cache", utils.SanitizeLogInput(upstreamURL))
@@ -76,6 +100,38 @@ func (s *SubscriptionService) ProviderFetchWithFallback(ctx context.Context, ups
 		return nil, fmt.Errorf("upstream unavailable and no cached provider file: %w", err)
 	}
 	return cached, nil
+}
+
+// headersOnlyBudget — тайм-аут запроса метаданных подписки.
+const headersOnlyBudget = 15 * time.Second
+
+// fetchHeadersOnly забирает у провайдера только метаданные подписки (срок
+// действия, трафик, profile-title) и записывает их в sub. Тело ответа
+// отбрасывается: узлы в этом сценарии качает Mihomo.
+//
+// Вызывается лишь как запасной путь, когда Mihomo не смог обновить провайдер
+// сам и loopback-адаптеру нечего было сохранить. Возвращает true, если
+// метаданные удалось получить.
+func (s *SubscriptionService) fetchHeadersOnly(sub *Subscription) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), headersOnlyBudget)
+	defer cancel()
+
+	resp, err := s.fetchWithUserAgent(ctx, sub.URL, sub, s.mihomoUserAgent())
+	if err != nil {
+		log.Printf("[Subscriptions] headers-only fetch failed for %s: %v", utils.SanitizeLogInput(sub.ID), err)
+		return false
+	}
+	defer resp.Body.Close()
+	// Тело не нужно, но соединение стоит вернуть в пул пригодным к переиспользованию.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxSubscriptionBytes))
+
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("[Subscriptions] headers-only fetch for %s returned HTTP %d", utils.SanitizeLogInput(sub.ID), resp.StatusCode)
+		return false
+	}
+
+	applySubscriptionHeaders(resp.Header, sub)
+	return true
 }
 
 // providerCachePath возвращает путь к файлу кэша провайдера для подписки.
@@ -162,7 +218,7 @@ func extractProxiesSection(content string) (string, bool) {
 func providerPayload(body []byte) ([]byte, string) {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {
-		return []byte("proxies: []\n"), "empty"
+		return []byte("proxies: []\n"), providerFormatEmpty
 	}
 
 	if trimmed[0] == '[' || trimmed[0] == '{' {
@@ -172,22 +228,22 @@ func providerPayload(body []byte) ([]byte, string) {
 			scratchSvc := &SubscriptionService{}
 			nodes := scratchSvc.outboundsToNodes(outbounds, scratchSub)
 			yamlOut, _ := scratchSvc.convertSubscriptionNodesToClashYAML(nodes)
-			return []byte(yamlOut), "xray-json"
+			return []byte(yamlOut), providerFormatXrayJSON
 		}
 	}
 
 	content := string(trimmed)
 	if section, wasFullConfig := extractProxiesSection(content); section != "" {
 		if wasFullConfig {
-			return []byte(section), "yaml-full"
+			return []byte(section), providerFormatYAMLFull
 		}
-		return []byte(section), "yaml-proxies"
+		return []byte(section), providerFormatYAMLProxies
 	}
 
 	if !strings.HasSuffix(content, "\n") {
 		content += "\n"
 	}
-	return []byte(content), "raw"
+	return []byte(content), providerFormatRaw
 }
 
 // countProviderNodes оценивает количество нод в provider payload: считает

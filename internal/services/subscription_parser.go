@@ -11,15 +11,50 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
-// subscriptionUserAgent — единый User-Agent для всех запросов подписок.
-// Провайдеры отдают разные наборы нод в зависимости от UA клиента; разные UA
-// для Xray- и Mihomo-путей приводили к рассинхрону списков нод одной подписки.
-// По UA Happ провайдеры отдают максимально полный набор нод.
-const subscriptionUserAgent = "Happ/1.0"
+// User-Agent выбирается по целевому ядру, потому что провайдеры отдают
+// принципиально разные форматы в зависимости от клиента.
+//
+// Замер на реальной подписке (19.08.2026):
+//
+//	Happ/1.0                  → xray-json,  81 563 Б → 24 узла после конвертации
+//	ClashMeta/…; mihomo/…     → clash yaml, 30 803 Б → 51 узел без конвертации
+//
+// Единый UA Happ выбирался ради согласованности списков нод между ядрами, но
+// списки и так разные — они уходят в разные ядра, — а ценой была потеря больше
+// половины узлов Mihomo и всех транспортных полей (udp, alpn, flow,
+// packet-encoding), которые конвертер не переносит.
+const (
+	// subscriptionUserAgentXray — UA для Xray-пути: по нему провайдеры отдают
+	// xray-json / share-links, которые парсер панели понимает нативно.
+	subscriptionUserAgentXray = "Happ/1.0"
+
+	// mihomoUserAgentFallbackVersion используется, когда реальная версия ядра
+	// недоступна (Mihomo не установлен или KernelService не подключён).
+	mihomoUserAgentFallbackVersion = "1.19.0"
+)
+
+// mihomoVersionRe вычленяет числовую часть версии ядра ("v1.19.38" → "1.19.38").
+var mihomoVersionRe = regexp.MustCompile(`\d+(?:\.\d+)*`)
+
+// mihomoUserAgent возвращает User-Agent Clash/Mihomo с реальной версией
+// установленного ядра — по нему провайдеры отдают готовый Clash YAML,
+// который панель передаёт Mihomo без конвертации.
+func (s *SubscriptionService) mihomoUserAgent() string {
+	version := mihomoUserAgentFallbackVersion
+	if s.kernelSvc != nil {
+		if info := s.kernelSvc.Get("mihomo"); info != nil {
+			if m := mihomoVersionRe.FindString(info.CurrentVersion); m != "" {
+				version = m
+			}
+		}
+	}
+	return fmt.Sprintf("ClashMeta/%s; mihomo/%s", version, version)
+}
 
 func sanitizeSSRFURL(urlStr string) string {
 	b := make([]byte, len(urlStr))
@@ -105,13 +140,6 @@ func (s *SubscriptionService) fetchWithUserAgent(ctx context.Context, subURL str
 	return s.httpClient.Do(req)
 }
 
-// DownloadRaw скачивает подписку с единым User-Agent панели
-// (subscriptionUserAgent). Экспортируется для использования из
-// ProviderFetch (loopback provider endpoint).
-func (s *SubscriptionService) DownloadRaw(ctx context.Context, subURL string, sub *Subscription) ([]byte, http.Header, error) {
-	return s.downloadRaw(ctx, subURL, sub)
-}
-
 func (s *SubscriptionService) downloadWithUA(ctx context.Context, subURL string, sub *Subscription, ua string) ([]byte, http.Header, error) {
 	parsed, err := url.Parse(subURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -135,10 +163,6 @@ func (s *SubscriptionService) downloadWithUA(ctx context.Context, subURL string,
 	return body, resp.Header, nil
 }
 
-func (s *SubscriptionService) downloadRaw(ctx context.Context, subURL string, sub *Subscription) ([]byte, http.Header, error) {
-	return s.downloadWithUA(ctx, subURL, sub, subscriptionUserAgent)
-}
-
 func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL string, sub *Subscription) (outbounds []Outbound, skips []SkipReason, bodyBytes []byte, headers http.Header, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -147,7 +171,7 @@ func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL strin
 		}
 	}()
 
-	body, headers, err := s.downloadWithUA(ctx, subURL, sub, subscriptionUserAgent)
+	body, headers, err := s.downloadWithUA(ctx, subURL, sub, subscriptionUserAgentXray)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

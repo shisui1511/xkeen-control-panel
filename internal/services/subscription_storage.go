@@ -1052,5 +1052,15 @@ func (s *SubscriptionService) PersistHeaderMetadata(id string, subCopy *Subscrip
 	live.HwidLocked = subCopy.HwidLocked
 	live.LastUpdate = time.Now()
 
+	// Формат и число узлов приходят из ProviderFetch. Нулевой счётчик не
+	// сохраняем: провайдер мог вернуть пустой/битый payload, а предыдущее
+	// значение по-прежнему описывает то, что лежит в кэше.
+	if subCopy.DetectedFormat != "" {
+		live.DetectedFormat = subCopy.DetectedFormat
+	}
+	if subCopy.LastCount > 0 {
+		live.LastCount = subCopy.LastCount
+	}
+
 	return s.save()
 }
