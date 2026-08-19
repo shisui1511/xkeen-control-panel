@@ -313,7 +313,8 @@ func TestSingleflightDeduplication(t *testing.T) {
 	for i := 0; i < concurrent; i++ {
 		go func(idx int) {
 			defer wg.Done()
-			_, errs[idx] = svc.ProviderFetch(context.Background(), sub.URL, sub)
+			subCopy := *sub
+			_, errs[idx] = svc.ProviderFetch(context.Background(), subCopy.URL, &subCopy)
 		}(i)
 	}
 	wg.Wait()

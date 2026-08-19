@@ -171,11 +171,6 @@ func (s *SubscriptionService) downloadWithUA(ctx context.Context, subURL string,
 		return nil, headers, err
 	}
 
-	// Apply subscription headers only if not an HTML landing page
-	if !isHTMLResponse(body, headers.Get("Content-Type")) {
-		applySubscriptionHeaders(headers, sub)
-	}
-
 	return body, headers, nil
 }
 
@@ -195,6 +190,9 @@ func (s *SubscriptionService) downloadAndParse(ctx context.Context, subURL strin
 	outs, skipReasons, err := parseSubscriptionBody(body, headers.Get("Content-Type"), sub)
 	if err != nil {
 		return nil, nil, nil, nil, err
+	}
+	if sub != nil && !isHTMLResponse(body, headers.Get("Content-Type")) {
+		applySubscriptionHeaders(headers, sub)
 	}
 	return outs, skipReasons, body, headers, nil
 }

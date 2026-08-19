@@ -109,6 +109,9 @@ func (s *SubscriptionService) Refresh(id string) error {
 		}
 		metadataFetched = true
 		subCopy.LastUpdate = time.Now()
+		if !isHTMLResponse(body, headers.Get("Content-Type")) {
+			applySubscriptionHeaders(headers, &subCopy)
+		}
 
 		if err := s.refreshXray(&subCopy, body, headers); err != nil {
 			refreshErr = err

@@ -882,4 +882,3 @@ func extractProxyGroupNamesFallback(content string) []string {
 	}
 	return groups
 }
-

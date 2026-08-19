@@ -438,9 +438,9 @@ func TestConfigRead_Success(t *testing.T) {
 	api := newTestAPI(t, tmpDir)
 
 	tests := []struct {
-		fileName        string
-		content         string
-		expectedCT      string
+		fileName   string
+		content    string
+		expectedCT string
 	}{
 		{"test.json", `{"hello": "world"}`, "application/json; charset=utf-8"},
 		{"test.yaml", "port: 7890\nproxies: []", "text/yaml; charset=utf-8"},

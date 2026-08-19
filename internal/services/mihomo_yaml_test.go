@@ -610,4 +610,3 @@ proxy-groups:
 		}
 	})
 }
-
