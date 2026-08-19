@@ -36,13 +36,17 @@ func TestSnapshotService(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create snapshots and tmp subdirs inside tmpDataDir to test exclusions
+	// Create snapshots, tmp and cache subdirs inside tmpDataDir to test exclusions
 	snapshotsSubdir := filepath.Join(tmpDataDir, "snapshots")
 	tmpSubdir := filepath.Join(tmpDataDir, "tmp")
+	cacheSubdir := filepath.Join(tmpDataDir, "cache", "providers")
 	if err := os.MkdirAll(snapshotsSubdir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(tmpSubdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cacheSubdir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	dummyBackupFile := filepath.Join(snapshotsSubdir, "dummy.tar.gz")
@@ -51,6 +55,10 @@ func TestSnapshotService(t *testing.T) {
 	}
 	dummyTmpFile := filepath.Join(tmpSubdir, "dummy_temp.txt")
 	if err := os.WriteFile(dummyTmpFile, []byte("dummy temp"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dummyCacheFile := filepath.Join(cacheSubdir, "dummy_provider.yaml")
+	if err := os.WriteFile(dummyCacheFile, []byte("proxies: []"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,7 +83,7 @@ func TestSnapshotService(t *testing.T) {
 	}
 
 	// Verify exclusions and filtering:
-	// Let's read the created archive and verify that snapshots/, tmp/, and geoip.dat are NOT inside
+	// Let's read the created archive and verify that snapshots/, tmp/, cache/, and geoip.dat are NOT inside
 	archFile, err := os.Open(svc.archivePath(meta.ID))
 	if err != nil {
 		t.Fatal(err)
@@ -102,6 +110,9 @@ func TestSnapshotService(t *testing.T) {
 		}
 		if strings.Contains(name, "tmp") {
 			t.Errorf("tmp directory/file %s should be excluded but was found in archive", name)
+		}
+		if strings.Contains(name, "cache") {
+			t.Errorf("cache directory/file %s should be excluded but was found in archive", name)
 		}
 		if strings.HasSuffix(strings.ToLower(name), ".dat") {
 			t.Errorf("DAT file %s should be filtered out but was found in archive", name)
@@ -327,5 +338,77 @@ func TestSnapshotService_EdgeCases(t *testing.T) {
 		t.Error("expected restore to fail due to file exceeding 10 MB limit")
 	} else if !strings.Contains(err.Error(), "exceeds maximum allowed size of 10 MB") {
 		t.Errorf("expected size limit error, got: %v", err)
+	}
+}
+
+func TestSnapshotExcludeCache(t *testing.T) {
+	tmpDataDir := t.TempDir()
+	configDir := filepath.Join(tmpDataDir, "config")
+	cacheDir := filepath.Join(tmpDataDir, "cache", "providers")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	configFile := filepath.Join(configDir, "config.yaml")
+	if err := os.WriteFile(configFile, []byte("port: 8080"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cacheFile := filepath.Join(cacheDir, "provider1.yaml")
+	if err := os.WriteFile(cacheFile, []byte("proxies: [{name: node1}]"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewSnapshotService(tmpDataDir, []string{configDir, tmpDataDir})
+
+	meta, err := svc.Create("Cache Exclusion Test")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Verify tar.gz does not contain cache/
+	archFile, err := os.Open(svc.archivePath(meta.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer archFile.Close()
+	gr, err := gzip.NewReader(archFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gr.Close()
+	tr := tar.NewReader(gr)
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(hdr.Name, "cache") {
+			t.Errorf("archive contains cache file %s, should have been excluded", hdr.Name)
+		}
+	}
+
+	// Overwrite cache file and restore
+	if err := os.WriteFile(cacheFile, []byte("proxies: [{name: updated}]"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.Restore(meta.ID); err != nil {
+		t.Fatalf("Restore failed: %v", err)
+	}
+
+	// Cache file on disk should NOT be deleted or overwritten by restore
+	cacheData, err := os.ReadFile(cacheFile)
+	if err != nil {
+		t.Fatalf("cache file was lost during restore: %v", err)
+	}
+	if string(cacheData) != "proxies: [{name: updated}]" {
+		t.Errorf("cache file was unexpectedly overwritten: %q", string(cacheData))
 	}
 }
