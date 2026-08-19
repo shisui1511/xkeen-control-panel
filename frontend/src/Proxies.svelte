@@ -390,7 +390,7 @@
       if (!current.has(name)) next.delete(name);
     }
     for (const g of groups) {
-      if (g.all.length > 8 && !seenGroups.has(g.name)) {
+      if (!seenGroups.has(g.name)) {
         next.add(g.name);
       }
       seenGroups.add(g.name);
@@ -1951,30 +1951,40 @@
       <!-- Observatory statistics -->
       {#if groups.length > 0 && $capabilities?.mihomo?.reachable}
         {@const stats = observatoryStats}
-        <div class="card" style="margin-bottom:18px;">
-          <h2 class="card-title" style="margin-top: 0;">{$t('proxies.observatory_title')}</h2>
-          <div class="stats-grid">
-            <div class="stat-box">
+        <div class="card obs-card">
+          <div class="obs-head">
+            <h2 class="card-title obs-title">{$t('proxies.observatory_title')}</h2>
+          </div>
+          <div class="obs-grid">
+            <div class="stat-box obs-stat-box">
               <div class="stat-label">{$t('proxies.obs_total')}</div>
-              <div class="stat-value">{stats.totalProxies}</div>
-              <div class="res-sub">
-                {$t('proxies.obs_total_sub', { groupsCount: groups.length })}
+              <div class="obs-val-row">
+                <span class="stat-value">{stats.totalProxies}</span>
+                <span class="res-sub">
+                  {$t('proxies.obs_total_sub', { groupsCount: groups.length })}
+                </span>
               </div>
             </div>
-            <div class="stat-box">
+            <div class="stat-box obs-stat-box">
               <div class="stat-label">{$t('proxies.obs_healthy')}</div>
-              <div class="stat-value" style="color:var(--success);">{stats.healthyProxies}</div>
-              <div class="res-sub">{$t('proxies.obs_healthy_sub')}</div>
+              <div class="obs-val-row">
+                <span class="stat-value ok">{stats.healthyProxies}</span>
+                <span class="res-sub">{$t('proxies.obs_healthy_sub')}</span>
+              </div>
             </div>
-            <div class="stat-box">
+            <div class="stat-box obs-stat-box">
               <div class="stat-label">{$t('proxies.obs_degraded')}</div>
-              <div class="stat-value" style="color:var(--warning);">{stats.degradedProxies}</div>
-              <div class="res-sub">{$t('proxies.obs_degraded_sub')}</div>
+              <div class="obs-val-row">
+                <span class="stat-value warn">{stats.degradedProxies}</span>
+                <span class="res-sub">{$t('proxies.obs_degraded_sub')}</span>
+              </div>
             </div>
-            <div class="stat-box">
+            <div class="stat-box obs-stat-box">
               <div class="stat-label">{$t('proxies.obs_unreachable')}</div>
-              <div class="stat-value" style="color:var(--danger);">{stats.downProxies}</div>
-              <div class="res-sub">{$t('proxies.obs_unreachable_sub')}</div>
+              <div class="obs-val-row">
+                <span class="stat-value err">{stats.downProxies}</span>
+                <span class="res-sub">{$t('proxies.obs_unreachable_sub')}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -2893,6 +2903,124 @@
   }
   .chevron-wrap.rotated {
     transform: rotate(180deg);
+  }
+
+  /* Compact Observatory Widget */
+  .obs-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg, 10px);
+    margin-bottom: 16px;
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    padding: 0;
+  }
+
+  .obs-head {
+    display: flex;
+    align-items: center;
+    padding: 6px 14px;
+    background: linear-gradient(
+      135deg,
+      var(--bg-group-head-from, rgba(20, 51, 79, 0.6)),
+      var(--bg-group-head-to, rgba(16, 42, 68, 0.7))
+    );
+    border-bottom: 1px solid var(--border-strong, var(--border));
+  }
+
+  .obs-head .card-title.obs-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--fg-secondary);
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .obs-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    margin: 0;
+    border: 0;
+  }
+
+  .obs-stat-box {
+    padding: 8px 14px 10px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: transparent;
+  }
+
+  .obs-stat-box:last-child {
+    border-right: 0;
+  }
+
+  .obs-stat-box .stat-label {
+    font-size: 9.5px;
+    letter-spacing: 0.12em;
+    margin-bottom: 2px;
+    line-height: 1.2;
+  }
+
+  .obs-val-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .obs-stat-box .stat-value {
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.15;
+  }
+
+  .obs-stat-box .stat-value.ok {
+    color: var(--success);
+  }
+
+  .obs-stat-box .stat-value.warn {
+    color: var(--warning);
+  }
+
+  .obs-stat-box .stat-value.err {
+    color: var(--danger);
+  }
+
+  .obs-stat-box .res-sub {
+    font-size: 11px;
+    margin-top: 0;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  @media (max-width: 768px) {
+    .obs-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .obs-stat-box:nth-child(2) {
+      border-right: 0;
+    }
+    .obs-stat-box:nth-child(1),
+    .obs-stat-box:nth-child(2) {
+      border-bottom: 1px solid var(--border);
+    }
+  }
+
+  @media (max-width: 480px) {
+    .obs-stat-box {
+      padding: 6px 10px 8px;
+    }
+    .obs-stat-box .stat-value {
+      font-size: 15px;
+    }
+    .obs-stat-box .res-sub {
+      font-size: 10px;
+    }
   }
 
   /* Mobile: proxy cards stack, observatory stats handled globally at 768px */
