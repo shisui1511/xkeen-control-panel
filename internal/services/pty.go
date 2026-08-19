@@ -119,6 +119,7 @@ func (s *PTYService) StartSession(cols, rows int) (*PTYSession, error) {
 		winRows = 500
 	}
 
+	shellPath := s.detectShell()
 	var cmd *exec.Cmd
 	if shellPath != "/bin/sh" {
 		cmd = exec.Command(shellPath, "-l")
@@ -175,6 +176,10 @@ func (s *PTYSession) Write(p []byte) (n int, err error) {
 
 // Resize updates the terminal geometry
 func (s *PTYSession) Resize(cols, rows int) error {
+	if cols <= 0 || rows <= 0 {
+		return errors.New("invalid terminal dimensions")
+	}
+
 	var winCols uint16 = 80
 	if cols >= 1 && cols <= 1000 {
 		winCols = uint16(cols)
