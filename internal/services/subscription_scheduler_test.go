@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -306,7 +307,9 @@ func TestMihomoSubscriptionType(t *testing.T) {
     cipher: aes-256-gcm
     password: testpass
 `
+	var upstreamHits int
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits++
 		w.Header().Set("Subscription-Userinfo", "upload=100; download=200; total=1000")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(yamlContent))
@@ -329,8 +332,6 @@ func TestMihomoSubscriptionType(t *testing.T) {
 		t.Fatalf("Refresh: %v", err)
 	}
 
-	got := svc.List()[0]
-
 	providerName := GetMihomoProviderName("", sub.Name, id)
 	expectedPutPath := "/providers/proxies/" + providerName
 
@@ -341,8 +342,80 @@ func TestMihomoSubscriptionType(t *testing.T) {
 		t.Errorf("expected Clash API PUT path %q, got %q", expectedPutPath, putPath)
 	}
 
+	// SUB-04: подписку для Mihomo качает сам Mihomo по команде reload.
+	// Панель не должна обращаться к провайдеру вторым запросом.
+	if upstreamHits != 0 {
+		t.Errorf("expected 0 upstream requests from the panel after successful reload, got %d", upstreamHits)
+	}
+
+	// Метаданные заголовков сохраняет loopback-адаптер, когда Mihomo забирает
+	// у него payload. Mihomo делает это синхронно внутри PUT, поэтому к моменту
+	// ответа Clash API данные уже на месте.
+	fetched := svc.Get(id)
+	if fetched == nil {
+		t.Fatal("subscription not found")
+	}
+	if _, err := svc.ProviderFetch(context.Background(), fetched.URL, fetched); err != nil {
+		t.Fatalf("ProviderFetch: %v", err)
+	}
+	if err := svc.PersistHeaderMetadata(id, fetched); err != nil {
+		t.Fatalf("PersistHeaderMetadata: %v", err)
+	}
+
+	got := svc.List()[0]
 	if got.Upload != 100 || got.Download != 200 || got.Total != 1000 {
 		t.Errorf("expected traffic values 100, 200, 1000; got %d, %d, %d", got.Upload, got.Download, got.Total)
+	}
+	if got.LastCount != 1 {
+		t.Errorf("expected 1 node counted from provider payload, got %d", got.LastCount)
+	}
+}
+
+func TestMihomoRefreshFetchesHeadersWhenReloadFails(t *testing.T) {
+	// Когда Mihomo не запущен, reload не проходит — но UI всё равно ждёт
+	// свежие срок действия и трафик, поэтому панель делает один запрос
+	// метаданных (SUB-04, запасной путь).
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+	svc.httpClient = http.DefaultClient
+	svc.SetKernelService(&fakeKernelService{active: "mihomo"})
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer apiServer.Close()
+	svc.SetMihomoAPI(apiServer.URL, "")
+
+	var upstreamHits int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamHits++
+		w.Header().Set("Subscription-Userinfo", "upload=1; download=2; total=3; expire=1800000000")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("proxies: []\n"))
+	}))
+	defer ts.Close()
+
+	sub := Subscription{
+		Name:         "Offline Mihomo",
+		URL:          ts.URL,
+		EnableMihomo: true,
+		Enabled:      true,
+	}
+	if err := svc.Add(&sub); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	id := svc.List()[0].ID
+
+	// Ошибка reload ожидаема — проверяем именно запасной путь метаданных.
+	_ = svc.Refresh(id)
+
+	if upstreamHits != 1 {
+		t.Errorf("expected exactly 1 headers-only request, got %d", upstreamHits)
+	}
+
+	got := svc.List()[0]
+	if got.Total != 3 || got.Expire != 1800000000 {
+		t.Errorf("expected metadata total=3 expire=1800000000, got total=%d expire=%d", got.Total, got.Expire)
 	}
 }
 

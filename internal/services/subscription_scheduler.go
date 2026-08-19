@@ -85,33 +85,39 @@ func (s *SubscriptionService) Refresh(id string) error {
 		return fmt.Errorf("subscription is not enabled for any kernel")
 	}
 
-	// Download subscription once (outside of lock to avoid blocking other operations)
-	body, headers, err := s.downloadWithUA(context.Background(), subCopy.URL, &subCopy, subscriptionUserAgent)
-	if err != nil {
-		s.mu.Lock()
-		if live := s.GetLocked(safeID); live != nil {
-			live.LastError = err.Error()
-			_ = s.save()
-		}
-		s.mu.Unlock()
-		return err
-	}
-
-	subCopy.LastUpdate = time.Now()
-
 	var refreshErr error
 	xrayChanged := false
 	xraySuccess := false
+	// metadataFetched — панель сама сходила к провайдеру и получила свежие
+	// заголовки. Для Mihomo-only подписок это неверно: тело качает Mihomo
+	// через loopback-адаптер, он же сохраняет метаданные (PersistHeaderMetadata).
+	metadataFetched := false
 
+	// Тело подписки нужно только Xray-пути — его парсит панель. Для Mihomo
+	// подписку скачивает сам Mihomo по команде reload, поэтому качать её здесь
+	// ещё раз значит удваивать обращения к провайдеру и HWID-хиты на один клик.
 	if subCopy.EnableXray {
-		err := s.refreshXray(&subCopy, body, headers)
+		body, headers, err := s.downloadWithUA(context.Background(), subCopy.URL, &subCopy, subscriptionUserAgentXray)
 		if err != nil {
+			s.mu.Lock()
+			if live := s.GetLocked(safeID); live != nil {
+				live.LastError = err.Error()
+				_ = s.save()
+			}
+			s.mu.Unlock()
+			return err
+		}
+		metadataFetched = true
+		subCopy.LastUpdate = time.Now()
+
+		if err := s.refreshXray(&subCopy, body, headers); err != nil {
 			refreshErr = err
 		} else {
 			xrayChanged = subCopy.LastChanged
 			xraySuccess = true
 		}
 	}
+
 	if subCopy.EnableMihomo {
 		providerName := subCopy.GetProviderName()
 		activeKernel := ""
@@ -123,6 +129,13 @@ func (s *SubscriptionService) Refresh(id string) error {
 			log.Printf("[Subscriptions] Mihomo reload failed: %v", err)
 			if !subCopy.EnableXray || refreshErr == nil {
 				refreshErr = err
+			}
+			// Mihomo не поднял подписку (не запущен / API недоступен), а UI всё
+			// равно ждёт свежие срок действия и трафик. Единственный случай,
+			// когда Mihomo-only подписку качает панель.
+			if !subCopy.EnableXray && s.fetchHeadersOnly(&subCopy) {
+				metadataFetched = true
+				subCopy.LastUpdate = time.Now()
 			}
 		}
 	}
@@ -139,20 +152,24 @@ func (s *SubscriptionService) Refresh(id string) error {
 			live.LastError = ""
 		}
 
-		// Always update HTTP headers metadata as the download itself succeeded.
-		live.LastUpdate = subCopy.LastUpdate
-		live.Upload = subCopy.Upload
-		live.Download = subCopy.Download
-		live.Total = subCopy.Total
-		live.Expire = subCopy.Expire
-		live.ProfileTitle = subCopy.ProfileTitle
-		live.ProfileUpdateHours = subCopy.ProfileUpdateHours
-		live.SupportURL = subCopy.SupportURL
-		live.ProfileWebPageURL = subCopy.ProfileWebPageURL
-		live.ProviderType = subCopy.ProviderType
+		// Метаданные заголовков перезаписываем только если панель сама ходила к
+		// провайдеру. Иначе их уже сохранил loopback-адаптер, и затирать их
+		// пустыми значениями из subCopy нельзя.
+		if metadataFetched {
+			live.LastUpdate = subCopy.LastUpdate
+			live.Upload = subCopy.Upload
+			live.Download = subCopy.Download
+			live.Total = subCopy.Total
+			live.Expire = subCopy.Expire
+			live.ProfileTitle = subCopy.ProfileTitle
+			live.ProfileUpdateHours = subCopy.ProfileUpdateHours
+			live.SupportURL = subCopy.SupportURL
+			live.ProfileWebPageURL = subCopy.ProfileWebPageURL
+			live.ProviderType = subCopy.ProviderType
 
-		// Временное имя провайдера (из ID) заменяется на бренд из profile-title.
-		s.maybeRenameProviderLocked(live)
+			// Временное имя провайдера (из ID) заменяется на бренд из profile-title.
+			s.maybeRenameProviderLocked(live)
+		}
 
 		// Update Xray state if its step succeeded
 		if xraySuccess {
