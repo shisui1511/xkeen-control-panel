@@ -44,12 +44,14 @@
     formMihomoGroups: string[];
     formEnabled: boolean;
     formUseProviderInterval: boolean;
-    availableMihomoGroups: string[];
     onClose: () => void;
     onSave: () => void;
   } = $props();
 
   let showAdvanced = $state(false);
+  let missingGroups = $derived(
+    (formMihomoGroups || []).filter((g) => !(availableMihomoGroups || []).includes(g))
+  );
 </script>
 
 <Modal
@@ -228,7 +230,7 @@
           </div>
         {/if}
 
-        {#if availableMihomoGroups.length === 0}
+        {#if availableMihomoGroups.length === 0 && missingGroups.length === 0}
           <div
             class="alert alert-warning"
             style="margin-bottom: 12px; font-size: 12.5px; border-radius: var(--radius-sm);"
@@ -263,7 +265,7 @@
           </div>
         {/if}
 
-        {#if availableMihomoGroups.length > 0}
+        {#if availableMihomoGroups.length > 0 || missingGroups.length > 0}
           <div
             class="mihomo-groups-checkboxes"
             style="display:flex; flex-direction:column; gap:8px; max-height:150px; overflow-y:auto; padding:10px; border:1px solid var(--border); border-radius:var(--radius-sm); background: rgba(0,0,0,0.15);"
@@ -284,6 +286,28 @@
                   }}
                 />
                 <span>{group}</span>
+              </label>
+            {/each}
+            {#each missingGroups as missingGroup}
+              <label
+                style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px; color:var(--fg-muted, #888);"
+              >
+                <input
+                  type="checkbox"
+                  checked={true}
+                  onchange={(e) => {
+                    if (!e.currentTarget.checked) {
+                      formMihomoGroups = formMihomoGroups.filter((g) => g !== missingGroup);
+                    }
+                  }}
+                />
+                <span>{missingGroup}</span>
+                <span
+                  class="badge"
+                  style="font-size:10px; padding:1px 6px; background:rgba(239,68,68,0.15); color:var(--color-danger, #ef4444); border:1px solid rgba(239,68,68,0.3); border-radius:var(--radius-xs);"
+                >
+                  ({$t('subscr.modal.group_missing_in_config')})
+                </span>
               </label>
             {/each}
           </div>

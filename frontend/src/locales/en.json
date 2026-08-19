@@ -1415,6 +1415,7 @@
   "app.or": "or",
   "subscr.modal.text_editor": "text editor",
   "subscr.modal.no_mihomo_groups_suffix": " to create groups.",
+  "subscr.modal.group_missing_in_config": "missing in config",
   "settings.comment": "Comment",
   "settings.size": "Size",
   "settings.created_at": "Creation Date",

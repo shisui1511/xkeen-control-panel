@@ -1003,34 +1003,8 @@
 
   async function loadAvailableMihomoGroups() {
     try {
-      const res = await apiFetch('/api/config/read?path=%2Fopt%2Fetc%2Fmihomo%2Fconfig.yaml');
-      if (!res.ok) return;
-      const data = await res.json();
-      const yamlContent = data.content || '';
-      const groupNames: string[] = [];
-      const lines = yamlContent.split('\n');
-      let inProxyGroups = false;
-      for (let line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('proxy-groups:')) {
-          inProxyGroups = true;
-          continue;
-        }
-        if (inProxyGroups) {
-          if (line.startsWith('-') || line.startsWith(' ') || line.trim() === '') {
-            if (trimmed.startsWith('- name:')) {
-              const name = trimmed
-                .replace('- name:', '')
-                .trim()
-                .replace(/^['"]|['"]$/g, '');
-              if (name) groupNames.push(name);
-            }
-          } else {
-            break;
-          }
-        }
-      }
-      availableMihomoGroups = groupNames;
+      const res = await apiFetchJSON<{ groups: string[] }>('/api/mihomo/groups');
+      availableMihomoGroups = res?.groups || [];
     } catch (e) {
       availableMihomoGroups = [];
     }
@@ -1042,6 +1016,7 @@
       loading = true;
     }
     try {
+      loadAvailableMihomoGroups();
       subscriptions = await apiFetchJSON<Subscription[]>('/api/proxy-providers', {
         signal: reqSignal
       });
