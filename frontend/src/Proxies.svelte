@@ -32,6 +32,9 @@
     type: string;
     alive?: boolean;
     delay?: number;
+    now?: string;
+    all?: string[];
+    provider?: string;
     history?: { time: string; delay: number }[];
   }
 
@@ -360,6 +363,26 @@
     return proxy.alive ?? false;
   }
 
+  function getEffectiveProxy(proxyName: string): Proxy | undefined {
+    let currentName = proxyName;
+    const visited = new Set<string>();
+    while (currentName && !visited.has(currentName)) {
+      visited.add(currentName);
+      const p = proxies[currentName];
+      if (!p) break;
+      if (
+        ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'].includes(p.type || '') &&
+        p.now
+      ) {
+        if (p.now === currentName) break;
+        currentName = p.now;
+        continue;
+      }
+      return p;
+    }
+    return proxies[currentName];
+  }
+
   function updateCollapsed() {
     const current = new Set(groups.map((g) => g.name));
     const next = new Set(collapsedGroups);
@@ -407,21 +430,22 @@
     let unchecked = 0;
 
     for (const name of nodeNames) {
-      const p = proxies[name];
+      const eff = getEffectiveProxy(name);
+      const p = eff || proxies[name];
       if (!p) {
         unchecked++;
         continue;
       }
       if (
-        ['DIRECT', 'REJECT'].includes(name.toUpperCase()) ||
+        ['DIRECT', 'REJECT'].includes((p.name || name).toUpperCase()) ||
         ['Direct', 'Reject', 'Compatible'].includes(p.type || '')
       ) {
         unchecked++;
         continue;
       }
-      const delay = getLastDelay(p);
+      const delay = getProxyDelay(name);
       const alive = isProxyAlive(p);
-      if (!p.history || p.history.length === 0 || delay === undefined) {
+      if (delay === undefined) {
         unchecked++;
       } else if (!alive || delay === 0 || delay > 400) {
         bad++;
@@ -464,24 +488,18 @@
     let list = [...allNodes];
     if (filter === 'working') {
       list = list.filter((name) => {
-        const p = proxies[name];
-        if (!p) return false;
-        const delay = getLastDelay(p);
-        return isProxyAlive(p) && delay !== undefined && delay > 0 && delay <= 800;
+        const delay = getProxyDelay(name);
+        return delay !== undefined && delay > 0 && delay <= 800;
       });
     } else if (filter === 'timeouts') {
       list = list.filter((name) => {
-        const p = proxies[name];
-        if (!p) return true;
-        const delay = getLastDelay(p);
-        return !isProxyAlive(p) || delay === 0 || delay === undefined || delay > 800;
+        const delay = getProxyDelay(name);
+        return delay === 0 || delay === undefined || delay > 800;
       });
     } else if (filter === 'latency') {
       list.sort((a, b) => {
-        const pA = proxies[a];
-        const pB = proxies[b];
-        const delayA = pA && isProxyAlive(pA) && getLastDelay(pA) ? getLastDelay(pA)! : 99999;
-        const delayB = pB && isProxyAlive(pB) && getLastDelay(pB) ? getLastDelay(pB)! : 99999;
+        const delayA = getProxyDelay(a) ?? 99999;
+        const delayB = getProxyDelay(b) ?? 99999;
         return delayA - delayB;
       });
     }
@@ -491,7 +509,7 @@
   function computeStats(): ObservatoryStats {
     const uniqueNodes = new Map<string, { alive: boolean; delay?: number }>();
 
-    // 1. Root proxies from Mihomo
+    // 1. Root and Provider proxies from Mihomo
     for (const p of Object.values(proxies)) {
       const typeLower = (p.type || '').toLowerCase();
       const nameLower = (p.name || '').toLowerCase();
@@ -579,14 +597,41 @@
       }
     }, 10000);
     try {
-      const data = await apiFetchJSON<{ proxies: Record<string, any> }>(
-        '/api/mihomo/proxy/proxies',
-        {
+      const [proxiesRes, providersRes] = await Promise.allSettled([
+        apiFetchJSON<{ proxies: Record<string, any> }>('/api/mihomo/proxy/proxies', {
           signal: reqSignal
+        }),
+        apiFetchJSON<{ providers: Record<string, any> }>('/api/mihomo/proxy/providers/proxies', {
+          signal: reqSignal
+        })
+      ]);
+
+      const rootProxies = proxiesRes.status === 'fulfilled' ? proxiesRes.value?.proxies || {} : {};
+      const providersMap =
+        providersRes.status === 'fulfilled' ? providersRes.value?.providers || {} : {};
+
+      const mergedProxies: Record<string, any> = { ...rootProxies };
+
+      for (const [provName, provData] of Object.entries(providersMap)) {
+        if (provData && Array.isArray((provData as any).proxies)) {
+          for (const node of (provData as any).proxies) {
+            if (!node || !node.name) continue;
+            if (!mergedProxies[node.name]) {
+              mergedProxies[node.name] = { ...node, provider: provName };
+            } else {
+              mergedProxies[node.name] = {
+                ...mergedProxies[node.name],
+                ...node,
+                provider: provName
+              };
+            }
+          }
         }
-      );
-      proxies = data.proxies || {};
-      const mappedGroups = Object.values(proxies)
+      }
+
+      proxies = mergedProxies;
+
+      const mappedGroups = Object.values(rootProxies)
         .filter((p: Proxy) => {
           return ['Selector', 'URLTest', 'Fallback', 'LoadBalance'].includes(p.type);
         })
@@ -620,11 +665,6 @@
       });
 
       groups = mappedGroups;
-      Object.keys(proxies).forEach((name) => {
-        if (data.proxies[name]?.history) {
-          proxies[name].history = data.proxies[name].history;
-        }
-      });
       updateCollapsed();
     } catch (e: any) {
       if (e?.name !== 'AbortError' && e?.status !== 401) {
@@ -670,20 +710,20 @@
   }
 
   function isLatencyStale(proxyName: string): boolean {
-    const proxy = proxies[proxyName];
-    if (!proxy || !proxy.history || proxy.history.length === 0) return false;
-    const lastItem = proxy.history[proxy.history.length - 1];
-    if (!lastItem.time) return false;
+    const hist = getProxyHistory(proxyName);
+    if (!hist || hist.length === 0) return false;
+    const lastItem = hist[hist.length - 1];
+    if (!lastItem?.time) return false;
     const timestamp = new Date(lastItem.time).getTime();
     if (isNaN(timestamp)) return false;
     return Date.now() - timestamp > 300000; // 5 minutes TTL
   }
 
   function getProxyLastTime(proxyName: string): number | null {
-    const proxy = proxies[proxyName];
-    if (!proxy || !proxy.history || proxy.history.length === 0) return null;
-    const lastItem = proxy.history[proxy.history.length - 1];
-    if (!lastItem.time) return null;
+    const hist = getProxyHistory(proxyName);
+    if (!hist || hist.length === 0) return null;
+    const lastItem = hist[hist.length - 1];
+    if (!lastItem?.time) return null;
     const timestamp = new Date(lastItem.time).getTime();
     return isNaN(timestamp) ? null : timestamp;
   }
@@ -702,11 +742,11 @@
     if (popoverHoverTimeout) clearTimeout(popoverHoverTimeout);
     const target = e.currentTarget as HTMLElement;
     popoverHoverTimeout = setTimeout(() => {
-      const p = proxies[proxyName];
-      if (p) {
+      const history = getProxyHistory(proxyName);
+      if (history && history.length > 0) {
         activePopover = {
           name: proxyName,
-          history: p.history || [],
+          history,
           el: target
         };
       }
@@ -727,17 +767,15 @@
       popoverHoverTimeout = null;
     }
     const target = e.currentTarget as HTMLElement;
-    const p = proxies[proxyName];
-    if (p) {
-      if (activePopover?.name === proxyName) {
-        activePopover = null;
-      } else {
-        activePopover = {
-          name: proxyName,
-          history: p.history || [],
-          el: target
-        };
-      }
+    const history = getProxyHistory(proxyName);
+    if (activePopover?.name === proxyName) {
+      activePopover = null;
+    } else if (history && history.length > 0) {
+      activePopover = {
+        name: proxyName,
+        history,
+        el: target
+      };
     }
   }
 
@@ -745,75 +783,75 @@
     if (batchTester.isActive()) return;
     testingLatency = true;
     error = '';
-
-    const nodeSet = new Set<string>();
-    for (const g of groups) {
-      for (const node of g.all) {
-        const p = proxies[node];
-        if (
-          node &&
-          !['DIRECT', 'REJECT'].includes(node.toUpperCase()) &&
-          p?.type !== 'Direct' &&
-          p?.type !== 'Reject'
-        ) {
-          if (isLatencyStale(node) || getProxyDelay(node) === undefined) {
-            nodeSet.add(node);
-          }
-        }
-      }
-    }
-
-    if (nodeSet.size === 0) {
-      for (const g of groups) {
-        for (const node of g.all) {
-          const p = proxies[node];
-          if (
-            node &&
-            !['DIRECT', 'REJECT'].includes(node.toUpperCase()) &&
-            p?.type !== 'Direct' &&
-            p?.type !== 'Reject'
-          ) {
-            nodeSet.add(node);
-          }
-        }
-      }
-    }
-
-    const nodes = Array.from(nodeSet);
-    if (nodes.length === 0) {
-      testingLatency = false;
-      return;
-    }
-
     poller?.pause();
+
     const pingConfig = getCurrentPingConfig();
     const targetUrl = getTargetUrl(pingConfig);
     const timeoutMs = pingConfig.timeoutMs;
 
     try {
-      await batchTester.run({
-        nodes,
-        targetUrl,
-        timeoutMs,
-        onProgressChange: (state) => {
-          batchProgress = state;
-          testingLatency = state.running;
-        },
-        onNodeComplete: (node, delay, rawHistoryItem) => {
-          if (proxies[node]) {
-            const currentHist = proxies[node].history ? [...proxies[node].history!] : [];
-            if (rawHistoryItem) {
-              currentHist.push(rawHistoryItem);
+      const activeGroups = groups.filter((g) => g.name !== 'GLOBAL' && g.all && g.all.length > 0);
+      if (activeGroups.length === 0) {
+        testingLatency = false;
+        poller?.resume();
+        return;
+      }
+
+      const total = activeGroups.length;
+      for (let i = 0; i < total; i++) {
+        const g = activeGroups[i];
+        batchProgress = {
+          running: true,
+          current: i + 1,
+          total,
+          currentNode: g.name,
+          currentNodeFlag: getCountryFlag(g.name),
+          retrying: false,
+          retrySeconds: 0,
+          targetUrl,
+          timeoutMs
+        };
+
+        try {
+          const res = await apiFetch(
+            `/api/mihomo/proxy/group/${encodeURIComponent(g.name)}/delay?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
+            { method: 'GET' }
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data && typeof data === 'object') {
+              for (const [nodeName, nodeDelay] of Object.entries(data)) {
+                const delayNum = typeof nodeDelay === 'number' ? nodeDelay : 0;
+                if (proxies[nodeName]) {
+                  const hist = proxies[nodeName].history ? [...proxies[nodeName].history!] : [];
+                  hist.push({ time: new Date().toISOString(), delay: delayNum });
+                  proxies[nodeName] = {
+                    ...proxies[nodeName],
+                    delay: delayNum,
+                    alive: delayNum > 0,
+                    history: hist
+                  };
+                }
+              }
             }
-            proxies[node] = {
-              ...proxies[node],
-              delay: delay ?? 0,
-              alive: (delay ?? 0) > 0,
-              history: currentHist
-            };
           }
+        } catch {
+          // continue with next group
         }
-      });
+      }
+
+      batchProgress = {
+        running: false,
+        current: total,
+        total,
+        currentNode: '',
+        currentNodeFlag: '',
+        retrying: false,
+        retrySeconds: 0,
+        targetUrl,
+        timeoutMs
+      };
+      showToast('success', $t('proxies.test_all_success'));
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
         showToast('error', err?.message || 'Error running batch latency test');
@@ -828,32 +866,53 @@
   async function testGroupLatency(group: ProxyGroup) {
     if (batchTester.isActive()) return;
     testingLatency = true;
-
-    const nodeSet = new Set<string>();
-    for (const node of group.all) {
-      const p = proxies[node];
-      if (
-        node &&
-        !['DIRECT', 'REJECT'].includes(node.toUpperCase()) &&
-        p?.type !== 'Direct' &&
-        p?.type !== 'Reject'
-      ) {
-        nodeSet.add(node);
-      }
-    }
-
-    const nodes = Array.from(nodeSet);
-    if (nodes.length === 0) {
-      testingLatency = false;
-      return;
-    }
-
     poller?.pause();
     const pingConfig = getCurrentPingConfig();
     const targetUrl = getTargetUrl(pingConfig);
     const timeoutMs = pingConfig.timeoutMs;
 
     try {
+      const res = await apiFetch(
+        `/api/mihomo/proxy/group/${encodeURIComponent(group.name)}/delay?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
+        { method: 'GET' }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data && typeof data === 'object') {
+          for (const [nodeName, nodeDelay] of Object.entries(data)) {
+            const delayNum = typeof nodeDelay === 'number' ? nodeDelay : 0;
+            if (proxies[nodeName]) {
+              const hist = proxies[nodeName].history ? [...proxies[nodeName].history!] : [];
+              hist.push({ time: new Date().toISOString(), delay: delayNum });
+              proxies[nodeName] = {
+                ...proxies[nodeName],
+                delay: delayNum,
+                alive: delayNum > 0,
+                history: hist
+              };
+            }
+          }
+          showToast('success', $t('proxies.test_all_success'));
+          return;
+        }
+      }
+
+      // Fallback to batch tester
+      const nodeSet = new Set<string>();
+      for (const node of group.all) {
+        const p = proxies[node];
+        if (
+          node &&
+          !['DIRECT', 'REJECT'].includes(node.toUpperCase()) &&
+          p?.type !== 'Direct' &&
+          p?.type !== 'Reject'
+        ) {
+          nodeSet.add(node);
+        }
+      }
+      const nodes = Array.from(nodeSet);
+      if (nodes.length === 0) return;
+
       await batchTester.run({
         nodes,
         targetUrl,
@@ -895,31 +954,70 @@
     const timeoutMs = pingConfig.timeoutMs;
 
     try {
-      const res = await apiFetch(
-        `/api/mihomo/proxy/proxies/${encodeURIComponent(proxyName)}/delay?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
-        {
-          method: 'GET'
+      const isGroup =
+        groups.some((g) => g.name === proxyName) ||
+        ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'].includes(
+          proxies[proxyName]?.type || ''
+        );
+
+      if (isGroup) {
+        const res = await apiFetch(
+          `/api/mihomo/proxy/group/${encodeURIComponent(proxyName)}/delay?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
+          { method: 'GET' }
+        );
+        if (!res.ok) throw new Error($t('proxies.load_error'));
+        const data = await res.json();
+        if (data && typeof data === 'object') {
+          for (const [nodeName, nodeDelay] of Object.entries(data)) {
+            const delayNum = typeof nodeDelay === 'number' ? nodeDelay : 0;
+            if (proxies[nodeName]) {
+              const hist = proxies[nodeName].history ? [...proxies[nodeName].history!] : [];
+              hist.push({ time: new Date().toISOString(), delay: delayNum });
+              proxies[nodeName] = {
+                ...proxies[nodeName],
+                delay: delayNum,
+                alive: delayNum > 0,
+                history: hist
+              };
+            }
+          }
         }
-      );
-      if (!res.ok) throw new Error($t('proxies.load_error'));
-      const data = await res.json();
-      const delay = typeof data?.delay === 'number' ? data.delay : 0;
-      if (proxies[proxyName]) {
-        const currentHist = proxies[proxyName].history ? [...proxies[proxyName].history!] : [];
-        currentHist.push({
-          time: new Date().toISOString(),
-          delay
-        });
-        proxies[proxyName] = {
-          ...proxies[proxyName],
-          delay,
-          alive: delay > 0,
-          history: currentHist
-        };
+      } else {
+        const res = await apiFetch(
+          `/api/mihomo/proxy/proxies/${encodeURIComponent(proxyName)}/delay?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
+          { method: 'GET' }
+        );
+        if (!res.ok) {
+          const prov = proxies[proxyName]?.provider;
+          if (prov) {
+            await apiFetch(
+              `/api/mihomo/proxy/providers/proxies/${encodeURIComponent(prov)}/healthcheck?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
+              { method: 'GET' }
+            );
+            await fetchProxies();
+            return;
+          }
+          throw new Error($t('proxies.load_error'));
+        }
+        const data = await res.json();
+        const delay = typeof data?.delay === 'number' ? data.delay : 0;
+        if (proxies[proxyName]) {
+          const currentHist = proxies[proxyName].history ? [...proxies[proxyName].history!] : [];
+          currentHist.push({
+            time: new Date().toISOString(),
+            delay
+          });
+          proxies[proxyName] = {
+            ...proxies[proxyName],
+            delay,
+            alive: delay > 0,
+            history: currentHist
+          };
+        }
       }
-      testingProxy = '';
     } catch (e: any) {
       showToast('error', e.message);
+    } finally {
       testingProxy = '';
     }
   }
@@ -935,16 +1033,30 @@
   }
 
   function getProxyDelay(proxyName: string): number | undefined {
+    const eff = getEffectiveProxy(proxyName);
+    if (eff) {
+      const d = getLastDelay(eff);
+      if (d !== undefined) return d;
+    }
     const proxy = proxies[proxyName];
     if (!proxy) return undefined;
     return getLastDelay(proxy);
   }
 
+  function getProxyHistory(proxyName: string): any[] {
+    const eff = getEffectiveProxy(proxyName);
+    if (eff && eff.history && eff.history.length > 0) {
+      return eff.history;
+    }
+    return proxies[proxyName]?.history || [];
+  }
+
   function getLatencyClass(proxyName: string): string {
-    const proxy = proxies[proxyName];
+    const eff = getEffectiveProxy(proxyName);
+    const proxy = eff || proxies[proxyName];
     if (!proxy) return 'lat dim';
     if (
-      ['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) ||
+      ['DIRECT', 'REJECT'].includes((proxy.name || proxyName).toUpperCase()) ||
       ['Direct', 'Reject', 'Compatible'].includes(proxy.type)
     )
       return 'lat dim';
@@ -964,10 +1076,11 @@
   }
 
   function getLatencyText(proxyName: string): string {
-    const proxy = proxies[proxyName];
+    const eff = getEffectiveProxy(proxyName);
+    const proxy = eff || proxies[proxyName];
     if (!proxy) return '—';
     if (
-      ['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) ||
+      ['DIRECT', 'REJECT'].includes((proxy.name || proxyName).toUpperCase()) ||
       ['Direct', 'Reject', 'Compatible'].includes(proxy.type)
     )
       return '—';
