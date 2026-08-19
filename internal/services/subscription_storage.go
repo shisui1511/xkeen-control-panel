@@ -908,6 +908,74 @@ func (s *SubscriptionService) CleanOrphanedSubscriptions() {
 	}
 }
 
+// SyncMihomoProviderBlocks приводит блоки proxy-providers в config.yaml
+// Mihomo к текущему виду, который генерирует панель. Без этого изменения
+// формата блока (новые директивы, другой порт панели) доезжают до уже
+// настроенных подписок только когда пользователь откроет и сохранит их
+// вручную.
+//
+// Вызывается один раз при старте, после SetPanelAddress.
+func (s *SubscriptionService) SyncMihomoProviderBlocks() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	type providerUpdate struct {
+		name  string
+		block string
+	}
+	updates := make([]providerUpdate, 0, len(s.subscriptions))
+	for i := range s.subscriptions {
+		sub := &s.subscriptions[i]
+		if !sub.EnableMihomo {
+			continue
+		}
+		updates = append(updates, providerUpdate{
+			name:  sub.GetProviderName(),
+			block: s.generateMihomoProxyProviderBlockLocked(sub, s.panelPort, s.panelHTTPS, s.loopbackPort),
+		})
+	}
+	if len(updates) == 0 {
+		return
+	}
+
+	configDir := s.mihomoConfigDir
+	if configDir == "" {
+		configDir = "/opt/etc/mihomo"
+	}
+	configPath := filepath.Join(configDir, "config.yaml")
+
+	s.mihomoMu.Lock()
+	defer s.mihomoMu.Unlock()
+
+	rawConfig, err := os.ReadFile(configPath)
+	if err != nil {
+		return
+	}
+
+	newConfig := string(rawConfig)
+	for _, u := range updates {
+		// Блок дописывается только если провайдер уже есть в конфиге: подписки
+		// с выключенной интеграцией не должны воскресать при рестарте панели.
+		if !MihomoProxyProviderExists(newConfig, u.name) {
+			continue
+		}
+		newConfig = ReplaceMihomoProxyProvider(newConfig, u.name, u.block)
+	}
+
+	if newConfig == string(rawConfig) {
+		return
+	}
+	if err := backupMihomoConfig(s.dataDir, configPath); err != nil {
+		log.Printf("[Subscriptions] provider block sync: backup failed: %v", err)
+		return
+	}
+	if err := utils.AtomicWriteFile(configPath, []byte(newConfig), 0600); err != nil {
+		log.Printf("[Subscriptions] provider block sync: write failed: %v", err)
+		return
+	}
+	log.Printf("[Subscriptions] proxy-provider blocks synced to current format")
+}
+
 func (s *SubscriptionService) migrateFromMihomoConfig() bool {
 	configDir := s.mihomoConfigDir
 	if configDir == "" {

@@ -281,6 +281,11 @@ func main() {
 	subscriptionSvc.SetMihomoSecretResolver(api.ResolveMihomoSecret)
 	api.SetSubscriptionService(subscriptionSvc)
 
+	// Привести блоки proxy-providers в config.yaml к текущему формату: без
+	// этого новые директивы блока доезжают до уже настроенных подписок только
+	// после ручного пересохранения.
+	subscriptionSvc.SyncMihomoProviderBlocks()
+
 	// Start subscription auto-refresh scheduler. It checks every 15 minutes
 	// and refreshes any subscription whose Interval has elapsed.
 	schedulerCtx, cancelScheduler := context.WithCancel(context.Background())

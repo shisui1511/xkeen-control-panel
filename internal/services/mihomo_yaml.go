@@ -563,6 +563,23 @@ func extractProviderBlocks(lines []string, sectionStart, sectionEnd, baseIndent 
 
 // ReplaceMihomoProxyProvider добавляет или обновляет блок провайдера в секции proxy-providers:.
 // Если block пустой, провайдер удаляется.
+// MihomoProxyProviderExists сообщает, есть ли в секции proxy-providers
+// конфига блок с указанным именем. Сравнение регистронезависимое — так же,
+// как в populateMihomoIntegrated.
+func MihomoProxyProviderExists(content string, providerID string) bool {
+	lines := strings.Split(content, "\n")
+	start, end, indent := findTopLevelSection(lines, "proxy-providers")
+	if start == -1 {
+		return false
+	}
+	for _, b := range extractProviderBlocks(lines, start, end, indent) {
+		if strings.EqualFold(b.ID, providerID) {
+			return true
+		}
+	}
+	return false
+}
+
 func ReplaceMihomoProxyProvider(content string, providerID string, block string) string {
 	lines := strings.Split(content, "\n")
 	start, end, indent := findTopLevelSection(lines, "proxy-providers")
