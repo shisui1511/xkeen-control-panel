@@ -675,90 +675,6 @@
     }
   }
 
-  async function testLatency() {
-    if (batchTester.isActive()) return;
-    testingLatency = true;
-    error = '';
-    poller?.pause();
-
-    const pingConfig = getCurrentPingConfig();
-    const targetUrl = getTargetUrl(pingConfig);
-    const timeoutMs = pingConfig.timeoutMs;
-
-    try {
-      const activeGroups = groups.filter((g) => g.name !== 'GLOBAL' && g.all && g.all.length > 0);
-      if (activeGroups.length === 0) {
-        testingLatency = false;
-        poller?.resume();
-        return;
-      }
-
-      const total = activeGroups.length;
-      for (let i = 0; i < total; i++) {
-        const g = activeGroups[i];
-        batchProgress = {
-          running: true,
-          current: i + 1,
-          total,
-          currentNode: g.name,
-          currentNodeFlag: getCountryFlag(g.name),
-          retrying: false,
-          retrySeconds: 0,
-          targetUrl,
-          timeoutMs
-        };
-
-        try {
-          const res = await apiFetch(
-            `/api/mihomo/proxy/group/${encodeURIComponent(g.name)}/delay?url=${encodeURIComponent(targetUrl)}&timeout=${timeoutMs}`,
-            { method: 'GET' }
-          );
-          if (res.ok) {
-            const data = await res.json();
-            if (data && typeof data === 'object') {
-              for (const [nodeName, nodeDelay] of Object.entries(data)) {
-                const delayNum = typeof nodeDelay === 'number' ? nodeDelay : 0;
-                if (proxies[nodeName]) {
-                  const hist = proxies[nodeName].history ? [...proxies[nodeName].history!] : [];
-                  hist.push({ time: new Date().toISOString(), delay: delayNum });
-                  proxies[nodeName] = {
-                    ...proxies[nodeName],
-                    delay: delayNum,
-                    alive: delayNum > 0,
-                    history: hist
-                  };
-                }
-              }
-            }
-          }
-        } catch {
-          // continue with next group
-        }
-      }
-
-      batchProgress = {
-        running: false,
-        current: total,
-        total,
-        currentNode: '',
-        currentNodeFlag: '',
-        retrying: false,
-        retrySeconds: 0,
-        targetUrl,
-        timeoutMs
-      };
-      showToast('success', $t('proxies.test_all_success'));
-    } catch (err: any) {
-      if (err?.name !== 'AbortError') {
-        showToast('error', err?.message || 'Error running batch latency test');
-      }
-    } finally {
-      testingLatency = false;
-      batchProgress = null;
-      poller?.resume();
-    }
-  }
-
   async function testGroupLatency(group: ProxyGroup) {
     if (batchTester.isActive()) return;
     testingLatency = true;
@@ -788,7 +704,7 @@
               };
             }
           }
-          showToast('success', $t('proxies.test_all_success'));
+          showToast('success', $t('proxies.test_group_success'));
           return;
         }
       }
@@ -1759,16 +1675,6 @@
             style="margin-right: 6px;"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></svg
           >
           {loading ? $t('app.loading') : $t('app.refresh')}
-        </button>
-        <button class="btn btn-primary" onclick={testLatency} disabled={testingLatency}>
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="currentColor"
-            style="margin-right: 6px;"><polygon points="5 3 19 12 5 21 5 3" /></svg
-          >
-          {testingLatency ? $t('proxies.testing') : $t('proxies.test_all_nodes')}
         </button>
         <PingTargetQuickMenu />
       </div>

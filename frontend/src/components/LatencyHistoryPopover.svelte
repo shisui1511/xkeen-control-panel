@@ -120,7 +120,7 @@
     <div class="popover-title" title={proxyName}>
       {$t('proxies.history_title', { nodeName: proxyName })}
     </div>
-    <button type="button" class="popover-close-btn" onclick={onClose} aria-label="Закрыть">
+    <button type="button" class="popover-close-btn" onclick={onClose} aria-label={$t('app.close')}>
       &times;
     </button>
   </div>
