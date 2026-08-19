@@ -44,6 +44,7 @@
     formMihomoGroups: string[];
     formEnabled: boolean;
     formUseProviderInterval: boolean;
+    availableMihomoGroups?: string[];
     onClose: () => void;
     onSave: () => void;
   } = $props();
