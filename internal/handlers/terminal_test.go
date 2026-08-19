@@ -160,6 +160,14 @@ func TestTerminalWebSocket_MaxSessions(t *testing.T) {
 	}
 	defer conn2.Close()
 
+	// Wait for 2 active sessions
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if ptySvc.ActiveSessionsCount() == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if count := ptySvc.ActiveSessionsCount(); count != 2 {
 		t.Errorf("expected 2 active sessions, got %d", count)
 	}
@@ -180,7 +188,13 @@ func TestTerminalWebSocket_MaxSessions(t *testing.T) {
 
 	// Close session 1
 	_ = conn1.Close()
-	time.Sleep(100 * time.Millisecond)
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if ptySvc.ActiveSessionsCount() == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	if count := ptySvc.ActiveSessionsCount(); count != 1 {
 		t.Errorf("expected 1 active session after closing conn1, got %d", count)
