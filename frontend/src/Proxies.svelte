@@ -2012,15 +2012,22 @@
                     {@const flag = getCountryFlag(proxyName)}
 
                     <div class="proxy-card" class:now={isActive}>
-                      <button
-                        type="button"
+                      <div
                         class="proxy-select-btn"
-                        disabled={group.type !== 'Selector'}
+                        role="button"
+                        tabindex={group.type === 'Selector' ? 0 : -1}
+                        aria-disabled={group.type !== 'Selector'}
                         title={group.type !== 'Selector'
                           ? $t('proxies.managed_automatically')
                           : undefined}
                         onclick={() =>
                           group.type === 'Selector' && selectProxy(group.name, proxyName)}
+                        onkeydown={(e) => {
+                          if (group.type === 'Selector' && (e.key === 'Enter' || e.key === ' ')) {
+                            e.preventDefault();
+                            selectProxy(group.name, proxyName);
+                          }
+                        }}
                       >
                         <div class="p-header">
                           <span class="p-name">
@@ -2059,7 +2066,7 @@
                             >
                           {/if}
                         </div>
-                      </button>
+                      </div>
 
                       {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
                         <button
@@ -2488,8 +2495,13 @@
     cursor: pointer;
     border-radius: var(--radius-md);
   }
-  .proxy-select-btn:disabled {
+  .proxy-select-btn:disabled,
+  .proxy-select-btn[aria-disabled='true'] {
     cursor: default;
+  }
+  .proxy-select-btn:focus-visible {
+    outline: 2px solid var(--accent, #29c2f0);
+    outline-offset: -2px;
   }
   .proxy-card::after {
     content: '';
