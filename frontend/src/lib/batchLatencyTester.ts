@@ -30,6 +30,7 @@ export function formatTimeAgo(
   timestampMs: number,
   t: (key: string, params?: any) => string
 ): string {
+  if (!timestampMs || isNaN(timestampMs)) return t('time.just_now');
   const diffSec = Math.max(0, Math.floor((Date.now() - timestampMs) / 1000));
   if (diffSec < 60) return t('time.just_now');
   const diffMin = Math.floor(diffSec / 60);

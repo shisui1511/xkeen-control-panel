@@ -31,6 +31,12 @@ describe('formatTimeAgo', () => {
     const now = Date.now();
     expect(formatTimeAgo(now - 2 * 86400 * 1000, mockT)).toBe('2 д назад');
   });
+
+  it('handles invalid, null, NaN or zero timestamps gracefully', () => {
+    expect(formatTimeAgo(NaN, mockT)).toBe('только что');
+    expect(formatTimeAgo(0, mockT)).toBe('только что');
+    expect(formatTimeAgo(undefined as any, mockT)).toBe('только что');
+  });
 });
 
 describe('BatchLatencyTester', () => {
