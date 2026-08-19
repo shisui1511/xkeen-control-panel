@@ -37,18 +37,26 @@ func validatePathAllowed(path string, allowedRoots []string) (string, error) {
 // «в лоб» тихо отвязывает механизм профилей, поэтому существующий симлинк
 // разыменовывается и запись идёт в его цель.
 //
-// Битый симлинк и любые ошибки разыменования означают запись по исходному
-// пути: это ровно то поведение, что было до появления функции.
+// Если симлинк указывает на еще не существующий файл (битый симлинк), функция
+// возвращает разрешенный путь цели, благодаря чему запись создает целевой файл,
+// сохраняя исходный симлинк.
 func resolveSymlinkTarget(path string) string {
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSymlink == 0 {
-		return path
+	curr := filepath.Clean(path)
+	for i := 0; i < 255; i++ {
+		info, err := os.Lstat(curr)
+		if err != nil || info.Mode()&os.ModeSymlink == 0 {
+			return curr
+		}
+		target, err := os.Readlink(curr)
+		if err != nil {
+			return curr
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(curr), target)
+		}
+		curr = filepath.Clean(target)
 	}
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil || resolved == "" {
-		return path
-	}
-	return resolved
+	return curr
 }
 
 // AtomicWriteFile writes data to a temporary file and then renames it to the target path.
@@ -59,14 +67,14 @@ func resolveSymlinkTarget(path string) string {
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	// Sanitize path to prevent directory traversal (CWE-22).
 	path = filepath.Clean(path)
-	path = resolveSymlinkTarget(path)
-	dir := filepath.Dir(path)
+	targetPath := resolveSymlinkTarget(path)
+	dir := filepath.Dir(targetPath)
 	// Ensure directory exists
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
-	// Create temporary file in same directory
+	// Create temporary file in same directory as target
 	tmpFile, err := os.CreateTemp(dir, "atomic-*")
 	if err != nil {
 		return err
@@ -95,8 +103,8 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 
-	// Atomic rename
-	return os.Rename(tmpPath, path)
+	// Atomic rename to resolved target path (preserving symlink if path was a symlink)
+	return os.Rename(tmpPath, targetPath)
 }
 
 // AtomicWriteFileSafe is like AtomicWriteFile but validates path against allowedRoots first.
