@@ -30,12 +30,36 @@ func validatePathAllowed(path string, allowedRoots []string) (string, error) {
 	return "", errors.New("path not within allowed roots")
 }
 
+// resolveSymlinkTarget возвращает путь, по которому должна произойти запись.
+//
+// os.Rename заменяет симлинк обычным файлом, а на роутере config.yaml Mihomo
+// часто является симлинком на активный профиль (profiles/default.yaml). Запись
+// «в лоб» тихо отвязывает механизм профилей, поэтому существующий симлинк
+// разыменовывается и запись идёт в его цель.
+//
+// Битый симлинк и любые ошибки разыменования означают запись по исходному
+// пути: это ровно то поведение, что было до появления функции.
+func resolveSymlinkTarget(path string) string {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return path
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil || resolved == "" {
+		return path
+	}
+	return resolved
+}
+
 // AtomicWriteFile writes data to a temporary file and then renames it to the target path.
 // This prevents file corruption if the process or system crashes during write.
 // Callers are responsible for validating the path via PathValidator before calling this function.
+//
+// If path is an existing symlink, the write goes to its target so the link itself survives.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	// Sanitize path to prevent directory traversal (CWE-22).
 	path = filepath.Clean(path)
+	path = resolveSymlinkTarget(path)
 	dir := filepath.Dir(path)
 	// Ensure directory exists
 	if err := os.MkdirAll(dir, 0755); err != nil {
