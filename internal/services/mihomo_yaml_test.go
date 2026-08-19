@@ -485,3 +485,129 @@ func TestParseClashProxyNode_Hysteria2(t *testing.T) {
 		t.Errorf("expected ObfsPassword simple_obfs_pass, got %q", node.ObfsPassword)
 	}
 }
+
+func TestExtractProxyGroupNames(t *testing.T) {
+	t.Run("Standard config with multiple group types", func(t *testing.T) {
+		yaml := `mixed-port: 7890
+allow-lan: true
+proxies:
+  - name: direct-node
+    type: direct
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - AUTO
+      - direct-node
+  - name: AUTO
+    type: url-test
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+    proxies:
+      - direct-node
+  - name: "Fallback-Group"
+    type: fallback
+    proxies:
+      - PROXY
+  - name: 'LoadBalance'
+    type: load-balance
+    strategy: round-robin
+    proxies:
+      - PROXY
+rules:
+  - MATCH,PROXY
+`
+		groups, err := ExtractProxyGroupNames(yaml)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := []string{"PROXY", "AUTO", "Fallback-Group", "LoadBalance"}
+		if len(groups) != len(expected) {
+			t.Fatalf("expected %d groups, got %d: %v", len(expected), len(groups), groups)
+		}
+		for i, exp := range expected {
+			if groups[i] != exp {
+				t.Errorf("at index %d: expected %q, got %q", i, exp, groups[i])
+			}
+		}
+	})
+
+	t.Run("Filters DIRECT and REJECT builtins", func(t *testing.T) {
+		yaml := `proxy-groups:
+  - name: PROXY
+    type: select
+  - name: DIRECT
+    type: select
+  - name: REJECT
+    type: select
+  - name: STREAMING
+    type: select
+`
+		groups, err := ExtractProxyGroupNames(yaml)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := []string{"PROXY", "STREAMING"}
+		if len(groups) != len(expected) {
+			t.Fatalf("expected %d groups, got %d: %v", len(expected), len(groups), groups)
+		}
+		if groups[0] != "PROXY" || groups[1] != "STREAMING" {
+			t.Errorf("unexpected groups: %v", groups)
+		}
+	})
+
+	t.Run("Config without proxy-groups section", func(t *testing.T) {
+		yaml := `mixed-port: 7890
+proxies:
+  - name: node1
+    type: vmess
+rules:
+  - MATCH,DIRECT
+`
+		groups, err := ExtractProxyGroupNames(yaml)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(groups) != 0 {
+			t.Errorf("expected empty groups, got %v", groups)
+		}
+	})
+
+	t.Run("Empty or whitespace YAML", func(t *testing.T) {
+		groups, err := ExtractProxyGroupNames("   \n\t  ")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(groups) != 0 {
+			t.Errorf("expected empty groups, got %v", groups)
+		}
+	})
+
+	t.Run("Malformed YAML fallback", func(t *testing.T) {
+		malformed := `port: 7890
+proxy-groups:
+  - name: GroupA
+    type: select
+  - name: "GroupB" # inline comment
+    invalid : : : :
+  - name: GroupC
+`
+		groups, err := ExtractProxyGroupNames(malformed)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(groups) == 0 {
+			t.Errorf("fallback should extract groups even on malformed YAML, got 0")
+		}
+		foundA := false
+		for _, g := range groups {
+			if g == "GroupA" {
+				foundA = true
+			}
+		}
+		if !foundA {
+			t.Errorf("GroupA should be extracted from malformed YAML, got %v", groups)
+		}
+	})
+}
+
