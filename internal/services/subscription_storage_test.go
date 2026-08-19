@@ -381,3 +381,47 @@ func TestMaybeRenameProviderAfterProfileTitle(t *testing.T) {
 	}
 	svc.mu.Unlock()
 }
+
+func TestNormalizeMACtoHWID(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"12:34:56:78:9a:bc", "123456789ABC"},
+		{"12-34-56-78-9A-BC", "123456789ABC"},
+		{"  123456789abc \n", "123456789ABC"},
+		{"00:00:00:00:00:00", ""},
+		{"ff:ff:ff:ff:ff:ff", ""},
+		{"invalid_mac", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		got := normalizeMACtoHWID(tt.input)
+		if got != tt.want {
+			t.Errorf("normalizeMACtoHWID(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestLoadOrGenerateHWID_EnvOverride(t *testing.T) {
+	t.Setenv("XCP_HWID", "AA:BB:CC:11:22:33")
+	tmp := t.TempDir()
+	hwid := loadOrGenerateHWID(tmp)
+	if hwid != "AABBCC112233" {
+		t.Fatalf("expected AABBCC112233 from env, got %s", hwid)
+	}
+}
+
+func TestLoadOrGenerateHWID_ExistingFile(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "data")
+	_ = os.MkdirAll(dir, 0755)
+	_ = os.WriteFile(filepath.Join(dir, "xcp_hwid.txt"), []byte("123456789ABC\n"), 0600)
+
+	hwid := loadOrGenerateHWID(tmp)
+	if hwid != "123456789ABC" {
+		t.Fatalf("expected 123456789ABC from file, got %s", hwid)
+	}
+}
+
