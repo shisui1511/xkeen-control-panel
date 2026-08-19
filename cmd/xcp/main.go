@@ -132,6 +132,7 @@ func main() {
 	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
 	srv.HandleProtected("/api/logs/download", api.LogsDownload)
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
+	srv.HandleProtected("/api/mihomo/groups", api.MihomoGroups)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
 	srv.HandleProtected("/api/system/clients", api.SystemClients)

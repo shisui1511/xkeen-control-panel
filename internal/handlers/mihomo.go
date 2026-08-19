@@ -4,13 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
+
+type MihomoGroupsResponse struct {
+	Groups []string `json:"groups"`
+}
 
 func (a *API) MihomoStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -23,6 +33,66 @@ func (a *API) MihomoStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write([]byte(out))
+}
+
+func (a *API) MihomoGroups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	reqPath := r.URL.Query().Get("path")
+	var targetPath string
+
+	if reqPath != "" {
+		cleanPath, err := a.pathVal.Validate(reqPath)
+		if err != nil {
+			a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+			return
+		}
+		targetPath = cleanPath
+	} else {
+		configDir := a.cfg.MihomoConfigDir
+		if configDir == "" {
+			configDir = "/opt/etc/mihomo"
+		}
+		targetPath = filepath.Join(configDir, "config.yaml")
+		if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+			altPath := filepath.Join(configDir, "config.yml")
+			if _, err := os.Stat(altPath); err == nil {
+				targetPath = altPath
+			}
+		}
+	}
+
+	cleanTarget, err := a.pathVal.Validate(targetPath)
+	if err != nil {
+		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
+		return
+	}
+
+	data, err := os.ReadFile(cleanTarget)
+	if err != nil {
+		if os.IsNotExist(err) {
+			a.jsonResponse(w, MihomoGroupsResponse{Groups: []string{}})
+			return
+		}
+		log.Printf("[MihomoGroups] failed to read config %s: %v", utils.SanitizeLogInput(cleanTarget), err)
+		a.jsonResponse(w, MihomoGroupsResponse{Groups: []string{}})
+		return
+	}
+
+	groups, err := services.ExtractProxyGroupNames(string(data))
+	if err != nil {
+		log.Printf("[MihomoGroups] failed to extract groups from %s: %v", utils.SanitizeLogInput(cleanTarget), err)
+		a.jsonResponse(w, MihomoGroupsResponse{Groups: []string{}})
+		return
+	}
+	if groups == nil {
+		groups = []string{}
+	}
+
+	a.jsonResponse(w, MihomoGroupsResponse{Groups: groups})
 }
 
 func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
