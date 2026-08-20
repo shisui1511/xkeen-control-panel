@@ -162,7 +162,7 @@
           {#if isTestingLatency}
             <span class="spinner" aria-hidden="true"></span>
           {:else}
-            <Icon name="traffic" size={18} color="var(--success, #46d18a)" />
+            <Icon name="traffic" size={18} color="var(--accent, #29c2f0)" />
           {/if}
         </div>
         <div class="qa-content">
@@ -204,7 +204,7 @@
           {#if isCreatingBackup}
             <span class="spinner" aria-hidden="true"></span>
           {:else}
-            <Icon name="download" size={18} color="var(--warning, #f0b450)" />
+            <Icon name="download" size={18} color="var(--accent, #29c2f0)" />
           {/if}
         </div>
         <div class="qa-content">
