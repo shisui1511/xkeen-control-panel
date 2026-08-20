@@ -92,6 +92,44 @@
   let mihomoFiles = $state<ConfigFileInfo[]>([]);
   let showSidebar = $state(true);
 
+  // Resizable Splitter (EDIT-02)
+  let fileTreeWidth = $state(
+    typeof localStorage !== 'undefined'
+      ? Number(localStorage.getItem('editor_filetree_width')) || 240
+      : 240
+  );
+  let isResizing = $state(false);
+
+  function startResize(e: MouseEvent | PointerEvent) {
+    e.preventDefault();
+    isResizing = true;
+    const startX = e.clientX;
+    const startWidth = fileTreeWidth;
+
+    function onMove(ev: MouseEvent | PointerEvent) {
+      const newWidth = Math.max(160, Math.min(450, startWidth + (ev.clientX - startX)));
+      fileTreeWidth = newWidth;
+    }
+
+    function onUp() {
+      isResizing = false;
+      localStorage.setItem('editor_filetree_width', String(fileTreeWidth));
+      window.removeEventListener('mousemove', onMove as any);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointermove', onMove as any);
+      window.removeEventListener('pointerup', onUp);
+    }
+
+    window.addEventListener('mousemove', onMove as any);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onMove as any);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  let isMac = $derived(
+    typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+  );
+
   // Status bar cursor position
   let cursorLine = $state(1);
   let cursorCol = $state(1);
@@ -1021,6 +1059,66 @@
     }
   }
 
+  async function duplicateFile(file: ConfigFileInfo) {
+    try {
+      const dotIdx = file.name.lastIndexOf('.');
+      const base = dotIdx !== -1 ? file.name.substring(0, dotIdx) : file.name;
+      const ext = dotIdx !== -1 ? file.name.substring(dotIdx) : '';
+      const dir = file.path.substring(0, file.path.lastIndexOf('/') + 1);
+      const newName = `${base}_copy${ext}`;
+      const newPath = `${dir}${newName}`;
+
+      const readRes = await apiFetch(`/api/config/read?path=${encodeURIComponent(file.path)}`);
+      if (!readRes.ok) throw new Error(await readRes.text());
+      const content = await readRes.text();
+
+      const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(newPath)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content })
+      });
+      if (!saveRes.ok) throw new Error(await saveRes.text());
+
+      showToast('success', $t('editor.duplicate_file'));
+      await loadFiles();
+      await loadFile(newPath);
+    } catch (e: any) {
+      showToast('error', e?.message || 'Failed to duplicate file');
+    }
+  }
+
+  function downloadFileByName(file: ConfigFileInfo) {
+    if (file.path === selectedFile && editorView) {
+      downloadFile();
+      return;
+    }
+    apiFetch(`/api/config/read?path=${encodeURIComponent(file.path)}`)
+      .then((r) => r.text())
+      .then((content) => {
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      })
+      .catch((err) => showToast('error', err?.message || 'Download failed'));
+  }
+
+  function deleteFileByInfo(file: ConfigFileInfo) {
+    selectedFile = file.path;
+    deleteFile();
+  }
+
+  function openBackupsForFile(file: ConfigFileInfo) {
+    selectedFile = file.path;
+    loadBackups(file.path);
+    drawerOpen = true;
+  }
+
   function toggleSchema() {
     schemaEnabled = !schemaEnabled;
   }
@@ -1357,80 +1455,74 @@
 <svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="editor-page-container">
-  <div class="page-head">
-    <div>
+  <!-- Level 1 Header (EDIT-01) -->
+  <div class="editor-page-head">
+    <div class="eph-left">
       <div class="crumbs">
-        {$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.group_core')} <span class="crumb-sep">›</span>
         {$t('nav.editor')}
         {#if activeTab === 'constructor'}
-          <span style="color:var(--fg-faint);margin:0 6px;">/</span>
-          {$t('editor.tab_constructor')}
+          <span class="crumb-sep">›</span> {$t('editor.tab_constructor')}
         {/if}
       </div>
-      <h1>
-        {activeTab === 'constructor' ? $t('editor.constructor_title') : $t('editor.h1')}
-      </h1>
-      <p class="sub">
-        {activeTab === 'constructor' ? $t('editor.constructor_subtitle') : $t('editor.h1_sub')}
-      </p>
-    </div>
-    {#if activeTab === 'files'}
-      <div class="ph-actions">
+      <div class="editor-mode-switcher">
         <button
-          class="btn btn-primary"
-          onclick={() => {
-            showCreateModal = true;
-            newFileName = '';
-          }}
-          title={$t('editor.create_file')}
+          class="mode-pill-btn"
+          class:active={activeTab === 'files'}
+          onclick={() => setTab('files')}
         >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2.5"
-            stroke-linecap="round"
-            ><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg
-          >
-          {$t('editor.new_file')}
+          <Icon name="editor" size={13} />
+          {$t('editor.tab_files')}
         </button>
+        <button
+          class="mode-pill-btn"
+          class:active={activeTab === 'constructor'}
+          onclick={() => setTab('constructor')}
+        >
+          <Icon name="settings" size={13} />
+          {$t('editor.tab_constructor')}
+        </button>
+      </div>
+    </div>
+
+    {#if activeTab === 'files'}
+      <div class="eph-right">
+        <span class="status-indicator" class:status-dirty={isDirty}>
+          <span class="status-dot" style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};"
+            >●</span
+          >
+          {isDirty ? $t('editor.unsaved') : $t('editor.saved')}
+        </span>
         {#if selectedFile}
           <button
-            class="btn btn-secondary"
+            class="btn btn-secondary btn-compact"
             onclick={() => loadFile(selectedFile)}
             disabled={loading}
             title={$t('editor.reload')}
           >
             <svg
-              width="14"
-              height="14"
+              width="13"
+              height="13"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              ><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg
+              stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /></svg
             >
             {$t('editor.reload')}
           </button>
           <button
-            class="btn btn-secondary"
+            class="btn btn-secondary btn-compact"
             onclick={checkBeforeSave}
             disabled={saving || applyLoading}
             title={$t('app.save')}
           >
             <svg
-              width="14"
-              height="14"
+              width="13"
+              height="13"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
               ><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><polyline
                 points="17 21 17 13 7 13 7 21"
               /><polyline points="7 3 7 8 15 8" /></svg
@@ -1438,28 +1530,25 @@
             {saving ? $t('app.loading') : $t('app.save')}
           </button>
           <button
-            class="btn btn-accent"
+            class="btn btn-accent btn-compact"
             onclick={handleSaveAndApply}
             disabled={saving || applyLoading}
             title={$t('editor.save_and_apply')}
           >
             {#if applyLoading}
-              <span class="ks-dot-spin">
-                <span class="ks-dot"></span>
-                <span class="ks-dot"></span>
-                <span class="ks-dot"></span>
-              </span>
+              <span class="ks-dot-spin"
+                ><span class="ks-dot"></span><span class="ks-dot"></span><span class="ks-dot"
+                ></span></span
+              >
               {$t('app.loading')}
             {:else}
               <svg
-                width="14"
-                height="14"
+                width="13"
+                height="13"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
                 ><path
                   d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"
                 /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /><path
@@ -1482,31 +1571,40 @@
     />
   {/if}
 
-  <div class="editor-tabs">
-    <button class="tab-btn" class:active={activeTab === 'files'} onclick={() => setTab('files')}>
-      <Icon name="editor" size={14} />
-      {$t('editor.tab_files')}
-    </button>
-    <button
-      class="tab-btn"
-      class:active={activeTab === 'constructor'}
-      onclick={() => setTab('constructor')}
-    >
-      <Icon name="settings" size={14} />
-      {$t('editor.tab_constructor')}
-    </button>
-  </div>
-
   {#if activeTab === 'files'}
-    <div class="editor-grid" class:sidebar-collapsed={!showSidebar}>
+    <!-- Workspace with Resizable Splitter (EDIT-02) -->
+    <div class="editor-workspace" class:resizing={isResizing}>
       {#if showSidebar}
-        <FileTree
-          {xrayFiles}
-          {mihomoFiles}
-          {selectedFile}
-          activeKernel={$capabilities?.active_kernel || ''}
-          onLoadFile={loadFile}
-        />
+        <div class="file-tree-pane" style="width: {fileTreeWidth}px;">
+          <FileTree
+            {xrayFiles}
+            {mihomoFiles}
+            {selectedFile}
+            activeKernel={$capabilities?.active_kernel || ''}
+            onLoadFile={loadFile}
+            onCreateFile={() => {
+              showCreateModal = true;
+              newFileName = '';
+            }}
+            onRenameFile={(f) => {
+              showRenameModal = true;
+              renameTarget = f.name;
+              selectedFile = f.path;
+            }}
+            onDuplicateFile={duplicateFile}
+            onDownloadFile={downloadFileByName}
+            onDeleteFile={deleteFileByInfo}
+            onViewBackups={openBackupsForFile}
+          />
+        </div>
+        <button
+          type="button"
+          class="editor-splitter"
+          aria-label="Resize sidebar"
+          tabindex="-1"
+          onpointerdown={startResize}
+          onmousedown={startResize}
+        ></button>
       {/if}
 
       <!-- Main Editor Card -->
@@ -1530,8 +1628,6 @@
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
                 ><path
                   d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
                 /></svg
@@ -1542,13 +1638,127 @@
         </div>
       {:else}
         <div class="editor-main-card">
-          <EditorTabs
-            {tabs}
-            {activeTabPath}
-            onSwitchTab={switchTab}
-            onPinTab={pinTab}
-            onCloseTab={closeTab}
-          />
+          <!-- Level 2 Subhead Bar (EDIT-01) -->
+          <div class="editor-subhead-bar">
+            <button
+              class="btn-sidebar-toggle"
+              onclick={() => (showSidebar = !showSidebar)}
+              title={showSidebar ? $t('editor.hide_sidebar') : $t('editor.show_sidebar')}
+              aria-label={showSidebar ? $t('editor.hide_sidebar') : $t('editor.show_sidebar')}
+            >
+              {#if showSidebar}
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"><polyline points="15 18 9 12 15 6" /></svg
+                >
+              {:else}
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"><polyline points="9 18 15 12 9 6" /></svg
+                >
+              {/if}
+            </button>
+
+            <div class="subhead-tabs-container">
+              <EditorTabs
+                {tabs}
+                {activeTabPath}
+                onSwitchTab={switchTab}
+                onPinTab={pinTab}
+                onCloseTab={closeTab}
+              />
+            </div>
+
+            {#if selectedFile}
+              <div class="subhead-meta-container">
+                {#if hasDraft}
+                  <div
+                    class="editor-draft-bar"
+                    style="display: inline-flex; align-items: center; gap: 4px;"
+                  >
+                    <span class="badge badge-warning" style="font-size: 11px; padding: 2px 6px;">
+                      {$t('editor.has_draft')}
+                    </span>
+                    <button class="btn btn-xs btn-primary" onclick={restoreDraft}>
+                      {$t('editor.restore_draft')}
+                    </button>
+                    <button class="btn btn-xs btn-secondary" onclick={discardDraft}>
+                      {$t('editor.discard_draft')}
+                    </button>
+                  </div>
+                {/if}
+                <EditorKernelWidget activeKernel={$capabilities?.active_kernel} />
+                <span class="subhead-file-meta">{fileType} • UTF‑8</span>
+                <div class="kebab-wrap">
+                  <button
+                    class="btn-kebab"
+                    onclick={toggleKebab}
+                    aria-label={$t('editor.more_actions')}
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle
+                        cx="12"
+                        cy="19"
+                        r="1"
+                      />
+                    </svg>
+                  </button>
+                  {#if showKebabMenu}
+                    <div class="kebab-dropdown" transition:fade={{ duration: 100 }}>
+                      <button class="kebab-item" onclick={downloadFile}>
+                        <Icon name="download" size={14} />
+                        {$t('editor.download_file')}
+                      </button>
+                      <button
+                        class="kebab-item"
+                        onclick={() => {
+                          showRenameModal = true;
+                          renameTarget = selectedFile.split('/').pop() || '';
+                        }}
+                      >
+                        <Icon name="edit" size={14} />
+                        {$t('app.rename')}
+                      </button>
+                      <button class="kebab-item" onclick={openTemplatesModal}>
+                        <Icon name="settings" size={14} />
+                        {$t('editor.templates')}
+                      </button>
+                      {#if fileType === 'JSON'}
+                        <button class="kebab-item" onclick={() => (showGeneratorModal = true)}>
+                          <Icon name="settings" size={14} />
+                          {$t('editor.generator')}
+                        </button>
+                      {/if}
+                      <button class="kebab-item" onclick={applyQuickFixes}>
+                        <Icon name="settings" size={14} />
+                        {$t('editor.quick_fixes')}
+                      </button>
+                      <div class="kebab-divider"></div>
+                      <button class="kebab-item danger" onclick={deleteFile}>
+                        <Icon name="trash" size={14} />
+                        {$t('app.delete')}
+                      </button>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+            {/if}
+          </div>
 
           {#if breadcrumbs.length > 0}
             <div class="editor-breadcrumbs">
@@ -1562,132 +1772,6 @@
               {/each}
             </div>
           {/if}
-          <div class="editor-toolbar">
-            <button
-              class="btn btn-secondary"
-              style="padding: 6px 10px; margin-right: 8px;"
-              onclick={() => (showSidebar = !showSidebar)}
-              title={showSidebar ? $t('editor.hide_sidebar') : $t('editor.show_sidebar')}
-              aria-label={showSidebar ? $t('editor.hide_sidebar') : $t('editor.show_sidebar')}
-            >
-              {#if showSidebar}
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"><polyline points="15 18 9 12 15 6" /></svg
-                >
-              {:else}
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"><polyline points="9 18 15 12 9 6" /></svg
-                >
-              {/if}
-            </button>
-            <span class="file-name"
-              >{selectedFile ? selectedFile.split('/').pop() : $t('editor.select_file')}</span
-            >
-            {#if selectedFile}
-              <span class="file-meta" style="margin-left:8px;"
-                >{fileSize} · {fileType} · UTF‑8 · {fileLineEndings}</span
-              >
-            {/if}
-
-            {#if hasDraft}
-              <div
-                class="editor-draft-bar"
-                style="margin-left: 12px; display: inline-flex; align-items: center; gap: 6px;"
-              >
-                <span
-                  class="badge badge-warning"
-                  style="font-size: 12px; display: flex; align-items: center; gap: 4px;"
-                >
-                  <span class="tab-dirty-dot" style="margin:0">●</span>
-                  {$t('editor.has_draft')}
-                </span>
-                <button class="btn btn-xs btn-primary" onclick={restoreDraft}>
-                  {$t('editor.restore_draft')}
-                </button>
-                <button class="btn btn-xs btn-secondary" onclick={discardDraft}>
-                  {$t('editor.discard_draft')}
-                </button>
-              </div>
-            {/if}
-
-            <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
-              <EditorKernelWidget activeKernel={$capabilities?.active_kernel} />
-              <div class="kebab-wrap">
-                <button
-                  class="btn btn-secondary"
-                  style="padding: 6px 10px;"
-                  onclick={toggleKebab}
-                  aria-label={$t('editor.more_actions')}
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  >
-                    <circle cx="12" cy="12" r="1" />
-                    <circle cx="12" cy="5" r="1" />
-                    <circle cx="12" cy="19" r="1" />
-                  </svg>
-                </button>
-                {#if showKebabMenu}
-                  <div class="kebab-dropdown" transition:fade={{ duration: 100 }}>
-                    <button class="kebab-item" onclick={downloadFile}>
-                      <Icon name="download" size={14} />
-                      {$t('editor.download_file')}
-                    </button>
-                    <button
-                      class="kebab-item"
-                      onclick={() => {
-                        showRenameModal = true;
-                        renameTarget = selectedFile.split('/').pop() || '';
-                      }}
-                    >
-                      <Icon name="edit" size={14} />
-                      {$t('app.rename')}
-                    </button>
-                    <button class="kebab-item" onclick={openTemplatesModal}>
-                      <Icon name="settings" size={14} />
-                      {$t('editor.templates')}
-                    </button>
-                    {#if fileType === 'JSON'}
-                      <button class="kebab-item" onclick={() => (showGeneratorModal = true)}>
-                        <Icon name="settings" size={14} />
-                        {$t('editor.generator')}
-                      </button>
-                    {/if}
-                    <button class="kebab-item" onclick={applyQuickFixes}>
-                      <Icon name="settings" size={14} />
-                      {$t('editor.quick_fixes')}
-                    </button>
-                    <div class="kebab-divider"></div>
-                    <button class="kebab-item danger" onclick={deleteFile}>
-                      <Icon name="trash" size={14} />
-                      {$t('app.delete')}
-                    </button>
-                  </div>
-                {/if}
-              </div>
-            </div>
-          </div>
 
           <!-- CodeMirror editor component -->
           <div style="flex: 1; min-height: 0; position:relative; background: var(--cm-bg);">
@@ -1734,54 +1818,50 @@
             {/each}
           </div>
 
-          <!-- Status Bar / Bottom Drawer Trigger -->
+          <!-- Status Bar (EDIT-05, EDIT-06) -->
           <div class="editor-statusbar">
-            <span class="status-indicator" class:status-dirty={isDirty} style="margin-right: 14px;">
-              <span style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};">●</span>
-              {isDirty ? $t('editor.unsaved') : $t('editor.saved')}
-            </span>
-            <span>Ln {cursorLine}, Col {cursorCol}</span>
-            <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
-              <label
-                style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"
+            <div class="sb-left">
+              <span>Ln {cursorLine}, Col {cursorCol}</span>
+              <span class="status-tip status-shortcut-tip">
+                <kbd>{isMac ? '⌘' : 'Ctrl'}</kbd>+<kbd>S</kbd>
+                {$t('editor.to_save')}
+              </span>
+            </div>
+
+            <div class="sb-right">
+              <button
+                class="chip-toggle"
+                class:active={schemaEnabled}
+                onclick={toggleSchema}
+                type="button"
+                title={$t(schemaEnabled ? 'editor.schema_on' : 'editor.schema_off')}
               >
-                <input
-                  type="checkbox"
-                  checked={schemaEnabled}
-                  onchange={toggleSchema}
-                  style="margin:0;width:12px;height:12px;"
-                />
-                {$t('editor.tab_schema')}
-              </label>
-              <label
-                style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;"
+                <span class="chip-dot"></span>
+                {$t(schemaEnabled ? 'editor.schema_on' : 'editor.schema_off')}
+              </button>
+              <button
+                class="chip-toggle"
+                class:active={expertMode}
+                onclick={toggleExpertMode}
+                type="button"
+                title={$t(expertMode ? 'editor.expert_on' : 'editor.expert_off')}
               >
-                <input
-                  type="checkbox"
-                  checked={expertMode}
-                  onchange={toggleExpertMode}
-                  style="margin:0;width:12px;height:12px;"
-                />
-                {$t('editor.tab_expert')}
-              </label>
+                <span class="chip-dot"></span>
+                {$t(expertMode ? 'editor.expert_on' : 'editor.expert_off')}
+              </button>
 
               {#if applyLoading && backgroundStatusText}
                 <div class="status-apply-indicator">
-                  <span class="ks-dot-spin">
-                    <span class="ks-dot"></span>
-                    <span class="ks-dot"></span>
-                    <span class="ks-dot"></span>
-                  </span>
+                  <span class="ks-dot-spin"
+                    ><span class="ks-dot"></span><span class="ks-dot"></span><span class="ks-dot"
+                    ></span></span
+                  >
                   <span>{backgroundStatusText}</span>
                 </div>
               {/if}
 
               {#if backups.length > 0}
-                <button
-                  class="backups-toggle-btn"
-                  onclick={() => (drawerOpen = !drawerOpen)}
-                  style="margin: 0;"
-                >
+                <button class="backups-toggle-btn" onclick={() => (drawerOpen = !drawerOpen)}>
                   <svg
                     width="10"
                     height="10"
@@ -1797,12 +1877,6 @@
                   {$t('editor.backups')} ({backups.length})
                 </button>
               {/if}
-
-              <span
-                class="status-tip status-shortcut-tip"
-                style="border-left: 1px solid var(--border); padding-left: 12px;"
-                >Ctrl+S — {$t('editor.to_save')}</span
-              >
             </div>
           </div>
 
@@ -2226,64 +2300,307 @@
     color: var(--warning) !important;
   }
 
-  .editor-tabs {
-    display: inline-flex;
-    align-self: flex-start;
-    width: fit-content;
-    gap: 4px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 4px;
-    margin-bottom: 16px;
+  .editor-page-container {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 76px);
+    min-height: 500px;
+    gap: 0;
   }
 
-  .tab-btn {
-    background: none;
-    border: none;
-    color: var(--fg-secondary);
-    font-size: 14px;
-    font-weight: 600;
-    padding: 6px 14px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
+  /* Level 1 Header */
+  .editor-page-head {
     display: flex;
     align-items: center;
-    gap: 6px;
-    transition:
-      background var(--transition-fast),
-      color var(--transition-fast);
+    justify-content: space-between;
+    padding: 6px 14px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+    border-radius: var(--radius-md);
+    gap: 12px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
   }
 
-  .tab-btn:hover {
+  .eph-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .eph-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .crumbs {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--fg-primary);
+    display: flex;
+    align-items: center;
+  }
+
+  .crumb-sep {
+    color: var(--fg-faint);
+    margin: 0 6px;
+    font-weight: 400;
+  }
+
+  .editor-mode-switcher {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .mode-pill-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--fg-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .mode-pill-btn:hover {
     color: var(--fg-primary);
     background: rgba(255, 255, 255, 0.04);
   }
 
-  .tab-btn.active {
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--fg-primary);
+  .mode-pill-btn.active {
+    background: var(--accent);
+    color: #03182a;
+    font-weight: 700;
   }
 
-  .editor-toolbar {
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
+  .status-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    color: var(--fg-dim);
+    font-family: var(--font-family-mono);
+  }
+
+  .status-dot {
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  .btn-compact {
+    padding: 4px 10px;
+    font-size: 12px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  /* Workspace & Resizable Splitter */
+  .editor-workspace {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    min-height: 0;
+    gap: 0;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .editor-workspace.resizing {
+    user-select: none;
+    cursor: col-resize;
+  }
+
+  .file-tree-pane {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .editor-splitter {
+    width: 6px;
+    cursor: col-resize;
+    background: transparent;
+    transition: background 0.15s ease;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 10;
+    margin: 0 3px;
+    border-radius: 3px;
+  }
+
+  .editor-splitter:hover,
+  .editor-splitter:active,
+  .editor-workspace.resizing .editor-splitter {
+    background: var(--accent);
+  }
+
+  .editor-main-card {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  /* Level 2 Subhead Bar */
+  .editor-subhead-bar {
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-card);
+    min-height: 36px;
+    gap: 6px;
+    padding-right: 8px;
+    flex-shrink: 0;
   }
 
-  .editor-toolbar .file-name {
-    font-family: var(--font-family-mono);
-    font-size: 14px;
-    color: var(--fg-primary);
-    font-weight: 600;
-  }
-
-  .editor-toolbar .file-meta {
-    font-family: var(--font-family-mono);
-    font-size: 12px;
+  .btn-sidebar-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 36px;
+    background: transparent;
+    border: none;
+    border-right: 1px solid var(--border);
     color: var(--fg-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+
+  .btn-sidebar-toggle:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--fg-primary);
+  }
+
+  .subhead-tabs-container {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .subhead-tabs-container::-webkit-scrollbar {
+    display: none;
+  }
+
+  .subhead-meta-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .subhead-file-meta {
+    font-size: 10.5px;
+    font-family: var(--font-family-mono);
+    color: var(--fg-dim);
+    background: rgba(255, 255, 255, 0.03);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-light, rgba(255, 255, 255, 0.05));
+  }
+
+  .btn-kebab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-kebab:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--fg-primary);
+  }
+
+  /* Status Bar Elements */
+  .chip-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-family-mono);
+    padding: 2px 7px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.02);
+    color: var(--fg-dim);
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1.3;
+  }
+
+  .chip-toggle:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--fg-primary);
+  }
+
+  .chip-toggle.active {
+    background: rgba(41, 194, 240, 0.15);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .chip-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .sb-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .sb-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status-shortcut-tip kbd {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-size: 10px;
+    font-family: var(--font-family-mono);
+    color: var(--fg-secondary);
   }
 
   .template-list {
