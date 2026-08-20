@@ -33,6 +33,7 @@
     next: Profile[];
     time: string;
     day: number;
+    timezone?: string;
   }
 
   let profiles: Profile[] = $state([]);
@@ -165,32 +166,27 @@
     showForm = true;
   }
 
-  function createFromTemplate(templateName: string) {
+  function createFromTemplate(templateName: 'workdays' | 'night' | 'weekend') {
     startCreate();
-    formName =
-      templateName === 'night'
-        ? $t('smartproxy.preset_night_title')
-        : templateName === 'workday'
-          ? $t('smartproxy.preset_workdays')
-          : $t('smartproxy.preset_always_title');
-
     formSchedule = Array.from({ length: 7 }, () => Array(24).fill(false));
 
-    if (templateName === 'night') {
-      const nightHours = [23, 0, 1, 2, 3, 4, 5, 6, 7];
-      for (let d = 0; d < 7; d++) {
-        for (const h of nightHours) {
-          formSchedule[d][h] = true;
-        }
-      }
-    } else if (templateName === 'workday') {
+    if (templateName === 'workdays') {
+      formName = $t('smartproxy.preset_workdays_title');
       for (let d = 1; d <= 5; d++) {
         for (let h = 9; h <= 17; h++) {
           formSchedule[d][h] = true;
         }
       }
-    } else if (templateName === 'always') {
+    } else if (templateName === 'night') {
+      formName = $t('smartproxy.preset_night_title');
       for (let d = 0; d < 7; d++) {
+        for (let h = 0; h < 8; h++) {
+          formSchedule[d][h] = true;
+        }
+      }
+    } else if (templateName === 'weekend') {
+      formName = $t('smartproxy.preset_weekend_title');
+      for (const d of [0, 6]) {
         for (let h = 0; h < 24; h++) {
           formSchedule[d][h] = true;
         }
@@ -418,15 +414,12 @@
     <div>
       <div class="crumbs">
         {$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
-        {$t('nav.smartproxy')}
+        {$t('smartproxy.title')}
       </div>
       <h1>{$t('smartproxy.title')}</h1>
       <p class="sub">{$t('smartproxy.subtitle')}</p>
     </div>
-    <div class="ph-actions" style="display:flex; gap:10px;">
-      <button class="btn btn-secondary" onclick={() => createFromTemplate('always')}>
-        {$t('smartproxy.from_template')}
-      </button>
+    <div class="ph-actions">
       <button class="btn btn-primary" onclick={startCreate}>
         <svg
           width="14"
@@ -435,9 +428,11 @@
           fill="none"
           stroke="currentColor"
           stroke-width="2"
-          style="margin-right: 6px;"><path d="M12 5v14M5 12h14" /></svg
+          style="margin-right: 6px;"
         >
-        {$t('smartproxy.add')}
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        {$t('smartproxy.create_profile')}
       </button>
     </div>
   </div>
@@ -448,126 +443,176 @@
 
   <!-- Current Status -->
   {#if status}
-    <div class="card mb-2" style="padding:18px 22px;">
-      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-        <span class="status-dot success" style="margin:0;"></span>
-        <div style="font-weight:700;color:var(--fg-primary);">
-          {$t('smartproxy.current_status')}
-        </div>
-        <div style="color:var(--fg-dim);font-size:12px;font-family:var(--font-family-mono);">
-          ({status.time}, {dayNames[status.day]})
-        </div>
-        {#if status.active?.length > 0}
-          <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap;">
-            {#each status.active as p}
-              <span class="status-badge active">{p.name} → {p.current_proxy || p.proxy_name}</span>
-            {/each}
+    {@const hasActive = status.active && status.active.length > 0}
+    <div class="card status-card mb-2">
+      <div class="status-card-inner">
+        <div class="status-indicator-group">
+          <span class="status-dot {hasActive ? 'active' : 'inactive'}" aria-hidden="true"></span>
+          <div class="status-label">
+            {$t('smartproxy.current_status')}
           </div>
-        {:else}
-          <div style="margin-left:auto; color:var(--fg-dim); font-size: 13px;">
-            {$t('smartproxy.no_active')}
-          </div>
-        {/if}
+          {#if hasActive}
+            <div class="status-active-badges">
+              {#each status.active as p}
+                <span class="status-badge active">{p.name} → {p.current_proxy || p.proxy_name}</span
+                >
+              {/each}
+            </div>
+          {:else}
+            <div class="status-no-active-text">
+              {$t('smartproxy.status_no_active')}
+            </div>
+          {/if}
+        </div>
+
+        <div class="status-time-group">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            class="time-icon"
+          >
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+          <span class="status-time-text">
+            {$t('smartproxy.router_time', {
+              time: status.time,
+              tz: status.timezone || dayNames[status.day]
+            })}
+          </span>
+        </div>
       </div>
     </div>
   {/if}
 
   <!-- Profile List -->
   {#if profiles.length === 0}
-    <!-- Templates Empty State -->
-    <div class="empty-state-container">
+    <!-- Templates Empty State & Balanced Onboarding -->
+    <div class="sp-onboarding-hero">
       <div class="empty-state-head">
         <h2>{$t('smartproxy.no_profiles_title')}</h2>
         <p>{$t('smartproxy.no_profiles_desc')}</p>
       </div>
 
       <div class="template-cards-grid">
-        <!-- Card 1: Night VPN -->
-        <div class="card template-card">
-          <div class="template-icon text-accent">
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-            </svg>
+        <!-- Card 1: Work Hours -->
+        <button
+          type="button"
+          class="card template-card"
+          onclick={() => createFromTemplate('workdays')}
+        >
+          <div class="template-card-top">
+            <div class="template-icon text-accent">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+              </svg>
+            </div>
+            <span class="template-badge">{$t('smartproxy.preset_workdays_badge')}</span>
+          </div>
+          <h3>{$t('smartproxy.preset_workdays_title')}</h3>
+          <p>{$t('smartproxy.preset_workdays_desc')}</p>
+          <div class="template-timeline" aria-hidden="true">
+            <div class="timeline-track">
+              <div class="timeline-segment" style="left: 37.5%; width: 37.5%;"></div>
+            </div>
+            <div class="timeline-labels">
+              <span>00:00</span>
+              <span class="lbl-highlight" style="left: 37.5%;">09:00</span>
+              <span class="lbl-highlight" style="left: 75%;">18:00</span>
+              <span>24:00</span>
+            </div>
+          </div>
+        </button>
+
+        <!-- Card 2: Night Mode -->
+        <button
+          type="button"
+          class="card template-card"
+          onclick={() => createFromTemplate('night')}
+        >
+          <div class="template-card-top">
+            <div class="template-icon text-warning">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+            </div>
+            <span class="template-badge">{$t('smartproxy.preset_night_badge')}</span>
           </div>
           <h3>{$t('smartproxy.preset_night_title')}</h3>
           <p>{$t('smartproxy.preset_night_desc')}</p>
-          <button
-            type="button"
-            class="btn btn-secondary btn-sm"
-            style="margin-top:auto;"
-            onclick={() => createFromTemplate('night')}
-          >
-            {$t('smartproxy.select')}
-          </button>
-        </div>
-
-        <!-- Card 2: Workdays -->
-        <div class="card template-card">
-          <div class="template-icon text-success">
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
+          <div class="template-timeline" aria-hidden="true">
+            <div class="timeline-track">
+              <div class="timeline-segment" style="left: 0%; width: 33.3%;"></div>
+            </div>
+            <div class="timeline-labels">
+              <span>00:00</span>
+              <span class="lbl-highlight" style="left: 33.3%;">08:00</span>
+              <span>24:00</span>
+            </div>
           </div>
-          <h3>{$t('smartproxy.preset_workdays')}</h3>
-          <p>{$t('smartproxy.preset_workday_desc')}</p>
-          <button
-            type="button"
-            class="btn btn-secondary btn-sm"
-            style="margin-top:auto;"
-            onclick={() => createFromTemplate('workday')}
-          >
-            {$t('smartproxy.select')}
-          </button>
-        </div>
+        </button>
 
-        <!-- Card 3: 24/7 -->
-        <div class="card template-card">
-          <div class="template-icon text-warning">
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
+        <!-- Card 3: Weekend -->
+        <button
+          type="button"
+          class="card template-card"
+          onclick={() => createFromTemplate('weekend')}
+        >
+          <div class="template-card-top">
+            <div class="template-icon text-success">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
+            </div>
+            <span class="template-badge">{$t('smartproxy.preset_weekend_badge')}</span>
           </div>
-          <h3>{$t('smartproxy.preset_always_title')}</h3>
-          <p>{$t('smartproxy.preset_always_desc')}</p>
-          <button
-            type="button"
-            class="btn btn-secondary btn-sm"
-            style="margin-top:auto;"
-            onclick={() => createFromTemplate('always')}
-          >
-            {$t('smartproxy.select')}
-          </button>
-        </div>
+          <h3>{$t('smartproxy.preset_weekend_title')}</h3>
+          <p>{$t('smartproxy.preset_weekend_desc')}</p>
+          <div class="template-timeline" aria-hidden="true">
+            <div class="timeline-track">
+              <div class="timeline-segment" style="left: 0%; width: 100%;"></div>
+            </div>
+            <div class="timeline-labels">
+              <span>00:00</span>
+              <span class="lbl-highlight" style="left: 50%;">12:00</span>
+              <span>24:00</span>
+            </div>
+          </div>
+        </button>
       </div>
 
-      <div style="margin-top:24px; text-align:center;">
-        <button class="btn btn-primary" onclick={startCreate}>
-          {$t('smartproxy.create_manually')}
+      <div class="manual-create-wrap">
+        <button type="button" class="btn-link manual-create-btn" onclick={startCreate}>
+          {$t('smartproxy.or_create_manual')}
         </button>
       </div>
     </div>
@@ -1092,22 +1137,83 @@
     border-right: none;
   }
 
-  /* Empty state template cards design */
-  .empty-state-container {
+  /* Status Banner */
+  .status-card {
+    padding: 14px 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+  }
+
+  .status-card-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .status-indicator-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .status-label {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--fg-primary);
+  }
+
+  .status-no-active-text {
+    font-size: 13px;
+    color: var(--fg-dim);
+  }
+
+  .status-active-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .status-time-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-family: var(--font-family-mono);
+    color: var(--fg-dim);
+    margin-left: auto;
+  }
+
+  :global(.status-dot.inactive) {
+    background-color: var(--fg-dim, #64748b);
+    box-shadow: none;
+  }
+
+  :global(.status-dot.active) {
+    background-color: var(--success, #46d18a);
+    box-shadow: 0 0 8px rgba(70, 209, 138, 0.4);
+  }
+
+  /* Empty state template cards design & Onboarding Hero */
+  .sp-onboarding-hero {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 24px 0;
+    padding: 32px 0 24px;
+    width: 100%;
   }
 
   .empty-state-head {
     text-align: center;
-    margin-bottom: 32px;
-    max-width: 480px;
+    margin-bottom: 28px;
+    max-width: 560px;
   }
 
   .empty-state-head h2 {
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 700;
     color: var(--fg-primary);
     margin-bottom: 8px;
@@ -1124,10 +1230,10 @@
     grid-template-columns: repeat(3, 1fr);
     gap: 16px;
     width: 100%;
-    max-width: 820px;
+    max-width: 900px;
   }
 
-  @media (max-width: 768px) {
+  @media (max-width: 820px) {
     .template-cards-grid {
       grid-template-columns: 1fr;
     }
@@ -1137,42 +1243,131 @@
     padding: 20px;
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
     gap: 12px;
     text-align: left;
     cursor: pointer;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    outline: none;
     transition:
       border-color var(--transition-fast),
-      transform var(--transition-fast);
+      transform var(--transition-fast),
+      box-shadow var(--transition-fast);
   }
 
   .template-card:hover {
     border-color: var(--accent);
     transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(41, 194, 240, 0.08);
+  }
+
+  .template-card:focus-visible {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+
+  .template-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
   }
 
   .template-icon {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 42px;
-    height: 42px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .template-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg-secondary);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
   }
 
   .template-card h3 {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 700;
     color: var(--fg-primary);
     margin: 0;
   }
 
   .template-card p {
-    font-size: 12px;
+    font-size: 12.5px;
     color: var(--fg-dim);
-    line-height: 1.4;
+    line-height: 1.45;
     margin: 0;
+    flex-grow: 1;
+  }
+
+  /* 24-hour mini-timeline */
+  .template-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+    width: 100%;
+  }
+
+  .timeline-track {
+    position: relative;
+    width: 100%;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .timeline-segment {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: var(--accent);
+    border-radius: 3px;
+  }
+
+  .timeline-labels {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    font-family: var(--font-family-mono);
+    color: var(--fg-faint);
+  }
+
+  .lbl-highlight {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .manual-create-wrap {
+    margin-top: 24px;
+    text-align: center;
+  }
+
+  .manual-create-btn {
+    background: none;
+    border: none;
+    color: var(--fg-dim);
+    font-size: 13px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    transition: color var(--transition-fast);
+  }
+
+  .manual-create-btn:hover {
+    color: var(--accent);
   }
 
   .text-accent {

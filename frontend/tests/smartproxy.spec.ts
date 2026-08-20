@@ -81,7 +81,8 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
             active: [],
             next: [],
             time: '12:00',
-            day: 1
+            day: 1,
+            timezone: 'UTC+3'
           })
         });
       } else if (url.includes('/api/mihomo/proxy/proxies')) {
@@ -106,27 +107,50 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
     });
   });
 
-  test('Empty state shows 3 template cards and CTA', async ({ page }) => {
+  test('Empty state shows balanced onboarding with 3 template cards and status bar', async ({
+    page
+  }) => {
     await page.goto('/#/smartproxy');
 
-    // 1. Verify Empty State Title
-    await expect(page.locator('.empty-state-head h2')).toContainText(/Нет профилей умного прокси/i);
+    // 1. Verify single CTA in page-head and no redundant "Из шаблона" button
+    const headerActions = page.locator('.ph-actions button');
+    await expect(headerActions).toHaveCount(1);
+    await expect(headerActions.first()).toContainText(/Создать профиль/i);
 
-    // 2. Verify 3 Template cards
+    // 2. Verify Status Banner has neutral inactive indicator and router NTP time
+    const statusDot = page.locator('.status-card .status-dot');
+    await expect(statusDot).toHaveClass(/inactive/);
+    await expect(page.locator('.status-card')).toContainText(/Нет активных правил по расписанию/i);
+    await expect(page.locator('.status-card')).toContainText(/Время роутера:\s*12:00/i);
+
+    // 3. Verify Empty State Title & Onboarding Hero
+    await expect(page.locator('.empty-state-head h2')).toContainText(/Сценарии автоматизации/i);
+
+    // 4. Verify 3 Template cards with 24h mini-timelines
     const templateCards = page.locator('.template-card');
     await expect(templateCards).toHaveCount(3);
 
-    // Cards titles: "Ночной VPN", "Будни 9-18", "Круглосуточный VPN" (depending on language)
-    await expect(templateCards.nth(0).locator('h3')).toContainText(/Ночной VPN/i);
-    await expect(templateCards.nth(1).locator('h3')).toContainText(/Будни 9-18/i);
-    await expect(templateCards.nth(2).locator('h3')).toContainText(/Круглосуточный/i);
+    // Cards titles: "Рабочие часы", "Ночной режим", "Выходные дни"
+    await expect(templateCards.nth(0).locator('h3')).toContainText(/Рабочие часы/i);
+    await expect(templateCards.nth(1).locator('h3')).toContainText(/Ночной режим/i);
+    await expect(templateCards.nth(2).locator('h3')).toContainText(/Выходные дни/i);
+
+    // Each card has a mini-timeline
+    await expect(templateCards.nth(0).locator('.template-timeline')).toBeVisible();
+    await expect(templateCards.nth(1).locator('.template-timeline')).toBeVisible();
+    await expect(templateCards.nth(2).locator('.template-timeline')).toBeVisible();
+
+    // 5. Verify manual create fallback link
+    await expect(page.locator('.manual-create-btn')).toContainText(
+      /или настройте профиль вручную с нуля/i
+    );
   });
 
   test('Create manually from Wizard walkthrough', async ({ page }) => {
     await page.goto('/#/smartproxy');
 
-    // 1. Open Wizard
-    await page.locator('button.btn-primary:has-text("Добавить")').first().click();
+    // 1. Open Wizard via Header Primary CTA
+    await page.locator('button.btn-primary:has-text("Создать профиль")').first().click();
 
     // Verify Modal & Step 1 is active
     await expect(page.locator('.modal-container')).toBeVisible();
@@ -186,12 +210,12 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
     expect(lastSavePayload.schedule[0][0]).toBe(false); // Sunday 0:00 inactive
   });
 
-  test('Create from a template bypasses first step', async ({ page }) => {
+  test('Create from a template (clicking entire card) bypasses first step', async ({ page }) => {
     await page.goto('/#/smartproxy');
 
-    // Click "Select" on Night VPN template
+    // Click on Work Hours template card
     const templateCards = page.locator('.template-card');
-    await templateCards.nth(0).locator('button').click();
+    await templateCards.nth(0).click();
 
     // Modal is opened directly at Step 2
     await expect(page.locator('.modal-container')).toBeVisible();
@@ -206,23 +230,22 @@ test.describe('Smart Proxy Wizard and Grid test suite', () => {
     await page.locator('button.btn-primary:has-text("Продолжить")').click();
     await expect(page.locator('.wizard-step-indicator').nth(2)).toHaveClass(/active/);
 
-    // Check that grid has active hours prefilled for Night VPN (hours 23, 0..7)
-    // 7 days * 9 active hours = 63 active slots
+    // Check that grid has active hours prefilled for Work Hours (5 days * 9 hours = 45 active slots)
     const activeCells = page.locator('.grid-cell.active');
-    await expect(activeCells).toHaveCount(63);
+    await expect(activeCells).toHaveCount(45);
 
     // Save
     await page.locator('button.btn-primary:has-text("Сохранить")').click();
 
     // Profile exists
-    await expect(page.locator('.profile-card-name')).toContainText('Ночной VPN');
+    await expect(page.locator('.profile-card-name')).toContainText('Рабочие часы');
   });
 
   test('Drawing with click and drag on scheduling grid works', async ({ page }) => {
     await page.goto('/#/smartproxy');
 
-    // Open add profile wizard
-    await page.locator('button.btn-primary:has-text("Добавить")').first().click();
+    // Open add profile wizard via manual link
+    await page.locator('.manual-create-btn').click();
     await page.locator('#sp-name').fill('Drag Test');
     await page.locator('button.btn-primary:has-text("Продолжить")').click();
     await page.locator('#sp-group').selectOption('PROXY-GROUP-1');

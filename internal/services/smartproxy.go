@@ -392,10 +392,22 @@ func (s *SmartProxyService) CurrentStatus() map[string]interface{} {
 		}
 	}
 
+	tzName, tzOffset := now.Zone()
+	tzFormatted := tzName
+	if tzFormatted == "" || strings.HasPrefix(tzFormatted, "+") || strings.HasPrefix(tzFormatted, "-") {
+		hours := tzOffset / 3600
+		if hours >= 0 {
+			tzFormatted = fmt.Sprintf("UTC+%d", hours)
+		} else {
+			tzFormatted = fmt.Sprintf("UTC%d", hours)
+		}
+	}
+
 	return map[string]interface{}{
-		"active": activeProfiles,
-		"next":   nextProfiles,
-		"time":   currentTime,
-		"day":    currentDay,
+		"active":   activeProfiles,
+		"next":     nextProfiles,
+		"time":     currentTime,
+		"day":      currentDay,
+		"timezone": tzFormatted,
 	}
 }
