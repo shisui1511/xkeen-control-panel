@@ -885,13 +885,16 @@
   }
 
   function getGroupTypeLabel(type: string): string {
-    const labels: Record<string, string> = {
-      Selector: 'Selector',
-      URLTest: 'URLTest',
-      Fallback: 'Fallback',
-      LoadBalance: 'LoadBalance'
+    const key = (type || '').toLowerCase();
+    const labelKeys: Record<string, string> = {
+      selector: 'proxies.group_type_selector',
+      urltest: 'proxies.group_type_urltest',
+      fallback: 'proxies.group_type_fallback',
+      loadbalance: 'proxies.group_type_loadbalance',
+      relay: 'proxies.group_type_relay'
     };
-    return labels[type] || type;
+    const translationKey = labelKeys[key];
+    return translationKey ? $t(translationKey) : type;
   }
 
   function getProxyDelay(proxyName: string): number | undefined {
@@ -1857,6 +1860,7 @@
           {@const nowUpper = (group.now || '').toUpperCase()}
           {@const isPinned = pinnedCoreGroups.includes(group.name)}
           {@const isAutoCore = role === 'core' && !isPinned}
+          {@const groupTypeKey = group.type.toLowerCase()}
           <div
             class="group-card"
             class:expanded={!isCollapsed}
@@ -1894,7 +1898,52 @@
                   </span>
                 {/if}
                 <span class="name">{group.name}</span>
-                <span class="type-badge">{group.type.toUpperCase()}</span>
+                <span class="type-badge">
+                  <span class="type-badge-icon" aria-hidden="true">
+                    {#if groupTypeKey === 'selector'}
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"><polyline points="20 6 9 17 4 12" /></svg
+                      >
+                    {:else if groupTypeKey === 'urltest' || groupTypeKey === 'fallback'}
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        ><path d="M21 12a9 9 0 1 1-3-6.7" /><path d="M21 3v6h-6" /></svg
+                      >
+                    {:else if groupTypeKey === 'loadbalance'}
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"><path d="M7 7h11l-3-3" /><path d="M17 17H6l3 3" /></svg
+                      >
+                    {:else if groupTypeKey === 'relay'}
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        ><circle cx="8" cy="12" r="3" /><circle cx="16" cy="12" r="3" /><path
+                          d="M10.5 12h3"
+                        /></svg
+                      >
+                    {/if}
+                  </span>
+                  {getGroupTypeLabel(group.type)}
+                </span>
 
                 {#if role === 'core' || role === 'service'}
                   <button
@@ -2554,15 +2603,20 @@
   }
   .type-badge {
     margin-left: auto;
-    font-size: 10px;
-    padding: 2px 8px;
-    border-radius: 99px;
-    background: rgba(41, 194, 240, 0.1);
-    border: 1px solid rgba(41, 194, 240, 0.2);
-    color: var(--accent);
-    font-family: var(--font-family-mono);
-    font-weight: 700;
-    text-transform: uppercase;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    padding: 0;
+    color: var(--fg-dim);
+    font-family: var(--font-family-sans);
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .type-badge-icon {
+    display: inline-flex;
+    opacity: 0.7;
   }
   .gc-lat-box {
     padding: 3px 10px;
@@ -2896,18 +2950,20 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
-    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 26px;
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    overflow: hidden;
   }
 
-  .brand-icon {
-    width: 20px;
-    height: 20px;
+  .group-icon-wrap .brand-icon {
+    width: 18px;
+    height: 18px;
     object-fit: contain;
     display: block;
-    flex-shrink: 0;
-    border-radius: 4px;
   }
 
   .lat {

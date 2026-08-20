@@ -307,6 +307,22 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     await expect(brandIcon).toBeVisible();
   });
 
+  // D-06: бейдж типа группы читается по-русски, а не показывает английское имя типа
+  test('group type badge отображается по-русски', async ({ page }) => {
+    await expect(page.locator('[data-group="YouTube"] .type-badge')).toHaveText(/Выбор/);
+  });
+
+  // D-05: логотип сервиса выровнен на единой круглой подложке 26x26
+  test('логотип сервиса выровнен на подложке 26px', async ({ page }) => {
+    const iconWrap = page.locator('[data-group="YouTube"] .group-icon-wrap');
+    const size = await iconWrap.evaluate((el) => {
+      const style = window.getComputedStyle(el);
+      return { width: style.width, height: style.height };
+    });
+    expect(size.width).toBe('26px');
+    expect(size.height).toBe('26px');
+  });
+
   test('Active node highlight - active node has accent border and background', async ({ page }) => {
     const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
     const gcHead = ytGroup.locator('.gc-head').first();
