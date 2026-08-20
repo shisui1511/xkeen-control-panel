@@ -1467,7 +1467,7 @@
       </div>
       <div class="editor-mode-switcher">
         <button
-          class="mode-pill-btn"
+          class="mode-pill-btn tab-btn"
           class:active={activeTab === 'files'}
           onclick={() => setTab('files')}
         >
@@ -1475,7 +1475,7 @@
           {$t('editor.tab_files')}
         </button>
         <button
-          class="mode-pill-btn"
+          class="mode-pill-btn tab-btn"
           class:active={activeTab === 'constructor'}
           onclick={() => setTab('constructor')}
         >

@@ -2132,7 +2132,7 @@
                         class="btn-rule-action rule-move"
                         onclick={() => moveRule(rule.id, -1)}
                         disabled={routingRules.findIndex((r) => r.id === rule.id) === 0}
-                        title={$t('app.move_up') || 'Вверх'}
+                        title={$t('app.move_up')}
                       >
                         <svg
                           width="11"
@@ -2149,7 +2149,7 @@
                         onclick={() => moveRule(rule.id, 1)}
                         disabled={routingRules.findIndex((r) => r.id === rule.id) ===
                           routingRules.length - 1}
-                        title={$t('app.move_down') || 'Вниз'}
+                        title={$t('app.move_down')}
                       >
                         <svg
                           width="11"
@@ -2164,7 +2164,7 @@
                         type="button"
                         class="btn-rule-action"
                         onclick={() => duplicateRule(rule)}
-                        title={$t('editor.duplicate_file') || 'Дублировать'}
+                        title={$t('app.duplicate')}
                       >
                         <svg
                           width="11"

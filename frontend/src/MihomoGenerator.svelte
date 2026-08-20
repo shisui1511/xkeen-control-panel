@@ -88,6 +88,7 @@
     tls?: boolean;
     fingerprint?: string;
     alterID?: number;
+    enabled?: boolean;
   }
 
   interface ProxyGroup {
@@ -243,6 +244,21 @@
       dismissZkeenGeodataWarning = dismissed === activePreset;
     }
   });
+
+  // Safe Merge State
+  let safeMergeEnabled = $state(true);
+  let safeMergeExpanded = $state(false);
+
+  // Resizable Splitter State
+  const PREVIEW_STORAGE_KEY = 'mihomo_builder_preview_width';
+  let previewWidth = $state(440);
+  let showPreviewPane = $state(true);
+  let isResizingPreview = $state(false);
+  let copyFeedback = $state(false);
+
+  // Preset Tracking
+  let lastAppliedPreset = $state('');
+  let presetBaseline = $state('');
 
   let sniffer = $state({
     enabled: false,
@@ -587,6 +603,12 @@
             selectedMetaRuleSets.set(k, v as string);
           }
         }
+        lastAppliedPreset = id;
+        presetBaseline = JSON.stringify({
+          activeRuleProvider,
+          groups: groups.map((g) => ({ name: g.name, type: g.type, enabled: g.enabled })),
+          rules: rules.map((r) => ({ type: r.type, value: r.value, outbound: r.outbound }))
+        });
         if (!silent) {
           showToast('success', $t('editor.preset_applied'));
         }
@@ -617,27 +639,44 @@
       groups = [
         {
           id: crypto.randomUUID(),
-          name: 'Proxy',
+          name: 'GLOBAL',
           type: 'select',
-          proxies: ['DIRECT', ...proxies.map((p) => p.name)],
+          proxies: proxies.map((p) => p.name),
           includeAll: true,
+          excludeFilter: '',
           url: 'https://www.gstatic.com/generate_204',
           interval: 300
         }
       ];
-      rules = [
-        { id: crypto.randomUUID(), type: 'GEOIP', value: 'private', outbound: 'DIRECT' },
-        { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'Proxy' }
-      ];
+      rules = [{ id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'GLOBAL' }];
       activeRuleProvider = 'none';
       selectedMetaRuleSets = new Map();
     } else if (id === 'zkeen-selective') {
-      groups = ZKEEN_16_GROUPS.map((g) => ({
-        ...g,
+      groups = (
+        schema?.mihomo?.presets?.find((x: any) => x.id === 'zkeen-selective')?.groups ||
+        ZKEEN_16_GROUPS
+      ).map((g: any) => ({
         id: crypto.randomUUID(),
-        enabled: true
+        name: g.name,
+        type: g.type || 'select',
+        proxies:
+          g.name === 'GLOBAL'
+            ? ['DIRECT', ...proxies.map((pr) => pr.name)]
+            : [...(g.proxies || [])],
+        includeAll: g.include_all ?? g.includeAll ?? false,
+        excludeFilter: g.exclude_filter || g.excludeFilter || '',
+        url: g.url || 'https://www.gstatic.com/generate_204',
+        interval: g.interval || 300,
+        icon: g.icon || '',
+        enabled: true,
+        hidden: g.hidden ?? false,
+        tolerance: g.tolerance ?? undefined,
+        maxFailedTimes: g.max_failed_times ?? g.maxFailedTimes ?? undefined
       }));
-      rules = [];
+      rules = [
+        { id: crypto.randomUUID(), type: 'GEOIP', value: 'ru', outbound: 'DIRECT' },
+        { id: crypto.randomUUID(), type: 'MATCH', value: '', outbound: 'DIRECT' }
+      ];
       activeRuleProvider = 'zkeen';
       selectedMetaRuleSets = new Map();
     } else if (id === 'only-blocked') {
@@ -666,10 +705,26 @@
       activeRuleProvider = 'zkeen';
       selectedMetaRuleSets = new Map();
     }
+    lastAppliedPreset = id;
+    presetBaseline = JSON.stringify({
+      activeRuleProvider,
+      groups: groups.map((g) => ({ name: g.name, type: g.type, enabled: g.enabled })),
+      rules: rules.map((r) => ({ type: r.type, value: r.value, outbound: r.outbound }))
+    });
     if (!silent) {
       showToast('success', $t('editor.preset_applied'));
     }
   }
+
+  const isPresetModified = $derived.by(() => {
+    if (!lastAppliedPreset || !presetBaseline) return false;
+    const current = JSON.stringify({
+      activeRuleProvider,
+      groups: groups.map((g) => ({ name: g.name, type: g.type, enabled: g.enabled })),
+      rules: rules.map((r) => ({ type: r.type, value: r.value, outbound: r.outbound }))
+    });
+    return current !== presetBaseline;
+  });
 
   // ── Import proxies from subscriptions ───────────────────────────────────
   async function loadSubscriptions() {
@@ -1085,6 +1140,18 @@
   }
 
   onMount(async () => {
+    try {
+      const savedWidth = localStorage.getItem(PREVIEW_STORAGE_KEY);
+      if (savedWidth) {
+        const parsed = parseInt(savedWidth, 10);
+        if (!isNaN(parsed) && parsed >= 280 && parsed <= 800) {
+          previewWidth = parsed;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     await loadSchema();
     await loadConfig(selectedFile || '/opt/etc/mihomo/config.yaml', true);
     await checkZkeenGeodata();
@@ -1179,6 +1246,23 @@
     proxies = proxies.filter((p) => p.id !== id);
   }
 
+  function duplicateProxy(p: Proxy) {
+    const { name: cleanName } = sanitizeProxyName(`${p.name}_copy`);
+    const newP: Proxy = {
+      ...p,
+      id: crypto.randomUUID(),
+      name: cleanName
+    };
+    proxies = [...proxies, newP];
+    showToast('info', $t('app.duplicate'));
+  }
+
+  function toggleProxy(id: string) {
+    proxies = proxies.map((p) =>
+      p.id === id ? { ...p, enabled: p.enabled === false ? true : false } : p
+    );
+  }
+
   function addGroup() {
     if (!ng.name.trim()) return;
     if (editingGroupId) {
@@ -1265,8 +1349,9 @@
   // ── YAML generation ─────────────────────────────────────────────────────
 
   function generateYAML(): string {
+    const activeProxies = proxies.filter((p) => p.enabled !== false);
     return generateMihomoYAML({
-      proxies,
+      proxies: activeProxies,
       groups,
       rules,
       dns,
@@ -1274,7 +1359,7 @@
       sniffer,
       activeRuleProvider,
       selectedMetaRuleSets,
-      preservedKeys,
+      preservedKeys: safeMergeEnabled ? preservedKeys : [],
       existingTproxyPort,
       existingRedirPort,
       externalControllerType,
@@ -1308,12 +1393,77 @@
     void sniffer.sniffHttp;
     void sniffer.sniffTls;
     void sniffer.sniffQuic;
+    void safeMergeEnabled;
     return generateYAML();
   });
 
   async function copyYAML() {
-    await navigator.clipboard.writeText(yaml);
-    showToast('success', $t('mihomo.yaml_copied'));
+    if (!yaml) return;
+    try {
+      await navigator.clipboard.writeText(yaml);
+      copyFeedback = true;
+      showToast('success', $t('mihomo.yaml_copied'));
+      setTimeout(() => {
+        copyFeedback = false;
+      }, 2000);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  function downloadYaml() {
+    if (!yaml) return;
+    const blob = new Blob([yaml], { type: 'text/yaml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'config.yaml';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  const yamlFileSize = $derived.by(() => {
+    if (!yaml) return '0 B';
+    const bytes = new Blob([yaml]).size;
+    if (bytes < 1024) return `${bytes} B`;
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  });
+
+  function startResizePreview(e: MouseEvent | PointerEvent) {
+    e.preventDefault();
+    isResizingPreview = true;
+    const startX = e.clientX;
+    const startWidth = previewWidth;
+
+    function onPointerMove(moveEvent: MouseEvent | PointerEvent) {
+      const delta = startX - moveEvent.clientX;
+      const newWidth = Math.min(800, Math.max(280, startWidth + delta));
+      previewWidth = newWidth;
+    }
+
+    function onPointerUp() {
+      isResizingPreview = false;
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('mousemove', onPointerMove);
+      window.removeEventListener('mouseup', onPointerUp);
+      try {
+        localStorage.setItem(PREVIEW_STORAGE_KEY, String(previewWidth));
+      } catch {
+        // ignore
+      }
+    }
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
+  }
+
+  function togglePreviewPane() {
+    showPreviewPane = !showPreviewPane;
   }
 
   function openInEditor() {
@@ -1675,7 +1825,8 @@
       <div class="page-head">
         <div>
           <div class="crumbs">
-            {$t('nav.group_services')} <span class="crumb-sep">/</span>
+            {$t('nav.group_services')} <span class="crumb-sep">›</span>
+            {$t('editor.title')} <span class="crumb-sep">›</span>
             {$t('mihomo.breadcrumb_generator')}
           </div>
           <h1>{$t('mihomo.h1')}</h1>
@@ -1684,6 +1835,25 @@
           </p>
         </div>
         <div class="ph-actions">
+          <button
+            type="button"
+            class="btn btn-secondary"
+            onclick={togglePreviewPane}
+            title={showPreviewPane ? $t('mihomo.hide_preview') : $t('mihomo.show_preview')}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+            <span>{showPreviewPane ? $t('mihomo.hide_preview') : $t('mihomo.show_preview')}</span>
+          </button>
           <button class="btn btn-secondary" onclick={openInEditor}>
             <svg
               width="13"
@@ -1720,66 +1890,124 @@
           </button>
         </div>
       </div>
-    {/if}
-
-    {#if preservedKeys.length > 0 && !dismissMergeWarning}
-      <div class="alert alert-warning alert-dismissible" style="margin: 0 0 16px 0;" role="status">
-        <span aria-hidden="true">⚠️</span>
-        <div>
-          <strong>{$t('editor.constructor_merge_warning_title')}</strong>
-          <div style="margin-top: 2px;">
-            {$t('editor.constructor_merge_warning_body', { keys: preservedKeys.join(', ') })}
-          </div>
+    {:else}
+      <div class="embedded-head-toolbar">
+        <div class="embedded-title-tag">
+          <span style="color: var(--fg-secondary);">{$t('editor.title')} › </span>
+          <strong>{$t('mihomo.breadcrumb_generator')}</strong>
         </div>
-        <button
-          type="button"
-          class="alert-close-btn"
-          onclick={() => {
-            dismissMergeWarning = true;
-            localStorage.setItem('xcp:dismissed_warning:preserved_keys', preservedKeys.join(','));
-          }}
-          aria-label={$t('app.close')}>&times;</button
-        >
+        <div class="ph-actions">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            onclick={togglePreviewPane}
+            title={showPreviewPane ? $t('mihomo.hide_preview') : $t('mihomo.show_preview')}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+            <span>{showPreviewPane ? $t('mihomo.hide_preview') : $t('mihomo.show_preview')}</span>
+          </button>
+        </div>
       </div>
     {/if}
 
-    <div class="gen-layout">
+    {#if preservedKeys.length > 0}
+      <div class="card safe-merge-card" data-testid="safe-merge-card">
+        <div class="safe-merge-head">
+          <div class="safe-merge-title-group">
+            <div class="safe-merge-icon-wrap">
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+            </div>
+            <div>
+              <div class="safe-merge-title">{$t('mihomo.safe_merge_title')}</div>
+              <div class="safe-merge-desc">{$t('mihomo.safe_merge_desc')}</div>
+            </div>
+          </div>
+          <label class="switch safe-merge-switch" title={$t('mihomo.safe_merge_toggle')}>
+            <input type="checkbox" bind:checked={safeMergeEnabled} />
+            <span class="slider round"></span>
+          </label>
+        </div>
+
+        {#if safeMergeEnabled}
+          <div class="safe-merge-tags">
+            {#each safeMergeExpanded ? preservedKeys : preservedKeys.slice(0, 6) as key}
+              <span class="directive-tag"><code>{key}</code></span>
+            {/each}
+            {#if preservedKeys.length > 6}
+              <button
+                type="button"
+                class="btn-tag-expand"
+                onclick={() => (safeMergeExpanded = !safeMergeExpanded)}
+              >
+                {safeMergeExpanded
+                  ? $t('mihomo.safe_merge_tags_less')
+                  : $t('mihomo.safe_merge_tags_more', { count: preservedKeys.length - 6 })}
+              </button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    <div class="gen-layout" class:resizing={isResizingPreview}>
       <!-- Left: sections -->
       <div class="gen-left">
         <!-- Scenario selection -->
-        <div
-          class="constructor-scenario-bar"
-          style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px;"
-        >
-          <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
-          <select
-            id="preset-select"
-            class="form-select preset-select"
-            style="max-width: 250px;"
-            data-testid="preset-select"
-            value={activePreset}
-            onchange={(e) => {
-              const val = e.currentTarget.value;
-              applyPreset(val);
-              if (val === 'rule-based') {
-                activeSection = 'rulesets';
-              } else if (val === 'zkeen-selective') {
-                activeSection = 'groups';
-              }
-            }}
-          >
-            <option value="">-- {$t('editor.constructor_scenario')} --</option>
-            {#if schema && schema.mihomo && schema.mihomo.presets}
-              {#each schema.mihomo.presets as p}
-                <option value={p.id}>{$t(p.name)}</option>
-              {/each}
-            {:else}
-              <option value="rule-based">{$t('editor.scenario_rule_based')}</option>
-              <option value="global-proxy">{$t('editor.scenario_global_proxy')}</option>
-              <option value="zkeen-selective">{$t('editor.scenario_zkeen_selective')}</option>
-              <option value="only-blocked">{$t('preset.only-blocked')}</option>
-            {/if}
-          </select>
+        <div class="constructor-scenario-bar">
+          <div class="scenario-select-wrap">
+            <label for="preset-select" class="form-label"
+              >{$t('editor.constructor_scenario')}:</label
+            >
+            <select
+              id="preset-select"
+              class="form-select preset-select"
+              data-testid="preset-select"
+              value={activePreset}
+              onchange={(e) => {
+                const val = e.currentTarget.value;
+                applyPreset(val);
+                if (val === 'rule-based') {
+                  activeSection = 'rulesets';
+                } else if (val === 'zkeen-selective') {
+                  activeSection = 'groups';
+                }
+              }}
+            >
+              <option value="">-- {$t('editor.constructor_scenario')} --</option>
+              {#if schema && schema.mihomo && schema.mihomo.presets}
+                {#each schema.mihomo.presets as p}
+                  <option value={p.id}>{$t(p.name)}</option>
+                {/each}
+              {:else}
+                <option value="rule-based">{$t('editor.scenario_rule_based')}</option>
+                <option value="global-proxy">{$t('editor.scenario_global_proxy')}</option>
+                <option value="zkeen-selective">{$t('editor.scenario_zkeen_selective')}</option>
+                <option value="only-blocked">{$t('preset.only-blocked')}</option>
+              {/if}
+            </select>
+          </div>
+          {#if isPresetModified}
+            <span class="preset-modified-chip">{$t('xray.preset_modified')}</span>
+          {/if}
         </div>
 
         {#if activePreset === 'zkeen-selective' && !hasZkeenGeodata && !dismissZkeenGeodataWarning}
@@ -1820,9 +2048,7 @@
 
         <!-- Rule providers -->
         <div class="rule-providers-row">
-          <label class="form-label" for="rp-select"
-            >{$t('editor.constructor_rule_providers')}:</label
-          >
+          <label class="form-label" for="rp-select">{$t('mihomo.rule_provider_label')}</label>
           <select
             id="rp-select"
             class="form-select rp-select"
@@ -1853,19 +2079,36 @@
               }}
             >
               {label}
-              {#if id === 'proxies' && proxies.length > 0}<span class="sec-count"
-                  >{proxies.length}</span
-                >{/if}
-              {#if id === 'groups' && groups.length > 0}<span class="sec-count"
-                  >{groups.length}</span
-                >{/if}
-              {#if id === 'rulesets' && selectedMetaRuleSets.size > 0}<span class="sec-count"
-                  >{selectedMetaRuleSets.size}</span
-                >{/if}
-              {#if id === 'rules' && rules.length > 0}<span class="sec-count">{rules.length}</span
-                >{/if}
-              {#if id === 'dns' && dns.enabled}<span class="sec-dot"></span>{/if}
-              {#if id === 'tun' && tun.enabled}<span class="sec-dot"></span>{/if}
+              {#if id === 'proxies' && proxies.length > 0}
+                <span class="sec-count">{proxies.length}</span>
+              {/if}
+              {#if id === 'groups' && groups.length > 0}
+                <span class="sec-count">{groups.length}</span>
+              {/if}
+              {#if id === 'rulesets' && selectedMetaRuleSets.size > 0}
+                <span class="sec-count">{selectedMetaRuleSets.size}</span>
+              {/if}
+              {#if id === 'rules' && rules.length > 0}
+                <span class="sec-count">{rules.length}</span>
+              {/if}
+              {#if id === 'dns'}
+                <span
+                  class="tab-status-badge"
+                  class:status-on={dns.enabled}
+                  class:status-off={!dns.enabled}
+                >
+                  {dns.enabled ? $t('mihomo.tab_status_on') : $t('mihomo.tab_status_off')}
+                </span>
+              {/if}
+              {#if id === 'tun'}
+                <span
+                  class="tab-status-badge"
+                  class:status-on={tun.enabled}
+                  class:status-off={!tun.enabled}
+                >
+                  {tun.enabled ? $t('mihomo.tab_status_on') : $t('mihomo.tab_status_off')}
+                </span>
+              {/if}
             </button>
           {/each}
         </div>
@@ -1874,16 +2117,51 @@
         {#if activeSection === 'proxies'}
           <div class="sec-body">
             {#each proxies as p (p.id)}
-              <div class="item-row">
+              <div class="item-row" class:item-disabled={p.enabled === false}>
                 <span class="item-badge type-{p.type}">{p.type}</span>
                 <span class="item-name">{p.name}</span>
                 <span class="item-meta">{p.server}:{p.port}</span>
-                <button class="item-edit" onclick={() => editProxy(p)} title={$t('app.edit')}
-                  >✎</button
+
+                <label
+                  class="switch item-switch"
+                  title={p.enabled === false
+                    ? $t('mihomo.proxy_disabled')
+                    : $t('mihomo.proxy_enabled')}
                 >
-                <button class="item-del" onclick={() => removeProxy(p.id)} title={$t('app.delete')}
-                  >✕</button
-                >
+                  <input
+                    type="checkbox"
+                    checked={p.enabled !== false}
+                    onchange={() => toggleProxy(p.id)}
+                  />
+                  <span class="slider round"></span>
+                </label>
+
+                <div class="item-actions">
+                  <button
+                    type="button"
+                    class="item-btn"
+                    onclick={() => editProxy(p)}
+                    title={$t('app.edit')}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    class="item-btn"
+                    onclick={() => duplicateProxy(p)}
+                    title={$t('app.duplicate')}
+                  >
+                    ⎘
+                  </button>
+                  <button
+                    type="button"
+                    class="item-btn item-btn-danger"
+                    onclick={() => removeProxy(p.id)}
+                    title={$t('app.delete')}
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
             {/each}
 
@@ -1917,25 +2195,33 @@
                     <span
                       class="item-meta"
                       title={sub.url}
-                      style="max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                      style="max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
                     >
                       {sub.url}
                     </span>
+                    <button
+                      type="button"
+                      class="item-btn"
+                      onclick={loadSubscriptions}
+                      title={$t('mihomo.refresh_provider')}
+                    >
+                      ⟳
+                    </button>
                   </div>
                 {/each}
               {/if}
 
-              <div class="constructor-proxy-list" style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <div class="constructor-proxy-list">
                 <button
-                  class="add-btn"
-                  style="flex: 1; min-width: 120px;"
+                  type="button"
+                  class="add-btn btn-action-primary"
                   onclick={() => (showProxyForm = true)}
                 >
                   + {$t('mihomo.add_proxy')}
                 </button>
                 <button
+                  type="button"
                   class="add-btn import-btn"
-                  style="flex: 1; min-width: 120px;"
                   onclick={loadSubscriptionProxies}
                   disabled={!hasXraySubscriptions}
                   title={hasXraySubscriptions
@@ -1944,11 +2230,7 @@
                 >
                   ↓ {$t('editor.constructor_import_proxies')}
                 </button>
-                <button
-                  class="add-btn import-btn"
-                  style="flex: 1; min-width: 120px;"
-                  onclick={openImportModal}
-                >
+                <button type="button" class="add-btn import-btn" onclick={openImportModal}>
                   <svg
                     width="12"
                     height="12"
@@ -2098,7 +2380,6 @@
                   bind:ng
                   isEdit={!!editingGroupId}
                   {allProxyNames}
-                  {mihomoProviders}
                   onSave={addGroup}
                   onCancel={() => {
                     showGroupForm = false;
@@ -2111,84 +2392,65 @@
                       url: 'https://www.gstatic.com/generate_204',
                       interval: 300,
                       useProviders: [],
-                      strategy: 'consistent-hashing'
+                      strategy: undefined
                     };
                   }}
                 />
               {:else}
-                <div class="constructor-proxy-list" style="display: flex; gap: 8px;">
-                  <button class="add-btn" style="flex: 1;" onclick={() => (showGroupForm = true)}>
-                    + {$t('mihomo.add_group')}
-                  </button>
-                </div>
+                <button class="add-btn" onclick={() => (showGroupForm = true)}>
+                  + {$t('mihomo.add_group')}
+                </button>
               {/if}
             {/if}
           </div>
         {/if}
 
-        <!-- RULESETS -->
+        <!-- RULE SETS (MetaCubeX) -->
         {#if activeSection === 'rulesets'}
-          <div class="sec-body" data-testid="rulesets-picker">
-            <div class="card rulesets-card" style="padding:16px;">
-              <div class="rulesets-header">
-                <h3 style="margin-top:0; margin-bottom:4px; font-size:16px;">
-                  {$t('editor.rulesets_picker')}
-                </h3>
-                <p
-                  class="sub"
-                  style="margin-top:0; margin-bottom:16px; font-size:12px; color:var(--fg-dim);"
-                >
-                  {$t('mihomo.rule_sets_hint')}
-                </p>
-              </div>
+          <div class="sec-body">
+            <div
+              class="rulesets-hint"
+              style="font-size:12px; color:var(--fg-dim); margin-bottom:12px;"
+            >
+              {$t('mihomo.rule_sets_hint')}
+            </div>
 
-              {#each Object.entries(META_RULE_SETS_BY_CATEGORY) as [category, items]}
-                <div class="rulesets-category-group" style="margin-top:16px;">
-                  <h4
-                    class="category-title"
-                    style="font-size:13px; font-weight:600; color:var(--fg-secondary); margin-bottom:8px; padding-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.05);"
-                  >
-                    {category}
-                  </h4>
+            <div class="rulesets-container" style="display:flex; flex-direction:column; gap:16px;">
+              {#each Object.entries(META_RULE_SETS_BY_CATEGORY) as [catName, items]}
+                <div
+                  class="ruleset-cat-card"
+                  style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius); padding:12px;"
+                >
                   <div
-                    class="rulesets-grid"
-                    style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:8px;"
+                    class="ruleset-cat-title"
+                    style="font-size:13px; font-weight:600; color:var(--fg-primary); margin-bottom:8px; display:flex; align-items:center; gap:6px;"
+                  >
+                    <span>{catName}</span>
+                    <span style="font-size:11px; font-weight:normal; color:var(--fg-dim);"
+                      >({items.length})</span
+                    >
+                  </div>
+                  <div
+                    class="ruleset-items-grid"
+                    style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:8px;"
                   >
                     {#each items as item}
                       {@const key = `${item.id}|${item.type}`}
                       {@const isChecked = selectedMetaRuleSets.has(key)}
                       <div
                         class="ruleset-item-row"
-                        class:selected={isChecked}
-                        style="display:flex; align-items:center; justify-content:space-between; padding:8px 12px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:var(--radius); transition:background var(--transition-fast), border-color var(--transition-fast);"
+                        style="display:flex; align-items:center; justify-content:space-between; padding:6px 10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-sm);"
                       >
                         <label
-                          class="ruleset-label"
-                          for="ruleset-{item.type}-{item.id}"
-                          style="display:flex; align-items:center; gap:8px; cursor:pointer; flex:1; user-select:none;"
+                          class="checkbox-label"
+                          style="display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; margin:0;"
                         >
                           <input
                             type="checkbox"
-                            id="ruleset-{item.type}-{item.id}"
-                            value={key}
                             checked={isChecked}
                             onchange={(e) => {
                               if (e.currentTarget.checked) {
-                                let outbound = item.defaultOutbound;
-                                if (
-                                  outbound === 'Proxy' &&
-                                  groups.some((g) => g.name === 'Selective')
-                                ) {
-                                  outbound = 'Selective';
-                                } else if (
-                                  outbound === 'Proxy' &&
-                                  groups.some((g) => g.name === 'Proxy')
-                                ) {
-                                  outbound = 'Proxy';
-                                } else if (!allProxyNames.includes(outbound)) {
-                                  outbound = allProxyNames[0] || 'DIRECT';
-                                }
-                                selectedMetaRuleSets.set(key, outbound);
+                                selectedMetaRuleSets.set(key, item.defaultOutbound || 'DIRECT');
                               } else {
                                 selectedMetaRuleSets.delete(key);
                               }
@@ -2196,25 +2458,24 @@
                             }}
                           />
                           <span
-                            class="ruleset-name"
+                            class="ruleset-item-label"
                             style="font-size:13px; font-weight:500; color:var(--fg-primary);"
                             >{item.label}</span
                           >
                           <span
                             class="ruleset-type-badge"
-                            style="font-size:9px; font-weight:700; text-transform:uppercase; color:var(--fg-dim); background:rgba(255,255,255,0.05); padding:1px 4px; border-radius:4px;"
+                            style="font-size:9px; background:var(--bg-surface); padding:2px 4px; border-radius:4px; opacity:0.7;"
                             >{item.type}</span
                           >
                         </label>
-
                         {#if isChecked}
                           <select
-                            class="ruleset-outbound-select"
-                            style="font-size:12px; background:var(--bg-surface); border:1px solid var(--border); color:var(--fg-primary); border-radius:var(--radius-sm); padding:2px 6px; max-width:120px; outline:none;"
+                            class="form-select"
+                            style="font-size:11px; padding:2px 4px; height:24px; width:80px;"
                             value={selectedMetaRuleSets.get(key)}
                             onchange={(e) => {
                               selectedMetaRuleSets.set(key, e.currentTarget.value);
-                              selectedMetaRuleSets = selectedMetaRuleSets;
+                              selectedMetaRuleSets = new Map(selectedMetaRuleSets);
                             }}
                           >
                             {#each allProxyNames as n}
@@ -2348,7 +2609,7 @@
                   id="mihomo-dns-fallback"
                   class="form-textarea"
                   value={dns.fallback.join('\n')}
-                  rows="2"
+                  rows="3"
                   onchange={(e) =>
                     (dns.fallback = e.currentTarget.value.split('\n').filter(Boolean))}></textarea>
               </div>
@@ -2369,25 +2630,25 @@
               <div class="form-row">
                 <label class="form-label" for="mihomo-tun-stack">Stack</label>
                 <select id="mihomo-tun-stack" class="form-select" bind:value={tun.stack}>
-                  <option value="mixed">mixed</option>
                   <option value="system">system</option>
                   <option value="gvisor">gvisor</option>
+                  <option value="mixed">mixed</option>
                 </select>
               </div>
               <div class="toggle-row">
                 <label class="toggle-label">
                   <input type="checkbox" bind:checked={tun.autoRoute} />
-                  <span>auto-route</span>
+                  <span>Auto route</span>
                 </label>
               </div>
               <div class="toggle-row">
                 <label class="toggle-label">
                   <input type="checkbox" bind:checked={tun.autoDetectInterface} />
-                  <span>auto-detect-interface</span>
+                  <span>Auto detect interface</span>
                 </label>
               </div>
               <div class="form-row">
-                <label class="form-label" for="mihomo-tun-dns-hijack">DNS hijack</label>
+                <label class="form-label" for="mihomo-tun-dns-hijack">DNS Hijack</label>
                 <input
                   id="mihomo-tun-dns-hijack"
                   class="form-input"
@@ -2486,7 +2747,7 @@
                     stroke-width="2"
                   >
                     <path
-                      d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+                      d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
                     />
                     <line x1="12" y1="9" x2="12" y2="13" />
                     <line x1="12" y1="17" x2="12.01" y2="17" />
@@ -2499,103 +2760,159 @@
         {/if}
       </div>
 
-      <!-- Right: YAML preview -->
-      <div class="gen-right">
-        <div class="preview-header">
-          <span class="preview-title">YAML {$t('mihomo.preview')}</span>
-          {#if yaml}
-            <button
-              class="btn btn-secondary btn-sm"
-              onclick={copyYAML}
-              aria-label={$t('mihomo.copy_yaml')}
+      <!-- Splitter -->
+      {#if showPreviewPane}
+        <button
+          type="button"
+          class="mihomo-splitter"
+          class:active={isResizingPreview}
+          aria-label="Resize preview"
+          tabindex="-1"
+          onpointerdown={startResizePreview}
+          onmousedown={startResizePreview}
+        >
+          <div class="splitter-handle"></div>
+        </button>
+
+        <!-- Right: YAML preview -->
+        <div class="gen-right card" style="width: {previewWidth}px; flex: 0 0 {previewWidth}px;">
+          <div class="preview-header">
+            <div class="preview-title-wrap">
+              <span class="preview-title">YAML {$t('mihomo.preview')}</span>
+              <span class="preview-size-badge">{yamlFileSize}</span>
+            </div>
+            <div class="preview-header-actions">
+              {#if yaml}
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  onclick={copyYAML}
+                  title={$t('mihomo.copy_yaml')}
+                >
+                  {#if copyFeedback}
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="var(--color-success, #22c55e)"
+                      stroke-width="2.5"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  {:else}
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <rect x="9" y="9" width="13" height="13" rx="2" /><path
+                        d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                      />
+                    </svg>
+                  {/if}
+                  <span style="margin-left: 4px;"
+                    >{copyFeedback ? $t('mihomo.yaml_copied') : $t('mihomo.copy_yaml')}</span
+                  >
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-secondary btn-sm"
+                  onclick={downloadYaml}
+                  title={$t('mihomo.download_yaml_title')}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  <span style="margin-left: 4px;">{$t('mihomo.download_yaml')}</span>
+                </button>
+              {/if}
+            </div>
+          </div>
+
+          <pre class="yaml-preview" data-testid="mihomo-yaml-preview">{yaml ||
+              $t('mihomo.empty_yaml_hint')}</pre>
+
+          {#if validationError}
+            <div
+              class="validation-error-block"
+              style="margin: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
             >
+              <div style="font-weight: bold; margin-bottom: 6px;">
+                {$t('editor.validation_failed')}
+              </div>
+              <div
+                style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;"
+              >
+                {parseValidationError(validationError, $currentLang)}
+              </div>
+              <details>
+                <summary style="cursor: pointer; font-size: 12px; opacity: 0.8; user-select: none;"
+                  >{$t('editor.validation_details')}</summary
+                >
+                <pre
+                  style="margin: 6px 0 0 0; white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 12px; opacity: 0.9; max-height: 200px; overflow-y: auto;">{validationError}</pre>
+              </details>
+            </div>
+          {/if}
+
+          <!-- Bottom Actions Toolbar -->
+          <div class="gen-preview-footer">
+            <button type="button" class="btn btn-secondary" onclick={openInEditor}>
               <svg
-                width="12"
-                height="12"
+                width="13"
+                height="13"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2"
-                ><rect x="9" y="9" width="13" height="13" rx="2" /><path
-                  d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                style="margin-right:5px"
+                ><path d="M12 20h9" /><path
+                  d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
                 /></svg
               >
+              {#if selectedFile}
+                {$t('mihomo.insert_editor')}
+              {:else}
+                {$t('mihomo.open_editor')}
+              {/if}
             </button>
-          {/if}
-        </div>
-        <pre class="yaml-preview">{yaml || $t('mihomo.empty_yaml_hint')}</pre>
 
-        {#if validationError}
-          <div
-            class="validation-error-block"
-            style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
-          >
-            <div style="font-weight: bold; margin-bottom: 6px;">
-              {$t('editor.validation_failed')}
-            </div>
-            <div
-              style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;"
-            >
-              {parseValidationError(validationError, $currentLang)}
-            </div>
-            <details>
-              <summary style="cursor: pointer; font-size: 12px; opacity: 0.8; user-select: none;"
-                >{$t('editor.validation_details')}</summary
-              >
-              <pre
-                style="margin: 6px 0 0 0; white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 12px; opacity: 0.9; max-height: 200px; overflow-y: auto;">{validationError}</pre>
-            </details>
-          </div>
-        {/if}
-
-        {#if embedded}
-          <div
-            class="gen-embedded-actions"
-            style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;"
-          >
-            <div style="display: flex; gap: 8px; width: 100%;">
-              <button class="btn btn-secondary" style="flex: 1;" onclick={openInEditor}>
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  style="margin-right:5px"
-                  ><path d="M12 20h9" /><path
-                    d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
-                  /></svg
-                >
-                {#if selectedFile}
-                  {$t('mihomo.insert_editor')}
-                {:else}
-                  {$t('mihomo.open_editor')}
-                {/if}
-              </button>
-              <button
-                class="btn btn-primary"
-                data-testid="apply-changes-btn"
-                onclick={handleApplyMihomo}
-                disabled={applyLoading || !yaml}
-                style="flex: 1;"
-              >
-                {applyLoading ? $t('mihomo.saving') : $t('mihomo.apply_changes')}
-              </button>
-            </div>
             {#if canUndo}
               <button
+                type="button"
                 class="btn btn-secondary"
                 onclick={handleUndo}
                 disabled={applyLoading}
-                style="width: 100%;"
               >
                 {$t('editor.undo')}
               </button>
             {/if}
+
+            <button
+              type="button"
+              class="btn btn-primary"
+              data-testid="apply-changes-btn"
+              onclick={handleApplyMihomo}
+              disabled={applyLoading || !yaml}
+            >
+              {applyLoading ? $t('mihomo.saving') : $t('mihomo.apply_and_restart')}
+            </button>
           </div>
-        {/if}
-      </div>
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -2763,11 +3080,147 @@
     margin: 0 6px;
   }
 
+  .embedded-head-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .embedded-title-tag {
+    font-size: 14px;
+  }
+
+  .safe-merge-card {
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  .safe-merge-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .safe-merge-title-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .safe-merge-icon-wrap {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    background: rgba(41, 194, 240, 0.12);
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .safe-merge-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .safe-merge-desc {
+    font-size: 11px;
+    color: var(--fg-dim);
+    margin-top: 1px;
+  }
+
+  .safe-merge-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    align-items: center;
+  }
+
+  .directive-tag {
+    font-size: 11px;
+    font-family: var(--font-family-mono, monospace);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    color: var(--fg-secondary);
+  }
+
+  .btn-tag-expand {
+    background: none;
+    border: none;
+    font-size: 11px;
+    color: var(--primary);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  .btn-tag-expand:hover {
+    text-decoration: underline;
+  }
+
   .gen-layout {
-    display: grid;
-    grid-template-columns: 1fr 380px;
-    gap: 20px;
-    align-items: start;
+    display: flex;
+    gap: 0;
+    align-items: stretch;
+    position: relative;
+    min-height: 520px;
+  }
+
+  .gen-left {
+    flex: 1;
+    min-width: 320px;
+    overflow-y: auto;
+    padding-right: 12px;
+  }
+
+  .mihomo-splitter {
+    width: 12px;
+    margin: 0 4px;
+    cursor: col-resize;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    user-select: none;
+    z-index: 10;
+    background: transparent;
+    border: none;
+    padding: 0;
+    outline: none;
+  }
+
+  .mihomo-splitter:hover .splitter-handle,
+  .mihomo-splitter.active .splitter-handle {
+    background: var(--color-primary, #0284c7);
+    box-shadow: 0 0 8px rgba(2, 132, 199, 0.4);
+  }
+
+  .splitter-handle {
+    width: 4px;
+    height: 36px;
+    border-radius: 2px;
+    background: var(--color-border, #334155);
+    transition: all 0.15s ease;
+  }
+
+  .gen-layout.resizing {
+    user-select: none;
+    cursor: col-resize;
   }
 
   /* Sections */
@@ -2815,11 +3268,22 @@
     line-height: 1.4;
   }
 
-  .sec-dot {
-    width: 6px;
-    height: 6px;
-    background: var(--success);
-    border-radius: 50%;
+  .tab-status-badge {
+    font-size: 9px;
+    font-weight: 700;
+    border-radius: 6px;
+    padding: 1px 5px;
+    line-height: 1.2;
+  }
+
+  .tab-status-badge.status-on {
+    background: rgba(70, 209, 138, 0.2);
+    color: var(--success);
+  }
+
+  .tab-status-badge.status-off {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--fg-dim);
   }
 
   .sec-body {
@@ -2837,6 +3301,12 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
+    transition: opacity var(--transition-fast);
+  }
+
+  .item-row.item-disabled {
+    opacity: 0.55;
+    filter: grayscale(0.4);
   }
 
   .item-row-rule {
@@ -2903,6 +3373,37 @@
     flex-shrink: 0;
   }
 
+  .item-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+
+  .item-btn {
+    background: none;
+    border: none;
+    color: var(--fg-faint);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast);
+    line-height: 1;
+  }
+
+  .item-btn:hover {
+    color: var(--fg-primary);
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .item-btn-danger:hover {
+    color: var(--danger);
+    background: rgba(239, 91, 107, 0.1);
+  }
+
   .item-edit {
     background: none;
     border: none;
@@ -2935,6 +3436,10 @@
 
   .item-del:hover {
     color: var(--danger);
+  }
+
+  .item-switch {
+    margin-left: 8px;
   }
 
   .rule-order {
@@ -3109,12 +3614,12 @@
 
   .add-btn {
     width: 100%;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px dashed var(--border-strong);
+    background: var(--bg-surface, #1e293b);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
-    color: var(--fg-dim);
+    color: var(--fg-secondary);
     font-size: 13px;
-    padding: 12px;
+    padding: 10px 14px;
     cursor: pointer;
     transition:
       background var(--transition-fast),
@@ -3124,9 +3629,14 @@
   }
 
   .add-btn:hover {
-    background: rgba(41, 194, 240, 0.05);
-    border-color: rgba(41, 194, 240, 0.3);
-    color: var(--primary);
+    background: var(--bg-card-hover, #334155);
+    border-color: var(--border-focus, var(--primary));
+    color: var(--fg-primary);
+  }
+
+  .btn-action-primary {
+    border-color: var(--border);
+    color: var(--fg-primary);
   }
 
   /* Toggle */
@@ -3146,25 +3656,33 @@
 
   /* YAML preview */
   .gen-right {
-    position: sticky;
-    top: 20px;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    max-height: calc(100vh - 140px);
+    min-width: 280px;
+    max-width: 800px;
+    height: calc(100vh - 160px);
+    position: sticky;
+    top: 16px;
   }
 
   .preview-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 14px;
+    padding: 8px 12px;
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+  }
+
+  .preview-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .preview-title {
@@ -3173,6 +3691,20 @@
     color: var(--fg-dim);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+  }
+
+  .preview-size-badge {
+    font-size: 10px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--fg-secondary);
+    padding: 1px 6px;
+    border-radius: 10px;
+  }
+
+  .preview-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .btn-sm {
@@ -3195,13 +3727,33 @@
     scrollbar-color: var(--border-strong) transparent;
   }
 
+  .gen-preview-footer {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  .gen-preview-footer .btn-primary {
+    flex: 1;
+    min-width: 140px;
+  }
+
   @media (max-width: 900px) {
     .gen-layout {
-      grid-template-columns: 1fr;
+      flex-direction: column;
     }
     .gen-right {
       position: static;
-      max-height: 300px;
+      max-height: 350px;
+      width: 100% !important;
+      flex: 1 1 auto !important;
+    }
+    .mihomo-splitter {
+      display: none;
     }
   }
 
@@ -3209,44 +3761,27 @@
   .constructor-scenario-bar {
     display: flex;
     align-items: center;
-    gap: 6px;
+    justify-content: space-between;
+    gap: 10px;
     flex-wrap: wrap;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
 
-  .scenario-label {
+  .scenario-select-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .preset-modified-chip {
     font-size: 11px;
-    color: var(--fg-dim);
-    font-weight: 500;
-    flex-shrink: 0;
-  }
-
-  .scenario-chip {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border);
+    font-weight: 600;
+    color: var(--warning);
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    padding: 2px 8px;
     border-radius: 12px;
-    color: var(--fg-secondary);
-    font-size: 12px;
-    font-weight: 500;
-    padding: 4px 12px;
-    cursor: pointer;
-    transition:
-      background var(--transition-fast),
-      border-color var(--transition-fast),
-      color var(--transition-fast);
-    line-height: 1.4;
-  }
-
-  .scenario-chip:hover {
-    background: rgba(41, 194, 240, 0.08);
-    border-color: rgba(41, 194, 240, 0.35);
-    color: var(--primary);
-  }
-
-  .scenario-chip.active {
-    background: rgba(41, 194, 240, 0.15);
-    border-color: rgba(41, 194, 240, 0.5);
-    color: var(--primary);
   }
 
   /* Rule providers row */
@@ -3271,19 +3806,50 @@
   /* Proxy list action group */
   .constructor-proxy-list {
     display: flex;
-    flex-direction: column;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .constructor-proxy-list .add-btn {
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 140px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     gap: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 500;
   }
 
-  .import-btn {
-    border-style: dashed;
-    color: var(--fg-dim);
+  .constructor-proxy-list .btn-action-primary {
+    background: var(--bg-surface, #1e293b);
+    border: 1px solid var(--border);
+    color: var(--fg-primary);
   }
 
-  .import-btn:hover {
-    background: rgba(70, 209, 138, 0.05);
-    border-color: rgba(70, 209, 138, 0.3);
-    color: var(--success);
+  .constructor-proxy-list .btn-action-primary:hover {
+    background: var(--bg-card-hover, #334155);
+    border-color: var(--primary);
+  }
+
+  .constructor-proxy-list .import-btn {
+    background: var(--bg-surface, #1e293b);
+    border: 1px solid var(--border);
+    color: var(--fg-secondary);
+  }
+
+  .constructor-proxy-list .import-btn:hover:not(:disabled) {
+    background: var(--bg-card-hover, #334155);
+    border-color: var(--primary);
+    color: var(--fg-primary);
+  }
+
+  .constructor-proxy-list .import-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Premium zkeen 16 groups grid */
