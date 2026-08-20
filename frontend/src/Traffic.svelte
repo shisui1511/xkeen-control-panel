@@ -458,8 +458,8 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_tools')}
-        <span class="crumb-separator">›</span>
+        {$t('nav.group_observability')}
+        <span class="crumb-sep">›</span>
         {$t('traffic.title')}
       </div>
       <h1>{$t('traffic.title')}</h1>
@@ -952,11 +952,6 @@
 </div>
 
 <style>
-  .crumb-separator {
-    color: var(--fg-faint);
-    margin: 0 8px;
-  }
-
   .badge-live-indicator {
     display: inline-flex;
     align-items: center;

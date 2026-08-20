@@ -824,7 +824,7 @@
           <div class="page-head">
             <div>
               <div class="crumbs">
-                {$t('nav.group_core')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+                {$t('nav.group_overview')} <span class="crumb-sep">›</span>
                 {$t('nav.dashboard')}
               </div>
               <h1>{$t('dash.title')}</h1>

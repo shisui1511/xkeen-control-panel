@@ -487,7 +487,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_observability')} <span class="crumb-sep">/</span>
+        {$t('nav.group_observability')} <span class="crumb-sep">›</span>
         {$t('conn.title')}
       </div>
       <h1>
@@ -554,6 +554,7 @@
           /></svg
         >
         <span>{$t('conn.close_all')}</span>
+        <span class="sr-only">Закрыть все</span>
       </button>
     </div>
   </div>
@@ -596,6 +597,7 @@
         >
         <input
           type="text"
+          id="filter-source"
           class="search-input"
           placeholder={$t('conn.search_placeholder')}
           bind:value={searchQuery}
@@ -1559,6 +1561,7 @@
   }
 
   .btn-close-conn {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1571,6 +1574,17 @@
     font-size: 16px;
     cursor: pointer;
     transition: background 0.15s ease;
+  }
+
+  .btn-close-conn::before {
+    content: '';
+    position: absolute;
+    top: -8px;
+    bottom: -8px;
+    left: -8px;
+    right: -8px;
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .btn-close-conn:hover {

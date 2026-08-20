@@ -175,7 +175,7 @@
               {#if activeConfig}
                 <span class="active-dot" title={$t('editor.active_config')}></span>
               {/if}
-              <span class="fr-name" title={file.name}>{file.name}</span>
+              <span class="fr-name file-name" title={file.name}>{file.name}</span>
             </div>
             <span class="fr-meta">{formatBytes(file.size)}</span>
           </button>
@@ -216,7 +216,7 @@
               {#if activeConfig}
                 <span class="active-dot" title={$t('editor.active_config')}></span>
               {/if}
-              <span class="fr-name" title={file.name}>{file.name}</span>
+              <span class="fr-name file-name" title={file.name}>{file.name}</span>
             </div>
             <span class="fr-meta">{formatBytes(file.size)}</span>
           </button>

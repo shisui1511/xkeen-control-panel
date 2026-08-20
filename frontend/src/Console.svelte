@@ -150,7 +150,7 @@
   <PageHeader
     title={$t('console.title')}
     subtitle={$t('console.subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_services') }, { label: $t('nav.console') }]}
+    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('nav.console') }]}
     {onSwitchTab}
     hideHome={true}
   />

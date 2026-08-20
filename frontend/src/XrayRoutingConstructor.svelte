@@ -248,7 +248,7 @@
     | '01_log.json'
     | '03_inbounds.json'
     | 'all'
-  >('05_routing.json');
+  >('all');
   let copyFeedback = $state(false);
 
   // Drag-and-Drop & Rule controls (BUILD-02)

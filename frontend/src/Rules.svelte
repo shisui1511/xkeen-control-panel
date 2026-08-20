@@ -299,7 +299,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.group_routing')} <span class="crumb-sep">›</span>
         {$t('nav.rules')}
       </div>
       <h1>{$t('rules.title')}</h1>

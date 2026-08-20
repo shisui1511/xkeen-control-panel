@@ -21,7 +21,7 @@
   {/if}
   {#each items as item, i}
     {#if !hideHome || i > 0}
-      <span class="breadcrumb-separator">/</span>
+      <span class="breadcrumb-separator">›</span>
     {/if}
     {#if item.tab && i < items.length - 1}
       <button class="breadcrumb-link" onclick={() => onNavigate(item.tab || '')}

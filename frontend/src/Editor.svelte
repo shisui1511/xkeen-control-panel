@@ -1459,7 +1459,7 @@
   <div class="editor-page-head">
     <div class="eph-left">
       <div class="crumbs">
-        {$t('nav.group_core')} <span class="crumb-sep">›</span>
+        {$t('nav.group_system')} <span class="crumb-sep">›</span>
         {$t('nav.editor')}
         {#if activeTab === 'constructor'}
           <span class="crumb-sep">›</span> {$t('editor.tab_constructor')}

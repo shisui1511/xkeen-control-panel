@@ -73,7 +73,10 @@
   async function fetchRestartLog() {
     try {
       const res = await apiFetch('/api/service/restart-log');
-      if (res.ok) restartLog = await res.json();
+      if (res.ok) {
+        const json = await res.json();
+        restartLog = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : [];
+      }
     } catch (e: any) {
       if (e?.status === 401) return;
     }
@@ -492,7 +495,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_system')} <span class="crumb-sep">/</span>
+        {$t('nav.group_system')} <span class="crumb-sep">›</span>
         {$t('nav.services')}
       </div>
       <h1>{$t('svc.h1')}</h1>
@@ -573,66 +576,124 @@
       <!-- Mutual Exclusive Radio Selector (SRV-02) -->
       <div class="core-radio-grid" role="radiogroup" aria-label={$t('svc.active_kernel_label')}>
         <!-- Mihomo Option -->
-        <button
-          type="button"
-          class="core-radio-card"
+        <div
+          role="button"
+          tabindex="0"
+          class="core-radio-card kernel-card"
           class:active={activeKernel === 'mihomo'}
           class:switching={switchingKernelTo === 'mihomo'}
           onclick={() => handleSwitchKernel('mihomo')}
-          disabled={switchingKernelTo !== null}
+          onkeydown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') handleSwitchKernel('mihomo');
+          }}
         >
           <div class="radio-indicator">
             <span class="radio-dot" class:checked={activeKernel === 'mihomo'}></span>
           </div>
-          <div class="radio-body">
+          <div class="radio-body k-body">
             <div class="radio-name">
               <span>Mihomo</span>
+              {#if mihomo?.current_version}
+                <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
+                  >v{mihomo.current_version}</span
+                >
+              {/if}
               {#if activeKernel === 'mihomo'}
                 <span class="active-pill">{$t('svc.active_label')}</span>
               {/if}
             </div>
-            <div class="radio-desc">
+            <div class="radio-desc k-meta">
               {#if !kernelsLoaded}
                 <Skeleton type="text-line" width="90px" />
               {:else}
-                v{mihomo?.current_version || '—'} · {mihomo?.process_status === 'running'
-                  ? $t('svc.running')
+                {mihomo?.process_status === 'running'
+                  ? `${$t('svc.running')} · PID ${mihomo?.pid || xkeenInfo.pid || '—'}`
                   : $t('svc.stopped')}
               {/if}
             </div>
+            {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
+              <a
+                href="#/editor"
+                class="badge badge-warning"
+                style="margin-top: 6px; display: inline-flex;"
+                title={$t('svc.mihomo_api_unavailable_title')}
+              >
+                {$t('svc.mihomo_api_unavailable')}
+              </a>
+            {/if}
           </div>
-        </button>
+          {#if !isRunning}
+            <button
+              type="button"
+              class="btn btn-primary btn-sm"
+              onclick={(e) => {
+                e.stopPropagation();
+                controlService('start');
+              }}
+              title={$t('svc.action_start')}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"
+                ><polygon points="5 3 19 12 5 21 5 3" /></svg
+              >
+              {$t('svc.action_start')}
+            </button>
+          {/if}
+        </div>
 
         <!-- Xray Option -->
-        <button
-          type="button"
-          class="core-radio-card"
+        <div
+          role="button"
+          tabindex="0"
+          class="core-radio-card kernel-card"
           class:active={activeKernel === 'xray'}
           class:switching={switchingKernelTo === 'xray'}
           onclick={() => handleSwitchKernel('xray')}
-          disabled={switchingKernelTo !== null}
+          onkeydown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') handleSwitchKernel('xray');
+          }}
         >
           <div class="radio-indicator">
             <span class="radio-dot" class:checked={activeKernel === 'xray'}></span>
           </div>
-          <div class="radio-body">
+          <div class="radio-body k-body">
             <div class="radio-name">
               <span>Xray</span>
+              {#if xray?.current_version}
+                <span class="k-ver text-secondary" style="font-size:12px; font-weight:normal;"
+                  >v{xray.current_version}</span
+                >
+              {/if}
               {#if activeKernel === 'xray'}
                 <span class="active-pill">{$t('svc.active_label')}</span>
               {/if}
             </div>
-            <div class="radio-desc">
+            <div class="radio-desc k-meta">
               {#if !kernelsLoaded}
                 <Skeleton type="text-line" width="90px" />
               {:else}
-                v{xray?.current_version || '—'} · {xray?.process_status === 'running'
-                  ? $t('svc.running')
+                {xray?.process_status === 'running'
+                  ? `${$t('svc.running')} · PID ${xray?.pid || xkeenInfo.pid || '—'}`
                   : $t('svc.stopped')}
               {/if}
             </div>
           </div>
-        </button>
+          {#if !isRunning}
+            <button
+              type="button"
+              class="btn btn-primary btn-sm"
+              onclick={(e) => {
+                e.stopPropagation();
+                controlService('start');
+              }}
+              title={$t('svc.action_start')}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"
+                ><polygon points="5 3 19 12 5 21 5 3" /></svg
+              >
+              {$t('svc.action_start')}
+            </button>
+          {/if}
+        </div>
       </div>
 
       <!-- Process Metadata Panel -->
@@ -933,7 +994,19 @@
     <div class="card restart-card">
       <div class="card-head-row">
         <div>
-          <h2 class="card-title">{$t('svc.restart_log_title')}</h2>
+          <h2 class="card-title">
+            {$t('svc.restart_log_title')}
+            <span class="ct-actions" style="margin-left:auto;">
+              {#if restartLog.length > 0}
+                <button
+                  class="btn btn-sm btn-secondary"
+                  onclick={() => (restartLogExpanded = !restartLogExpanded)}
+                >
+                  {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
+                </button>
+              {/if}
+            </span>
+          </h2>
           <p class="card-subtitle">
             {pluralize(
               restartLog.length,
@@ -944,14 +1017,6 @@
             )}
           </p>
         </div>
-        {#if restartLog.length > 5}
-          <button
-            class="btn btn-sm btn-secondary"
-            onclick={() => (restartLogExpanded = !restartLogExpanded)}
-          >
-            {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
-          </button>
-        {/if}
       </div>
 
       {#if restartLog.length === 0}
@@ -969,7 +1034,7 @@
         </div>
       {:else}
         <div class="restart-log">
-          {#each restartLogExpanded ? restartLog : restartLog.slice(0, 5) as entry}
+          {#each Array.isArray(restartLog) ? (restartLogExpanded ? restartLog : restartLog.slice(0, 5)) : [] as entry}
             <div
               class="log-entry"
               class:log-success={entry.success}

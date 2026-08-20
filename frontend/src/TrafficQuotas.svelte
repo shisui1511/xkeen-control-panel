@@ -384,7 +384,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_tools')} <span class="crumb-separator">/</span>
+        {$t('nav.group_observability')} <span class="crumb-sep">›</span>
         {$t('nav.trafficquotas')}
       </div>
       <h1>{$t('trafficquotas.title')}</h1>

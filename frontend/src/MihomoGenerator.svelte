@@ -1825,7 +1825,7 @@
       <div class="page-head">
         <div>
           <div class="crumbs">
-            {$t('nav.group_services')} <span class="crumb-sep">›</span>
+            {$t('nav.group_system')} <span class="crumb-sep">›</span>
             {$t('editor.title')} <span class="crumb-sep">›</span>
             {$t('mihomo.breadcrumb_generator')}
           </div>
@@ -1921,7 +1921,7 @@
     {/if}
 
     {#if preservedKeys.length > 0}
-      <div class="card safe-merge-card" data-testid="safe-merge-card">
+      <div class="card safe-merge-card alert-warning" data-testid="safe-merge-card">
         <div class="safe-merge-head">
           <div class="safe-merge-title-group">
             <div class="safe-merge-icon-wrap">
@@ -1938,7 +1938,10 @@
             </div>
             <div>
               <div class="safe-merge-title">{$t('mihomo.safe_merge_title')}</div>
-              <div class="safe-merge-desc">{$t('mihomo.safe_merge_desc')}</div>
+              <div class="safe-merge-desc">
+                {$t('mihomo.safe_merge_desc')}
+                <span class="sr-only">({preservedKeys.join(', ')})</span>
+              </div>
             </div>
           </div>
           <label class="switch safe-merge-switch" title={$t('mihomo.safe_merge_toggle')}>
@@ -2415,7 +2418,11 @@
               {$t('mihomo.rule_sets_hint')}
             </div>
 
-            <div class="rulesets-container" style="display:flex; flex-direction:column; gap:16px;">
+            <div
+              class="rulesets-container rulesets-picker"
+              data-testid="rulesets-picker"
+              style="display:flex; flex-direction:column; gap:16px;"
+            >
               {#each Object.entries(META_RULE_SETS_BY_CATEGORY) as [catName, items]}
                 <div
                   class="ruleset-cat-card"
@@ -2447,6 +2454,8 @@
                         >
                           <input
                             type="checkbox"
+                            value={key}
+                            id="ruleset-{item.type}-{item.id}"
                             checked={isChecked}
                             onchange={(e) => {
                               if (e.currentTarget.checked) {

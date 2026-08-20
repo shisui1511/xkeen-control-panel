@@ -601,17 +601,11 @@ input[type='number'] {
 }
 
 .container {
-  max-width: min(100%, 1920px);
+  max-width: min(100%, 2400px);
   margin: 0 auto;
   padding: clamp(16px, 1.8vw, 36px) clamp(16px, 2.2vw, 40px) 60px;
   width: 100%;
   box-sizing: border-box;
-}
-
-@media (min-width: 2560px) {
-  .container {
-    max-width: 2400px;
-  }
 }
 
 .center-container {
@@ -1305,6 +1299,14 @@ body.drawer-locked {
   font-weight: 600;
   text-transform: uppercase;
   margin-bottom: 6px;
+}
+
+.crumb-sep,
+.crumb-separator {
+  color: var(--fg-faint);
+  margin: 0 6px;
+  font-weight: 400;
+  display: inline-block;
 }
 
 .ph-actions {
