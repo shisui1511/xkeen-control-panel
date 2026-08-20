@@ -106,6 +106,14 @@ const MOCK_PROXIES = {
       type: 'Vless',
       alive: true,
       history: [{ delay: 900, time: '' }]
+    },
+    DIRECT: {
+      name: 'DIRECT',
+      type: 'Direct'
+    },
+    REJECT: {
+      name: 'REJECT',
+      type: 'Reject'
     }
   }
 };
@@ -452,5 +460,96 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
       await refreshBtn.click();
       await expect.poll(() => postRequests.length).toBe(1);
     }
+  });
+
+  // D-08: клик по плашке статуса фильтрует группы, повторный клик сбрасывает
+  test('observatory filter: клик по плашке изолирует группы, повторный клик сбрасывает', async ({
+    page
+  }) => {
+    await expect(page.locator('.group-card').filter({ hasText: 'YouTube' }).first()).toBeVisible();
+    await expect(
+      page.locator('.group-card').filter({ hasText: 'FastGroup' }).first()
+    ).toBeVisible();
+
+    const badBtn = page.locator('.obs-stat-btn').filter({ hasText: 'Недоступны' }).first();
+    await expect(badBtn).toBeVisible();
+
+    // Кликаем по "Недоступны"
+    await badBtn.click();
+    await expect(badBtn).toHaveAttribute('aria-pressed', 'true');
+
+    // YouTube и FastGroup обе содержат DE-Node-04 (bad, alive=false)
+    await expect(page.locator('.group-card').filter({ hasText: 'YouTube' }).first()).toBeVisible();
+
+    // Клик повторно сбрасывает фильтр
+    await badBtn.click();
+    await expect(badBtn).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('.group-card').filter({ hasText: 'YouTube' }).first()).toBeVisible();
+  });
+
+  // D-09: заголовок и подписи на русском без капслока
+  test('observatory filter: заголовок и подписи на русском без капслока', async ({ page }) => {
+    const title = page.locator('.obs-title');
+    await expect(title).toHaveText('Состояние узлов');
+    const textTransform = await title.evaluate((el) => window.getComputedStyle(el).textTransform);
+    expect(textTransform).toBe('none');
+  });
+
+  // D-10: расшифровка общего числа узлов
+  test('observatory filter: расшифровка общего числа узлов', async ({ page }) => {
+    const totalBox = page.locator('.obs-stat-box').first();
+    const resSub = totalBox.locator('.res-sub');
+    await expect(resSub).toBeVisible();
+    await expect(resSub).toHaveText(/\d+\s+прокси\s+\+\s+\d+\s+системн/);
+  });
+
+  // D-11: тултип полосы здоровья
+  test('health bar: тултип показывает числа и проценты', async ({ page }) => {
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const collapseAllBtn = page.locator('button:has-text("Свернуть все")');
+    await collapseAllBtn.click();
+
+    const healthBar = ytGroup.locator('.health-bar').first();
+    await expect(healthBar).toBeVisible();
+
+    await healthBar.hover();
+    const tooltip = page.locator('.health-tooltip');
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toContainText(/Доступно:\s+\d+\s+\(\d+%\)/);
+    await expect(tooltip).toContainText(/Недоступно:\s+\d+\s+\(\d+%\)/);
+
+    // Escape скрывает тултип
+    await page.keyboard.press('Escape');
+    await expect(tooltip).toBeHidden();
+  });
+
+  // D-11: полоса не прилипает к нижней границе карточки
+  test('health bar: полоса не прилипает к нижней границе карточки', async ({ page }) => {
+    const collapseAllBtn = page.locator('button:has-text("Свернуть все")');
+    await collapseAllBtn.click();
+
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const healthBar = ytGroup.locator('.health-bar').first();
+
+    const barBox = await healthBar.boundingBox();
+    const cardBox = await ytGroup.boundingBox();
+
+    expect(barBox).not.toBeNull();
+    expect(cardBox).not.toBeNull();
+    if (barBox && cardBox) {
+      const gap = cardBox.y + cardBox.height - (barBox.y + barBox.height);
+      expect(gap).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  // D-11: aria-label содержит сводку
+  test('health bar: aria-label содержит сводку', async ({ page }) => {
+    const collapseAllBtn = page.locator('button:has-text("Свернуть все")');
+    await collapseAllBtn.click();
+
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const healthBar = ytGroup.locator('.health-bar').first();
+    const ariaLabel = await healthBar.getAttribute('aria-label');
+    expect(ariaLabel).toMatch(/Доступно:\s+\d+/);
   });
 });
