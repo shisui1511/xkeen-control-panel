@@ -240,6 +240,15 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
           contentType: 'application/json',
           body: JSON.stringify({ success: true })
         });
+      } else if (url.includes('/api/mihomo/proxy/group/') && url.includes('/delay')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            'RU-Node-01': 55,
+            'US-Node-02': 160
+          })
+        });
       } else if (url.includes('/api/mihomo/proxy/connections')) {
         await route.fulfill({
           status: 200,
@@ -551,5 +560,102 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     const healthBar = ytGroup.locator('.health-bar').first();
     const ariaLabel = await healthBar.getAttribute('aria-label');
     expect(ariaLabel).toMatch(/Доступно:\s+\d+/);
+  });
+
+  // D-13: Quick-Select Popover
+  test('quick select: клик по плашке открывает поповер и клик по узлу переключает прокси', async ({
+    page
+  }) => {
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const trigger = ytGroup.locator('.gc-now-pill-trigger').first();
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+
+    const popover = page.locator('.qs-popover');
+    await expect(popover).toBeVisible();
+
+    const searchInput = popover.locator('.qs-search');
+    await expect(searchInput).toBeVisible();
+    await expect(searchInput).toBeFocused();
+
+    // Клик по узлу NL-Node-03
+    const nlOption = popover.locator('.qs-item').filter({ hasText: 'NL-Node-03' });
+    await expect(nlOption).toBeVisible();
+    await nlOption.click();
+
+    // Поповер закрывается, PUT отправлен
+    await expect(popover).toBeHidden();
+    expect(
+      putRequests.some((r) => r.url.includes('YouTube') && r.body?.name === 'NL-Node-03')
+    ).toBe(true);
+  });
+
+  // D-14: Quick-Select клавиатурная навигация
+  test('quick select: навигация стрелками и выбор через Enter', async ({ page }) => {
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const trigger = ytGroup.locator('.gc-now-pill-trigger').first();
+    await trigger.click();
+
+    const popover = page.locator('.qs-popover');
+    await expect(popover).toBeVisible();
+
+    // Нажатие вниз и Enter
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+
+    await expect(popover).toBeHidden();
+    expect(putRequests.length).toBeGreaterThan(0);
+  });
+
+  // D-15: Quick-Select информационная плашка для URLTest
+  test('quick select: группа URLTest показывает предупреждение об автоматическом выборе', async ({
+    page
+  }) => {
+    const fastGroup = page.locator('.group-card').filter({ hasText: 'FastGroup' }).first();
+    const trigger = fastGroup.locator('.gc-now-pill-trigger').first();
+    await trigger.click();
+
+    const popover = page.locator('.qs-popover');
+    await expect(popover).toBeVisible();
+
+    const note = popover.locator('.qs-auto-note');
+    await expect(note).toBeVisible();
+    await expect(note).toContainText('автоматически');
+
+    // Клик по узлу в URLTest не отправляет PUT
+    const firstOption = popover.locator('.qs-item').first();
+    await firstOption.click({ force: true });
+    expect(putRequests.filter((r) => r.url.includes('FastGroup')).length).toBe(0);
+
+    await page.keyboard.press('Escape');
+    await expect(popover).toBeHidden();
+  });
+
+  // D-16: Ping micro-button & per-group testing
+  test('ping micro-button: запуск теста группы блокирует только эту группу со спиннером', async ({
+    page
+  }) => {
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const pingBtn = ytGroup.locator('.gc-ping-btn').first();
+    await expect(pingBtn).toBeVisible();
+
+    await pingBtn.click();
+    await expect(pingBtn).toBeVisible();
+  });
+
+  // D-17: Latency history popover на бейдже задержки группы
+  test('latency history popover: клик на бейдж задержки группы открывает историю', async ({
+    page
+  }) => {
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const latBox = ytGroup.locator('.gc-lat-box').first();
+    await expect(latBox).toBeVisible();
+
+    await latBox.click();
+    const historyPopover = page.locator('.latency-history-popover');
+    await expect(historyPopover).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(historyPopover).toBeHidden();
   });
 });

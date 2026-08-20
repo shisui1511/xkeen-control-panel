@@ -21,7 +21,12 @@
   } from './lib/batchLatencyTester';
   import { getTargetUrl, getCurrentPingConfig } from './lib/pingTargetStore';
   import type { PollerControls } from './lib/poller';
-  import { splitGroupsByRole, classifyGroupRole, type GroupRole } from './lib/proxyClassification';
+  import {
+    splitGroupsByRole,
+    classifyGroupRole,
+    classifyLatency,
+    type GroupRole
+  } from './lib/proxyClassification';
   import { readPinnedCoreGroups, togglePinnedCoreGroup } from './lib/proxyViewPrefs';
   import {
     getLastDelay,
@@ -35,6 +40,9 @@
   import Pin from './lib/components/icons/Pin.svelte';
   import ObservatoryPanel from './components/proxies/ObservatoryPanel.svelte';
   import HealthBar from './components/proxies/HealthBar.svelte';
+  import QuickSelectPopover, {
+    type QuickSelectNode
+  } from './components/proxies/QuickSelectPopover.svelte';
 
   // Subcomponents for providers (subscriptions)
   import SubscriptionList from './components/subscriptions/SubscriptionList.svelte';
@@ -80,14 +88,6 @@
     icon?: string;
   }
 
-  interface ObservatoryStats {
-    totalProxies: number;
-    healthyProxies: number;
-    degradedProxies: number;
-    downProxies: number;
-    avgLatency: number;
-  }
-
   interface Subscription {
     id: string;
     name: string;
@@ -98,6 +98,13 @@
     use_provider_interval: boolean;
     enable_xray: boolean;
     enable_mihomo: boolean;
+    mihomo_integrated: boolean;
+    hwid_locked: boolean;
+    last_update: string;
+    last_error?: string;
+    proxy_count?: number;
+    upload?: number;
+    download?: number;
     total?: number;
     expire?: number;
     support_url?: string;
@@ -153,7 +160,7 @@
   let loading = $state(false);
   let error = $state('');
   let loadTimedOut = $state(false);
-  let testingLatency = $state(false);
+  let testingGroupName = $state<string | null>(null);
   let testingProxy = $state('');
   let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let collapsedGroups = $state(new Set<string>());
@@ -167,6 +174,9 @@
 
   // Interactive observatory filter (D-08)
   let observatoryFilter = $state<ObservatoryFilter>(null);
+
+  // Quick-Select popover state (D-13)
+  let quickSelect = $state<{ groupName: string; anchor: HTMLElement } | null>(null);
 
   // Batch testing & latency history state
   let poller = $state<PollerControls | null>(null);
@@ -497,6 +507,10 @@
         body: JSON.stringify({ name: proxyName })
       });
       if (!res.ok) throw new Error($t('proxies.select_error'));
+      showToast(
+        'success',
+        $t('proxies.quick_select_success', { group: groupName, node: proxyName })
+      );
       await fetchProxies();
     } catch (e: any) {
       groups[groupIndex] = {
@@ -506,6 +520,40 @@
       if (e?.status === 401) return;
       showToast('error', $t('proxies.select_error'));
     }
+  }
+
+  function openQuickSelect(anchor: HTMLElement, groupName: string) {
+    if (quickSelect?.groupName === groupName) {
+      quickSelect = null;
+    } else {
+      quickSelect = { groupName, anchor };
+    }
+  }
+
+  async function handleQuickSelect(nodeName: string) {
+    if (!quickSelect) return;
+    const groupName = quickSelect.groupName;
+    const grp = groups.find((g) => g.name === groupName);
+    quickSelect = null;
+    if (!grp || grp.type.toLowerCase() !== 'selector') return;
+    await selectProxy(groupName, nodeName);
+  }
+
+  function buildQuickSelectNodes(group: ProxyGroup): QuickSelectNode[] {
+    return group.all.map((name) => {
+      const delay = getProxyDelay(name);
+      const eff = getEffectiveProxy(name);
+      const alive = eff ? isProxyAlive(eff) : proxies[name] ? isProxyAlive(proxies[name]) : true;
+      const bucket = classifyLatency(delay, alive);
+      return {
+        name,
+        isGroup: !!groups.find((g) => g.name === name),
+        bucket,
+        delay,
+        latencyText: getLatencyText(name),
+        latencyClass: getLatencyClass(name)
+      };
+    });
   }
 
   function isLatencyStale(proxyName: string): boolean {
@@ -523,18 +571,32 @@
     if (!hist || hist.length === 0) return null;
     const lastItem = hist[hist.length - 1];
     if (!lastItem?.time) return null;
-    const timestamp = new Date(lastItem.time).getTime();
-    return isNaN(timestamp) ? null : timestamp;
+    const t = new Date(lastItem.time).getTime();
+    return isNaN(t) ? null : t;
   }
 
   function getLatencyTitle(proxyName: string): string {
-    if (isLatencyStale(proxyName)) {
-      const tMs = getProxyLastTime(proxyName);
-      if (tMs) {
-        return $t('proxies.stale_tooltip', { timeAgo: formatTimeAgo(tMs, $t) });
-      }
+    const eff = getEffectiveProxy(proxyName);
+    const proxy = eff || proxies[proxyName];
+    const delay = getProxyDelay(proxyName);
+    const parts: string[] = [];
+
+    if (delay !== undefined) {
+      parts.push(delay === 0 ? $t('proxies.timeout') : `${delay} ms`);
+    } else {
+      parts.push($t('proxies.not_tested'));
     }
-    return '';
+
+    const lastTime = getProxyLastTime(proxyName);
+    if (lastTime) {
+      parts.push(formatTimeAgo(lastTime, $t));
+    }
+
+    if (proxy && (proxy.all?.length ?? 0) > 0) {
+      parts.push(`${proxy.all?.length} ${$tp('proxies.nodes', proxy.all?.length ?? 0)}`);
+    }
+
+    return parts.join(' · ');
   }
 
   function handleBadgeMouseEnter(e: MouseEvent, proxyName: string) {
@@ -549,7 +611,7 @@
           el: target
         };
       }
-    }, 200);
+    }, 400);
   }
 
   function handleBadgeMouseLeave() {
@@ -559,7 +621,7 @@
     }
   }
 
-  function handleBadgeClick(e: MouseEvent, proxyName: string) {
+  function handleBadgeClick(e: MouseEvent | KeyboardEvent, proxyName: string) {
     e.stopPropagation();
     if (popoverHoverTimeout) {
       clearTimeout(popoverHoverTimeout);
@@ -579,8 +641,8 @@
   }
 
   async function testGroupLatency(group: ProxyGroup) {
-    if (batchTester.isActive()) return;
-    testingLatency = true;
+    if (batchTester.isActive() || testingGroupName) return;
+    testingGroupName = group.name;
     poller?.pause();
     const pingConfig = getCurrentPingConfig();
     const targetUrl = getTargetUrl(pingConfig);
@@ -634,7 +696,7 @@
         timeoutMs,
         onProgressChange: (state) => {
           batchProgress = state;
-          testingLatency = state.running;
+          testingGroupName = state.running ? group.name : null;
         },
         onNodeComplete: (node, delay, rawHistoryItem) => {
           if (proxies[node]) {
@@ -656,7 +718,7 @@
         showToast('error', err?.message || 'Error testing group');
       }
     } finally {
-      testingLatency = false;
+      testingGroupName = null;
       batchProgress = null;
       poller?.resume();
     }
@@ -1858,7 +1920,62 @@
                   {:else if group.now}
                     {@const latencyClass = getLatencyClass(group.now)}
                     {@const latencyText = getLatencyText(group.now)}
-                    <div class="gc-lat-box {latencyClass}">{latencyText}</div>
+                    <button
+                      type="button"
+                      class="gc-lat-box {latencyClass}"
+                      data-stop-head-click
+                      title={getLatencyTitle(group.now)}
+                      onmouseenter={(e) => handleBadgeMouseEnter(e, group.now)}
+                      onmouseleave={handleBadgeMouseLeave}
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        handleBadgeClick(e, group.now);
+                      }}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleBadgeClick(e, group.now);
+                        }
+                      }}
+                    >
+                      {latencyText}
+                    </button>
+                    <button
+                      type="button"
+                      class="gc-ping-btn"
+                      data-stop-head-click
+                      title={testingGroupName && testingGroupName !== group.name
+                        ? $t('proxies.test_group_busy')
+                        : $t('proxies.test_group')}
+                      aria-label={$t('proxies.test_group')}
+                      disabled={testingGroupName === group.name || batchProgress?.running}
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        testGroupLatency(group);
+                      }}
+                    >
+                      {#if testingGroupName === group.name}
+                        <span
+                          class="spinner"
+                          style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
+                        ></span>
+                      {:else}
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                        >
+                          <polygon
+                            points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+                            fill="currentColor"
+                          />
+                        </svg>
+                      {/if}
+                    </button>
                   {/if}
 
                   {#if !isMini}
@@ -1902,43 +2019,55 @@
                     {@const itemFlag = !item.isGroup ? getCountryFlag(item.name) : null}
                     {@const itemLatencyText = getLatencyText(item.name)}
                     {@const itemLatencyClass = getLatencyClass(item.name)}
-                    <div
-                      class="gc-now-pill"
-                      class:is-leaf={!item.isGroup}
-                      class:lat-ok={itemLatencyClass === 'lat ok'}
-                      class:lat-mid={itemLatencyClass === 'lat mid'}
-                      class:lat-bad={itemLatencyClass === 'lat bad'}
-                      class:gc-now-pill-link={item.isGroup}
-                      role={item.isGroup ? 'button' : undefined}
-                      tabindex={item.isGroup ? 0 : undefined}
-                      title={item.isGroup ? $t('proxies.goto_parent_group') : undefined}
-                      data-stop-head-click={item.isGroup ? '' : undefined}
-                      onclick={item.isGroup
-                        ? (e: MouseEvent) => {
-                            e.stopPropagation();
-                            focusGroupCard(item.name);
-                          }
-                        : undefined}
-                      onkeydown={item.isGroup
-                        ? (e: KeyboardEvent) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              focusGroupCard(item.name);
-                            }
-                          }
-                        : undefined}
-                    >
-                      <div
-                        class="gc-now-dot"
-                        class:is-leaf={!item.isGroup}
+                    {#if item.isGroup}
+                      <button
+                        type="button"
+                        class="gc-now-pill gc-now-pill-link"
                         class:lat-ok={itemLatencyClass === 'lat ok'}
                         class:lat-mid={itemLatencyClass === 'lat mid'}
                         class:lat-bad={itemLatencyClass === 'lat bad'}
-                      ></div>
-                      {#if itemFlag}{itemFlag}
-                      {/if}{item.name}
-                    </div>
+                        title={$t('proxies.goto_parent_group')}
+                        data-stop-head-click
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          focusGroupCard(item.name);
+                        }}
+                      >
+                        <div
+                          class="gc-now-dot"
+                          class:lat-ok={itemLatencyClass === 'lat ok'}
+                          class:lat-mid={itemLatencyClass === 'lat mid'}
+                          class:lat-bad={itemLatencyClass === 'lat bad'}
+                        ></div>
+                        {#if itemFlag}{itemFlag}
+                        {/if}{item.name}
+                      </button>
+                    {:else}
+                      <button
+                        type="button"
+                        class="gc-now-pill is-leaf gc-now-pill-trigger"
+                        class:lat-ok={itemLatencyClass === 'lat ok'}
+                        class:lat-mid={itemLatencyClass === 'lat mid'}
+                        class:lat-bad={itemLatencyClass === 'lat bad'}
+                        data-stop-head-click
+                        aria-haspopup="listbox"
+                        aria-expanded={quickSelect?.groupName === group.name}
+                        title={$t('proxies.quick_select_title')}
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          openQuickSelect(e.currentTarget as HTMLElement, group.name);
+                        }}
+                      >
+                        <div
+                          class="gc-now-dot is-leaf"
+                          class:lat-ok={itemLatencyClass === 'lat ok'}
+                          class:lat-mid={itemLatencyClass === 'lat mid'}
+                          class:lat-bad={itemLatencyClass === 'lat bad'}
+                        ></div>
+                        {#if itemFlag}{itemFlag}
+                        {/if}{item.name}
+                      </button>
+                    {/if}
                   {/snippet}
 
                   {#if displayChain.truncated}
@@ -2006,7 +2135,7 @@
                     type="button"
                     class="filter-chip group-test-btn"
                     onclick={() => testGroupLatency(group)}
-                    disabled={testingLatency || batchProgress?.running}
+                    disabled={testingGroupName === group.name || batchProgress?.running}
                     title={$t('proxies.test_group')}
                   >
                     <svg
@@ -2301,6 +2430,21 @@
   />
 {/if}
 
+{#if quickSelect}
+  {@const selectedGrp = groups.find((g) => g.name === quickSelect?.groupName)}
+  {#if selectedGrp}
+    <QuickSelectPopover
+      groupName={selectedGrp.name}
+      groupType={selectedGrp.type}
+      nodes={buildQuickSelectNodes(selectedGrp)}
+      currentNode={selectedGrp.now}
+      anchorEl={quickSelect.anchor}
+      onSelect={handleQuickSelect}
+      onClose={() => (quickSelect = null)}
+    />
+  {/if}
+{/if}
+
 <style>
   /* Tabs styles */
   .tabs-container {
@@ -2567,6 +2711,15 @@
     font-family: var(--font-family-mono);
     font-size: 11px;
     font-weight: 800;
+    background: none;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+  }
+  .gc-lat-box:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
   .gc-lat-box.lat.ok {
     color: var(--success);
@@ -2587,6 +2740,30 @@
     color: var(--fg-dim);
     background: rgba(92, 116, 145, 0.15);
     border: 1px solid rgba(92, 116, 145, 0.35);
+  }
+  .gc-ping-btn {
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    cursor: pointer;
+    color: var(--fg-faint);
+    border-radius: var(--radius-sm, 4px);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+  }
+  .gc-ping-btn:hover:not(:disabled) {
+    color: var(--accent);
+    background: var(--hover, rgba(255, 255, 255, 0.08));
+  }
+  .gc-ping-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .gc-ping-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
   .gc-count-text {
     color: var(--fg-dim);
@@ -2614,6 +2791,8 @@
     font-size: 11px;
     font-weight: 600;
     transition: all 0.2s;
+    text-align: left;
+    font-family: inherit;
   }
   .gc-now-pill.is-leaf {
     background: rgba(41, 194, 240, 0.08);
@@ -2657,6 +2836,16 @@
     cursor: pointer;
   }
   .gc-now-pill-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .gc-now-pill-trigger {
+    cursor: pointer;
+  }
+  .gc-now-pill-trigger:hover {
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .gc-now-pill-trigger:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
   }

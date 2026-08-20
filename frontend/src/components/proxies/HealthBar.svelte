@@ -118,12 +118,11 @@
   });
 </script>
 
-<div
+<button
+  type="button"
   bind:this={barEl}
   class="health-bar"
   class:compact
-  role="group"
-  tabindex="0"
   aria-label={ariaSummary}
   onmouseenter={showTooltip}
   onmouseleave={hideTooltip}
@@ -145,7 +144,7 @@
   {#if stats.systemPct > 0}
     <div class="health-segment system" style="width: {stats.systemPct}%;"></div>
   {/if}
-</div>
+</button>
 
 {#if isHovered && rows.length > 0}
   <div
@@ -166,14 +165,19 @@
 
 <style>
   .health-bar {
+    display: flex;
+    width: calc(100% - 36px);
     margin: 6px 18px 10px;
     border-radius: var(--radius-sm, 4px);
     height: 4px;
-    display: flex;
     overflow: hidden;
     background: var(--bg-secondary, rgba(255, 255, 255, 0.05));
     cursor: pointer;
     transition: height 0.15s ease;
+    border: none;
+    padding: 0;
+    font: inherit;
+    box-sizing: border-box;
   }
 
   .health-bar:hover,
