@@ -1901,6 +1901,33 @@
           </button>
         </div>
       </div>
+    {:else}
+      <div class="embedded-head-toolbar">
+        <div class="embedded-title-tag">
+          <strong>{$t('xray.presets_h1')}</strong>
+        </div>
+        <div class="ph-actions">
+          <button
+            class="btn btn-secondary btn-compact"
+            onclick={() => (showPreviewPane = !showPreviewPane)}
+            title={$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right: 4px;"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+            {$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
+          </button>
+        </div>
+      </div>
     {/if}
 
     <div class="gen-layout" class:resizing={isResizingPreview}>
@@ -3450,6 +3477,20 @@
     justify-content: space-between;
     align-items: flex-start;
     margin-bottom: var(--spacing-4, 16px);
+  }
+
+  .embedded-head-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-3, 12px);
+    padding-bottom: var(--spacing-2, 8px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .embedded-title-tag {
+    font-size: var(--font-size-sm, 0.8125rem);
+    color: var(--fg);
   }
 
   .ph-actions {

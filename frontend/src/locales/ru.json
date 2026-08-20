@@ -1005,7 +1005,7 @@
   "xray.breadcrumb_presets": "Пресеты Xray",
   "xray.presets_h1": "Визуальные пресеты Xray",
   "xray.presets_sub": "Настройка логирования, DNS, inbounds, outbounds, routing и policy для Xray.",
-  "xray.preset_selective": "Выборочная (Антизапрет)",
+  "xray.preset_selective": "Выборочная",
   "xray.preset_selective_desc": "Проксирование заблокированных доменов и ресурсов из списков",
   "xray.preset_all_proxy": "Полное проксирование",
   "xray.preset_all_proxy_desc": "Направление всех исходящих соединений через выбранный прокси-сервер",

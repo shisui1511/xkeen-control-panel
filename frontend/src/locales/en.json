@@ -1006,7 +1006,7 @@
   "xray.breadcrumb_presets": "Xray Presets",
   "xray.presets_h1": "Xray Visual Presets",
   "xray.presets_sub": "Configure logging, DNS, inbounds, outbounds, routing, and policy for Xray.",
-  "xray.preset_selective": "Selective (Antizapret)",
+  "xray.preset_selective": "Selective",
   "xray.preset_selective_desc": "Route blocked domains and lists via proxy",
   "xray.preset_all_proxy": "All Proxy Routing",
   "xray.preset_all_proxy_desc": "Route all outbound connections through the proxy server",
