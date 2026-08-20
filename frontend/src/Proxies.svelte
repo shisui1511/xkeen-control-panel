@@ -21,6 +21,9 @@
   } from './lib/batchLatencyTester';
   import { getTargetUrl, getCurrentPingConfig } from './lib/pingTargetStore';
   import type { PollerControls } from './lib/poller';
+  import { splitGroupsByRole, type GroupRole } from './lib/proxyClassification';
+  import { readPinnedCoreGroups, togglePinnedCoreGroup } from './lib/proxyViewPrefs';
+  import Pin from './lib/components/icons/Pin.svelte';
 
   // Subcomponents for providers (subscriptions)
   import SubscriptionList from './components/subscriptions/SubscriptionList.svelte';
@@ -154,6 +157,10 @@
   let seenGroups = $state(new Set<string>());
   const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
 
+  // Core-routing segmentation state (D-01, D-04)
+  let pinnedCoreGroups = $state<string[]>(readPinnedCoreGroups());
+  let groupCardEls = $state<Record<string, HTMLElement | null>>({});
+
   // Batch testing & latency history state
   let poller = $state<PollerControls | null>(null);
   const batchTester = new BatchLatencyTester();
@@ -244,6 +251,14 @@
         })
   );
 
+  // Core-routing segmentation (D-01, D-04) — depends on filteredGroups above.
+  let proxyTypeMap = $derived(
+    Object.fromEntries(Object.entries(proxies).map(([k, v]) => [k, v?.type]))
+  );
+  let groupSections = $derived(
+    splitGroupsByRole(filteredGroups, new Set(pinnedCoreGroups), proxyTypeMap)
+  );
+
   function getLastDelay(proxy: Proxy): number | undefined {
     if (proxy.history && proxy.history.length > 0) {
       return proxy.history[proxy.history.length - 1].delay;
@@ -301,6 +316,35 @@
       next.add(groupName);
     }
     collapsedGroups = next;
+  }
+
+  // .gc-head is a non-button div[role="button"] (Pitfall 1 / D-02, D-13): nested
+  // interactive elements (breadcrumb chip, pin button) mark themselves with
+  // data-stop-head-click so the collapse toggle below ignores clicks on them.
+  function handleHeadClick(e: MouseEvent, groupName: string) {
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-stop-head-click]')) return;
+    toggleCollapse(groupName);
+  }
+
+  function handleHeadKeydown(e: KeyboardEvent, groupName: string) {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleCollapse(groupName);
+    }
+  }
+
+  // D-02: scrolls to and briefly highlights the parent group's card in the
+  // Core section when a breadcrumb chip in a service card is clicked.
+  function focusGroupCard(name: string) {
+    const el = groupCardEls[name];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('flash-highlight');
+    safeTimeout(() => {
+      el.classList.remove('flash-highlight');
+    }, 1400);
   }
 
   let groupFilters = $state<Record<string, 'all' | 'working' | 'timeouts' | 'latency'>>({});
@@ -1800,286 +1844,336 @@
           oncta={fetchProxies}
         />
       {:else}
-        <div class="group-grid">
-          {#each filteredGroups as group}
-            {@const isCollapsed = collapsedGroups.has(group.name)}
-            {@const nodes = getFilteredNodes(group, searchDebouncedQuery)}
-            <div class="group-card" class:expanded={!isCollapsed}>
-              <button
-                type="button"
-                class="gc-head collapsible"
-                aria-expanded={!isCollapsed}
-                onclick={() => toggleCollapse(group.name)}
-              >
-                <div class="gc-head-row1">
-                  {#if group.icon}
-                    <span class="group-icon-wrap" aria-hidden="true">
-                      <img
-                        src={group.icon}
-                        alt=""
-                        loading="lazy"
-                        referrerpolicy="no-referrer"
-                        class="brand-icon"
-                        onerror={(e) => {
-                          const target = e.currentTarget as HTMLElement;
-                          if (target) target.style.display = 'none';
-                        }}
-                      />
-                    </span>
-                  {/if}
-                  <span class="name">{group.name}</span>
-                  <span class="type-badge">{group.type.toUpperCase()}</span>
-
-                  {#if group.now}
-                    {@const latencyClass = getLatencyClass(group.now)}
-                    {@const latencyText = getLatencyText(group.now)}
-                    <div class="gc-lat-box {latencyClass}">{latencyText}</div>
-                  {/if}
-
-                  <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
-                    <ChevronDown
-                      size={14}
-                      color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
+        {#snippet groupCard(group: ProxyGroup, role: GroupRole)}
+          {@const isCollapsed = collapsedGroups.has(group.name)}
+          {@const nodes = getFilteredNodes(group, searchDebouncedQuery)}
+          <div
+            class="group-card"
+            class:expanded={!isCollapsed}
+            data-group={group.name}
+            data-role={role}
+            bind:this={groupCardEls[group.name]}
+          >
+            <div
+              class="gc-head collapsible"
+              role="button"
+              tabindex="0"
+              aria-expanded={!isCollapsed}
+              onclick={(e) => handleHeadClick(e, group.name)}
+              onkeydown={(e) => handleHeadKeydown(e, group.name)}
+            >
+              <div class="gc-head-row1">
+                {#if group.icon}
+                  <span class="group-icon-wrap" aria-hidden="true">
+                    <img
+                      src={group.icon}
+                      alt=""
+                      loading="lazy"
+                      referrerpolicy="no-referrer"
+                      class="brand-icon"
+                      onerror={(e) => {
+                        const target = e.currentTarget as HTMLElement;
+                        if (target) target.style.display = 'none';
+                      }}
                     />
                   </span>
-                </div>
+                {/if}
+                <span class="name">{group.name}</span>
+                <span class="type-badge">{group.type.toUpperCase()}</span>
 
-                <div class="gc-head-row2">
-                  <span class="gc-count-text"
-                    >{group.all.length}
-                    {$t('proxies.nodes_label')}</span
+                {#if group.now}
+                  {@const latencyClass = getLatencyClass(group.now)}
+                  {@const latencyText = getLatencyText(group.now)}
+                  <div class="gc-lat-box {latencyClass}">{latencyText}</div>
+                {/if}
+
+                <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
+                  <ChevronDown size={14} color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'} />
+                </span>
+              </div>
+
+              <div class="gc-head-row2">
+                <span class="gc-count-text"
+                  >{group.all.length}
+                  {$t('proxies.nodes_label')}</span
+                >
+                <span class="gc-separator">·</span>
+                <span class="gc-active-label">{$t('proxies.active')}:</span>
+
+                {#each getSelectionChain(group.name) as item, index}
+                  {@const itemFlag = !item.isGroup ? getCountryFlag(item.name) : null}
+                  {@const itemLatencyText = getLatencyText(item.name)}
+                  {@const itemLatencyClass = getLatencyClass(item.name)}
+                  {#if index > 0}
+                    <span class="gc-arrow">›</span>
+                  {/if}
+                  <div
+                    class="gc-now-pill"
+                    class:is-leaf={!item.isGroup}
+                    class:lat-ok={itemLatencyClass === 'lat ok'}
+                    class:lat-mid={itemLatencyClass === 'lat mid'}
+                    class:lat-bad={itemLatencyClass === 'lat bad'}
+                    class:gc-now-pill-link={item.isGroup}
+                    role="button"
+                    tabindex={item.isGroup ? 0 : -1}
+                    aria-disabled={!item.isGroup}
+                    title={item.isGroup ? $t('proxies.goto_parent_group') : undefined}
+                    data-stop-head-click={item.isGroup ? '' : undefined}
+                    onclick={item.isGroup
+                      ? (e: MouseEvent) => {
+                          e.stopPropagation();
+                          focusGroupCard(item.name);
+                        }
+                      : undefined}
+                    onkeydown={item.isGroup
+                      ? (e: KeyboardEvent) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            focusGroupCard(item.name);
+                          }
+                        }
+                      : undefined}
                   >
-                  <span class="gc-separator">·</span>
-                  <span class="gc-active-label">{$t('proxies.active')}:</span>
-
-                  {#each getSelectionChain(group.name) as item, index}
-                    {@const itemFlag = !item.isGroup ? getCountryFlag(item.name) : null}
-                    {@const itemLatencyText = getLatencyText(item.name)}
-                    {@const itemLatencyClass = getLatencyClass(item.name)}
-                    {#if index > 0}
-                      <span class="gc-arrow">›</span>
-                    {/if}
                     <div
-                      class="gc-now-pill"
+                      class="gc-now-dot"
                       class:is-leaf={!item.isGroup}
                       class:lat-ok={itemLatencyClass === 'lat ok'}
                       class:lat-mid={itemLatencyClass === 'lat mid'}
                       class:lat-bad={itemLatencyClass === 'lat bad'}
-                    >
-                      <div
-                        class="gc-now-dot"
-                        class:is-leaf={!item.isGroup}
-                        class:lat-ok={itemLatencyClass === 'lat ok'}
-                        class:lat-mid={itemLatencyClass === 'lat mid'}
-                        class:lat-bad={itemLatencyClass === 'lat bad'}
-                      ></div>
-                      {#if itemFlag}{itemFlag}
-                      {/if}{item.name}
-                    </div>
-                  {:else}
-                    <span style="color:var(--fg-dim)">—</span>
-                  {/each}
-                </div>
-              </button>
+                    ></div>
+                    {#if itemFlag}{itemFlag}
+                    {/if}{item.name}
+                  </div>
+                {:else}
+                  <span style="color:var(--fg-dim)">—</span>
+                {/each}
+              </div>
+            </div>
 
-              {#if isCollapsed}
-                {@const hStats = getGroupHealthStats(nodes)}
-                <div
-                  class="health-bar"
-                  title={hStats.tooltip}
-                  aria-label={hStats.tooltip}
-                  role="img"
+            {#if isCollapsed}
+              {@const hStats = getGroupHealthStats(nodes)}
+              <div class="health-bar" title={hStats.tooltip} aria-label={hStats.tooltip} role="img">
+                {#if hStats.fast > 0}
+                  <div
+                    class="health-segment fast"
+                    style="width: {hStats.fastPct}%;"
+                    title="{$t('proxies.health_fast')}: {hStats.fast}"
+                  ></div>
+                {/if}
+                {#if hStats.mid > 0}
+                  <div
+                    class="health-segment mid"
+                    style="width: {hStats.midPct}%;"
+                    title="{$t('proxies.health_mid')}: {hStats.mid}"
+                  ></div>
+                {/if}
+                {#if hStats.bad > 0}
+                  <div
+                    class="health-segment bad"
+                    style="width: {hStats.badPct}%;"
+                    title="{$t('proxies.health_bad')}: {hStats.bad}"
+                  ></div>
+                {/if}
+                {#if hStats.unchecked > 0}
+                  <div
+                    class="health-segment unchecked"
+                    style="width: {hStats.uncheckedPct}%;"
+                    title="{$t('proxies.health_unchecked')}: {hStats.unchecked}"
+                  ></div>
+                {/if}
+              </div>
+            {:else}
+              <div class="group-filters">
+                <button
+                  type="button"
+                  class="filter-chip"
+                  class:active={(groupFilters[group.name] || 'all') === 'all'}
+                  onclick={() => (groupFilters[group.name] = 'all')}
                 >
-                  {#if hStats.fast > 0}
-                    <div
-                      class="health-segment fast"
-                      style="width: {hStats.fastPct}%;"
-                      title="{$t('proxies.health_fast')}: {hStats.fast}"
-                    ></div>
-                  {/if}
-                  {#if hStats.mid > 0}
-                    <div
-                      class="health-segment mid"
-                      style="width: {hStats.midPct}%;"
-                      title="{$t('proxies.health_mid')}: {hStats.mid}"
-                    ></div>
-                  {/if}
-                  {#if hStats.bad > 0}
-                    <div
-                      class="health-segment bad"
-                      style="width: {hStats.badPct}%;"
-                      title="{$t('proxies.health_bad')}: {hStats.bad}"
-                    ></div>
-                  {/if}
-                  {#if hStats.unchecked > 0}
-                    <div
-                      class="health-segment unchecked"
-                      style="width: {hStats.uncheckedPct}%;"
-                      title="{$t('proxies.health_unchecked')}: {hStats.unchecked}"
-                    ></div>
-                  {/if}
-                </div>
-              {:else}
-                <div class="group-filters">
-                  <button
-                    type="button"
-                    class="filter-chip"
-                    class:active={(groupFilters[group.name] || 'all') === 'all'}
-                    onclick={() => (groupFilters[group.name] = 'all')}
-                  >
-                    {$t('proxies.filter_all')}
-                    <span class="filter-count">{nodes.length}</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="filter-chip"
-                    class:active={groupFilters[group.name] === 'working'}
-                    onclick={() => (groupFilters[group.name] = 'working')}
-                  >
-                    {$t('proxies.filter_working')}
-                  </button>
-                  <button
-                    type="button"
-                    class="filter-chip"
-                    class:active={groupFilters[group.name] === 'timeouts'}
-                    onclick={() => (groupFilters[group.name] = 'timeouts')}
-                  >
-                    {$t('proxies.filter_timeouts')}
-                  </button>
-                  <button
-                    type="button"
-                    class="filter-chip"
-                    class:active={groupFilters[group.name] === 'latency'}
-                    onclick={() => (groupFilters[group.name] = 'latency')}
-                  >
-                    {$t('proxies.filter_by_latency')}
-                  </button>
+                  {$t('proxies.filter_all')}
+                  <span class="filter-count">{nodes.length}</span>
+                </button>
+                <button
+                  type="button"
+                  class="filter-chip"
+                  class:active={groupFilters[group.name] === 'working'}
+                  onclick={() => (groupFilters[group.name] = 'working')}
+                >
+                  {$t('proxies.filter_working')}
+                </button>
+                <button
+                  type="button"
+                  class="filter-chip"
+                  class:active={groupFilters[group.name] === 'timeouts'}
+                  onclick={() => (groupFilters[group.name] = 'timeouts')}
+                >
+                  {$t('proxies.filter_timeouts')}
+                </button>
+                <button
+                  type="button"
+                  class="filter-chip"
+                  class:active={groupFilters[group.name] === 'latency'}
+                  onclick={() => (groupFilters[group.name] = 'latency')}
+                >
+                  {$t('proxies.filter_by_latency')}
+                </button>
 
-                  <div class="group-actions-spacer"></div>
+                <div class="group-actions-spacer"></div>
 
-                  <button
-                    type="button"
-                    class="filter-chip group-test-btn"
-                    onclick={() => testGroupLatency(group)}
-                    disabled={testingLatency || batchProgress?.running}
-                    title={$t('proxies.test_group')}
+                <button
+                  type="button"
+                  class="filter-chip group-test-btn"
+                  onclick={() => testGroupLatency(group)}
+                  disabled={testingLatency || batchProgress?.running}
+                  title={$t('proxies.test_group')}
+                >
+                  <svg
+                    width="11"
+                    height="11"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    style="margin-right: 4px;"
                   >
-                    <svg
-                      width="11"
-                      height="11"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      style="margin-right: 4px;"
+                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                  </svg>
+                  {$t('proxies.test_group')}
+                </button>
+              </div>
+
+              {@const filteredNodesList = getFilteredGroupNodes(group.name, nodes)}
+              <div class="proxy-grid">
+                {#each filteredNodesList as proxyName}
+                  {@const isActive = group.now === proxyName}
+                  {@const healthClass = getLatencyClass(proxyName)}
+                  {@const healthText = getLatencyText(proxyName)}
+                  {@const proxy = proxies[proxyName]}
+                  {@const flag = getCountryFlag(proxyName)}
+
+                  <div class="proxy-card" class:now={isActive}>
+                    <div
+                      class="proxy-select-btn"
+                      role="button"
+                      tabindex={group.type === 'Selector' ? 0 : -1}
+                      aria-disabled={group.type !== 'Selector'}
+                      title={group.type !== 'Selector'
+                        ? $t('proxies.managed_automatically')
+                        : undefined}
+                      onclick={() =>
+                        group.type === 'Selector' && selectProxy(group.name, proxyName)}
+                      onkeydown={(e) => {
+                        if (group.type === 'Selector' && (e.key === 'Enter' || e.key === ' ')) {
+                          e.preventDefault();
+                          selectProxy(group.name, proxyName);
+                        }
+                      }}
                     >
-                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                    </svg>
-                    {$t('proxies.test_group')}
-                  </button>
-                </div>
-
-                {@const filteredNodesList = getFilteredGroupNodes(group.name, nodes)}
-                <div class="proxy-grid">
-                  {#each filteredNodesList as proxyName}
-                    {@const isActive = group.now === proxyName}
-                    {@const healthClass = getLatencyClass(proxyName)}
-                    {@const healthText = getLatencyText(proxyName)}
-                    {@const proxy = proxies[proxyName]}
-                    {@const flag = getCountryFlag(proxyName)}
-
-                    <div class="proxy-card" class:now={isActive}>
-                      <div
-                        class="proxy-select-btn"
-                        role="button"
-                        tabindex={group.type === 'Selector' ? 0 : -1}
-                        aria-disabled={group.type !== 'Selector'}
-                        title={group.type !== 'Selector'
-                          ? $t('proxies.managed_automatically')
-                          : undefined}
-                        onclick={() =>
-                          group.type === 'Selector' && selectProxy(group.name, proxyName)}
-                        onkeydown={(e) => {
-                          if (group.type === 'Selector' && (e.key === 'Enter' || e.key === ' ')) {
-                            e.preventDefault();
-                            selectProxy(group.name, proxyName);
-                          }
-                        }}
-                      >
-                        <div class="p-header">
-                          <span class="p-name">
-                            {#if flag}{flag}
-                            {/if}{proxyName}
-                          </span>
-                          <span class="p-type">{getProxyTypeLabel(proxy)}</span>
-                        </div>
+                      <div class="p-header">
+                        <span class="p-name">
+                          {#if flag}{flag}
+                          {/if}{proxyName}
+                        </span>
+                        <span class="p-type">{getProxyTypeLabel(proxy)}</span>
                       </div>
+                    </div>
 
-                      <div class="p-footer">
-                        {#if (batchProgress?.running && batchProgress?.currentNode === proxyName) || testingProxy === proxyName}
-                          <span class="lat dim">
-                            <span class="lat-spinner"></span>
-                          </span>
-                        {:else}
+                    <div class="p-footer">
+                      {#if (batchProgress?.running && batchProgress?.currentNode === proxyName) || testingProxy === proxyName}
+                        <span class="lat dim">
+                          <span class="lat-spinner"></span>
+                        </span>
+                      {:else}
+                        <button
+                          type="button"
+                          class="lat {healthClass}"
+                          title={getLatencyTitle(proxyName)}
+                          onmouseenter={(e) => handleBadgeMouseEnter(e, proxyName)}
+                          onmouseleave={handleBadgeMouseLeave}
+                          onclick={(e) => handleBadgeClick(e, proxyName)}
+                          onkeydown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              handleBadgeClick(e as any, proxyName);
+                            }
+                          }}
+                        >
+                          {healthText}
+                        </button>
+                      {/if}
+
+                      <div class="p-actions-wrap">
+                        {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
                           <button
                             type="button"
-                            class="lat {healthClass}"
-                            title={getLatencyTitle(proxyName)}
-                            onmouseenter={(e) => handleBadgeMouseEnter(e, proxyName)}
-                            onmouseleave={handleBadgeMouseLeave}
-                            onclick={(e) => handleBadgeClick(e, proxyName)}
-                            onkeydown={(e) => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                handleBadgeClick(e as any, proxyName);
-                              }
-                            }}
+                            class="btn-latency-test"
+                            onclick={() => testProxyLatency(proxyName)}
+                            disabled={testingProxy === proxyName}
+                            title={$t('proxies.test_single')}
                           >
-                            {healthText}
+                            {#if testingProxy === proxyName}
+                              <span
+                                class="spinner"
+                                style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
+                              ></span>
+                            {:else}
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                style="opacity: 0.6;"
+                                ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
+                              >
+                            {/if}
                           </button>
                         {/if}
 
-                        <div class="p-actions-wrap">
-                          {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
-                            <button
-                              type="button"
-                              class="btn-latency-test"
-                              onclick={() => testProxyLatency(proxyName)}
-                              disabled={testingProxy === proxyName}
-                              title={$t('proxies.test_single')}
-                            >
-                              {#if testingProxy === proxyName}
-                                <span
-                                  class="spinner"
-                                  style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
-                                ></span>
-                              {:else}
-                                <svg
-                                  width="12"
-                                  height="12"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  stroke-width="2"
-                                  style="opacity: 0.6;"
-                                  ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
-                                >
-                              {/if}
-                            </button>
-                          {/if}
-
-                          {#if group.type === 'Selector'}
-                            <span class="selector-dot" class:active={isActive}
-                              >{isActive ? '●' : '○'}</span
-                            >
-                          {/if}
-                        </div>
+                        {#if group.type === 'Selector'}
+                          <span class="selector-dot" class:active={isActive}
+                            >{isActive ? '●' : '○'}</span
+                          >
+                        {/if}
                       </div>
                     </div>
-                  {/each}
-                </div>
-              {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/snippet}
+
+        <section class="proxy-section proxy-section-core">
+          <h2 class="proxy-section-title">{$t('proxies.section_core')}</h2>
+          <div class="group-grid core-grid">
+            {#each groupSections.core as group (group.name)}
+              {@render groupCard(group, 'core')}
+            {/each}
+          </div>
+        </section>
+
+        {#if groupSections.service.length > 0}
+          <section class="proxy-section proxy-section-service">
+            <h2 class="proxy-section-title">{$t('proxies.section_service')}</h2>
+            <div class="group-grid">
+              {#each groupSections.service as group (group.name)}
+                {@render groupCard(group, 'service')}
+              {/each}
             </div>
-          {/each}
-        </div>
+          </section>
+        {/if}
+
+        {#if groupSections.system.length > 0}
+          <section class="proxy-section proxy-section-system">
+            <h2 class="proxy-section-title">{$t('proxies.section_system')}</h2>
+            <div class="group-grid">
+              {#each groupSections.system as group (group.name)}
+                {@render groupCard(group, 'system')}
+              {/each}
+            </div>
+          </section>
+        {/if}
       {/if}
     {/if}
   {:else if activeTab === 'providers'}
@@ -2253,6 +2347,33 @@
     margin-bottom: 30px;
     align-items: start;
   }
+  .proxy-section {
+    margin-bottom: 8px;
+  }
+  .proxy-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--fg-secondary);
+    margin: 0 0 10px;
+  }
+  .core-grid .group-card {
+    border-left: 3px solid var(--accent);
+  }
+  .core-grid .group-card .gc-head .name {
+    font-size: 17px;
+  }
+  .group-card.flash-highlight {
+    animation: gc-flash 1.4s ease-out;
+  }
+  @keyframes gc-flash {
+    0%,
+    40% {
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+    100% {
+      box-shadow: none;
+    }
+  }
   .group-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -2287,11 +2408,6 @@
     position: relative;
     overflow: hidden;
     width: 100%;
-    border-left: 0;
-    border-right: 0;
-    border-top: 0;
-    font: inherit;
-    color: inherit;
     text-align: left;
   }
   .group-card .gc-head::before {
@@ -2310,6 +2426,10 @@
   }
   .group-card .gc-head.collapsible:hover {
     background: var(--hover);
+  }
+  .group-card .gc-head.collapsible:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
   .gc-head-row1 {
     display: flex;
@@ -2436,6 +2556,22 @@
     background: rgba(239, 91, 107, 0.08);
     border-color: rgba(239, 91, 107, 0.2);
     color: var(--danger);
+  }
+  .gc-now-pill-link {
+    cursor: pointer;
+  }
+  .gc-now-pill-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  @media (max-width: 767px) {
+    .core-grid {
+      grid-template-columns: 1fr;
+    }
+    .core-grid .gc-head {
+      min-height: 44px;
+    }
   }
 
   .proxy-grid {

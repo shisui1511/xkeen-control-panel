@@ -251,8 +251,12 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     // .page-head is a generic class also rendered on Dashboard's own default
     // view (briefly active before the hash-based tab switch completes), so
     // waiting on it as an OR-fallback here raced against that transition and
-    // resolved too early. .group-grid is unique to the Proxies page.
-    await page.waitForSelector('.group-grid', { timeout: 10000 });
+    // resolved too early. .group-card is unique to the Proxies page.
+    // (Phase 90: the page now renders up to three `.group-grid` sections —
+    // Core/Service/System — and the Core section renders even when empty
+    // (D-01), so `.group-grid` alone can resolve to a zero-height, not-yet-
+    // visible element; `.group-card` is unambiguous regardless of section.)
+    await page.waitForSelector('.group-card', { timeout: 10000 });
   });
 
   test('Grid Layout - nodes rendered in 5 columns grid', async ({ page }) => {

@@ -134,6 +134,57 @@ const MOCK_PROXIES_RESPONSE = {
       type: 'Shadowsocks',
       alive: true,
       history: [{ delay: 110, time: '2024-01-01T00:00:00Z' }]
+    },
+    // Core routing (D-01/D-02/D-03/D-04) fixture groups
+    GLOBAL: {
+      name: 'GLOBAL',
+      type: 'Selector',
+      now: 'YouTube',
+      all: ['YouTube', 'QUIC', 'Заблок. сервисы'],
+      alive: true,
+      history: [{ delay: 50, time: '2024-01-01T00:00:00Z' }]
+    },
+    'Заблок. сервисы': {
+      name: 'Заблок. сервисы',
+      type: 'Selector',
+      now: 'sp',
+      all: ['sp', 'sp2'],
+      alive: true,
+      history: [{ delay: 60, time: '2024-01-01T00:00:00Z' }]
+    },
+    YouTube: {
+      name: 'YouTube',
+      type: 'Selector',
+      now: 'Заблок. сервисы',
+      all: ['Заблок. сервисы', 'sp'],
+      alive: true,
+      history: [{ delay: 70, time: '2024-01-01T00:00:00Z' }]
+    },
+    QUIC: {
+      name: 'QUIC',
+      type: 'Selector',
+      now: 'REJECT',
+      all: ['REJECT'],
+      alive: true,
+      history: [{ delay: 0, time: '2024-01-01T00:00:00Z' }]
+    },
+    sp: {
+      name: 'sp',
+      type: 'Shadowsocks',
+      alive: true,
+      history: [{ delay: 80, time: '2024-01-01T00:00:00Z' }]
+    },
+    sp2: {
+      name: 'sp2',
+      type: 'Shadowsocks',
+      alive: true,
+      history: [{ delay: 90, time: '2024-01-01T00:00:00Z' }]
+    },
+    REJECT: {
+      name: 'REJECT',
+      type: 'Reject',
+      alive: true,
+      history: [{ delay: 0, time: '2024-01-01T00:00:00Z' }]
     }
   }
 };
@@ -318,8 +369,10 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
   // D-11/D-12: Поиск по имени группы — фильтрация и скрытие несовпавших
   test('D-11/D-12: поиск по имени группы скрывает несовпадающие группы', async ({ page }) => {
+    // 2 исходные группы (LargeGroup/SmallGroup) + 4 core-routing фикстуры
+    // (GLOBAL, Заблок. сервисы, YouTube, QUIC) добавленные для core routing тестов
     const allCards = page.locator('.group-card');
-    await expect(allCards).toHaveCount(2);
+    await expect(allCards).toHaveCount(6);
 
     const largeCard = page.locator('.group-card').filter({ hasText: 'LargeGroup' }).first();
     const smallCard = page.locator('.group-card').filter({ hasText: 'SmallGroup' }).first();
@@ -339,5 +392,39 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     await searchInput.fill('');
     await expect(largeCard).toBeVisible();
     await expect(smallCard).toBeVisible();
+  });
+
+  // D-01/D-03: группы разделены на секции Core/Service/System
+  test('core routing: группы разделены на секции', async ({ page }) => {
+    await expect(page.locator('.proxy-section-core [data-group="GLOBAL"]')).toBeVisible();
+    await expect(page.locator('.proxy-section-core [data-group="Заблок. сервисы"]')).toBeVisible();
+    await expect(page.locator('.proxy-section-service [data-group="YouTube"]')).toBeVisible();
+    await expect(page.locator('.proxy-section-system [data-group="QUIC"]')).toBeVisible();
+  });
+
+  // Pitfall 1 / D-02: .gc-head — div[role=button], вложенный breadcrumb-чипс
+  // кликабелен и не сворачивает карточку
+  test('core routing: шапка карточки не является кнопкой', async ({ page }) => {
+    const ytCard = page.locator('[data-group="YouTube"]');
+    const gcHead = ytCard.locator('.gc-head').first();
+
+    expect(await gcHead.evaluate((el) => el.tagName)).toBe('DIV');
+
+    const initialExpanded = await gcHead.getAttribute('aria-expanded');
+    await gcHead.click();
+    const afterHeadClick = await gcHead.getAttribute('aria-expanded');
+    expect(afterHeadClick).not.toBe(initialExpanded);
+
+    // Возвращаем в исходное состояние для чистоты следующей проверки
+    await gcHead.click();
+    expect(await gcHead.getAttribute('aria-expanded')).toBe(initialExpanded);
+
+    const breadcrumbChip = ytCard.locator('.gc-now-pill-link').first();
+    const beforeChipClick = await gcHead.getAttribute('aria-expanded');
+    await breadcrumbChip.click();
+    expect(await gcHead.getAttribute('aria-expanded')).toBe(beforeChipClick);
+
+    const blockedCard = page.locator('[data-group="Заблок. сервисы"]');
+    await expect(blockedCard).toHaveClass(/flash-highlight/);
   });
 });
