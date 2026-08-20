@@ -1135,6 +1135,9 @@
                 <ServiceStatusGroup
                   {serviceStatus}
                   capabilities={$capabilities}
+                  xkeenVersion={version !== $t('app.loading') && version !== $t('app.error')
+                    ? version
+                    : ''}
                   {statusLoading}
                   {statusError}
                   onRefresh={fetchLiveStatus}

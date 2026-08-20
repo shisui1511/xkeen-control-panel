@@ -65,6 +65,17 @@
     return '';
   });
 
+  const formattedVersion = $derived.by(() => {
+    if (!version || isNotInstalled) return '';
+    const cleanVer = version.trim();
+    if (!cleanVer || cleanVer === 'unknown') return '';
+    // Bare semver strings ("1.19.30") get a "v" prefix; strings that already
+    // carry a product name/suffix (e.g. "XKeen 2.0.1 Beta") are shown as-is,
+    // otherwise "v" ends up glued onto the product name ("vXKeen 2.0.1 Beta").
+    if (cleanVer.startsWith('v')) return cleanVer;
+    return /^\d/.test(cleanVer) ? `v${cleanVer}` : cleanVer;
+  });
+
   async function handleRestart() {
     if (isBusy || !onRestart) return;
     isRestarting = true;
@@ -103,30 +114,27 @@
 >
   <div class="card-header">
     <div class="header-left">
-      <span class="status-dot {dotColorClass}" aria-hidden="true"></span>
-      <div class="title-group">
-        <div class="name-row">
-          <span class="service-name">{name}</span>
-          {#if isActiveKernel}
-            <span class="badge badge-active" title={$t('svc.active_kernel_label')}>
-              {$t('svc.active_kernel_badge')}
-            </span>
-          {/if}
-          {#if version && !isNotInstalled}
-            <span class="version-badge">{version}</span>
-          {/if}
-        </div>
-        {#if subLabel}
-          <span class="sub-label" title={subLabel}>{subLabel}</span>
+      <div class="name-row">
+        <span class="status-dot {dotColorClass}" aria-hidden="true"></span>
+        <span class="service-name">{name}</span>
+        {#if isActiveKernel}
+          <span class="badge badge-active" title={$t('svc.active_kernel_label')}>
+            {$t('svc.active_kernel_badge')}
+          </span>
         {/if}
       </div>
+      {#if subLabel}
+        <span class="sub-label" title={subLabel}>{subLabel}</span>
+      {/if}
     </div>
 
     <div class="header-right">
       <span class="status-text status-text-{status}">
         {statusText}
       </span>
-      {#if isInsecureLan && onMigrate}
+      {#if formattedVersion}
+        <span class="version-badge" title={formattedVersion}>{formattedVersion}</span>
+      {:else if isInsecureLan && onMigrate}
         <button
           type="button"
           class="badge badge-warning migrate-badge"
@@ -192,13 +200,13 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    min-height: 132px;
+    min-height: 124px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 70%), var(--bg-card, #102a44);
     border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
     border-radius: var(--radius-lg, 12px);
-    padding: 16px;
-    gap: 14px;
+    padding: 14px 16px;
+    gap: 12px;
     box-shadow: var(--shadow, 0 4px 12px rgba(0, 0, 0, 0.2));
     transition:
       border-color 0.2s ease,
@@ -230,16 +238,8 @@
 
   .header-left {
     display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    min-width: 0;
-    flex: 1;
-  }
-
-  .title-group {
-    display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
     min-width: 0;
     flex: 1;
   }
@@ -247,8 +247,8 @@
   .name-row {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
+    min-width: 0;
   }
 
   .service-name {
@@ -256,6 +256,7 @@
     font-weight: 600;
     color: var(--fg-primary, #ffffff);
     letter-spacing: -0.01em;
+    line-height: 1.2;
   }
 
   .sub-label {
@@ -266,12 +267,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
     line-height: 1.3;
+    padding-left: 16px;
   }
 
   .header-right {
     display: flex;
     flex-direction: column;
     align-items: flex-end;
+    justify-content: flex-start;
     gap: 4px;
     flex-shrink: 0;
   }
@@ -279,6 +282,7 @@
   .status-text {
     font-size: 12px;
     font-weight: 600;
+    line-height: 1.2;
   }
 
   .status-text-running {
@@ -299,10 +303,9 @@
   }
 
   .status-dot {
-    width: 9px;
-    height: 9px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    margin-top: 5px;
     flex-shrink: 0;
     transition:
       background-color 0.25s ease,
@@ -342,47 +345,63 @@
   }
 
   .badge-active {
-    background: rgba(41, 194, 240, 0.15);
+    background: rgba(41, 194, 240, 0.12);
     color: var(--accent, #29c2f0);
-    border: 1px solid rgba(41, 194, 240, 0.3);
-    font-size: 10.5px;
-    font-weight: 600;
+    border: 1px solid rgba(41, 194, 240, 0.25);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
     padding: 1px 6px;
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm, 4px);
+    text-transform: uppercase;
   }
 
   .version-badge {
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--fg-secondary, #8fa3b8);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--fg-muted, var(--fg-secondary, #8fa3b8));
     border: 1px solid rgba(255, 255, 255, 0.08);
-    font-size: 11px;
+    font-size: 10.5px;
     font-family: var(--font-family-mono, monospace);
-    padding: 1px 5px;
-    border-radius: var(--radius-sm, 6px);
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm, 4px);
+    letter-spacing: -0.01em;
   }
 
   .migrate-badge {
     cursor: pointer;
     border: none;
-    font-size: 11px;
-    padding: 2px 6px;
+    font-size: 10.5px;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm, 4px);
   }
 
   .card-actions {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
     padding-top: 10px;
     border-top: 1px solid rgba(255, 255, 255, 0.05);
-    min-height: 42px;
+    margin-top: auto;
   }
 
   .btn-group {
-    display: flex;
-    align-items: center;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 8px;
     width: 100%;
-    justify-content: flex-end;
+  }
+
+  .btn-group :global(.btn) {
+    width: 100%;
+    padding: 7px 8px;
+    font-size: 12.5px;
+    white-space: nowrap;
+    justify-content: center;
+  }
+
+  .btn-group :global(.btn span) {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .install-link {
@@ -391,6 +410,24 @@
     text-align: center;
     display: inline-flex;
     align-items: center;
-    height: 32px;
+    padding: 7px 12px;
+    font-size: 12.5px;
+    height: 33px;
+    border-radius: var(--radius-md);
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--fg-primary);
+    text-decoration: none;
+    font-weight: 600;
+    transition:
+      background-color var(--transition-fast),
+      border-color var(--transition-fast),
+      color var(--transition-fast);
+  }
+
+  .install-link:hover {
+    border-color: var(--accent-line);
+    color: var(--accent);
+    background: var(--hover);
   }
 </style>

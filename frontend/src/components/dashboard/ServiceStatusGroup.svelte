@@ -11,6 +11,7 @@
   let {
     serviceStatus,
     capabilities,
+    xkeenVersion = '',
     statusLoading = false,
     statusError = false,
     onRefresh,
@@ -25,6 +26,7 @@
       mihomoVersion: string;
     };
     capabilities: any;
+    xkeenVersion?: string;
     statusLoading?: boolean;
     statusError?: boolean;
     onRefresh?: () => Promise<void> | void;
@@ -210,7 +212,7 @@
         name="XKeen"
         serviceId="xkeen"
         status={serviceStatus.xkeen}
-        version=""
+        version={xkeenVersion}
         isActiveKernel={false}
         isInstalled={true}
         onRestart={restartXkeen}
