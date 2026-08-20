@@ -33,6 +33,7 @@
     network?: string;
     protocol?: string[];
     inboundTag?: string[];
+    enabled?: boolean;
   }
 
   interface DNSServer {
@@ -170,6 +171,154 @@
     levels: { '0': { handshake: 4, connIdle: 300, uplinkOnly: 2, downlinkOnly: 5 } },
     system: {}
   });
+
+  // Presets & Modification tracking (BUILD-04)
+  let lastAppliedPreset = $state<string | null>(null);
+  let isPresetModified = $state<boolean>(false);
+
+  const defaultPresets = [
+    {
+      id: 'selective-routing',
+      nameKey: 'xray.preset_selective',
+      descKey: 'xray.preset_selective_desc'
+    },
+    {
+      id: 'all-proxy-routing',
+      nameKey: 'xray.preset_all_proxy',
+      descKey: 'xray.preset_all_proxy_desc'
+    },
+    {
+      id: 'selective-no-quic',
+      nameKey: 'xray.preset_selective_no_quic',
+      descKey: 'xray.preset_selective_no_quic_desc'
+    },
+    {
+      id: 'only-blocked-routing',
+      nameKey: 'xray.preset_blocked_only',
+      descKey: 'xray.preset_blocked_only_desc'
+    },
+    {
+      id: 'minimal-routing',
+      nameKey: 'xray.preset_minimal',
+      descKey: 'xray.preset_minimal_desc'
+    }
+  ];
+
+  // Resizable Splitter State (BUILD-01)
+  let previewWidth = $state<number>(
+    typeof localStorage !== 'undefined' && localStorage.getItem('xray_builder_preview_width')
+      ? Math.max(280, Math.min(800, Number(localStorage.getItem('xray_builder_preview_width'))))
+      : 440
+  );
+  let showPreviewPane = $state<boolean>(true);
+  let isResizingPreview = $state<boolean>(false);
+
+  function startResizePreview(e: MouseEvent | PointerEvent) {
+    e.preventDefault();
+    isResizingPreview = true;
+    const startX = e.clientX;
+    const startWidth = previewWidth;
+
+    function onMove(ev: MouseEvent | PointerEvent) {
+      const delta = startX - ev.clientX;
+      const newWidth = Math.max(280, Math.min(800, startWidth + delta));
+      previewWidth = newWidth;
+    }
+
+    function onUp() {
+      isResizingPreview = false;
+      localStorage.setItem('xray_builder_preview_width', String(previewWidth));
+      window.removeEventListener('mousemove', onMove as any);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointermove', onMove as any);
+      window.removeEventListener('pointerup', onUp);
+    }
+
+    window.addEventListener('mousemove', onMove as any);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onMove as any);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  // Preview Tabs & Code Toolbar (BUILD-03)
+  let activePreviewTab = $state<
+    | '05_routing.json'
+    | '04_outbounds.json'
+    | '02_dns.json'
+    | '01_log.json'
+    | '03_inbounds.json'
+    | 'all'
+  >('05_routing.json');
+  let copyFeedback = $state(false);
+
+  // Drag-and-Drop & Rule controls (BUILD-02)
+  let draggedIndex = $state<number | null>(null);
+  let dragOverIndex = $state<number | null>(null);
+
+  function handleDragStart(e: DragEvent, index: number) {
+    draggedIndex = index;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(index));
+    }
+  }
+
+  function handleDragOver(e: DragEvent, index: number) {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'move';
+    }
+    dragOverIndex = index;
+  }
+
+  function handleDrop(e: DragEvent, index: number) {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) {
+      draggedIndex = null;
+      dragOverIndex = null;
+      return;
+    }
+    const updated = [...routingRules];
+    const [moved] = updated.splice(draggedIndex, 1);
+    updated.splice(index, 0, moved);
+    routingRules = updated;
+    draggedIndex = null;
+    dragOverIndex = null;
+    isDirty = true;
+    if (lastAppliedPreset) isPresetModified = true;
+  }
+
+  function handleDragEnd() {
+    draggedIndex = null;
+    dragOverIndex = null;
+  }
+
+  function toggleRuleEnabled(ruleId: string) {
+    routingRules = routingRules.map((r) => {
+      if (r.id === ruleId) {
+        return { ...r, enabled: r.enabled === false ? true : false };
+      }
+      return r;
+    });
+    isDirty = true;
+    if (lastAppliedPreset) isPresetModified = true;
+  }
+
+  function duplicateRule(rule: XrayRoutingRule) {
+    const copy: XrayRoutingRule = {
+      ...JSON.parse(JSON.stringify(rule)),
+      id: crypto.randomUUID()
+    };
+    const idx = routingRules.findIndex((r) => r.id === rule.id);
+    if (idx !== -1) {
+      routingRules.splice(idx + 1, 0, copy);
+    } else {
+      routingRules.push(copy);
+    }
+    routingRules = [...routingRules];
+    isDirty = true;
+    if (lastAppliedPreset) isPresetModified = true;
+  }
 
   let schema = $state<any>(null);
   let schemaLoading = $state(true);
@@ -813,7 +962,7 @@
     list.push(['04_outbounds.json', { outbounds: customOutbounds }]);
 
     // 05_routing.json
-    const rules = [...routingRules];
+    const rules = routingRules.filter((r) => r.enabled !== false);
     for (const r of generatedRules) {
       const exists = rules.some((ex) => ex.inboundTag && ex.inboundTag.includes(r.inboundTag[0]));
       if (!exists) {
@@ -1287,8 +1436,26 @@
           port: '0-65535'
         }
       ];
-      dnsOverVless = true;
+    } else if (presetId === 'minimal-routing') {
+      dnsConfig.servers = ['1.1.1.1', '8.8.8.8'];
+      routingRules = [
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'direct',
+          ip: ['geoip:private']
+        },
+        {
+          id: crypto.randomUUID(),
+          type: 'field',
+          outboundTag: 'direct',
+          port: '0-65535'
+        }
+      ];
+      dnsOverVless = false;
     }
+    lastAppliedPreset = presetId;
+    isPresetModified = false;
     isDirty = true;
     showToast('success', $t('editor.preset_applied'));
   }
@@ -1436,16 +1603,60 @@
     routingRules.filter((r) => !ruleFilterTag || r.outboundTag === ruleFilterTag)
   );
 
-  // Превью
-  let previewJson = $derived.by(() => {
+  // Превью (BUILD-03)
+  let previewFiles = $derived.by(() => {
     const list = getChangedFiles();
     const result: Record<string, any> = {};
     for (const [name, managed] of list) {
       const existing = xrayFiles[name] ?? {};
       result[name] = mergeXrayFile(name, existing, managed);
     }
-    return JSON.stringify(result, null, 2);
+    return result;
   });
+
+  let previewJson = $derived.by(() => {
+    return JSON.stringify(previewFiles, null, 2);
+  });
+
+  let activePreviewText = $derived.by(() => {
+    if (activePreviewTab === 'all') {
+      return JSON.stringify(previewFiles, null, 2);
+    }
+    if (previewFiles[activePreviewTab]) {
+      return JSON.stringify(previewFiles[activePreviewTab], null, 2);
+    }
+    return JSON.stringify(previewFiles, null, 2);
+  });
+
+  let activeFileSize = $derived.by(() => {
+    const bytes = new Blob([activePreviewText]).size;
+    if (bytes < 1024) return `${bytes} B`;
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  });
+
+  async function copyPreviewJson() {
+    try {
+      await navigator.clipboard.writeText(activePreviewText);
+      copyFeedback = true;
+      showToast('success', $t('xray.copied'));
+      setTimeout(() => {
+        copyFeedback = false;
+      }, 2000);
+    } catch {
+      showToast('error', $t('app.error'));
+    }
+  }
+
+  function downloadPreviewJson() {
+    const fileName = activePreviewTab === 'all' ? 'xray-config.json' : activePreviewTab;
+    const blob = new Blob([activePreviewText], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   function getNodeServer(node: any): string {
     if (!node || !node.settings) return '';
@@ -1623,8 +1834,9 @@
       <div class="page-head">
         <div>
           <div class="crumbs">
-            {$t('nav.group_services')} <span class="crumb-sep">/</span>
-            {$t('xray.breadcrumb_presets')}
+            {$t('nav.group_system')} <span class="crumb-sep">›</span>
+            {$t('editor.title')} <span class="crumb-sep">›</span>
+            {$t('xray.presets_h1')}
           </div>
           <h1>{$t('xray.presets_h1')}</h1>
           <p class="sub">
@@ -1632,7 +1844,26 @@
           </p>
         </div>
         <div class="ph-actions">
-          <button class="btn btn-secondary" onclick={openInEditor}>
+          <button
+            class="btn btn-secondary btn-compact"
+            onclick={() => (showPreviewPane = !showPreviewPane)}
+            title={$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="margin-right: 4px;"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+            {$t(showPreviewPane ? 'xray.hide_preview' : 'xray.show_preview')}
+          </button>
+          <button class="btn btn-secondary btn-compact" onclick={openInEditor}>
             <svg
               width="13"
               height="13"
@@ -1653,7 +1884,7 @@
           </button>
           {#if canUndo}
             <button
-              class="btn btn-secondary"
+              class="btn btn-secondary btn-compact"
               onclick={handleUndo}
               disabled={applyLoading}
               style="margin-right: 8px;"
@@ -1662,7 +1893,7 @@
             </button>
           {/if}
           <button
-            class="btn btn-primary"
+            class="btn btn-primary btn-compact"
             data-testid="apply-changes-btn"
             onclick={handleApplyChanges}
           >
@@ -1672,19 +1903,39 @@
       </div>
     {/if}
 
-    <div class="gen-layout">
+    <div class="gen-layout" class:resizing={isResizingPreview}>
       <!-- Left Panel -->
       <div class="gen-left">
-        <!-- Scenario chips -->
+        <!-- Scenario chips (BUILD-04) -->
         <div class="constructor-scenario-bar">
           <span class="scenario-label">{$t('editor.constructor_scenario')}:</span>
           {#if schema && schema.xray && schema.xray.presets}
             {#each schema.xray.presets as p}
-              <button class="scenario-chip" onclick={() => applyPreset(p.id)}>{$t(p.name)}</button>
+              <button
+                class="scenario-chip"
+                class:active={lastAppliedPreset === p.id}
+                title={$t(p.desc || p.name)}
+                onclick={() => applyPreset(p.id)}
+              >
+                {$t(p.name)}
+                {#if lastAppliedPreset === p.id && isPresetModified}
+                  <span class="preset-mod-badge">{$t('xray.preset_modified')}</span>
+                {/if}
+              </button>
             {/each}
           {:else}
-            {#each [['selective-routing', $t('editor.scenario_rule_based')], ['all-proxy-routing', $t('editor.scenario_global_proxy')], ['selective-no-quic', $t('xray.preset_block_quic')], ['only-blocked-routing', $t('preset.only-blocked-routing')]] as [id, label]}
-              <button class="scenario-chip" onclick={() => applyPreset(id as any)}>{label}</button>
+            {#each defaultPresets as p}
+              <button
+                class="scenario-chip"
+                class:active={lastAppliedPreset === p.id}
+                title={$t(p.descKey)}
+                onclick={() => applyPreset(p.id)}
+              >
+                {$t(p.nameKey)}
+                {#if lastAppliedPreset === p.id && isPresetModified}
+                  <span class="preset-mod-badge">{$t('xray.preset_modified')}</span>
+                {/if}
+              </button>
             {/each}
           {/if}
         </div>
@@ -1766,30 +2017,161 @@
               </select>
             </div>
 
-            <div class="section-title">{$t('editor.xray_routing_rules')}</div>
+            <div class="section-title">{$t('xray.routing_rules')}</div>
 
             <div class="routing-rules-list" data-testid="routing-rules-list">
               {#each filteredRules as rule, idx (rule.id)}
-                <div class="card rule-card">
+                <div
+                  class="card rule-card"
+                  class:rule-disabled={rule.enabled === false}
+                  class:dragging={draggedIndex === idx}
+                  class:drag-over={dragOverIndex === idx}
+                  draggable="true"
+                  ondragstart={(e) => handleDragStart(e, idx)}
+                  ondragover={(e) => handleDragOver(e, idx)}
+                  ondrop={(e) => handleDrop(e, idx)}
+                  ondragend={handleDragEnd}
+                >
                   <div class="rule-header">
-                    <span class="badge badge-tag">{rule.outboundTag}</span>
+                    <div class="rule-head-left">
+                      <span class="drag-handle" title={$t('xray.drag_handle')}>⠿</span>
+                      <button
+                        type="button"
+                        class="rule-toggle-btn"
+                        class:active={rule.enabled !== false}
+                        title={rule.enabled !== false
+                          ? $t('xray.rule_enabled')
+                          : $t('xray.rule_disabled')}
+                        onclick={() => toggleRuleEnabled(rule.id)}
+                      >
+                        <span class="toggle-dot"></span>
+                      </button>
+                      <span
+                        class="badge badge-tag"
+                        class:badge-direct={rule.outboundTag === 'direct'}
+                        class:badge-block={rule.outboundTag === 'block'}
+                        class:badge-proxy={rule.outboundTag !== 'direct' &&
+                          rule.outboundTag !== 'block'}
+                      >
+                        {#if rule.outboundTag === 'direct'}
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.5"><polyline points="20 6 9 17 4 12" /></svg
+                          >
+                        {:else if rule.outboundTag === 'block'}
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.5"
+                            ><circle cx="12" cy="12" r="10" /><line
+                              x1="4.93"
+                              y1="4.93"
+                              x2="19.07"
+                              y2="19.07"
+                            /></svg
+                          >
+                        {:else}
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.5"
+                            ><circle cx="12" cy="12" r="10" /><line
+                              x1="2"
+                              y1="12"
+                              x2="22"
+                              y2="12"
+                            /><path
+                              d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
+                            /></svg
+                          >
+                        {/if}
+                        {rule.outboundTag}
+                      </span>
+                    </div>
+
                     <div class="rule-actions">
                       <button
-                        class="rule-move"
+                        type="button"
+                        class="btn-rule-action rule-move"
                         onclick={() => moveRule(rule.id, -1)}
-                        disabled={routingRules.findIndex((r) => r.id === rule.id) === 0}>▲</button
+                        disabled={routingRules.findIndex((r) => r.id === rule.id) === 0}
+                        title={$t('app.move_up') || 'Вверх'}
                       >
+                        <svg
+                          width="11"
+                          height="11"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"><polyline points="18 15 12 9 6 15" /></svg
+                        >
+                      </button>
                       <button
-                        class="rule-move"
+                        type="button"
+                        class="btn-rule-action rule-move"
                         onclick={() => moveRule(rule.id, 1)}
                         disabled={routingRules.findIndex((r) => r.id === rule.id) ===
-                          routingRules.length - 1}>▼</button
+                          routingRules.length - 1}
+                        title={$t('app.move_down') || 'Вниз'}
                       >
+                        <svg
+                          width="11"
+                          height="11"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2.5"><polyline points="6 9 12 15 18 9" /></svg
+                        >
+                      </button>
                       <button
-                        class="rule-del"
-                        onclick={() => removeRule(rule.id)}
-                        title={$t('app.delete')}>✕</button
+                        type="button"
+                        class="btn-rule-action"
+                        onclick={() => duplicateRule(rule)}
+                        title={$t('editor.duplicate_file') || 'Дублировать'}
                       >
+                        <svg
+                          width="11"
+                          height="11"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          ><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
+                            d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                          /></svg
+                        >
+                      </button>
+                      <button
+                        type="button"
+                        class="btn-rule-action btn-rule-del rule-del"
+                        onclick={() => removeRule(rule.id)}
+                        title={$t('app.delete')}
+                      >
+                        <svg
+                          width="11"
+                          height="11"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          ><line x1="18" y1="6" x2="6" y2="18" /><line
+                            x1="6"
+                            y1="6"
+                            x2="18"
+                            y2="18"
+                          /></svg
+                        >
+                      </button>
                     </div>
                   </div>
 
@@ -2721,78 +3103,151 @@
         {/if}
       </div>
 
-      <!-- Right Panel (Preview) -->
-      <div class="gen-right">
-        <div class="preview-header">
-          <span class="preview-title">JSON {$t('mihomo.preview')}</span>
-        </div>
-        <pre class="constructor-preview-panel" data-testid="xray-json-preview">{previewJson}</pre>
+      {#if showPreviewPane}
+        <!-- Resizable Splitter (BUILD-01) -->
+        <button
+          type="button"
+          class="xray-splitter"
+          aria-label="Resize preview"
+          tabindex="-1"
+          onpointerdown={startResizePreview}
+          onmousedown={startResizePreview}
+        ></button>
 
-        {#if validationError}
-          <div
-            class="validation-error-block"
-            style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
-          >
-            <div style="font-weight: bold; margin-bottom: 6px;">
-              {$t('editor.validation_failed')}
+        <!-- Right Panel (Tabbed JSON Preview) (BUILD-03) -->
+        <div class="gen-right" style="width: {previewWidth}px;">
+          <div class="preview-card">
+            <!-- File Tabs -->
+            <div class="preview-tabs-bar">
+              {#each [['05_routing.json', '05_routing.json'], ['04_outbounds.json', '04_outbounds.json'], ['02_dns.json', '02_dns.json'], ['01_log.json', '01_log.json'], ['03_inbounds.json', '03_inbounds.json'], ['all', $t('xray.all_files')]] as [tabId, tabTitle]}
+                <button
+                  type="button"
+                  class="preview-tab-btn"
+                  class:active={activePreviewTab === tabId}
+                  onclick={() => (activePreviewTab = tabId as any)}
+                >
+                  {tabTitle}
+                </button>
+              {/each}
             </div>
-            <div
-              style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;"
-            >
-              {parseValidationError(validationError, $currentLang)}
+
+            <!-- Preview Toolbar -->
+            <div class="preview-toolbar">
+              <span class="preview-meta-size">{activeFileSize}</span>
+              <div class="preview-tools-right">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-secondary btn-tool-action"
+                  onclick={copyPreviewJson}
+                  title={$t('xray.copy_json')}
+                >
+                  <svg
+                    width="11"
+                    height="11"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
+                      d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                    /></svg
+                  >
+                  <span>{$t(copyFeedback ? 'xray.copied' : 'xray.copy_json')}</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-secondary btn-tool-action"
+                  onclick={downloadPreviewJson}
+                  title={$t('xray.download_json')}
+                >
+                  <svg
+                    width="11"
+                    height="11"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+                      points="7 10 12 15 17 10"
+                    /><line x1="12" y1="15" x2="12" y2="3" /></svg
+                  >
+                  <span>{$t('xray.download_json')}</span>
+                </button>
+              </div>
             </div>
-            <details>
-              <summary style="cursor: pointer; font-size: 12px; opacity: 0.8; user-select: none;"
-                >{$t('editor.validation_details')}</summary
-              >
-              <pre
-                style="margin: 6px 0 0 0; white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 12px; opacity: 0.9; max-height: 200px; overflow-y: auto;">{validationError}</pre>
-            </details>
+
+            <!-- JSON Pre Panel -->
+            <pre
+              class="constructor-preview-panel"
+              data-testid="xray-json-preview">{activePreviewText}</pre>
           </div>
-        {/if}
 
-        {#if embedded}
-          <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
-            <button class="btn btn-secondary" style="flex: 1;" onclick={openInEditor}>
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                style="margin-right:5px"
-                ><path d="M12 20h9" /><path
-                  d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
-                /></svg
+          {#if validationError}
+            <div
+              class="validation-error-block"
+              style="margin-top: 12px; padding: 12px; background: rgba(239, 91, 107, 0.1); border: 1px solid var(--danger); border-radius: var(--radius-md); color: var(--danger); font-size: 13px;"
+            >
+              <div style="font-weight: bold; margin-bottom: 6px;">
+                {$t('editor.validation_failed')}
+              </div>
+              <div
+                style="white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 13px; margin-bottom: 8px;"
               >
-              {#if selectedFile}
-                {$t('mihomo.insert_editor')}
-              {:else}
-                {$t('mihomo.open_editor')}
+                {parseValidationError(validationError, $currentLang)}
+              </div>
+              <details>
+                <summary style="cursor: pointer; font-size: 12px; opacity: 0.8; user-select: none;"
+                  >{$t('editor.validation_details')}</summary
+                >
+                <pre
+                  style="margin: 6px 0 0 0; white-space: pre-wrap; font-family: var(--font-family-mono); font-size: 12px; opacity: 0.9; max-height: 200px; overflow-y: auto;">{validationError}</pre>
+              </details>
+            </div>
+          {/if}
+
+          {#if embedded}
+            <div class="gen-embedded-actions" style="margin-top: 12px; display: flex; gap: 8px;">
+              <button class="btn btn-secondary" style="flex: 1;" onclick={openInEditor}>
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  style="margin-right:5px"
+                  ><path d="M12 20h9" /><path
+                    d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"
+                  /></svg
+                >
+                {#if selectedFile}
+                  {$t('mihomo.insert_editor')}
+                {:else}
+                  {$t('mihomo.open_editor')}
+                {/if}
+              </button>
+              {#if canUndo}
+                <button
+                  class="btn btn-secondary"
+                  onclick={handleUndo}
+                  disabled={applyLoading}
+                  style="flex: 1;"
+                >
+                  {$t('editor.undo')}
+                </button>
               {/if}
-            </button>
-            {#if canUndo}
               <button
-                class="btn btn-secondary"
-                onclick={handleUndo}
-                disabled={applyLoading}
+                class="btn btn-primary"
+                data-testid="apply-changes-btn"
+                onclick={handleApplyChanges}
                 style="flex: 1;"
               >
-                {$t('editor.undo')}
+                {$t('mihomo.apply_changes')}
               </button>
-            {/if}
-            <button
-              class="btn btn-primary"
-              data-testid="apply-changes-btn"
-              onclick={handleApplyChanges}
-              style="flex: 1;"
-            >
-              {$t('mihomo.apply_changes')}
-            </button>
-          </div>
-        {/if}
-      </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
@@ -3003,15 +3458,63 @@
   }
 
   .gen-layout {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--spacing-4, 16px);
-    align-items: start;
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    align-items: stretch;
+    min-height: 520px;
+  }
+
+  .gen-layout.resizing {
+    user-select: none;
+    cursor: col-resize;
+  }
+
+  .gen-left {
+    flex: 1;
+    min-width: 0;
+    padding-right: var(--spacing-3, 12px);
+  }
+
+  .xray-splitter {
+    width: 8px;
+    background: transparent;
+    border: none;
+    cursor: col-resize;
+    position: relative;
+    padding: 0;
+    margin: 0 4px;
+    flex-shrink: 0;
+    transition: background-color var(--transition-fast);
+  }
+
+  .xray-splitter::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 2px;
+    background: var(--border);
+    border-radius: 1px;
+    transition: background-color var(--transition-fast);
+  }
+
+  .xray-splitter:hover::after,
+  .gen-layout.resizing .xray-splitter::after {
+    background: var(--accent);
+    width: 3px;
   }
 
   @media (max-width: 1024px) {
     .gen-layout {
-      grid-template-columns: 1fr;
+      flex-direction: column;
+    }
+    .gen-left {
+      padding-right: 0;
+    }
+    .xray-splitter {
+      display: none;
     }
   }
 
@@ -3037,11 +3540,31 @@
     color: var(--fg);
     font-size: 0.75rem;
     cursor: pointer;
-    transition: background-color var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    transition:
+      background-color var(--transition-fast),
+      border-color var(--transition-fast);
   }
 
   .scenario-chip:hover {
     background: var(--bg-surface-active);
+    border-color: var(--accent);
+  }
+
+  .scenario-chip.active {
+    background: rgba(var(--accent-rgb, 13, 110, 253), 0.15);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .preset-mod-badge {
+    margin-left: 5px;
+    font-size: 0.6875rem;
+    color: var(--color-warning-fg, #eab308);
+    opacity: 0.9;
+    font-style: italic;
   }
 
   .rule-providers-row {
@@ -3112,63 +3635,168 @@
     display: flex;
     flex-direction: column;
     gap: var(--spacing-2, 8px);
-    max-height: 400px;
+    max-height: 480px;
     overflow-y: auto;
     scrollbar-width: thin;
   }
 
   .rule-card {
-    padding: var(--spacing-3, 12px);
+    padding: 10px 12px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-md, 6px);
+    transition:
+      border-color var(--transition-fast),
+      opacity var(--transition-fast),
+      background-color var(--transition-fast);
+  }
+
+  .rule-card.rule-disabled {
+    opacity: 0.55;
+    background: var(--bg-surface-hover);
+  }
+
+  .rule-card.dragging {
+    opacity: 0.35;
+    border-style: dashed;
+    border-color: var(--accent);
+  }
+
+  .rule-card.drag-over {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 13, 110, 253), 0.25);
   }
 
   .rule-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
+  }
+
+  .rule-head-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .drag-handle {
+    cursor: grab;
+    color: var(--fg-muted, var(--fg-secondary));
+    font-size: 1rem;
+    line-height: 1;
+    user-select: none;
+    padding: 0 2px;
+    opacity: 0.6;
+    transition: opacity var(--transition-fast);
+  }
+
+  .drag-handle:hover {
+    opacity: 1;
+    color: var(--fg);
+  }
+
+  .rule-toggle-btn {
+    width: 28px;
+    height: 16px;
+    border-radius: 9px;
+    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.15));
+    border: 1px solid var(--border);
+    position: relative;
+    cursor: pointer;
+    padding: 0;
+    transition:
+      background-color var(--transition-fast),
+      border-color var(--transition-fast);
+    flex-shrink: 0;
+  }
+
+  .rule-toggle-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .rule-toggle-btn .toggle-dot {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform var(--transition-fast);
+  }
+
+  .rule-toggle-btn.active .toggle-dot {
+    transform: translateX(12px);
   }
 
   .badge-tag {
-    background: var(--bg-surface-hover);
-    color: var(--fg);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     font-weight: 500;
-    padding: 2px 6px;
+    padding: 2px 7px;
     border-radius: 4px;
     font-size: 0.75rem;
+    font-family: var(--font-mono, monospace);
+  }
+
+  .badge-direct {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+
+  .badge-block {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+
+  .badge-proxy {
+    background: rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
+    border: 1px solid rgba(139, 92, 246, 0.3);
   }
 
   .rule-actions {
     display: flex;
     gap: 4px;
+    align-items: center;
   }
 
-  .rule-move,
-  .rule-del {
+  .btn-rule-action {
     background: transparent;
-    border: none;
+    border: 1px solid transparent;
     color: var(--fg-secondary);
-    width: 20px;
-    height: 20px;
-    display: flex;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    font-size: 0.6875rem;
     cursor: pointer;
     border-radius: 4px;
+    transition:
+      background-color var(--transition-fast),
+      color var(--transition-fast);
   }
 
-  .rule-move:hover,
-  .rule-del:hover {
+  .btn-rule-action:hover:not(:disabled) {
     background: var(--bg-surface-hover);
     color: var(--fg);
+    border-color: var(--border);
   }
 
-  .rule-move:disabled {
+  .btn-rule-action:disabled {
     opacity: 0.3;
     cursor: not-allowed;
+  }
+
+  .btn-rule-del:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border-color: rgba(239, 68, 68, 0.3);
   }
 
   .rule-details {
@@ -3388,39 +4016,113 @@
   .gen-right {
     display: flex;
     flex-direction: column;
-    height: 100%;
-    min-height: 450px;
+    flex-shrink: 0;
+    min-width: 280px;
+    max-width: 800px;
+    padding-left: var(--spacing-3, 12px);
   }
 
-  .preview-header {
-    padding: 8px 12px;
-    background: var(--bg-surface);
+  .preview-card {
+    display: flex;
+    flex-direction: column;
     border: 1px solid var(--border);
-    border-bottom: none;
-    border-radius: var(--radius-md, 6px) var(--radius-md, 6px) 0 0;
+    border-radius: var(--radius-md, 6px);
+    overflow: hidden;
+    background: var(--bg-surface);
   }
 
-  .preview-title {
-    font-size: var(--font-size-xs, 0.75rem);
+  .preview-tabs-bar {
+    display: flex;
+    align-items: center;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding: 2px 4px 0 4px;
+    gap: 2px;
+  }
+
+  .preview-tabs-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .preview-tab-btn {
+    padding: 6px 10px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
     color: var(--fg-secondary);
+    font-size: 0.75rem;
+    font-family: var(--font-mono, monospace);
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+      color var(--transition-fast),
+      border-color var(--transition-fast);
+    margin-bottom: -1px;
+  }
+
+  .preview-tab-btn:hover {
+    color: var(--fg);
+  }
+
+  .preview-tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
     font-weight: 600;
-    text-transform: uppercase;
+  }
+
+  .preview-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    background: var(--bg-surface-hover);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .preview-meta-size {
+    font-size: 0.6875rem;
+    color: var(--fg-muted, var(--fg-secondary));
+    font-family: var(--font-mono, monospace);
+  }
+
+  .preview-tools-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .btn-tool-action {
+    padding: 3px 8px;
+    font-size: 0.6875rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 4px;
+    height: 24px;
+  }
+
+  .btn-compact {
+    height: 32px;
+    padding: 4px 10px;
+    font-size: 0.75rem;
   }
 
   .constructor-preview-panel {
     flex: 1;
     margin: 0;
-    padding: var(--spacing-4, 16px);
+    padding: var(--spacing-3, 12px);
     background: #1e1e1e;
     color: #d4d4d4;
-    border: 1px solid var(--border);
-    border-radius: 0 0 var(--radius-md, 6px) var(--radius-md, 6px);
+    border: none;
     font-family: var(--font-mono, monospace);
     font-size: var(--font-size-xs, 0.75rem);
     line-height: 1.5;
     overflow: auto;
     scrollbar-width: thin;
-    max-height: 500px;
+    max-height: 520px;
+    min-height: 320px;
   }
 
   .checkbox-container {
