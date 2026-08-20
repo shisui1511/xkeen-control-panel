@@ -427,4 +427,26 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     const blockedCard = page.locator('[data-group="Заблок. сервисы"]');
     await expect(blockedCard).toHaveClass(/flash-highlight/);
   });
+
+  // D-04: закрепление группы в Core переживает перезагрузку страницы
+  test('core routing: закрепление группы переживает перезагрузку', async ({ page }) => {
+    // Автоопределённая Core-группа (совпала с CORE_GROUP_PATTERNS) — кнопка
+    // булавки неактивна, ручное открепление для неё не предусмотрено
+    await expect(page.locator('[data-group="GLOBAL"] .gc-pin-btn')).toBeDisabled();
+
+    await page.locator('[data-group="YouTube"] .gc-pin-btn').click();
+    await expect(page.locator('.proxy-section-core [data-group="YouTube"]')).toBeVisible();
+
+    await page.reload();
+    await page.waitForSelector('.group-card, .proxies-page, .ph-actions', { timeout: 10000 });
+    await expect(page.locator('.proxy-section-core [data-group="YouTube"]')).toBeVisible();
+  });
+
+  // D-03: служебная группа со статическим выходом отрисована мини-карточкой
+  test('core routing: служебная группа отрисована мини-карточкой', async ({ page }) => {
+    const quicCard = page.locator('[data-group="QUIC"]');
+    await expect(quicCard).toHaveClass(/gc-mini/);
+    await expect(quicCard).toHaveClass(/out-reject/);
+    await expect(quicCard.locator('.proxy-grid')).toHaveCount(0);
+  });
 });

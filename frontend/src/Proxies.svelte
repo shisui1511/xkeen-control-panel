@@ -21,7 +21,7 @@
   } from './lib/batchLatencyTester';
   import { getTargetUrl, getCurrentPingConfig } from './lib/pingTargetStore';
   import type { PollerControls } from './lib/poller';
-  import { splitGroupsByRole, type GroupRole } from './lib/proxyClassification';
+  import { splitGroupsByRole, classifyGroupRole, type GroupRole } from './lib/proxyClassification';
   import { readPinnedCoreGroups, togglePinnedCoreGroup } from './lib/proxyViewPrefs';
   import Pin from './lib/components/icons/Pin.svelte';
 
@@ -299,11 +299,17 @@
     for (const name of [...next]) {
       if (!current.has(name)) next.delete(name);
     }
+    const pinnedNames = new Set(pinnedCoreGroups);
     for (const g of groups) {
       if (!seenGroups.has(g.name)) {
         next.add(g.name);
       }
       seenGroups.add(g.name);
+      // Служебные мини-карточки (D-03): свернутое состояние по умолчанию, не
+      // только при первом появлении — разворачивать в них нечего.
+      if (classifyGroupRole(g, groups, pinnedNames, proxyTypeMap) === 'system') {
+        next.add(g.name);
+      }
     }
     collapsedGroups = next;
   }
@@ -1847,20 +1853,29 @@
         {#snippet groupCard(group: ProxyGroup, role: GroupRole)}
           {@const isCollapsed = collapsedGroups.has(group.name)}
           {@const nodes = getFilteredNodes(group, searchDebouncedQuery)}
+          {@const isMini = role === 'system'}
+          {@const nowUpper = (group.now || '').toUpperCase()}
+          {@const isPinned = pinnedCoreGroups.includes(group.name)}
+          {@const isAutoCore = role === 'core' && !isPinned}
           <div
             class="group-card"
             class:expanded={!isCollapsed}
+            class:gc-mini={isMini}
+            class:out-direct={isMini && nowUpper === 'DIRECT'}
+            class:out-reject={isMini && (nowUpper === 'REJECT' || nowUpper === 'REJECT-DROP')}
+            class:out-pass={isMini && nowUpper === 'PASS'}
             data-group={group.name}
             data-role={role}
             bind:this={groupCardEls[group.name]}
           >
             <div
-              class="gc-head collapsible"
+              class="gc-head"
+              class:collapsible={!isMini}
               role="button"
-              tabindex="0"
-              aria-expanded={!isCollapsed}
-              onclick={(e) => handleHeadClick(e, group.name)}
-              onkeydown={(e) => handleHeadKeydown(e, group.name)}
+              tabindex={isMini ? -1 : 0}
+              aria-expanded={isMini ? undefined : !isCollapsed}
+              onclick={isMini ? undefined : (e) => handleHeadClick(e, group.name)}
+              onkeydown={isMini ? undefined : (e) => handleHeadKeydown(e, group.name)}
             >
               <div class="gc-head-row1">
                 {#if group.icon}
@@ -1881,265 +1896,307 @@
                 <span class="name">{group.name}</span>
                 <span class="type-badge">{group.type.toUpperCase()}</span>
 
-                {#if group.now}
+                {#if role === 'core' || role === 'service'}
+                  <button
+                    type="button"
+                    class="gc-pin-btn"
+                    data-stop-head-click
+                    aria-pressed={isPinned}
+                    title={isAutoCore
+                      ? $t('proxies.pin_auto_core')
+                      : isPinned
+                        ? $t('proxies.unpin_from_core')
+                        : $t('proxies.pin_to_core')}
+                    aria-label={isAutoCore
+                      ? $t('proxies.pin_auto_core')
+                      : isPinned
+                        ? $t('proxies.unpin_from_core')
+                        : $t('proxies.pin_to_core')}
+                    disabled={isAutoCore}
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      pinnedCoreGroups = togglePinnedCoreGroup(group.name);
+                    }}
+                  >
+                    <Pin size={13} />
+                  </button>
+                {/if}
+
+                {#if isMini}
+                  <span class="gc-static-out" title={$t('proxies.static_output')}>{group.now}</span>
+                {:else if group.now}
                   {@const latencyClass = getLatencyClass(group.now)}
                   {@const latencyText = getLatencyText(group.now)}
                   <div class="gc-lat-box {latencyClass}">{latencyText}</div>
                 {/if}
 
-                <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
-                  <ChevronDown size={14} color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'} />
-                </span>
+                {#if !isMini}
+                  <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
+                    <ChevronDown
+                      size={14}
+                      color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
+                    />
+                  </span>
+                {/if}
               </div>
 
-              <div class="gc-head-row2">
-                <span class="gc-count-text"
-                  >{group.all.length}
-                  {$t('proxies.nodes_label')}</span
-                >
-                <span class="gc-separator">·</span>
-                <span class="gc-active-label">{$t('proxies.active')}:</span>
-
-                {#each getSelectionChain(group.name) as item, index}
-                  {@const itemFlag = !item.isGroup ? getCountryFlag(item.name) : null}
-                  {@const itemLatencyText = getLatencyText(item.name)}
-                  {@const itemLatencyClass = getLatencyClass(item.name)}
-                  {#if index > 0}
-                    <span class="gc-arrow">›</span>
-                  {/if}
-                  <div
-                    class="gc-now-pill"
-                    class:is-leaf={!item.isGroup}
-                    class:lat-ok={itemLatencyClass === 'lat ok'}
-                    class:lat-mid={itemLatencyClass === 'lat mid'}
-                    class:lat-bad={itemLatencyClass === 'lat bad'}
-                    class:gc-now-pill-link={item.isGroup}
-                    role="button"
-                    tabindex={item.isGroup ? 0 : -1}
-                    aria-disabled={!item.isGroup}
-                    title={item.isGroup ? $t('proxies.goto_parent_group') : undefined}
-                    data-stop-head-click={item.isGroup ? '' : undefined}
-                    onclick={item.isGroup
-                      ? (e: MouseEvent) => {
-                          e.stopPropagation();
-                          focusGroupCard(item.name);
-                        }
-                      : undefined}
-                    onkeydown={item.isGroup
-                      ? (e: KeyboardEvent) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            focusGroupCard(item.name);
-                          }
-                        }
-                      : undefined}
+              {#if !isMini}
+                <div class="gc-head-row2">
+                  <span class="gc-count-text"
+                    >{group.all.length}
+                    {$t('proxies.nodes_label')}</span
                   >
+                  <span class="gc-separator">·</span>
+                  <span class="gc-active-label">{$t('proxies.active')}:</span>
+
+                  {#each getSelectionChain(group.name) as item, index}
+                    {@const itemFlag = !item.isGroup ? getCountryFlag(item.name) : null}
+                    {@const itemLatencyText = getLatencyText(item.name)}
+                    {@const itemLatencyClass = getLatencyClass(item.name)}
+                    {#if index > 0}
+                      <span class="gc-arrow">›</span>
+                    {/if}
                     <div
-                      class="gc-now-dot"
+                      class="gc-now-pill"
                       class:is-leaf={!item.isGroup}
                       class:lat-ok={itemLatencyClass === 'lat ok'}
                       class:lat-mid={itemLatencyClass === 'lat mid'}
                       class:lat-bad={itemLatencyClass === 'lat bad'}
-                    ></div>
-                    {#if itemFlag}{itemFlag}
-                    {/if}{item.name}
-                  </div>
-                {:else}
-                  <span style="color:var(--fg-dim)">—</span>
-                {/each}
-              </div>
-            </div>
-
-            {#if isCollapsed}
-              {@const hStats = getGroupHealthStats(nodes)}
-              <div class="health-bar" title={hStats.tooltip} aria-label={hStats.tooltip} role="img">
-                {#if hStats.fast > 0}
-                  <div
-                    class="health-segment fast"
-                    style="width: {hStats.fastPct}%;"
-                    title="{$t('proxies.health_fast')}: {hStats.fast}"
-                  ></div>
-                {/if}
-                {#if hStats.mid > 0}
-                  <div
-                    class="health-segment mid"
-                    style="width: {hStats.midPct}%;"
-                    title="{$t('proxies.health_mid')}: {hStats.mid}"
-                  ></div>
-                {/if}
-                {#if hStats.bad > 0}
-                  <div
-                    class="health-segment bad"
-                    style="width: {hStats.badPct}%;"
-                    title="{$t('proxies.health_bad')}: {hStats.bad}"
-                  ></div>
-                {/if}
-                {#if hStats.unchecked > 0}
-                  <div
-                    class="health-segment unchecked"
-                    style="width: {hStats.uncheckedPct}%;"
-                    title="{$t('proxies.health_unchecked')}: {hStats.unchecked}"
-                  ></div>
-                {/if}
-              </div>
-            {:else}
-              <div class="group-filters">
-                <button
-                  type="button"
-                  class="filter-chip"
-                  class:active={(groupFilters[group.name] || 'all') === 'all'}
-                  onclick={() => (groupFilters[group.name] = 'all')}
-                >
-                  {$t('proxies.filter_all')}
-                  <span class="filter-count">{nodes.length}</span>
-                </button>
-                <button
-                  type="button"
-                  class="filter-chip"
-                  class:active={groupFilters[group.name] === 'working'}
-                  onclick={() => (groupFilters[group.name] = 'working')}
-                >
-                  {$t('proxies.filter_working')}
-                </button>
-                <button
-                  type="button"
-                  class="filter-chip"
-                  class:active={groupFilters[group.name] === 'timeouts'}
-                  onclick={() => (groupFilters[group.name] = 'timeouts')}
-                >
-                  {$t('proxies.filter_timeouts')}
-                </button>
-                <button
-                  type="button"
-                  class="filter-chip"
-                  class:active={groupFilters[group.name] === 'latency'}
-                  onclick={() => (groupFilters[group.name] = 'latency')}
-                >
-                  {$t('proxies.filter_by_latency')}
-                </button>
-
-                <div class="group-actions-spacer"></div>
-
-                <button
-                  type="button"
-                  class="filter-chip group-test-btn"
-                  onclick={() => testGroupLatency(group)}
-                  disabled={testingLatency || batchProgress?.running}
-                  title={$t('proxies.test_group')}
-                >
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                    style="margin-right: 4px;"
-                  >
-                    <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                  </svg>
-                  {$t('proxies.test_group')}
-                </button>
-              </div>
-
-              {@const filteredNodesList = getFilteredGroupNodes(group.name, nodes)}
-              <div class="proxy-grid">
-                {#each filteredNodesList as proxyName}
-                  {@const isActive = group.now === proxyName}
-                  {@const healthClass = getLatencyClass(proxyName)}
-                  {@const healthText = getLatencyText(proxyName)}
-                  {@const proxy = proxies[proxyName]}
-                  {@const flag = getCountryFlag(proxyName)}
-
-                  <div class="proxy-card" class:now={isActive}>
-                    <div
-                      class="proxy-select-btn"
+                      class:gc-now-pill-link={item.isGroup}
                       role="button"
-                      tabindex={group.type === 'Selector' ? 0 : -1}
-                      aria-disabled={group.type !== 'Selector'}
-                      title={group.type !== 'Selector'
-                        ? $t('proxies.managed_automatically')
+                      tabindex={item.isGroup ? 0 : -1}
+                      aria-disabled={!item.isGroup}
+                      title={item.isGroup ? $t('proxies.goto_parent_group') : undefined}
+                      data-stop-head-click={item.isGroup ? '' : undefined}
+                      onclick={item.isGroup
+                        ? (e: MouseEvent) => {
+                            e.stopPropagation();
+                            focusGroupCard(item.name);
+                          }
                         : undefined}
-                      onclick={() =>
-                        group.type === 'Selector' && selectProxy(group.name, proxyName)}
-                      onkeydown={(e) => {
-                        if (group.type === 'Selector' && (e.key === 'Enter' || e.key === ' ')) {
-                          e.preventDefault();
-                          selectProxy(group.name, proxyName);
-                        }
-                      }}
-                    >
-                      <div class="p-header">
-                        <span class="p-name">
-                          {#if flag}{flag}
-                          {/if}{proxyName}
-                        </span>
-                        <span class="p-type">{getProxyTypeLabel(proxy)}</span>
-                      </div>
-                    </div>
-
-                    <div class="p-footer">
-                      {#if (batchProgress?.running && batchProgress?.currentNode === proxyName) || testingProxy === proxyName}
-                        <span class="lat dim">
-                          <span class="lat-spinner"></span>
-                        </span>
-                      {:else}
-                        <button
-                          type="button"
-                          class="lat {healthClass}"
-                          title={getLatencyTitle(proxyName)}
-                          onmouseenter={(e) => handleBadgeMouseEnter(e, proxyName)}
-                          onmouseleave={handleBadgeMouseLeave}
-                          onclick={(e) => handleBadgeClick(e, proxyName)}
-                          onkeydown={(e) => {
+                      onkeydown={item.isGroup
+                        ? (e: KeyboardEvent) => {
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault();
-                              handleBadgeClick(e as any, proxyName);
+                              e.stopPropagation();
+                              focusGroupCard(item.name);
                             }
-                          }}
-                        >
-                          {healthText}
-                        </button>
-                      {/if}
+                          }
+                        : undefined}
+                    >
+                      <div
+                        class="gc-now-dot"
+                        class:is-leaf={!item.isGroup}
+                        class:lat-ok={itemLatencyClass === 'lat ok'}
+                        class:lat-mid={itemLatencyClass === 'lat mid'}
+                        class:lat-bad={itemLatencyClass === 'lat bad'}
+                      ></div>
+                      {#if itemFlag}{itemFlag}
+                      {/if}{item.name}
+                    </div>
+                  {:else}
+                    <span style="color:var(--fg-dim)">—</span>
+                  {/each}
+                </div>
+              {/if}
+            </div>
 
-                      <div class="p-actions-wrap">
-                        {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
+            {#if !isMini}
+              {#if isCollapsed}
+                {@const hStats = getGroupHealthStats(nodes)}
+                <div
+                  class="health-bar"
+                  title={hStats.tooltip}
+                  aria-label={hStats.tooltip}
+                  role="img"
+                >
+                  {#if hStats.fast > 0}
+                    <div
+                      class="health-segment fast"
+                      style="width: {hStats.fastPct}%;"
+                      title="{$t('proxies.health_fast')}: {hStats.fast}"
+                    ></div>
+                  {/if}
+                  {#if hStats.mid > 0}
+                    <div
+                      class="health-segment mid"
+                      style="width: {hStats.midPct}%;"
+                      title="{$t('proxies.health_mid')}: {hStats.mid}"
+                    ></div>
+                  {/if}
+                  {#if hStats.bad > 0}
+                    <div
+                      class="health-segment bad"
+                      style="width: {hStats.badPct}%;"
+                      title="{$t('proxies.health_bad')}: {hStats.bad}"
+                    ></div>
+                  {/if}
+                  {#if hStats.unchecked > 0}
+                    <div
+                      class="health-segment unchecked"
+                      style="width: {hStats.uncheckedPct}%;"
+                      title="{$t('proxies.health_unchecked')}: {hStats.unchecked}"
+                    ></div>
+                  {/if}
+                </div>
+              {:else}
+                <div class="group-filters">
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={(groupFilters[group.name] || 'all') === 'all'}
+                    onclick={() => (groupFilters[group.name] = 'all')}
+                  >
+                    {$t('proxies.filter_all')}
+                    <span class="filter-count">{nodes.length}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={groupFilters[group.name] === 'working'}
+                    onclick={() => (groupFilters[group.name] = 'working')}
+                  >
+                    {$t('proxies.filter_working')}
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={groupFilters[group.name] === 'timeouts'}
+                    onclick={() => (groupFilters[group.name] = 'timeouts')}
+                  >
+                    {$t('proxies.filter_timeouts')}
+                  </button>
+                  <button
+                    type="button"
+                    class="filter-chip"
+                    class:active={groupFilters[group.name] === 'latency'}
+                    onclick={() => (groupFilters[group.name] = 'latency')}
+                  >
+                    {$t('proxies.filter_by_latency')}
+                  </button>
+
+                  <div class="group-actions-spacer"></div>
+
+                  <button
+                    type="button"
+                    class="filter-chip group-test-btn"
+                    onclick={() => testGroupLatency(group)}
+                    disabled={testingLatency || batchProgress?.running}
+                    title={$t('proxies.test_group')}
+                  >
+                    <svg
+                      width="11"
+                      height="11"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      style="margin-right: 4px;"
+                    >
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                    {$t('proxies.test_group')}
+                  </button>
+                </div>
+
+                {@const filteredNodesList = getFilteredGroupNodes(group.name, nodes)}
+                <div class="proxy-grid">
+                  {#each filteredNodesList as proxyName}
+                    {@const isActive = group.now === proxyName}
+                    {@const healthClass = getLatencyClass(proxyName)}
+                    {@const healthText = getLatencyText(proxyName)}
+                    {@const proxy = proxies[proxyName]}
+                    {@const flag = getCountryFlag(proxyName)}
+
+                    <div class="proxy-card" class:now={isActive}>
+                      <div
+                        class="proxy-select-btn"
+                        role="button"
+                        tabindex={group.type === 'Selector' ? 0 : -1}
+                        aria-disabled={group.type !== 'Selector'}
+                        title={group.type !== 'Selector'
+                          ? $t('proxies.managed_automatically')
+                          : undefined}
+                        onclick={() =>
+                          group.type === 'Selector' && selectProxy(group.name, proxyName)}
+                        onkeydown={(e) => {
+                          if (group.type === 'Selector' && (e.key === 'Enter' || e.key === ' ')) {
+                            e.preventDefault();
+                            selectProxy(group.name, proxyName);
+                          }
+                        }}
+                      >
+                        <div class="p-header">
+                          <span class="p-name">
+                            {#if flag}{flag}
+                            {/if}{proxyName}
+                          </span>
+                          <span class="p-type">{getProxyTypeLabel(proxy)}</span>
+                        </div>
+                      </div>
+
+                      <div class="p-footer">
+                        {#if (batchProgress?.running && batchProgress?.currentNode === proxyName) || testingProxy === proxyName}
+                          <span class="lat dim">
+                            <span class="lat-spinner"></span>
+                          </span>
+                        {:else}
                           <button
                             type="button"
-                            class="btn-latency-test"
-                            onclick={() => testProxyLatency(proxyName)}
-                            disabled={testingProxy === proxyName}
-                            title={$t('proxies.test_single')}
+                            class="lat {healthClass}"
+                            title={getLatencyTitle(proxyName)}
+                            onmouseenter={(e) => handleBadgeMouseEnter(e, proxyName)}
+                            onmouseleave={handleBadgeMouseLeave}
+                            onclick={(e) => handleBadgeClick(e, proxyName)}
+                            onkeydown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleBadgeClick(e as any, proxyName);
+                              }
+                            }}
                           >
-                            {#if testingProxy === proxyName}
-                              <span
-                                class="spinner"
-                                style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
-                              ></span>
-                            {:else}
-                              <svg
-                                width="12"
-                                height="12"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                style="opacity: 0.6;"
-                                ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
-                              >
-                            {/if}
+                            {healthText}
                           </button>
                         {/if}
 
-                        {#if group.type === 'Selector'}
-                          <span class="selector-dot" class:active={isActive}
-                            >{isActive ? '●' : '○'}</span
-                          >
-                        {/if}
+                        <div class="p-actions-wrap">
+                          {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
+                            <button
+                              type="button"
+                              class="btn-latency-test"
+                              onclick={() => testProxyLatency(proxyName)}
+                              disabled={testingProxy === proxyName}
+                              title={$t('proxies.test_single')}
+                            >
+                              {#if testingProxy === proxyName}
+                                <span
+                                  class="spinner"
+                                  style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
+                                ></span>
+                              {:else}
+                                <svg
+                                  width="12"
+                                  height="12"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  stroke-width="2"
+                                  style="opacity: 0.6;"
+                                  ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
+                                >
+                              {/if}
+                            </button>
+                          {/if}
+
+                          {#if group.type === 'Selector'}
+                            <span class="selector-dot" class:active={isActive}
+                              >{isActive ? '●' : '○'}</span
+                            >
+                          {/if}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                {/each}
-              </div>
+                  {/each}
+                </div>
+              {/if}
             {/if}
           </div>
         {/snippet}
@@ -2361,6 +2418,48 @@
   }
   .core-grid .group-card .gc-head .name {
     font-size: 17px;
+  }
+  .proxy-section-system .group-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  }
+  .group-card.gc-mini .gc-head {
+    padding: 8px 14px;
+    min-height: 40px;
+    flex-direction: row;
+    align-items: center;
+  }
+  .group-card.gc-mini.out-direct {
+    border-left: 3px solid var(--success);
+  }
+  .group-card.gc-mini.out-reject {
+    border-left: 3px solid var(--danger);
+  }
+  .group-card.gc-mini.out-pass {
+    border-left: 3px solid var(--fg-dim);
+  }
+  .gc-static-out {
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    color: var(--fg-dim);
+  }
+  .gc-pin-btn {
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    cursor: pointer;
+    color: var(--fg-faint);
+    border-radius: var(--radius-sm);
+  }
+  .gc-pin-btn:hover:not(:disabled) {
+    color: var(--accent);
+    background: var(--hover);
+  }
+  .gc-pin-btn[aria-pressed='true'] {
+    color: var(--accent);
+  }
+  .gc-pin-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
   }
   .group-card.flash-highlight {
     animation: gc-flash 1.4s ease-out;
