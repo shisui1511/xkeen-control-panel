@@ -27,7 +27,13 @@
     classifyLatency,
     type GroupRole
   } from './lib/proxyClassification';
-  import { readPinnedCoreGroups, togglePinnedCoreGroup } from './lib/proxyViewPrefs';
+  import {
+    readPinnedCoreGroups,
+    togglePinnedCoreGroup,
+    readProxiesViewMode,
+    writeProxiesViewMode,
+    type ProxiesViewMode
+  } from './lib/proxyViewPrefs';
   import {
     getLastDelay,
     isProxyAlive,
@@ -38,6 +44,8 @@
     type NodeSnapshot
   } from './lib/proxyStats';
   import Pin from './lib/components/icons/Pin.svelte';
+  import ViewGrid from './lib/components/icons/ViewGrid.svelte';
+  import ViewList from './lib/components/icons/ViewList.svelte';
   import ObservatoryPanel from './components/proxies/ObservatoryPanel.svelte';
   import HealthBar from './components/proxies/HealthBar.svelte';
   import QuickSelectPopover, {
@@ -226,6 +234,27 @@
   let parseReportData = $state<any>(null);
   let rawResponseData = $state<any>(null);
 
+  // View mode state (D-17)
+  let viewMode = $state<ProxiesViewMode>(readProxiesViewMode());
+  function setViewMode(mode: ProxiesViewMode) {
+    viewMode = mode;
+    writeProxiesViewMode(mode);
+  }
+
+  // Chunked rendering state (D-20)
+  const NODE_RENDER_CHUNK = 50;
+  let nodeRenderLimit = $state<Record<string, number>>({});
+
+  function getRenderLimit(groupName: string): number {
+    return nodeRenderLimit[groupName] ?? NODE_RENDER_CHUNK;
+  }
+
+  function increaseRenderLimit(groupName: string, total: number) {
+    const current = getRenderLimit(groupName);
+    const next = Math.min(total, current + NODE_RENDER_CHUNK);
+    nodeRenderLimit[groupName] = next;
+  }
+
   let searchDebouncedQuery = $state('');
   let searchTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
@@ -241,10 +270,24 @@
     const nextCollapsed = new Set<string>();
     groups.forEach((g) => nextCollapsed.add(g.name));
     collapsedGroups = nextCollapsed;
+    nodeRenderLimit = {};
   }
 
   function expandAll() {
-    collapsedGroups = new Set<string>();
+    // Сброс лимитов до NODE_RENDER_CHUNK по умолчанию для каждой группы
+    nodeRenderLimit = {};
+    const groupNames = groups.map((g) => g.name);
+    const BATCH_SIZE = 4;
+    const nextCollapsed = new Set(collapsedGroups);
+
+    for (let i = 0; i < groupNames.length; i += BATCH_SIZE) {
+      const batch = groupNames.slice(i, i + BATCH_SIZE);
+      const delay = Math.floor(i / BATCH_SIZE) * 16;
+      safeTimeout(() => {
+        batch.forEach((name) => nextCollapsed.delete(name));
+        collapsedGroups = new Set(nextCollapsed);
+      }, delay);
+    }
   }
 
   function getFilteredNodes(group: ProxyGroup, query: string): string[] {
@@ -329,6 +372,7 @@
       next.delete(groupName);
     } else {
       next.add(groupName);
+      delete nodeRenderLimit[groupName];
     }
     collapsedGroups = next;
   }
@@ -1629,6 +1673,28 @@
           placeholder={$t('proxies.filter_placeholder')}
           aria-label={$t('proxies.filter_placeholder')}
         />
+        <div class="view-toggle" role="group" aria-label={$t('proxies.view_mode_label')}>
+          <button
+            type="button"
+            class="view-toggle-btn"
+            data-view="grid"
+            aria-pressed={viewMode === 'grid'}
+            onclick={() => setViewMode('grid')}
+          >
+            <ViewGrid size={14} />
+            <span>{$t('proxies.view_mode_grid')}</span>
+          </button>
+          <button
+            type="button"
+            class="view-toggle-btn"
+            data-view="list"
+            aria-pressed={viewMode === 'list'}
+            onclick={() => setViewMode('list')}
+          >
+            <ViewList size={14} />
+            <span>{$t('proxies.view_mode_list')}</span>
+          </button>
+        </div>
         <button class="btn btn-secondary" onclick={expandAll} title={$t('proxies.expand_all')}>
           <svg
             width="14"
@@ -1978,13 +2044,32 @@
                     </button>
                   {/if}
 
+                  {#if viewMode === 'list' && !isMini}
+                    <HealthBar
+                      compact={true}
+                      stats={computeGroupHealthStats(nodes, resolveNodeSnapshot)}
+                    />
+                  {/if}
+
                   {#if !isMini}
-                    <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
-                      <ChevronDown
-                        size={14}
-                        color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
-                      />
-                    </span>
+                    <button
+                      type="button"
+                      class="gc-chevron-btn"
+                      data-stop-head-click
+                      aria-expanded={!isCollapsed}
+                      aria-label={$t('proxies.toggle_group_nodes')}
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        toggleCollapse(group.name);
+                      }}
+                    >
+                      <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
+                        <ChevronDown
+                          size={14}
+                          color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
+                        />
+                      </span>
+                    </button>
                   {/if}
                 </div>
               </div>
@@ -2091,169 +2176,199 @@
             </div>
 
             {#if !isMini}
-              {#if isCollapsed}
+              {#if viewMode === 'grid' && isCollapsed}
                 <HealthBar stats={computeGroupHealthStats(nodes, resolveNodeSnapshot)} />
-              {:else}
-                <div class="group-filters">
-                  <button
-                    type="button"
-                    class="filter-chip"
-                    class:active={(groupFilters[group.name] || 'all') === 'all'}
-                    onclick={() => (groupFilters[group.name] = 'all')}
-                  >
-                    {$t('proxies.filter_all')}
-                    <span class="filter-count">{nodes.length}</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="filter-chip"
-                    class:active={groupFilters[group.name] === 'working'}
-                    onclick={() => (groupFilters[group.name] = 'working')}
-                  >
-                    {$t('proxies.filter_working')}
-                  </button>
-                  <button
-                    type="button"
-                    class="filter-chip"
-                    class:active={groupFilters[group.name] === 'timeouts'}
-                    onclick={() => (groupFilters[group.name] = 'timeouts')}
-                  >
-                    {$t('proxies.filter_timeouts')}
-                  </button>
-                  <button
-                    type="button"
-                    class="filter-chip"
-                    class:active={groupFilters[group.name] === 'latency'}
-                    onclick={() => (groupFilters[group.name] = 'latency')}
-                  >
-                    {$t('proxies.filter_by_latency')}
-                  </button>
-
-                  <div class="group-actions-spacer"></div>
-
-                  <button
-                    type="button"
-                    class="filter-chip group-test-btn"
-                    onclick={() => testGroupLatency(group)}
-                    disabled={testingGroupName === group.name || batchProgress?.running}
-                    title={$t('proxies.test_group')}
-                  >
-                    <svg
-                      width="11"
-                      height="11"
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                      style="margin-right: 4px;"
-                    >
-                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                    </svg>
-                    {$t('proxies.test_group')}
-                  </button>
-                </div>
-
+              {:else if !isCollapsed}
                 {@const filteredNodesList = getFilteredGroupNodes(group.name, nodes)}
-                <div class="proxy-grid">
-                  {#each filteredNodesList as proxyName}
-                    {@const proxy = proxies[proxyName]}
-                    {@const isAlive = isProxyAlive(proxy)}
-                    {@const isDirectOrReject = ['DIRECT', 'REJECT'].includes(
-                      proxyName.toUpperCase()
-                    )}
-                    {@const isActive = group.now === proxyName}
-                    {@const flag = getCountryFlag(proxyName)}
-                    {@const healthClass = getLatencyClass(proxyName)}
-                    {@const healthText = getLatencyText(proxyName)}
-                    <div class="proxy-card" class:now={isActive}>
-                      <div
-                        class="proxy-select-btn"
-                        role="button"
-                        tabindex={group.type === 'Selector' ? 0 : -1}
-                        aria-disabled={group.type !== 'Selector'}
-                        title={group.type !== 'Selector'
-                          ? $t('proxies.managed_automatically')
-                          : undefined}
-                        onclick={() =>
-                          group.type === 'Selector' && selectProxy(group.name, proxyName)}
-                        onkeydown={(e) => {
-                          if (group.type === 'Selector' && (e.key === 'Enter' || e.key === ' ')) {
-                            e.preventDefault();
-                            selectProxy(group.name, proxyName);
-                          }
-                        }}
+                {@const renderLimit = getRenderLimit(group.name)}
+                {@const renderedNodes = filteredNodesList.slice(0, renderLimit)}
+                <div class="gc-body">
+                  <div class="gc-body-inner">
+                    <div class="group-filters">
+                      <button
+                        type="button"
+                        class="filter-chip"
+                        class:active={(groupFilters[group.name] || 'all') === 'all'}
+                        onclick={() => (groupFilters[group.name] = 'all')}
                       >
-                        <div class="p-header">
-                          <span class="p-name" title={proxyName}>
-                            {#if flag}
-                              <span class="flag-icon" aria-hidden="true">{flag}</span>
-                            {/if}
-                            {proxyName}
-                          </span>
-                          <span class="p-type">{getProxyTypeLabel(proxy)}</span>
-                        </div>
-                      </div>
+                        {$t('proxies.filter_all')}
+                        <span class="filter-count">{nodes.length}</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="filter-chip"
+                        class:active={groupFilters[group.name] === 'working'}
+                        onclick={() => (groupFilters[group.name] = 'working')}
+                      >
+                        {$t('proxies.filter_working')}
+                      </button>
+                      <button
+                        type="button"
+                        class="filter-chip"
+                        class:active={groupFilters[group.name] === 'timeouts'}
+                        onclick={() => (groupFilters[group.name] = 'timeouts')}
+                      >
+                        {$t('proxies.filter_timeouts')}
+                      </button>
+                      <button
+                        type="button"
+                        class="filter-chip"
+                        class:active={groupFilters[group.name] === 'latency'}
+                        onclick={() => (groupFilters[group.name] = 'latency')}
+                      >
+                        {$t('proxies.filter_by_latency')}
+                      </button>
 
-                      <div class="p-footer">
-                        {#if (batchProgress?.running && batchProgress?.currentNode === proxyName) || testingProxy === proxyName}
-                          <span class="lat dim">
-                            <span class="lat-spinner"></span>
-                          </span>
-                        {:else}
-                          <button
-                            type="button"
-                            class="lat {healthClass}"
-                            title={getLatencyTitle(proxyName)}
-                            onmouseenter={(e) => handleBadgeMouseEnter(e, proxyName)}
-                            onmouseleave={handleBadgeMouseLeave}
-                            onclick={(e) => handleBadgeClick(e, proxyName)}
+                      <div class="group-actions-spacer"></div>
+
+                      <button
+                        type="button"
+                        class="filter-chip group-test-btn"
+                        onclick={() => testGroupLatency(group)}
+                        disabled={testingGroupName === group.name || batchProgress?.running}
+                        title={$t('proxies.test_group')}
+                      >
+                        <svg
+                          width="11"
+                          height="11"
+                          viewBox="0 0 24 24"
+                          fill="currentColor"
+                          style="margin-right: 4px;"
+                        >
+                          <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        </svg>
+                        {$t('proxies.test_group')}
+                      </button>
+                    </div>
+
+                    <div class="proxy-grid">
+                      {#each renderedNodes as proxyName}
+                        {@const proxy = proxies[proxyName]}
+                        {@const isAlive = isProxyAlive(proxy)}
+                        {@const isDirectOrReject = ['DIRECT', 'REJECT'].includes(
+                          proxyName.toUpperCase()
+                        )}
+                        {@const isActive = group.now === proxyName}
+                        {@const flag = getCountryFlag(proxyName)}
+                        {@const healthClass = getLatencyClass(proxyName)}
+                        {@const healthText = getLatencyText(proxyName)}
+                        <div class="proxy-card" class:now={isActive}>
+                          <div
+                            class="proxy-select-btn"
+                            role="button"
+                            tabindex={group.type === 'Selector' ? 0 : -1}
+                            aria-disabled={group.type !== 'Selector'}
+                            title={group.type !== 'Selector'
+                              ? $t('proxies.managed_automatically')
+                              : undefined}
+                            onclick={() =>
+                              group.type === 'Selector' && selectProxy(group.name, proxyName)}
                             onkeydown={(e) => {
-                              if (e.key === 'Enter' || e.key === ' ') {
+                              if (
+                                group.type === 'Selector' &&
+                                (e.key === 'Enter' || e.key === ' ')
+                              ) {
                                 e.preventDefault();
-                                handleBadgeClick(e as any, proxyName);
+                                selectProxy(group.name, proxyName);
                               }
                             }}
                           >
-                            {healthText}
-                          </button>
-                        {/if}
+                            <div class="p-header">
+                              <span class="p-name" title={proxyName}>
+                                {#if flag}
+                                  <span class="flag-icon" aria-hidden="true">{flag}</span>
+                                {/if}
+                                {proxyName}
+                              </span>
+                              <span class="p-type">{getProxyTypeLabel(proxy)}</span>
+                            </div>
+                          </div>
 
-                        <div class="p-actions-wrap">
-                          {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
-                            <button
-                              type="button"
-                              class="btn-latency-test"
-                              onclick={() => testProxyLatency(proxyName)}
-                              disabled={testingProxy === proxyName}
-                              title={$t('proxies.test_single')}
-                            >
-                              {#if testingProxy === proxyName}
-                                <span
-                                  class="spinner"
-                                  style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
-                                ></span>
-                              {:else}
-                                <svg
-                                  width="12"
-                                  height="12"
-                                  viewBox="0 0 24 24"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  stroke-width="2"
-                                  style="opacity: 0.6;"
-                                  ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
+                          <div class="p-footer">
+                            {#if (batchProgress?.running && batchProgress?.currentNode === proxyName) || testingProxy === proxyName}
+                              <span class="lat dim">
+                                <span class="lat-spinner"></span>
+                              </span>
+                            {:else}
+                              <button
+                                type="button"
+                                class="lat {healthClass}"
+                                title={getLatencyTitle(proxyName)}
+                                onmouseenter={(e) => handleBadgeMouseEnter(e, proxyName)}
+                                onmouseleave={handleBadgeMouseLeave}
+                                onclick={(e) => handleBadgeClick(e, proxyName)}
+                                onkeydown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    handleBadgeClick(e as any, proxyName);
+                                  }
+                                }}
+                              >
+                                {healthText}
+                              </button>
+                            {/if}
+
+                            <div class="p-actions-wrap">
+                              {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
+                                <button
+                                  type="button"
+                                  class="btn-latency-test"
+                                  onclick={() => testProxyLatency(proxyName)}
+                                  disabled={testingProxy === proxyName}
+                                  title={$t('proxies.test_single')}
+                                >
+                                  {#if testingProxy === proxyName}
+                                    <span
+                                      class="spinner"
+                                      style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
+                                    ></span>
+                                  {:else}
+                                    <svg
+                                      width="12"
+                                      height="12"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      stroke-width="2"
+                                      style="opacity: 0.6;"
+                                      ><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" /></svg
+                                    >
+                                  {/if}
+                                </button>
+                              {/if}
+
+                              {#if group.type === 'Selector'}
+                                <span class="selector-dot" class:active={isActive}
+                                  >{isActive ? '●' : '○'}</span
                                 >
                               {/if}
-                            </button>
-                          {/if}
-
-                          {#if group.type === 'Selector'}
-                            <span class="selector-dot" class:active={isActive}
-                              >{isActive ? '●' : '○'}</span
-                            >
-                          {/if}
+                            </div>
+                          </div>
                         </div>
-                      </div>
+                      {/each}
                     </div>
-                  {/each}
+
+                    {#if filteredNodesList.length > renderLimit}
+                      {@const remaining = filteredNodesList.length - renderLimit}
+                      <div class="proxy-grid-footer">
+                        <button
+                          type="button"
+                          class="proxy-grid-more"
+                          onclick={() => increaseRenderLimit(group.name, filteredNodesList.length)}
+                        >
+                          {$t('proxies.show_more_nodes')}
+                          {remaining}
+                          {$tp('proxies.nodes', remaining)}
+                        </button>
+                        <span class="rendered-nodes-hint">
+                          {$t('proxies.rendered_nodes_hint', {
+                            shown: renderLimit,
+                            total: filteredNodesList.length
+                          })}
+                        </span>
+                      </div>
+                    {/if}
+                  </div>
                 </div>
               {/if}
             {/if}
@@ -2269,7 +2384,7 @@
               {$tp('proxies.nodes', coreNodesCount)})
             </span>
           </h2>
-          <div class="group-grid core-grid">
+          <div class="group-grid core-grid" class:group-list={viewMode === 'list'}>
             {#each groupSections.core as group (group.name)}
               {@render groupCard(group, 'core')}
             {/each}
@@ -2286,7 +2401,7 @@
                 {$tp('proxies.nodes', serviceNodesCount)})
               </span>
             </h2>
-            <div class="group-grid">
+            <div class="group-grid" class:group-list={viewMode === 'list'}>
               {#each groupSections.service as group (group.name)}
                 {@render groupCard(group, 'service')}
               {/each}
@@ -2304,7 +2419,7 @@
                 {$tp('proxies.nodes', systemNodesCount)})
               </span>
             </h2>
-            <div class="group-grid">
+            <div class="group-grid" class:group-list={viewMode === 'list'}>
               {#each groupSections.system as group (group.name)}
                 {@render groupCard(group, 'system')}
               {/each}
@@ -3135,6 +3250,181 @@
   }
   .chevron-wrap.rotated {
     transform: rotate(180deg);
+  }
+
+  .gc-chevron-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+    font: inherit;
+  }
+  .gc-chevron-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  /* View toggle (D-17) */
+  .view-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .view-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    height: var(--btn-h, 32px);
+    background: none;
+    border: none;
+    color: var(--fg-dim);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .view-toggle-btn + .view-toggle-btn {
+    border-left: 1px solid var(--border);
+  }
+  .view-toggle-btn:hover {
+    background: var(--hover);
+    color: var(--fg-primary);
+  }
+  .view-toggle-btn[aria-pressed='true'] {
+    background: var(--accent-soft, var(--hover));
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .view-toggle-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  /* Group List View (D-18, D-19) */
+  .group-grid.group-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .group-grid.group-list .group-card {
+    border-radius: var(--radius-sm, 6px);
+  }
+  .group-grid.group-list .group-card.expanded {
+    grid-column: auto;
+  }
+  .group-list .gc-head {
+    flex-direction: row;
+    align-items: center;
+    height: 40px;
+    padding: 0 12px;
+    gap: 10px;
+  }
+  .group-list .gc-head-row1 {
+    flex: 0 1 auto;
+    width: auto;
+    gap: 8px;
+  }
+  .group-list .gc-head-row2 {
+    width: auto;
+    margin-top: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .group-list .gc-count-text,
+  .group-list .gc-active-label,
+  .group-list .gc-provider-badge {
+    display: none;
+  }
+  .group-list .gc-head .name {
+    font-size: 13px;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .group-list .health-bar {
+    width: 64px;
+    margin: 0;
+    flex: 0 0 64px;
+  }
+  .group-list .proxy-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+    gap: 6px;
+    padding: 8px 12px;
+  }
+
+  .group-list .gc-body {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.18s ease;
+  }
+  .group-list .group-card.expanded .gc-body {
+    grid-template-rows: 1fr;
+  }
+  .gc-body-inner {
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* Chunked loading (D-20) */
+  .proxy-grid-footer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    margin: 0 16px 12px;
+  }
+  .proxy-grid-more {
+    width: calc(100% - 32px);
+    height: 32px;
+    background: var(--bg-surface, rgba(255, 255, 255, 0.03));
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm, 4px);
+    color: var(--fg-dim);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .proxy-grid-more:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .rendered-nodes-hint {
+    font-size: 11px;
+    color: var(--fg-muted, var(--fg-dim));
+  }
+
+  @media (max-width: 767px) {
+    .group-list .gc-head {
+      height: 44px;
+    }
+    .group-list .gc-chevron-btn,
+    .group-list .gc-ping-btn,
+    .group-list .gc-pin-btn {
+      min-width: 44px;
+      min-height: 44px;
+      justify-content: center;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .view-toggle-btn {
+      min-width: 44px;
+      justify-content: center;
+      padding: 0 6px;
+    }
+    .view-toggle-btn span {
+      display: none;
+    }
   }
 
   /* Mobile: proxy cards stack, observatory stats handled globally at 768px */

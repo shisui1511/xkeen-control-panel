@@ -180,6 +180,15 @@
     box-sizing: border-box;
   }
 
+  .health-bar.compact {
+    width: 64px;
+    min-width: 64px;
+    max-width: 64px;
+    height: 6px;
+    margin: 0 4px;
+    flex: 0 0 64px;
+  }
+
   .health-bar:hover,
   .health-bar:focus-visible {
     height: 6px;
