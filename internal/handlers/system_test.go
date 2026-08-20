@@ -185,3 +185,24 @@ func TestCheckActiveConfigsInvalid(t *testing.T) {
 		t.Errorf("expected checkActiveConfigsInvalid to be false for empty valid dirs, got %v", invalid)
 	}
 }
+
+func TestPosixTZOffsetHours(t *testing.T) {
+	cases := []struct {
+		tz        string
+		wantHours int
+		wantOK    bool
+	}{
+		{"MSK-3", 3, true}, // Moscow: POSIX offset -3 means actual UTC+3
+		{"UTC0", 0, true},
+		{"CST6CDT", -6, true}, // US Central: POSIX offset 6 means actual UTC-6
+		{"JST-9", 9, true},
+		{"", 0, false},
+		{"Europe/Moscow", 0, false}, // IANA name, not POSIX — must not be parsed as an offset
+	}
+	for _, c := range cases {
+		hours, ok := posixTZOffsetHours(c.tz)
+		if ok != c.wantOK || hours != c.wantHours {
+			t.Errorf("posixTZOffsetHours(%q) = (%d, %v), want (%d, %v)", c.tz, hours, ok, c.wantHours, c.wantOK)
+		}
+	}
+}
