@@ -21,6 +21,9 @@
   } from './lib/batchLatencyTester';
   import { getTargetUrl, getCurrentPingConfig } from './lib/pingTargetStore';
   import type { PollerControls } from './lib/poller';
+  import { splitGroupsByRole, classifyGroupRole, type GroupRole } from './lib/proxyClassification';
+  import { readPinnedCoreGroups, togglePinnedCoreGroup } from './lib/proxyViewPrefs';
+  import Pin from './lib/components/icons/Pin.svelte';
 
   // Subcomponents for providers (subscriptions)
   import SubscriptionList from './components/subscriptions/SubscriptionList.svelte';
@@ -154,6 +157,10 @@
   let seenGroups = $state(new Set<string>());
   const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
 
+  // Core-routing segmentation state (D-01, D-04)
+  let pinnedCoreGroups = $state<string[]>(readPinnedCoreGroups());
+  let groupCardEls = $state<Record<string, HTMLElement | null>>({});
+
   // Batch testing & latency history state
   let poller = $state<PollerControls | null>(null);
   const batchTester = new BatchLatencyTester();
@@ -244,6 +251,14 @@
         })
   );
 
+  // Core-routing segmentation (D-01, D-04) — depends on filteredGroups above.
+  let proxyTypeMap = $derived(
+    Object.fromEntries(Object.entries(proxies).map(([k, v]) => [k, v?.type]))
+  );
+  let groupSections = $derived(
+    splitGroupsByRole(filteredGroups, new Set(pinnedCoreGroups), proxyTypeMap)
+  );
+
   function getLastDelay(proxy: Proxy): number | undefined {
     if (proxy.history && proxy.history.length > 0) {
       return proxy.history[proxy.history.length - 1].delay;
@@ -284,11 +299,17 @@
     for (const name of [...next]) {
       if (!current.has(name)) next.delete(name);
     }
+    const pinnedNames = new Set(pinnedCoreGroups);
     for (const g of groups) {
       if (!seenGroups.has(g.name)) {
         next.add(g.name);
       }
       seenGroups.add(g.name);
+      // Служебные мини-карточки (D-03): свернутое состояние по умолчанию, не
+      // только при первом появлении — разворачивать в них нечего.
+      if (classifyGroupRole(g, groups, pinnedNames, proxyTypeMap) === 'system') {
+        next.add(g.name);
+      }
     }
     collapsedGroups = next;
   }
@@ -301,6 +322,35 @@
       next.add(groupName);
     }
     collapsedGroups = next;
+  }
+
+  // .gc-head is a non-button div[role="button"] (Pitfall 1 / D-02, D-13): nested
+  // interactive elements (breadcrumb chip, pin button) mark themselves with
+  // data-stop-head-click so the collapse toggle below ignores clicks on them.
+  function handleHeadClick(e: MouseEvent, groupName: string) {
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-stop-head-click]')) return;
+    toggleCollapse(groupName);
+  }
+
+  function handleHeadKeydown(e: KeyboardEvent, groupName: string) {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleCollapse(groupName);
+    }
+  }
+
+  // D-02: scrolls to and briefly highlights the parent group's card in the
+  // Core section when a breadcrumb chip in a service card is clicked.
+  function focusGroupCard(name: string) {
+    const el = groupCardEls[name];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('flash-highlight');
+    safeTimeout(() => {
+      el.classList.remove('flash-highlight');
+    }, 1400);
   }
 
   let groupFilters = $state<Record<string, 'all' | 'working' | 'timeouts' | 'latency'>>({});
@@ -835,13 +885,16 @@
   }
 
   function getGroupTypeLabel(type: string): string {
-    const labels: Record<string, string> = {
-      Selector: 'Selector',
-      URLTest: 'URLTest',
-      Fallback: 'Fallback',
-      LoadBalance: 'LoadBalance'
+    const key = (type || '').toLowerCase();
+    const labelKeys: Record<string, string> = {
+      selector: 'proxies.group_type_selector',
+      urltest: 'proxies.group_type_urltest',
+      fallback: 'proxies.group_type_fallback',
+      loadbalance: 'proxies.group_type_loadbalance',
+      relay: 'proxies.group_type_relay'
     };
-    return labels[type] || type;
+    const translationKey = labelKeys[key];
+    return translationKey ? $t(translationKey) : type;
   }
 
   function getProxyDelay(proxyName: string): number | undefined {
@@ -1800,50 +1853,143 @@
           oncta={fetchProxies}
         />
       {:else}
-        <div class="group-grid">
-          {#each filteredGroups as group}
-            {@const isCollapsed = collapsedGroups.has(group.name)}
-            {@const nodes = getFilteredNodes(group, searchDebouncedQuery)}
-            <div class="group-card" class:expanded={!isCollapsed}>
-              <button
-                type="button"
-                class="gc-head collapsible"
-                aria-expanded={!isCollapsed}
-                onclick={() => toggleCollapse(group.name)}
-              >
-                <div class="gc-head-row1">
-                  {#if group.icon}
-                    <span class="group-icon-wrap" aria-hidden="true">
-                      <img
-                        src={group.icon}
-                        alt=""
-                        loading="lazy"
-                        referrerpolicy="no-referrer"
-                        class="brand-icon"
-                        onerror={(e) => {
-                          const target = e.currentTarget as HTMLElement;
-                          if (target) target.style.display = 'none';
-                        }}
-                      />
-                    </span>
-                  {/if}
-                  <span class="name">{group.name}</span>
-                  <span class="type-badge">{group.type.toUpperCase()}</span>
+        {#snippet groupCard(group: ProxyGroup, role: GroupRole)}
+          {@const isCollapsed = collapsedGroups.has(group.name)}
+          {@const nodes = getFilteredNodes(group, searchDebouncedQuery)}
+          {@const isMini = role === 'system'}
+          {@const nowUpper = (group.now || '').toUpperCase()}
+          {@const isPinned = pinnedCoreGroups.includes(group.name)}
+          {@const isAutoCore = role === 'core' && !isPinned}
+          {@const groupTypeKey = group.type.toLowerCase()}
+          <div
+            class="group-card"
+            class:expanded={!isCollapsed}
+            class:gc-mini={isMini}
+            class:out-direct={isMini && nowUpper === 'DIRECT'}
+            class:out-reject={isMini && (nowUpper === 'REJECT' || nowUpper === 'REJECT-DROP')}
+            class:out-pass={isMini && nowUpper === 'PASS'}
+            data-group={group.name}
+            data-role={role}
+            bind:this={groupCardEls[group.name]}
+          >
+            <div
+              class="gc-head"
+              class:collapsible={!isMini}
+              role="button"
+              tabindex={isMini ? -1 : 0}
+              aria-expanded={isMini ? undefined : !isCollapsed}
+              onclick={isMini ? undefined : (e) => handleHeadClick(e, group.name)}
+              onkeydown={isMini ? undefined : (e) => handleHeadKeydown(e, group.name)}
+            >
+              <div class="gc-head-row1">
+                {#if group.icon}
+                  <span class="group-icon-wrap" aria-hidden="true">
+                    <img
+                      src={group.icon}
+                      alt=""
+                      loading="lazy"
+                      referrerpolicy="no-referrer"
+                      class="brand-icon"
+                      onerror={(e) => {
+                        const target = e.currentTarget as HTMLElement;
+                        if (target) target.style.display = 'none';
+                      }}
+                    />
+                  </span>
+                {/if}
+                <span class="name">{group.name}</span>
+                <span class="type-badge">
+                  <span class="type-badge-icon" aria-hidden="true">
+                    {#if groupTypeKey === 'selector'}
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"><polyline points="20 6 9 17 4 12" /></svg
+                      >
+                    {:else if groupTypeKey === 'urltest' || groupTypeKey === 'fallback'}
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        ><path d="M21 12a9 9 0 1 1-3-6.7" /><path d="M21 3v6h-6" /></svg
+                      >
+                    {:else if groupTypeKey === 'loadbalance'}
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"><path d="M7 7h11l-3-3" /><path d="M17 17H6l3 3" /></svg
+                      >
+                    {:else if groupTypeKey === 'relay'}
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        ><circle cx="8" cy="12" r="3" /><circle cx="16" cy="12" r="3" /><path
+                          d="M10.5 12h3"
+                        /></svg
+                      >
+                    {/if}
+                  </span>
+                  {getGroupTypeLabel(group.type)}
+                </span>
 
-                  {#if group.now}
-                    {@const latencyClass = getLatencyClass(group.now)}
-                    {@const latencyText = getLatencyText(group.now)}
-                    <div class="gc-lat-box {latencyClass}">{latencyText}</div>
-                  {/if}
+                {#if role === 'core' || role === 'service'}
+                  <button
+                    type="button"
+                    class="gc-pin-btn"
+                    data-stop-head-click
+                    aria-pressed={isPinned}
+                    title={isAutoCore
+                      ? $t('proxies.pin_auto_core')
+                      : isPinned
+                        ? $t('proxies.unpin_from_core')
+                        : $t('proxies.pin_to_core')}
+                    aria-label={isAutoCore
+                      ? $t('proxies.pin_auto_core')
+                      : isPinned
+                        ? $t('proxies.unpin_from_core')
+                        : $t('proxies.pin_to_core')}
+                    disabled={isAutoCore}
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      pinnedCoreGroups = togglePinnedCoreGroup(group.name);
+                    }}
+                  >
+                    <Pin size={13} />
+                  </button>
+                {/if}
 
+                {#if isMini}
+                  <span class="gc-static-out" title={$t('proxies.static_output')}>{group.now}</span>
+                {:else if group.now}
+                  {@const latencyClass = getLatencyClass(group.now)}
+                  {@const latencyText = getLatencyText(group.now)}
+                  <div class="gc-lat-box {latencyClass}">{latencyText}</div>
+                {/if}
+
+                {#if !isMini}
                   <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
                     <ChevronDown
                       size={14}
                       color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
                     />
                   </span>
-                </div>
+                {/if}
+              </div>
 
+              {#if !isMini}
                 <div class="gc-head-row2">
                   <span class="gc-count-text"
                     >{group.all.length}
@@ -1865,6 +2011,27 @@
                       class:lat-ok={itemLatencyClass === 'lat ok'}
                       class:lat-mid={itemLatencyClass === 'lat mid'}
                       class:lat-bad={itemLatencyClass === 'lat bad'}
+                      class:gc-now-pill-link={item.isGroup}
+                      role="button"
+                      tabindex={item.isGroup ? 0 : -1}
+                      aria-disabled={!item.isGroup}
+                      title={item.isGroup ? $t('proxies.goto_parent_group') : undefined}
+                      data-stop-head-click={item.isGroup ? '' : undefined}
+                      onclick={item.isGroup
+                        ? (e: MouseEvent) => {
+                            e.stopPropagation();
+                            focusGroupCard(item.name);
+                          }
+                        : undefined}
+                      onkeydown={item.isGroup
+                        ? (e: KeyboardEvent) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              focusGroupCard(item.name);
+                            }
+                          }
+                        : undefined}
                     >
                       <div
                         class="gc-now-dot"
@@ -1880,8 +2047,10 @@
                     <span style="color:var(--fg-dim)">—</span>
                   {/each}
                 </div>
-              </button>
+              {/if}
+            </div>
 
+            {#if !isMini}
               {#if isCollapsed}
                 {@const hStats = getGroupHealthStats(nodes)}
                 <div
@@ -2077,9 +2246,40 @@
                   {/each}
                 </div>
               {/if}
+            {/if}
+          </div>
+        {/snippet}
+
+        <section class="proxy-section proxy-section-core">
+          <h2 class="proxy-section-title">{$t('proxies.section_core')}</h2>
+          <div class="group-grid core-grid">
+            {#each groupSections.core as group (group.name)}
+              {@render groupCard(group, 'core')}
+            {/each}
+          </div>
+        </section>
+
+        {#if groupSections.service.length > 0}
+          <section class="proxy-section proxy-section-service">
+            <h2 class="proxy-section-title">{$t('proxies.section_service')}</h2>
+            <div class="group-grid">
+              {#each groupSections.service as group (group.name)}
+                {@render groupCard(group, 'service')}
+              {/each}
             </div>
-          {/each}
-        </div>
+          </section>
+        {/if}
+
+        {#if groupSections.system.length > 0}
+          <section class="proxy-section proxy-section-system">
+            <h2 class="proxy-section-title">{$t('proxies.section_system')}</h2>
+            <div class="group-grid">
+              {#each groupSections.system as group (group.name)}
+                {@render groupCard(group, 'system')}
+              {/each}
+            </div>
+          </section>
+        {/if}
       {/if}
     {/if}
   {:else if activeTab === 'providers'}
@@ -2253,6 +2453,75 @@
     margin-bottom: 30px;
     align-items: start;
   }
+  .proxy-section {
+    margin-bottom: 8px;
+  }
+  .proxy-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--fg-secondary);
+    margin: 0 0 10px;
+  }
+  .core-grid .group-card {
+    border-left: 3px solid var(--accent);
+  }
+  .core-grid .group-card .gc-head .name {
+    font-size: 17px;
+  }
+  .proxy-section-system .group-grid {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  }
+  .group-card.gc-mini .gc-head {
+    padding: 8px 14px;
+    min-height: 40px;
+    flex-direction: row;
+    align-items: center;
+  }
+  .group-card.gc-mini.out-direct {
+    border-left: 3px solid var(--success);
+  }
+  .group-card.gc-mini.out-reject {
+    border-left: 3px solid var(--danger);
+  }
+  .group-card.gc-mini.out-pass {
+    border-left: 3px solid var(--fg-dim);
+  }
+  .gc-static-out {
+    font-family: var(--font-family-mono);
+    font-size: 11px;
+    color: var(--fg-dim);
+  }
+  .gc-pin-btn {
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    cursor: pointer;
+    color: var(--fg-faint);
+    border-radius: var(--radius-sm);
+  }
+  .gc-pin-btn:hover:not(:disabled) {
+    color: var(--accent);
+    background: var(--hover);
+  }
+  .gc-pin-btn[aria-pressed='true'] {
+    color: var(--accent);
+  }
+  .gc-pin-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .group-card.flash-highlight {
+    animation: gc-flash 1.4s ease-out;
+  }
+  @keyframes gc-flash {
+    0%,
+    40% {
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+    100% {
+      box-shadow: none;
+    }
+  }
   .group-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -2287,11 +2556,6 @@
     position: relative;
     overflow: hidden;
     width: 100%;
-    border-left: 0;
-    border-right: 0;
-    border-top: 0;
-    font: inherit;
-    color: inherit;
     text-align: left;
   }
   .group-card .gc-head::before {
@@ -2310,6 +2574,10 @@
   }
   .group-card .gc-head.collapsible:hover {
     background: var(--hover);
+  }
+  .group-card .gc-head.collapsible:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
   .gc-head-row1 {
     display: flex;
@@ -2335,15 +2603,20 @@
   }
   .type-badge {
     margin-left: auto;
-    font-size: 10px;
-    padding: 2px 8px;
-    border-radius: 99px;
-    background: rgba(41, 194, 240, 0.1);
-    border: 1px solid rgba(41, 194, 240, 0.2);
-    color: var(--accent);
-    font-family: var(--font-family-mono);
-    font-weight: 700;
-    text-transform: uppercase;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    padding: 0;
+    color: var(--fg-dim);
+    font-family: var(--font-family-sans);
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .type-badge-icon {
+    display: inline-flex;
+    opacity: 0.7;
   }
   .gc-lat-box {
     padding: 3px 10px;
@@ -2436,6 +2709,22 @@
     background: rgba(239, 91, 107, 0.08);
     border-color: rgba(239, 91, 107, 0.2);
     color: var(--danger);
+  }
+  .gc-now-pill-link {
+    cursor: pointer;
+  }
+  .gc-now-pill-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  @media (max-width: 767px) {
+    .core-grid {
+      grid-template-columns: 1fr;
+    }
+    .core-grid .gc-head {
+      min-height: 44px;
+    }
   }
 
   .proxy-grid {
@@ -2661,18 +2950,20 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 22px;
-    height: 22px;
-    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 26px;
+    border-radius: 8px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    overflow: hidden;
   }
 
-  .brand-icon {
-    width: 20px;
-    height: 20px;
+  .group-icon-wrap .brand-icon {
+    width: 18px;
+    height: 18px;
     object-fit: contain;
     display: block;
-    flex-shrink: 0;
-    border-radius: 4px;
   }
 
   .lat {

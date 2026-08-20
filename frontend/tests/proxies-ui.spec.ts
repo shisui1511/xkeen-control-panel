@@ -251,8 +251,12 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     // .page-head is a generic class also rendered on Dashboard's own default
     // view (briefly active before the hash-based tab switch completes), so
     // waiting on it as an OR-fallback here raced against that transition and
-    // resolved too early. .group-grid is unique to the Proxies page.
-    await page.waitForSelector('.group-grid', { timeout: 10000 });
+    // resolved too early. .group-card is unique to the Proxies page.
+    // (Phase 90: the page now renders up to three `.group-grid` sections —
+    // Core/Service/System — and the Core section renders even when empty
+    // (D-01), so `.group-grid` alone can resolve to a zero-height, not-yet-
+    // visible element; `.group-card` is unambiguous regardless of section.)
+    await page.waitForSelector('.group-card', { timeout: 10000 });
   });
 
   test('Grid Layout - nodes rendered in 5 columns grid', async ({ page }) => {
@@ -301,6 +305,22 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     // Brand icon image should be present in the header
     const brandIcon = ytGroup.locator('.gc-head img.brand-icon');
     await expect(brandIcon).toBeVisible();
+  });
+
+  // D-06: бейдж типа группы читается по-русски, а не показывает английское имя типа
+  test('group type badge отображается по-русски', async ({ page }) => {
+    await expect(page.locator('[data-group="YouTube"] .type-badge')).toHaveText(/Выбор/);
+  });
+
+  // D-05: логотип сервиса выровнен на единой круглой подложке 26x26
+  test('логотип сервиса выровнен на подложке 26px', async ({ page }) => {
+    const iconWrap = page.locator('[data-group="YouTube"] .group-icon-wrap');
+    const size = await iconWrap.evaluate((el) => {
+      const style = window.getComputedStyle(el);
+      return { width: style.width, height: style.height };
+    });
+    expect(size.width).toBe('26px');
+    expect(size.height).toBe('26px');
   });
 
   test('Active node highlight - active node has accent border and background', async ({ page }) => {
