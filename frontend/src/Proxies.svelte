@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { t, currentLang } from './i18n';
+  import { t, tp, currentLang } from './i18n';
   import { usePoller } from './lib/poller';
   import { capabilities, fetchCapabilities, showToast, devMode, showConfirm } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
@@ -258,6 +258,9 @@
   let groupSections = $derived(
     splitGroupsByRole(filteredGroups, new Set(pinnedCoreGroups), proxyTypeMap)
   );
+  let coreNodesCount = $derived(groupSections.core.reduce((s, g) => s + g.all.length, 0));
+  let serviceNodesCount = $derived(groupSections.service.reduce((s, g) => s + g.all.length, 0));
+  let systemNodesCount = $derived(groupSections.system.reduce((s, g) => s + g.all.length, 0));
 
   function getLastDelay(proxy: Proxy): number | undefined {
     if (proxy.history && proxy.history.length > 0) {
@@ -1597,6 +1600,48 @@
     return chain;
   }
 
+  function getGroupProviderName(group: ProxyGroup): string | null {
+    if (!group || !Array.isArray(group.all) || group.all.length === 0) return null;
+    const counts = new Map<string, number>();
+    for (const nodeName of group.all) {
+      const prov = proxies[nodeName]?.provider;
+      if (prov && typeof prov === 'string' && prov.trim() !== '') {
+        counts.set(prov, (counts.get(prov) || 0) + 1);
+      }
+    }
+    if (counts.size === 0) return null;
+    let topProv: string | null = null;
+    let topCount = 0;
+    for (const [prov, count] of counts.entries()) {
+      if (count > topCount) {
+        topCount = count;
+        topProv = prov;
+      }
+    }
+    return topProv;
+  }
+
+  function getDisplayChain(groupName: string): {
+    items: ChainItem[];
+    truncated: boolean;
+    fullText: string;
+  } {
+    const fullChain = getSelectionChain(groupName);
+    const fullText = fullChain.map((item) => item.name).join(' › ');
+    if (fullChain.length <= 2) {
+      return {
+        items: fullChain,
+        truncated: false,
+        fullText
+      };
+    }
+    return {
+      items: [fullChain[0], fullChain[fullChain.length - 1]],
+      truncated: true,
+      fullText
+    };
+  }
+
   onMount(() => {
     const hash = window.location.hash;
     if (hash.includes('tab=providers') || window.location.search.includes('tab=providers')) {
@@ -1852,6 +1897,10 @@
           ctaText={$t('app.refresh')}
           oncta={fetchProxies}
         />
+      {:else if searchDebouncedQuery.trim() !== '' && groupSections.core.length + groupSections.service.length + groupSections.system.length === 0}
+        <div class="search-empty-state">
+          {$t('proxies.search_no_matches')}
+        </div>
       {:else}
         {#snippet groupCard(group: ProxyGroup, role: GroupRole)}
           {@const isCollapsed = collapsedGroups.has(group.name)}
@@ -1861,6 +1910,8 @@
           {@const isPinned = pinnedCoreGroups.includes(group.name)}
           {@const isAutoCore = role === 'core' && !isPinned}
           {@const groupTypeKey = group.type.toLowerCase()}
+          {@const providerName = getGroupProviderName(group)}
+          {@const displayChain = getDisplayChain(group.name)}
           <div
             class="group-card"
             class:expanded={!isCollapsed}
@@ -1945,66 +1996,84 @@
                   {getGroupTypeLabel(group.type)}
                 </span>
 
-                {#if role === 'core' || role === 'service'}
-                  <button
-                    type="button"
-                    class="gc-pin-btn"
-                    data-stop-head-click
-                    aria-pressed={isPinned}
-                    title={isAutoCore
-                      ? $t('proxies.pin_auto_core')
-                      : isPinned
-                        ? $t('proxies.unpin_from_core')
-                        : $t('proxies.pin_to_core')}
-                    aria-label={isAutoCore
-                      ? $t('proxies.pin_auto_core')
-                      : isPinned
-                        ? $t('proxies.unpin_from_core')
-                        : $t('proxies.pin_to_core')}
-                    disabled={isAutoCore}
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      pinnedCoreGroups = togglePinnedCoreGroup(group.name);
-                    }}
-                  >
-                    <Pin size={13} />
-                  </button>
-                {/if}
+                <div class="gc-head-actions">
+                  {#if role === 'core' || role === 'service'}
+                    <button
+                      type="button"
+                      class="gc-pin-btn"
+                      data-stop-head-click
+                      aria-pressed={isPinned}
+                      title={isAutoCore
+                        ? $t('proxies.pin_auto_core')
+                        : isPinned
+                          ? $t('proxies.unpin_from_core')
+                          : $t('proxies.pin_to_core')}
+                      aria-label={isAutoCore
+                        ? $t('proxies.pin_auto_core')
+                        : isPinned
+                          ? $t('proxies.unpin_from_core')
+                          : $t('proxies.pin_to_core')}
+                      disabled={isAutoCore}
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        pinnedCoreGroups = togglePinnedCoreGroup(group.name);
+                      }}
+                    >
+                      <Pin size={13} />
+                    </button>
+                  {/if}
 
-                {#if isMini}
-                  <span class="gc-static-out" title={$t('proxies.static_output')}>{group.now}</span>
-                {:else if group.now}
-                  {@const latencyClass = getLatencyClass(group.now)}
-                  {@const latencyText = getLatencyText(group.now)}
-                  <div class="gc-lat-box {latencyClass}">{latencyText}</div>
-                {/if}
+                  {#if isMini}
+                    <span class="gc-static-out" title={$t('proxies.static_output')}
+                      >{group.now}</span
+                    >
+                  {:else if group.now}
+                    {@const latencyClass = getLatencyClass(group.now)}
+                    {@const latencyText = getLatencyText(group.now)}
+                    <div class="gc-lat-box {latencyClass}">{latencyText}</div>
+                  {/if}
 
-                {#if !isMini}
-                  <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
-                    <ChevronDown
-                      size={14}
-                      color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
-                    />
-                  </span>
-                {/if}
+                  {#if !isMini}
+                    <span class="chevron-wrap" class:rotated={!isCollapsed} aria-hidden="true">
+                      <ChevronDown
+                        size={14}
+                        color={isCollapsed ? 'var(--fg-dim)' : 'var(--accent)'}
+                      />
+                    </span>
+                  {/if}
+                </div>
               </div>
 
               {#if !isMini}
-                <div class="gc-head-row2">
+                <div
+                  class="gc-head-row2"
+                  title={displayChain.fullText ? displayChain.fullText : undefined}
+                >
                   <span class="gc-count-text"
                     >{group.all.length}
-                    {$t('proxies.nodes_label')}</span
+                    {$tp('proxies.nodes', group.all.length)}</span
                   >
+                  {#if providerName}
+                    <span class="gc-provider-badge" title={$t('proxies.from_provider')}>
+                      <svg
+                        width="10"
+                        height="10"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                      </svg>
+                      {providerName}
+                    </span>
+                  {/if}
                   <span class="gc-separator">·</span>
                   <span class="gc-active-label">{$t('proxies.active')}:</span>
 
-                  {#each getSelectionChain(group.name) as item, index}
+                  {#snippet chainPill(item: ChainItem)}
                     {@const itemFlag = !item.isGroup ? getCountryFlag(item.name) : null}
                     {@const itemLatencyText = getLatencyText(item.name)}
                     {@const itemLatencyClass = getLatencyClass(item.name)}
-                    {#if index > 0}
-                      <span class="gc-arrow">›</span>
-                    {/if}
                     <div
                       class="gc-now-pill"
                       class:is-leaf={!item.isGroup}
@@ -2012,9 +2081,8 @@
                       class:lat-mid={itemLatencyClass === 'lat mid'}
                       class:lat-bad={itemLatencyClass === 'lat bad'}
                       class:gc-now-pill-link={item.isGroup}
-                      role="button"
-                      tabindex={item.isGroup ? 0 : -1}
-                      aria-disabled={!item.isGroup}
+                      role={item.isGroup ? 'button' : undefined}
+                      tabindex={item.isGroup ? 0 : undefined}
                       title={item.isGroup ? $t('proxies.goto_parent_group') : undefined}
                       data-stop-head-click={item.isGroup ? '' : undefined}
                       onclick={item.isGroup
@@ -2043,9 +2111,24 @@
                       {#if itemFlag}{itemFlag}
                       {/if}{item.name}
                     </div>
+                  {/snippet}
+
+                  {#if displayChain.truncated}
+                    {@render chainPill(displayChain.items[0])}
+                    <span class="gc-arrow">›</span>
+                    <span class="gc-chain-ellipsis" title={displayChain.fullText}>…</span>
+                    <span class="gc-arrow">›</span>
+                    {@render chainPill(displayChain.items[1])}
+                  {:else if displayChain.items.length > 0}
+                    {#each displayChain.items as item, index}
+                      {#if index > 0}
+                        <span class="gc-arrow">›</span>
+                      {/if}
+                      {@render chainPill(item)}
+                    {/each}
                   {:else}
                     <span style="color:var(--fg-dim)">—</span>
-                  {/each}
+                  {/if}
                 </div>
               {/if}
             </div>
@@ -2149,12 +2232,15 @@
                 {@const filteredNodesList = getFilteredGroupNodes(group.name, nodes)}
                 <div class="proxy-grid">
                   {#each filteredNodesList as proxyName}
+                    {@const proxy = proxies[proxyName]}
+                    {@const isAlive = isProxyAlive(proxy)}
+                    {@const isDirectOrReject = ['DIRECT', 'REJECT'].includes(
+                      proxyName.toUpperCase()
+                    )}
                     {@const isActive = group.now === proxyName}
+                    {@const flag = getCountryFlag(proxyName)}
                     {@const healthClass = getLatencyClass(proxyName)}
                     {@const healthText = getLatencyText(proxyName)}
-                    {@const proxy = proxies[proxyName]}
-                    {@const flag = getCountryFlag(proxyName)}
-
                     <div class="proxy-card" class:now={isActive}>
                       <div
                         class="proxy-select-btn"
@@ -2174,9 +2260,11 @@
                         }}
                       >
                         <div class="p-header">
-                          <span class="p-name">
-                            {#if flag}{flag}
-                            {/if}{proxyName}
+                          <span class="p-name" title={proxyName}>
+                            {#if flag}
+                              <span class="flag-icon" aria-hidden="true">{flag}</span>
+                            {/if}
+                            {proxyName}
                           </span>
                           <span class="p-type">{getProxyTypeLabel(proxy)}</span>
                         </div>
@@ -2251,7 +2339,14 @@
         {/snippet}
 
         <section class="proxy-section proxy-section-core">
-          <h2 class="proxy-section-title">{$t('proxies.section_core')}</h2>
+          <h2 class="proxy-section-title">
+            {$t('proxies.section_core')}
+            <span class="proxy-section-count">
+              {groupSections.core.length}
+              {$tp('proxies.groups', groupSections.core.length)} ({coreNodesCount}
+              {$tp('proxies.nodes', coreNodesCount)})
+            </span>
+          </h2>
           <div class="group-grid core-grid">
             {#each groupSections.core as group (group.name)}
               {@render groupCard(group, 'core')}
@@ -2261,7 +2356,14 @@
 
         {#if groupSections.service.length > 0}
           <section class="proxy-section proxy-section-service">
-            <h2 class="proxy-section-title">{$t('proxies.section_service')}</h2>
+            <h2 class="proxy-section-title">
+              {$t('proxies.section_service')}
+              <span class="proxy-section-count">
+                {groupSections.service.length}
+                {$tp('proxies.groups', groupSections.service.length)} ({serviceNodesCount}
+                {$tp('proxies.nodes', serviceNodesCount)})
+              </span>
+            </h2>
             <div class="group-grid">
               {#each groupSections.service as group (group.name)}
                 {@render groupCard(group, 'service')}
@@ -2272,7 +2374,14 @@
 
         {#if groupSections.system.length > 0}
           <section class="proxy-section proxy-section-system">
-            <h2 class="proxy-section-title">{$t('proxies.section_system')}</h2>
+            <h2 class="proxy-section-title">
+              {$t('proxies.section_system')}
+              <span class="proxy-section-count">
+                {groupSections.system.length}
+                {$tp('proxies.groups', groupSections.system.length)} ({systemNodesCount}
+                {$tp('proxies.nodes', systemNodesCount)})
+              </span>
+            </h2>
             <div class="group-grid">
               {#each groupSections.system as group (group.name)}
                 {@render groupCard(group, 'system')}
@@ -2462,6 +2571,42 @@
     color: var(--fg-secondary);
     margin: 0 0 10px;
   }
+  .proxy-section-count {
+    margin-left: 8px;
+    font-weight: 500;
+    color: var(--fg-faint);
+    font-size: 12px;
+  }
+  .gc-provider-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 99px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    color: var(--fg-dim);
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .gc-chain-ellipsis {
+    color: var(--fg-faint);
+    cursor: help;
+    letter-spacing: 1px;
+  }
+  .search-empty-state {
+    padding: 32px 16px;
+    text-align: center;
+    color: var(--fg-dim);
+    font-size: 14px;
+    background: var(--bg-card);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-md);
+    margin-top: 8px;
+  }
   .core-grid .group-card {
     border-left: 3px solid var(--accent);
   }
@@ -2601,8 +2746,13 @@
     font-size: 15px;
     letter-spacing: -0.01em;
   }
-  .type-badge {
+  .gc-head-actions {
     margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .type-badge {
     display: inline-flex;
     align-items: center;
     gap: 4px;

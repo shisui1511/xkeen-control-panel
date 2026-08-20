@@ -248,6 +248,24 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
             }
           })
         });
+      } else if (url.includes('/api/mihomo/proxy/providers/proxies')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            providers: {
+              MySubscription: {
+                name: 'MySubscription',
+                proxies: [
+                  { name: 'fast-01' },
+                  { name: 'fast-02' },
+                  { name: 'fast-03' },
+                  { name: 'fast-04' }
+                ]
+              }
+            }
+          })
+        });
       } else if (url.includes('/api/mihomo/proxy/proxies') && !url.includes('/delay')) {
         // Возвращаем фикстуру с группами
         await route.fulfill({
@@ -369,8 +387,8 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
 
   // D-11/D-12: Поиск по имени группы — фильтрация и скрытие несовпавших
   test('D-11/D-12: поиск по имени группы скрывает несовпадающие группы', async ({ page }) => {
-    // 2 исходные группы (LargeGroup/SmallGroup) + 4 core-routing фикстуры
-    // (GLOBAL, Заблок. сервисы, YouTube, QUIC) добавленные для core routing тестов
+    // 2 исходные группы (LargeGroup/SmallGroup) + 4 core-routing/service фикстуры
+    // (GLOBAL, Заблок. сервисы, YouTube, QUIC)
     const allCards = page.locator('.group-card');
     await expect(allCards).toHaveCount(6);
 
@@ -448,5 +466,54 @@ test.describe('Proxies layout (Phase 9.2) — D-03, D-05, D-07, D-08, D-11/D-12'
     await expect(quicCard).toHaveClass(/gc-mini/);
     await expect(quicCard).toHaveClass(/out-reject/);
     await expect(quicCard.locator('.proxy-grid')).toHaveCount(0);
+  });
+
+  // D-07: поиск фильтрует обе секции и показывает счётчики
+  test('view sections: поиск фильтрует обе секции и показывает счётчики', async ({ page }) => {
+    const searchInput = page.locator('input.group-search');
+    await searchInput.fill('YouTube');
+    await page.waitForTimeout(300);
+
+    await expect(page.locator('.proxy-section-service [data-group="YouTube"]')).toBeVisible();
+    await expect(page.locator('.proxy-section-service [data-group="Telegram"]')).toHaveCount(0);
+    const serviceCount = page.locator('.proxy-section-service .proxy-section-count');
+    await expect(serviceCount).toContainText(/1\s+группа/);
+  });
+
+  // D-07: пустой результат поиска показывает одно сообщение
+  test('view sections: пустой результат поиска показывает одно сообщение', async ({ page }) => {
+    const searchInput = page.locator('input.group-search');
+    await searchInput.fill('zzzz-not-found');
+    await page.waitForTimeout(300);
+
+    const emptyState = page.locator('.search-empty-state');
+    await expect(emptyState).toBeVisible();
+    await expect(emptyState).toContainText('По запросу ничего не найдено');
+    await expect(page.locator('.group-card')).toHaveCount(0);
+  });
+
+  // D-02: длинная цепочка маршрута сокращается с тултипом
+  test('view sections: длинная цепочка маршрута сокращается', async ({ page }) => {
+    const globalCard = page.locator('[data-group="GLOBAL"]');
+    await expect(globalCard).toBeVisible();
+    const ellipsis = globalCard.locator('.gc-chain-ellipsis');
+    await expect(ellipsis).toBeVisible();
+    await expect(ellipsis).toHaveAttribute('title', 'YouTube › Заблок. сервисы › sp');
+
+    const chip = globalCard.locator('.gc-now-pill-link').first();
+    await expect(chip).toBeVisible();
+    const gcHead = globalCard.locator('.gc-head').first();
+    const beforeClick = await gcHead.getAttribute('aria-expanded');
+    await chip.click();
+    expect(await gcHead.getAttribute('aria-expanded')).toBe(beforeClick);
+  });
+
+  // D-07: микро-бейдж провайдера виден для группы из подписки
+  test('view sections: микро-бейдж провайдера виден для группы из подписки', async ({ page }) => {
+    const smallCard = page.locator('[data-group="SmallGroup"]');
+    await expect(smallCard).toBeVisible();
+    const badge = smallCard.locator('.gc-provider-badge');
+    await expect(badge).toBeVisible();
+    await expect(badge).toContainText('MySubscription');
   });
 });

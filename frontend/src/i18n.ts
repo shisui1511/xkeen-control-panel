@@ -140,6 +140,14 @@ export const t = derived([currentLang, translationsStore], ([$lang, $translation
   };
 });
 
+// Derived store for pluralized translations
+export const tp = derived([currentLang, t], ([$lang, $t]) => {
+  return (baseKey: string, n: number, params?: Record<string, string | number>): string => {
+    const suffix = pluralize(n, '_one', '_few', '_many', $lang);
+    return $t(baseKey + suffix, { count: n, ...(params ?? {}) });
+  };
+});
+
 /**
  * Хелпер для выбора правильной формы числительного.
  * По умолчанию применяет правила русского языка (CLDR Russian rules).

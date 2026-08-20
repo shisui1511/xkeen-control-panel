@@ -87,3 +87,46 @@ describe('pluralize() — английские правила склонения
     expect(pluralize(21, ONE, '', MANY, 'en')).toBe(MANY);
   });
 });
+
+import { get } from 'svelte/store';
+import { tp, loadLanguage, setLang, currentLang } from './i18n';
+
+describe('tp() store — склоняемые подписи', () => {
+  it('русские формы для proxies.nodes и proxies.groups', async () => {
+    await loadLanguage('ru');
+    currentLang.set('ru');
+    const tpFn = get(tp);
+
+    expect(tpFn('proxies.nodes', 1)).toBe('узел');
+    expect(tpFn('proxies.nodes', 2)).toBe('узла');
+    expect(tpFn('proxies.nodes', 3)).toBe('узла');
+    expect(tpFn('proxies.nodes', 4)).toBe('узла');
+    expect(tpFn('proxies.nodes', 5)).toBe('узлов');
+    expect(tpFn('proxies.nodes', 0)).toBe('узлов');
+    expect(tpFn('proxies.nodes', 11)).toBe('узлов');
+    expect(tpFn('proxies.nodes', 12)).toBe('узлов');
+    expect(tpFn('proxies.nodes', 14)).toBe('узлов');
+    expect(tpFn('proxies.nodes', 21)).toBe('узел');
+    expect(tpFn('proxies.nodes', 22)).toBe('узла');
+    expect(tpFn('proxies.nodes', 43)).toBe('узла');
+    expect(tpFn('proxies.nodes', 45)).toBe('узлов');
+    expect(tpFn('proxies.nodes', 38)).toBe('узлов');
+
+    expect(tpFn('proxies.groups', 1)).toBe('группа');
+    expect(tpFn('proxies.groups', 3)).toBe('группы');
+    expect(tpFn('proxies.groups', 17)).toBe('групп');
+
+    expect(() => tpFn('proxies.nodes', 5, { extra: 'x' })).not.toThrow();
+  });
+
+  it('английские формы при currentLang === en', async () => {
+    await loadLanguage('en');
+    currentLang.set('en');
+    const tpFn = get(tp);
+
+    expect(tpFn('proxies.nodes', 1)).toBe('node');
+    expect(tpFn('proxies.nodes', 5)).toBe('nodes');
+    expect(tpFn('proxies.groups', 1)).toBe('group');
+    expect(tpFn('proxies.groups', 5)).toBe('groups');
+  });
+});
