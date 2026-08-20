@@ -62,12 +62,12 @@
             $t('dash.qa_latency_test_success', { delay: String(delayVal || '—') })
           );
         } else {
-          showToast('info', 'Тест задержки выполнен (проверьте вкладку Узлы)');
+          showToast('error', $t('dash.qa_latency_test_err'));
         }
       }
     } catch (e: any) {
       if (e?.status === 401) return;
-      showToast('error', e?.message || 'Ошибка тестирования задержки');
+      showToast('error', e?.message || $t('dash.qa_latency_test_err'));
     } finally {
       isTestingLatency = false;
     }
@@ -115,11 +115,11 @@
         window.location.href = `/api/snapshots/${meta.id}/download`;
         showToast('success', $t('dash.qa_backup_success'));
       } else {
-        showToast('error', 'Не удалось получить ID созданного снимка');
+        showToast('error', $t('dash.qa_backup_err_id'));
       }
     } catch (e: any) {
       if (e?.status === 401) return;
-      showToast('error', e?.message || 'Ошибка создания резервной копии');
+      showToast('error', e?.message || $t('dash.qa_backup_err'));
     } finally {
       isCreatingBackup = false;
     }

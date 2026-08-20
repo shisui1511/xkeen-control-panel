@@ -108,8 +108,8 @@
         <div class="name-row">
           <span class="service-name">{name}</span>
           {#if isActiveKernel}
-            <span class="badge badge-active" title="Активное ядро маршрутизации">
-              {$t('svc.active_kernel_badge') || 'Активно'}
+            <span class="badge badge-active" title={$t('svc.active_kernel_label')}>
+              {$t('svc.active_kernel_badge')}
             </span>
           {/if}
           {#if version && !isNotInstalled}

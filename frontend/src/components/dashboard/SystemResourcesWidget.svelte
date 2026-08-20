@@ -99,7 +99,7 @@
             </div>
             <div class="stat-value">
               {formatBytes(systemStats.disk.free)}
-              <span class="stat-unit">{$t('dash.disk_free', { free: '' }).trim()}</span>
+              <span class="stat-unit">{$t('dash.free_suffix')}</span>
             </div>
             <div class="res-sub">
               {$t('dash.disk_of_total_pct', {
@@ -211,10 +211,6 @@
           {#if systemStats.boot_time}
             <div class="res-sub">
               {$t('dash.uptime_since', { time: systemStats.boot_time })}
-            </div>
-          {:else}
-            <div class="res-sub">
-              {$t('dash.uptime_stable')}
             </div>
           {/if}
           <div class="uptime-badge-row">

@@ -128,7 +128,7 @@
           </span>
         </div>
         <div class="diag-item">
-          <span class="diag-label">{$t('dash.uptime_since', { time: '' }).replace('с ', '')}</span>
+          <span class="diag-label">{$t('dash.info_boot_time')}</span>
           <span class="diag-val mono">{systemStats?.boot_time || '—'}</span>
         </div>
       </div>

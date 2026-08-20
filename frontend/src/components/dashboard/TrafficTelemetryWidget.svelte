@@ -32,7 +32,7 @@
 </script>
 
 <div class="traffic-telemetry-widget">
-  <Card title={$t('nav.traffic') || 'Телеметрия трафика'}>
+  <Card title={$t('nav.traffic')}>
     {#snippet actions()}
       <div class="telemetry-status">
         <span class="live-dot" class:live-dot-active={traffic.connected} aria-hidden="true"></span>
@@ -46,19 +46,19 @@
         type="button"
         class="telemetry-box"
         onclick={handleTrafficClick}
-        title="Перейти к графикам трафика"
+        title={$t('traffic.goto_charts')}
       >
         <div class="box-head">
           <span class="ico-badge down-badge">
             <Icon name="arrow-down" size={14} color="var(--accent, #29c2f0)" />
           </span>
-          <span class="box-label">{$t('traffic.download') || 'Загрузка'}</span>
+          <span class="box-label">{$t('traffic.download')}</span>
         </div>
         <div class="box-value tabular-nums">
           {formattedDown}
         </div>
         <div class="box-sub">
-          {traffic.connected ? '↓ Входящий поток' : 'Ожидание потока...'}
+          {traffic.connected ? $t('traffic.inbound_flow') : $t('traffic.waiting_flow')}
         </div>
       </button>
 
@@ -67,19 +67,19 @@
         type="button"
         class="telemetry-box"
         onclick={handleTrafficClick}
-        title="Перейти к графикам трафика"
+        title={$t('traffic.goto_charts')}
       >
         <div class="box-head">
           <span class="ico-badge up-badge">
             <Icon name="upload" size={14} color="var(--success, #46d18a)" />
           </span>
-          <span class="box-label">{$t('traffic.upload') || 'Отдача'}</span>
+          <span class="box-label">{$t('traffic.upload')}</span>
         </div>
         <div class="box-value tabular-nums">
           {formattedUp}
         </div>
         <div class="box-sub">
-          {traffic.connected ? '↑ Исходящий поток' : 'Ожидание потока...'}
+          {traffic.connected ? $t('traffic.outbound_flow') : $t('traffic.waiting_flow')}
         </div>
       </button>
 
@@ -88,7 +88,7 @@
         type="button"
         class="telemetry-box"
         onclick={handleConnectionsClick}
-        title="Перейти к списку активных сессий"
+        title={$t('traffic.goto_sessions')}
       >
         <div class="box-head">
           <span class="ico-badge conn-badge">
