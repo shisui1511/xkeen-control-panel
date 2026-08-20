@@ -25,6 +25,9 @@
   import ServiceStatusGroup from './components/dashboard/ServiceStatusGroup.svelte';
   import SystemResourcesWidget from './components/dashboard/SystemResourcesWidget.svelte';
   import TrafficTelemetryWidget from './components/dashboard/TrafficTelemetryWidget.svelte';
+  import QuickActionsWidget from './components/dashboard/QuickActionsWidget.svelte';
+  import SystemInfoWidget from './components/dashboard/SystemInfoWidget.svelte';
+  import SystemAboutModal from './components/dashboard/SystemAboutModal.svelte';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import UnsavedChangesModal from './components/UnsavedChangesModal.svelte';
   import SystemStatusCapsule from './components/status/SystemStatusCapsule.svelte';
@@ -40,6 +43,7 @@
   let panelVersion = $state($t('app.loading'));
   let loading = $state(false);
   let showMihomoMigrateModal = $state(false);
+  let showAboutModal = $state(false);
   let showUnsavedModal = $state(false);
   let pendingTargetTab = $state<string | null>(null);
   let pendingTargetHash = $state<string | null>(null);
@@ -1128,151 +1132,50 @@
           {/if}
 
           <!-- Live Service Status cards (DASH-03) -->
-          <div style="margin-bottom: 18px;">
-            <ServiceStatusGroup
-              {serviceStatus}
-              capabilities={$capabilities}
-              {statusLoading}
-              {statusError}
-              onRefresh={fetchLiveStatus}
-              onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
-            />
-          </div>
+          <!-- Dashboard 60/40 Layout Grid (DASH-01) -->
+          <div class="dashboard-layout-grid">
+            <!-- Left Column (60%): Service Status, System Resources, Traffic Telemetry -->
+            <div class="dash-col-left">
+              <!-- Service Status Group (DASH-03) -->
+              <div class="dash-section">
+                <ServiceStatusGroup
+                  {serviceStatus}
+                  capabilities={$capabilities}
+                  {statusLoading}
+                  {statusError}
+                  onRefresh={fetchLiveStatus}
+                  onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
+                />
+              </div>
 
-          <!-- Dashboard Grid for secondary widgets (GRID-01) -->
-          <div class="dashboard-grid">
-            <!-- System Resources (DASH-01, DASH-04) -->
-            <div class="dash-card-wrapper">
-              <SystemResourcesWidget {systemStats} {loadHistory} {sparklineData} />
+              <!-- System Resources (DASH-01, DASH-04) -->
+              <div class="dash-section">
+                <SystemResourcesWidget {systemStats} {loadHistory} {sparklineData} />
+              </div>
+
+              <!-- Traffic & Network Telemetry (DASH-01) -->
+              <div class="dash-section">
+                <TrafficTelemetryWidget onSwitchTab={switchTab} />
+              </div>
             </div>
 
-            <!-- Traffic & Network Telemetry (DASH-01) -->
-            <div class="dash-card-wrapper">
-              <TrafficTelemetryWidget onSwitchTab={switchTab} />
-            </div>
+            <!-- Right Column (40%): Quick Actions, System Info -->
+            <div class="dash-col-right">
+              <!-- Quick Actions (DASH-02) -->
+              <div class="dash-section">
+                <QuickActionsWidget onSwitchTab={switchTab} />
+              </div>
 
-            <!-- System Info -->
-            <div class="dash-card-wrapper">
-              <Card title={$t('dash.system_info')}>
-                <div class="info-rows">
-                  <div class="info-row">
-                    <div class="lbl">{$t('dash.info_version')}</div>
-                    <div class="val">{version}</div>
-                  </div>
-                  <div class="info-row">
-                    <div class="lbl">{$t('dash.info_version_panel')}</div>
-                    <div class="val">{panelVersion}</div>
-                  </div>
-                  <div class="info-row">
-                    <div class="lbl">{$t('dash.info_platform')}</div>
-                    <div class="val">{systemStats?.platform || '—'}</div>
-                  </div>
-                  <div class="info-row">
-                    <div class="lbl">{$t('dash.info_kernel')}</div>
-                    <div class="val">{systemStats?.kernel_version || '—'}</div>
-                  </div>
-                  <div class="info-row">
-                    <div class="lbl">{$t('dash.info_host')}</div>
-                    <div class="val">{systemStats?.hostname || '—'}</div>
-                  </div>
-                  <div class="info-row">
-                    <div class="lbl">{$t('dash.info_ip')}</div>
-                    <div class="val">{systemStats?.ip_interface || '—'}</div>
-                  </div>
-                  <div class="info-row">
-                    <div class="lbl">{$t('dash.info_timezone')}</div>
-                    <div class="val">{systemStats?.timezone || '—'}</div>
-                  </div>
-                  <div class="info-row">
-                    <div class="lbl">{$t('dash.info_config')}</div>
-                    <div class="val">
-                      {systemStats?.config_path || '/opt/etc/xkeen/'}
-                      {#if systemStats?.config_lines}
-                        <span class="info-badge info-badge-orange"
-                          >{pluralize(
-                            systemStats.config_lines,
-                            $t('dash.info_lines_one', { count: String(systemStats.config_lines) }),
-                            $t('dash.info_lines_few', { count: String(systemStats.config_lines) }),
-                            $t('dash.info_lines_many', { count: String(systemStats.config_lines) }),
-                            $currentLang
-                          )}</span
-                        >
-                      {/if}
-                    </div>
-                  </div>
-                  <div class="info-row">
-                    <div class="lbl">{$t('dash.info_updated')}</div>
-                    <div class="val">{statsLastFetched || '—'}</div>
-                  </div>
-                </div>
-              </Card>
-            </div>
-
-            <!-- Quick Actions -->
-            <div class="dash-card-wrapper">
-              <Card title={$t('dash.quick_actions')}>
-                <div class="qa-grid-mini">
-                  <button type="button" class="qa-mini" onclick={() => switchTab('proxies')}>
-                    <span class="qa-mini-ico"><Icon name="proxies" size={18} /></span>
-                    <span
-                      ><b>{$t('nav.proxies')}</b><span class="s"
-                        >{totalProxiesCount > 0
-                          ? $t('dash.proxies_summary', {
-                              total: totalProxiesCount,
-                              active: activeProxiesCount
-                            })
-                          : subscriptionProxiesCount > 0
-                            ? $t('dash.proxies_from_subs', { count: subscriptionProxiesCount })
-                            : $t('dash.proxies_placeholder')}</span
-                      ></span
-                    >
-                  </button>
-                  <button
-                    type="button"
-                    class="qa-mini"
-                    onclick={() => {
-                      switchTab('proxies');
-                      window.location.hash = '#/proxies?tab=providers';
-                    }}
-                  >
-                    <span class="qa-mini-ico"><Icon name="subscriptions" size={18} /></span>
-                    <span
-                      ><b>{$t('nav.subscriptions')}</b><span class="s"
-                        >{totalSubsCount > 0
-                          ? `${totalSubsCount} ${pluralize(totalSubsCount, $t('dash.source_one'), $t('dash.source_few'), $t('dash.source_many'), $currentLang)}${subsLastUpdated ? ' · ' + subsLastUpdated : ''}`
-                          : $t('dash.subs_empty')}</span
-                      ></span
-                    >
-                  </button>
-                  <button type="button" class="qa-mini" onclick={() => switchTab('editor')}>
-                    <span class="qa-mini-ico"><Icon name="editor" size={18} /></span>
-                    <span
-                      ><b>{$t('nav.editor')}</b><span class="s">{$t('dash.editor_subtitle')}</span
-                      ></span
-                    >
-                  </button>
-                  <button type="button" class="qa-mini" onclick={() => switchTab('logs')}>
-                    <span class="qa-mini-ico"><Icon name="logs" size={18} /></span>
-                    <span
-                      ><b>{$t('nav.logs')}</b><span class="s">{$t('dash.logs_subtitle')}</span
-                      ></span
-                    >
-                  </button>
-                  <button type="button" class="qa-mini" onclick={() => switchTab('dat')}>
-                    <span class="qa-mini-ico"><Icon name="dat" size={18} /></span>
-                    <span
-                      ><b>{$t('nav.dat')}</b><span class="s">{$t('dash.dat_subtitle')}</span></span
-                    >
-                  </button>
-                  <button type="button" class="qa-mini" onclick={() => switchTab('console')}>
-                    <span class="qa-mini-ico"><Icon name="console" size={18} /></span>
-                    <span
-                      ><b>{$t('nav.console')}</b><span class="s">{$t('dash.console_subtitle')}</span
-                      ></span
-                    >
-                  </button>
-                </div>
-              </Card>
+              <!-- System Info (DASH-04, D-08) -->
+              <div class="dash-section">
+                <SystemInfoWidget
+                  {systemStats}
+                  {version}
+                  {panelVersion}
+                  {statsLastFetched}
+                  onOpenAbout={() => (showAboutModal = true)}
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -1537,147 +1440,40 @@
   onLeaveWithoutSaving={handleLeaveWithoutSaving}
   onStay={handleStay}
 />
+<SystemAboutModal
+  isOpen={showAboutModal}
+  onClose={() => (showAboutModal = false)}
+  {systemStats}
+  {panelVersion}
+/>
 
 <style>
-  .dashboard-grid {
+  /* Dashboard 60/40 Layout Grid (DASH-01) */
+  .dashboard-layout-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
-    gap: var(--grid-gap, 16px);
-    margin-top: 18px;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    gap: var(--space-lg, 24px);
     align-items: start;
   }
 
-  .dash-card-wrapper {
-    min-width: 0;
-    width: 100%;
-  }
-
-  /* Quick actions grid */
-  .qa-grid-mini {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
-    gap: var(--grid-gap, 12px);
-  }
-
-  .qa-mini {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    padding: 14px;
-    border: 1px solid var(--border);
-    background: var(--bg-elevated);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all 0.15s;
-    text-decoration: none;
-    color: inherit;
-    width: 100%;
-    font: inherit;
-    text-align: left;
-  }
-
-  .qa-mini:hover {
-    border-color: var(--accent-line);
-    transform: translateY(-1px);
-    box-shadow: 0 14px 28px -18px rgba(41, 194, 240, 0.45);
-  }
-
-  .qa-mini-ico {
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    display: grid;
-    place-items: center;
-    background: var(--accent-soft);
-    color: var(--accent);
-    border: 1px solid var(--accent-line);
-    flex: 0 0 36px;
-  }
-
-  .qa-mini b {
-    color: var(--fg-primary);
-    font-weight: 700;
-    font-size: 13.5px;
-    display: block;
-  }
-
-  .qa-mini .s {
-    color: var(--fg-dim);
-    font-size: 11.5px;
-    display: block;
-    margin-top: 2px;
-  }
-
-  /* Info rows */
-  .info-rows {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
-    margin: -18px calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad));
-    border-top: 1px solid var(--border);
-  }
-
-  :global([data-density='compact']) .info-rows {
-    margin-top: -12px;
-  }
-
-  .info-row {
-    display: flex;
-    gap: 14px;
-    align-items: center;
-    padding: 13px 20px;
-    border-bottom: 1px solid var(--border);
-    border-right: 1px solid var(--border);
-  }
-
-  .info-row:nth-child(2n) {
-    border-right: 0;
-  }
-  .info-row:nth-last-child(-n + 2) {
-    border-bottom: 0;
-  }
-
-  .info-row .lbl {
-    color: var(--fg-secondary);
-    font-size: 12.5px;
-    min-width: 130px;
-  }
-
-  .info-row .val {
-    color: var(--fg-primary);
-    font-family: var(--font-family-mono);
-    font-size: 13px;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-    min-width: 0;
-  }
-
-  @media (max-width: 768px) {
-    .info-rows {
+  @media (max-width: 1024px) {
+    .dashboard-layout-grid {
       grid-template-columns: 1fr;
+      gap: 18px;
     }
+  }
 
-    .info-row {
-      border-right: 0 !important;
-      padding: 10px 14px;
-      gap: 10px;
-    }
+  .dash-col-left,
+  .dash-col-right {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    min-width: 0;
+  }
 
-    .info-row:nth-last-child(-n + 2) {
-      border-bottom: 1px solid var(--border);
-    }
-
-    .info-row:last-child {
-      border-bottom: 0;
-    }
-
-    .info-row .lbl {
-      min-width: 110px;
-      font-size: 12px;
-    }
-
-    .info-row .val {
-      font-size: 12px;
-    }
+  .dash-section {
+    width: 100%;
+    min-width: 0;
   }
 
   /* Page header — title left, buttons top-right */
@@ -1712,26 +1508,6 @@
     align-items: center;
     flex-shrink: 0;
     padding-top: 4px;
-  }
-
-  /* Info badges inside info-row — match reference .pill */
-  .info-badge {
-    display: inline-block;
-    font-size: 10.5px;
-    font-weight: 600;
-    padding: 1px 7px;
-    border-radius: 3px;
-    margin-left: 6px;
-    vertical-align: middle;
-    font-family: var(--font-family-mono);
-    letter-spacing: 0.02em;
-  }
-
-  /* config lines badge — warning/orange */
-  .info-badge-orange {
-    background: rgba(255, 138, 0, 0.1);
-    color: var(--warning, #f59e0b);
-    border: 1px solid rgba(255, 138, 0, 0.2);
   }
 
   /* Quickstart checklist card */
