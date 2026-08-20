@@ -797,7 +797,7 @@
     inert={drawerIsModal}
   >
     <!-- Mihomo offline warning banner / Restarting notice -->
-    {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities.mihomo.reachable}
+    {#if mihomoDependentTabs.includes(currentTab) && $capabilities !== null && !$capabilities?.mihomo?.reachable}
       {#if $isServiceRestarting}
         <div
           class="service-restarting-banner"
@@ -809,7 +809,7 @@
       {:else}
         <div style="margin: 12px 16px 0;">
           <ApiOffline
-            endpoint={$capabilities.mihomo.discovered_secret ? 'Mihomo API' : '127.0.0.1:9090'}
+            endpoint={$capabilities?.mihomo?.discovered_secret ? 'Mihomo API' : '127.0.0.1:9090'}
             lastSeenSeconds={0}
             onRetry={fetchCapabilities}
           />
@@ -842,13 +842,7 @@
                 {$t('app.refresh')}
               </Button>
               <Button variant="primary" onclick={restartXkeen} title={$t('dash.restart_xkeen')}>
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                  aria-hidden="true"><path d="M13 2 4 14h7l-1 8 10-13h-7z" /></svg
-                >
+                <Icon name="refresh" size={14} />
                 {$t('dash.restart_xkeen')}
               </Button>
             </div>
@@ -994,7 +988,7 @@
           {/if}
 
           <!-- Problems Panel (conditional) -->
-          {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running) || ($capabilities !== null && !$capabilities.kernels?.xray?.installed && !$capabilities.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring}
+          {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring}
             <div style="margin-bottom: 18px;">
               <Card title={$t('dash.problems_panel')}>
                 <div class="problems-list">
@@ -1073,7 +1067,7 @@
                       </Button>
                     </div>
                   {/if}
-                  {#if $capabilities !== null && !$capabilities.mihomo.api_reachable && $capabilities.mihomo.process_running}
+                  {#if $capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running}
                     <div class="problem-item alert-warning">
                       <div class="problem-content">
                         <span class="problem-icon"><Icon name="warning" size={16} /></span>
@@ -1094,7 +1088,7 @@
                       </Button>
                     </div>
                   {/if}
-                  {#if $capabilities !== null && !$capabilities.kernels.xray.installed && !$capabilities.kernels.mihomo.installed}
+                  {#if $capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed}
                     <div class="problem-item alert-error">
                       <div class="problem-content">
                         <span class="problem-icon"><Icon name="warning" size={16} /></span>
@@ -1110,7 +1104,7 @@
                       </Button>
                     </div>
                   {/if}
-                  {#if $capabilities !== null && $capabilities.mihomo?.is_insecure_lan}
+                  {#if $capabilities !== null && $capabilities?.mihomo?.is_insecure_lan}
                     <div class="problem-item alert-warning">
                       <div class="problem-content">
                         <span class="problem-icon"><Icon name="warning" size={16} /></span>

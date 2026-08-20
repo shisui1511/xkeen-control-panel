@@ -22,7 +22,7 @@
 
 <Modal
   {isOpen}
-  title={$t('dash.system_about_title') || 'О системе и диагностика'}
+  title={$t('dash.system_about_title')}
   maxWidth="640px"
   onclose={onClose}
   dataTestid="system-about-modal"
@@ -136,7 +136,7 @@
 
     <div class="modal-actions-footer">
       <Button variant="secondary" onclick={onClose}>
-        {$t('app.close') || 'Закрыть'}
+        {$t('app.close')}
       </Button>
     </div>
   </div>

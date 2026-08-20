@@ -29,46 +29,52 @@
     <div class="info-rows">
       <div class="info-row">
         <div class="lbl">{$t('dash.info_version')}</div>
-        <div class="val mono">{version}</div>
+        <div class="val mono" title={version}>{version}</div>
       </div>
 
       <div class="info-row">
         <div class="lbl">{$t('dash.info_version_panel')}</div>
-        <div class="val mono">{panelVersion}</div>
+        <div class="val mono" title={panelVersion}>{panelVersion}</div>
       </div>
 
       <div class="info-row">
         <div class="lbl">{$t('dash.info_platform')}</div>
-        <div class="val">{systemStats?.platform || '—'}</div>
+        <div class="val" title={systemStats?.platform || '—'}>{systemStats?.platform || '—'}</div>
       </div>
 
       <div class="info-row">
         <div class="lbl">{$t('dash.info_kernel')}</div>
-        <div class="val mono">{systemStats?.kernel_version || '—'}</div>
+        <div class="val mono" title={systemStats?.kernel_version || '—'}>
+          {systemStats?.kernel_version || '—'}
+        </div>
       </div>
 
       <div class="info-row">
         <div class="lbl">{$t('dash.info_host')}</div>
-        <div class="val">{systemStats?.hostname || '—'}</div>
+        <div class="val" title={systemStats?.hostname || '—'}>{systemStats?.hostname || '—'}</div>
       </div>
 
       <div class="info-row">
         <div class="lbl">{$t('dash.info_ip')}</div>
-        <div class="val mono">{systemStats?.ip_interface || '—'}</div>
+        <div class="val mono" title={systemStats?.ip_interface || '—'}>
+          {systemStats?.ip_interface || '—'}
+        </div>
       </div>
 
       <div class="info-row">
         <div class="lbl">{$t('dash.info_timezone')}</div>
-        <div class="val">{systemStats?.timezone || '—'}</div>
+        <div class="val" title={systemStats?.timezone || '—'}>{systemStats?.timezone || '—'}</div>
       </div>
 
       <div class="info-row">
         <div class="lbl">{$t('dash.info_config')}</div>
         <div class="val config-val">
-          <span class="config-path mono">{systemStats?.config_path || '/opt/etc/xkeen/'}</span>
+          <span class="config-path mono" title={systemStats?.config_path || '/opt/etc/xkeen/'}>
+            {systemStats?.config_path || '/opt/etc/xkeen/'}
+          </span>
           {#if systemStats?.config_lines}
             <!-- D-08: Soft muted line count badge instead of aggressive orange -->
-            <span class="info-badge info-badge-muted">
+            <span class="info-badge info-badge-muted" title="{systemStats.config_lines} lines">
               {pluralize(
                 systemStats.config_lines,
                 $t('dash.info_lines_one', { count: String(systemStats.config_lines) }),
@@ -83,7 +89,9 @@
 
       <div class="info-row">
         <div class="lbl">{$t('dash.info_updated')}</div>
-        <div class="val text-muted">{statsLastFetched || '—'}</div>
+        <div class="val text-muted" title={statsLastFetched || '—'}>
+          {statsLastFetched || '—'}
+        </div>
       </div>
     </div>
   </Card>

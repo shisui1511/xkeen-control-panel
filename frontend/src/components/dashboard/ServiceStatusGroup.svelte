@@ -45,7 +45,7 @@
 
   async function restartXkeen() {
     activateRestartGrace(6000);
-    showToast('info', $t('capsule.toast_restarting_xkeen') || 'Перезапуск XKeen...');
+    showToast('info', $t('capsule.toast_restarting_xkeen'));
     try {
       const res = await apiFetch('/api/service/control?action=restart', { method: 'POST' });
       if (!res.ok) {
@@ -173,7 +173,7 @@
   {#if statusLoading}
     <div class="services-grid">
       {#each [1, 2, 3] as _}
-        <div class="skeleton-card">
+        <div class="service-sk-card">
           <div class="sk-head">
             <Skeleton type="circle" width="10px" height="10px" />
             <Skeleton type="rect" width="100px" height="18px" />
@@ -266,7 +266,7 @@
     }
   }
 
-  .skeleton-card {
+  .service-sk-card {
     background: var(--bg-card, #102a44);
     border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
     border-radius: var(--radius-lg, 12px);

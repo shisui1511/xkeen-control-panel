@@ -243,9 +243,11 @@
     padding: 12px;
     text-align: left;
     cursor: pointer;
+    min-height: 64px;
     transition:
       background 0.15s ease,
       border-color 0.15s ease,
+      box-shadow 0.15s ease,
       transform 0.12s ease;
     width: 100%;
     color: inherit;
@@ -255,6 +257,7 @@
   .qa-btn:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.04);
     border-color: rgba(41, 194, 240, 0.3);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
     transform: translateY(-1px);
   }
 
@@ -270,6 +273,7 @@
   .qa-btn-destructive:hover:not(:disabled) {
     border-color: rgba(244, 112, 127, 0.4);
     background: rgba(244, 112, 127, 0.04);
+    box-shadow: 0 2px 10px rgba(244, 112, 127, 0.1);
   }
 
   .qa-icon-wrap {

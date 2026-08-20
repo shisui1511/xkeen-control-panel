@@ -99,7 +99,10 @@
         <div class="box-value tabular-nums">
           {traffic.connections}
         </div>
-        <div class="box-sub">
+        <div
+          class="box-sub tabular-nums"
+          title="TCP {traffic.tcp_connections} · UDP {traffic.udp_connections}"
+        >
           TCP {traffic.tcp_connections} · UDP {traffic.udp_connections}
         </div>
       </button>
@@ -164,6 +167,8 @@
     padding: 14px;
     display: flex;
     flex-direction: column;
+    justify-content: space-between;
+    min-height: 104px;
     gap: 6px;
     text-align: left;
     cursor: pointer;

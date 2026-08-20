@@ -117,7 +117,7 @@
           {/if}
         </div>
         {#if subLabel}
-          <span class="sub-label">{subLabel}</span>
+          <span class="sub-label" title={subLabel}>{subLabel}</span>
         {/if}
       </div>
     </div>
@@ -192,6 +192,7 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    min-height: 132px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 70%), var(--bg-card, #102a44);
     border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
@@ -232,13 +233,15 @@
     align-items: flex-start;
     gap: 10px;
     min-width: 0;
+    flex: 1;
   }
 
   .title-group {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
     min-width: 0;
+    flex: 1;
   }
 
   .name-row {
@@ -256,12 +259,13 @@
   }
 
   .sub-label {
-    font-size: 12px;
+    font-size: 11.5px;
     font-weight: 400;
     color: var(--fg-muted, var(--fg-secondary, #8fa3b8));
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    line-height: 1.3;
   }
 
   .header-right {
@@ -370,6 +374,7 @@
     justify-content: flex-end;
     padding-top: 10px;
     border-top: 1px solid rgba(255, 255, 255, 0.05);
+    min-height: 42px;
   }
 
   .btn-group {
@@ -384,5 +389,8 @@
     width: 100%;
     justify-content: center;
     text-align: center;
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
   }
 </style>

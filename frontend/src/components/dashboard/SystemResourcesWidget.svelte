@@ -93,127 +93,158 @@
         <!-- Storage (Disk) -->
         {#if systemStats.disk}
           <div class="stat-box">
-            <div class="stat-head">
-              <span class="stat-label">{$t('dash.disk')}</span>
-              <span class="stat-pct" style="color: {diskBarColor};">{diskUsedPct.toFixed(1)}%</span>
-            </div>
-            <div class="stat-value">
-              {formatBytes(systemStats.disk.free)}
-              <span class="stat-unit">{$t('dash.free_suffix')}</span>
-            </div>
-            <div class="res-sub">
-              {$t('dash.disk_of_total_pct', {
-                total: formatBytes(systemStats.disk.total),
-                pct: diskUsedPct.toFixed(1)
-              })}
-            </div>
-            <div class="stat-bar">
+            <div class="stat-content-top">
+              <div class="stat-head">
+                <span class="stat-label">{$t('dash.disk')}</span>
+                <span class="stat-pct" style="color: {diskBarColor};"
+                  >{diskUsedPct.toFixed(1)}%</span
+                >
+              </div>
+              <div class="stat-value">
+                {formatBytes(systemStats.disk.free)}
+                <span class="stat-unit">{$t('dash.free_suffix')}</span>
+              </div>
               <div
-                class="stat-bar-fill"
-                style="width: {Math.min(diskUsedPct, 100).toFixed(
-                  1
-                )}%; background: {diskBarColor}; box-shadow: 0 0 8px {diskBarColor};"
-              ></div>
+                class="res-sub"
+                title={$t('dash.disk_of_total', {
+                  total: formatBytes(systemStats.disk.total)
+                })}
+              >
+                {$t('dash.disk_of_total', {
+                  total: formatBytes(systemStats.disk.total)
+                })}
+              </div>
+            </div>
+            <div class="stat-bottom">
+              <div class="stat-bar">
+                <div
+                  class="stat-bar-fill"
+                  style="width: {Math.min(diskUsedPct, 100).toFixed(
+                    1
+                  )}%; background: {diskBarColor}; box-shadow: 0 0 8px {diskBarColor};"
+                ></div>
+              </div>
             </div>
           </div>
         {/if}
 
         <!-- RAM -->
         <div class="stat-box">
-          <div class="stat-head">
-            <span class="stat-label">{$t('dash.ram')}</span>
-            <span class="stat-pct" style="color: {ramBarColor};">{ramUsedPct.toFixed(1)}%</span>
-          </div>
-          <div class="stat-value">
-            {ramUsedMb}
-            <span class="stat-unit">{$t('dash.unit_mb')}</span>
-          </div>
-          <div class="res-sub">
-            {$t('dash.ram_of_total_pct', {
-              total: ramTotalMb,
-              pct: ramUsedPct.toFixed(1)
-            })}
-          </div>
-          <div class="stat-bar">
+          <div class="stat-content-top">
+            <div class="stat-head">
+              <span class="stat-label">{$t('dash.ram')}</span>
+              <span class="stat-pct" style="color: {ramBarColor};">{ramUsedPct.toFixed(1)}%</span>
+            </div>
+            <div class="stat-value">
+              {ramUsedMb}
+              <span class="stat-unit">{$t('dash.unit_mb')}</span>
+            </div>
             <div
-              class="stat-bar-fill"
-              style="width: {Math.min(ramUsedPct, 100).toFixed(
-                1
-              )}%; background: {ramBarColor}; box-shadow: 0 0 8px {ramBarColor};"
-            ></div>
+              class="res-sub"
+              title={$t('dash.ram_of_total', {
+                total: ramTotalMb
+              })}
+            >
+              {$t('dash.ram_of_total', {
+                total: ramTotalMb
+              })}
+            </div>
+          </div>
+          <div class="stat-bottom">
+            <div class="stat-bar">
+              <div
+                class="stat-bar-fill"
+                style="width: {Math.min(ramUsedPct, 100).toFixed(
+                  1
+                )}%; background: {ramBarColor}; box-shadow: 0 0 8px {ramBarColor};"
+              ></div>
+            </div>
           </div>
         </div>
 
         <!-- Load Average -->
         <div class="stat-box">
-          <div class="stat-head">
-            <span class="stat-label">{$t('dash.load')}</span>
-          </div>
-          <div class="stat-value">
-            {systemStats.load[0].toFixed(2)}
-          </div>
-          <div class="res-sub">
-            {$t('dash.load_avg_line', {
-              v1: systemStats.load[0].toFixed(2),
-              v2: systemStats.load[1].toFixed(2),
-              v3: systemStats.load[2].toFixed(2)
-            })}
-          </div>
-          {#if sparklineData}
-            <div class="sparkline-container">
-              <svg
-                class="sparkline"
-                viewBox="0 0 200 42"
-                preserveAspectRatio="none"
-                aria-hidden="true"
-              >
-                <defs>
-                  <linearGradient id="loadGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="#29c2f0" stop-opacity="0.45" />
-                    <stop offset="100%" stop-color="#29c2f0" stop-opacity="0.0" />
-                  </linearGradient>
-                </defs>
-                <!-- Reference baseline -->
-                <line
-                  x1="0"
-                  y1="41"
-                  x2="200"
-                  y2="41"
-                  stroke="rgba(255, 255, 255, 0.08)"
-                  stroke-width="1"
-                />
-                <path d={sparklineData.fill} fill="url(#loadGrad)" />
-                <path
-                  d={sparklineData.line}
-                  fill="none"
-                  stroke="var(--accent, #29c2f0)"
-                  stroke-width="1.75"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
+          <div class="stat-content-top">
+            <div class="stat-head">
+              <span class="stat-label">{$t('dash.load')}</span>
             </div>
-          {/if}
+            <div class="stat-value">
+              {systemStats.load[0].toFixed(2)}
+            </div>
+            <div
+              class="res-sub res-sub-load"
+              title={$t('dash.load_avg_line', {
+                v1: systemStats.load[0].toFixed(2),
+                v2: systemStats.load[1].toFixed(2),
+                v3: systemStats.load[2].toFixed(2)
+              })}
+            >
+              {$t('dash.load_avg_line', {
+                v1: systemStats.load[0].toFixed(2),
+                v2: systemStats.load[1].toFixed(2),
+                v3: systemStats.load[2].toFixed(2)
+              })}
+            </div>
+          </div>
+          <div class="stat-bottom">
+            {#if sparklineData}
+              <div class="sparkline-container">
+                <svg
+                  class="sparkline"
+                  viewBox="0 0 200 42"
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <defs>
+                    <linearGradient id="loadGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="#29c2f0" stop-opacity="0.45" />
+                      <stop offset="100%" stop-color="#29c2f0" stop-opacity="0.0" />
+                    </linearGradient>
+                  </defs>
+                  <!-- Reference baseline -->
+                  <line
+                    x1="0"
+                    y1="41"
+                    x2="200"
+                    y2="41"
+                    stroke="rgba(255, 255, 255, 0.08)"
+                    stroke-width="1"
+                  />
+                  <path d={sparklineData.fill} fill="url(#loadGrad)" />
+                  <path
+                    d={sparklineData.line}
+                    fill="none"
+                    stroke="var(--accent, #29c2f0)"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </div>
+            {/if}
+          </div>
         </div>
 
         <!-- Uptime -->
         <div class="stat-box">
-          <div class="stat-head">
-            <span class="stat-label">{$t('dash.uptime')}</span>
-          </div>
-          <div class="stat-value">
-            {$t('dash.uptime_dhm', {
-              days: systemStats.uptime.days,
-              hours: systemStats.uptime.hours,
-              minutes: systemStats.uptime.minutes
-            })}
-          </div>
-          {#if systemStats.boot_time}
-            <div class="res-sub">
-              {$t('dash.uptime_since', { time: systemStats.boot_time })}
+          <div class="stat-content-top">
+            <div class="stat-head">
+              <span class="stat-label">{$t('dash.uptime')}</span>
             </div>
-          {/if}
-          <div class="uptime-badge-row">
+            <div class="stat-value">
+              {$t('dash.uptime_dhm', {
+                days: systemStats.uptime.days,
+                hours: systemStats.uptime.hours,
+                minutes: systemStats.uptime.minutes
+              })}
+            </div>
+            {#if systemStats.boot_time}
+              <div class="res-sub" title={$t('dash.uptime_since', { time: systemStats.boot_time })}>
+                {$t('dash.uptime_since', { time: systemStats.boot_time })}
+              </div>
+            {/if}
+          </div>
+          <div class="stat-bottom uptime-badge-row">
             <span class="uptime-badge">
               <span class="uptime-dot"></span>
               {$t('dash.uptime_stable')}
@@ -243,7 +274,9 @@
     padding: 14px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    justify-content: space-between;
+    min-height: 126px;
+    gap: 8px;
     position: relative;
     transition:
       background 0.15s ease,
@@ -253,6 +286,17 @@
   .stat-box:hover {
     background: rgba(255, 255, 255, 0.035);
     border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .stat-content-top {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .stat-bottom {
+    margin-top: auto;
+    width: 100%;
   }
 
   .stat-head {
@@ -301,13 +345,20 @@
     text-overflow: ellipsis;
   }
 
+  .res-sub-load {
+    font-size: 11px;
+    font-family: var(--font-family-mono, monospace);
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
   .stat-bar {
     width: 100%;
     height: 6px;
     background: rgba(255, 255, 255, 0.08);
     border-radius: 999px;
     overflow: hidden;
-    margin-top: 6px;
+    margin-top: 4px;
   }
 
   .stat-bar-fill {
@@ -319,7 +370,7 @@
   }
 
   .sparkline-container {
-    margin-top: 4px;
+    margin-top: 2px;
     height: 36px;
     position: relative;
     overflow: hidden;
@@ -333,7 +384,9 @@
   }
 
   .uptime-badge-row {
-    margin-top: 4px;
+    margin-top: 2px;
+    display: flex;
+    align-items: center;
   }
 
   .uptime-badge {
