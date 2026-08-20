@@ -35,6 +35,27 @@ async function setupRestMocks(page: Page, mihomoReachable = true) {
           }
         })
       });
+    } else if (url.includes('/api/system/clients')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          clients: {
+            '192.168.1.5': {
+              ip: '192.168.1.5',
+              mac: 'AA:BB:CC:DD:EE:01',
+              display_name: 'Work-MacBook',
+              active: true
+            },
+            '192.168.1.99': {
+              ip: '192.168.1.99',
+              mac: 'AA:BB:CC:DD:EE:99',
+              display_name: 'Smart-TV',
+              active: true
+            }
+          }
+        })
+      });
     } else if (url.includes('/api/mihomo/proxy/configs')) {
       if (route.request().method() === 'GET') {
         await route.fulfill({
@@ -88,7 +109,7 @@ const TWO_CONNECTIONS_FRAME = JSON.stringify({
       upload: 1024,
       download: 8192,
       start: new Date().toISOString(),
-      chains: ['PROXY', 'us-newyork-01', 'DIRECT'],
+      chains: ['SmartProxy', 'us-newyork-01'],
       rule: 'DOMAIN-SUFFIX',
       rulePayload: 'youtube.com'
     },
@@ -126,62 +147,83 @@ test.describe('Connections page test suite', () => {
     });
 
     await page.goto('/#/connections');
-    // Ждём появления таблицы после получения WS-данных
     await page.waitForSelector('.connections-table', { timeout: 5000 });
   });
 
-  test('live indicator appears when WS connects', async ({ page }) => {
-    // После получения WS-сообщения wsConnected = true → .live-indicator виден
-    await expect(page.locator('.live-indicator')).toBeVisible();
-    // Индикатор не находится в состоянии reconnecting
-    await expect(page.locator('.live-indicator')).not.toHaveClass(/live-reconnecting/);
+  test('live indicator badge appears when WS connects', async ({ page }) => {
+    await expect(page.locator('.live-badge.running')).toBeVisible();
   });
 
   test('connection columns display correct data from WS frame', async ({ page }) => {
-    // В таблице 2 строки — по одной на каждое соединение из WS mock
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(2);
-    // Первая строка содержит данные conn-1 (youtube.com, PROXY chain, TCP badge)
+    // Первая строка содержит данные conn-1 (youtube.com, SmartProxy chain, TCP badge)
     await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
       'youtube.com'
     );
     await expect(page.locator('.connections-table tbody td.col-chain').first()).toContainText(
-      'PROXY'
+      'SmartProxy'
     );
     await expect(page.locator('.connections-table tbody .net-badge').first()).toContainText('TCP');
   });
 
-  test('filter input narrows visible connections by source IP', async ({ page }) => {
-    // Изначально в таблице 2 строки
+  test('global search narrows visible connections by host or client name', async ({ page }) => {
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(2);
 
-    // Используем первый фильтр — Source (IP)...
-    const sourceFilter = page.locator('input.filter-input').first();
-    // Фильтруем по IP второго соединения — должна остаться 1 строка
-    await sourceFilter.fill('192.168.1.99');
+    const searchInput = page.locator('.search-input');
+    await searchInput.fill('Smart-TV');
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(1);
+    await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
+      'google.com'
+    );
 
-    // Вводим несовпадающий IP — строк не должно быть
-    await sourceFilter.fill('xxx.no.match');
+    await searchInput.fill('xxx.no.match');
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(0);
   });
-});
 
-// Тест reconnect — отдельная группа с собственным beforeEach (без успешного WS)
-test.describe('Connections page — reconnect scenario', () => {
-  test('reconnecting indicator appears when WS closes', async ({ page }) => {
-    await disableServiceWorker(page);
-    await setupRestMocks(page, true);
+  test('quick filter chips filter by Proxy and Direct', async ({ page }) => {
+    await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(2);
 
-    // WS mock: отправляем пустой frame и сразу закрываем — триггерит onclose → wsReconnecting = true
-    await page.routeWebSocket('**/api/mihomo/connections/ws', async (ws) => {
-      ws.send(JSON.stringify({ connections: [] }));
-      ws.close();
-    });
+    // Click Direct only
+    await page.locator('.f-chip:has-text("Direct")').click();
+    await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(1);
+    await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
+      'google.com'
+    );
 
-    await page.goto('/#/connections');
+    // Click Proxy only
+    await page.locator('.f-chip:has-text("Proxy")').click();
+    await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(1);
+    await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
+      'youtube.com'
+    );
 
-    // wsReconnecting = true → появляется .live-reconnecting
-    await expect(page.locator('.live-reconnecting')).toBeVisible({ timeout: 5000 });
+    // Click All
+    await page.locator('.f-chip:has-text("Все"), .f-chip:has-text("All")').first().click();
+    await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(2);
+  });
+
+  test('clicking row opens Connection Inspector Drawer', async ({ page }) => {
+    await expect(page.locator('.inspector-drawer')).toHaveCount(0);
+
+    // Click first row
+    await page.locator('.connections-table tbody tr.conn-row').first().click();
+
+    // Drawer opens
+    await expect(page.locator('.inspector-drawer')).toBeVisible();
+    await expect(page.locator('.inspector-drawer')).toContainText('youtube.com:443');
+    await expect(page.locator('.inspector-drawer')).toContainText('Work-MacBook');
+
+    // Close drawer via close button
+    await page.locator('.drawer-close').click();
+    await expect(page.locator('.inspector-drawer')).toHaveCount(0);
+  });
+
+  test('grouping by LAN client renders accordion cards', async ({ page }) => {
+    const groupSelect = page.locator('select.group-select');
+    await groupSelect.selectOption('client');
+
+    await expect(page.locator('.group-card')).toHaveCount(2);
+    await expect(page.locator('.group-card').first()).toContainText('Work-MacBook');
   });
 });
 
@@ -189,10 +231,8 @@ test.describe('Connections page — reconnect scenario', () => {
 test.describe('Connections page — offline state when Mihomo offline', () => {
   test('shows empty state when Mihomo offline', async ({ page }) => {
     await disableServiceWorker(page);
-    // Настраиваем capabilities с mihomo.reachable: false
     await setupRestMocks(page, false);
 
-    // WS не должен подключиться (mihomo offline), но нам нужна страница
     await page.routeWebSocket('**/api/mihomo/connections/ws', async (ws) => {
       ws.close();
     });
