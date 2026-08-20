@@ -439,15 +439,17 @@
   });
 
   let timeLabels = $derived.by(() => {
+    const s = $t('traffic.sec');
+    const m = $t('traffic.per_min');
     switch (activeTimeframe) {
       case '1m':
-        return ['-60с', '-45с', '-30с', '-15с', $t('traffic.now')];
+        return [`-60 ${s}`, `-45 ${s}`, `-30 ${s}`, `-15 ${s}`, $t('traffic.now')];
       case '5m':
-        return ['-5м', '-3.5м', '-2.5м', '-1м', $t('traffic.now')];
+        return [`-5 ${m}`, `-3.5 ${m}`, `-2.5 ${m}`, `-1 ${m}`, $t('traffic.now')];
       case '15m':
-        return ['-15м', '-11м', '-7.5м', '-3.5м', $t('traffic.now')];
+        return [`-15 ${m}`, `-11 ${m}`, `-7.5 ${m}`, `-3.5 ${m}`, $t('traffic.now')];
       case '1h':
-        return ['-60м', '-45м', '-30м', '-15м', $t('traffic.now')];
+        return [`-60 ${m}`, `-45 ${m}`, `-30 ${m}`, `-15 ${m}`, $t('traffic.now')];
     }
   });
 </script>
