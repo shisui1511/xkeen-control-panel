@@ -22,6 +22,9 @@
   import Skeleton from './components/Skeleton.svelte';
   import ApiOffline from './components/ApiOffline.svelte';
   import EmptyState from './components/EmptyState.svelte';
+  import ServiceStatusGroup from './components/dashboard/ServiceStatusGroup.svelte';
+  import SystemResourcesWidget from './components/dashboard/SystemResourcesWidget.svelte';
+  import TrafficTelemetryWidget from './components/dashboard/TrafficTelemetryWidget.svelte';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
   import UnsavedChangesModal from './components/UnsavedChangesModal.svelte';
   import SystemStatusCapsule from './components/status/SystemStatusCapsule.svelte';
@@ -150,21 +153,6 @@
   const isSSLExpiring = $derived(
     systemStats !== null && systemStats.ssl_cert_days >= 0 && systemStats.ssl_cert_days < 7
   );
-
-  function getDiskBarColor(stats: SystemStats): string {
-    if (!stats.disk) {
-      return 'var(--success)';
-    }
-    const pct = (stats.disk.used / stats.disk.total) * 100;
-    const freeMB = stats.disk.free / 1024 / 1024;
-    if (pct > 90 || freeMB < 10) {
-      return 'var(--danger)';
-    }
-    if (pct > 80) {
-      return 'var(--warning)';
-    }
-    return 'var(--success)';
-  }
 
   async function fetchSubscriptionSummary(signal?: AbortSignal) {
     try {
@@ -1139,240 +1127,29 @@
             </div>
           {/if}
 
-          <!-- Live Service Status card -->
+          <!-- Live Service Status cards (DASH-03) -->
           <div style="margin-bottom: 18px;">
-            <Card title={$t('dash.service_status')}>
-              {#if statusLoading}
-                <div class="status-badges-row">
-                  <div class="status-badge-item">
-                    <Skeleton type="rect" width="140px" height="34px" />
-                  </div>
-                  <div class="status-badge-item">
-                    <Skeleton type="rect" width="140px" height="34px" />
-                  </div>
-                  <div class="status-badge-item">
-                    <Skeleton type="rect" width="140px" height="34px" />
-                  </div>
-                  <div class="status-badge-item">
-                    <Skeleton type="rect" width="80px" height="34px" />
-                  </div>
-                </div>
-              {:else if statusError}
-                <div class="status-error-row">
-                  <span><Icon name="warning" size={14} /> {$t('dash.status_error')}</span>
-                  <Button
-                    variant="secondary"
-                    onclick={handleRefresh}
-                    loading={isRefreshing}
-                    disabled={isRefreshing}
-                    title={$t('app.refresh')}
-                  >
-                    ↺ {$t('app.refresh')}
-                  </Button>
-                </div>
-              {:else}
-                <div class="status-badges-row">
-                  <div class="status-badge-item">
-                    <span class="status-dot {statusColor(serviceStatus.xkeen)}"></span>
-                    <span class="svc-cell-stack">
-                      <span class="status-badge-label">XKeen</span>
-                      <span class="lbl">{$t('dash.xkeen_sub')}</span>
-                    </span>
-                    <span class="status-badge-value">
-                      <span class="status-{statusColor(serviceStatus.xkeen)}">
-                        {serviceStatus.xkeen === 'running'
-                          ? $t('app.running')
-                          : $t('kernel.status.stopped')}
-                      </span>
-                    </span>
-                  </div>
-                  <div class="status-badge-item">
-                    <span class="status-dot {statusColor(serviceStatus.xray)}"></span>
-                    <span class="svc-cell-stack">
-                      <span class="status-badge-label">Xray</span>
-                      <span class="lbl">{$t('dash.xray_sub')}</span>
-                    </span>
-                    <span class="status-badge-value">
-                      <span class="status-{statusColor(serviceStatus.xray)}">
-                        {$t('kernel.status.' + (serviceStatus.xray || 'unknown'))}
-                      </span>
-                      {#if serviceStatus.xrayVersion && serviceStatus.xray !== 'not_installed'}
-                        <span class="version-badge">{serviceStatus.xrayVersion}</span>
-                      {/if}
-                    </span>
-                  </div>
-                  <div class="status-badge-item">
-                    <span class="status-dot {statusColor(serviceStatus.mihomo)}"></span>
-                    <span class="svc-cell-stack">
-                      <span class="status-badge-label">Mihomo</span>
-                      <span class="lbl">{$t('dash.mihomo_sub')}</span>
-                    </span>
-                    <span class="status-badge-value">
-                      <span class="status-{statusColor(serviceStatus.mihomo)}">
-                        {$t('kernel.status.' + (serviceStatus.mihomo || 'unknown'))}
-                      </span>
-                      {#if serviceStatus.mihomoVersion && serviceStatus.mihomo !== 'not_installed'}
-                        <span class="version-badge">{serviceStatus.mihomoVersion}</span>
-                      {/if}
-                      {#if $capabilities?.mihomo?.is_insecure_lan}
-                        <button
-                          class="badge badge-warning"
-                          style="margin-left: 6px; cursor: pointer; border: none; font-size: 11px; padding: 2px 6px;"
-                          onclick={() => (showMihomoMigrateModal = true)}
-                          title={$t('mihomo.migrate_banner_body')}
-                        >
-                          {$t('mihomo.controller_mode_insecure')}
-                        </button>
-                      {/if}
-                    </span>
-                  </div>
-                  <div class="status-badge-item">
-                    <span class="status-dot neutral"></span>
-                    <span class="svc-cell-stack">
-                      <span class="status-badge-label">{$t('dash.connections')}</span>
-                      <span class="lbl">{$t('dash.connections_sub')}</span>
-                    </span>
-                    <span class="status-badge-value mono" style="color:var(--fg-primary);">
-                      {serviceStatus.connections}
-                    </span>
-                  </div>
-                </div>
-              {/if}
-            </Card>
+            <ServiceStatusGroup
+              {serviceStatus}
+              capabilities={$capabilities}
+              {statusLoading}
+              {statusError}
+              onRefresh={fetchLiveStatus}
+              onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
+            />
           </div>
 
           <!-- Dashboard Grid for secondary widgets (GRID-01) -->
           <div class="dashboard-grid">
-            <!-- System Resources -->
-            {#if systemStats}
-              <div class="dash-card-wrapper">
-                <Card title={$t('dash.system_stats')}>
-                  <div class="stats-grid">
-                    {#if systemStats.disk}
-                      <div class="stat-box">
-                        <div class="stat-label">{$t('dash.disk')}</div>
-                        <div class="stat-value">
-                          {formatBytes(systemStats.disk.free)}
-                        </div>
-                        <div class="res-sub">
-                          {$t('dash.disk_free', { free: formatBytes(systemStats.disk.free) })}
-                          {$t('dash.disk_of_total_pct', {
-                            total: formatBytes(systemStats.disk.total),
-                            pct: ((systemStats.disk.used / systemStats.disk.total) * 100).toFixed(1)
-                          })}
-                        </div>
-                        <div class="stat-bar">
-                          <div
-                            class="stat-bar-fill"
-                            style="width: {(
-                              (systemStats.disk.used / systemStats.disk.total) *
-                              100
-                            ).toFixed(1)}%; background: {getDiskBarColor(
-                              systemStats
-                            )}; box-shadow: 0 0 8px {getDiskBarColor(systemStats)};"
-                          ></div>
-                        </div>
-                      </div>
-                    {/if}
-                    <div class="stat-box">
-                      <div class="stat-label">{$t('dash.ram')}</div>
-                      <div class="stat-value">
-                        {(systemStats.memory.used / 1024 / 1024).toFixed(2)}<span
-                          style="color:var(--fg-secondary);font-size:14px;font-weight:500;margin-left:6px;"
-                          >{$t('dash.unit_mb')}</span
-                        >
-                      </div>
-                      <div class="res-sub">
-                        {$t('dash.ram_of_total_pct', {
-                          total: (systemStats.memory.total / 1024 / 1024).toFixed(2),
-                          pct: ((systemStats.memory.used / systemStats.memory.total) * 100).toFixed(
-                            1
-                          )
-                        })}
-                      </div>
-                      <div class="stat-bar">
-                        <div
-                          class="stat-bar-fill"
-                          style="width: {(
-                            (systemStats.memory.used / systemStats.memory.total) *
-                            100
-                          ).toFixed(1)}%"
-                        ></div>
-                      </div>
-                    </div>
-                    <div class="stat-box">
-                      <div class="stat-label">{$t('dash.load')}</div>
-                      <div class="stat-value">{systemStats.load[0].toFixed(2)}</div>
-                      <div class="res-sub">
-                        {$t('dash.load_avg_line', {
-                          v1: systemStats.load[0].toFixed(2),
-                          v2: systemStats.load[1].toFixed(2),
-                          v3: systemStats.load[2].toFixed(2)
-                        })}
-                      </div>
-                      {#if sparklineData}
-                        <svg class="sparkline" viewBox="0 0 200 42" preserveAspectRatio="none">
-                          <defs>
-                            <linearGradient id="sg1" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stop-color="#29c2f0" stop-opacity=".5" />
-                              <stop offset="100%" stop-color="#29c2f0" stop-opacity="0" />
-                            </linearGradient>
-                          </defs>
-                          <path d={sparklineData.fill} fill="url(#sg1)" />
-                          <path
-                            d={sparklineData.line}
-                            fill="none"
-                            stroke="#29c2f0"
-                            stroke-width="1.5"
-                          />
-                        </svg>
-                      {/if}
-                    </div>
-                    <div class="stat-box">
-                      <div class="stat-label">{$t('dash.uptime')}</div>
-                      <div class="stat-value">
-                        {$t('dash.uptime_dhm', {
-                          days: systemStats.uptime.days,
-                          hours: systemStats.uptime.hours,
-                          minutes: systemStats.uptime.minutes
-                        })}
-                      </div>
-                      {#if systemStats.boot_time}
-                        <div class="res-sub">
-                          {$t('dash.uptime_since', { time: systemStats.boot_time })}
-                        </div>
-                      {/if}
-                      <div class="stats" style="margin-top:10px;">
-                        <span class="stat">{$t('dash.uptime_stable')}</span>
-                      </div>
-                    </div>
-                    <div class="stat-box">
-                      <div class="stat-label">{$t('dash.goroutines')}</div>
-                      <div class="stat-value">{systemStats.go_runtime.goroutines}</div>
-                      <div class="res-sub">
-                        {$t('dash.goroutines_heap_gc', {
-                          heap: (systemStats.go_runtime.heap_alloc / 1024 / 1024).toFixed(1),
-                          gc: systemStats.go_runtime.num_gc
-                        })}
-                      </div>
-                      {#if systemStats.go_runtime.go_version || systemStats.go_runtime.goarch}
-                        <div class="stats" style="margin-top:10px;">
-                          {#if systemStats.go_runtime.gomaxprocs}
-                            <span class="stat"
-                              >{systemStats.go_runtime.gomaxprocs}
-                              {systemStats.go_runtime.go_version}</span
-                            >
-                          {/if}
-                          {#if systemStats.go_runtime.goarch}
-                            <span class="stat">{systemStats.go_runtime.goarch}</span>
-                          {/if}
-                        </div>
-                      {/if}
-                    </div>
-                  </div>
-                </Card>
-              </div>
-            {/if}
+            <!-- System Resources (DASH-01, DASH-04) -->
+            <div class="dash-card-wrapper">
+              <SystemResourcesWidget {systemStats} {loadHistory} {sparklineData} />
+            </div>
+
+            <!-- Traffic & Network Telemetry (DASH-01) -->
+            <div class="dash-card-wrapper">
+              <TrafficTelemetryWidget onSwitchTab={switchTab} />
+            </div>
 
             <!-- System Info -->
             <div class="dash-card-wrapper">
@@ -1775,105 +1552,6 @@
     width: 100%;
   }
 
-  /* Status badges — matches reference: flush grid inside card with dividers */
-  .status-badges-row {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
-    gap: 0;
-    margin: -18px calc(-1 * var(--card-pad)) calc(-1 * var(--card-pad));
-    border-top: 1px solid var(--border);
-  }
-
-  :global([data-density='compact']) .status-badges-row {
-    margin-top: -12px;
-  }
-
-  .status-badge-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 14px 20px;
-    border-right: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-  }
-
-  .status-badge-item:last-child {
-    border-right: 0;
-  }
-  .status-badge-item:nth-last-child(-n + 4) {
-    border-bottom: 0;
-  }
-
-  @media (max-width: 768px) {
-    .status-badge-item {
-      border-bottom: 1px solid var(--border);
-      border-right: 1px solid var(--border);
-    }
-    .status-badge-item:nth-child(2n) {
-      border-right: 0;
-    }
-    .status-badge-item:nth-last-child(-n + 2) {
-      border-bottom: 0;
-    }
-  }
-
-  .svc-cell-stack {
-    display: flex;
-    flex-direction: column;
-    line-height: 1.25;
-  }
-
-  .svc-cell-stack .lbl {
-    font-size: 11.5px;
-    color: var(--fg-dim);
-    margin-top: 2px;
-  }
-
-  .status-badge-label {
-    font-weight: 700;
-    color: var(--fg-primary);
-    font-size: 13px;
-  }
-
-  .status-badge-value {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-    margin-left: auto;
-    flex-shrink: 0;
-  }
-
-  .status-success {
-    color: var(--success);
-  }
-  .status-error {
-    color: var(--danger);
-  }
-  .status-warning {
-    color: var(--warning);
-  }
-
-  .version-badge {
-    font-family: var(--font-family-mono);
-    font-size: 10px;
-    color: var(--fg-dim);
-    letter-spacing: 0.03em;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 1px 6px;
-  }
-
-  .status-error-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    color: var(--danger);
-    padding: 14px 20px;
-  }
-
   /* Quick actions grid */
   .qa-grid-mini {
     display: grid;
@@ -2027,14 +1705,6 @@
     margin: 4px 0 0;
   }
 
-  /* Sub-text under stat values */
-  .res-sub {
-    font-size: 11.5px;
-    color: var(--fg-dim);
-    margin-top: 6px;
-    font-family: var(--font-family-mono);
-  }
-
   /* ph-actions */
   .ph-actions {
     display: flex;
@@ -2042,15 +1712,6 @@
     align-items: center;
     flex-shrink: 0;
     padding-top: 4px;
-  }
-
-  /* sparkline */
-  .sparkline {
-    display: block;
-    width: 100%;
-    height: 42px;
-    margin-top: 10px;
-    overflow: visible;
   }
 
   /* Info badges inside info-row — match reference .pill */
@@ -2064,13 +1725,6 @@
     vertical-align: middle;
     font-family: var(--font-family-mono);
     letter-spacing: 0.02em;
-  }
-
-  /* "latest" badge — uses accent color vars from design system */
-  .info-badge-teal {
-    background: var(--accent-soft);
-    color: var(--accent);
-    border: 1px solid var(--accent-line);
   }
 
   /* config lines badge — warning/orange */
