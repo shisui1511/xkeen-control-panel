@@ -75,10 +75,21 @@ const TRAFFIC_FRAME = JSON.stringify({
     peak_day_down: 80000,
     peak_week_up: 500000,
     peak_week_down: 800000,
+    peak_hour_up_time: Math.floor(Date.now() / 1000) - 120,
+    peak_hour_down_time: Math.floor(Date.now() / 1000) - 60,
     hour_start: Math.floor(Date.now() / 1000),
     day_start: Math.floor(Date.now() / 1000),
     week_start: Math.floor(Date.now() / 1000)
-  }
+  },
+  top_clients: [
+    {
+      ip: '192.168.1.105',
+      upload: 512000,
+      download: 2048000,
+      total_bytes: 2560000,
+      active_connections: 4
+    }
+  ]
 });
 
 test.describe('Traffic page test suite', () => {
@@ -96,23 +107,79 @@ test.describe('Traffic page test suite', () => {
 
     await page.goto('/#/traffic');
     // Ждем появления статуса live
-    await page.waitForSelector('.status-indicator.live', { timeout: 5000 });
+    await page.waitForSelector('.badge-live-indicator.is-live', { timeout: 5000 });
   });
 
   test('live indicator appears when WS connects', async ({ page }) => {
-    const status = page.locator('.status-indicator');
-    await expect(status).toHaveText(/live/i);
+    const status = page.locator('.badge-live-indicator');
+    await expect(status).toHaveText(/live|в реальном времени/i);
   });
 
-  test('displays peak load values in the table', async ({ page }) => {
-    // В таблице пиков должны отображаться значения из mock фрейма
-    const cells = page.locator('.connections-table tbody td');
-    await expect(cells.first()).toContainText('4.9 KB/s'); // 5000 B/s upload peak hour
-    await expect(cells.first()).toContainText('7.8 KB/s'); // 8000 B/s download peak hour
+  test('KPI cards follow standard order: Download (1st), Upload (2nd), Connections (3rd)', async ({
+    page
+  }) => {
+    const statCards = page.locator('.traffic-stats-grid .card');
+    await expect(statCards).toHaveCount(3);
+
+    // 1st Card: Download
+    await expect(statCards.nth(0)).toContainText(/download|загрузка/i);
+    const downloadSparkline = statCards.nth(0).locator('svg.sparkline');
+    await expect(downloadSparkline).toBeVisible();
+
+    // 2nd Card: Upload
+    await expect(statCards.nth(1)).toContainText(/upload|отдача/i);
+    const uploadSparkline = statCards.nth(1).locator('svg.sparkline');
+    await expect(uploadSparkline).toBeVisible();
+
+    // 3rd Card: Active Connections
+    await expect(statCards.nth(2)).toContainText(/active connections|активные соединения/i);
+    await expect(statCards.nth(2)).toContainText('3 TCP · 2 UDP');
+  });
+
+  test('displays peak load cards with timestamps and separate flows', async ({ page }) => {
+    const peakCards = page.locator('.peak-period-card');
+    await expect(peakCards).toHaveCount(3);
+
+    // В первой карточке за час должны быть метрики
+    await expect(peakCards.nth(0)).toContainText('7.8 KB/s'); // 8000 B/s download peak
+    await expect(peakCards.nth(0)).toContainText('4.9 KB/s'); // 5000 B/s upload peak
+  });
+
+  test('displays top LAN clients widget', async ({ page }) => {
+    const clientRows = page.locator('.client-row');
+    await expect(clientRows).toHaveCount(1);
+    await expect(clientRows.first()).toContainText('192.168.1.105');
+    await expect(clientRows.first()).toContainText('4');
+  });
+
+  test('timeframe buttons switch active interval', async ({ page }) => {
+    const tfPills = page.locator('.timeframe-picker .tf-pill');
+    await expect(tfPills).toHaveCount(4);
+
+    // По умолчанию выбран 1m
+    await expect(tfPills.nth(0)).toHaveClass(/active/);
+
+    // Кликаем по 5m
+    await tfPills.nth(1).click();
+    await expect(tfPills.nth(1)).toHaveClass(/active/);
+    await expect(tfPills.nth(0)).not.toHaveClass(/active/);
+  });
+
+  test('pause button toggles pause status badge and mode', async ({ page }) => {
+    const pauseBtn = page.locator('.ph-actions button').first();
+    await expect(pauseBtn).toBeVisible();
+
+    // Нажимаем паузу
+    await pauseBtn.click();
+    const status = page.locator('.badge-live-indicator');
+    await expect(status).toHaveText(/paused|на паузе/i);
+
+    // Возобновляем
+    await pauseBtn.click();
+    await expect(status).toHaveText(/live|в реальном времени/i);
   });
 
   test('reset stats button triggers dialog and requests API', async ({ page }) => {
-    // Нажимаем на кнопку сброса
     const resetButton = page.locator('.btn-reset');
     await expect(resetButton).toBeVisible();
     await resetButton.click();
@@ -128,15 +195,24 @@ test.describe('Traffic page test suite', () => {
   test('SVG charts have role and aria-labels for accessibility', async ({ page }) => {
     const mainChart = page.locator('.chart-svg-container svg');
     await expect(mainChart).toHaveAttribute('role', 'img');
-    await expect(mainChart).toHaveAttribute('aria-label', /Main traffic speed chart/i);
+    await expect(mainChart).toHaveAttribute(
+      'aria-label',
+      /Main traffic speed chart|Главный график скорости трафика/i
+    );
 
-    const uploadSparkline = page.locator('.stat-card-spark:nth-child(1) svg.sparkline');
-    await expect(uploadSparkline).toHaveAttribute('role', 'img');
-    await expect(uploadSparkline).toHaveAttribute('aria-label', /Upload sparkline/i);
-
-    const downloadSparkline = page.locator('.stat-card-spark:nth-child(2) svg.sparkline');
+    const downloadSparkline = page.locator('.traffic-stats-grid .card:nth-child(1) svg.sparkline');
     await expect(downloadSparkline).toHaveAttribute('role', 'img');
-    await expect(downloadSparkline).toHaveAttribute('aria-label', /Download sparkline/i);
+    await expect(downloadSparkline).toHaveAttribute(
+      'aria-label',
+      /Download sparkline|Мини-график загрузки/i
+    );
+
+    const uploadSparkline = page.locator('.traffic-stats-grid .card:nth-child(2) svg.sparkline');
+    await expect(uploadSparkline).toHaveAttribute('role', 'img');
+    await expect(uploadSparkline).toHaveAttribute(
+      'aria-label',
+      /Upload sparkline|Мини-график отдачи/i
+    );
   });
 });
 
@@ -151,7 +227,9 @@ test.describe('Traffic empty state and auto-reconnect tests', () => {
     await page.goto('/#/traffic');
 
     const emptyContainer = page.locator('.chart-empty');
-    await expect(emptyContainer).toContainText(/Waiting for traffic data/i);
-    await expect(emptyContainer).toContainText(/Connecting to the proxy kernel metrics/i);
+    await expect(emptyContainer).toContainText(/Waiting for traffic data|Ожидание данных трафика/i);
+    await expect(emptyContainer).toContainText(
+      /Connecting to the proxy kernel metrics|Подключение к службе сбора метрик/i
+    );
   });
 });

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,15 @@ type ProxyTraffic struct {
 	TotalBytes    int64  `json:"total_bytes"`
 }
 
+// ClientTraffic holds aggregated traffic for a LAN client IP
+type ClientTraffic struct {
+	IP          string `json:"ip"`
+	Upload      int64  `json:"upload"`
+	Download    int64  `json:"download"`
+	TotalBytes  int64  `json:"total_bytes"`
+	ActiveConns int    `json:"active_connections"`
+}
+
 // TrafficAlert represents an alert when quota is exceeded
 type TrafficAlert struct {
 	QuotaID   string `json:"quota_id"`
@@ -48,17 +58,23 @@ type TrafficAlert struct {
 	Timestamp int64  `json:"timestamp"`
 }
 
-// TrafficPeaks holds peak upload and download rates over calendar periods
+// TrafficPeaks holds peak upload and download rates over calendar periods with timestamps
 type TrafficPeaks struct {
-	PeakHourUp   int64 `json:"peak_hour_up"`
-	PeakHourDown int64 `json:"peak_hour_down"`
-	PeakDayUp    int64 `json:"peak_day_up"`
-	PeakDayDown  int64 `json:"peak_day_down"`
-	PeakWeekUp   int64 `json:"peak_week_up"`
-	PeakWeekDown int64 `json:"peak_week_down"`
-	HourStart    int64 `json:"hour_start"`
-	DayStart     int64 `json:"day_start"`
-	WeekStart    int64 `json:"week_start"`
+	PeakHourUp       int64 `json:"peak_hour_up"`
+	PeakHourDown     int64 `json:"peak_hour_down"`
+	PeakDayUp        int64 `json:"peak_day_up"`
+	PeakDayDown      int64 `json:"peak_day_down"`
+	PeakWeekUp       int64 `json:"peak_week_up"`
+	PeakWeekDown     int64 `json:"peak_week_down"`
+	PeakHourUpTime   int64 `json:"peak_hour_up_time"`
+	PeakHourDownTime int64 `json:"peak_hour_down_time"`
+	PeakDayUpTime    int64 `json:"peak_day_up_time"`
+	PeakDayDownTime  int64 `json:"peak_day_down_time"`
+	PeakWeekUpTime   int64 `json:"peak_week_up_time"`
+	PeakWeekDownTime int64 `json:"peak_week_down_time"`
+	HourStart        int64 `json:"hour_start"`
+	DayStart         int64 `json:"day_start"`
+	WeekStart        int64 `json:"week_start"`
 }
 
 // TrafficStore is the on-disk format
@@ -77,9 +93,11 @@ const saveLockThrottle = 1 * time.Minute
 // maxTrafficFileSize is the rotation threshold for traffic.json.
 const maxTrafficFileSize = 5 * 1024 * 1024 // 5 MB
 
-// mihomoConnMetadata holds metadata about connection protocol
+// mihomoConnMetadata holds metadata about connection protocol and client
 type mihomoConnMetadata struct {
-	Network string `json:"network"`
+	Network  string `json:"network"`
+	SourceIP string `json:"sourceIP"`
+	Host     string `json:"host"`
 }
 
 // mihomoConn is a single connection entry from the Mihomo /connections stream.
@@ -115,6 +133,7 @@ type TrafficQuotaService struct {
 	activeConnsCount int64
 	tcpConnsCount    int64
 	udpConnsCount    int64
+	topClients       []ClientTraffic
 	trafficSubs      map[chan []byte]struct{}
 	trafficSubsMu    sync.RWMutex
 
@@ -720,6 +739,7 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 
 	var activeCount, tcpCount, udpCount int64
 	activeCount = int64(len(connections))
+	clientMap := make(map[string]*ClientTraffic)
 	for _, conn := range connections {
 		net := strings.ToUpper(conn.Metadata.Network)
 		if net == "TCP" {
@@ -727,10 +747,36 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 		} else if net == "UDP" {
 			udpCount++
 		}
+
+		srcIP := conn.Metadata.SourceIP
+		if srcIP == "" {
+			srcIP = "127.0.0.1"
+		}
+		c, ok := clientMap[srcIP]
+		if !ok {
+			c = &ClientTraffic{IP: srcIP}
+			clientMap[srcIP] = c
+		}
+		c.Upload += conn.Upload
+		c.Download += conn.Download
+		c.TotalBytes += (conn.Upload + conn.Download)
+		c.ActiveConns++
 	}
 	s.activeConnsCount = activeCount
 	s.tcpConnsCount = tcpCount
 	s.udpConnsCount = udpCount
+
+	topClients := make([]ClientTraffic, 0, len(clientMap))
+	for _, c := range clientMap {
+		topClients = append(topClients, *c)
+	}
+	sort.Slice(topClients, func(i, j int) bool {
+		return topClients[i].TotalBytes > topClients[j].TotalBytes
+	})
+	if len(topClients) > 5 {
+		topClients = topClients[:5]
+	}
+	s.topClients = topClients
 
 	if err := s.saveLocked(false); err != nil {
 		log.Printf("TrafficQuota: failed to save stats: %v", err)
@@ -856,6 +902,7 @@ func (s *TrafficQuotaService) processTrafficSnapshot(up, down int64) {
 	s.mu.Lock()
 
 	now := time.Now()
+	nowUnix := now.Unix()
 	currentHourStart := now.Truncate(time.Hour).Unix()
 	currentDayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
 
@@ -869,43 +916,57 @@ func (s *TrafficQuotaService) processTrafficSnapshot(up, down int64) {
 	if s.peaks.HourStart != currentHourStart {
 		s.peaks.PeakHourUp = 0
 		s.peaks.PeakHourDown = 0
+		s.peaks.PeakHourUpTime = 0
+		s.peaks.PeakHourDownTime = 0
 		s.peaks.HourStart = currentHourStart
 	}
 	if s.peaks.DayStart != currentDayStart {
 		s.peaks.PeakDayUp = 0
 		s.peaks.PeakDayDown = 0
+		s.peaks.PeakDayUpTime = 0
+		s.peaks.PeakDayDownTime = 0
 		s.peaks.DayStart = currentDayStart
 	}
 	if s.peaks.WeekStart != currentWeekStart {
 		s.peaks.PeakWeekUp = 0
 		s.peaks.PeakWeekDown = 0
+		s.peaks.PeakWeekUpTime = 0
+		s.peaks.PeakWeekDownTime = 0
 		s.peaks.WeekStart = currentWeekStart
 	}
 
 	// Обновляем пики
 	if up > s.peaks.PeakHourUp {
 		s.peaks.PeakHourUp = up
+		s.peaks.PeakHourUpTime = nowUnix
 	}
 	if down > s.peaks.PeakHourDown {
 		s.peaks.PeakHourDown = down
+		s.peaks.PeakHourDownTime = nowUnix
 	}
 	if up > s.peaks.PeakDayUp {
 		s.peaks.PeakDayUp = up
+		s.peaks.PeakDayUpTime = nowUnix
 	}
 	if down > s.peaks.PeakDayDown {
 		s.peaks.PeakDayDown = down
+		s.peaks.PeakDayDownTime = nowUnix
 	}
 	if up > s.peaks.PeakWeekUp {
 		s.peaks.PeakWeekUp = up
+		s.peaks.PeakWeekUpTime = nowUnix
 	}
 	if down > s.peaks.PeakWeekDown {
 		s.peaks.PeakWeekDown = down
+		s.peaks.PeakWeekDownTime = nowUnix
 	}
 
 	conns := s.activeConnsCount
 	tcp := s.tcpConnsCount
 	udp := s.udpConnsCount
 	peaksCopy := s.peaks
+	topClientsCopy := make([]ClientTraffic, len(s.topClients))
+	copy(topClientsCopy, s.topClients)
 
 	_ = s.saveLocked(false)
 	s.mu.Unlock()
@@ -917,6 +978,7 @@ func (s *TrafficQuotaService) processTrafficSnapshot(up, down int64) {
 		"tcp_connections": tcp,
 		"udp_connections": udp,
 		"peaks":           peaksCopy,
+		"top_clients":     topClientsCopy,
 	}
 	raw, err := json.Marshal(payload)
 	if err == nil {
