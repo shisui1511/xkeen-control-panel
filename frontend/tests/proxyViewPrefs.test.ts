@@ -14,7 +14,7 @@ describe('proxyViewPrefs', () => {
 
   beforeEach(() => {
     mockStorage = {};
-    (global as any).window = {
+    (globalThis as any).window = {
       localStorage: {
         getItem: (key: string) => mockStorage[key] ?? null,
         setItem: (key: string, value: string) => {
@@ -28,7 +28,7 @@ describe('proxyViewPrefs', () => {
         }
       }
     };
-    (global as any).localStorage = (global as any).window.localStorage;
+    (globalThis as any).localStorage = (globalThis as any).window.localStorage;
   });
 
   describe('readPinnedCoreGroups', () => {
@@ -68,6 +68,16 @@ describe('proxyViewPrefs', () => {
       const afterRemove = togglePinnedCoreGroup('X');
       expect(afterRemove).toEqual([]);
       expect(readPinnedCoreGroups()).toEqual([]);
+    });
+
+    it('caps total pinned groups at MAX_PINNED_CORE_GROUPS (50) on addition', () => {
+      const existing = Array.from({ length: 50 }, (_, i) => `group-${i}`);
+      mockStorage[PINNED_CORE_GROUPS_KEY] = JSON.stringify(existing);
+
+      const afterAdd = togglePinnedCoreGroup('group-new');
+      expect(afterAdd.length).toBe(50);
+      expect(afterAdd[afterAdd.length - 1]).toBe('group-new');
+      expect(readPinnedCoreGroups().length).toBe(50);
     });
   });
 

@@ -50,7 +50,10 @@ export function writePinnedCoreGroups(names: string[]): void {
 export function togglePinnedCoreGroup(name: string): string[] {
   const current = readPinnedCoreGroups();
   const idx = current.indexOf(name);
-  const next = idx >= 0 ? current.filter((n) => n !== name) : [...current, name];
+  const next =
+    idx >= 0
+      ? current.filter((n) => n !== name)
+      : [...current, name].slice(-MAX_PINNED_CORE_GROUPS);
   writePinnedCoreGroups(next);
   return next;
 }
