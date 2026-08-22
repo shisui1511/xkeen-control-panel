@@ -412,13 +412,15 @@
     let list = [...allNodes];
     if (filter === 'working') {
       list = list.filter((name) => {
+        const p = proxies[name];
         const delay = getProxyDelay(name);
-        return delay !== undefined && delay > 0 && delay <= 800;
+        return delay !== undefined && classifyLatency(delay, isProxyAlive(p)) !== 'bad';
       });
     } else if (filter === 'timeouts') {
       list = list.filter((name) => {
+        const p = proxies[name];
         const delay = getProxyDelay(name);
-        return delay === 0 || delay === undefined || delay > 800;
+        return delay === undefined || classifyLatency(delay, isProxyAlive(p)) === 'bad';
       });
     } else if (filter === 'latency') {
       list.sort((a, b) => {
