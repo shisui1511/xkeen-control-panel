@@ -128,5 +128,7 @@ describe('tp() store — склоняемые подписи', () => {
     expect(tpFn('proxies.nodes', 5)).toBe('nodes');
     expect(tpFn('proxies.groups', 1)).toBe('group');
     expect(tpFn('proxies.groups', 5)).toBe('groups');
+    expect(tpFn('proxies.obs_proxy_nodes', 1)).toBe('proxy');
+    expect(tpFn('proxies.obs_proxy_nodes', 43)).toBe('proxies');
   });
 });

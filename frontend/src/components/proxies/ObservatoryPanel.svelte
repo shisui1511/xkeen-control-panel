@@ -23,7 +23,7 @@
         <span class="stat-value">{stats.totalNodes > 0 ? stats.totalNodes : '—'}</span>
         <span class="res-sub">
           {stats.proxyNodes}
-          {$t('proxies.obs_proxy_nodes')} + {stats.systemNodes}
+          {$tp('proxies.obs_proxy_nodes', stats.proxyNodes)} + {stats.systemNodes}
           {$tp('proxies.obs_system_nodes', stats.systemNodes)}
         </span>
       </div>

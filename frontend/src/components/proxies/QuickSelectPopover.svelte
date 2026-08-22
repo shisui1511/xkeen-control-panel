@@ -42,6 +42,45 @@
   let left = $state(0);
   let isBottomSheet = $state(false);
 
+  let touchStartY = $state(0);
+  let isDragging = $state(false);
+  let dragTranslateY = $state(0);
+
+  function handleTouchStart(e: TouchEvent) {
+    if (!isBottomSheet || e.touches.length !== 1) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.tagName === 'INPUT') return;
+
+    touchStartY = e.touches[0].clientY;
+    isDragging = true;
+    dragTranslateY = 0;
+  }
+
+  function handleTouchMove(e: TouchEvent) {
+    if (!isDragging || !isBottomSheet || e.touches.length !== 1) return;
+    const currentY = e.touches[0].clientY;
+    const deltaY = currentY - touchStartY;
+
+    if (deltaY > 0) {
+      dragTranslateY = deltaY;
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+    } else {
+      dragTranslateY = 0;
+    }
+  }
+
+  function handleTouchEnd() {
+    if (!isDragging || !isBottomSheet) return;
+    isDragging = false;
+    const threshold = 60;
+    if (dragTranslateY >= threshold) {
+      onClose();
+    }
+    dragTranslateY = 0;
+  }
+
   let isSelector = $derived(groupType.toLowerCase() === 'selector');
   let isAuto = $derived(!isSelector);
 
@@ -217,13 +256,36 @@
   bind:this={popoverEl}
   class="qs-popover"
   class:qs-bottom-sheet={isBottomSheet}
-  style={isBottomSheet ? '' : `top: ${top}px; left: ${left}px;`}
+  style={isBottomSheet
+    ? `transform: translateY(${dragTranslateY}px); transition: ${isDragging ? 'none' : 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)'};`
+    : `top: ${top}px; left: ${left}px;`}
   role="dialog"
   aria-modal="false"
   aria-label={$t('proxies.quick_select_title')}
   tabindex="-1"
 >
-  <div class="qs-header">
+  {#if isBottomSheet}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="qs-drag-handle"
+      aria-hidden="true"
+      ontouchstart={handleTouchStart}
+      ontouchmove={handleTouchMove}
+      ontouchend={handleTouchEnd}
+      ontouchcancel={handleTouchEnd}
+    >
+      <div class="qs-drag-bar"></div>
+    </div>
+  {/if}
+
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="qs-header"
+    ontouchstart={handleTouchStart}
+    ontouchmove={handleTouchMove}
+    ontouchend={handleTouchEnd}
+    ontouchcancel={handleTouchEnd}
+  >
     <input
       bind:this={searchEl}
       type="search"
@@ -314,6 +376,24 @@
     border-left: 0;
     border-right: 0;
     border-bottom: 0;
+  }
+
+  .qs-drag-handle {
+    width: 100%;
+    padding: 8px 0 2px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: grab;
+    touch-action: none;
+    background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
+  }
+
+  .qs-drag-bar {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-strong, var(--border, #475569));
   }
 
   .qs-header {

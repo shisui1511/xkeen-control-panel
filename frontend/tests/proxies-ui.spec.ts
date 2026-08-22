@@ -658,4 +658,48 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     await page.keyboard.press('Escape');
     await expect(historyPopover).toBeHidden();
   });
+
+  // UI-Review: Swipe-to-dismiss для QuickSelect Bottom Sheet на мобильных
+  test('quick select mobile: свайп вниз по драг-ручке закрывает bottom sheet', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const trigger = ytGroup.locator('.gc-now-pill-trigger').first();
+    await trigger.click();
+
+    const popover = page.locator('.qs-popover');
+    await expect(popover).toBeVisible();
+    await expect(popover).toHaveClass(/qs-bottom-sheet/);
+
+    const dragHandle = popover.locator('.qs-drag-handle');
+    await expect(dragHandle).toBeVisible();
+
+    // Симуляция жеста touch drag вниз
+    await dragHandle.evaluate((el) => {
+      const touchStart = new Touch({
+        identifier: 1,
+        target: el,
+        clientY: 400,
+        clientX: 180
+      });
+      el.dispatchEvent(
+        new TouchEvent('touchstart', { touches: [touchStart], bubbles: true, cancelable: true })
+      );
+
+      const touchMove = new Touch({
+        identifier: 1,
+        target: el,
+        clientY: 500,
+        clientX: 180
+      });
+      el.dispatchEvent(
+        new TouchEvent('touchmove', { touches: [touchMove], bubbles: true, cancelable: true })
+      );
+
+      el.dispatchEvent(
+        new TouchEvent('touchend', { touches: [], bubbles: true, cancelable: true })
+      );
+    });
+
+    await expect(popover).toBeHidden();
+  });
 });

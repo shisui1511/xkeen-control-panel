@@ -2165,7 +2165,7 @@
                       {@render chainPill(item)}
                     {/each}
                   {:else}
-                    <span style="color:var(--fg-dim)">—</span>
+                    <span style="color:var(--fg-dim)" aria-label={$t('proxies.not_tested')}>—</span>
                   {/if}
                 </div>
               {/if}
