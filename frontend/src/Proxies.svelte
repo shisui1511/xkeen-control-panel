@@ -457,6 +457,13 @@
         })
       ]);
 
+      if (proxiesRes.status === 'rejected') {
+        const e = proxiesRes.reason;
+        if (e?.name !== 'AbortError' && e?.status !== 401) {
+          error = e?.message || $t('proxies.load_error');
+        }
+      }
+
       const rootProxies = proxiesRes.status === 'fulfilled' ? proxiesRes.value?.proxies || {} : {};
       const providersMap =
         providersRes.status === 'fulfilled' ? providersRes.value?.providers || {} : {};
