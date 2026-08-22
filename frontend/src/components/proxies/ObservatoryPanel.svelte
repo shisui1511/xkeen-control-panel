@@ -9,13 +9,17 @@
   }
 
   let { stats, activeFilter, onFilterChange }: Props = $props();
+
+  // Плашка «Не проверено» остаётся на экране, пока её фильтр активен, даже если
+  // счётчик непроверенных упал до нуля — иначе активный фильтр невозможно снять.
+  let showUnchecked = $derived(stats.unchecked > 0 || activeFilter === 'unchecked');
 </script>
 
 <div class="card obs-card">
   <div class="obs-head">
     <h2 class="card-title obs-title">{$t('proxies.observatory_title')}</h2>
   </div>
-  <div class="obs-grid" class:has-unchecked={stats.unchecked > 0}>
+  <div class="obs-grid" class:has-unchecked={showUnchecked}>
     <!-- Total (Not interactive) -->
     <div class="stat-box obs-stat-box">
       <div class="stat-label">{$t('proxies.obs_total')}</div>
@@ -72,14 +76,19 @@
     </button>
 
     <!-- Unchecked (Optional / Conditional) -->
-    {#if stats.unchecked > 0}
-      <div class="stat-box obs-stat-box">
+    {#if showUnchecked}
+      <button
+        type="button"
+        class="stat-box obs-stat-box obs-stat-btn"
+        aria-pressed={activeFilter === 'unchecked'}
+        onclick={() => onFilterChange(activeFilter === 'unchecked' ? null : 'unchecked')}
+      >
         <div class="stat-label">{$t('proxies.obs_unchecked')}</div>
         <div class="obs-val-row">
           <span class="stat-value">{stats.unchecked}</span>
           <span class="res-sub">{$t('proxies.obs_unchecked_sub')}</span>
         </div>
-      </div>
+      </button>
     {/if}
   </div>
 </div>
