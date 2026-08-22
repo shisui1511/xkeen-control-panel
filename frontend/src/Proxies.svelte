@@ -26,6 +26,7 @@
     classifyGroupRole,
     classifyLatency,
     isSystemProxy,
+    isProxyGroupType,
     type GroupRole
   } from './lib/proxyClassification';
   import {
@@ -333,10 +334,7 @@
       visited.add(currentName);
       const p = proxies[currentName];
       if (!p) break;
-      if (
-        ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'].includes(p.type || '') &&
-        p.now
-      ) {
+      if (isProxyGroupType(p.type) && p.now) {
         if (p.now === currentName) break;
         currentName = p.now;
         continue;
@@ -485,9 +483,7 @@
       proxies = mergedProxies;
 
       const mappedGroups = Object.values(rootProxies)
-        .filter((p: Proxy) => {
-          return ['Selector', 'URLTest', 'Fallback', 'LoadBalance'].includes(p.type);
-        })
+        .filter((p: Proxy) => isProxyGroupType(p.type))
         .map((p: any) => ({
           name: p.name,
           type: p.type,
@@ -777,10 +773,7 @@
 
     try {
       const isGroup =
-        groups.some((g) => g.name === proxyName) ||
-        ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'].includes(
-          proxies[proxyName]?.type || ''
-        );
+        groups.some((g) => g.name === proxyName) || isProxyGroupType(proxies[proxyName]?.type);
 
       if (isGroup) {
         const res = await apiFetch(
