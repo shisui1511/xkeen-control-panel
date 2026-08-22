@@ -246,7 +246,7 @@ export function computeGroupHealthStats(
   };
 }
 
-export type ObservatoryFilter = 'healthy' | 'degraded' | 'down' | null;
+export type ObservatoryFilter = 'healthy' | 'degraded' | 'down' | 'unchecked' | null;
 
 export function groupMatchesLatencyFilter(
   nodeNames: string[],
@@ -258,12 +258,16 @@ export function groupMatchesLatencyFilter(
 
   for (const name of nodeNames) {
     const snapshot = resolve(name);
-    if (!snapshot) continue;
+    if (!snapshot) {
+      if (filter === 'unchecked') return true;
+      continue;
+    }
     if (isSystemProxy(snapshot.name, snapshot.type)) continue;
     const bucket = classifyLatency(snapshot.delay, snapshot.alive);
     if (filter === 'healthy' && bucket === 'fast') return true;
     if (filter === 'degraded' && bucket === 'mid') return true;
     if (filter === 'down' && bucket === 'bad') return true;
+    if (filter === 'unchecked' && bucket === 'unchecked') return true;
   }
   return false;
 }

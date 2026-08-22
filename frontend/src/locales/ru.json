@@ -1471,6 +1471,7 @@
   "proxies.groups_few": "группы",
   "proxies.groups_many": "групп",
   "proxies.search_no_matches": "По запросу ничего не найдено",
+  "proxies.filter_no_matches": "Нет групп с узлами в выбранном состоянии",
   "proxies.from_provider": "Группа из подписки",
   "proxies.full_route_chain": "Полная цепочка маршрута",
   "proxies.quick_select_title": "Быстрый выбор узла",

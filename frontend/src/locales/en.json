@@ -1472,6 +1472,7 @@
   "proxies.groups_few": "groups",
   "proxies.groups_many": "groups",
   "proxies.search_no_matches": "No matches for your query",
+  "proxies.filter_no_matches": "No groups have nodes in the selected state",
   "proxies.from_provider": "Group from a subscription",
   "proxies.full_route_chain": "Full route chain",
   "proxies.quick_select_title": "Quick node select",

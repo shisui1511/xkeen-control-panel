@@ -1849,9 +1849,11 @@
           ctaText={$t('app.refresh')}
           oncta={fetchProxies}
         />
-      {:else if searchDebouncedQuery.trim() !== '' && groupSections.core.length + groupSections.service.length + groupSections.system.length === 0}
+      {:else if (searchDebouncedQuery.trim() !== '' || observatoryFilter !== null) && groupSections.core.length + groupSections.service.length + groupSections.system.length === 0}
         <div class="search-empty-state">
-          {$t('proxies.search_no_matches')}
+          {searchDebouncedQuery.trim() !== ''
+            ? $t('proxies.search_no_matches')
+            : $t('proxies.filter_no_matches')}
         </div>
       {:else}
         {#snippet groupCard(group: ProxyGroup, role: GroupRole)}

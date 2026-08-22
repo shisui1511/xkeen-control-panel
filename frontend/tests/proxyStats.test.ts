@@ -199,13 +199,15 @@ describe('proxyStats unit tests', () => {
       fast1: { name: 'fast1', alive: true, delay: 100 },
       mid1: { name: 'mid1', alive: true, delay: 400 },
       bad1: { name: 'bad1', alive: false, delay: 0 },
-      sys1: { name: 'sys1', type: 'Direct', alive: true }
+      sys1: { name: 'sys1', type: 'Direct', alive: true },
+      fresh1: { name: 'fresh1', alive: true }
     };
     const resolve = (name: string) => snapshotMap[name];
 
     it('returns true when filter is null', () => {
       expect(groupMatchesLatencyFilter(['bad1'], null, resolve)).toBe(true);
       expect(groupMatchesLatencyFilter([], null, resolve)).toBe(true);
+      expect(groupMatchesLatencyFilter(['fresh1'], null, resolve)).toBe(true);
     });
 
     it('matches healthy filter', () => {
@@ -227,6 +229,36 @@ describe('proxyStats unit tests', () => {
       expect(groupMatchesLatencyFilter(['sys1'], 'healthy', resolve)).toBe(false);
       expect(groupMatchesLatencyFilter(['sys1'], 'degraded', resolve)).toBe(false);
       expect(groupMatchesLatencyFilter(['sys1'], 'down', resolve)).toBe(false);
+    });
+
+    it('matches unchecked filter', () => {
+      expect(groupMatchesLatencyFilter(['fresh1', 'bad1'], 'unchecked', resolve)).toBe(true);
+      expect(groupMatchesLatencyFilter(['fast1', 'mid1', 'bad1'], 'unchecked', resolve)).toBe(
+        false
+      );
+    });
+
+    it('treats a node without a resolvable snapshot as unchecked', () => {
+      expect(groupMatchesLatencyFilter(['ghost1'], 'unchecked', resolve)).toBe(true);
+    });
+
+    it('does not treat a system-only group as unchecked', () => {
+      expect(groupMatchesLatencyFilter(['sys1'], 'unchecked', resolve)).toBe(false);
+    });
+
+    it('returns false for an empty node list under the unchecked filter', () => {
+      expect(groupMatchesLatencyFilter([], 'unchecked', resolve)).toBe(false);
+    });
+
+    it('keeps the down/healthy regression for the extended snapshot map', () => {
+      expect(groupMatchesLatencyFilter(['fresh1', 'bad1'], 'down', resolve)).toBe(true);
+      expect(groupMatchesLatencyFilter(['fresh1', 'bad1'], 'healthy', resolve)).toBe(false);
+    });
+
+    it('keeps an unresolved node skipped for the three pre-existing filters', () => {
+      expect(groupMatchesLatencyFilter(['ghost1'], 'healthy', resolve)).toBe(false);
+      expect(groupMatchesLatencyFilter(['ghost1'], 'degraded', resolve)).toBe(false);
+      expect(groupMatchesLatencyFilter(['ghost1'], 'down', resolve)).toBe(false);
     });
   });
 });
