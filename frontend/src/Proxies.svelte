@@ -726,12 +726,7 @@
       const nodeSet = new Set<string>();
       for (const node of group.all) {
         const p = proxies[node];
-        if (
-          node &&
-          !['DIRECT', 'REJECT'].includes(node.toUpperCase()) &&
-          p?.type !== 'Direct' &&
-          p?.type !== 'Reject'
-        ) {
+        if (node && !isSystemProxy(node, p?.type)) {
           nodeSet.add(node);
         }
       }
@@ -2308,7 +2303,7 @@
                             {/if}
 
                             <div class="p-actions-wrap">
-                              {#if !['DIRECT', 'REJECT'].includes(proxyName.toUpperCase()) && !['Direct', 'Reject', 'Compatible'].includes(proxy?.type || '')}
+                              {#if !isSystemProxy(proxyName, proxy?.type)}
                                 <button
                                   type="button"
                                   class="btn-latency-test"
