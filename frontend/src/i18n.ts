@@ -104,13 +104,13 @@ export async function loadLanguage(lang: Lang): Promise<void> {
 
     const moduleData = dict.default || dict;
 
-    translationsStore.update((current) => {
-      current[lang] = {
+    translationsStore.update((current) => ({
+      ...current,
+      [lang]: {
         ...baseTranslations[lang],
         ...moduleData
-      };
-      return current;
-    });
+      }
+    }));
   } catch (err) {
     console.error(`Failed to load translation for ${lang}:`, err);
   }
