@@ -25,6 +25,7 @@
     splitGroupsByRole,
     classifyGroupRole,
     classifyLatency,
+    isSystemProxy,
     type GroupRole
   } from './lib/proxyClassification';
   import {
@@ -890,19 +891,18 @@
     const eff = getEffectiveProxy(proxyName);
     const proxy = eff || proxies[proxyName];
     if (!proxy) return 'lat dim';
-    if (
-      ['DIRECT', 'REJECT'].includes((proxy.name || proxyName).toUpperCase()) ||
-      ['Direct', 'Reject', 'Compatible'].includes(proxy.type)
-    )
-      return 'lat dim';
+    if (isSystemProxy(proxy.name || proxyName, proxy.type)) return 'lat dim';
     const delay = getProxyDelay(proxyName);
+    const alive = isProxyAlive(proxy);
+    const bucket = classifyLatency(delay, alive);
+    if (bucket === 'unchecked') return 'lat dim';
     let baseClass = 'lat';
-    if (delay === undefined || delay === 0 || delay >= 800) {
-      baseClass += ' bad';
-    } else if (delay < 300) {
+    if (bucket === 'fast') {
       baseClass += ' ok';
-    } else {
+    } else if (bucket === 'mid') {
       baseClass += ' mid';
+    } else {
+      baseClass += ' bad';
     }
     if (isLatencyStale(proxyName)) {
       baseClass += ' latency-stale';
@@ -914,13 +914,12 @@
     const eff = getEffectiveProxy(proxyName);
     const proxy = eff || proxies[proxyName];
     if (!proxy) return '—';
-    if (
-      ['DIRECT', 'REJECT'].includes((proxy.name || proxyName).toUpperCase()) ||
-      ['Direct', 'Reject', 'Compatible'].includes(proxy.type)
-    )
-      return '—';
+    if (isSystemProxy(proxy.name || proxyName, proxy.type)) return '—';
     const delay = getProxyDelay(proxyName);
-    if (delay === undefined || delay === 0 || delay >= 800) return 'timeout';
+    const alive = isProxyAlive(proxy);
+    const bucket = classifyLatency(delay, alive);
+    if (bucket === 'unchecked') return '—';
+    if (bucket === 'bad') return 'timeout';
     const prefix = isLatencyStale(proxyName) ? '~' : '';
     return `${prefix}${delay} ${$t('app.ms')}`;
   }
