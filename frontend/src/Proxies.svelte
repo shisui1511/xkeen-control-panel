@@ -876,7 +876,7 @@
     };
   }
 
-  function getProxyHistory(proxyName: string): any[] {
+  function getProxyHistory(proxyName: string): { time: string; delay: number }[] {
     const eff = getEffectiveProxy(proxyName);
     if (eff && eff.history && eff.history.length > 0) {
       return eff.history;
@@ -2241,9 +2241,6 @@
                       {#each renderedNodes as proxyName}
                         {@const proxy = proxies[proxyName]}
                         {@const isAlive = isProxyAlive(proxy)}
-                        {@const isDirectOrReject = ['DIRECT', 'REJECT'].includes(
-                          proxyName.toUpperCase()
-                        )}
                         {@const isActive = group.now === proxyName}
                         {@const flag = getCountryFlag(proxyName)}
                         {@const healthClass = getLatencyClass(proxyName)}
@@ -2296,7 +2293,7 @@
                                 onkeydown={(e) => {
                                   if (e.key === 'Enter' || e.key === ' ') {
                                     e.preventDefault();
-                                    handleBadgeClick(e as any, proxyName);
+                                    handleBadgeClick(e, proxyName);
                                   }
                                 }}
                               >
