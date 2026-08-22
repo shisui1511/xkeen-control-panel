@@ -45,6 +45,7 @@
     type ObservatoryFilter,
     type NodeSnapshot
   } from './lib/proxyStats';
+  import { preserveInFlightLatency } from './lib/proxyMerge';
   import Pin from './lib/components/icons/Pin.svelte';
   import ViewGrid from './lib/components/icons/ViewGrid.svelte';
   import ViewList from './lib/components/icons/ViewList.svelte';
@@ -170,8 +171,21 @@
   let loading = $state(false);
   let error = $state('');
   let loadTimedOut = $state(false);
-  let testingGroupName = $state<string | null>(null);
+  // Потрековое состояние тестируемых групп (D-16, G-90-7): Set пересоздаётся при
+  // каждом изменении, а не мутируется на месте — под $state обычный Set в Svelte 5
+  // не является глубоко реактивным (тот же паттерн, что и у collapsedGroups ниже).
+  let testingGroupNames = $state(new Set<string>());
   let testingProxy = $state('');
+
+  function markGroupTesting(name: string) {
+    testingGroupNames = new Set(testingGroupNames).add(name);
+  }
+
+  function unmarkGroupTesting(name: string) {
+    const next = new Set(testingGroupNames);
+    next.delete(name);
+    testingGroupNames = next;
+  }
   let loadTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let collapsedGroups = $state(new Set<string>());
   let filterQuery = $state('');
@@ -434,6 +448,23 @@
 
   let observatoryStats = $derived(computeObservatoryStats(proxies, subNodes, subHealth));
 
+  // Имена узлов, чьи поля измерения (delay/alive/history) сейчас защищены от
+  // затирания ответом фонового опроса (G-90-7): сами тестируемые группы, все
+  // узлы внутри них и одиночный узел из testProxyLatency(). Дешёвая при простое.
+  function getProtectedNodeNames(): Set<string> {
+    if (testingGroupNames.size === 0 && !testingProxy) return new Set();
+    const protectedNames = new Set<string>();
+    for (const groupName of testingGroupNames) {
+      protectedNames.add(groupName);
+      const group = groups.find((g) => g.name === groupName);
+      if (group) {
+        for (const node of group.all) protectedNames.add(node);
+      }
+    }
+    if (testingProxy) protectedNames.add(testingProxy);
+    return protectedNames;
+  }
+
   async function fetchProxies(signal?: AbortSignal) {
     const reqSignal = signal instanceof AbortSignal ? signal : undefined;
     if (Object.keys(proxies).length === 0) {
@@ -489,7 +520,7 @@
         }
       }
 
-      proxies = mergedProxies;
+      proxies = preserveInFlightLatency(mergedProxies, proxies, getProtectedNodeNames());
 
       const mappedGroups = Object.values(rootProxies)
         .filter((p: Proxy) => isProxyGroupType(p.type))
@@ -691,9 +722,8 @@
   }
 
   async function testGroupLatency(group: ProxyGroup) {
-    if (batchTester.isActive() || testingGroupName) return;
-    testingGroupName = group.name;
-    poller?.pause();
+    if (testingGroupNames.has(group.name)) return;
+    markGroupTesting(group.name);
     const pingConfig = getCurrentPingConfig();
     const targetUrl = getTargetUrl(pingConfig);
     const timeoutMs = pingConfig.timeoutMs;
@@ -724,7 +754,14 @@
         }
       }
 
-      // Fallback to batch tester
+      // Fallback to batch tester. Общий тестер один на всю страницу и остаётся
+      // строго одиночным — если он уже занят другой группой, молчать нельзя
+      // (T-90-08-05): сообщаем тостом и выходим, не плодя параллельный прогон.
+      if (batchTester.isActive()) {
+        showToast('info', $t('proxies.test_group_busy'));
+        return;
+      }
+
       const nodeSet = new Set<string>();
       for (const node of group.all) {
         const p = proxies[node];
@@ -741,7 +778,6 @@
         timeoutMs,
         onProgressChange: (state) => {
           batchProgress = state;
-          testingGroupName = state.running ? group.name : null;
         },
         onNodeComplete: (node, delay, rawHistoryItem) => {
           if (proxies[node]) {
@@ -763,9 +799,10 @@
         showToast('error', err?.message || 'Error testing group');
       }
     } finally {
-      testingGroupName = null;
-      batchProgress = null;
-      poller?.resume();
+      unmarkGroupTesting(group.name);
+      if (!batchTester.isActive()) {
+        batchProgress = null;
+      }
     }
   }
 
@@ -2009,17 +2046,16 @@
                       type="button"
                       class="gc-ping-btn"
                       data-stop-head-click
-                      title={testingGroupName && testingGroupName !== group.name
-                        ? $t('proxies.test_group_busy')
-                        : $t('proxies.test_group')}
+                      title={$t('proxies.test_group')}
                       aria-label={$t('proxies.test_group')}
-                      disabled={testingGroupName === group.name || batchProgress?.running}
+                      aria-busy={testingGroupNames.has(group.name)}
+                      disabled={testingGroupNames.has(group.name)}
                       onclick={(e) => {
                         e.stopPropagation();
                         testGroupLatency(group);
                       }}
                     >
-                      {#if testingGroupName === group.name}
+                      {#if testingGroupNames.has(group.name)}
                         <span
                           class="spinner"
                           style="--spinner-size: 12px; --spinner-track: currentColor; --spinner-color: transparent;"
@@ -2223,7 +2259,7 @@
                         type="button"
                         class="filter-chip group-test-btn"
                         onclick={() => testGroupLatency(group)}
-                        disabled={testingGroupName === group.name || batchProgress?.running}
+                        disabled={testingGroupNames.has(group.name)}
                         title={$t('proxies.test_group')}
                       >
                         <svg
