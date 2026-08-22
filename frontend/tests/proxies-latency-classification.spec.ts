@@ -142,4 +142,93 @@ test.describe('Единая классификация задержки прок
     const pillClass = (await pillTrigger.getAttribute('class')) || '';
     expect(pillClass).not.toMatch(/\blat-bad\b/);
   });
+
+  test('единая классификация: непроверенный узел нейтрален в сетке узлов и в Quick-Select', async ({
+    page
+  }) => {
+    const card = page.locator('.group-card').filter({ hasText: 'Untested' }).first();
+
+    const isGridVisible = await card.locator('.proxy-grid').isVisible();
+    if (!isGridVisible) {
+      await card.locator('.gc-head').first().click();
+    }
+    await expect(card.locator('.proxy-grid')).toBeVisible();
+
+    const freshCard = card.locator('.proxy-card').filter({ hasText: 'Fresh-Node-01' }).first();
+    const freshLat = freshCard.locator('.p-footer button.lat');
+    const freshClass = (await freshLat.getAttribute('class')) || '';
+    expect(freshClass).toMatch(/\bdim\b/);
+    expect(freshClass).not.toMatch(/\bbad\b/);
+    await expect(freshLat).toHaveText('—');
+
+    const quickCard = card.locator('.proxy-card').filter({ hasText: 'Quick-Node-02' }).first();
+    const quickLat = quickCard.locator('.p-footer button.lat');
+    const quickClass = (await quickLat.getAttribute('class')) || '';
+    expect(quickClass).toMatch(/\bok\b/);
+    const quickText = (await quickLat.textContent()) || '';
+    expect(quickText).toContain('120');
+    expect(quickText).toContain('мс');
+
+    const deadCard = card.locator('.proxy-card').filter({ hasText: 'Dead-Node-03' }).first();
+    const deadLat = deadCard.locator('.p-footer button.lat');
+    const deadClass = (await deadLat.getAttribute('class')) || '';
+    expect(deadClass).toMatch(/\bbad\b/);
+    await expect(deadLat).toHaveText('timeout');
+
+    // Quick-Select: та же непроверенная нода должна быть нейтральной, а не timeout
+    const pillTrigger = card.locator('.gc-now-pill-trigger').first();
+    await pillTrigger.click();
+    const popover = page.locator('.qs-popover');
+    await expect(popover).toBeVisible();
+
+    const freshItem = popover.locator('.qs-item').filter({ hasText: 'Fresh-Node-01' }).first();
+    const freshItemLat = freshItem.locator('.lat');
+    const freshItemClass = (await freshItemLat.getAttribute('class')) || '';
+    expect(freshItemClass).toMatch(/\bdim\b/);
+    const freshItemText = (await freshItemLat.textContent()) || '';
+    expect(freshItemText).not.toContain('timeout');
+
+    await page.keyboard.press('Escape');
+    await expect(popover).toBeHidden();
+  });
+
+  test('единая классификация: бейдж узла согласован с виджетом «Состояние узлов»', async ({
+    page
+  }) => {
+    const uncheckedBox = page.locator('.obs-stat-box').filter({ hasText: 'Не проверено' }).first();
+    await expect(uncheckedBox).toBeVisible();
+    await expect(uncheckedBox.locator('.stat-value')).toHaveText('1');
+
+    const card = page.locator('.group-card').filter({ hasText: 'Untested' }).first();
+    const latBox = card.locator('.gc-lat-box').first();
+    await expect(latBox).toHaveText('—');
+
+    // Ни один видимый .gc-lat-box группы Untested не показывает timeout
+    const untestedLatBoxes = card.locator('.gc-lat-box');
+    const count = await untestedLatBoxes.count();
+    for (let i = 0; i < count; i++) {
+      const text = await untestedLatBoxes.nth(i).textContent();
+      expect(text).not.toContain('timeout');
+    }
+  });
+
+  test('единая классификация: полоса здоровья показывает сегмент непроверенных', async ({
+    page
+  }) => {
+    const collapseAllBtn = page.locator('button:has-text("Свернуть все")');
+    await collapseAllBtn.click();
+
+    const card = page.locator('.group-card').filter({ hasText: 'Untested' }).first();
+    const healthBar = card.locator('.health-bar').first();
+    await expect(healthBar).toBeVisible();
+    await expect(healthBar.locator('.health-segment.unchecked')).toBeVisible();
+
+    await healthBar.hover();
+    const tooltip = page.locator('.health-tooltip');
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toContainText(/Не проверено:\s*1\s*\(\d+%\)/);
+
+    await page.keyboard.press('Escape');
+    await expect(tooltip).toBeHidden();
+  });
 });
