@@ -27,7 +27,7 @@ var (
 	lan10Regex  = regexp.MustCompile(`\b10\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\b`)
 
 	// timestamp1970Regex matches 1970/01/01 or 1970-01-01 timestamps produced before NTP sync
-	timestamp1970Regex = regexp.MustCompile(`\b1970[-/](?:01|1)[-/](?:01|1)\b`)
+	timestamp1970Regex = regexp.MustCompile(`\b1970[-/](?:01|1)[-/](?:01|1)`)
 )
 
 // StripANSI removes all ANSI escape sequences from input string.

@@ -35,6 +35,7 @@ type API struct {
 	consoleSvc            *services.ConsoleService
 	ptySvc                *services.PTYService
 	templateSvc           *services.TemplateService
+	logDispatcher         *services.LogDispatcher
 	clientResolver        *services.ClientResolver
 	assetsSvc             *assets.AssetsService
 	pathVal               *utils.PathValidator
@@ -99,6 +100,14 @@ func (a *API) SetPTYService(svc *services.PTYService) {
 
 func (a *API) SetTemplateService(svc *services.TemplateService) {
 	a.templateSvc = svc
+}
+
+func (a *API) SetLogDispatcher(svc *services.LogDispatcher) {
+	a.logDispatcher = svc
+}
+
+func (a *API) LogDispatcher() *services.LogDispatcher {
+	return a.logDispatcher
 }
 
 func (a *API) SetAssetsService(svc *assets.AssetsService) {

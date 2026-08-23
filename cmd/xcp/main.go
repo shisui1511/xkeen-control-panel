@@ -166,6 +166,10 @@ func main() {
 	srv.HandleProtected("/api/service/dns-redirect", api.ServiceDNSRedirect)
 	srv.HandleProtected("/api/service/restart-log", api.ServiceRestartLog)
 	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
+	srv.HandleProtected("/api/logs/history", api.LogsHistory)
+	srv.HandleProtected("/api/logs/flash-health", api.LogsFlashHealth)
+	srv.HandleProtected("/api/logs/level", api.LogsSetLevel)
+	srv.HandleProtected("/api/logs/clear", api.LogsClear)
 	srv.HandleProtected("/api/logs/download", api.LogsDownload)
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
 	srv.HandleProtected("/api/mihomo/groups", api.MihomoGroups)
@@ -254,6 +258,16 @@ func main() {
 	watchdogSvc := services.NewWatchdogService(api.XKeenService(), cfg.MihomoConfigDir, cfg.XRayConfigDir)
 	watchdogSvc.Start()
 	defer watchdogSvc.Stop()
+
+	// Unified Log Dispatcher (LOGHUB-04, LOGHUB-05, LOGHUB-06)
+	logDir := filepath.Dir(cfg.XCPLogPath)
+	if logDir == "" || logDir == "." {
+		logDir = "/opt/var/log"
+	}
+	logDispatcher := services.NewLogDispatcher(cfg.LogSources, logDir, cfg.MihomoAPIURL)
+	logDispatcher.Start()
+	defer logDispatcher.Stop()
+	api.SetLogDispatcher(logDispatcher)
 
 	// Config Snapshots
 	xrayDir := filepath.Dir(cfg.XRayConfigDir)                            // e.g. /opt/etc/xray
