@@ -139,6 +139,9 @@ export const mihomoSchema = {
       description: 'Traffic sniffing configuration',
       properties: {
         enable: { type: 'boolean' },
+        'force-dns-mapping': { type: 'boolean' },
+        'parse-pure-ip': { type: 'boolean' },
+        'override-destination': { type: 'boolean' },
         sniff: {
           type: 'object',
           properties: {
@@ -208,7 +211,8 @@ export const mihomoSchema = {
           additionalProperties: { type: 'string' },
           description: 'Per-domain DNS policy'
         },
-        'proxy-server-nameserver': { type: 'array', items: { type: 'string' } }
+        'proxy-server-nameserver': { type: 'array', items: { type: 'string' } },
+        'direct-nameserver': { type: 'array', items: { type: 'string' } }
       }
     },
     hosts: {
@@ -253,7 +257,10 @@ export const mihomoSchema = {
           tfo: { type: 'boolean', description: 'Enable TCP Fast Open' },
           'skip-cert-verify': { type: 'boolean' },
           tls: { type: 'boolean' },
-          network: { type: 'string', enum: ['tcp', 'udp', 'ws', 'grpc', 'h2'] }
+          network: { type: 'string', enum: ['tcp', 'udp', 'ws', 'grpc', 'h2'] },
+          'dialer-proxy': { type: 'string', description: 'Chain dialer proxy' },
+          ports: { type: 'string', description: 'Port hopping range' },
+          smux: { type: 'object', description: 'Multiplexing settings' }
         },
         required: ['name', 'type', 'server', 'port']
       }
@@ -267,7 +274,7 @@ export const mihomoSchema = {
           name: { type: 'string', description: 'Group name' },
           type: {
             type: 'string',
-            enum: ['select', 'url-test', 'fallback', 'load-balance', 'relay'],
+            enum: ['select', 'url-test', 'fallback', 'load-balance', 'relay', 'smart'],
             description: 'Group type'
           },
           proxies: {
@@ -279,6 +286,10 @@ export const mihomoSchema = {
           interval: { type: 'integer', description: 'Test interval in seconds' },
           tolerance: { type: 'integer', description: 'Latency tolerance in ms' },
           lazy: { type: 'boolean', description: 'Lazy test (only on select)' },
+          'expected-status': { type: 'string', description: 'Expected HTTP status code' },
+          'exclude-type': { type: 'string', description: 'Exclude proxy types regex' },
+          'include-all': { type: 'boolean', description: 'Include all proxies' },
+          'include-all-providers': { type: 'boolean', description: 'Include all providers' },
           'disable-udp': { type: 'boolean' },
           strategy: {
             type: 'string',

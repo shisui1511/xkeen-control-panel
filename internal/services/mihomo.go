@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -366,4 +368,96 @@ func (s *MihomoService) ValidateMihomoConfig() (PreflightResult, error) {
 		Errors:   errors,
 		Warnings: warnings,
 	}, nil
+}
+
+// DNSQuery performs an interactive DNS resolution query via Mihomo Clash API /dns/query.
+func (s *MihomoService) DNSQuery(ctx context.Context, name string, qtype string) ([]byte, error) {
+	info, err := s.ParseControllerConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse controller config: %w", err)
+	}
+
+	var reqURL string
+	if info.Type == "unix" {
+		reqURL = "http://localhost/dns/query"
+	} else if info.Type == "tcp" && info.Target != "" {
+		target := info.Target
+		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+			target = "http://" + target
+		}
+		reqURL = strings.TrimRight(target, "/") + "/dns/query"
+	} else {
+		return nil, fmt.Errorf("mihomo controller is not configured")
+	}
+
+	if qtype == "" {
+		qtype = "A"
+	}
+	reqURL = fmt.Sprintf("%s?name=%s&type=%s", reqURL, url.QueryEscape(name), url.QueryEscape(qtype))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	if info.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+info.Secret)
+	}
+
+	client := s.GetHTTPClient()
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return body, fmt.Errorf("mihomo dns query returned status %d: %s", resp.StatusCode, string(body))
+	}
+	return body, nil
+}
+
+// FlushFakeIPCache flushes the Fake-IP cache via Mihomo Clash API /cache/fakeip/flush.
+func (s *MihomoService) FlushFakeIPCache(ctx context.Context) error {
+	info, err := s.ParseControllerConfig()
+	if err != nil {
+		return fmt.Errorf("failed to parse controller config: %w", err)
+	}
+
+	var reqURL string
+	if info.Type == "unix" {
+		reqURL = "http://localhost/cache/fakeip/flush"
+	} else if info.Type == "tcp" && info.Target != "" {
+		target := info.Target
+		if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
+			target = "http://" + target
+		}
+		reqURL = strings.TrimRight(target, "/") + "/cache/fakeip/flush"
+	} else {
+		return fmt.Errorf("mihomo controller is not configured")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, nil)
+	if err != nil {
+		return err
+	}
+	if info.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+info.Secret)
+	}
+
+	client := s.GetHTTPClient()
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to flush fake-ip cache (status %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
 }

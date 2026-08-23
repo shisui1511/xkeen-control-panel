@@ -22,6 +22,8 @@ export interface Proxy {
   fingerprint?: string;
   alterID?: number;
   username?: string;
+  dialerProxy?: string;
+  ports?: string;
 }
 
 export interface ProxyGroup {
@@ -40,6 +42,9 @@ export interface ProxyGroup {
   maxFailedTimes?: number;
   useProviders?: string[];
   strategy?: 'round-robin' | 'consistent-hashing' | 'sticky-sessions';
+  lazy?: boolean;
+  expectedStatus?: string;
+  excludeType?: string;
 }
 
 export interface Rule {
@@ -913,6 +918,12 @@ export function generateYAML(state: MihomoConfigState): string {
         if (p.tls) lines.push(`    tls: true`);
         if (p.skipCertVerify) lines.push(`    skip-cert-verify: true`);
       }
+      if (p.dialerProxy) {
+        lines.push(`    dialer-proxy: ${yamlSafeString(p.dialerProxy)}`);
+      }
+      if (p.ports) {
+        lines.push(`    ports: ${yamlSafeString(p.ports)}`);
+      }
     }
     lines.push('');
   }
@@ -942,6 +953,9 @@ export function generateYAML(state: MihomoConfigState): string {
       if (g.excludeFilter) {
         lines.push(`    exclude-filter: ${yamlSafeString(g.excludeFilter)}`);
       }
+      if (g.excludeType) {
+        lines.push(`    exclude-type: ${yamlSafeString(g.excludeType)}`);
+      }
       if (g.includeAll === true) {
         lines.push(`    include-all: true`);
       }
@@ -956,11 +970,17 @@ export function generateYAML(state: MihomoConfigState): string {
         lines.push(`    proxies:`);
         for (const p of g.proxies) lines.push(`      - ${yamlSafeString(p)}`);
       }
-      if (g.type !== 'select') {
+      if (g.type !== 'select' && g.type !== 'relay') {
         lines.push(`    url: ${g.url || 'https://www.gstatic.com/generate_204'}`);
         lines.push(`    interval: ${g.interval || 300}`);
         if (g.hidden === true) {
           lines.push(`    hidden: true`);
+        }
+        if (g.lazy === true) {
+          lines.push(`    lazy: true`);
+        }
+        if (g.expectedStatus) {
+          lines.push(`    expected-status: ${g.expectedStatus}`);
         }
         if (g.tolerance !== undefined && g.tolerance > 0) {
           lines.push(`    tolerance: ${g.tolerance}`);

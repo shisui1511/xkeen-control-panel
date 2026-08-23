@@ -46,8 +46,9 @@
     invalidateCache?: boolean;
   } = $props();
 
-  type ProxyType = 'vless' | 'hysteria2' | 'tuic' | 'ss' | 'vmess';
-  type GroupType = 'select' | 'url-test' | 'fallback' | 'load-balance';
+  type ProxyType =
+    'vless' | 'hysteria2' | 'tuic' | 'ss' | 'vmess' | 'trojan' | 'wireguard' | 'socks5' | 'http';
+  type GroupType = 'select' | 'url-test' | 'fallback' | 'load-balance' | 'relay' | 'smart';
   type RuleType =
     | 'DOMAIN-SUFFIX'
     | 'DOMAIN-KEYWORD'
@@ -65,14 +66,14 @@
     type: ProxyType;
     server: string;
     port: number;
-    // vless/vmess
+    // vless/vmess/trojan
     uuid?: string;
     flow?: string;
     // reality
     publicKey?: string;
     shortId?: string;
     servername?: string;
-    // hy2
+    // hy2/trojan/ss
     password?: string;
     sni?: string;
     skipCertVerify?: boolean;
@@ -89,6 +90,9 @@
     fingerprint?: string;
     alterID?: number;
     enabled?: boolean;
+    // Advanced options (Phase 102)
+    dialerProxy?: string;
+    ports?: string;
   }
 
   interface ProxyGroup {
@@ -107,6 +111,9 @@
     maxFailedTimes?: number; // NEW (D-02): maps to YAML key max-failed-times
     useProviders?: string[];
     strategy?: 'round-robin' | 'consistent-hashing' | 'sticky-sessions';
+    lazy?: boolean;
+    expectedStatus?: string;
+    excludeType?: string;
   }
 
   interface Rule {
@@ -1522,8 +1529,25 @@
     }
   }
 
-  const PROXY_TYPES: ProxyType[] = ['vless', 'hysteria2', 'tuic', 'ss', 'vmess'];
-  const GROUP_TYPES: GroupType[] = ['select', 'url-test', 'fallback', 'load-balance'];
+  const PROXY_TYPES: ProxyType[] = [
+    'vless',
+    'hysteria2',
+    'tuic',
+    'ss',
+    'vmess',
+    'trojan',
+    'wireguard',
+    'socks5',
+    'http'
+  ];
+  const GROUP_TYPES: GroupType[] = [
+    'select',
+    'url-test',
+    'fallback',
+    'load-balance',
+    'relay',
+    'smart'
+  ];
   const RULE_TYPES: RuleType[] = [
     'DOMAIN-SUFFIX',
     'DOMAIN-KEYWORD',
