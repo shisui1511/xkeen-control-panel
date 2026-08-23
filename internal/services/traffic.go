@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1091,14 +1092,14 @@ func (s *TrafficQuotaService) getMihomoProxies() (map[string]mihomoProxy, error)
 
 func (s *TrafficQuotaService) applyProxyToGroup(groupName, proxyName string) error {
 	client, baseURL, secret := s.getMihomoHTTPClientAndBaseURL()
-	url := fmt.Sprintf("%s/proxies/%s", baseURL, groupName)
+	reqURL := fmt.Sprintf("%s/proxies/%s", baseURL, url.PathEscape(groupName))
 	bodyMap := map[string]string{"name": proxyName}
 	bodyBytes, err := json.Marshal(bodyMap)
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequest("PUT", reqURL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return err
 	}
