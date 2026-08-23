@@ -73,6 +73,8 @@
 
   // Top clients
   let topClients: ClientTraffic[] = $state([]);
+  // Sum of total_bytes across ALL LAN clients (server-side, before truncation to top 5)
+  let totalClientsBytes = $state(0);
 
   // Connection history for stats
   const CONN_HISTORY_MAX = 3600; // 1 hour at 1 sample/sec
@@ -124,6 +126,9 @@
   });
 
   let totalClientsTraffic = $derived.by(() => {
+    // Prefer the server-computed total across ALL clients so the per-client
+    // share reflects the real network, not just the visible top-5 subset.
+    if (totalClientsBytes > 0) return totalClientsBytes;
     return topClients.reduce((sum, c) => sum + c.total_bytes, 0) || 1;
   });
 
@@ -234,6 +239,9 @@
         }
         if (data.top_clients) {
           topClients = data.top_clients;
+        }
+        if (typeof data.total_clients_bytes === 'number') {
+          totalClientsBytes = data.total_clients_bytes;
         }
       } catch (e) {
         // ignore

@@ -130,13 +130,14 @@ type TrafficQuotaService struct {
 	connSubs   map[chan []byte]struct{}
 	connSubsMu sync.RWMutex
 
-	peaks            TrafficPeaks
-	activeConnsCount int64
-	tcpConnsCount    int64
-	udpConnsCount    int64
-	topClients       []ClientTraffic
-	trafficSubs      map[chan []byte]struct{}
-	trafficSubsMu    sync.RWMutex
+	peaks             TrafficPeaks
+	activeConnsCount  int64
+	tcpConnsCount     int64
+	udpConnsCount     int64
+	topClients        []ClientTraffic
+	totalClientsBytes int64 // sum across ALL LAN clients, before topClients is truncated to 5
+	trafficSubs       map[chan []byte]struct{}
+	trafficSubsMu     sync.RWMutex
 
 	httpClient         *http.Client
 	mihomoSvc          *MihomoService
@@ -799,8 +800,10 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 	s.udpConnsCount = udpCount
 
 	topClients := make([]ClientTraffic, 0, len(clientMap))
+	var totalClientsBytes int64
 	for _, c := range clientMap {
 		topClients = append(topClients, *c)
+		totalClientsBytes += c.TotalBytes
 	}
 	sort.Slice(topClients, func(i, j int) bool {
 		return topClients[i].TotalBytes > topClients[j].TotalBytes
@@ -809,6 +812,7 @@ func (s *TrafficQuotaService) processConnSnapshot(connections []mihomoConn) {
 		topClients = topClients[:5]
 	}
 	s.topClients = topClients
+	s.totalClientsBytes = totalClientsBytes
 
 	if err := s.saveLocked(false); err != nil {
 		log.Printf("TrafficQuota: failed to save stats: %v", err)
@@ -999,18 +1003,20 @@ func (s *TrafficQuotaService) processTrafficSnapshot(up, down int64) {
 	peaksCopy := s.peaks
 	topClientsCopy := make([]ClientTraffic, len(s.topClients))
 	copy(topClientsCopy, s.topClients)
+	totalClientsBytesCopy := s.totalClientsBytes
 
 	_ = s.saveLocked(false)
 	s.mu.Unlock()
 
 	payload := map[string]interface{}{
-		"up":              up,
-		"down":            down,
-		"connections":     conns,
-		"tcp_connections": tcp,
-		"udp_connections": udp,
-		"peaks":           peaksCopy,
-		"top_clients":     topClientsCopy,
+		"up":                  up,
+		"down":                down,
+		"connections":         conns,
+		"tcp_connections":     tcp,
+		"udp_connections":     udp,
+		"peaks":               peaksCopy,
+		"top_clients":         topClientsCopy,
+		"total_clients_bytes": totalClientsBytesCopy,
 	}
 	raw, err := json.Marshal(payload)
 	if err == nil {
