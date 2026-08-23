@@ -2050,10 +2050,11 @@
 
             <div class="section-title">{$t('xray.routing_rules')}</div>
 
-            <div class="routing-rules-list" data-testid="routing-rules-list">
+            <div class="routing-rules-list" data-testid="routing-rules-list" role="list">
               {#each filteredRules as rule (rule.id)}
                 <div
                   class="card rule-card"
+                  role="listitem"
                   class:rule-disabled={rule.enabled === false}
                   class:dragging={draggedRuleId === rule.id}
                   class:drag-over={dragOverRuleId === rule.id}
@@ -2070,6 +2071,11 @@
                         type="button"
                         class="rule-toggle-btn"
                         class:active={rule.enabled !== false}
+                        role="switch"
+                        aria-checked={rule.enabled !== false}
+                        aria-label={rule.enabled !== false
+                          ? $t('xray.rule_enabled')
+                          : $t('xray.rule_disabled')}
                         title={rule.enabled !== false
                           ? $t('xray.rule_enabled')
                           : $t('xray.rule_disabled')}
