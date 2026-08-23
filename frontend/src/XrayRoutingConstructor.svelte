@@ -206,9 +206,13 @@
 
   // Resizable Splitter State (BUILD-01)
   let previewWidth = $state<number>(
-    typeof localStorage !== 'undefined' && localStorage.getItem('xray_builder_preview_width')
-      ? Math.max(280, Math.min(800, Number(localStorage.getItem('xray_builder_preview_width'))))
-      : 440
+    (() => {
+      if (typeof localStorage === 'undefined') return 440;
+      const raw = localStorage.getItem('xray_builder_preview_width');
+      if (!raw) return 440;
+      const num = Number(raw);
+      return !isNaN(num) ? Math.max(280, Math.min(800, num)) : 440;
+    })()
   );
   let showPreviewPane = $state<boolean>(true);
   let isResizingPreview = $state<boolean>(false);
