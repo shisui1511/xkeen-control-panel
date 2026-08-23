@@ -16,11 +16,14 @@ interface OverflowReport {
   mainClientWidth: number;
   mainRight: number;
   clipped: { cls: string; right: number }[];
+  serviceCardOverflow: { cls: string; scrollWidth: number; clientWidth: number }[];
 }
 
 /**
- * Собирает метрики переполнения документа/`.main-content` и список
- * карточек правой колонки Dashboard, выходящих за правый край контента.
+ * Собирает метрики переполнения документа/`.main-content`, список
+ * карточек правой колонки Dashboard, выходящих за правый край контента,
+ * и самопереполнение карточек сервисов (XKeen/Mihomo/Xray) — их кнопки
+ * и заголовок не должны раздувать карточку шире выделенной grid-дорожки.
  */
 async function collectOverflow(page: Page): Promise<OverflowReport> {
   return page.evaluate(() => {
@@ -29,6 +32,9 @@ async function collectOverflow(page: Page): Promise<OverflowReport> {
     const mainRect = main?.getBoundingClientRect();
     const clippedEls = Array.from(
       document.querySelectorAll('.dash-col-right .dash-section')
+    ) as HTMLElement[];
+    const serviceCards = Array.from(
+      document.querySelectorAll('.services-grid .service-card')
     ) as HTMLElement[];
 
     return {
@@ -40,19 +46,32 @@ async function collectOverflow(page: Page): Promise<OverflowReport> {
       clipped: clippedEls.map((el) => ({
         cls: el.className,
         right: el.getBoundingClientRect().right
+      })),
+      serviceCardOverflow: serviceCards.map((el) => ({
+        cls: el.className,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth
       }))
     };
   });
 }
 
 test.describe('Dashboard — адаптивность по ширине области контента', () => {
-  const widths = [1920, 1440, 1280, 1100, 1024];
+  // 1260/1250 покрывают полосу непосредственно над порогом схлопывания в одну
+  // колонку (~940px ширины контента): здесь двухколоночная раскладка ещё
+  // активна, но левая колонка (60%) уже узкая — именно в этом диапазоне
+  // карточки сервисов (XKeen/Mihomo/Xray) раньше выталкивались за край.
+  const widths = [1920, 1600, 1440, 1280, 1260, 1250, 1100, 1024];
 
   for (const width of widths) {
     test(`ширина ${width}px: нет переполнения и карточки правой колонки не обрезаны`, async ({
       page
     }) => {
       await setupMocks(page, 'mihomo');
+      // Русская локаль: кириллические подписи кнопок ("Перезапустить",
+      // "Остановить") заметно длиннее английских и обрезание/переполнение
+      // карточек сервисов проявляется только на них — панель русскоязычная.
+      await page.addInitScript(() => window.localStorage.setItem('lang', 'ru'));
       await page.setViewportSize({ width, height: 900 });
       await visitPage(page, '/#/dashboard');
       await expect(page.locator('.dashboard-layout-grid')).toBeVisible();
@@ -65,6 +84,16 @@ test.describe('Dashboard — адаптивность по ширине обла
           item.right,
           `карточка ${item.cls} выходит за правый край контента (${item.right} > ${report.mainRight + TOLERANCE_PX}) на ширине ${width}px`
         ).toBeLessThanOrEqual(report.mainRight + TOLERANCE_PX);
+      }
+
+      // Инвариант 1б: карточки сервисов (XKeen/Mihomo/Xray) не раздуваются
+      // шире выделенной им grid-дорожки — заголовок и кнопки должны
+      // сжиматься/обрезаться троеточием, а не выталкивать карточку за край.
+      for (const card of report.serviceCardOverflow) {
+        expect(
+          card.scrollWidth,
+          `карточка сервиса ${card.cls} переполнена по горизонтали (scrollWidth=${card.scrollWidth} > clientWidth=${card.clientWidth}) на ширине ${width}px`
+        ).toBeLessThanOrEqual(card.clientWidth + TOLERANCE_PX);
       }
 
       // Инвариант 2: нет горизонтальной прокрутки документа
@@ -129,11 +158,12 @@ test.describe('Панель — отсутствие горизонтально�
     '/#/subscriptions',
     '/#/settings'
   ];
-  const sweepWidths = [1440, 1280, 1024];
+  const sweepWidths = [1440, 1280, 1250, 1024];
 
   for (const route of routes) {
-    test(`${route}: нет переполнения на 1440/1280/1024px`, async ({ page }) => {
+    test(`${route}: нет переполнения на 1440/1280/1250/1024px`, async ({ page }) => {
       await setupMocks(page, 'mihomo');
+      await page.addInitScript(() => window.localStorage.setItem('lang', 'ru'));
       await visitPage(page, route);
 
       const failures: string[] = [];
@@ -154,6 +184,13 @@ test.describe('Панель — отсутствие горизонтально�
           failures.push(
             `${route}@${width}px: .main-content переполнен (scrollWidth=${report.mainScrollWidth} > clientWidth=${report.mainClientWidth})`
           );
+        }
+        for (const card of report.serviceCardOverflow) {
+          if (card.scrollWidth > card.clientWidth + TOLERANCE_PX) {
+            failures.push(
+              `${route}@${width}px: карточка сервиса ${card.cls} переполнена (scrollWidth=${card.scrollWidth} > clientWidth=${card.clientWidth})`
+            );
+          }
         }
       }
 

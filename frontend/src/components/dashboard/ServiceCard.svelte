@@ -200,6 +200,7 @@
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    min-width: 0;
     min-height: 124px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 70%), var(--bg-card, #102a44);
@@ -252,6 +253,10 @@
   }
 
   .service-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 15px;
     font-weight: 600;
     color: var(--fg-primary, #ffffff);
@@ -345,6 +350,7 @@
   }
 
   .badge-active {
+    flex-shrink: 0;
     background: rgba(41, 194, 240, 0.12);
     color: var(--accent, #29c2f0);
     border: 1px solid rgba(41, 194, 240, 0.25);
@@ -389,10 +395,12 @@
     grid-template-columns: 1fr 1fr;
     gap: 8px;
     width: 100%;
+    min-width: 0;
   }
 
   .btn-group :global(.btn) {
     width: 100%;
+    min-width: 0;
     padding: 7px 8px;
     font-size: 12.5px;
     white-space: nowrap;
@@ -402,6 +410,8 @@
   .btn-group :global(.btn span) {
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 
   .install-link {

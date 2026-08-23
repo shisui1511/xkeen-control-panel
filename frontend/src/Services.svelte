@@ -1155,14 +1155,14 @@
   /* 2-Section Grid Layout (SRV-01) */
   .services-top-grid {
     display: grid;
-    grid-template-columns: 1.7fr 1fr;
+    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
     gap: 20px;
     margin-bottom: 24px;
   }
 
   .services-bottom-grid {
     display: grid;
-    grid-template-columns: 1.4fr 1fr;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
     gap: 20px;
     margin-bottom: 32px;
   }
@@ -1376,6 +1376,7 @@
 
   /* Updates Card */
   .updates-card {
+    min-width: 0;
     padding: 24px;
     display: flex;
     flex-direction: column;
@@ -1397,8 +1398,10 @@
 
   .channel-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
     padding: 10px 14px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
