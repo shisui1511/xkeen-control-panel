@@ -294,10 +294,18 @@
 
   function highlightMatches(text: string, query: string): string {
     if (!query) return escapeHtml(text);
-    const escaped = escapeHtml(text);
     const safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(${safeQuery})`, 'gi');
-    return escaped.replace(regex, '<mark class="log-mark">$1</mark>');
+    const parts = text.split(regex);
+    return parts
+      .map((part) => {
+        if (!part) return '';
+        if (part.toLowerCase() === query.toLowerCase()) {
+          return `<mark class="log-mark">${escapeHtml(part)}</mark>`;
+        }
+        return escapeHtml(part);
+      })
+      .join('');
   }
 
   function escapeHtml(str: string): string {
@@ -934,6 +942,8 @@
     white-space: nowrap;
     border-left: 2px solid transparent;
     transition: background 0.1s ease;
+    min-width: 100%;
+    width: max-content;
   }
 
   .logs-console.wrap-mode .log-row {
