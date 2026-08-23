@@ -387,7 +387,13 @@ func (s *TrafficQuotaService) GetQuota(id string) (TrafficQuota, bool) {
 // threshold, or a Period value the reset switch does not recognize). An
 // empty Period defaults to "monthly" (mirroring the TrafficQuotaAdd HTTP
 // handler's own default) rather than being rejected, so callers that omit
-// it keep working; only a non-empty, unrecognized Period is an error.
+// it keep working; only a non-empty, unrecognized Period is an error. An
+// empty TargetType is likewise defaulted to "global" (mirroring the same
+// HTTP handler's TargetType default) rather than rejected — but a
+// TargetType of "proxy" with no TargetID, or any other unrecognized
+// TargetType, is rejected: either would silently defeat quota enforcement
+// in checkQuotas/processConnSnapshot (CurrentBytes never increments) while
+// still showing up in the UI as an active, enabled limit.
 func validateQuota(q *TrafficQuota) error {
 	if q.LimitBytes <= 0 {
 		return fmt.Errorf("limit_bytes must be positive")
@@ -402,6 +408,19 @@ func validateQuota(q *TrafficQuota) error {
 	case "daily", "weekly", "monthly":
 	default:
 		return fmt.Errorf("invalid period: %s", q.Period)
+	}
+	if q.TargetType == "" {
+		q.TargetType = "global"
+	}
+	switch q.TargetType {
+	case "global":
+		// TargetID not required
+	case "proxy":
+		if q.TargetID == "" {
+			return fmt.Errorf("target_id is required when target_type is \"proxy\"")
+		}
+	default:
+		return fmt.Errorf("invalid target_type: %s", q.TargetType)
 	}
 	return nil
 }
