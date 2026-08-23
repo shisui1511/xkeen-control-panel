@@ -479,10 +479,10 @@ func (s *TrafficQuotaService) GetStats() map[string]interface{} {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	proxyList := make([]*ProxyTraffic, 0, len(s.proxyStats))
+	proxyList := make([]ProxyTraffic, 0, len(s.proxyStats))
 	var totalUpload, totalDownload int64
 	for _, stat := range s.proxyStats {
-		proxyList = append(proxyList, stat)
+		proxyList = append(proxyList, *stat)
 		totalUpload += stat.UploadBytes
 		totalDownload += stat.DownloadBytes
 	}
