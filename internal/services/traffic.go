@@ -112,6 +112,12 @@ const saveLockThrottle = 1 * time.Minute
 // maxTrafficFileSize is the rotation threshold for traffic.json.
 const maxTrafficFileSize = 5 * 1024 * 1024 // 5 MB
 
+// wsReadDeadline bounds how long streamConnections/streamTraffic will block on
+// ReadMessage without receiving anything from Mihomo. Mihomo emits a snapshot
+// roughly once per second on both endpoints even when idle, so this is a
+// generous margin that only trips for a genuinely stalled connection (STAB-02).
+const wsReadDeadline = 30 * time.Second
+
 // mihomoConnMetadata holds metadata about connection protocol and client
 type mihomoConnMetadata struct {
 	Network  string `json:"network"`
@@ -611,12 +617,30 @@ func (s *TrafficQuotaService) collectorLoop() {
 
 // connectionsWSLoop connects to Mihomo's /connections WebSocket endpoint and
 // processes real-time connection snapshots. Reconnects automatically with
-// exponential backoff (5 s → 60 s) when the stream is interrupted.
+// exponential backoff (see wsReconnectLoop) when the stream is interrupted.
 func (s *TrafficQuotaService) connectionsWSLoop() {
+	s.wsReconnectLoop("connections", s.streamConnections)
+}
+
+// wsReconnectLoop drives a single WS stream (connections or traffic) through
+// dial → read → reconnect with exponential backoff (5s → 60s baseline).
+// When Mihomo is fully stopped, dial attempts fail almost instantly; after
+// several such rapid consecutive failures the cap widens to 5 minutes so a
+// stopped kernel does not produce a steady drumbeat of retries/goroutine
+// churn for as long as it stays down (STAB-02). Deduplicated between
+// connectionsWSLoop and trafficWSLoop, which previously carried identical
+// backoff logic.
+func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func() error) {
 	defer s.wg.Done()
 
-	backoff := 5 * time.Second
-	const maxBackoff = 60 * time.Second
+	const baseBackoff = 5 * time.Second
+	const shortBackoffCap = 60 * time.Second
+	const extendedBackoffCap = 5 * time.Minute
+	const rapidFailureThreshold = 3 * time.Second
+	const extendedAfterFailures = 5
+
+	backoff := baseBackoff
+	consecutiveFailures := 0
 
 	for {
 		select {
@@ -626,18 +650,29 @@ func (s *TrafficQuotaService) connectionsWSLoop() {
 		}
 
 		start := time.Now()
-		err := s.streamConnections()
+		err := streamFn()
 		if err == nil {
 			// Graceful shutdown via stopCh.
 			return
 		}
+		elapsed := time.Since(start)
 
-		// If the session ran for more than 30 s it was healthy — reset backoff.
-		if time.Since(start) > 30*time.Second {
-			backoff = 5 * time.Second
+		if elapsed > 30*time.Second {
+			// Session was healthy for a while and later dropped — start over.
+			backoff = baseBackoff
+			consecutiveFailures = 0
+		} else if elapsed < rapidFailureThreshold {
+			// Near-instant failure (e.g. connection refused) — Mihomo is
+			// likely stopped rather than just having a transient hiccup.
+			consecutiveFailures++
 		}
 
-		log.Printf("TrafficQuota: WS connections stream ended: %v — retry in %s", err, backoff)
+		backoffCap := shortBackoffCap
+		if consecutiveFailures >= extendedAfterFailures {
+			backoffCap = extendedBackoffCap
+		}
+
+		log.Printf("TrafficQuota: WS %s stream ended: %v — retry in %s", label, err, backoff)
 
 		select {
 		case <-time.After(backoff):
@@ -645,8 +680,11 @@ func (s *TrafficQuotaService) connectionsWSLoop() {
 			return
 		}
 
-		if backoff < maxBackoff {
+		if backoff < backoffCap {
 			backoff *= 2
+			if backoff > backoffCap {
+				backoff = backoffCap
+			}
 		}
 	}
 }
@@ -679,6 +717,12 @@ func (s *TrafficQuotaService) streamConnections() error {
 	log.Printf("TrafficQuota: WebSocket connected to %s", wsURL)
 
 	for {
+		// Mihomo emits a /connections snapshot roughly once per second even when
+		// idle. A read deadline well above that cadence detects a socket that
+		// accepted the handshake but then went silent (e.g. a wedged Mihomo
+		// process), forcing a reconnect through the backoff loop instead of
+		// blocking this goroutine on ReadMessage indefinitely (STAB-02).
+		_ = conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
 			select {
@@ -883,42 +927,7 @@ func (s *TrafficQuotaService) broadcastTraffic(raw []byte) {
 }
 
 func (s *TrafficQuotaService) trafficWSLoop() {
-	defer s.wg.Done()
-
-	backoff := 5 * time.Second
-	const maxBackoff = 60 * time.Second
-
-	for {
-		select {
-		case <-s.stopCh:
-			return
-		default:
-		}
-
-		start := time.Now()
-		err := s.streamTraffic()
-		if err == nil {
-			// Graceful shutdown via stopCh.
-			return
-		}
-
-		// If the session ran for more than 30 s it was healthy — reset backoff.
-		if time.Since(start) > 30*time.Second {
-			backoff = 5 * time.Second
-		}
-
-		log.Printf("TrafficQuota: WS traffic stream ended: %v — retry in %s", err, backoff)
-
-		select {
-		case <-time.After(backoff):
-		case <-s.stopCh:
-			return
-		}
-
-		if backoff < maxBackoff {
-			backoff *= 2
-		}
-	}
+	s.wsReconnectLoop("traffic", s.streamTraffic)
 }
 
 type mihomoTraffic struct {
@@ -951,6 +960,7 @@ func (s *TrafficQuotaService) streamTraffic() error {
 	log.Printf("TrafficQuota: WebSocket traffic connected to %s", wsURL)
 
 	for {
+		_ = conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
 			select {
