@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bufio"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 const (
@@ -220,7 +222,15 @@ func (a *API) LogsDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	f, err := os.Open(cleanPath)
+	if err != nil {
+		a.errorResponse(w, "Failed to read log file", http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
 	w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(cleanPath))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	http.ServeFile(w, r, cleanPath)
+	redactedReader := services.NewRedactionReader(f)
+	_, _ = io.Copy(w, redactedReader)
 }
