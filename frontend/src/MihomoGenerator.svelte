@@ -610,6 +610,7 @@
           rules: rules.map((r) => ({ type: r.type, value: r.value, outbound: r.outbound }))
         });
         if (!silent) {
+          isDirty = true;
           showToast('success', $t('editor.preset_applied'));
         }
         return;
@@ -712,6 +713,7 @@
       rules: rules.map((r) => ({ type: r.type, value: r.value, outbound: r.outbound }))
     });
     if (!silent) {
+      isDirty = true;
       showToast('success', $t('editor.preset_applied'));
     }
   }
@@ -1021,13 +1023,16 @@
         }
       }
 
-      proxies = [...proxies, ...mappedList];
+      if (mappedList.length > 0) {
+        proxies = [...proxies, ...mappedList];
+        isDirty = true;
+        showToast('success', $t('subscr.import_success', { count: mappedList.length }));
+      } else {
+        proxies = [...proxies, ...mappedList];
+      }
 
       if (skippedCount > 0) {
         showToast('warning', $t('subscr.partial_map_warning'));
-      }
-      if (mappedList.length > 0) {
-        showToast('success', $t('subscr.import_success', { count: mappedList.length }));
       }
 
       showImportModal = false;
@@ -1232,6 +1237,7 @@
     } else {
       proxies = [...proxies, { ...np, name: cleanName, id: crypto.randomUUID() }];
     }
+    isDirty = true;
     showProxyForm = false;
     np = newProxyDefaults('vless');
   }
@@ -1244,6 +1250,7 @@
 
   function removeProxy(id: string) {
     proxies = proxies.filter((p) => p.id !== id);
+    isDirty = true;
   }
 
   function duplicateProxy(p: Proxy) {
@@ -1267,6 +1274,7 @@
     proxies = proxies.map((p) =>
       p.id === id ? { ...p, enabled: p.enabled === false ? true : false } : p
     );
+    isDirty = true;
   }
 
   function addGroup() {
@@ -1294,6 +1302,7 @@
         }
       ];
     }
+    isDirty = true;
     showGroupForm = false;
     ng = {
       name: '',
@@ -1324,6 +1333,7 @@
 
   function removeGroup(id: string) {
     groups = groups.filter((g) => g.id !== id);
+    isDirty = true;
   }
 
   function addRule() {
@@ -1331,15 +1341,19 @@
       ...rules,
       {
         id: crypto.randomUUID(),
-        type: 'DOMAIN-SUFFIX',
-        value: '',
-        outbound: 'DIRECT'
+        type: nr.type || 'DOMAIN-SUFFIX',
+        value: nr.value || '',
+        outbound: nr.outbound || 'DIRECT'
       }
     ];
+    showRuleForm = false;
+    nr = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
+    isDirty = true;
   }
 
   function removeRule(id: string) {
     rules = rules.filter((r) => r.id !== id);
+    isDirty = true;
   }
 
   function moveRule(id: string, dir: -1 | 1) {
@@ -1350,6 +1364,7 @@
     const arr = [...rules];
     [arr[idx], arr[next]] = [arr[next], arr[idx]];
     rules = arr;
+    isDirty = true;
   }
 
   // ── YAML generation ─────────────────────────────────────────────────────
@@ -2781,7 +2796,7 @@
           type="button"
           class="mihomo-splitter"
           class:active={isResizingPreview}
-          aria-label="Resize preview"
+          aria-label={$t('xray.resize_preview')}
           tabindex="-1"
           onpointerdown={startResizePreview}
           onmousedown={startResizePreview}
