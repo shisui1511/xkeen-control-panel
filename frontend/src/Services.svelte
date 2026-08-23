@@ -613,15 +613,33 @@
               {/if}
             </div>
             {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
-              <span
+              <a
+                href="#/editor"
                 class="badge badge-warning"
                 style="margin-top: 6px; display: inline-flex;"
                 title={$t('svc.mihomo_api_unavailable_title')}
+                onclick={(e) => e.stopPropagation()}
               >
                 {$t('svc.mihomo_api_unavailable')}
-              </span>
+              </a>
             {/if}
           </div>
+          {#if !isRunning}
+            <button
+              type="button"
+              class="btn btn-primary btn-sm"
+              onclick={(e) => {
+                e.stopPropagation();
+                controlService('start');
+              }}
+              title={$t('svc.action_start')}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+              {$t('svc.action_start')}
+            </button>
+          {/if}
         </div>
 
         <!-- Xray Option -->
@@ -662,6 +680,22 @@
               {/if}
             </div>
           </div>
+          {#if !isRunning}
+            <button
+              type="button"
+              class="btn btn-primary btn-sm"
+              onclick={(e) => {
+                e.stopPropagation();
+                controlService('start');
+              }}
+              title={$t('svc.action_start')}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+              {$t('svc.action_start')}
+            </button>
+          {/if}
         </div>
       </div>
 
@@ -963,19 +997,7 @@
     <div class="card restart-card">
       <div class="card-head-row">
         <div>
-          <h2 class="card-title">
-            {$t('svc.restart_log_title')}
-            <span class="ct-actions" style="margin-left:auto;">
-              {#if restartLog.length > 0}
-                <button
-                  class="btn btn-sm btn-secondary"
-                  onclick={() => (restartLogExpanded = !restartLogExpanded)}
-                >
-                  {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
-                </button>
-              {/if}
-            </span>
-          </h2>
+          <h2 class="card-title">{$t('svc.restart_log_title')}</h2>
           <p class="card-subtitle">
             {pluralize(
               restartLog.length,
@@ -986,6 +1008,16 @@
             )}
           </p>
         </div>
+        {#if restartLog.length > 0}
+          <div class="ct-actions">
+            <button
+              class="btn btn-sm btn-secondary"
+              onclick={() => (restartLogExpanded = !restartLogExpanded)}
+            >
+              {restartLogExpanded ? $t('svc.log_collapse') : $t('svc.log_expand')}
+            </button>
+          </div>
+        {/if}
       </div>
 
       {#if restartLog.length === 0}

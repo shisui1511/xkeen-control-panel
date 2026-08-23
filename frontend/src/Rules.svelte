@@ -614,11 +614,11 @@
           <table>
             <thead>
               <tr>
-                <th style="width: 50px;">Вкл</th>
+                <th style="width: 50px;">{$t('rules.enabled_col')}</th>
                 <th>{$t('rules.type_col')}</th>
                 <th>{$t('rules.value')}</th>
                 <th>{$t('rules.target')}</th>
-                <th>Комментарий</th>
+                <th>{$t('rules.comment_col')}</th>
                 <th style="width: 50px;"></th>
               </tr>
             </thead>
@@ -644,7 +644,7 @@
                     <button
                       class="btn btn-danger btn-sm"
                       onclick={() => removeCustomRule(rule.id)}
-                      title="Удалить"
+                      title={$t('app.delete')}
                       style="padding: 2px 8px; font-size: 11px;"
                     >
                       ✕

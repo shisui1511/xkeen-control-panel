@@ -134,8 +134,9 @@
 
   $effect(() => {
     // Reset highlight on query change
-    query;
-    highlightIndex = 0;
+    if (query !== undefined) {
+      highlightIndex = 0;
+    }
   });
 
   let activeOptionId = $derived(

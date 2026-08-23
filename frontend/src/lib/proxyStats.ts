@@ -214,7 +214,7 @@ export function computeGroupHealthStats(
     });
 
     const sumFloor = raw.reduce((s, r) => s + r.floor, 0);
-    let diff = 100 - sumFloor;
+    const diff = 100 - sumFloor;
 
     // Сортируем по величине остатка для распределения недостающих процентов
     const sorted = [...raw].filter((r) => r.count > 0).sort((a, b) => b.rem - a.rem);

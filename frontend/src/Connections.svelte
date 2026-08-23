@@ -1712,12 +1712,11 @@
   .btn-close-conn::before {
     content: '';
     position: absolute;
-    top: -8px;
-    bottom: -8px;
-    left: -8px;
-    right: -8px;
-    min-width: 44px;
-    min-height: 44px;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 44px;
   }
 
   .btn-close-conn:hover {
