@@ -203,6 +203,11 @@
         const downSpeed = data.down || 0;
         const now = Date.now();
 
+        // Keep buffering into allTrafficData and bookkeeping lastTickTime even
+        // while paused — the main chart resumes from this buffer via
+        // frozenPoints, and lastTickTime must stay current so a resumed
+        // session doesn't multiply the instantaneous speed by the entire
+        // paused interval on the next tick.
         allTrafficData.push({
           up: upSpeed,
           down: downSpeed,
@@ -216,32 +221,38 @@
           allTrafficData = allTrafficData;
         }
 
-        totalUp = upSpeed;
-        totalDown = downSpeed;
-
-        if (lastTickTime > 0) {
-          const elapsedSec = (now - lastTickTime) / 1000;
-          sessionUp += upSpeed * elapsedSec;
-          sessionDown += downSpeed * elapsedSec;
-        }
+        const elapsedSec = lastTickTime > 0 ? (now - lastTickTime) / 1000 : 0;
         lastTickTime = now;
 
-        activeConnectionsCount = data.connections || 0;
-        tcpConnectionsCount = data.tcp_connections || 0;
-        udpConnectionsCount = data.udp_connections || 0;
+        // "Paused" implies the whole live view is frozen for inspection —
+        // skip every other state update so KPI cards, sparklines, top
+        // clients and peaks stop changing while the badge reads "Paused".
+        if (!isPaused) {
+          totalUp = upSpeed;
+          totalDown = downSpeed;
 
-        connHistory.push({ ts: now, count: activeConnectionsCount });
-        if (connHistory.length > CONN_HISTORY_MAX) connHistory.shift();
-        connHistory = connHistory;
+          if (elapsedSec > 0) {
+            sessionUp += upSpeed * elapsedSec;
+            sessionDown += downSpeed * elapsedSec;
+          }
 
-        if (data.peaks) {
-          peaks = data.peaks;
-        }
-        if (data.top_clients) {
-          topClients = data.top_clients;
-        }
-        if (typeof data.total_clients_bytes === 'number') {
-          totalClientsBytes = data.total_clients_bytes;
+          activeConnectionsCount = data.connections || 0;
+          tcpConnectionsCount = data.tcp_connections || 0;
+          udpConnectionsCount = data.udp_connections || 0;
+
+          connHistory.push({ ts: now, count: activeConnectionsCount });
+          if (connHistory.length > CONN_HISTORY_MAX) connHistory.shift();
+          connHistory = connHistory;
+
+          if (data.peaks) {
+            peaks = data.peaks;
+          }
+          if (data.top_clients) {
+            topClients = data.top_clients;
+          }
+          if (typeof data.total_clients_bytes === 'number') {
+            totalClientsBytes = data.total_clients_bytes;
+          }
         }
       } catch (e) {
         // ignore
@@ -420,7 +431,10 @@
 
   // Card Sparkline generator (last 20 points)
   let sparklines = $derived.by(() => {
-    const points = allTrafficData.slice(-20);
+    // Mirror the main chart's frozenPoints behavior so the sparkline cards
+    // actually stop moving while paused instead of continuing to animate
+    // from the live allTrafficData buffer.
+    const points = (frozenPoints || allTrafficData).slice(-20);
     if (points.length < 2) {
       return { uLine: '', uArea: '', dLine: '', dArea: '' };
     }
