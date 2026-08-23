@@ -12,6 +12,17 @@ dns:
   listen: 0.0.0.0:1053
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "+.keenetic.pro"
+    - "+.keenetic.net"
+    - "+.keenetic.link"
+    - "+.keenetic.io"
+    - "192.168.*"
+    - "172.16.*"
+    - "10.*"
+    - "localhost"
+    - "*.lan"
+    - "*.local"
   nameserver:
     - 77.88.8.8
     - 1.1.1.1
@@ -50,6 +61,12 @@ rule-providers:
     interval: 86400
 
 rules:
+  # Безусловный DIRECT для LAN и корпоративных протоколов
+  - DST-PORT,3389,DIRECT
+  - DST-PORT,22,DIRECT
+  - DST-PORT,445,DIRECT
+  - DST-PORT,1194,DIRECT
+  - DST-PORT,51820,DIRECT
   - RULE-SET,category-ads-all,REJECT
   - RULE-SET,telegram-ip,Selective
   - RULE-SET,private-ip,DIRECT

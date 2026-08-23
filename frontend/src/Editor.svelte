@@ -1287,8 +1287,28 @@
 
       if (!data.content) throw new Error('Template is empty');
 
+      let finalContent = data.content;
+      try {
+        const currentContent = editorView.state.doc.toString();
+        const mergeRes = await apiFetchJSON<{ content: string }>('/api/config/smart-merge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: template.type,
+            existing_content: currentContent,
+            template_content: data.content,
+            target_file: selectedFile
+          })
+        });
+        if (mergeRes && mergeRes.content) {
+          finalContent = mergeRes.content;
+        }
+      } catch (mergeErr) {
+        console.warn('Smart merge fallback to raw template:', mergeErr);
+      }
+
       editorView.dispatch({
-        changes: { from: 0, to: editorView.state.doc.length, insert: data.content }
+        changes: { from: 0, to: editorView.state.doc.length, insert: finalContent }
       });
       isDirty = true;
       showTemplatesModal = false;

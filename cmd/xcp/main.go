@@ -157,6 +157,14 @@ func main() {
 	srv.HandleProtected("/api/config/rename", api.ConfigRename)
 	srv.HandleProtected("/api/config/validate", api.ConfigValidate)
 	srv.HandleProtected("/api/config/preflight", api.ConfigPreflight)
+	srv.HandleProtected("/api/config/smart-merge", api.ConfigSmartMerge)
+	srv.HandleProtected("/api/rules/custom", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			api.UserRulesList(w, r)
+		} else {
+			api.UserRulesSave(w, r)
+		}
+	})
 	srv.HandleProtected("/api/config/mihomo-migrate-socket", api.MihomoMigrateSocket)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
@@ -308,6 +316,10 @@ func main() {
 
 	// Assets Service
 	srv.HandleProtected("/api/assets/definition", api.AssetsDefinition)
+
+	// User Custom Rules Service (TMPL-06, TMPL-07)
+	userRulesSvc := services.NewUserRulesService(cfg.DataDir)
+	api.SetUserRulesService(userRulesSvc)
 
 	// Templates
 	templatesFS, err := xkeencontrolpanel.GetTemplatesFS()

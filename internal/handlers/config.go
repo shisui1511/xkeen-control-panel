@@ -808,3 +808,47 @@ func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data 
 
 	return ""
 }
+
+// ConfigSmartMergeRequest represents the payload for smart template merging.
+type ConfigSmartMergeRequest struct {
+	Type              string `json:"type"` // "mihomo" or "xray"
+	ExistingContent   string `json:"existing_content"`
+	TemplateContent   string `json:"template_content"`
+	TargetFile        string `json:"target_file,omitempty"`
+	ActiveOutboundTag string `json:"active_outbound_tag,omitempty"`
+}
+
+// ConfigSmartMerge handles smart merging of configuration templates without destroying user proxies or settings.
+func (a *API) ConfigSmartMerge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req ConfigSmartMergeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.errorResponse(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	var userRules []services.UserRule
+	if a.userRulesSvc != nil {
+		userRules = a.userRulesSvc.List()
+	}
+
+	var merged string
+	var err error
+
+	if strings.EqualFold(req.Type, "xray") {
+		merged, err = services.SmartMergeXray(req.ExistingContent, req.TemplateContent, req.TargetFile, req.ActiveOutboundTag, userRules)
+	} else {
+		merged, err = services.SmartMergeMihomo(req.ExistingContent, req.TemplateContent, userRules)
+	}
+
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	JSONSuccess(w, map[string]string{"content": merged})
+}

@@ -329,11 +329,23 @@ func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscr
 	if https {
 		sb.WriteString("    skip-cert-verify: true\n")
 	}
-	// override.udp — страховка для узлов, у которых провайдер не прислал
+	// override.udp & override.tfo — страховка для узлов, у которых провайдер не прислал
 	// udp: true. Без него Mihomo не проксирует UDP (QUIC/HTTP3, игры,
-	// DNS-over-QUIC уходят мимо туннеля).
+	// звонки Telegram, Discord Voice уходят мимо туннеля).
 	sb.WriteString("    override:\n")
 	sb.WriteString("      udp: true\n")
+	sb.WriteString("      tfo: true\n")
+
+	hwid := sub.HwidToken
+	if hwid == "" {
+		hwid = s.hwid
+	}
+	if hwid != "" && !sub.HwidLocked {
+		sb.WriteString("    header:\n")
+		sb.WriteString(fmt.Sprintf("      x-hwid:\n        - \"%s\"\n", hwid))
+		sb.WriteString("      User-Agent:\n        - \"ClashMeta/v1.18.0 (XKeen-Control-Panel)\"\n")
+	}
+
 	sb.WriteString("    health-check:\n")
 	sb.WriteString("      enable: true\n")
 	sb.WriteString("      url: http://www.gstatic.com/generate_204\n")
