@@ -17,6 +17,7 @@
   const BUFFER_ROWS = 10;
 
   let destroyed = false;
+  let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   let logIdCounter = 0;
   let logs = $state<LogEntry[]>([]);
   let ws = $state<WebSocket | null>(null);
@@ -169,6 +170,11 @@
   }
 
   function connect() {
+    if (destroyed) return;
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/api/logs/ws`;
 
@@ -181,7 +187,7 @@
     };
 
     ws.onmessage = (event) => {
-      if (document.hidden) return;
+      if (document.hidden || destroyed) return;
       if (paused) {
         pausedNewCount += 1;
         return;
@@ -211,12 +217,17 @@
       logs = [...logs, parseLogLine(`[xkeen] ${msg}`)];
 
       if (!paused && !destroyed) {
-        setTimeout(connect, 3000);
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        reconnectTimeout = setTimeout(connect, 3000);
       }
     };
   }
 
   function disconnect() {
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
     if (ws) {
       ws.close();
       ws = null;
