@@ -343,8 +343,7 @@ func (s *TrafficQuotaService) saveLocked(force bool) error {
 }
 
 // rotateIfNeeded renames traffic.json to a timestamped .bak when it exceeds
-// maxTrafficFileSize and purges orphaned proxyStats entries to reclaim space.
-// Caller MUST hold s.mu (write lock).
+// maxTrafficFileSize. Caller MUST hold s.mu (write lock).
 func (s *TrafficQuotaService) rotateIfNeeded() {
 	info, err := os.Stat(s.storePath())
 	if err != nil || info.Size() < maxTrafficFileSize {
@@ -357,20 +356,7 @@ func (s *TrafficQuotaService) rotateIfNeeded() {
 	}
 	log.Printf("traffic: traffic.json exceeded 5 MB, rotated → %s", bakPath)
 
-	// Keep only proxyStats entries referenced by active quotas.
-	active := make(map[string]bool)
-	for _, q := range s.quotas {
-		if q.TargetType == "proxy" && q.TargetID != "" {
-			active[q.TargetID] = true
-		}
-	}
-	for name := range s.proxyStats {
-		if !active[name] {
-			delete(s.proxyStats, name)
-		}
-	}
-
-	// Write pruned state back to disk immediately so traffic.json exists
+	// Write state back to disk immediately so traffic.json exists
 	store := TrafficStore{
 		Quotas:         s.quotas,
 		ProxyStats:     s.proxyStats,
