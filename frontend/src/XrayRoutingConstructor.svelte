@@ -252,45 +252,49 @@
   let copyFeedback = $state(false);
 
   // Drag-and-Drop & Rule controls (BUILD-02)
-  let draggedIndex = $state<number | null>(null);
-  let dragOverIndex = $state<number | null>(null);
+  let draggedRuleId = $state<string | null>(null);
+  let dragOverRuleId = $state<string | null>(null);
 
-  function handleDragStart(e: DragEvent, index: number) {
-    draggedIndex = index;
+  function handleDragStart(e: DragEvent, ruleId: string) {
+    draggedRuleId = ruleId;
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', String(index));
+      e.dataTransfer.setData('text/plain', ruleId);
     }
   }
 
-  function handleDragOver(e: DragEvent, index: number) {
+  function handleDragOver(e: DragEvent, ruleId: string) {
     e.preventDefault();
     if (e.dataTransfer) {
       e.dataTransfer.dropEffect = 'move';
     }
-    dragOverIndex = index;
+    dragOverRuleId = ruleId;
   }
 
-  function handleDrop(e: DragEvent, index: number) {
+  function handleDrop(e: DragEvent, targetRuleId: string) {
     e.preventDefault();
-    if (draggedIndex === null || draggedIndex === index) {
-      draggedIndex = null;
-      dragOverIndex = null;
+    if (!draggedRuleId || draggedRuleId === targetRuleId) {
+      draggedRuleId = null;
+      dragOverRuleId = null;
       return;
     }
-    const updated = [...routingRules];
-    const [moved] = updated.splice(draggedIndex, 1);
-    updated.splice(index, 0, moved);
-    routingRules = updated;
-    draggedIndex = null;
-    dragOverIndex = null;
-    isDirty = true;
-    if (lastAppliedPreset) isPresetModified = true;
+    const fromIdx = routingRules.findIndex((r) => r.id === draggedRuleId);
+    const toIdx = routingRules.findIndex((r) => r.id === targetRuleId);
+    if (fromIdx !== -1 && toIdx !== -1) {
+      const updated = [...routingRules];
+      const [moved] = updated.splice(fromIdx, 1);
+      updated.splice(toIdx, 0, moved);
+      routingRules = updated;
+      isDirty = true;
+      if (lastAppliedPreset) isPresetModified = true;
+    }
+    draggedRuleId = null;
+    dragOverRuleId = null;
   }
 
   function handleDragEnd() {
-    draggedIndex = null;
-    dragOverIndex = null;
+    draggedRuleId = null;
+    dragOverRuleId = null;
   }
 
   function toggleRuleEnabled(ruleId: string) {
@@ -2047,16 +2051,16 @@
             <div class="section-title">{$t('xray.routing_rules')}</div>
 
             <div class="routing-rules-list" data-testid="routing-rules-list">
-              {#each filteredRules as rule, idx (rule.id)}
+              {#each filteredRules as rule (rule.id)}
                 <div
                   class="card rule-card"
                   class:rule-disabled={rule.enabled === false}
-                  class:dragging={draggedIndex === idx}
-                  class:drag-over={dragOverIndex === idx}
+                  class:dragging={draggedRuleId === rule.id}
+                  class:drag-over={dragOverRuleId === rule.id}
                   draggable="true"
-                  ondragstart={(e) => handleDragStart(e, idx)}
-                  ondragover={(e) => handleDragOver(e, idx)}
-                  ondrop={(e) => handleDrop(e, idx)}
+                  ondragstart={(e) => handleDragStart(e, rule.id)}
+                  ondragover={(e) => handleDragOver(e, rule.id)}
+                  ondrop={(e) => handleDrop(e, rule.id)}
                   ondragend={handleDragEnd}
                 >
                   <div class="rule-header">
