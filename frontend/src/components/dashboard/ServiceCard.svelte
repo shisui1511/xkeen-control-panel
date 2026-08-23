@@ -391,15 +391,15 @@
   }
 
   .btn-group {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     width: 100%;
     min-width: 0;
   }
 
   .btn-group :global(.btn) {
-    width: 100%;
+    flex: 1 1 130px;
     min-width: 0;
     padding: 7px 8px;
     font-size: 12.5px;
