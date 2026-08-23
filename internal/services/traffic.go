@@ -1282,9 +1282,7 @@ func (s *TrafficQuotaService) checkQuotas() {
 			}
 			if group.Now != fallback {
 				if _, saved := s.blockedProxies[groupName]; !saved {
-					if group.Now != "DIRECT" && group.Now != "REJECT" {
-						s.blockedProxies[groupName] = group.Now
-					}
+					s.blockedProxies[groupName] = group.Now
 				}
 				blockActions = append(blockActions, struct {
 					groupName string
