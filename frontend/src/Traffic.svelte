@@ -179,6 +179,14 @@
   const MAX_RECONNECT_DELAY = 16000;
 
   function connect() {
+    // Guard against overlapping connects: a visibilitychange firing while a
+    // fresh reconnect attempt is still CONNECTING must not open a second
+    // socket — the first one's handlers would stay attached and double up
+    // every WS-driven update once it finishes connecting.
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
     if (reconnectTimeout) {
       clearTimeout(reconnectTimeout);
       reconnectTimeout = null;
