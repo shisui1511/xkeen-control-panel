@@ -1123,11 +1123,6 @@ func (s *TrafficQuotaService) checkQuotas() {
 	s.mu.RLock()
 	quotasCopy := make([]TrafficQuota, len(s.quotas))
 	copy(quotasCopy, s.quotas)
-
-	proxyStatsCopy := make(map[string]int64)
-	for name, stat := range s.proxyStats {
-		proxyStatsCopy[name] = stat.TotalBytes
-	}
 	s.mu.RUnlock()
 
 	mihomoProxies, err := s.getMihomoProxies()
