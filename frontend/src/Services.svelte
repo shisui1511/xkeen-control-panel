@@ -57,7 +57,7 @@
 
   let kernels = $state<Kernel[]>([]);
   let kernelsLoaded = $state(false);
-  let statusIntervals = $state<Record<string, ReturnType<typeof setInterval>>>({});
+  const statusIntervals: Record<string, ReturnType<typeof setInterval>> = {};
 
   // Restart log
   interface RestartLogEntry {
@@ -577,7 +577,8 @@
       <div class="core-radio-grid" role="radiogroup" aria-label={$t('svc.active_kernel_label')}>
         <!-- Mihomo Option -->
         <div
-          role="button"
+          role="radio"
+          aria-checked={activeKernel === 'mihomo'}
           tabindex="0"
           class="core-radio-card kernel-card"
           class:active={activeKernel === 'mihomo'}
@@ -612,37 +613,21 @@
               {/if}
             </div>
             {#if ($capabilities?.mihomo?.process_running || mihomo?.process_status === 'running') && $capabilities?.mihomo?.reachable && !$capabilities?.mihomo?.api_reachable}
-              <a
-                href="#/editor"
+              <span
                 class="badge badge-warning"
                 style="margin-top: 6px; display: inline-flex;"
                 title={$t('svc.mihomo_api_unavailable_title')}
               >
                 {$t('svc.mihomo_api_unavailable')}
-              </a>
+              </span>
             {/if}
           </div>
-          {#if !isRunning}
-            <button
-              type="button"
-              class="btn btn-primary btn-sm"
-              onclick={(e) => {
-                e.stopPropagation();
-                controlService('start');
-              }}
-              title={$t('svc.action_start')}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"
-                ><polygon points="5 3 19 12 5 21 5 3" /></svg
-              >
-              {$t('svc.action_start')}
-            </button>
-          {/if}
         </div>
 
         <!-- Xray Option -->
         <div
-          role="button"
+          role="radio"
+          aria-checked={activeKernel === 'xray'}
           tabindex="0"
           class="core-radio-card kernel-card"
           class:active={activeKernel === 'xray'}
@@ -677,22 +662,6 @@
               {/if}
             </div>
           </div>
-          {#if !isRunning}
-            <button
-              type="button"
-              class="btn btn-primary btn-sm"
-              onclick={(e) => {
-                e.stopPropagation();
-                controlService('start');
-              }}
-              title={$t('svc.action_start')}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"
-                ><polygon points="5 3 19 12 5 21 5 3" /></svg
-              >
-              {$t('svc.action_start')}
-            </button>
-          {/if}
         </div>
       </div>
 
