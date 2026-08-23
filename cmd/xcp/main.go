@@ -40,12 +40,25 @@ func main() {
 
 	// Router-grade RAM/GC limits (STAB-06): Keenetic devices typically have
 	// 128-256 MB total RAM shared with the kernel and other services. A
-	// hard soft-memory-limit plus an aggressive GC target keeps XCP's own
-	// footprint predictable instead of relying on the Go runtime's default
-	// heap-doubling behavior, which can otherwise contribute to OOM-killer
-	// intervention on a loaded router (see Phase 99 analysis).
-	debug.SetMemoryLimit(45 * 1024 * 1024) // 45 MiB
-	debug.SetGCPercent(30)
+	// soft-memory-limit plus a moderately aggressive GC target keeps XCP's
+	// own footprint predictable instead of relying on the Go runtime's
+	// default heap-doubling behavior, which can otherwise contribute to
+	// OOM-killer intervention on a loaded router (see Phase 99 analysis).
+	//
+	// 96 MiB (not a tighter 45 MiB) leaves headroom for existing code paths
+	// that already buffer multi-MB payloads fully in memory in a single
+	// allocation — kernel binary downloads (KernelService.FetchBinary), DAT
+	// geodata updates, and diagnostics snapshot .tar.gz creation — so a
+	// single such operation doesn't push the soft limit into continuous-GC
+	// territory (SetMemoryLimit trades memory for CPU once resident heap
+	// approaches it; on low-power router CPUs that trade can itself produce
+	// the sluggishness this phase is meant to prevent). GOGC=50 is a milder
+	// target than the previous 30 for the same reason — enough headroom
+	// between collections to avoid GC thrashing under normal operation,
+	// while SetMemoryLimit remains the hard backstop against unbounded
+	// growth.
+	debug.SetMemoryLimit(96 * 1024 * 1024) // 96 MiB
+	debug.SetGCPercent(50)
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
