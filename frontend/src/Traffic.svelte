@@ -255,7 +255,7 @@
           }
         }
       } catch (e) {
-        // ignore
+        console.error('traffic ws frame parse failed', e);
       }
     };
 
