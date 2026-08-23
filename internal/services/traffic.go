@@ -380,7 +380,35 @@ func (s *TrafficQuotaService) GetQuota(id string) (TrafficQuota, bool) {
 	return TrafficQuota{}, false
 }
 
+// validateQuota rejects quota field combinations that would silently defeat
+// the automated quota-driven proxy blocking/alerting logic in checkQuotas
+// and checkResets (e.g. a non-positive limit, an unreachable alert
+// threshold, or a Period value the reset switch does not recognize). An
+// empty Period defaults to "monthly" (mirroring the TrafficQuotaAdd HTTP
+// handler's own default) rather than being rejected, so callers that omit
+// it keep working; only a non-empty, unrecognized Period is an error.
+func validateQuota(q *TrafficQuota) error {
+	if q.LimitBytes <= 0 {
+		return fmt.Errorf("limit_bytes must be positive")
+	}
+	if q.AlertThreshold < 0 || q.AlertThreshold > 100 {
+		return fmt.Errorf("alert_threshold must be between 0 and 100")
+	}
+	if q.Period == "" {
+		q.Period = "monthly"
+	}
+	switch q.Period {
+	case "daily", "weekly", "monthly":
+	default:
+		return fmt.Errorf("invalid period: %s", q.Period)
+	}
+	return nil
+}
+
 func (s *TrafficQuotaService) AddQuota(q *TrafficQuota) error {
+	if err := validateQuota(q); err != nil {
+		return err
+	}
 	if q.ID == "" {
 		q.ID = fmt.Sprintf("quota_%d", time.Now().UnixNano())
 	}
@@ -392,6 +420,9 @@ func (s *TrafficQuotaService) AddQuota(q *TrafficQuota) error {
 }
 
 func (s *TrafficQuotaService) UpdateQuota(id string, q *TrafficQuota) error {
+	if err := validateQuota(q); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.quotas {
