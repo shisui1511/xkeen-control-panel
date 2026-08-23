@@ -162,6 +162,17 @@ type TrafficQuotaService struct {
 	blockedProxies     map[string]string
 	resetTime          int64
 	trackerInitialized bool
+
+	// checkQuotasMu serializes checkQuotas() invocations. It is invoked both
+	// from the periodic resetTicker in collectorLoop and from every processed
+	// connections snapshot (potentially several times per second under active
+	// traffic); without this guard two concurrent invocations could compute
+	// overlapping block/restore sets for the same proxy group and issue
+	// conflicting applyProxyToGroup calls to Mihomo. TryLock coalesces
+	// overlapping triggers by skipping a run instead of queueing it — the
+	// next scheduled call picks up any state change the skipped run would
+	// have observed.
+	checkQuotasMu sync.Mutex
 }
 
 func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaService {
@@ -1195,6 +1206,15 @@ func (s *TrafficQuotaService) applyProxyToGroup(groupName, proxyName string) err
 }
 
 func (s *TrafficQuotaService) checkQuotas() {
+	// Coalesce overlapping invocations (see checkQuotasMu doc comment): if a
+	// check is already running, skip this trigger rather than queueing
+	// behind it — the running check (or the next scheduled trigger) will
+	// observe any state change this call would have seen.
+	if !s.checkQuotasMu.TryLock() {
+		return
+	}
+	defer s.checkQuotasMu.Unlock()
+
 	s.mu.RLock()
 	quotasCopy := make([]TrafficQuota, len(s.quotas))
 	copy(quotasCopy, s.quotas)
