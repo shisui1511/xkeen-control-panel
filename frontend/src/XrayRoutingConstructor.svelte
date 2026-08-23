@@ -1188,11 +1188,13 @@
     newRule.network = 'tcp,udp';
     newRule.inboundTagRaw = '';
     isDirty = true;
+    if (lastAppliedPreset) isPresetModified = true;
   }
 
   function removeRule(id: string) {
     routingRules = routingRules.filter((r) => r.id !== id);
     isDirty = true;
+    if (lastAppliedPreset) isPresetModified = true;
   }
 
   function moveRule(id: string, dir: -1 | 1) {
@@ -1204,6 +1206,7 @@
     [arr[idx], arr[next]] = [arr[next], arr[idx]];
     routingRules = arr;
     isDirty = true;
+    if (lastAppliedPreset) isPresetModified = true;
   }
 
   // CRUD для DNS серверов
