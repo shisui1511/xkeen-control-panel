@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -39,6 +40,7 @@ type WatchdogService struct {
 	mu                  sync.Mutex
 	consecutiveFailures int
 	disarmed            bool
+	disarmInFlight      bool
 }
 
 // NewWatchdogService creates a watchdog for the given XKeen service instance.
@@ -70,19 +72,30 @@ func (w *WatchdogService) Stop() {
 func (w *WatchdogService) loop() {
 	defer w.wg.Done()
 
+	// Run the first health check immediately rather than waiting a full
+	// watchdogCheckInterval — a kernel that is already wedged at boot (e.g.
+	// right after a router reboot where XKeen fails to come up) should be
+	// detected as soon as this service starts, not up to ~120s later.
+	w.runCheck()
+
 	ticker := time.NewTicker(watchdogCheckInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
-			w.CheckHealth()
-			if issues := ValidateXrayRoutingTags(w.xrayDir); len(issues) > 0 {
-				log.Printf("Watchdog: Xray routing validation found %d issue(s): %s", len(issues), strings.Join(issues, "; "))
-			}
+			w.runCheck()
 		case <-w.stopCh:
 			return
 		}
+	}
+}
+
+// runCheck performs one health-check + routing-validation pass.
+func (w *WatchdogService) runCheck() {
+	w.CheckHealth()
+	if issues := ValidateXrayRoutingTags(w.xrayDir); len(issues) > 0 {
+		log.Printf("Watchdog: Xray routing validation found %d issue(s): %s", len(issues), strings.Join(issues, "; "))
 	}
 }
 
@@ -130,10 +143,29 @@ func (w *WatchdogService) CheckHealth() {
 	log.Printf("Watchdog: kernel health check failed (%d/%d): status=%q err=%v",
 		w.consecutiveFailures, watchdogMaxFailures, strings.TrimSpace(status), err)
 
-	if w.consecutiveFailures >= watchdogMaxFailures && !w.disarmed {
-		w.disarmed = true
+	if w.consecutiveFailures >= watchdogMaxFailures && !w.disarmed && !w.disarmInFlight {
+		w.disarmInFlight = true
 		log.Printf("Watchdog: %d consecutive kernel failures — triggering emergency TPROXY disarm", w.consecutiveFailures)
-		go w.EmergencyDisarmTProxy()
+		// Tracked by wg so Stop() (called during graceful shutdown/restart)
+		// waits for an in-flight disarm sequence instead of abandoning it
+		// mid-way through mutating iptables state.
+		w.wg.Add(1)
+		go func() {
+			defer w.wg.Done()
+			ok := w.EmergencyDisarmTProxy()
+			w.mu.Lock()
+			w.disarmInFlight = false
+			// Only latch disarmed on confirmed success. On failure, leave it
+			// false so the next qualifying health check (consecutiveFailures
+			// is still >= watchdogMaxFailures) retries instead of the
+			// circuit breaker silently sitting there having never actually
+			// removed the interception rule.
+			w.disarmed = ok
+			w.mu.Unlock()
+			if !ok {
+				log.Printf("Watchdog: EmergencyDisarmTProxy failed — will retry on next qualifying health check")
+			}
+		}()
 	}
 }
 
@@ -144,29 +176,179 @@ func (w *WatchdogService) ConsecutiveFailures() int {
 	return w.consecutiveFailures
 }
 
-// EmergencyDisarmTProxy removes the XKEEN_TPROXY interception rule from
-// iptables mangle/PREROUTING so LAN devices regain direct internet access
-// when the proxy kernel has failed watchdogMaxFailures consecutive health
-// checks (STAB-05). This is invoked directly (not via the xkeen binary)
-// because the XKeen binary itself may be the thing that's wedged.
-func (w *WatchdogService) EmergencyDisarmTProxy() {
-	// iptables -D removes a single matching rule per invocation; loop until
-	// no more matches are found (bounded, so a misbehaving iptables can't
-	// wedge this goroutine forever).
-	for i := 0; i < 10; i++ {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		cmd := exec.CommandContext(ctx, "iptables", "-t", "mangle", "-D", "PREROUTING", "-j", "XKEEN_TPROXY")
-		out, err := cmd.CombinedOutput()
-		cancel()
-		if err != nil {
-			if i == 0 {
-				log.Printf("Watchdog: EmergencyDisarmTProxy: no XKEEN_TPROXY rule removed (already absent or iptables unavailable): %v — %s",
-					err, strings.TrimSpace(string(out)))
-			}
-			return
-		}
-		log.Printf("Watchdog: removed XKEEN_TPROXY interception rule from mangle/PREROUTING (iteration %d)", i+1)
+// tproxyChainMarker is a literal chain/comment name some XKeen builds may
+// use for their interception rule. It is matched as a substring fallback,
+// but is NOT assumed to be the primary signal: per this project's own
+// stability analysis (ideas/system-freeze-causes-and-stability-analysis.md
+// §6.1), the actual interception is installed as a `mangle/PREROUTING` rule
+// using the kernel's real `TPROXY` netfilter target (`-j TPROXY --on-port
+// 7892` or `--on-port 10808`), which may live directly in PREROUTING or in a
+// custom chain jumped to from PREROUTING — not necessarily under a chain
+// literally named "XKEEN_TPROXY". See tproxyTarget below for the primary
+// match.
+const tproxyChainMarker = "XKEEN_TPROXY"
+
+// tproxyTarget is the real netfilter target module XKeen's interception
+// rule invokes (`-j TPROXY --on-port ...`). Matching on this rather than a
+// guessed chain name is what makes EmergencyDisarmTProxy correct regardless
+// of which chain XKeen happens to install the rule into.
+const tproxyTarget = "TPROXY"
+
+// builtinMangleChains lists the standard chains iptables predefines in the
+// mangle table. Any other chain name encountered while scanning is a
+// custom/user chain (e.g. one XKeen creates for its own interception rules),
+// which disarmTProxyFamily also tracks so it can remove the PREROUTING (or
+// similar) jump into it once that chain is confirmed to hold a TPROXY rule.
+var builtinMangleChains = map[string]bool{
+	"PREROUTING": true, "INPUT": true, "FORWARD": true, "OUTPUT": true, "POSTROUTING": true,
+}
+
+// EmergencyDisarmTProxy removes the TPROXY interception rule(s) installed by
+// XKeen from the iptables (and ip6tables, when present) mangle table so LAN
+// devices regain direct internet access when the proxy kernel has failed
+// watchdogMaxFailures consecutive health checks (STAB-05). This is invoked
+// directly (not via the xkeen binary) because the XKeen binary itself may be
+// the thing that's wedged.
+//
+// It reports whether the disarm can be considered handled: true if every
+// family it could query came back clean (rules removed, or confirmed none
+// present); false on an execution failure (iptables missing, xtables lock
+// contention, permission error) so the caller can retry on the next
+// qualifying health check instead of silently latching a failed attempt as
+// success.
+func (w *WatchdogService) EmergencyDisarmTProxy() bool {
+	ctx := context.Background()
+
+	removedV4, okV4 := disarmTProxyFamily(ctx, "iptables-save", "iptables")
+	removedV6, okV6 := disarmTProxyFamily(ctx, "ip6tables-save", "ip6tables")
+
+	if !okV4 || !okV6 {
+		log.Printf("Watchdog: EmergencyDisarmTProxy incomplete (ipv4 ok=%v removed=%d, ipv6 ok=%v removed=%d) — TPROXY interception may still be active",
+			okV4, removedV4, okV6, removedV6)
+		return false
 	}
+
+	if removedV4+removedV6 == 0 {
+		log.Printf("Watchdog: EmergencyDisarmTProxy: no %s rules found in mangle table (already absent or interception not installed)", tproxyChainMarker)
+	} else {
+		log.Printf("Watchdog: EmergencyDisarmTProxy removed %d TPROXY interception rule(s) (ipv4=%d, ipv6=%d)",
+			removedV4+removedV6, removedV4, removedV6)
+	}
+	return true
+}
+
+// disarmTProxyFamily removes every mangle-table rule that installs XKeen's
+// TPROXY interception, for one iptables family (saveBin/delBin is either
+// "iptables-save"/"iptables" or "ip6tables-save"/"ip6tables"). It lists the
+// live rules via saveBin and identifies matches two ways:
+//  1. any rule invoking the real `-j TPROXY` netfilter target (the
+//     interception mechanism XKeen actually uses per this project's own
+//     analysis — see tproxyTarget), regardless of which chain it lives in;
+//  2. any rule mentioning tproxyChainMarker as a fallback, in case a given
+//     build names its chain/comment "XKEEN_TPROXY" literally.
+//
+// If a match (1) lives in a custom (non-builtin) chain, this also removes
+// the jump rule(s) that reference that chain (e.g. "-A PREROUTING -j
+// xkeen"), so the interception is fully disarmed rather than leaving a
+// dangling-but-still-invoked custom chain. Each matching "-A ..." line is
+// converted to the equivalent "-D ..." invocation and executed — the exact
+// rule signature is discovered live rather than hardcoded/guessed.
+//
+// Returns the number of rules removed and whether the operation can be
+// trusted as complete. ok is true both when rules were found and removed and
+// when the binary simply isn't present on this system (ip6tables may not be
+// installed on all router variants — that's not a failure of the disarm
+// attempt). ok is false only on a genuine execution failure such as xtables
+// lock contention or a permission error, where we can't tell whether the
+// interception rule is actually gone.
+func disarmTProxyFamily(ctx context.Context, saveBin, delBin string) (removed int, ok bool) {
+	saveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	out, err := exec.CommandContext(saveCtx, saveBin, "-t", "mangle").Output()
+	cancel()
+	if err != nil {
+		if isCommandNotFound(err) {
+			// This iptables family isn't present on this system — nothing to
+			// disarm here, not a failure.
+			return 0, true
+		}
+		log.Printf("Watchdog: EmergencyDisarmTProxy: failed to list mangle table via %s: %v", saveBin, err)
+		return 0, false
+	}
+
+	var lines []string
+	for _, l := range strings.Split(string(out), "\n") {
+		if l = strings.TrimSpace(l); strings.HasPrefix(l, "-A ") {
+			lines = append(lines, l)
+		}
+	}
+
+	toDelete := map[string]bool{} // dedup: a line could match both signals
+	customChains := map[string]bool{}
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		chain := fields[1]
+		matchesTarget := false
+		for i, f := range fields {
+			if f == "-j" && i+1 < len(fields) && fields[i+1] == tproxyTarget {
+				matchesTarget = true
+				break
+			}
+		}
+		if matchesTarget || strings.Contains(line, tproxyChainMarker) {
+			toDelete[line] = true
+			if !builtinMangleChains[chain] {
+				customChains[chain] = true
+			}
+		}
+	}
+
+	// Second pass: also remove any rule that jumps into a custom chain we
+	// just identified as holding the interception rule, so the chain is
+	// fully unreachable (not just emptied).
+	if len(customChains) > 0 {
+		for _, line := range lines {
+			fields := strings.Fields(line)
+			for i, f := range fields {
+				if f == "-j" && i+1 < len(fields) && customChains[fields[i+1]] {
+					toDelete[line] = true
+					break
+				}
+			}
+		}
+	}
+
+	for line := range toDelete {
+		args := strings.Fields(line)
+		args[0] = "-D" // "-A CHAIN ..." -> "-D CHAIN ..." removes exactly this rule
+		delArgs := append([]string{"-w", "5", "-t", "mangle"}, args...)
+
+		delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
+		delOut, delErr := exec.CommandContext(delCtx, delBin, delArgs...).CombinedOutput()
+		delCancel()
+		if delErr != nil {
+			log.Printf("Watchdog: EmergencyDisarmTProxy: failed to remove rule via %s (%q): %v — %s",
+				delBin, line, delErr, strings.TrimSpace(string(delOut)))
+			return removed, false
+		}
+
+		log.Printf("Watchdog: removed TPROXY interception rule via %s: %s", delBin, line)
+		removed++
+	}
+
+	return removed, true
+}
+
+// isCommandNotFound reports whether err comes from exec failing to locate
+// the binary on PATH (as opposed to the binary running and failing).
+func isCommandNotFound(err error) bool {
+	var execErr *exec.Error
+	if errors.As(err, &execErr) {
+		return errors.Is(execErr.Err, exec.ErrNotFound)
+	}
+	return false
 }
 
 // defaultMihomoConfigYAML is a minimal, self-contained recovery config: DIRECT-only
