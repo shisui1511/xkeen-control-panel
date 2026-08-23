@@ -1487,10 +1487,12 @@
 
     {#if activeTab === 'files'}
       <div class="eph-right">
-        <span class="status-indicator" class:status-dirty={isDirty}>
-          <span class="status-dot" style="color: {isDirty ? 'var(--warning)' : 'var(--success)'};"
-            >●</span
-          >
+        <span
+          class="save-status badge"
+          class:badge-success={!isDirty}
+          class:badge-warning={isDirty}
+        >
+          <Icon name={isDirty ? 'edit' : 'check'} size={11} />
           {isDirty ? $t('editor.unsaved') : $t('editor.saved')}
         </span>
         {#if selectedFile}
@@ -2296,10 +2298,6 @@
 </Modal>
 
 <style>
-  .status-dirty {
-    color: var(--warning) !important;
-  }
-
   .editor-page-container {
     display: flex;
     flex-direction: column;
@@ -2385,18 +2383,12 @@
     font-weight: 700;
   }
 
-  .status-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 11.5px;
-    color: var(--fg-dim);
-    font-family: var(--font-family-mono);
-  }
-
-  .status-dot {
-    font-size: 10px;
-    line-height: 1;
+  /* Уточнение глобального .badge — все цвета берутся из
+     .badge-success / .badge-warning в global.css */
+  .save-status {
+    font-size: 10.5px;
+    text-transform: none;
+    letter-spacing: 0.02em;
   }
 
   .btn-compact {
@@ -2431,24 +2423,54 @@
     min-height: 0;
     flex-shrink: 0;
     overflow: hidden;
+    max-width: 42%;
   }
 
+  /* Разделитель — это <button>, поэтому появлялась дефолтная браузерная
+     рамка кнопки (2px outset). Сбрасываем всё оформление и рисуем
+     тонкую линию собственным псевдоэлементом поверх прозрачной
+     hit-area шириной 10px (удобная зона для col-resize). */
   .editor-splitter {
-    width: 6px;
-    cursor: col-resize;
+    appearance: none;
+    -webkit-appearance: none;
+    border: 0;
+    padding: 0;
+    margin: 0 2px;
     background: transparent;
-    transition: background 0.15s ease;
+    box-sizing: border-box;
+    width: 10px;
     flex-shrink: 0;
     position: relative;
     z-index: 10;
-    margin: 0 3px;
-    border-radius: 3px;
+    cursor: col-resize;
+    touch-action: none;
   }
 
-  .editor-splitter:hover,
-  .editor-splitter:active,
-  .editor-workspace.resizing .editor-splitter {
+  .editor-splitter::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 1px;
+    height: 100%;
+    background: var(--border);
+    border-radius: 1px;
+    transition:
+      width 0.15s ease,
+      background 0.15s ease;
+  }
+
+  .editor-splitter:hover::before,
+  .editor-splitter:active::before,
+  .editor-workspace.resizing .editor-splitter::before {
+    width: 2px;
     background: var(--accent);
+  }
+
+  .editor-splitter:focus-visible::before {
+    background: var(--accent);
+    width: 2px;
   }
 
   .editor-main-card {
