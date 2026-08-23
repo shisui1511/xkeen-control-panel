@@ -42,6 +42,14 @@
     quota_name: string;
     severity: string;
     message: string;
+    // Structured fields (present on alerts generated after this field was
+    // added; older persisted alerts may lack them). When present, alertText()
+    // renders a localized string via i18n instead of the backend's
+    // hardcoded-Russian `message`.
+    kind?: 'exceeded' | 'threshold' | string;
+    current_bytes?: number;
+    limit_bytes?: number;
+    percent?: number;
     timestamp: number;
   }
 
@@ -317,6 +325,24 @@
     return Math.min(100, (q.current_bytes / q.limit_bytes) * 100);
   }
 
+  // Renders a localized alert string when the backend sent structured
+  // fields (kind/current_bytes/limit_bytes/percent); falls back to the
+  // backend's pre-formatted (Russian-only) `message` for older alerts
+  // that predate this field, so nothing regresses on upgrade.
+  function alertText(a: Alert): string {
+    if (!a.kind || a.current_bytes === undefined || a.limit_bytes === undefined) {
+      return a.message;
+    }
+    const key =
+      a.kind === 'exceeded' ? 'trafficquotas.alert_exceeded' : 'trafficquotas.alert_threshold';
+    return $t(key, {
+      name: a.quota_name,
+      current: formatBytes(a.current_bytes),
+      limit: formatBytes(a.limit_bytes),
+      percent: (a.percent ?? 0).toFixed(0)
+    });
+  }
+
   function getActionBadgeClass(action?: string): string {
     switch (action) {
       case 'throttle':
@@ -448,7 +474,7 @@
             class:alert-warning={a.severity === 'warning'}
             class:alert-error={a.severity === 'critical'}
           >
-            {a.message}
+            {alertText(a)}
           </div>
         {/each}
       </div>

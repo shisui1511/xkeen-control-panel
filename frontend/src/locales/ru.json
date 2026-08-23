@@ -744,6 +744,8 @@
   "trafficquotas.delete_consequence": "Правило ограничения трафика будет безвозвратно удалено.",
   "trafficquotas.subtitle": "Учёт трафика и ограничения потребления",
   "trafficquotas.alerts": "Алерты",
+  "trafficquotas.alert_exceeded": "Лимит '{name}' превышен: {current} из {limit} ({percent}%)",
+  "trafficquotas.alert_threshold": "Лимит '{name}' на {percent}%: {current} из {limit}",
   "trafficquotas.clear_alerts": "Очистить алерты",
   "trafficquotas.stats": "Статистика",
   "trafficquotas.total_upload": "Отдача",

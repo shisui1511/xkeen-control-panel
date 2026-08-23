@@ -61,8 +61,20 @@ type TrafficAlert struct {
 	QuotaID   string `json:"quota_id"`
 	QuotaName string `json:"quota_name"`
 	Severity  string `json:"severity"` // "warning", "critical"
-	Message   string `json:"message"`
-	Timestamp int64  `json:"timestamp"`
+	// Message is a pre-formatted, Russian-language string kept for backward
+	// compatibility with any consumer that hasn't switched to the structured
+	// fields below (e.g. old entries loaded from a pre-upgrade traffic.json).
+	// New consumers should prefer Kind/CurrentBytes/LimitBytes/Percent and
+	// render a localized string client-side via i18n.
+	Message string `json:"message"`
+	// Kind identifies which localized template the frontend should use:
+	// "exceeded" (quota reached/passed 100%) or "threshold" (quota crossed
+	// its configured alert_threshold but is still under 100%).
+	Kind         string  `json:"kind"`
+	CurrentBytes int64   `json:"current_bytes"`
+	LimitBytes   int64   `json:"limit_bytes"`
+	Percent      float64 `json:"percent"`
+	Timestamp    int64   `json:"timestamp"`
 }
 
 // TrafficPeaks holds peak upload and download rates over calendar periods with timestamps
@@ -1199,6 +1211,10 @@ func (s *TrafficQuotaService) checkQuotas() {
 		quotaID  string
 		severity string
 		message  string
+		kind     string
+		current  int64
+		limit    int64
+		percent  float64
 	}, 0)
 
 	for i := range quotasCopy {
@@ -1215,10 +1231,18 @@ func (s *TrafficQuotaService) checkQuotas() {
 				quotaID  string
 				severity string
 				message  string
+				kind     string
+				current  int64
+				limit    int64
+				percent  float64
 			}{
 				quotaID:  q.ID,
 				severity: "critical",
 				message:  fmt.Sprintf("Лимит '%s' превышен: %s из %s (%.0f%%)", q.Name, formatBytes(current), formatBytes(q.LimitBytes), percent),
+				kind:     "exceeded",
+				current:  current,
+				limit:    q.LimitBytes,
+				percent:  percent,
 			})
 
 			var fallback string
@@ -1251,10 +1275,18 @@ func (s *TrafficQuotaService) checkQuotas() {
 				quotaID  string
 				severity string
 				message  string
+				kind     string
+				current  int64
+				limit    int64
+				percent  float64
 			}{
 				quotaID:  q.ID,
 				severity: "warning",
 				message:  fmt.Sprintf("Лимит '%s' на %.0f%%: %s из %s", q.Name, percent, formatBytes(current), formatBytes(q.LimitBytes)),
+				kind:     "threshold",
+				current:  current,
+				limit:    q.LimitBytes,
+				percent:  percent,
 			})
 		}
 	}
@@ -1333,14 +1365,14 @@ func (s *TrafficQuotaService) checkQuotas() {
 			}
 		}
 		if quotaPtr != nil {
-			s.addAlert(quotaPtr, alert.severity, alert.message)
+			s.addAlert(quotaPtr, alert.severity, alert.message, alert.kind, alert.current, alert.limit, alert.percent)
 		}
 	}
 
 	s.mu.Unlock()
 }
 
-func (s *TrafficQuotaService) addAlert(q *TrafficQuota, severity, message string) {
+func (s *TrafficQuotaService) addAlert(q *TrafficQuota, severity, message, kind string, current, limit int64, percent float64) {
 	// Deduplicate: don't add same alert within 1 hour
 	for _, a := range s.alerts {
 		if a.QuotaID == q.ID && a.Severity == severity {
@@ -1356,11 +1388,15 @@ func (s *TrafficQuotaService) addAlert(q *TrafficQuota, severity, message string
 	}
 
 	s.alerts = append(s.alerts, TrafficAlert{
-		QuotaID:   q.ID,
-		QuotaName: q.Name,
-		Severity:  severity,
-		Message:   message,
-		Timestamp: time.Now().Unix(),
+		QuotaID:      q.ID,
+		QuotaName:    q.Name,
+		Severity:     severity,
+		Message:      message,
+		Kind:         kind,
+		CurrentBytes: current,
+		LimitBytes:   limit,
+		Percent:      percent,
+		Timestamp:    time.Now().Unix(),
 	})
 }
 

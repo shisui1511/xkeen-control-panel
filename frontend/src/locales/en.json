@@ -745,6 +745,8 @@
   "trafficquotas.title": "Traffic Quotas",
   "trafficquotas.subtitle": "Traffic accounting and consumption limits",
   "trafficquotas.alerts": "Alerts",
+  "trafficquotas.alert_exceeded": "Limit '{name}' exceeded: {current} of {limit} ({percent}%)",
+  "trafficquotas.alert_threshold": "Limit '{name}' at {percent}%: {current} of {limit}",
   "trafficquotas.clear_alerts": "Clear alerts",
   "trafficquotas.stats": "Statistics",
   "trafficquotas.total_upload": "Upload",
