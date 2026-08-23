@@ -28,9 +28,15 @@ type TrafficQuota struct {
 	Period         string `json:"period"` // "daily", "weekly", "monthly"
 	Enabled        bool   `json:"enabled"`
 	AlertThreshold int    `json:"alert_threshold"` // 0-100, percent
-	Action         string `json:"action"`          // "notify", "throttle", "log_only", "block"
-	CurrentBytes   int64  `json:"current_bytes"`
-	LastReset      int64  `json:"last_reset"`
+	// "notify", "log_only" and "block" (→ Mihomo REJECT) are implemented in
+	// checkQuotas; "redirect_direct" (→ Mihomo DIRECT) is also implemented
+	// but was previously undocumented here. "throttle" is accepted (the
+	// frontend renders it as a disabled/"unsupported" option) but has no
+	// bandwidth-limiting implementation yet — it currently behaves exactly
+	// like "notify".
+	Action       string `json:"action"`
+	CurrentBytes int64  `json:"current_bytes"`
+	LastReset    int64  `json:"last_reset"`
 }
 
 // ProxyTraffic holds accumulated traffic per proxy
