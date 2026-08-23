@@ -227,6 +227,23 @@ export const xraySchema = {
         portals: { type: 'array', items: { type: 'object' } }
       }
     },
+    fakedns: {
+      type: 'object',
+      description: 'FakeDNS pool configuration',
+      properties: {
+        ipPool: { type: 'string', description: 'Fake-IP address pool CIDR (e.g. 198.18.0.0/15)' },
+        poolSize: { type: 'integer', description: 'Fake-IP pool size' }
+      }
+    },
+    burstObservatory: {
+      type: 'object',
+      description: 'Burst health monitoring',
+      properties: {
+        subjectSelector: { type: 'array', items: { type: 'string' } },
+        probeURL: { type: 'string', description: 'URL for burst health probes' },
+        probeInterval: { type: 'string', description: 'Probe interval' }
+      }
+    },
     observatory: {
       type: 'object',
       description: 'Outbound health monitoring',

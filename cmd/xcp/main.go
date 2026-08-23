@@ -184,6 +184,7 @@ func main() {
 	srv.HandleProtected("/api/mihomo/dns/query", api.MihomoDNSQuery)
 	srv.HandleProtected("/api/mihomo/cache/fakeip/flush", api.MihomoFlushFakeIP)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
+	srv.HandleProtected("/api/xray/reality/keygen", api.XrayRealityKeygen)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
 	srv.HandleProtected("/api/system/clients", api.SystemClients)
 	srv.HandleProtected("/api/system/diagnostics", api.DiagnosticsDownload)

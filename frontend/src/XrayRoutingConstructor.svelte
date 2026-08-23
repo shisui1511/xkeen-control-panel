@@ -816,6 +816,11 @@
       streamSettings.grpcSettings = {
         serviceName: form.serviceName || ''
       };
+    } else if (form.network === 'xhttp') {
+      streamSettings.xhttpSettings = {
+        path: form.path || '/',
+        mode: 'auto'
+      };
     }
 
     if (form.security === 'tls') {
@@ -871,6 +876,27 @@
     const o = customOutbounds[index];
     outboundForm = parseOutboundToForm(o);
     showOutboundForm = true;
+  }
+
+  let generatingRealityKeys = $state(false);
+  async function generateRealityKeys() {
+    generatingRealityKeys = true;
+    try {
+      const res = await apiFetch('/api/xray/reality/keygen');
+      const data = await res.json();
+      if (res.ok && data?.data) {
+        outboundForm.publicKey = data.data.public_key;
+        outboundForm.shortId = data.data.short_id;
+        showToast('success', $t('xray.reality_keys_generated'));
+      } else {
+        showToast('error', data?.error || 'Failed to generate Reality keys');
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e.message);
+    } finally {
+      generatingRealityKeys = false;
+    }
   }
 
   function saveOutbound() {
@@ -2936,6 +2962,18 @@
                 </div>
 
                 {#if outboundForm.security === 'reality'}
+                  <div style="margin-bottom: 12px; display: flex; justify-content: flex-end;">
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      onclick={generateRealityKeys}
+                      disabled={generatingRealityKeys}
+                    >
+                      {generatingRealityKeys
+                        ? $t('xray.generating')
+                        : $t('xray.generate_reality_keys')}
+                    </button>
+                  </div>
                   <div class="form-row2">
                     <div class="form-col">
                       <label class="form-label" for="outbound-pubkey">Reality Public Key</label>
@@ -2986,6 +3024,7 @@
                       <option value="tcp">tcp</option>
                       <option value="ws">websocket (ws)</option>
                       <option value="grpc">gRPC</option>
+                      <option value="xhttp">xhttp (SplitHTTP)</option>
                     </select>
                   </div>
                   <div class="form-col">
