@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -282,7 +283,7 @@ func (s *SmartProxyService) applyProxyToGroup(groupName, proxyName string) error
 		}
 	}
 
-	url := fmt.Sprintf("%s/proxies/%s", baseURL, groupName)
+	url := fmt.Sprintf("%s/proxies/%s", baseURL, url.PathEscape(groupName))
 	bodyMap := map[string]string{"name": proxyName}
 	bodyBytes, err := json.Marshal(bodyMap)
 	if err != nil {
