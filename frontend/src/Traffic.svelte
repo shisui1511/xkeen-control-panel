@@ -317,8 +317,11 @@
   }
 
   function handleVisibilityChange() {
-    if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN)) {
-      connect();
+    if (!document.hidden) {
+      lastTickTime = 0; // avoid huge elapsedSec spike from messages dropped while hidden
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        connect();
+      }
     }
   }
 
