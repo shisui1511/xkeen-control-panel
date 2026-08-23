@@ -554,7 +554,6 @@
           /></svg
         >
         <span>{$t('conn.close_all')}</span>
-        <span class="sr-only">Закрыть все</span>
       </button>
     </div>
   </div>
