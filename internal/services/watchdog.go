@@ -106,13 +106,13 @@ func (w *WatchdogService) runCheck() {
 // misread as healthy.
 func isKernelStatusHealthy(status string) bool {
 	lower := strings.ToLower(status)
-	negativeMarkers := []string{"not running", "не запущен", "не активен", "остановлен", "stopped"}
+	negativeMarkers := []string{"not running", "не запущен", "незапущен", "не актив", "неактив", "не работает", "неработает", "остановлен", "stopped"}
 	for _, m := range negativeMarkers {
 		if strings.Contains(lower, m) {
 			return false
 		}
 	}
-	return strings.Contains(lower, "running") || strings.Contains(lower, "активен")
+	return strings.Contains(lower, "running") || strings.Contains(lower, "актив") || strings.Contains(lower, "запущен") || strings.Contains(lower, "работает")
 }
 
 // CheckHealth polls XKeen's current status and updates the failure counter.
@@ -237,6 +237,47 @@ func (w *WatchdogService) EmergencyDisarmTProxy() bool {
 	return true
 }
 
+// splitIptablesRule splits an iptables-save rule string into individual command-line
+// arguments, correctly preserving arguments enclosed in single or double quotes
+// (such as rule comments or complex match options).
+func splitIptablesRule(line string) []string {
+	var args []string
+	var current strings.Builder
+	inQuotes := false
+	var quoteChar rune
+	escaped := false
+
+	for _, r := range line {
+		if escaped {
+			current.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		switch {
+		case (r == '"' || r == '\'') && !inQuotes:
+			inQuotes = true
+			quoteChar = r
+		case inQuotes && r == quoteChar:
+			inQuotes = false
+		case (r == ' ' || r == '\t') && !inQuotes:
+			if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteRune(r)
+		}
+	}
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args
+}
+
 // disarmTProxyFamily removes every mangle-table rule that installs XKeen's
 // TPROXY interception, for one iptables family (saveBin/delBin is either
 // "iptables-save"/"iptables" or "ip6tables-save"/"ip6tables"). It lists the
@@ -285,7 +326,7 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string) (removed in
 	toDelete := map[string]bool{} // dedup: a line could match both signals
 	customChains := map[string]bool{}
 	for _, line := range lines {
-		fields := strings.Fields(line)
+		fields := splitIptablesRule(line)
 		if len(fields) < 2 {
 			continue
 		}
@@ -310,7 +351,7 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string) (removed in
 	// fully unreachable (not just emptied).
 	if len(customChains) > 0 {
 		for _, line := range lines {
-			fields := strings.Fields(line)
+			fields := splitIptablesRule(line)
 			for i, f := range fields {
 				if f == "-j" && i+1 < len(fields) && customChains[fields[i+1]] {
 					toDelete[line] = true
@@ -321,7 +362,10 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string) (removed in
 	}
 
 	for line := range toDelete {
-		args := strings.Fields(line)
+		args := splitIptablesRule(line)
+		if len(args) == 0 {
+			continue
+		}
 		args[0] = "-D" // "-A CHAIN ..." -> "-D CHAIN ..." removes exactly this rule
 		delArgs := append([]string{"-w", "5", "-t", "mangle"}, args...)
 

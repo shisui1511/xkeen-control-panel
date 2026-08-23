@@ -312,16 +312,104 @@ func TestWatchdogService_CheckHealth_RecoveryResetsCounter(t *testing.T) {
 
 func TestIsKernelStatusHealthy(t *testing.T) {
 	cases := map[string]bool{
-		"XKeen is running":     true,
-		"Ядро активен":         true,
-		"XKeen is not running": false,
-		"":                     false,
-		"stopped":              false,
+		"XKeen is running":       true,
+		"Ядро активен":           true,
+		"Служба XKeen активна":   true,
+		"Службы активны":         true,
+		"Ядро активно":           true,
+		"XKeen запущен":          true,
+		"Служба запущена":        true,
+		"XKeen is not running":   false,
+		"XKeen не запущен":       false,
+		"XKeen незапущен":        false,
+		"Служба не запущена":     false,
+		"Служба незапущена":      false,
+		"Служба не активна":      false,
+		"Служба неактивна":       false,
+		"Ядро не активно":        false,
+		"Ядро неактивно":         false,
+		"XKeen не активен":       false,
+		"XKeen неактивен":        false,
+		"XKeen остановлен":       false,
+		"Службы остановлены":     false,
+		"":                       false,
+		"stopped":                false,
 	}
 	for status, want := range cases {
 		if got := isKernelStatusHealthy(status); got != want {
 			t.Errorf("isKernelStatusHealthy(%q) = %v, want %v", status, got, want)
 		}
+	}
+}
+
+func TestSplitIptablesRule(t *testing.T) {
+	cases := []struct {
+		input string
+		want  []string
+	}{
+		{
+			input: `-A PREROUTING -j xkeen`,
+			want:  []string{"-A", "PREROUTING", "-j", "xkeen"},
+		},
+		{
+			input: `-A xkeen -p tcp -m comment --comment "XKeen TProxy Rule" -j TPROXY --on-port 7892`,
+			want:  []string{"-A", "xkeen", "-p", "tcp", "-m", "comment", "--comment", "XKeen TProxy Rule", "-j", "TPROXY", "--on-port", "7892"},
+		},
+		{
+			input: `-A xkeen -m comment --comment 'Single Quoted Comment' -j ACCEPT`,
+			want:  []string{"-A", "xkeen", "-m", "comment", "--comment", "Single Quoted Comment", "-j", "ACCEPT"},
+		},
+		{
+			input: `-A xkeen -m comment --comment "Escaped \"Quotes\"" -j ACCEPT`,
+			want:  []string{"-A", "xkeen", "-m", "comment", "--comment", `Escaped "Quotes"`, "-j", "ACCEPT"},
+		},
+		{
+			input: `  -A   PREROUTING   -j   xkeen  `,
+			want:  []string{"-A", "PREROUTING", "-j", "xkeen"},
+		},
+		{
+			input: ``,
+			want:  nil,
+		},
+	}
+
+	for _, c := range cases {
+		got := splitIptablesRule(c.input)
+		if len(got) != len(c.want) {
+			t.Fatalf("splitIptablesRule(%q) length = %d, want %d: %v", c.input, len(got), len(c.want), got)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("splitIptablesRule(%q)[%d] = %q, want %q", c.input, i, got[i], c.want[i])
+			}
+		}
+	}
+}
+
+func TestDisarmTProxyFamily_WithQuotedComments(t *testing.T) {
+	saveOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -m comment --comment "XKeen TProxy PREROUTING" -j xkeen
+-A xkeen -p tcp -m comment --comment "XKeen TProxy Interception" -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, logPath := installFakeIptables(t, saveOutput)
+
+	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if removed != 2 {
+		t.Fatalf("expected 2 rules removed, got %d", removed)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("expected deletions to have been logged: %v", err)
+	}
+	log := string(logData)
+	if !strings.Contains(log, "XKeen TProxy Interception") {
+		t.Errorf("expected comment to be preserved in deletion arguments, log:\n%s", log)
 	}
 }
 

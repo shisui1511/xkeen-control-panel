@@ -436,8 +436,8 @@ func getPrimaryLANIP() string {
 }
 
 // posixTZOffsetRe matches the "std offset" portion of a POSIX TZ string,
-// e.g. the "-3" in "MSK-3" or the "6" in "CST6CDT".
-var posixTZOffsetRe = regexp.MustCompile(`^[A-Za-z]+([+-]?\d+)`)
+// e.g. the "-3" in "MSK-3", "<+03>-3", or the "6" in "CST6CDT".
+var posixTZOffsetRe = regexp.MustCompile(`^(?:<[^>]+>|[A-Za-z]+)([+-]?\d+)`)
 
 // posixTZOffsetHours extracts the UTC offset in hours encoded in a POSIX TZ
 // string such as "MSK-3" (used by /etc/TZ on OpenWrt/Keenetic/Entware).
