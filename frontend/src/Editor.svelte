@@ -75,6 +75,7 @@
   let breadcrumbs = $state<PathSegment[]>([]);
   let applyLoading = $state(false);
   let backgroundStatusText = $state('');
+  let statusCheckInterval: ReturnType<typeof setInterval> | null = null;
 
   // Drawer states
   let drawerOpen = $state(false);
@@ -441,7 +442,7 @@
       if (activeTabPath !== path) {
         await switchTab(path);
       }
-      if (!confirmUnsaved()) return;
+      if (!(await confirmUnsaved())) return;
     }
     localStorage.removeItem('editor.draft.' + path);
 
@@ -523,7 +524,7 @@
       if (isPreview) {
         if (previewTab) {
           if (previewTab.isDirty) {
-            if (!confirmUnsaved()) {
+            if (!(await confirmUnsaved())) {
               loading = false;
               loadingPath = null;
               return;
@@ -671,11 +672,11 @@
       return [
         {
           type: 'removed',
-          value: 'File is too large for visual diff. Old version content hidden.'
+          value: $t('editor.diff_large_old')
         },
         {
           type: 'added',
-          value: 'File is too large for visual diff. New version content will be saved.'
+          value: $t('editor.diff_large_new')
         }
       ];
     }
@@ -898,7 +899,12 @@
 
     backgroundStatusText = `${$t('editor.checking_status')} (1/${maxAttempts})`;
 
-    const interval = setInterval(async () => {
+    if (statusCheckInterval) {
+      clearInterval(statusCheckInterval);
+      statusCheckInterval = null;
+    }
+
+    statusCheckInterval = setInterval(async () => {
       attempts++;
       backgroundStatusText = `${$t('editor.checking_status')} (${attempts}/${maxAttempts})`;
 
@@ -907,7 +913,10 @@
         if (res.ok) {
           const parsed = await res.json();
           if (parsed && parsed.success && parsed.data && parsed.data.is_running === true) {
-            clearInterval(interval);
+            if (statusCheckInterval) {
+              clearInterval(statusCheckInterval);
+              statusCheckInterval = null;
+            }
             showToast('success', $t('editor.apply_success'));
             applyLoading = false;
             backgroundStatusText = '';
@@ -916,14 +925,20 @@
         }
       } catch (err: any) {
         if (err?.status === 401) {
-          clearInterval(interval);
+          if (statusCheckInterval) {
+            clearInterval(statusCheckInterval);
+            statusCheckInterval = null;
+          }
           return;
         }
         // Ignore check errors and retry
       }
 
       if (attempts >= maxAttempts) {
-        clearInterval(interval);
+        if (statusCheckInterval) {
+          clearInterval(statusCheckInterval);
+          statusCheckInterval = null;
+        }
         showToast('error', $t('editor.apply_timeout'));
         applyLoading = false;
         backgroundStatusText = '';
@@ -1075,7 +1090,7 @@
       const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(newPath)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content })
+        body: content
       });
       if (!saveRes.ok) throw new Error(await saveRes.text());
 
@@ -1449,6 +1464,10 @@
       unregisterDirty();
       unregisterDirty = null;
     }
+    if (statusCheckInterval) {
+      clearInterval(statusCheckInterval);
+      statusCheckInterval = null;
+    }
   });
 </script>
 
@@ -1602,7 +1621,7 @@
         <button
           type="button"
           class="editor-splitter"
-          aria-label="Resize sidebar"
+          aria-label={$t('editor.resize_sidebar')}
           tabindex="-1"
           onpointerdown={startResize}
           onmousedown={startResize}

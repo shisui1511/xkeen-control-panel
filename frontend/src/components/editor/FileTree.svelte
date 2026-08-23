@@ -242,6 +242,7 @@
     <div class="ctx-header monospace">{f.name}</div>
     <button
       class="ctx-item"
+      role="menuitem"
       onclick={() => {
         closeContextMenu();
         onRenameFile(f);
@@ -262,6 +263,7 @@
     </button>
     <button
       class="ctx-item"
+      role="menuitem"
       onclick={() => {
         closeContextMenu();
         onDuplicateFile(f);
@@ -282,6 +284,7 @@
     </button>
     <button
       class="ctx-item"
+      role="menuitem"
       onclick={() => {
         closeContextMenu();
         onDownloadFile(f);
@@ -302,6 +305,7 @@
     </button>
     <button
       class="ctx-item"
+      role="menuitem"
       onclick={() => {
         closeContextMenu();
         onViewBackups(f);
@@ -321,6 +325,7 @@
     <div class="ctx-divider"></div>
     <button
       class="ctx-item ctx-danger"
+      role="menuitem"
       onclick={() => {
         closeContextMenu();
         onDeleteFile(f);

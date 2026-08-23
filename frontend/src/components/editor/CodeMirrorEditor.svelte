@@ -89,6 +89,7 @@
 
   let editorContainer: HTMLDivElement | null = $state(null);
   const schemaCompartment = new Compartment();
+  let lastPath = '';
 
   function getSchemaExtensions(filePath: string, expert: boolean = false) {
     if (!schemaEnabled) return [];
@@ -158,6 +159,15 @@
     const currentExpertMode = expertMode;
     const currentSchemaEnabled = schemaEnabled;
 
+    if (view && view.dom.isConnected && lastPath === currentPath) {
+      const schemaExts = getSchemaExtensions(currentPath, currentExpertMode);
+      view.dispatch({
+        effects: schemaCompartment.reconfigure(schemaExts)
+      });
+      return;
+    }
+
+    lastPath = currentPath;
     const lang = currentPath.endsWith('.yaml') || currentPath.endsWith('.yml') ? yaml() : json();
     const schemaExts = getSchemaExtensions(currentPath, currentExpertMode);
 
