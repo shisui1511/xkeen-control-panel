@@ -174,7 +174,7 @@
     }
   }
 
-  let reconnectTimeout: any = null;
+  let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
   let reconnectDelay = 1000;
   const MAX_RECONNECT_DELAY = 16000;
 
