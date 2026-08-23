@@ -1,33 +1,44 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
-  import { showToast } from './stores';
+  import { showToast, showConfirm } from './stores';
+  import { apiFetch } from './lib/api';
+  import { formatBytes } from './lib/format';
 
   interface LogEntry {
     id: number;
     timestamp: string;
-    source: string;
-    level: string; // 'info' | 'warning' | 'error' | 'debug' | ''
-    text: string;
-    raw: string;
+    source: string; // 'mihomo' | 'xray' | 'xkeen' | 'syslog' | 'xcp'
+    level: string; // 'info' | 'warning' | 'error' | 'debug' | 'fatal'
+    subsystem?: string;
+    message: string;
+    metadata?: Record<string, string>;
   }
 
-  const MAX_LOG_BUFFER = 500;
+  interface FlashHealthInfo {
+    total_logs_bytes: number;
+    free_space_bytes: number;
+    total_space_bytes: number;
+    is_under_pressure: boolean;
+    emergency_actions: number;
+  }
+
+  const MAX_LOG_BUFFER = 1000;
   const ROW_HEIGHT = 28;
   const BUFFER_ROWS = 10;
 
   let destroyed = false;
   let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  let flashHealthInterval: ReturnType<typeof setInterval> | null = null;
   let logIdCounter = 0;
+
   let logs = $state<LogEntry[]>([]);
+  let incomingBuffer: LogEntry[] = [];
+  let rafId: number | null = null;
+
   let ws = $state<WebSocket | null>(null);
   let containerHeight = $state(0);
   let scrollTop = $state(0);
-
-  function handleScroll(e: Event) {
-    const target = e.currentTarget as HTMLElement;
-    scrollTop = target.scrollTop;
-  }
 
   let connected = $state(false);
   let paused = $state(false);
@@ -40,21 +51,57 @@
   let logContainer = $state<HTMLDivElement>();
   let availableSources = $state<string[]>([]);
 
-  // Known sources for tabs
-  const KNOWN_SOURCES = ['xkeen', 'xray', 'mihomo', 'xcp'];
+  // Flash health and runtime level
+  let flashHealth = $state<FlashHealthInfo | null>(null);
+  let runtimeLevel = $state('info');
+  let isUpdatingLevel = $state(false);
+
+  // Filter sources
+  const SOURCE_TABS = [
+    { id: '', label: 'logs.all_sources' },
+    { id: 'mihomo', label: 'Mihomo' },
+    { id: 'xray', label: 'Xray' },
+    { id: 'xkeen', label: 'XKeen' },
+    { id: 'syslog', label: 'logs.source_syslog' },
+    { id: 'xcp', label: 'logs.source_xcp' },
+    { id: 'errors', label: 'logs.errors_tab', isError: true }
+  ];
 
   const filteredLogs = $derived.by(() => {
     let result = logs;
-    if (filter) {
-      const lf = filter.toLowerCase();
-      result = result.filter((log) => log.raw.toLowerCase().includes(lf));
-    }
-    if (sourceFilter) {
+
+    // Source / Priority filter
+    if (sourceFilter === 'errors') {
+      result = result.filter((log) => log.level === 'error' || log.level === 'fatal');
+    } else if (sourceFilter) {
       result = result.filter((log) => log.source.toLowerCase() === sourceFilter.toLowerCase());
     }
+
+    // Severity level filter
     if (levelFilter) {
-      result = result.filter((log) => log.level === levelFilter);
+      result = result.filter((log) => log.level.toLowerCase() === levelFilter.toLowerCase());
     }
+
+    // Search query: supports inversion '!term' and text search
+    if (filter) {
+      const q = filter.trim();
+      if (q.startsWith('!') && q.length > 1) {
+        const excludeTerm = q.substring(1).toLowerCase();
+        result = result.filter((log) => {
+          const haystack =
+            `${log.timestamp} ${log.source} ${log.level} ${log.subsystem || ''} ${log.message}`.toLowerCase();
+          return !haystack.includes(excludeTerm);
+        });
+      } else {
+        const includeTerm = q.toLowerCase();
+        result = result.filter((log) => {
+          const haystack =
+            `${log.timestamp} ${log.source} ${log.level} ${log.subsystem || ''} ${log.message}`.toLowerCase();
+          return haystack.includes(includeTerm);
+        });
+      }
+    }
+
     return result;
   });
 
@@ -73,92 +120,9 @@
     }));
   });
 
-  function parseLogLine(raw: string): LogEntry {
-    let timestamp = '';
-    let source = '';
-    let level = '';
-    let text = raw.trim();
-
-    // 1. Bracket source prefix ^\[([^\]]+)\]\s*
-    const bracketMatch = text.match(/^\[([^\]]+)\]\s*/);
-    if (bracketMatch) {
-      const tag = bracketMatch[1].toLowerCase();
-      if (tag.includes('access.log') || tag.includes('error.log') || tag === 'xray') {
-        source = 'xray';
-      } else if (tag.includes('mihomo.log') || tag === 'mihomo') {
-        source = 'mihomo';
-      } else if (tag.includes('xkeen-detached') || tag.includes('xkeen.log') || tag === 'xkeen') {
-        source = 'xkeen';
-      } else if (tag.includes('xcp.log') || tag === 'xcp') {
-        source = 'xcp';
-      } else {
-        source = bracketMatch[1];
-      }
-      text = text.substring(bracketMatch[0].length).trim();
-    }
-
-    // 2. Timestamp extraction
-    const tsMatch = text.match(
-      /^(\d{4}[-/]\d{2}[-/]\d{2}[T\s]|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\s*)?(\d{2}:\d{2}:\d{2})/
-    );
-    if (tsMatch) {
-      timestamp = tsMatch[2];
-      text = text.substring(tsMatch[0].length).trim();
-    } else {
-      const now = new Date();
-      timestamp = now.toTimeString().split(' ')[0];
-    }
-
-    // 3. Bracket tags for severity
-    const tags: string[] = [];
-    let tempText = text;
-    while (true) {
-      const tagMatch = tempText.match(/^\[([^\]]+)\]\s*/);
-      if (!tagMatch) break;
-      tags.push(tagMatch[1]);
-      tempText = tempText.substring(tagMatch[0].length).trim();
-    }
-
-    for (const tag of tags) {
-      const lowerTag = tag.toLowerCase();
-      if (['info', 'inf', 'information'].includes(lowerTag)) {
-        level = 'info';
-      } else if (['warning', 'warn', 'wrn'].includes(lowerTag)) {
-        level = 'warning';
-      } else if (['error', 'err', 'fatal'].includes(lowerTag)) {
-        level = 'error';
-      } else if (['debug', 'dbg'].includes(lowerTag)) {
-        level = 'debug';
-      } else if (!source) {
-        if (lowerTag === 'xray') source = 'xray';
-        else if (lowerTag === 'mihomo') source = 'mihomo';
-        else if (lowerTag === 'xkeen') source = 'xkeen';
-      }
-    }
-
-    if (!source) {
-      const lowerRaw = raw.toLowerCase();
-      if (lowerRaw.includes('xray')) source = 'xray';
-      else if (lowerRaw.includes('mihomo')) source = 'mihomo';
-      else source = 'xkeen';
-    }
-
-    if (!level) {
-      const lowerText = text.toLowerCase();
-      if (lowerText.includes('error') || lowerText.includes('err:')) {
-        level = 'error';
-      } else if (lowerText.includes('warning') || lowerText.includes('warn:')) {
-        level = 'warning';
-      } else if (lowerText.includes('debug') || lowerText.includes('dbg:')) {
-        level = 'debug';
-      } else {
-        level = 'info';
-      }
-    }
-
-    text = tempText;
-    logIdCounter += 1;
-    return { id: logIdCounter, timestamp, source, level, text, raw };
+  function handleScroll(e: Event) {
+    const target = e.currentTarget as HTMLElement;
+    scrollTop = target.scrollTop;
   }
 
   function updateSources() {
@@ -167,6 +131,135 @@
       if (log.source) sources.add(log.source);
     }
     availableSources = Array.from(sources).sort();
+  }
+
+  function scheduleBatchFlush() {
+    if (rafId !== null) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = null;
+      if (incomingBuffer.length === 0) return;
+
+      if (paused) {
+        pausedNewCount += incomingBuffer.length;
+        incomingBuffer = [];
+        return;
+      }
+
+      const toAppend = incomingBuffer;
+      incomingBuffer = [];
+      logs = [...logs, ...toAppend].slice(-MAX_LOG_BUFFER);
+      updateSources();
+
+      if (autoScroll && logContainer) {
+        setTimeout(() => {
+          if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
+        }, 0);
+      }
+    });
+  }
+
+  function parseFallbackLogLine(raw: string): LogEntry {
+    logIdCounter += 1;
+    let text = raw.trim();
+    let source = 'xkeen';
+    let level = 'info';
+    let subsystem = '';
+    let timestamp = new Date().toTimeString().split(' ')[0];
+
+    const bracketMatch = text.match(/^\[([^\]]+)\]\s*/);
+    if (bracketMatch) {
+      const tag = bracketMatch[1].toLowerCase();
+      if (tag.includes('xray') || tag.includes('access') || tag.includes('error.log')) {
+        source = 'xray';
+      } else if (tag.includes('mihomo')) {
+        source = 'mihomo';
+      } else if (tag.includes('xkeen')) {
+        source = 'xkeen';
+      } else if (tag.includes('syslog') || tag.includes('messages')) {
+        source = 'syslog';
+      } else if (tag.includes('xcp')) {
+        source = 'xcp';
+      }
+      text = text.substring(bracketMatch[0].length).trim();
+    }
+
+    const tsMatch = text.match(
+      /^(\d{4}[-/]\d{2}[-/]\d{2}[T\s]|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\s*)?(\d{2}:\d{2}:\d{2})/
+    );
+    if (tsMatch) {
+      timestamp = tsMatch[2];
+      text = text.substring(tsMatch[0].length).trim();
+    }
+
+    const lower = text.toLowerCase();
+    if (lower.includes('error') || lower.includes('fatal') || lower.includes('failed')) {
+      level = 'error';
+    } else if (lower.includes('warn')) {
+      level = 'warning';
+    } else if (lower.includes('debug')) {
+      level = 'debug';
+    }
+
+    return {
+      id: logIdCounter,
+      timestamp,
+      source,
+      level,
+      subsystem,
+      message: text
+    };
+  }
+
+  async function loadHistory() {
+    try {
+      const res = await apiFetch('/api/logs/history');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.entries && Array.isArray(data.entries) && data.entries.length > 0) {
+          logs = data.entries;
+          updateSources();
+          if (autoScroll && logContainer) {
+            setTimeout(() => {
+              if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
+            }, 50);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load initial log history:', e);
+    }
+  }
+
+  async function fetchFlashHealth() {
+    try {
+      const res = await apiFetch('/api/logs/flash-health');
+      if (res.ok) {
+        flashHealth = await res.json();
+      }
+    } catch {}
+  }
+
+  async function changeLogLevel(newLevel: string) {
+    if (isUpdatingLevel) return;
+    isUpdatingLevel = true;
+    try {
+      const res = await apiFetch('/api/logs/level', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'mihomo', level: newLevel })
+      });
+      if (res.ok) {
+        runtimeLevel = newLevel;
+        showToast('success', $t('logs.level_updated', { level: newLevel.toUpperCase() }));
+      } else {
+        const err = await res.json();
+        showToast('error', err?.error || 'Failed to update level');
+      }
+    } catch (e: any) {
+      showToast('error', e?.message || 'Failed to change log level');
+    } finally {
+      isUpdatingLevel = false;
+    }
   }
 
   function connect() {
@@ -182,40 +275,54 @@
 
     ws.onopen = () => {
       connected = true;
-      const msg = $t('logs.connected');
-      logs = [...logs, parseLogLine(`[xkeen] ${msg}`)];
     };
 
     ws.onmessage = (event) => {
       if (document.hidden || destroyed) return;
-      if (paused) {
-        pausedNewCount += 1;
-        return;
-      }
-      const entry = parseLogLine(event.data);
-      logs = [...logs, entry].slice(-MAX_LOG_BUFFER);
-      updateSources();
 
-      if (autoScroll && logContainer) {
-        setTimeout(() => {
-          if (logContainer) {
-            logContainer.scrollTop = logContainer.scrollHeight;
+      try {
+        const parsed = JSON.parse(event.data);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            logIdCounter += 1;
+            incomingBuffer.push({
+              id: item.id || logIdCounter,
+              timestamp: item.timestamp || new Date().toTimeString().split(' ')[0],
+              source: item.source || 'sys',
+              level: item.level || 'info',
+              subsystem: item.subsystem || '',
+              message: item.message || ''
+            });
           }
-        }, 0);
+          scheduleBatchFlush();
+          return;
+        } else if (parsed && typeof parsed === 'object') {
+          logIdCounter += 1;
+          incomingBuffer.push({
+            id: parsed.id || logIdCounter,
+            timestamp: parsed.timestamp || new Date().toTimeString().split(' ')[0],
+            source: parsed.source || 'sys',
+            level: parsed.level || 'info',
+            subsystem: parsed.subsystem || '',
+            message: parsed.message || ''
+          });
+          scheduleBatchFlush();
+          return;
+        }
+      } catch {
+        // Fallback for plain text streams
+        const entry = parseFallbackLogLine(event.data);
+        incomingBuffer.push(entry);
+        scheduleBatchFlush();
       }
     };
 
     ws.onerror = () => {
       connected = false;
-      const msg = $t('logs.connection_error');
-      logs = [...logs, parseLogLine(`[error] ${msg}`)];
     };
 
     ws.onclose = () => {
       connected = false;
-      const msg = $t('logs.disconnected');
-      logs = [...logs, parseLogLine(`[xkeen] ${msg}`)];
-
       if (!paused && !destroyed) {
         if (reconnectTimeout) clearTimeout(reconnectTimeout);
         reconnectTimeout = setTimeout(connect, 3000);
@@ -234,10 +341,21 @@
     }
   }
 
-  function clearLogs() {
+  async function handleClearLogs() {
+    const confirmed = await showConfirm($t('logs.clear_confirm'));
+    if (!confirmed) return;
+    try {
+      await apiFetch('/api/logs/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'all' })
+      });
+    } catch {}
     logs = [];
-    availableSources = [];
+    incomingBuffer = [];
     pausedNewCount = 0;
+    showToast('success', $t('logs.cleared_success'));
+    fetchFlashHealth();
   }
 
   function togglePause() {
@@ -263,7 +381,12 @@
   }
 
   function exportFiltered() {
-    const textContent = filteredLogs.map((l) => l.raw).join('\n');
+    const textContent = filteredLogs
+      .map(
+        (l) =>
+          `[${l.timestamp}] [${l.source}] [${l.level.toUpperCase()}] ${l.subsystem ? `[${l.subsystem}] ` : ''}${l.message}`
+      )
+      .join('\n');
     const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -285,7 +408,8 @@
 
   async function copyRow(entry: LogEntry) {
     try {
-      await navigator.clipboard.writeText(entry.raw);
+      const line = `[${entry.timestamp}] [${entry.source}] [${entry.level.toUpperCase()}] ${entry.subsystem ? `[${entry.subsystem}] ` : ''}${entry.message}`;
+      await navigator.clipboard.writeText(line);
       showToast('success', $t('logs.copied'));
     } catch {
       showToast('error', 'Failed to copy');
@@ -294,13 +418,16 @@
 
   function highlightMatches(text: string, query: string): string {
     if (!query) return escapeHtml(text);
-    const safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const cleanQuery = query.startsWith('!') ? query.substring(1).trim() : query.trim();
+    if (!cleanQuery) return escapeHtml(text);
+
+    const safeQuery = cleanQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`(${safeQuery})`, 'gi');
     const parts = text.split(regex);
     return parts
       .map((part) => {
         if (!part) return '';
-        if (part.toLowerCase() === query.toLowerCase()) {
+        if (part.toLowerCase() === cleanQuery.toLowerCase()) {
           return `<mark class="log-mark">${escapeHtml(part)}</mark>`;
         }
         return escapeHtml(part);
@@ -320,11 +447,16 @@
   function handleVisibilityChange() {
     if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN) && !paused && !destroyed) {
       connect();
+      fetchFlashHealth();
     }
   }
 
   onMount(() => {
+    loadHistory();
+    fetchFlashHealth();
+    flashHealthInterval = setInterval(fetchFlashHealth, 30000);
     connect();
+
     window.addEventListener('visibilitychange', handleVisibilityChange);
     const mainContent = document.querySelector('.main-content') as HTMLElement;
     if (mainContent) {
@@ -334,6 +466,14 @@
 
   onDestroy(() => {
     destroyed = true;
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (flashHealthInterval) {
+      clearInterval(flashHealthInterval);
+      flashHealthInterval = null;
+    }
     disconnect();
     window.removeEventListener('visibilitychange', handleVisibilityChange);
     const mainContent = document.querySelector('.main-content') as HTMLElement;
@@ -355,6 +495,29 @@
       <p class="sub">{$t('logs.h1_sub')}</p>
     </div>
     <div class="ph-actions">
+      <!-- Flash Health Badge -->
+      {#if flashHealth}
+        <div
+          class="flash-health-badge"
+          class:pressure={flashHealth.is_under_pressure}
+          title={$t('logs.flash_health_desc')}
+        >
+          <span class="flash-icon">💾</span>
+          <span class="flash-stat"
+            >{$t('logs.flash_total_logs', {
+              size: formatBytes(flashHealth.total_logs_bytes)
+            })}</span
+          >
+          <span class="flash-divider">•</span>
+          <span class="flash-stat"
+            >{$t('logs.flash_free', { free: formatBytes(flashHealth.free_space_bytes) })}</span
+          >
+          {#if flashHealth.emergency_actions > 0}
+            <span class="flash-alert-tag">⚡ {flashHealth.emergency_actions}</span>
+          {/if}
+        </div>
+      {/if}
+
       {#if !connected}
         <span class="status-badge stopped">
           <span class="status-dot error"></span>{$t('logs.status_disconnected')}
@@ -374,8 +537,18 @@
     </div>
   </div>
 
+  {#if flashHealth && flashHealth.is_under_pressure}
+    <div class="pressure-banner">
+      <span class="pressure-icon">⚠️</span>
+      <span>{$t('logs.flash_pressure_alert')}</span>
+      <button class="btn btn-sm btn-secondary" onclick={handleClearLogs}>
+        {$t('logs.clear')}
+      </button>
+    </div>
+  {/if}
+
   <div class="logs-page-container">
-    <!-- Unified Balanced Toolbar (LOGS-01) -->
+    <!-- Unified Balanced Toolbar (LOGHUB-08) -->
     <div class="logs-toolbar">
       <!-- Left Controls: Stream Lifecycle -->
       <div class="tb-group tb-stream">
@@ -403,7 +576,7 @@
           {/if}
         </button>
 
-        <button class="btn btn-secondary btn-sm" onclick={clearLogs} title={$t('logs.clear')}>
+        <button class="btn btn-secondary btn-sm" onclick={handleClearLogs} title={$t('logs.clear')}>
           <svg
             width="13"
             height="13"
@@ -489,11 +662,29 @@
             >
           </button>
         </div>
+
+        <!-- Runtime Core Log-Level Switcher -->
+        <div class="runtime-level-control" title={$t('logs.runtime_level')}>
+          <span class="ctrl-label">Mihomo:</span>
+          <select
+            class="runtime-select"
+            value={runtimeLevel}
+            disabled={isUpdatingLevel}
+            onchange={(e) => changeLogLevel((e.target as HTMLSelectElement).value)}
+            aria-label={$t('logs.runtime_level')}
+          >
+            <option value="silent">SILENT</option>
+            <option value="error">ERROR</option>
+            <option value="warning">WARN</option>
+            <option value="info">INFO</option>
+            <option value="debug">DEBUG</option>
+          </select>
+        </div>
       </div>
 
       <!-- Right Controls: Search & Filtering -->
       <div class="tb-group tb-filters">
-        <!-- Search Input with Clear and Counter -->
+        <!-- Search Input with Inversion & Match Counter -->
         <div class="search-wrap">
           <svg
             class="search-icon"
@@ -526,24 +717,17 @@
           {/if}
         </div>
 
-        <!-- Dynamic Source Filter Tabs -->
+        <!-- Source Tabs -->
         <div class="source-pills" role="group" aria-label={$t('logs.source')}>
-          <button
-            type="button"
-            class="source-pill"
-            class:active={sourceFilter === ''}
-            onclick={() => (sourceFilter = '')}
-          >
-            {$t('logs.all_sources')}
-          </button>
-          {#each KNOWN_SOURCES as src}
+          {#each SOURCE_TABS as tab}
             <button
               type="button"
               class="source-pill"
-              class:active={sourceFilter === src}
-              onclick={() => (sourceFilter = sourceFilter === src ? '' : src)}
+              class:error-tab={tab.isError}
+              class:active={sourceFilter === tab.id}
+              onclick={() => (sourceFilter = sourceFilter === tab.id ? '' : tab.id)}
             >
-              {src}
+              {tab.label.startsWith('logs.') ? $t(tab.label) : tab.label}
             </button>
           {/each}
         </div>
@@ -559,7 +743,7 @@
       </div>
     </div>
 
-    <!-- Log Console Pane (LOGS-02) -->
+    <!-- Log Console Pane (Virtual Scroll + Fluid Layout) -->
     <div
       class="logs-console"
       class:wrap-mode={wordWrap}
@@ -580,7 +764,7 @@
           {#each visibleLogs as item (item.log.id)}
             <div
               class="log-row"
-              class:row-error={item.log.level === 'error'}
+              class:row-error={item.log.level === 'error' || item.log.level === 'fatal'}
               class:row-warning={item.log.level === 'warning'}
               class:row-debug={item.log.level === 'debug'}
               style={!wordWrap
@@ -592,7 +776,7 @@
                 <span class="src-tag">{item.log.source || 'sys'}</span>
               </span>
               <span class="col-level">
-                {#if item.log.level === 'error'}
+                {#if item.log.level === 'error' || item.log.level === 'fatal'}
                   <span class="lvl-badge lvl-error">ERR</span>
                 {:else if item.log.level === 'warning'}
                   <span class="lvl-badge lvl-warn">WRN</span>
@@ -602,9 +786,12 @@
                   <span class="lvl-badge lvl-info">INF</span>
                 {/if}
               </span>
+              {#if item.log.subsystem}
+                <span class="col-subsystem">[{item.log.subsystem}]</span>
+              {/if}
               <span class="col-msg">
                 <!-- eslint-disable-next-line svelte/no-at-html-tags -->
-                {@html highlightMatches(item.log.text, filter)}
+                {@html highlightMatches(item.log.message, filter)}
               </span>
 
               <button
@@ -754,6 +941,52 @@
     padding-top: 6px;
   }
 
+  .flash-health-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    font-family: var(--font-family-mono);
+    color: var(--fg-secondary);
+  }
+
+  .flash-health-badge.pressure {
+    border-color: var(--color-error);
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--color-error);
+  }
+
+  .flash-divider {
+    color: var(--fg-dim);
+    opacity: 0.5;
+  }
+
+  .flash-alert-tag {
+    background: var(--color-error);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .pressure-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid var(--color-error);
+    border-radius: var(--radius-md);
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--color-error);
+    font-weight: 600;
+  }
+
   .logs-page-container {
     display: flex;
     flex-direction: column;
@@ -762,7 +995,7 @@
     min-height: 0;
   }
 
-  /* Unified Toolbar (LOGS-01) */
+  /* Unified Toolbar */
   .logs-toolbar {
     display: flex;
     align-items: center;
@@ -804,6 +1037,35 @@
     border-bottom-left-radius: 0;
     border-left: 1px solid var(--border);
     padding: 0 6px;
+  }
+
+  .runtime-level-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 6px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+  }
+
+  .ctrl-label {
+    color: var(--fg-dim);
+    font-weight: 600;
+  }
+
+  .runtime-select {
+    height: 24px;
+    padding: 0 4px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-family-mono);
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--accent);
+    cursor: pointer;
   }
 
   /* Search Input */
@@ -897,11 +1159,16 @@
     font-weight: 700;
   }
 
+  .source-pill.error-tab.active {
+    background: var(--color-error);
+    color: #fff;
+  }
+
   /* Level Select */
   .level-select {
     height: 30px;
-    padding: 0 20px 0 8px;
-    font-size: 11px;
+    padding: 0 8px;
+    font-size: 12px;
     font-weight: 600;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
@@ -910,190 +1177,209 @@
     cursor: pointer;
   }
 
-  /* Log Console (LOGS-02) */
+  .level-select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  /* Log Console Pane */
   .logs-console {
+    position: relative;
     flex: 1;
-    min-height: 0;
-    background: #071422;
+    min-height: 200px;
+    background: var(--bg-terminal);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
+    overflow-y: auto;
+    overflow-x: hidden;
     font-family: var(--font-family-mono);
     font-size: 12px;
-    line-height: 1.4;
-    overflow-y: auto;
-    overflow-x: auto;
-    position: relative;
+    line-height: 28px;
+    color: var(--fg-terminal);
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
+  }
+
+  .logs-console.wrap-mode {
+    overflow-x: hidden;
+    line-height: 1.5;
+  }
+
+  .lines-container {
+    width: 100%;
   }
 
   .lines-container.static-layout {
     display: flex;
     flex-direction: column;
-    padding: 8px 0;
   }
 
   .log-row {
     display: flex;
     align-items: center;
-    gap: 8px;
     padding: 0 12px;
     box-sizing: border-box;
     white-space: nowrap;
-    border-left: 2px solid transparent;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     transition: background 0.1s ease;
-    min-width: 100%;
-    width: max-content;
   }
 
-  .logs-console.wrap-mode .log-row {
+  .wrap-mode .log-row {
     white-space: normal;
-    padding: 4px 12px;
-    min-height: 26px;
+    padding: 6px 12px;
     align-items: flex-start;
   }
 
   .log-row:hover {
-    background: rgba(255, 255, 255, 0.03);
-  }
-
-  .log-row.row-error {
-    background: rgba(244, 112, 127, 0.08);
-    border-left-color: var(--danger, #f4707f);
-  }
-
-  .log-row.row-warning {
-    background: rgba(245, 166, 35, 0.06);
-    border-left-color: var(--warning, #f5a623);
-  }
-
-  .col-ts {
-    width: 65px;
-    color: #64748b;
-    flex-shrink: 0;
-    user-select: none;
-    font-size: 11px;
-  }
-
-  .col-src {
-    width: 60px;
-    flex-shrink: 0;
-    user-select: none;
-  }
-
-  .src-tag {
-    display: inline-block;
-    padding: 1px 5px;
-    border-radius: 3px;
-    background: rgba(255, 255, 255, 0.06);
-    color: #94a3b8;
-    font-size: 10px;
-    font-weight: 600;
-  }
-
-  .col-level {
-    width: 40px;
-    flex-shrink: 0;
-    user-select: none;
-  }
-
-  .lvl-badge {
-    display: inline-block;
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-size: 9.5px;
-    font-weight: 700;
-    text-align: center;
-    width: 28px;
-  }
-
-  .lvl-error {
-    background: rgba(244, 112, 127, 0.2);
-    color: #f4707f;
-  }
-
-  .lvl-warn {
-    background: rgba(245, 166, 35, 0.2);
-    color: #f5a623;
-  }
-
-  .lvl-info {
-    background: rgba(255, 255, 255, 0.05);
-    color: #94a3b8;
-  }
-
-  .lvl-debug {
-    background: rgba(167, 139, 250, 0.2);
-    color: #a78bfa;
-  }
-
-  .col-msg {
-    flex: 1;
-    color: #e2e8f0;
-    word-break: break-all;
-  }
-
-  .log-row.row-error .col-msg {
-    color: #fca5a5;
-  }
-
-  .log-row.row-warning .col-msg {
-    color: #fde047;
-  }
-
-  :global(.log-mark) {
-    background: #f59e0b;
-    color: #000;
-    padding: 0 2px;
-    border-radius: 2px;
-  }
-
-  .copy-row-btn {
-    opacity: 0;
-    background: rgba(255, 255, 255, 0.08);
-    border: none;
-    color: #94a3b8;
-    padding: 2px 5px;
-    border-radius: 3px;
-    cursor: pointer;
-    margin-left: auto;
-    transition: all 0.15s ease;
+    background: rgba(255, 255, 255, 0.04);
   }
 
   .log-row:hover .copy-row-btn {
     opacity: 1;
   }
 
+  .row-error {
+    background: rgba(239, 68, 68, 0.08);
+    color: #fca5a5;
+  }
+
+  .row-error:hover {
+    background: rgba(239, 68, 68, 0.14);
+  }
+
+  .row-warning {
+    background: rgba(245, 158, 11, 0.06);
+    color: #fcd34d;
+  }
+
+  .row-warning:hover {
+    background: rgba(245, 158, 11, 0.12);
+  }
+
+  .row-debug {
+    color: #94a3b8;
+  }
+
+  .col-ts {
+    flex-shrink: 0;
+    width: 70px;
+    color: var(--fg-dim);
+    font-size: 11px;
+  }
+
+  .col-src {
+    flex-shrink: 0;
+    width: 75px;
+    margin-right: 6px;
+  }
+
+  .src-tag {
+    display: inline-block;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--fg-dim);
+    max-width: 70px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .col-level {
+    flex-shrink: 0;
+    width: 40px;
+    margin-right: 6px;
+  }
+
+  .lvl-badge {
+    display: inline-block;
+    padding: 1px 4px;
+    font-size: 9px;
+    font-weight: 800;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
+  }
+
+  .lvl-error {
+    background: var(--color-error);
+    color: #fff;
+  }
+
+  .lvl-warn {
+    background: #d97706;
+    color: #fff;
+  }
+
+  .lvl-info {
+    background: rgba(41, 194, 240, 0.2);
+    color: var(--accent);
+  }
+
+  .lvl-debug {
+    background: rgba(148, 163, 184, 0.2);
+    color: #94a3b8;
+  }
+
+  .col-subsystem {
+    flex-shrink: 0;
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    margin-right: 8px;
+  }
+
+  .col-msg {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .wrap-mode .col-msg {
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+  }
+
+  :global(.log-mark) {
+    background: #fbbf24;
+    color: #0f172a;
+    padding: 0 2px;
+    border-radius: 2px;
+    font-weight: 700;
+  }
+
+  .copy-row-btn {
+    opacity: 0;
+    background: transparent;
+    border: none;
+    color: var(--fg-dim);
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition:
+      opacity 0.15s,
+      color 0.15s;
+    margin-left: 6px;
+    flex-shrink: 0;
+  }
+
   .copy-row-btn:hover {
-    background: var(--accent);
-    color: #03182a;
+    color: var(--fg-primary);
+    background: rgba(255, 255, 255, 0.1);
   }
 
-  .floating-pause-banner {
-    position: sticky;
-    bottom: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: inline-flex;
-    align-items: center;
-    gap: 12px;
-    background: #14334f;
-    border: 1px solid var(--accent);
-    color: #e2e8f0;
-    padding: 6px 14px;
-    border-radius: 20px;
-    font-size: 12px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    z-index: 10;
-  }
-
+  /* Empty State */
   .empty-state {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     height: 100%;
-    padding: 40px 20px;
+    min-height: 180px;
     color: var(--fg-dim);
     text-align: center;
     gap: 8px;
@@ -1107,44 +1393,79 @@
 
   .empty-desc {
     font-size: 12px;
-    color: var(--fg-faint);
+    color: var(--fg-dim);
   }
 
-  /* Footer Status Bar */
+  /* Floating Pause Banner */
+  .floating-pause-banner {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid var(--accent);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    border-radius: var(--radius-full);
+    padding: 6px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--fg-primary);
+    z-index: 10;
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translate(-50%, 8px);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+  }
+
+  /* Status Bar / Footer */
   .logs-footer {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 4px 8px;
+    justify-content: flex-end;
+    gap: 16px;
+    padding: 2px 4px;
     font-size: 11px;
     color: var(--fg-dim);
   }
 
   .footer-stat {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 6px;
   }
 
   .footer-live {
-    color: var(--fg-secondary);
+    font-weight: 600;
   }
 
   .live-dot {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #46d18a;
-    box-shadow: 0 0 6px rgba(70, 209, 138, 0.6);
+    background: var(--color-success);
+    box-shadow: 0 0 6px var(--color-success);
+    transition:
+      background 0.2s,
+      box-shadow 0.2s;
   }
 
   .live-dot.paused {
-    background: #f5a623;
-    box-shadow: 0 0 6px rgba(245, 166, 35, 0.6);
+    background: var(--color-warning);
+    box-shadow: 0 0 6px var(--color-warning);
   }
 
   .live-dot.disconnected {
-    background: #f4707f;
-    box-shadow: 0 0 6px rgba(244, 112, 127, 0.6);
+    background: var(--color-error);
+    box-shadow: 0 0 6px var(--color-error);
   }
 </style>
