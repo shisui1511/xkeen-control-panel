@@ -216,6 +216,7 @@
   );
   let showPreviewPane = $state<boolean>(true);
   let isResizingPreview = $state<boolean>(false);
+  let activeSplitterCleanup: (() => void) | null = null;
 
   function startResizePreview(e: MouseEvent | PointerEvent) {
     e.preventDefault();
@@ -232,11 +233,20 @@
     function onUp() {
       isResizingPreview = false;
       localStorage.setItem('xray_builder_preview_width', String(previewWidth));
+      if (activeSplitterCleanup) {
+        activeSplitterCleanup();
+      }
+    }
+
+    function cleanup() {
       window.removeEventListener('mousemove', onMove as any);
       window.removeEventListener('mouseup', onUp);
       window.removeEventListener('pointermove', onMove as any);
       window.removeEventListener('pointerup', onUp);
+      activeSplitterCleanup = null;
     }
+
+    activeSplitterCleanup = cleanup;
 
     window.addEventListener('mousemove', onMove as any);
     window.addEventListener('mouseup', onUp);
@@ -251,6 +261,7 @@
     | '02_dns.json'
     | '01_log.json'
     | '03_inbounds.json'
+    | '06_policy.json'
     | 'all'
   >('all');
   let copyFeedback = $state(false);
@@ -506,6 +517,9 @@
     if (unregisterDirty) {
       unregisterDirty();
       unregisterDirty = null;
+    }
+    if (activeSplitterCleanup) {
+      activeSplitterCleanup();
     }
   });
 
@@ -3152,7 +3166,7 @@
         <button
           type="button"
           class="xray-splitter"
-          aria-label="Resize preview"
+          aria-label={$t('xray.resize_preview')}
           tabindex="-1"
           onpointerdown={startResizePreview}
           onmousedown={startResizePreview}
@@ -3163,7 +3177,7 @@
           <div class="preview-card">
             <!-- File Tabs -->
             <div class="preview-tabs-bar">
-              {#each [['05_routing.json', '05_routing.json'], ['04_outbounds.json', '04_outbounds.json'], ['02_dns.json', '02_dns.json'], ['01_log.json', '01_log.json'], ['03_inbounds.json', '03_inbounds.json'], ['all', $t('xray.all_files')]] as [tabId, tabTitle]}
+              {#each [['05_routing.json', '05_routing.json'], ['04_outbounds.json', '04_outbounds.json'], ['02_dns.json', '02_dns.json'], ['01_log.json', '01_log.json'], ['03_inbounds.json', '03_inbounds.json'], ['06_policy.json', '06_policy.json'], ['all', $t('xray.all_files')]] as [tabId, tabTitle]}
                 <button
                   type="button"
                   class="preview-tab-btn"

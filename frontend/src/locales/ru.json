@@ -1043,6 +1043,7 @@
   "xray.preset_modified": "(изменено)",
   "xray.hide_preview": "Скрыть превью",
   "xray.show_preview": "Показать превью",
+  "xray.resize_preview": "Изменить ширину панели предпросмотра",
   "xray.all_files": "Все файлы",
   "xray.rule_enabled": "Правило включено",
   "xray.rule_disabled": "Правило отключено",

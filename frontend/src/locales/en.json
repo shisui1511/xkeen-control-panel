@@ -1044,6 +1044,7 @@
   "xray.preset_modified": "(modified)",
   "xray.hide_preview": "Hide preview",
   "xray.show_preview": "Show preview",
+  "xray.resize_preview": "Resize preview panel",
   "xray.all_files": "All files",
   "xray.rule_enabled": "Rule enabled",
   "xray.rule_disabled": "Rule disabled",
