@@ -219,6 +219,7 @@
 <style>
   .quick-actions-widget {
     width: 100%;
+    container: qa / inline-size;
   }
 
   .qa-grid {
@@ -227,7 +228,9 @@
     gap: 12px;
   }
 
-  @media (max-width: 640px) {
+  /* Порог 400px — минимально комфортная ширина двух плиток .qa-btn
+     (иконка 34px + текст + паддинги 12px + gap 12px) */
+  @container qa (max-width: 400px) {
     .qa-grid {
       grid-template-columns: 1fr;
     }

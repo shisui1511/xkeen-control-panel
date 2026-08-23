@@ -111,3 +111,53 @@ test.describe('Dashboard — адаптивность по ширине обла
     });
   }
 });
+
+test.describe('Панель — отсутствие горизонтального переполнения', () => {
+  const routes = [
+    '/#/dashboard',
+    '/#/services',
+    '/#/connections',
+    '/#/proxies',
+    '/#/rules',
+    '/#/smartproxy',
+    '/#/traffic',
+    '/#/trafficquotas',
+    '/#/logs',
+    '/#/editor',
+    '/#/dat',
+    '/#/network',
+    '/#/subscriptions',
+    '/#/settings'
+  ];
+  const sweepWidths = [1440, 1280, 1024];
+
+  for (const route of routes) {
+    test(`${route}: нет переполнения на 1440/1280/1024px`, async ({ page }) => {
+      await setupMocks(page, 'mihomo');
+      await visitPage(page, route);
+
+      const failures: string[] = [];
+
+      for (const width of sweepWidths) {
+        await page.setViewportSize({ width, height: 900 });
+        // короткая пауза на стабилизацию раскладки после изменения viewport
+        await page.waitForTimeout(150);
+
+        const report = await collectOverflow(page);
+
+        if (report.docScrollWidth > report.innerWidth + TOLERANCE_PX) {
+          failures.push(
+            `${route}@${width}px: горизонтальная прокрутка документа (scrollWidth=${report.docScrollWidth} > innerWidth=${report.innerWidth})`
+          );
+        }
+        if (report.mainScrollWidth > report.mainClientWidth + TOLERANCE_PX) {
+          failures.push(
+            `${route}@${width}px: .main-content переполнен (scrollWidth=${report.mainScrollWidth} > clientWidth=${report.mainClientWidth})`
+          );
+        }
+      }
+
+      expect(failures, failures.join('\n')).toHaveLength(0);
+    });
+  }
+});

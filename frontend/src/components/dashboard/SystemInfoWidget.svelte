@@ -134,6 +134,7 @@
   .lbl {
     color: var(--fg-secondary, #8fa3b8);
     font-weight: 500;
+    flex-shrink: 0;
   }
 
   .val {
@@ -142,6 +143,7 @@
     text-align: right;
     word-break: break-word;
     overflow-wrap: anywhere;
+    min-width: 0;
   }
 
   .mono {
