@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -37,6 +38,15 @@ func main() {
 
 	flag.Parse()
 
+	// Router-grade RAM/GC limits (STAB-06): Keenetic devices typically have
+	// 128-256 MB total RAM shared with the kernel and other services. A
+	// hard soft-memory-limit plus an aggressive GC target keeps XCP's own
+	// footprint predictable instead of relying on the Go runtime's default
+	// heap-doubling behavior, which can otherwise contribute to OOM-killer
+	// intervention on a loaded router (see Phase 99 analysis).
+	debug.SetMemoryLimit(45 * 1024 * 1024) // 45 MiB
+	debug.SetGCPercent(30)
+
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Printf("Failed to load config: %v. Creating default...", err)
@@ -56,6 +66,19 @@ func main() {
 		} else {
 			log.Printf("Failed to initialize log rotator for %s: %v", cfg.XCPLogPath, err)
 		}
+	}
+
+	// System sysctl profile (STAB-06): no-op on non-Entware machines (see
+	// DeploySysctlProfile's "/opt/etc missing" detection), so this is safe
+	// to always call, including during local development.
+	if err := services.DeploySysctlProfile(""); err != nil {
+		log.Printf("Failed to deploy sysctl profile: %v", err)
+	}
+
+	// Auto-recover a missing Mihomo config.yaml so the kernel has something
+	// valid to start with instead of crash-looping (STAB-04).
+	if err := services.EnsureDefaultMihomoConfig(cfg.MihomoConfigDir); err != nil {
+		log.Printf("Failed to ensure default Mihomo config: %v", err)
 	}
 
 	srvCfg := &server.Config{
@@ -210,6 +233,14 @@ func main() {
 	trafficQuotaSvc.Start()
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
+
+	// Watchdog / circuit breaker (STAB-05): supervises the active kernel and
+	// disarms the XKEEN_TPROXY iptables interception after 3 consecutive
+	// failed health checks, so a wedged proxy kernel doesn't leave the LAN
+	// without internet access.
+	watchdogSvc := services.NewWatchdogService(api.XKeenService(), cfg.MihomoConfigDir, cfg.XRayConfigDir)
+	watchdogSvc.Start()
+	defer watchdogSvc.Stop()
 
 	// Config Snapshots
 	xrayDir := filepath.Dir(cfg.XRayConfigDir)                            // e.g. /opt/etc/xray

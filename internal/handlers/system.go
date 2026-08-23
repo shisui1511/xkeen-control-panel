@@ -339,7 +339,9 @@ func (a *API) checkActiveConfigsInvalid() bool {
 		xrayBin := a.getBinaryPath("xray")
 		if xrayBin != "" {
 			if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
-				cmd := exec.Command(xrayBin, "-test", "-confdir", a.cfg.XRayConfigDir)
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, xrayBin, "-test", "-confdir", a.cfg.XRayConfigDir)
 				setupXrayCmdEnv(cmd, a.cfg.XRayConfigDir)
 				if err := cmd.Run(); err != nil {
 					return true
@@ -353,7 +355,9 @@ func (a *API) checkActiveConfigsInvalid() bool {
 		mihomoBin := a.getBinaryPath("mihomo")
 		if mihomoBin != "" {
 			if _, err := os.Stat(a.cfg.MihomoConfigDir); err == nil {
-				cmd := exec.Command(mihomoBin, "-t", "-d", a.cfg.MihomoConfigDir)
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, mihomoBin, "-t", "-d", a.cfg.MihomoConfigDir)
 				if err := cmd.Run(); err != nil {
 					return true
 				}

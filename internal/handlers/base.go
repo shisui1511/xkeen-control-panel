@@ -113,6 +113,10 @@ func (a *API) MihomoService() *services.MihomoService {
 	return a.mihomoSvc
 }
 
+func (a *API) XKeenService() *services.XKeenService {
+	return a.xkeenSvc
+}
+
 func (a *API) SetKernelService(svc *services.KernelService) {
 	a.kernelSvc = svc
 }
