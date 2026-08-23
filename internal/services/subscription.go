@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -264,10 +265,14 @@ type SubscriptionService struct {
 	// чтение secret из config.yaml Mihomo), используется когда mihomoSecret пуст.
 	mihomoSecretResolver func() string
 	lastCleanup          time.Time
-	panelPort            int
-	panelHTTPS           bool
-	loopbackPort         int
-	localHTTPClient      *http.Client
+	// cleaning guards CleanOrphanedSubscriptions against concurrent execution:
+	// GetSystemStats() can spawn a new cleanup goroutine on every poll cycle
+	// (every few seconds) while Disk.Free stays below the emergency threshold (STAB-03).
+	cleaning        atomic.Bool
+	panelPort       int
+	panelHTTPS      bool
+	loopbackPort    int
+	localHTTPClient *http.Client
 }
 
 func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *SubscriptionService {

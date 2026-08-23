@@ -5,7 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 )
+
+// kernelCheckSemaphore limits the number of concurrent background release-check
+// goroutines spawned by KernelCheck. Without this, rapid repeated POST requests
+// could accumulate unbounded goroutines making outbound GitHub API calls (STAB-01).
+var kernelCheckSemaphore = make(chan struct{}, 2)
 
 func (a *API) KernelList(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -44,8 +50,21 @@ func (a *API) KernelCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Run check in background so response is immediate
-	go a.kernelSvc.CheckLatest(context.Background(), name)
+	// Run check in background so response is immediate.
+	// Bounded by kernelCheckSemaphore (max 2 concurrent) and a hard 10s timeout
+	// so a slow/unresponsive GitHub API cannot accumulate goroutines (STAB-01).
+	go func() {
+		select {
+		case kernelCheckSemaphore <- struct{}{}:
+			defer func() { <-kernelCheckSemaphore }()
+		default:
+			// Already 2 checks in flight; drop this one rather than queue indefinitely.
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = a.kernelSvc.CheckLatest(ctx, name)
+	}()
 
 	JSONSuccess(w, map[string]string{"status": "checking"})
 }

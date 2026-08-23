@@ -139,9 +139,8 @@ func (s *XKeenService) GetVersion() string {
 }
 
 func (s *XKeenService) Status() (string, error) {
-	cmd := exec.Command(s.BinaryPath, "-status")
-	out, err := cmd.CombinedOutput()
-	output := utils.StripANSI(string(out))
+	out, err := s.runWithTimeout("-status", 5*time.Second)
+	output := utils.StripANSI(out)
 	if err != nil {
 		return output, err
 	}

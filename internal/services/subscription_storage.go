@@ -850,6 +850,15 @@ func (s *SubscriptionService) GetParseReport(id string) (*ParseReport, error) {
 // but only if those files are older than 7 days, and system time is synchronized (at least 2026-01-01).
 // This execution is throttled to run at most once per hour.
 func (s *SubscriptionService) CleanOrphanedSubscriptions() {
+	// Prevent concurrent execution: GetSystemStats() may spawn a new goroutine
+	// calling this method on every poll cycle while free disk space stays low.
+	// Without this guard, dozens of goroutines could pile up doing redundant
+	// directory scans in parallel (STAB-03).
+	if !s.cleaning.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.cleaning.Store(false)
+
 	if time.Now().Before(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)) {
 		log.Println("[Cleanup] System time is before 2026-01-01, skipping orphaned subscription cleanup")
 		return
