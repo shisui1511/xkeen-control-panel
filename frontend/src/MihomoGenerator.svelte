@@ -1247,13 +1247,19 @@
   }
 
   function duplicateProxy(p: Proxy) {
-    const { name: cleanName } = sanitizeProxyName(`${p.name}_copy`);
+    const baseCopyName = `${p.name}_copy`;
+    const uniqueName = generateUniqueProxyName(
+      baseCopyName,
+      proxies.map((pr) => pr.name)
+    );
+    const { name: cleanName } = sanitizeProxyName(uniqueName);
     const newP: Proxy = {
       ...p,
       id: crypto.randomUUID(),
       name: cleanName
     };
     proxies = [...proxies, newP];
+    isDirty = true;
     showToast('info', $t('app.duplicate'));
   }
 
