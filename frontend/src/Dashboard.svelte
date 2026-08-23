@@ -1127,51 +1127,53 @@
 
           <!-- Live Service Status cards (DASH-03) -->
           <!-- Dashboard 60/40 Layout Grid (DASH-01) -->
-          <div class="dashboard-layout-grid">
-            <!-- Left Column (60%): Service Status, System Resources, Traffic Telemetry -->
-            <div class="dash-col-left">
-              <!-- Service Status Group (DASH-03) -->
-              <div class="dash-section">
-                <ServiceStatusGroup
-                  {serviceStatus}
-                  capabilities={$capabilities}
-                  xkeenVersion={version !== $t('app.loading') && version !== $t('app.error')
-                    ? version
-                    : ''}
-                  {statusLoading}
-                  {statusError}
-                  onRefresh={fetchLiveStatus}
-                  onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
-                />
+          <div class="dashboard-grid-scope">
+            <div class="dashboard-layout-grid">
+              <!-- Left Column (60%): Service Status, System Resources, Traffic Telemetry -->
+              <div class="dash-col-left">
+                <!-- Service Status Group (DASH-03) -->
+                <div class="dash-section">
+                  <ServiceStatusGroup
+                    {serviceStatus}
+                    capabilities={$capabilities}
+                    xkeenVersion={version !== $t('app.loading') && version !== $t('app.error')
+                      ? version
+                      : ''}
+                    {statusLoading}
+                    {statusError}
+                    onRefresh={fetchLiveStatus}
+                    onShowMihomoMigrateModal={() => (showMihomoMigrateModal = true)}
+                  />
+                </div>
+
+                <!-- System Resources (DASH-01, DASH-04) -->
+                <div class="dash-section">
+                  <SystemResourcesWidget {systemStats} {loadHistory} {sparklineData} />
+                </div>
+
+                <!-- Traffic & Network Telemetry (DASH-01) -->
+                <div class="dash-section">
+                  <TrafficTelemetryWidget onSwitchTab={switchTab} />
+                </div>
               </div>
 
-              <!-- System Resources (DASH-01, DASH-04) -->
-              <div class="dash-section">
-                <SystemResourcesWidget {systemStats} {loadHistory} {sparklineData} />
-              </div>
+              <!-- Right Column (40%): Quick Actions, System Info -->
+              <div class="dash-col-right">
+                <!-- Quick Actions (DASH-02) -->
+                <div class="dash-section">
+                  <QuickActionsWidget onSwitchTab={switchTab} />
+                </div>
 
-              <!-- Traffic & Network Telemetry (DASH-01) -->
-              <div class="dash-section">
-                <TrafficTelemetryWidget onSwitchTab={switchTab} />
-              </div>
-            </div>
-
-            <!-- Right Column (40%): Quick Actions, System Info -->
-            <div class="dash-col-right">
-              <!-- Quick Actions (DASH-02) -->
-              <div class="dash-section">
-                <QuickActionsWidget onSwitchTab={switchTab} />
-              </div>
-
-              <!-- System Info (DASH-04, D-08) -->
-              <div class="dash-section">
-                <SystemInfoWidget
-                  {systemStats}
-                  {version}
-                  {panelVersion}
-                  {statsLastFetched}
-                  onOpenAbout={() => (showAboutModal = true)}
-                />
+                <!-- System Info (DASH-04, D-08) -->
+                <div class="dash-section">
+                  <SystemInfoWidget
+                    {systemStats}
+                    {version}
+                    {panelVersion}
+                    {statsLastFetched}
+                    onOpenAbout={() => (showAboutModal = true)}
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -1446,6 +1448,14 @@
 
 <style>
   /* Dashboard 60/40 Layout Grid (DASH-01) */
+  /* Раскладка переключается по фактической ширине области контента
+     (container query), а не по ширине окна браузера. Порог 940px:
+     левой колонке нужно ~520px (виджеты используют minmax(180px,1fr)),
+     правой — ~360px, плюс gap 24px. */
+  .dashboard-grid-scope {
+    container: dashgrid / inline-size;
+  }
+
   .dashboard-layout-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
@@ -1453,6 +1463,15 @@
     align-items: start;
   }
 
+  @container dashgrid (max-width: 940px) {
+    .dashboard-layout-grid {
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+  }
+
+  /* Fallback для движков без поддержки container queries: при окне
+     <=1024px область контента заведомо уже 940px, оба правила совпадают. */
   @media (max-width: 1024px) {
     .dashboard-layout-grid {
       grid-template-columns: 1fr;
