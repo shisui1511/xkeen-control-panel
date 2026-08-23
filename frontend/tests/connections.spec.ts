@@ -225,6 +225,72 @@ test.describe('Connections page test suite', () => {
     await expect(page.locator('.group-card')).toHaveCount(2);
     await expect(page.locator('.group-card').first()).toContainText('Work-MacBook');
   });
+
+  test('sorting by upload, download and time reorders connections', async ({ page }) => {
+    // Check initial rows
+    const firstHost = page.locator('.connections-table tbody td.col-host').first();
+    await expect(firstHost).toContainText('youtube.com');
+
+    // Click upload sort column header
+    const uploadTh = page.locator('th.col-upload').first();
+    await uploadTh.click();
+    // Default desc sort -> conn-1 (1024 bytes) first
+    await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
+      'youtube.com'
+    );
+
+    // Toggle to asc -> conn-2 (0 bytes) first
+    await uploadTh.click();
+    await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
+      'google.com'
+    );
+
+    // Click download sort column header -> conn-1 (8192 bytes) desc
+    const downloadTh = page.locator('th.col-download').first();
+    await downloadTh.click();
+    await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
+      'youtube.com'
+    );
+  });
+
+  test('pause button toggles stream live status', async ({ page }) => {
+    await expect(page.locator('.live-badge.running')).toBeVisible();
+
+    // Click pause button in actions
+    const pauseBtn = page.locator('.ph-actions button.btn-secondary');
+    await pauseBtn.click();
+
+    // Paused badge visible
+    await expect(page.locator('.live-badge.paused')).toBeVisible();
+
+    // Click resume button
+    await pauseBtn.click();
+    await expect(page.locator('.live-badge.running')).toBeVisible();
+  });
+
+  test('keyboard navigation opens drawer on Enter and closes on Escape', async ({ page }) => {
+    const firstRow = page.locator('.connections-table tbody tr.conn-row').first();
+    await firstRow.focus();
+    await page.keyboard.press('Enter');
+
+    await expect(page.locator('.inspector-drawer')).toBeVisible();
+    await expect(page.locator('.inspector-drawer')).toContainText('youtube.com:443');
+
+    // Press Escape to close
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.inspector-drawer')).toHaveCount(0);
+  });
+
+  test('close all connections button opens confirmation dialog', async ({ page }) => {
+    const closeAllBtn = page.locator('.ph-actions button.btn-danger-soft');
+    await expect(closeAllBtn).toBeEnabled();
+
+    // Click close all
+    await closeAllBtn.click();
+
+    // Confirm dialog modal appears
+    await expect(page.locator('.modal-backdrop, .dialog-backdrop, .modal, .dialog')).toBeVisible();
+  });
 });
 
 // Тест оффлайн состояния — отдельная группа с capabilities.reachable: false

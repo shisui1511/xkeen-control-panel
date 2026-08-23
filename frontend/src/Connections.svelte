@@ -47,6 +47,8 @@
   let connections = $state<Connection[]>([]);
   let clients = $state<Record<string, ClientInfo>>({});
   let clientsRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let launchTimer1: ReturnType<typeof setTimeout> | null = null;
+  let launchTimer2: ReturnType<typeof setTimeout> | null = null;
 
   interface TrafficHistory {
     upload: number;
@@ -131,9 +133,15 @@
 
           if (prev) {
             const durationSec = (now - prev.timestamp) / 1000;
-            if (durationSec > 0.2) {
+            if (durationSec > 0.2 && durationSec <= 5) {
               uploadSpeed = Math.max(0, (conn.upload - prev.upload) / durationSec);
               downloadSpeed = Math.max(0, (conn.download - prev.download) / durationSec);
+              nextHistory.set(conn.id, {
+                upload: conn.upload,
+                download: conn.download,
+                timestamp: now
+              });
+            } else if (durationSec > 5) {
               nextHistory.set(conn.id, {
                 upload: conn.upload,
                 download: conn.download,
@@ -266,7 +274,7 @@
   }
 
   function formatBytes(bytes: number): string {
-    if (!bytes || bytes === 0) return '0 B';
+    if (!bytes || bytes <= 0 || isNaN(bytes)) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
@@ -301,12 +309,15 @@
         body: JSON.stringify({ action: 'start' })
       });
       if (!res.ok) throw new Error('Failed to start Mihomo');
-      setTimeout(async () => {
+      launchTimer1 = setTimeout(async () => {
+        if (destroyed) return;
         await fetchCapabilities();
+        if (destroyed) return;
         connectWS();
         mihomoLaunching = false;
       }, 1500);
-      setTimeout(async () => {
+      launchTimer2 = setTimeout(async () => {
+        if (destroyed) return;
         await fetchCapabilities();
       }, 4000);
     } catch (e: any) {
@@ -382,8 +393,10 @@
       let valA = 0;
       let valB = 0;
       if (sortKey === 'start') {
-        valA = new Date(a.start).getTime() || 0;
-        valB = new Date(b.start).getTime() || 0;
+        const timeA = new Date(a.start).getTime() || Date.now();
+        const timeB = new Date(b.start).getTime() || Date.now();
+        valA = Date.now() - timeA;
+        valB = Date.now() - timeB;
       } else if (sortKey === 'upload') {
         valA = a.upload;
         valB = b.upload;
@@ -438,7 +451,7 @@
         const chainStr = isDirect(conn) ? 'DIRECT' : (conn.chains || []).join(' → ');
         key = chainStr;
         title = chainStr;
-        subtitle = isDirect(conn) ? 'Direct outbound' : 'Proxy tunnel chain';
+        subtitle = isDirect(conn) ? $t('conn.route_direct_sub') : $t('conn.route_proxy_sub');
       }
 
       if (!map.has(key)) {
@@ -463,9 +476,22 @@
     return Array.from(map.values()).sort((a, b) => b.downloadTotal - a.downloadTotal);
   });
 
+  function handleVisibilityChange() {
+    if (document.visibilityState === 'visible') {
+      trafficHistory = new Map();
+    }
+  }
+
+  function handleWindowKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && selectedConnectionId) {
+      selectedConnectionId = null;
+    }
+  }
+
   onMount(() => {
     loadClients();
     clientsRefreshTimer = setInterval(loadClients, 20000);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       loading = true;
       connectWS();
@@ -478,9 +504,20 @@
       clearInterval(clientsRefreshTimer);
       clientsRefreshTimer = null;
     }
+    if (launchTimer1) {
+      clearTimeout(launchTimer1);
+      launchTimer1 = null;
+    }
+    if (launchTimer2) {
+      clearTimeout(launchTimer2);
+      launchTimer2 = null;
+    }
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
     disconnectWS();
   });
 </script>
+
+<svelte:window onkeydown={handleWindowKeyDown} />
 
 <div class="container">
   <!-- page-head -->
@@ -603,8 +640,10 @@
         />
         {#if searchQuery}
           <span class="match-badge">{filteredConnections.length}/{connections.length}</span>
-          <button class="clear-search-btn" onclick={() => (searchQuery = '')} aria-label="Clear"
-            >×</button
+          <button
+            class="clear-search-btn"
+            onclick={() => (searchQuery = '')}
+            aria-label={$t('app.clear')}>×</button
           >
         {/if}
       </div>
@@ -719,21 +758,60 @@
                       <th class="col-network">{$t('conn.network')}</th>
                       <th
                         class="col-traffic col-upload right-align pointer"
+                        role="columnheader"
+                        tabindex="0"
+                        aria-sort={sortKey === 'upload'
+                          ? sortAsc
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'}
                         onclick={() => toggleSort('upload')}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleSort('upload');
+                          }
+                        }}
                       >
                         ↑ {$t('conn.upload')}
                         {sortKey === 'upload' ? (sortAsc ? '▲' : '▼') : ''}
                       </th>
                       <th
                         class="col-traffic col-download right-align pointer"
+                        role="columnheader"
+                        tabindex="0"
+                        aria-sort={sortKey === 'download'
+                          ? sortAsc
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'}
                         onclick={() => toggleSort('download')}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleSort('download');
+                          }
+                        }}
                       >
                         ↓ {$t('conn.download')}
                         {sortKey === 'download' ? (sortAsc ? '▲' : '▼') : ''}
                       </th>
                       <th
                         class="col-duration right-align pointer"
+                        role="columnheader"
+                        tabindex="0"
+                        aria-sort={sortKey === 'start'
+                          ? sortAsc
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'}
                         onclick={() => toggleSort('start')}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleSort('start');
+                          }
+                        }}
                       >
                         ⏱ {$t('conn.duration')}
                         {sortKey === 'start' ? (sortAsc ? '▲' : '▼') : ''}
@@ -769,19 +847,49 @@
               <th class="col-network">{$t('conn.network')}</th>
               <th
                 class="col-traffic col-upload right-align pointer"
+                role="columnheader"
+                tabindex="0"
+                aria-sort={sortKey === 'upload' ? (sortAsc ? 'ascending' : 'descending') : 'none'}
                 onclick={() => toggleSort('upload')}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('upload');
+                  }
+                }}
               >
                 ↑ {$t('conn.upload')}
                 {sortKey === 'upload' ? (sortAsc ? '▲' : '▼') : ''}
               </th>
               <th
                 class="col-traffic col-download right-align pointer"
+                role="columnheader"
+                tabindex="0"
+                aria-sort={sortKey === 'download' ? (sortAsc ? 'ascending' : 'descending') : 'none'}
                 onclick={() => toggleSort('download')}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('download');
+                  }
+                }}
               >
                 ↓ {$t('conn.download')}
                 {sortKey === 'download' ? (sortAsc ? '▲' : '▼') : ''}
               </th>
-              <th class="col-duration right-align pointer" onclick={() => toggleSort('start')}>
+              <th
+                class="col-duration right-align pointer"
+                role="columnheader"
+                tabindex="0"
+                aria-sort={sortKey === 'start' ? (sortAsc ? 'ascending' : 'descending') : 'none'}
+                onclick={() => toggleSort('start')}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('start');
+                  }
+                }}
+              >
                 ⏱ {$t('conn.duration')}
                 {sortKey === 'start' ? (sortAsc ? '▲' : '▼') : ''}
               </th>
@@ -831,7 +939,18 @@
   <tr
     class="conn-row"
     class:selected={selectedConnectionId === conn.id}
+    tabindex="0"
+    role="button"
+    aria-label={`${getHost(conn)}:${conn.metadata.destinationPort}`}
     onclick={() => (selectedConnectionId = conn.id)}
+    onkeydown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        if ((e.target as HTMLElement)?.tagName !== 'BUTTON') {
+          e.preventDefault();
+          selectedConnectionId = conn.id;
+        }
+      }
+    }}
   >
     <!-- Source Column -->
     <td class="col-src">
@@ -943,13 +1062,17 @@
     onclick={() => (selectedConnectionId = null)}
     aria-label={$t('app.close')}
   ></button>
-  <aside class="inspector-drawer">
+  <div class="inspector-drawer" role="dialog" aria-modal="true" aria-labelledby="inspector-title">
     <div class="drawer-header">
       <div class="drawer-title-group">
-        <h3 class="drawer-title">{$t('conn.inspector_title')}</h3>
+        <h3 class="drawer-title" id="inspector-title">{$t('conn.inspector_title')}</h3>
         <span class="drawer-subtitle monospace">{conn.id}</span>
       </div>
-      <button class="drawer-close" onclick={() => (selectedConnectionId = null)} aria-label="Close">
+      <button
+        class="drawer-close"
+        onclick={() => (selectedConnectionId = null)}
+        aria-label={$t('app.close')}
+      >
         ✕
       </button>
     </div>
@@ -1002,7 +1125,7 @@
           </div>
           {#if conn.rulePayload}
             <div class="m-row">
-              <span class="m-key">Rule Payload:</span>
+              <span class="m-key">{$t('conn.rule_payload')}:</span>
               <span class="m-val monospace">{conn.rulePayload}</span>
             </div>
           {/if}
@@ -1047,7 +1170,7 @@
             <span class="m-val monospace">{getDuration(conn.start)}</span>
           </div>
           <div class="m-row">
-            <span class="m-key">Start:</span>
+            <span class="m-key">{$t('conn.start_time')}:</span>
             <span class="m-val monospace">{new Date(conn.start).toLocaleString()}</span>
           </div>
         </div>
@@ -1059,7 +1182,7 @@
         ✕ {$t('conn.close_this')}
       </button>
     </div>
-  </aside>
+  </div>
 {/if}
 
 <style>
@@ -1407,6 +1530,11 @@
     color: var(--fg-primary);
   }
 
+  .connections-table th.pointer:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
   .right-align {
     text-align: right;
   }
@@ -1419,6 +1547,12 @@
 
   .conn-row:hover {
     background: rgba(255, 255, 255, 0.03);
+  }
+
+  .conn-row:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    background: rgba(41, 194, 240, 0.08);
   }
 
   .conn-row.selected {
