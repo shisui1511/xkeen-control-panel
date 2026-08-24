@@ -797,6 +797,26 @@
                         {sortKey === 'download' ? (sortAsc ? '▲' : '▼') : ''}
                       </th>
                       <th
+                        class="col-traffic col-speed right-align pointer"
+                        role="columnheader"
+                        tabindex="0"
+                        aria-sort={sortKey === 'speed'
+                          ? sortAsc
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'}
+                        onclick={() => toggleSort('speed')}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleSort('speed');
+                          }
+                        }}
+                      >
+                        ⚡ {$t('conn.speed')}
+                        {sortKey === 'speed' ? (sortAsc ? '▲' : '▼') : ''}
+                      </th>
+                      <th
                         class="col-duration right-align pointer"
                         role="columnheader"
                         tabindex="0"
@@ -878,6 +898,22 @@
                 {sortKey === 'download' ? (sortAsc ? '▲' : '▼') : ''}
               </th>
               <th
+                class="col-traffic col-speed right-align pointer"
+                role="columnheader"
+                tabindex="0"
+                aria-sort={sortKey === 'speed' ? (sortAsc ? 'ascending' : 'descending') : 'none'}
+                onclick={() => toggleSort('speed')}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('speed');
+                  }
+                }}
+              >
+                ⚡ {$t('conn.speed')}
+                {sortKey === 'speed' ? (sortAsc ? '▲' : '▼') : ''}
+              </th>
+              <th
                 class="col-duration right-align pointer"
                 role="columnheader"
                 tabindex="0"
@@ -909,6 +945,7 @@
                   <td class="col-traffic col-download"
                     ><Skeleton type="text-line" width="50px" /></td
                   >
+                  <td class="col-traffic col-speed"><Skeleton type="text-line" width="60px" /></td>
                   <td class="col-duration"><Skeleton type="text-line" width="30px" /></td>
                   <td></td>
                 </tr>
@@ -918,7 +955,7 @@
                 {@render connectionRow(conn)}
               {:else}
                 <tr>
-                  <td colspan="9" style="text-align: center; padding: 40px; color: var(--fg-dim);">
+                  <td colspan="10" style="text-align: center; padding: 40px; color: var(--fg-dim);">
                     {wsConnected ? $t('conn.no_connections') : $t('conn.ws_offline')}
                   </td>
                 </tr>
@@ -1019,14 +1056,18 @@
     <!-- Upload Column (CONN-04: Mute 0 B/s) -->
     <td class="monospace col-traffic col-upload right-align">
       <div class="bytes-val text-upload">{formatBytes(conn.upload)}</div>
-      {#if speed && speed.uploadSpeed > 0}
-        <div class="speed-active">↑ {formatBytes(speed.uploadSpeed)}/s</div>
-      {/if}
     </td>
 
     <!-- Download Column (CONN-04: Mute 0 B/s) -->
     <td class="monospace col-traffic col-download right-align">
       <div class="bytes-val text-download">{formatBytes(conn.download)}</div>
+    </td>
+
+    <!-- Speed Column (CONN-04: Mute 0 B/s, CONN-05: sortable) -->
+    <td class="monospace col-traffic col-speed right-align">
+      {#if speed && speed.uploadSpeed > 0}
+        <div class="speed-active">↑ {formatBytes(speed.uploadSpeed)}/s</div>
+      {/if}
       {#if speed && speed.downloadSpeed > 0}
         <div class="speed-active">↓ {formatBytes(speed.downloadSpeed)}/s</div>
       {/if}
@@ -1508,7 +1549,7 @@
 
   .connections-table {
     width: 100%;
-    min-width: 820px;
+    min-width: 900px;
     border-collapse: collapse;
   }
 
@@ -1691,6 +1732,11 @@
     color: #29c2f0;
     font-weight: 600;
     margin-top: 2px;
+  }
+
+  .col-speed {
+    width: 92px;
+    white-space: nowrap;
   }
 
   .btn-close-conn {
