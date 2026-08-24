@@ -169,15 +169,21 @@ test.describe('Connections page test suite', () => {
   test('global search narrows visible connections by host or client name', async ({ page }) => {
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(2);
 
+    // При пустом поле поиска счётчик совпадений отсутствует в DOM
+    await expect(page.locator('.match-badge')).toHaveCount(0);
+
     const searchInput = page.locator('.search-input');
     await searchInput.fill('Smart-TV');
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(1);
     await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
       'google.com'
     );
+    await expect(page.locator('.match-badge')).toBeVisible();
+    await expect(page.locator('.match-badge')).toHaveText(/(Найдено|Found):\s*1\/2/);
 
     await searchInput.fill('xxx.no.match');
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(0);
+    await expect(page.locator('.match-badge')).toHaveText(/(Найдено|Found):\s*0\/2/);
   });
 
   test('quick filter chips filter by Proxy and Direct', async ({ page }) => {

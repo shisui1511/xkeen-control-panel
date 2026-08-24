@@ -621,29 +621,35 @@
     <div class="conn-toolbar">
       <!-- Search Input with Clear and Counter -->
       <div class="search-wrap">
-        <svg
-          class="search-icon"
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          ><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg
-        >
-        <input
-          type="text"
-          id="filter-source"
-          class="search-input"
-          placeholder={$t('conn.search_placeholder')}
-          bind:value={searchQuery}
-        />
+        <div class="search-field">
+          <svg
+            class="search-icon"
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            ><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg
+          >
+          <input
+            type="text"
+            id="filter-source"
+            class="search-input"
+            placeholder={$t('conn.search_placeholder')}
+            bind:value={searchQuery}
+          />
+          {#if searchQuery}
+            <button
+              class="clear-search-btn"
+              onclick={() => (searchQuery = '')}
+              aria-label={$t('app.clear')}>×</button
+            >
+          {/if}
+        </div>
         {#if searchQuery}
-          <span class="match-badge">{filteredConnections.length}/{connections.length}</span>
-          <button
-            class="clear-search-btn"
-            onclick={() => (searchQuery = '')}
-            aria-label={$t('app.clear')}>×</button
+          <span class="match-badge"
+            >{$t('conn.match_found')} {filteredConnections.length}/{connections.length}</span
           >
         {/if}
       </div>
@@ -1328,6 +1334,13 @@
     position: relative;
     display: flex;
     align-items: center;
+    gap: 8px;
+  }
+
+  .search-field {
+    position: relative;
+    display: flex;
+    align-items: center;
   }
 
   .search-icon {
@@ -1339,7 +1352,7 @@
 
   .search-input {
     height: 32px;
-    padding: 0 54px 0 28px;
+    padding: 0 26px 0 28px;
     font-size: 12.5px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
@@ -1357,12 +1370,11 @@
   }
 
   .match-badge {
-    position: absolute;
-    right: 22px;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--accent);
     font-weight: 700;
     font-family: var(--font-family-mono);
+    white-space: nowrap;
   }
 
   .clear-search-btn {
