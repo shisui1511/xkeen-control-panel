@@ -621,29 +621,35 @@
     <div class="conn-toolbar">
       <!-- Search Input with Clear and Counter -->
       <div class="search-wrap">
-        <svg
-          class="search-icon"
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          ><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg
-        >
-        <input
-          type="text"
-          id="filter-source"
-          class="search-input"
-          placeholder={$t('conn.search_placeholder')}
-          bind:value={searchQuery}
-        />
+        <div class="search-field">
+          <svg
+            class="search-icon"
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            ><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg
+          >
+          <input
+            type="text"
+            id="filter-source"
+            class="search-input"
+            placeholder={$t('conn.search_placeholder')}
+            bind:value={searchQuery}
+          />
+          {#if searchQuery}
+            <button
+              class="clear-search-btn"
+              onclick={() => (searchQuery = '')}
+              aria-label={$t('app.clear')}>×</button
+            >
+          {/if}
+        </div>
         {#if searchQuery}
-          <span class="match-badge">{filteredConnections.length}/{connections.length}</span>
-          <button
-            class="clear-search-btn"
-            onclick={() => (searchQuery = '')}
-            aria-label={$t('app.clear')}>×</button
+          <span class="match-badge"
+            >{$t('conn.match_found')} {filteredConnections.length}/{connections.length}</span
           >
         {/if}
       </div>
@@ -797,6 +803,26 @@
                         {sortKey === 'download' ? (sortAsc ? '▲' : '▼') : ''}
                       </th>
                       <th
+                        class="col-traffic col-speed right-align pointer"
+                        role="columnheader"
+                        tabindex="0"
+                        aria-sort={sortKey === 'speed'
+                          ? sortAsc
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'}
+                        onclick={() => toggleSort('speed')}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleSort('speed');
+                          }
+                        }}
+                      >
+                        ⚡ {$t('conn.speed')}
+                        {sortKey === 'speed' ? (sortAsc ? '▲' : '▼') : ''}
+                      </th>
+                      <th
                         class="col-duration right-align pointer"
                         role="columnheader"
                         tabindex="0"
@@ -878,6 +904,22 @@
                 {sortKey === 'download' ? (sortAsc ? '▲' : '▼') : ''}
               </th>
               <th
+                class="col-traffic col-speed right-align pointer"
+                role="columnheader"
+                tabindex="0"
+                aria-sort={sortKey === 'speed' ? (sortAsc ? 'ascending' : 'descending') : 'none'}
+                onclick={() => toggleSort('speed')}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('speed');
+                  }
+                }}
+              >
+                ⚡ {$t('conn.speed')}
+                {sortKey === 'speed' ? (sortAsc ? '▲' : '▼') : ''}
+              </th>
+              <th
                 class="col-duration right-align pointer"
                 role="columnheader"
                 tabindex="0"
@@ -909,6 +951,7 @@
                   <td class="col-traffic col-download"
                     ><Skeleton type="text-line" width="50px" /></td
                   >
+                  <td class="col-traffic col-speed"><Skeleton type="text-line" width="60px" /></td>
                   <td class="col-duration"><Skeleton type="text-line" width="30px" /></td>
                   <td></td>
                 </tr>
@@ -918,7 +961,7 @@
                 {@render connectionRow(conn)}
               {:else}
                 <tr>
-                  <td colspan="9" style="text-align: center; padding: 40px; color: var(--fg-dim);">
+                  <td colspan="10" style="text-align: center; padding: 40px; color: var(--fg-dim);">
                     {wsConnected ? $t('conn.no_connections') : $t('conn.ws_offline')}
                   </td>
                 </tr>
@@ -1019,14 +1062,18 @@
     <!-- Upload Column (CONN-04: Mute 0 B/s) -->
     <td class="monospace col-traffic col-upload right-align">
       <div class="bytes-val text-upload">{formatBytes(conn.upload)}</div>
-      {#if speed && speed.uploadSpeed > 0}
-        <div class="speed-active">↑ {formatBytes(speed.uploadSpeed)}/s</div>
-      {/if}
     </td>
 
     <!-- Download Column (CONN-04: Mute 0 B/s) -->
     <td class="monospace col-traffic col-download right-align">
       <div class="bytes-val text-download">{formatBytes(conn.download)}</div>
+    </td>
+
+    <!-- Speed Column (CONN-04: Mute 0 B/s, CONN-05: sortable) -->
+    <td class="monospace col-traffic col-speed right-align">
+      {#if speed && speed.uploadSpeed > 0}
+        <div class="speed-active">↑ {formatBytes(speed.uploadSpeed)}/s</div>
+      {/if}
       {#if speed && speed.downloadSpeed > 0}
         <div class="speed-active">↓ {formatBytes(speed.downloadSpeed)}/s</div>
       {/if}
@@ -1287,6 +1334,13 @@
     position: relative;
     display: flex;
     align-items: center;
+    gap: 8px;
+  }
+
+  .search-field {
+    position: relative;
+    display: flex;
+    align-items: center;
   }
 
   .search-icon {
@@ -1298,7 +1352,7 @@
 
   .search-input {
     height: 32px;
-    padding: 0 54px 0 28px;
+    padding: 0 26px 0 28px;
     font-size: 12.5px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
@@ -1316,12 +1370,11 @@
   }
 
   .match-badge {
-    position: absolute;
-    right: 22px;
-    font-size: 10px;
+    font-size: 11px;
     color: var(--accent);
     font-weight: 700;
     font-family: var(--font-family-mono);
+    white-space: nowrap;
   }
 
   .clear-search-btn {
@@ -1508,7 +1561,7 @@
 
   .connections-table {
     width: 100%;
-    min-width: 820px;
+    min-width: 900px;
     border-collapse: collapse;
   }
 
@@ -1691,6 +1744,11 @@
     color: #29c2f0;
     font-weight: 600;
     margin-top: 2px;
+  }
+
+  .col-speed {
+    width: 92px;
+    white-space: nowrap;
   }
 
   .btn-close-conn {

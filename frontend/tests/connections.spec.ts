@@ -169,15 +169,21 @@ test.describe('Connections page test suite', () => {
   test('global search narrows visible connections by host or client name', async ({ page }) => {
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(2);
 
+    // При пустом поле поиска счётчик совпадений отсутствует в DOM
+    await expect(page.locator('.match-badge')).toHaveCount(0);
+
     const searchInput = page.locator('.search-input');
     await searchInput.fill('Smart-TV');
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(1);
     await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
       'google.com'
     );
+    await expect(page.locator('.match-badge')).toBeVisible();
+    await expect(page.locator('.match-badge')).toHaveText(/(Найдено|Found):\s*1\/2/);
 
     await searchInput.fill('xxx.no.match');
     await expect(page.locator('.connections-table tbody tr.conn-row')).toHaveCount(0);
+    await expect(page.locator('.match-badge')).toHaveText(/(Найдено|Found):\s*0\/2/);
   });
 
   test('quick filter chips filter by Proxy and Direct', async ({ page }) => {
@@ -305,5 +311,87 @@ test.describe('Connections page — offline state when Mihomo offline', () => {
 
     await page.goto('/#/connections');
     await expect(page.locator('.empty-state')).toBeVisible({ timeout: 5000 });
+  });
+});
+
+// Второй WS-фрейм с приращениями upload/download — даёт ненулевые скорости для теста сортировки по скорости
+const SPEED_DELTA_FRAME = JSON.stringify({
+  connections: [
+    {
+      id: 'conn-1',
+      metadata: {
+        network: 'TCP',
+        type: 'HTTP',
+        sourceIP: '192.168.1.5',
+        sourcePort: '54321',
+        destinationIP: '1.2.3.4',
+        destinationPort: '443',
+        host: 'youtube.com',
+        process: 'Chrome'
+      },
+      upload: 2048,
+      download: 9216,
+      start: new Date().toISOString(),
+      chains: ['SmartProxy', 'us-newyork-01'],
+      rule: 'DOMAIN-SUFFIX',
+      rulePayload: 'youtube.com'
+    },
+    {
+      id: 'conn-2',
+      metadata: {
+        network: 'UDP',
+        type: 'DNS',
+        sourceIP: '192.168.1.99',
+        sourcePort: '11111',
+        destinationIP: '8.8.8.8',
+        destinationPort: '53',
+        host: 'google.com',
+        process: ''
+      },
+      upload: 262144,
+      download: 262144,
+      start: new Date().toISOString(),
+      chains: ['DIRECT'],
+      rule: 'GEOIP',
+      rulePayload: 'private'
+    }
+  ]
+});
+
+// Тест сортировки по колонке скорости (G-94-4) — отдельная группа со своим WS-моком из двух фреймов
+test.describe('Connections page — sorting by speed column', () => {
+  test('clicking SPEED column header sorts connections by total speed', async ({ page }) => {
+    await disableServiceWorker(page);
+    await setupRestMocks(page, true);
+
+    await page.routeWebSocket('**/api/mihomo/connections/ws', async (ws) => {
+      ws.send(TWO_CONNECTIONS_FRAME);
+      setTimeout(() => ws.send(SPEED_DELTA_FRAME), 800);
+    });
+
+    await page.goto('/#/connections');
+    await page.waitForSelector('.connections-table', { timeout: 5000 });
+
+    // Дождаться ненулевой скорости после второго фрейма
+    await expect(
+      page.locator('.connections-table tbody td.col-speed .speed-active').first()
+    ).toBeVisible({ timeout: 5000 });
+
+    const speedTh = page.locator('th.col-speed').first();
+    await expect(speedTh).toHaveAttribute('aria-sort', 'none');
+
+    // Первый клик: по убыванию — conn-2 (google.com) самое быстрое
+    await speedTh.click();
+    await expect(speedTh).toHaveAttribute('aria-sort', 'descending');
+    await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
+      'google.com'
+    );
+
+    // Второй клик: по возрастанию — conn-1 (youtube.com) самое медленное
+    await speedTh.click();
+    await expect(speedTh).toHaveAttribute('aria-sort', 'ascending');
+    await expect(page.locator('.connections-table tbody td.col-host').first()).toContainText(
+      'youtube.com'
+    );
   });
 });

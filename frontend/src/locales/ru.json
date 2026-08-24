@@ -1202,6 +1202,7 @@
   "conn.close_success": "Соединение закрыто",
   "conn.close_this": "Разорвать это соединение",
   "conn.search_placeholder": "Поиск по хосту, IP, клиенту или правилу...",
+  "conn.match_found": "Найдено:",
   "conn.group_by": "Группировка:",
   "conn.group_none": "Без группировки",
   "conn.group_client": "По клиентам LAN",

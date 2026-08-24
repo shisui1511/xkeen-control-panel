@@ -1203,6 +1203,7 @@
   "conn.close_success": "Connection closed",
   "conn.close_this": "Terminate this connection",
   "conn.search_placeholder": "Search by host, IP, client, or rule...",
+  "conn.match_found": "Found:",
   "conn.group_by": "Grouping:",
   "conn.group_none": "No grouping",
   "conn.group_client": "By LAN client",
