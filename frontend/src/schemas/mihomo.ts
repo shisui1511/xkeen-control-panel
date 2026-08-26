@@ -274,7 +274,7 @@ export const mihomoSchema = {
           name: { type: 'string', description: 'Group name' },
           type: {
             type: 'string',
-            enum: ['select', 'url-test', 'fallback', 'load-balance', 'relay', 'smart'],
+            enum: ['select', 'url-test', 'fallback', 'load-balance'],
             description: 'Group type'
           },
           proxies: {

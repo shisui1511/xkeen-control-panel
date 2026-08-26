@@ -48,7 +48,7 @@
 
   type ProxyType =
     'vless' | 'hysteria2' | 'tuic' | 'ss' | 'vmess' | 'trojan' | 'wireguard' | 'socks5' | 'http';
-  type GroupType = 'select' | 'url-test' | 'fallback' | 'load-balance' | 'relay' | 'smart';
+  type GroupType = 'select' | 'url-test' | 'fallback' | 'load-balance';
   type RuleType =
     | 'DOMAIN-SUFFIX'
     | 'DOMAIN-KEYWORD'
@@ -1539,14 +1539,6 @@
     'wireguard',
     'socks5',
     'http'
-  ];
-  const GROUP_TYPES: GroupType[] = [
-    'select',
-    'url-test',
-    'fallback',
-    'load-balance',
-    'relay',
-    'smart'
   ];
   const RULE_TYPES: RuleType[] = [
     'DOMAIN-SUFFIX',
