@@ -101,8 +101,11 @@ func (a *API) SubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var presence struct {
-		EnableXray   *bool `json:"enable_xray"`
-		EnableMihomo *bool `json:"enable_mihomo"`
+		EnableXray      *bool `json:"enable_xray"`
+		EnableMihomo    *bool `json:"enable_mihomo"`
+		SockoptMark     *int  `json:"sockopt_mark"`
+		SockoptFastOpen *bool `json:"sockopt_fast_open"`
+		SockoptMptcp    *bool `json:"sockopt_mptcp"`
 	}
 	if err := json.Unmarshal(body, &presence); err == nil {
 		if presence.EnableXray == nil {
@@ -110,6 +113,15 @@ func (a *API) SubscriptionUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 		if presence.EnableMihomo == nil {
 			sub.EnableMihomo = existing.EnableMihomo
+		}
+		if presence.SockoptMark == nil {
+			sub.SockoptMark = existing.SockoptMark
+		}
+		if presence.SockoptFastOpen == nil {
+			sub.SockoptFastOpen = existing.SockoptFastOpen
+		}
+		if presence.SockoptMptcp == nil {
+			sub.SockoptMptcp = existing.SockoptMptcp
 		}
 	}
 

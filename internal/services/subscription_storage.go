@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -500,6 +501,10 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 
 			existing.EnableXray = sub.EnableXray
 			existing.EnableMihomo = sub.EnableMihomo
+
+			existing.SockoptMark = sub.SockoptMark
+			existing.SockoptFastOpen = sub.SockoptFastOpen
+			existing.SockoptMptcp = sub.SockoptMptcp
 
 			if sub.RoutingMode != "" {
 				existing.RoutingMode = sub.RoutingMode
@@ -1182,3 +1187,102 @@ func (s *SubscriptionService) PersistHeaderMetadata(id string, subCopy *Subscrip
 
 	return s.save()
 }
+
+// SetNodeDialerProxy sets or clears the dialerProxy target node tag for a specific node in a subscription.
+func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag string) error {
+	safeID := filepath.Base(subID)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var sourceSub *Subscription
+	var sourceNode *SubscriptionNode
+	for i := range s.subscriptions {
+		if s.subscriptions[i].ID == safeID {
+			sourceSub = &s.subscriptions[i]
+			for j := range sourceSub.Nodes {
+				if sourceSub.Nodes[j].Tag == nodeTag {
+					sourceNode = &sourceSub.Nodes[j]
+					break
+				}
+			}
+			break
+		}
+	}
+
+	if sourceSub == nil || sourceNode == nil {
+		return errors.New("node not found")
+	}
+
+	if targetTag == "" {
+		sourceNode.DialerProxy = ""
+		return s.save()
+	}
+
+	if targetTag == nodeTag {
+		return errors.New("cannot cascade node to itself")
+	}
+
+	// Target must belong to an active Xray subscription and not have its own dialerProxy
+	var targetFound bool
+	for i := range s.subscriptions {
+		sub := &s.subscriptions[i]
+		if !sub.Enabled || !sub.EnableXray {
+			continue
+		}
+		for j := range sub.Nodes {
+			node := &sub.Nodes[j]
+			if node.Tag == targetTag {
+				targetFound = true
+				if node.DialerProxy != "" {
+					return errors.New("chain limited to one level")
+				}
+				break
+			}
+		}
+		if targetFound {
+			break
+		}
+	}
+
+	if !targetFound {
+		return errors.New("target not available")
+	}
+
+	sourceNode.DialerProxy = targetTag
+	return s.save()
+}
+
+// DialerProxyTargets returns all candidate nodes across active Xray subscriptions
+// that can be used as dialerProxy targets for the specified source node.
+func (s *SubscriptionService) DialerProxyTargets(subID, nodeTag string) ([]DialerProxyTarget, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	targets := make([]DialerProxyTarget, 0)
+	for i := range s.subscriptions {
+		sub := &s.subscriptions[i]
+		if !sub.Enabled || !sub.EnableXray {
+			continue
+		}
+		for j := range sub.Nodes {
+			node := &sub.Nodes[j]
+			if node.Tag == nodeTag {
+				continue
+			}
+			if node.DialerProxy != "" {
+				continue
+			}
+			targets = append(targets, DialerProxyTarget{
+				SubscriptionID:   sub.ID,
+				SubscriptionName: sub.Name,
+				Tag:              node.Tag,
+				Name:             node.Name,
+			})
+		}
+	}
+
+	return targets, nil
+}
+

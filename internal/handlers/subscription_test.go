@@ -524,3 +524,70 @@ func TestMihomoProviderRedirect(t *testing.T) {
 		t.Errorf("expected all original query params preserved, got %q", loc)
 	}
 }
+
+func TestSubscriptionUpdate_SockoptPreserve(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+
+	sub := &services.Subscription{
+		ID:              "sub-test",
+		Name:            "Original Name",
+		URL:             "https://example.com/sub",
+		Enabled:         true,
+		EnableXray:      true,
+		SockoptMark:     123,
+		SockoptFastOpen: true,
+		SockoptMptcp:    true,
+	}
+	if err := subSvc.Add(sub); err != nil {
+		t.Fatalf("failed to add sub: %v", err)
+	}
+
+	// 1. Partial update without any sockopt fields in JSON
+	updateBody := `{"name": "Renamed Sub"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/update?id=sub-test", strings.NewReader(updateBody))
+	rr := httptest.NewRecorder()
+	api.SubscriptionUpdate(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	updated := subSvc.Get("sub-test")
+	if updated == nil {
+		t.Fatalf("subscription not found after update")
+	}
+	if updated.Name != "Renamed Sub" {
+		t.Errorf("expected Name='Renamed Sub', got %q", updated.Name)
+	}
+	if updated.SockoptMark != 123 {
+		t.Errorf("expected SockoptMark=123 preserved, got %d", updated.SockoptMark)
+	}
+	if !updated.SockoptFastOpen {
+		t.Errorf("expected SockoptFastOpen=true preserved")
+	}
+	if !updated.SockoptMptcp {
+		t.Errorf("expected SockoptMptcp=true preserved")
+	}
+
+	// 2. Explicit update of sockopt fields
+	explicitBody := `{"sockopt_mark": 456, "sockopt_fast_open": false}`
+	req2 := httptest.NewRequest(http.MethodPost, "/api/subscriptions/update?id=sub-test", strings.NewReader(explicitBody))
+	rr2 := httptest.NewRecorder()
+	api.SubscriptionUpdate(rr2, req2)
+
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 on second update, got %d", rr2.Code)
+	}
+
+	updated2 := subSvc.Get("sub-test")
+	if updated2.SockoptMark != 456 {
+		t.Errorf("expected updated SockoptMark=456, got %d", updated2.SockoptMark)
+	}
+	if updated2.SockoptFastOpen {
+		t.Errorf("expected updated SockoptFastOpen=false, got true")
+	}
+	if !updated2.SockoptMptcp {
+		t.Errorf("expected SockoptMptcp=true preserved when omitted, got false")
+	}
+}
+

@@ -71,6 +71,17 @@ type SubscriptionNode struct {
 	LocalAddresses []string `json:"local_addresses,omitempty"`
 	AllowedIPs     []string `json:"allowed_ips,omitempty"`
 	KeepAlive      int      `json:"keepalive,omitempty"`
+
+	// DialerProxy holds the tag of the outbound node to chain/cascade through (D-11).
+	DialerProxy string `json:"dialer_proxy,omitempty"`
+}
+
+// DialerProxyTarget represents an eligible target node for dialing proxy chaining.
+type DialerProxyTarget struct {
+	SubscriptionID   string `json:"subscription_id"`
+	SubscriptionName string `json:"subscription_name"`
+	Tag              string `json:"tag"`
+	Name             string `json:"name"`
 }
 
 // Subscription represents a proxy subscription
@@ -96,6 +107,11 @@ type Subscription struct {
 	// "auto"         — дополнительно записывать 05_routing.{id}.json с правилом
 	//                  geosite:geolocation-!cn → balancer → все прокси подписки.
 	RoutingMode string `json:"routing_mode,omitempty"`
+
+	// Sockopt settings (Xray outbounds level, D-12)
+	SockoptMark     int  `json:"sockopt_mark,omitempty"`      // fwmark (0 = disabled)
+	SockoptFastOpen bool `json:"sockopt_fast_open,omitempty"` // TCP Fast Open
+	SockoptMptcp    bool `json:"sockopt_mptcp,omitempty"`     // Multipath TCP
 
 	ProxyCount int    `json:"proxy_count"`
 	LastError  string `json:"last_error,omitempty"`
