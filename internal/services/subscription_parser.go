@@ -337,6 +337,9 @@ func convertSubscriptionNodeToOutbound(node *SubscriptionNode) *Outbound {
 	switch protocol {
 	case "direct", "block", "dns", "selector", "urltest", "":
 		return nil
+	case "wireguard":
+		ob, _ := wireguardNodeToOutbound(node)
+		return ob
 	}
 
 	lastColon := strings.LastIndex(node.Server, ":")
@@ -553,6 +556,8 @@ func parseXrayConfigArray(body []byte) []Outbound {
 			out := ob
 			if out.Protocol == "hysteria" || out.Protocol == "hysteria2" {
 				out = normalizeXrayHysteriaOutbound(out)
+			} else if out.Protocol == "wireguard" {
+				out = normalizeXrayWireguardOutbound(out)
 			}
 			// Use "remarks" as the tag for this server
 			if cfg.Remarks != "" {
@@ -704,6 +709,8 @@ func skipReasonForScheme(line string) string {
 		return "невалидный URL или порт в socks://"
 	case strings.HasPrefix(line, "http-proxy://"):
 		return "невалидный URL или порт в http-proxy://"
+	case strings.HasPrefix(line, "wireguard://"), strings.HasPrefix(line, "wg://"):
+		return "невалидный URL, ключ или порт в wireguard://"
 	default:
 		return "неподдерживаемый протокол или невалидный URL"
 	}
@@ -726,6 +733,12 @@ func parseShareLink(link string) (out *Outbound) {
 			return nil
 		}
 		return parseVMessLink(link)
+	}
+
+	// wireguard:// or wg://
+	if strings.HasPrefix(link, "wireguard://") || strings.HasPrefix(link, "wg://") {
+		ob, _ := parseWireGuardLink(link)
+		return ob
 	}
 
 	// vless://

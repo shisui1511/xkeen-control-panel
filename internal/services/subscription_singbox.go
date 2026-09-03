@@ -2,6 +2,8 @@ package services
 
 import (
 	"encoding/json"
+	"net"
+	"strconv"
 	"strings"
 )
 
@@ -26,6 +28,14 @@ type singBoxOutbound struct {
 	TLS        *singBoxTLS     `json:"tls,omitempty"`
 	Transport  *singBoxTrans   `json:"transport,omitempty"`
 	Multiplex  json.RawMessage `json:"multiplex,omitempty"`
+
+	// WireGuard fields
+	PrivateKey    string      `json:"private_key"`
+	PeerPublicKey string      `json:"peer_public_key"`
+	PreSharedKey  string      `json:"pre_shared_key"`
+	LocalAddress  interface{} `json:"local_address"`
+	MTU           int         `json:"mtu"`
+	Reserved      interface{} `json:"reserved"`
 }
 
 type singBoxTLS struct {
@@ -193,6 +203,39 @@ func convertSingBoxOutbound(sb *singBoxOutbound) *Outbound {
 			},
 			StreamSettings: streamSettings,
 		}
+
+	case "wireguard":
+		var localAddrs []string
+		if sb.LocalAddress != nil {
+			switch la := sb.LocalAddress.(type) {
+			case string:
+				if s := strings.TrimSpace(la); s != "" {
+					localAddrs = []string{s}
+				}
+			case []interface{}:
+				for _, elem := range la {
+					if s, ok := elem.(string); ok && strings.TrimSpace(s) != "" {
+						localAddrs = append(localAddrs, strings.TrimSpace(s))
+					}
+				}
+			}
+		}
+
+		reserved := decodeWireguardReserved(sb.Reserved)
+		pubKey := sb.PeerPublicKey
+		node := &SubscriptionNode{
+			Tag:            tag,
+			Protocol:       "wireguard",
+			Server:         net.JoinHostPort(sb.Server, strconv.Itoa(sb.ServerPort)),
+			PublicKey:      pubKey,
+			SecretKey:      sb.PrivateKey,
+			PreSharedKey:   sb.PreSharedKey,
+			LocalAddresses: localAddrs,
+			MTU:            sb.MTU,
+			Reserved:       reserved,
+		}
+		ob, _ := wireguardNodeToOutbound(node)
+		return ob
 	}
 
 	return nil
