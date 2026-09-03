@@ -29,6 +29,7 @@ var (
 		"shadowsocks": true,
 		"socks":       true,
 		"http":        true,
+		"wireguard":   true,
 	}
 )
 
@@ -61,6 +62,15 @@ type SubscriptionNode struct {
 	Insecure     bool   `json:"insecure,omitempty"`
 	ObfsType     string `json:"obfs_type,omitempty"`
 	ObfsPassword string `json:"obfs_password,omitempty"`
+
+	// WireGuard fields
+	SecretKey      string   `json:"secret_key,omitempty"`
+	PreSharedKey   string   `json:"pre_shared_key,omitempty"`
+	Reserved       []int    `json:"reserved,omitempty"`
+	MTU            int      `json:"mtu,omitempty"`
+	LocalAddresses []string `json:"local_addresses,omitempty"`
+	AllowedIPs     []string `json:"allowed_ips,omitempty"`
+	KeepAlive      int      `json:"keepalive,omitempty"`
 }
 
 // Subscription represents a proxy subscription
