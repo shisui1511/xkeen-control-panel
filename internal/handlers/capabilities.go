@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,6 +28,8 @@ type XRayCapability struct {
 	// ConfDirExists — true если директория существует на диске.
 	// Если false — fragment-файлы подписок не будут подхвачены XRay.
 	ConfDirExists bool `json:"conf_dir_exists"`
+	// GRPCReady — true если активное ядро Xray и в config.json есть api-блок.
+	GRPCReady bool `json:"grpc_ready"`
 }
 
 // KernelCapability holds install status for a single kernel.
@@ -152,6 +156,24 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	resp.XRay.ConfDir = a.cfg.XRayConfigDir
 	if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
 		resp.XRay.ConfDirExists = true
+	}
+	if resp.ActiveKernel == "xray" && resp.XRay.ConfDirExists {
+		cfgPath := filepath.Join(a.cfg.XRayConfigDir, "config.json")
+		if data, err := os.ReadFile(cfgPath); err == nil {
+			var root map[string]interface{}
+			if json.Unmarshal(data, &root) == nil {
+				if inbs, ok := root["inbounds"].([]interface{}); ok {
+					for _, inb := range inbs {
+						if m, ok := inb.(map[string]interface{}); ok {
+							if m["tag"] == "api" {
+								resp.XRay.GRPCReady = true
+								break
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	if a.xkeenSvc != nil {

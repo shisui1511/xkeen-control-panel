@@ -195,6 +195,7 @@ func main() {
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/xray/reality/keygen", api.XrayRealityKeygen)
 	srv.HandleProtected("/api/xray/stats", api.XrayStats)
+	srv.HandleProtected("/api/xray/grpc/monitoring", api.XrayGRPCMonitoring)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
 	srv.HandleProtected("/api/system/clients", api.SystemClients)
 	srv.HandleProtected("/api/system/diagnostics", api.DiagnosticsDownload)

@@ -1,18 +1,24 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 	statspb "github.com/shisui1511/xkeen-control-panel/internal/xrayapi/gen/xray/app/stats/command"
 	"github.com/shisui1511/xkeen-control-panel/internal/xrayapi/testutil"
 )
@@ -132,3 +138,235 @@ func TestXrayStats(t *testing.T) {
 		t.Errorf("expected 1024/2048, got %d/%d", vless.Uplink, vless.Downlink)
 	}
 }
+
+func TestXrayGRPCMonitoring(t *testing.T) {
+	tmpDir := t.TempDir()
+	pv := utils.NewPathValidator([]string{tmpDir})
+
+	cfg := &config.Config{
+		XRayConfigDir: tmpDir,
+		XRayAPIPort:   10085,
+	}
+	api := &API{
+		cfg:     cfg,
+		pathVal: pv,
+	}
+
+	cfgPath := filepath.Join(tmpDir, "config.json")
+
+	// 1. Missing config file -> 503 and file not created
+	body := bytes.NewBufferString(`{"enabled": true}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/xray/grpc/monitoring", body)
+	rr := httptest.NewRecorder()
+	api.XrayGRPCMonitoring(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when config missing, got %d", rr.Code)
+	}
+	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
+		t.Errorf("config.json should not have been created on missing file error")
+	}
+
+	// 2. Non-POST -> 405
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/xray/grpc/monitoring", nil)
+	rrGet := httptest.NewRecorder()
+	api.XrayGRPCMonitoring(rrGet, reqGet)
+	if rrGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 on GET, got %d", rrGet.Code)
+	}
+
+	// 3. Bad request body -> 400
+	reqBad := httptest.NewRequest(http.MethodPost, "/api/xray/grpc/monitoring", bytes.NewBufferString(`invalid-json`))
+	rrBad := httptest.NewRecorder()
+	api.XrayGRPCMonitoring(rrBad, reqBad)
+	if rrBad.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 on invalid JSON, got %d", rrBad.Code)
+	}
+
+	// Create initial config file
+	initialConfig := `{
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "port": 10808,
+      "protocol": "socks"
+    }
+  ]
+}`
+	if err := os.WriteFile(cfgPath, []byte(initialConfig), 0600); err != nil {
+		t.Fatalf("failed to write initial config: %v", err)
+	}
+
+	// Find a free port for testing
+	freeLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	testPort := freeLn.Addr().(*net.TCPAddr).Port
+	_ = freeLn.Close()
+	cfg.XRayAPIPort = testPort
+
+	// 4. Enable monitoring -> 200, config contains api inbound and stats
+	bodyEnable := bytes.NewBufferString(`{"enabled": true}`)
+	reqEnable := httptest.NewRequest(http.MethodPost, "/api/xray/grpc/monitoring", bodyEnable)
+	rrEnable := httptest.NewRecorder()
+	api.XrayGRPCMonitoring(rrEnable, reqEnable)
+
+	if rrEnable.Code != http.StatusOK {
+		t.Fatalf("expected 200 on enable, got %d: %s", rrEnable.Code, rrEnable.Body.String())
+	}
+
+	savedData, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("failed to read saved config: %v", err)
+	}
+	var savedObj map[string]interface{}
+	if err := json.Unmarshal(savedData, &savedObj); err != nil {
+		t.Fatalf("failed to parse saved config: %v", err)
+	}
+	hasAPIInbound := false
+	for _, inb := range savedObj["inbounds"].([]interface{}) {
+		if inb.(map[string]interface{})["tag"] == "api" {
+			hasAPIInbound = true
+			break
+		}
+	}
+	if !hasAPIInbound {
+		t.Errorf("saved config does not contain api inbound")
+	}
+
+	// 5. Busy port test -> 409 and file unchanged
+	busyLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", testPort))
+	if err != nil {
+		t.Fatalf("failed to occupy test port: %v", err)
+	}
+	contentBeforeBusy := string(savedData)
+
+	bodyBusy := bytes.NewBufferString(`{"enabled": true}`)
+	reqBusy := httptest.NewRequest(http.MethodPost, "/api/xray/grpc/monitoring", bodyBusy)
+	rrBusy := httptest.NewRecorder()
+	api.XrayGRPCMonitoring(rrBusy, reqBusy)
+	_ = busyLn.Close()
+
+	if rrBusy.Code != http.StatusConflict {
+		t.Errorf("expected 409 Conflict on busy port, got %d: %s", rrBusy.Code, rrBusy.Body.String())
+	}
+	contentAfterBusy, _ := os.ReadFile(cfgPath)
+	if string(contentAfterBusy) != contentBeforeBusy {
+		t.Errorf("file was modified despite busy port conflict")
+	}
+
+	// 6. Disable monitoring -> 200, api inbound removed, stats remains
+	bodyDisable := bytes.NewBufferString(`{"enabled": false}`)
+	reqDisable := httptest.NewRequest(http.MethodPost, "/api/xray/grpc/monitoring", bodyDisable)
+	rrDisable := httptest.NewRecorder()
+	api.XrayGRPCMonitoring(rrDisable, reqDisable)
+
+	if rrDisable.Code != http.StatusOK {
+		t.Fatalf("expected 200 on disable, got %d: %s", rrDisable.Code, rrDisable.Body.String())
+	}
+
+	disabledData, _ := os.ReadFile(cfgPath)
+	var disabledObj map[string]interface{}
+	_ = json.Unmarshal(disabledData, &disabledObj)
+
+	for _, inb := range disabledObj["inbounds"].([]interface{}) {
+		if inb.(map[string]interface{})["tag"] == "api" {
+			t.Errorf("api inbound should have been removed on disable")
+		}
+	}
+	if _, ok := disabledObj["stats"]; !ok {
+		t.Errorf("stats object should remain after disable")
+	}
+}
+
+func TestCapabilitiesGRPCReady(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{
+		XRayConfigDir: tmpDir,
+	}
+	api := &API{
+		cfg: cfg,
+	}
+
+	cfgPath := filepath.Join(tmpDir, "config.json")
+
+	// Create mock xkeen script that reports status from an environment variable
+	mockScript := filepath.Join(tmpDir, "mock_xkeen.sh")
+	scriptContent := "#!/bin/sh\nif [ \"$1\" = \"-status\" ]; then echo \"$MOCK_KERNEL_STATUS\"; fi\n"
+	if err := os.WriteFile(mockScript, []byte(scriptContent), 0755); err != nil {
+		t.Fatalf("failed to write mock script: %v", err)
+	}
+
+	xkeenSvc := services.NewXKeenService(mockScript, tmpDir)
+	api.xkeenSvc = xkeenSvc
+
+	// 1. Config has api inbound and active kernel is xray -> grpc_ready: true
+	configWithAPI := `{
+  "inbounds": [
+    {
+      "tag": "api",
+      "port": 10085
+    }
+  ]
+}`
+	if err := os.WriteFile(cfgPath, []byte(configWithAPI), 0600); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	t.Setenv("MOCK_KERNEL_STATUS", "XRay is running")
+	api.capsCache = nil // invalidate cache
+
+	req := httptest.NewRequest(http.MethodGet, "/api/capabilities", nil)
+	rr := httptest.NewRecorder()
+	api.Capabilities(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool                 `json:"success"`
+		Data    CapabilitiesResponse `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse capabilities response: %v", err)
+	}
+	if !resp.Data.XRay.GRPCReady {
+		t.Errorf("expected GRPCReady to be true when xray is active and api inbound exists")
+	}
+
+	// 2. Active kernel is mihomo -> grpc_ready: false
+	t.Setenv("MOCK_KERNEL_STATUS", "Mihomo is running")
+	api.capsCache = nil
+	rrMihomo := httptest.NewRecorder()
+	api.Capabilities(rrMihomo, req)
+
+	var respMihomo struct {
+		Success bool                 `json:"success"`
+		Data    CapabilitiesResponse `json:"data"`
+	}
+	_ = json.Unmarshal(rrMihomo.Body.Bytes(), &respMihomo)
+	if respMihomo.Data.XRay.GRPCReady {
+		t.Errorf("expected GRPCReady to be false when active kernel is mihomo")
+	}
+
+	// 3. Active kernel is xray but config lacks api inbound -> grpc_ready: false
+	t.Setenv("MOCK_KERNEL_STATUS", "XRay is running")
+	api.capsCache = nil
+	configWithoutAPI := `{"inbounds": [{"tag": "socks-in"}]}`
+	_ = os.WriteFile(cfgPath, []byte(configWithoutAPI), 0600)
+
+	rrNoAPI := httptest.NewRecorder()
+	api.Capabilities(rrNoAPI, req)
+
+	var respNoAPI struct {
+		Success bool                 `json:"success"`
+		Data    CapabilitiesResponse `json:"data"`
+	}
+	_ = json.Unmarshal(rrNoAPI.Body.Bytes(), &respNoAPI)
+	if respNoAPI.Data.XRay.GRPCReady {
+		t.Errorf("expected GRPCReady to be false when config lacks api inbound")
+	}
+}
+
