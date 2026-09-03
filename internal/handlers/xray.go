@@ -329,3 +329,49 @@ func (a *API) XrayRestartLogger(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// XrayTLSPingRequest defines payload for testing TLS handshake.
+type XrayTLSPingRequest struct {
+	Dest       string   `json:"dest"`
+	ServerName string   `json:"server_name"`
+	ALPN       []string `json:"alpn"`
+}
+
+// XrayTLSPing handles POST /api/xray/tls-ping to perform a native TLS handshake ping.
+func (a *API) XrayTLSPing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req XrayTLSPingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.errorResponse(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	panelPort := 8090
+	if a.cfg != nil && a.cfg.Port > 0 {
+		panelPort = a.cfg.Port
+	}
+
+	if err := services.ValidateTLSTarget(req.Dest, panelPort); err != nil {
+		a.errorResponse(w, fmt.Sprintf("invalid destination: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	serverName := strings.TrimSpace(req.ServerName)
+	if len(serverName) > 253 {
+		a.errorResponse(w, "server_name exceeds maximum length of 253 characters", http.StatusBadRequest)
+		return
+	}
+
+	result, err := services.TLSPing(req.Dest, serverName, req.ALPN)
+	if err != nil {
+		a.errorResponse(w, fmt.Sprintf("tls ping failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	JSONSuccess(w, result)
+}
+
+

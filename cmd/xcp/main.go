@@ -198,6 +198,7 @@ func main() {
 	srv.HandleProtected("/api/xray/grpc/monitoring", api.XrayGRPCMonitoring)
 	srv.HandleProtected("/api/xray/test-route", api.XrayTestRoute)
 	srv.HandleProtected("/api/xray/restart-logger", api.XrayRestartLogger)
+	srv.HandleProtected("/api/xray/tls-ping", api.XrayTLSPing)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
 	srv.HandleProtected("/api/system/clients", api.SystemClients)
 	srv.HandleProtected("/api/system/diagnostics", api.DiagnosticsDownload)

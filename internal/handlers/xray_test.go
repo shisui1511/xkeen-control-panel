@@ -557,4 +557,77 @@ func TestXrayRestartLogger(t *testing.T) {
 	}
 }
 
+func TestXrayTLSPing(t *testing.T) {
+	api := &API{}
+
+	// 1. Method not allowed (GET)
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/xray/tls-ping", nil)
+	rrGet := httptest.NewRecorder()
+	api.XrayTLSPing(rrGet, reqGet)
+	if rrGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 on GET, got %d", rrGet.Code)
+	}
+
+	// 2. Invalid JSON body -> 400
+	reqBadJSON := httptest.NewRequest(http.MethodPost, "/api/xray/tls-ping", bytes.NewBufferString(`{bad json`))
+	rrBadJSON := httptest.NewRecorder()
+	api.XrayTLSPing(rrBadJSON, reqBadJSON)
+	if rrBadJSON.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 on bad JSON, got %d", rrBadJSON.Code)
+	}
+
+	// 3. Rejected target (loopback IP) -> 400
+	reqLoopback := httptest.NewRequest(http.MethodPost, "/api/xray/tls-ping", bytes.NewBufferString(`{"dest": "127.0.0.1:443"}`))
+	rrLoopback := httptest.NewRecorder()
+	api.XrayTLSPing(rrLoopback, reqLoopback)
+	if rrLoopback.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 on loopback target, got %d: %s", rrLoopback.Code, rrLoopback.Body.String())
+	}
+
+	// 4. Rejected target (private network) -> 400
+	reqPrivate := httptest.NewRequest(http.MethodPost, "/api/xray/tls-ping", bytes.NewBufferString(`{"dest": "192.168.1.1:443"}`))
+	rrPrivate := httptest.NewRecorder()
+	api.XrayTLSPing(rrPrivate, reqPrivate)
+	if rrPrivate.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 on private IP target, got %d", rrPrivate.Code)
+	}
+
+	// 5. Rejected target (panel port match) -> 400
+	reqPanelPort := httptest.NewRequest(http.MethodPost, "/api/xray/tls-ping", bytes.NewBufferString(`{"dest": "example.com:8090"}`))
+	rrPanelPort := httptest.NewRecorder()
+	api.XrayTLSPing(rrPanelPort, reqPanelPort)
+	if rrPanelPort.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 on panel port match, got %d", rrPanelPort.Code)
+	}
+
+	// 6. Rejected server_name (too long) -> 400
+	longSN := fmt.Sprintf(`{"dest": "example.com:443", "server_name": "%s"}`, string(make([]byte, 255)))
+	reqLongSN := httptest.NewRequest(http.MethodPost, "/api/xray/tls-ping", bytes.NewBufferString(longSN))
+	rrLongSN := httptest.NewRecorder()
+	api.XrayTLSPing(rrLongSN, reqLongSN)
+	if rrLongSN.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 on excessive server_name length, got %d", rrLongSN.Code)
+	}
+
+	// 7. Valid target -> 200 (returns diagnostic result even if offline)
+	reqValid := httptest.NewRequest(http.MethodPost, "/api/xray/tls-ping", bytes.NewBufferString(`{"dest": "cloudflare.com:443", "server_name": "cloudflare.com", "alpn": ["h2"]}`))
+	rrValid := httptest.NewRecorder()
+	api.XrayTLSPing(rrValid, reqValid)
+	if rrValid.Code != http.StatusOK {
+		t.Fatalf("expected 200 on valid target, got %d: %s", rrValid.Code, rrValid.Body.String())
+	}
+
+	var resp struct {
+		Success bool                  `json:"success"`
+		Data    services.TLSPingResult `json:"data"`
+	}
+	if err := json.Unmarshal(rrValid.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !resp.Success {
+		t.Errorf("expected success envelope to be true")
+	}
+}
+
+
 
