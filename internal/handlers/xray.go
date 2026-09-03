@@ -351,7 +351,8 @@ func (a *API) XrayTLSPing(w http.ResponseWriter, r *http.Request) {
 		panelPort = a.cfg.Port
 	}
 
-	if err := services.ValidateTLSTarget(req.Dest, panelPort); err != nil {
+	dialAddr, defaultSNI, err := services.ValidateTLSTarget(req.Dest, panelPort)
+	if err != nil {
 		a.errorResponse(w, fmt.Sprintf("invalid destination: %v", err), http.StatusBadRequest)
 		return
 	}
@@ -361,8 +362,11 @@ func (a *API) XrayTLSPing(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, "server_name exceeds maximum length of 253 characters", http.StatusBadRequest)
 		return
 	}
+	if serverName == "" {
+		serverName = defaultSNI
+	}
 
-	result, err := services.TLSPing(req.Dest, serverName, req.ALPN)
+	result, err := services.TLSPing(dialAddr, serverName, req.ALPN)
 	if err != nil {
 		a.errorResponse(w, fmt.Sprintf("tls ping failed: %v", err), http.StatusInternalServerError)
 		return

@@ -94,6 +94,12 @@ func TestTLSPingTargetValidation(t *testing.T) {
 		{"private 192.168.x", "192.168.1.1:443", panelPort, true, "private"},
 		{"private ipv6 ula", "[fc00::1]:443", panelPort, true, "private"},
 
+		// Unspecified IP (0.0.0.0 and ::)
+		{"unspecified ipv4", "0.0.0.0:443", panelPort, true, "unspecified"},
+		{"unspecified ipv4 no port", "0.0.0.0", panelPort, true, "unspecified"},
+		{"unspecified ipv6 with port", "[::]:443", panelPort, true, "unspecified"},
+		{"unspecified ipv6 bare", "::", panelPort, true, "unspecified"},
+
 		// Link-local & cloud metadata
 		{"link-local metadata", "169.254.169.254:443", panelPort, true, "link-local"},
 		{"link-local general", "169.254.1.1:443", panelPort, true, "link-local"},
@@ -120,16 +126,19 @@ func TestTLSPingTargetValidation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := services.ValidateTLSTarget(tc.dest, tc.panelPort)
+			dialAddr, sni, err := services.ValidateTLSTarget(tc.dest, tc.panelPort)
 			if tc.shouldFail {
 				if err == nil {
-					t.Errorf("expected validation failure for %q, got nil", tc.dest)
+					t.Errorf("expected validation failure for %q, got nil (dialAddr: %s, sni: %s)", tc.dest, dialAddr, sni)
 				} else if tc.errContains != "" && !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.errContains)) {
 					t.Errorf("expected error containing %q, got %q", tc.errContains, err.Error())
 				}
 			} else {
 				if err != nil {
 					t.Errorf("expected validation success for %q, got error: %v", tc.dest, err)
+				}
+				if dialAddr == "" {
+					t.Errorf("expected non-empty dialAddr for %q", tc.dest)
 				}
 			}
 		})

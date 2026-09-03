@@ -66,17 +66,18 @@ type TLSPingResult struct {
 }
 
 // ValidateTLSTarget checks if the target destination is safe to connect to,
-// rejecting loopback, private ranges, link-local/cloud metadata, control characters,
-// and matching panel port to prevent internal network scanning.
-func ValidateTLSTarget(dest string, panelPort int) error {
+// preventing SSRF, port scanning against the panel, and loopback/private IP connections.
+// It resolves domain names once, validates all returned IPs, and returns the concrete
+// vetted dial address (ip:port) and the server name (SNI), mitigating DNS-rebinding TOCTOU attacks.
+func ValidateTLSTarget(dest string, panelPort int) (string, string, error) {
 	dest = strings.TrimSpace(dest)
 	if dest == "" {
-		return errors.New("destination cannot be empty")
+		return "", "", errors.New("destination cannot be empty")
 	}
 
-	for _, c := range dest {
-		if unicode.IsControl(c) || unicode.IsSpace(c) {
-			return errors.New("destination contains invalid or control characters")
+	for _, r := range dest {
+		if unicode.IsControl(r) || unicode.IsSpace(r) {
+			return "", "", errors.New("destination contains invalid or control characters")
 		}
 	}
 
@@ -84,54 +85,70 @@ func ValidateTLSTarget(dest string, panelPort int) error {
 	port := 443
 
 	if strings.Contains(dest, ":") {
-		h, p, err := net.SplitHostPort(dest)
-		if err != nil {
-			return fmt.Errorf("invalid host:port format: %w", err)
+		if h, p, err := net.SplitHostPort(dest); err == nil {
+			host = h
+			parsedPort, err := strconv.Atoi(p)
+			if err != nil || parsedPort < 1 || parsedPort > 65535 {
+				return "", "", errors.New("port must be between 1 and 65535")
+			}
+			port = parsedPort
+		} else if ip := net.ParseIP(dest); ip != nil {
+			// Bare IPv6 literal (e.g. "::1" or "2001:db8::1")
+			host = dest
+			port = 443
+		} else {
+			return "", "", fmt.Errorf("invalid host:port format: %w", err)
 		}
-		host = h
-		parsedPort, err := strconv.Atoi(p)
-		if err != nil || parsedPort < 1 || parsedPort > 65535 {
-			return errors.New("port must be between 1 and 65535")
-		}
-		port = parsedPort
 	}
 
 	if host == "" {
-		return errors.New("host cannot be empty")
+		return "", "", errors.New("host cannot be empty")
 	}
 	if len(host) > 253 {
-		return errors.New("host exceeds maximum length of 253 characters")
+		return "", "", errors.New("host exceeds maximum length of 253 characters")
 	}
 
 	if panelPort > 0 && port == panelPort {
-		return errors.New("destination port matches control panel port")
+		return "", "", errors.New("destination port matches control panel port")
 	}
 
 	lowerHost := strings.ToLower(host)
 	if lowerHost == "localhost" || strings.HasSuffix(lowerHost, ".local") || strings.HasSuffix(lowerHost, ".internal") || strings.HasSuffix(lowerHost, ".lan") {
-		return errors.New("loopback or local domain destination is prohibited")
+		return "", "", errors.New("loopback or local domain destination is prohibited")
 	}
 
 	if ip := net.ParseIP(host); ip != nil {
 		if err := isProhibitedIP(ip); err != nil {
-			return err
+			return "", "", err
 		}
-	} else {
-		ips, err := net.LookupIP(host)
-		if err != nil {
-			return fmt.Errorf("failed to resolve host: %w", err)
+		return net.JoinHostPort(ip.String(), strconv.Itoa(port)), host, nil
+	}
+
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to resolve host: %w", err)
+	}
+	if len(ips) == 0 {
+		return "", "", errors.New("no IP addresses resolved for host")
+	}
+
+	var chosen net.IP
+	for _, resolvedIP := range ips {
+		if err := isProhibitedIP(resolvedIP); err != nil {
+			return "", "", fmt.Errorf("domain resolves to a prohibited IP: %w", err)
 		}
-		for _, resolvedIP := range ips {
-			if err := isProhibitedIP(resolvedIP); err != nil {
-				return fmt.Errorf("domain resolves to a prohibited IP: %w", err)
-			}
+		if chosen == nil {
+			chosen = resolvedIP
 		}
 	}
 
-	return nil
+	return net.JoinHostPort(chosen.String(), strconv.Itoa(port)), host, nil
 }
 
 func isProhibitedIP(ip net.IP) error {
+	if ip.IsUnspecified() {
+		return errors.New("unspecified destination IP is prohibited")
+	}
 	if ip.IsLoopback() {
 		return errors.New("loopback destination IP is prohibited")
 	}
