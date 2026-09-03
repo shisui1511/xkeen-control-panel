@@ -110,6 +110,44 @@ func (s *SubscriptionService) outboundsToNodes(outbounds []Outbound, sub *Subscr
 					}
 				}
 			}
+		case "wireguard":
+			if outbounds[i].Settings != nil {
+				if secKey, _ := outbounds[i].Settings["secretKey"].(string); secKey != "" {
+					node.SecretKey = secKey
+				}
+				if mtu, _ := outbounds[i].Settings["mtu"].(float64); mtu > 0 {
+					node.MTU = int(mtu)
+				} else if mtuInt, _ := outbounds[i].Settings["mtu"].(int); mtuInt > 0 {
+					node.MTU = mtuInt
+				}
+				if res := decodeWireguardReserved(outbounds[i].Settings["reserved"]); len(res) == 3 {
+					node.Reserved = res
+				}
+				if addrs, ok := outbounds[i].Settings["address"].([]interface{}); ok {
+					var localAddrs []string
+					for _, a := range addrs {
+						if s, ok := a.(string); ok && s != "" {
+							localAddrs = append(localAddrs, s)
+						}
+					}
+					node.LocalAddresses = localAddrs
+				} else if addrs, ok := outbounds[i].Settings["address"].([]string); ok {
+					node.LocalAddresses = addrs
+				}
+				if peers, ok := outbounds[i].Settings["peers"].([]interface{}); ok && len(peers) > 0 {
+					if peer, ok := peers[0].(map[string]interface{}); ok {
+						if pubKey, _ := peer["publicKey"].(string); pubKey != "" {
+							node.PublicKey = pubKey
+						}
+						if psk, _ := peer["preSharedKey"].(string); psk != "" {
+							node.PreSharedKey = psk
+						}
+						if ep, _ := peer["endpoint"].(string); ep != "" {
+							node.Server = ep
+						}
+					}
+				}
+			}
 		}
 
 		if outbounds[i].StreamSettings != nil {
@@ -753,6 +791,25 @@ func extractServer(ob *Outbound) string {
 			}
 			if address != "" && port > 0 {
 				return fmt.Sprintf("%s:%d", address, int(port))
+			}
+		}
+	}
+	// Для wireguard
+	if peersRaw, ok := ob.Settings["peers"]; ok {
+		var firstPeer map[string]interface{}
+		switch v := peersRaw.(type) {
+		case []interface{}:
+			if len(v) > 0 {
+				firstPeer, _ = v[0].(map[string]interface{})
+			}
+		case []map[string]interface{}:
+			if len(v) > 0 {
+				firstPeer = v[0]
+			}
+		}
+		if firstPeer != nil {
+			if ep, ok := firstPeer["endpoint"].(string); ok && ep != "" {
+				return ep
 			}
 		}
 	}

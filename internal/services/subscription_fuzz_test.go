@@ -178,3 +178,22 @@ func FuzzParseHTTPProxyLink(f *testing.F) {
 		parseHTTPProxyLink(link)
 	})
 }
+
+// FuzzParseSubscription tests full subscription parsing with various protocol inputs including WireGuard.
+func FuzzParseSubscription(f *testing.F) {
+	f.Add("wireguard://privKey123@1.2.3.4:51820?publickey=pubKey456&presharedkey=psk789&ip=10.0.0.2&reserved=1,2,3&mtu=1420#MyWG")
+	f.Add("wireguard://privKey@1.2.3.4:51820?ip=10.0.0.2")
+	f.Add("wireguard://privKey@1.2.3.4:99999?publickey=pub")
+	f.Add("wireguard://:::garbage")
+	f.Add("- name: wg1\n  type: wireguard\n  server: 1.2.3.4\n  port: 51820\n  public-key: pub")
+	f.Add("- name: wg2\n  type: wireguard\n  server: 1.2.3.4\n  port: 51820\n  private-key: priv\n  public-key: pub\n  reserved: invalid_base64")
+	f.Add(`[{"outbounds":[{"protocol":"wireguard","settings":{}}]}]`)
+	f.Add("vless://550e8400-e29b-41d4-a716-446655440000@host.example.com:443?security=tls#tag")
+	f.Add("")
+
+	f.Fuzz(func(t *testing.T, data string) {
+		sub := &Subscription{}
+		_, _, _ = parseSubscriptionBody([]byte(data), "", sub)
+	})
+}
+

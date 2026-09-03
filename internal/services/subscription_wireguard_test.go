@@ -3,6 +3,8 @@ package services
 import (
 	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -360,5 +362,186 @@ wireguard://priv2@5.6.7.8:51820?publickey=pub2#WG-Beta
 			res1[0].Tag, res1[1].Tag, res2[0].Tag, res2[1].Tag)
 	}
 }
+
+func TestOutboundsToNodesWireguard(t *testing.T) {
+	svc := &SubscriptionService{}
+	sub := &Subscription{ID: "sub-1"}
+
+	// 1. Full wireguard outbound
+	outbounds := []Outbound{
+		{
+			Tag:      "wg-out",
+			Protocol: "wireguard",
+			Settings: map[string]interface{}{
+				"secretKey": "my-secret",
+				"mtu":       float64(1420),
+				"reserved":  []interface{}{1, 2, 3},
+				"address":   []interface{}{"10.0.0.2/32"},
+				"peers": []interface{}{
+					map[string]interface{}{
+						"endpoint":     "1.2.3.4:51820",
+						"publicKey":    "my-pub",
+						"preSharedKey": "my-psk",
+					},
+				},
+			},
+		},
+	}
+
+	nodes := svc.outboundsToNodes(outbounds, sub)
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	n := nodes[0]
+	if n.Protocol != "wireguard" || n.Server != "1.2.3.4:51820" || n.PublicKey != "my-pub" || n.SecretKey != "my-secret" {
+		t.Errorf("node fields mismatch: %+v", n)
+	}
+	if n.PreSharedKey != "my-psk" || n.MTU != 1420 || len(n.Reserved) != 3 || len(n.LocalAddresses) != 1 {
+		t.Errorf("node optional fields mismatch: %+v", n)
+	}
+
+	// 2. Wireguard outbound without peers -> no panic, empty server
+	emptyPeerOutbounds := []Outbound{
+		{
+			Tag:      "wg-no-peers",
+			Protocol: "wireguard",
+			Settings: map[string]interface{}{
+				"secretKey": "sec",
+			},
+		},
+	}
+	nodesNoPeers := svc.outboundsToNodes(emptyPeerOutbounds, sub)
+	if len(nodesNoPeers) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodesNoPeers))
+	}
+	if nodesNoPeers[0].Server != "" {
+		t.Errorf("expected empty server when no peers, got %s", nodesNoPeers[0].Server)
+	}
+}
+
+func TestExtractServerWireguard(t *testing.T) {
+	// With peer
+	obWithPeer := &Outbound{
+		Protocol: "wireguard",
+		Settings: map[string]interface{}{
+			"peers": []interface{}{
+				map[string]interface{}{
+					"endpoint": "2.3.4.5:51820",
+				},
+			},
+		},
+	}
+	if ep := extractServer(obWithPeer); ep != "2.3.4.5:51820" {
+		t.Errorf("extractServer = %q, want 2.3.4.5:51820", ep)
+	}
+
+	// Without peers
+	obNoPeers := &Outbound{
+		Protocol: "wireguard",
+		Settings: map[string]interface{}{},
+	}
+	if ep := extractServer(obNoPeers); ep != "" {
+		t.Errorf("extractServer = %q, want empty", ep)
+	}
+}
+
+func TestWriteFragmentWireguard(t *testing.T) {
+	tmpDir := t.TempDir()
+	subDir := filepath.Join(tmpDir, "subs")
+	configDir := filepath.Join(tmpDir, "configs")
+	svc := NewSubscriptionService(subDir, configDir, "")
+
+	sub := &Subscription{ID: "sub-wg"}
+	outbounds := []Outbound{
+		{
+			Tag:      "wg-node-1",
+			Protocol: "wireguard",
+			Settings: map[string]interface{}{
+				"secretKey": "sec-1",
+				"peers": []interface{}{
+					map[string]interface{}{
+						"endpoint":  "1.2.3.4:51820",
+						"publicKey": "pub-1",
+					},
+				},
+			},
+		},
+		{
+			Tag:      "unsupported-node",
+			Protocol: "unsupported_protocol_xyz",
+			Settings: map[string]interface{}{},
+		},
+	}
+
+	fragPath := filepath.Join(configDir, "04_outbounds.sub_wg.json")
+	nodes, err := svc.writeFragment(fragPath, outbounds, sub)
+	if err != nil {
+		t.Fatalf("writeFragment failed: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Errorf("expected 2 metadata nodes, got %d", len(nodes))
+	}
+
+	// Read written fragment from disk
+	savedBytes, err := os.ReadFile(fragPath)
+	if err != nil {
+		t.Fatalf("failed to read fragment: %v", err)
+	}
+	var wrapper struct {
+		Outbounds []Outbound `json:"outbounds"`
+	}
+	if err := json.Unmarshal(savedBytes, &wrapper); err != nil {
+		t.Fatalf("failed to parse fragment JSON: %v", err)
+	}
+
+	// Only wireguard should be in allowedOutbounds
+	if len(wrapper.Outbounds) != 1 {
+		t.Fatalf("expected 1 allowed outbound, got %d", len(wrapper.Outbounds))
+	}
+	if wrapper.Outbounds[0].Protocol != "wireguard" || wrapper.Outbounds[0].Tag != "wg-node-1" {
+		t.Errorf("unexpected outbound saved: %+v", wrapper.Outbounds[0])
+	}
+}
+
+func TestWireguardHealthNotApplicable(t *testing.T) {
+	tmpDir := t.TempDir()
+	subDir := filepath.Join(tmpDir, "subs")
+	configDir := filepath.Join(tmpDir, "configs")
+	subSvc := NewSubscriptionService(subDir, configDir, "")
+
+	sub := &Subscription{
+		ID: "sub-health",
+		Nodes: []SubscriptionNode{
+			{
+				Tag:      "wg-health-node",
+				Protocol: "wireguard",
+				Server:   "1.2.3.4:51820",
+			},
+		},
+	}
+	subSvc.subscriptions = []Subscription{*sub}
+
+	hSvc := NewSubscriptionHealthService(tmpDir, subSvc)
+
+	// 1. ForceCheckNode
+	h, ok := hSvc.ForceCheckNode("sub-health", "wg-health-node")
+	if !ok {
+		t.Fatalf("expected ok=true for ForceCheckNode")
+	}
+	if h.LatencyMs != -2 {
+		t.Errorf("expected LatencyMs=-2 for WireGuard, got %d", h.LatencyMs)
+	}
+
+	// 2. checkSubscription
+	hSvc.checkSubscription(sub)
+	allHealth := hSvc.GetHealth("sub-health")
+	if nodeH, exists := allHealth["wg-health-node"]; !exists {
+		t.Errorf("expected health entry for wg-health-node")
+	} else if nodeH.LatencyMs != -2 {
+		t.Errorf("expected LatencyMs=-2 in batch check, got %d", nodeH.LatencyMs)
+	}
+}
+
+
 
 
