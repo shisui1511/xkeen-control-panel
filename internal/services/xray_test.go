@@ -86,6 +86,7 @@ func TestTLSPingTargetValidation(t *testing.T) {
 		{"loopback ipv4 no port", "127.0.0.5", panelPort, true, "loopback"},
 		{"loopback localhost", "localhost:443", panelPort, true, "loopback"},
 		{"loopback ipv6", "[::1]:443", panelPort, true, "loopback"},
+		{"domain resolving to loopback", "127.0.0.1.nip.io:443", panelPort, true, "prohibited"},
 
 		// Private IPv4 & IPv6
 		{"private 10.x", "10.0.0.1:443", panelPort, true, "private"},

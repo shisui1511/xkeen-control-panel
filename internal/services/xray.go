@@ -113,23 +113,40 @@ func ValidateTLSTarget(dest string, panelPort int) error {
 	}
 
 	if ip := net.ParseIP(host); ip != nil {
-		if ip.IsLoopback() {
-			return errors.New("loopback destination IP is prohibited")
+		if err := isProhibitedIP(ip); err != nil {
+			return err
 		}
-		if ip.IsPrivate() {
-			return errors.New("private network destination IP is prohibited")
+	} else {
+		ips, err := net.LookupIP(host)
+		if err != nil {
+			return fmt.Errorf("failed to resolve host: %w", err)
 		}
-		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return errors.New("link-local destination IP is prohibited")
-		}
-		// CGNAT 100.64.0.0/10
-		if v4 := ip.To4(); v4 != nil {
-			if v4[0] == 100 && (v4[1]&0xc0) == 64 {
-				return errors.New("carrier-grade NAT destination IP is prohibited")
+		for _, resolvedIP := range ips {
+			if err := isProhibitedIP(resolvedIP); err != nil {
+				return fmt.Errorf("domain resolves to a prohibited IP: %w", err)
 			}
 		}
 	}
 
+	return nil
+}
+
+func isProhibitedIP(ip net.IP) error {
+	if ip.IsLoopback() {
+		return errors.New("loopback destination IP is prohibited")
+	}
+	if ip.IsPrivate() {
+		return errors.New("private network destination IP is prohibited")
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return errors.New("link-local destination IP is prohibited")
+	}
+	// CGNAT 100.64.0.0/10
+	if v4 := ip.To4(); v4 != nil {
+		if v4[0] == 100 && (v4[1]&0xc0) == 64 {
+			return errors.New("carrier-grade NAT destination IP is prohibited")
+		}
+	}
 	return nil
 }
 
