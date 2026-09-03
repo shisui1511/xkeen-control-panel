@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -138,6 +139,13 @@ func main() {
 	// API handlers
 	api := handlers.NewAPI(cfg, srv)
 	srv.HandleProtected("/api/auth/change-password", api.ChangePassword)
+
+	// Profiling endpoints (protected)
+	srv.HandleProtected("/debug/pprof/", pprof.Index)
+	srv.HandleProtected("/debug/pprof/cmdline", pprof.Cmdline)
+	srv.HandleProtected("/debug/pprof/profile", pprof.Profile)
+	srv.HandleProtected("/debug/pprof/symbol", pprof.Symbol)
+	srv.HandleProtected("/debug/pprof/trace", pprof.Trace)
 
 	// Public endpoints
 	srv.Handle("/api/version", api.Version)

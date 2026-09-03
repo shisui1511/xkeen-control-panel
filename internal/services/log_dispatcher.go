@@ -118,7 +118,7 @@ type LogDispatcher struct {
 }
 
 var (
-	subsystemRegex = regexp.MustCompile(`\[([a-zA-Z0-9_\-\.\+]+)\]`)
+	subsystemRegex = regexp.MustCompile(`^\[([a-zA-Z0-9_\-\.\+]+)\]`)
 	timestampRegex = regexp.MustCompile(`^(\d{4}[-/]\d{2}[-/]\d{2}[T\s]|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\s*)?(\d{2}:\d{2}:\d{2})`)
 )
 
@@ -281,7 +281,11 @@ func (d *LogDispatcher) parseRedactedLine(line string, fallbackSource string) Lo
 			subsystem = tag
 		}
 
-		text = strings.TrimSpace(strings.TrimPrefix(text, match[0]))
+		newText := strings.TrimSpace(strings.TrimPrefix(text, match[0]))
+		if newText == text {
+			break
+		}
+		text = newText
 	}
 
 	// 4. Heuristic Level detection if still default
@@ -536,7 +540,12 @@ func (d *LogDispatcher) startFileConnectors() {
 		}
 	}
 
+	seen := make(map[string]bool)
 	for _, src := range sources {
+		if src == "" || seen[src] {
+			continue
+		}
+		seen[src] = true
 		if _, err := os.Stat(src); err == nil {
 			d.wg.Add(1)
 			go d.tailFile(src)

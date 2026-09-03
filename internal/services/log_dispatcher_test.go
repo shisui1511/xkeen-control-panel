@@ -104,3 +104,26 @@ func TestLogDispatcher_BatchBroadcast(t *testing.T) {
 		t.Fatal("timed out waiting for batch broadcast")
 	}
 }
+
+func TestLogDispatcher_NonPrefixBracketsNoInfiniteLoop(t *testing.T) {
+	d := NewLogDispatcher(nil, t.TempDir(), "")
+	defer d.Stop()
+
+	// Line where bracket tag is in the middle of a URL/path, not at the beginning
+	raw := "2026/09/02 19:23:30 GET /proxies/Node [VLESS]/delay 404 4.521875ms"
+	done := make(chan struct{})
+	go func() {
+		entry := d.IngestLine(raw, "xcp")
+		if !strings.Contains(entry.Message, "[VLESS]") {
+			t.Errorf("expected message to preserve content, got %s", entry.Message)
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success: parsed promptly without hanging
+	case <-time.After(1 * time.Second):
+		t.Fatal("parseRedactedLine hung in infinite loop on non-prefix bracket")
+	}
+}
