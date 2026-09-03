@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -193,6 +194,7 @@ func main() {
 	srv.HandleProtected("/api/mihomo/cache/fakeip/flush", api.MihomoFlushFakeIP)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/xray/reality/keygen", api.XrayRealityKeygen)
+	srv.HandleProtected("/api/xray/stats", api.XrayStats)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
 	srv.HandleProtected("/api/system/clients", api.SystemClients)
 	srv.HandleProtected("/api/system/diagnostics", api.DiagnosticsDownload)
@@ -269,6 +271,31 @@ func main() {
 	trafficQuotaSvc.Start()
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
+
+	xrayGRPCSvc := services.NewXrayGRPCService(fmt.Sprintf("127.0.0.1:%d", cfg.XRayAPIPort))
+	xrayGRPCSvc.SetActiveKernelFunc(func() string {
+		if kSvc := api.KernelService(); kSvc != nil {
+			for _, info := range kSvc.List() {
+				if info.ProcessStatus == "running" {
+					return info.Name
+				}
+			}
+		}
+		if xSvc := api.XKeenService(); xSvc != nil {
+			if status, err := xSvc.Status(); err == nil {
+				lower := strings.ToLower(status)
+				if strings.Contains(lower, "xray") {
+					return "xray"
+				} else if strings.Contains(lower, "mihomo") {
+					return "mihomo"
+				}
+			}
+		}
+		return "xray"
+	})
+	xrayGRPCSvc.Start()
+	api.SetXrayGRPCService(xrayGRPCSvc)
+	defer xrayGRPCSvc.Stop()
 
 	// Watchdog / circuit breaker (STAB-05): supervises the active kernel and
 	// disarms the XKEEN_TPROXY iptables interception after 3 consecutive

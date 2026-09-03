@@ -1,4 +1,4 @@
-.PHONY: build run clean test lint fmt deps keenetic-arm64 keenetic-mipsle keenetic-mips compress
+.PHONY: build run clean test lint fmt deps keenetic-arm64 keenetic-mipsle keenetic-mips compress proto
 
 BINARY_NAME=xcp
 EXACT_TAG := $(shell git describe --tags --exact-match HEAD 2>/dev/null)
@@ -58,3 +58,11 @@ fmt:
 
 clean:
 	rm -rf build/
+
+# Необязательная генерация protobuf/gRPC кода (локально, не в CI)
+proto:
+	protoc --proto_path=internal/xrayapi/proto \
+		--go_out=. --go_opt=module=github.com/shisui1511/xkeen-control-panel \
+		--go-grpc_out=. --go-grpc_opt=module=github.com/shisui1511/xkeen-control-panel \
+		internal/xrayapi/proto/xray/common/net/network.proto \
+		internal/xrayapi/proto/xray/app/stats/command/command.proto

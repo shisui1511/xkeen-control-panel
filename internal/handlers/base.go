@@ -30,6 +30,7 @@ type API struct {
 	networkSvc            *services.NetworkToolsService
 	smartProxySvc         *services.SmartProxyService
 	trafficQuotaSvc       *services.TrafficQuotaService
+	xrayGRPCSvc           *services.XrayGRPCService
 	datSvc                *services.DATManagerService
 	snapshotSvc           *services.SnapshotService
 	consoleSvc            *services.ConsoleService
@@ -81,6 +82,14 @@ func (a *API) SetSmartProxyService(svc *services.SmartProxyService) {
 
 func (a *API) SetTrafficQuotaService(svc *services.TrafficQuotaService) {
 	a.trafficQuotaSvc = svc
+}
+
+func (a *API) SetXrayGRPCService(svc *services.XrayGRPCService) {
+	a.xrayGRPCSvc = svc
+}
+
+func (a *API) XrayGRPCService() *services.XrayGRPCService {
+	return a.xrayGRPCSvc
 }
 
 func (a *API) SetDATManagerService(svc *services.DATManagerService) {
@@ -137,6 +146,10 @@ func (a *API) XKeenService() *services.XKeenService {
 
 func (a *API) SetKernelService(svc *services.KernelService) {
 	a.kernelSvc = svc
+}
+
+func (a *API) KernelService() *services.KernelService {
+	return a.kernelSvc
 }
 
 func (a *API) SetSubscriptionService(svc *services.SubscriptionService) {

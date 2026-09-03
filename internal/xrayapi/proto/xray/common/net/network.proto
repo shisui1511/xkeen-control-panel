@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package xray.common.net;
+option go_package = "github.com/shisui1511/xkeen-control-panel/internal/xrayapi/gen/xray/common/net";
+
+enum Network {
+  Unknown = 0;
+  TCP = 2;
+  UDP = 3;
+  UNIX = 4;
+}
+
+message NetworkList {
+  repeated Network network = 1;
+}

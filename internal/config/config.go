@@ -14,6 +14,7 @@ type Config struct {
 	Port             int         `json:"port"`
 	LoopbackPort     int         `json:"loopback_port"`
 	XRayConfigDir    string      `json:"xray_config_dir"`
+	XRayAPIPort      int         `json:"xray_api_port"`
 	XKeenBinary      string      `json:"xkeen_binary"`
 	MihomoConfigDir  string      `json:"mihomo_config_dir"`
 	MihomoBinary     string      `json:"mihomo_binary"`
@@ -74,6 +75,7 @@ func Default() *Config {
 		Port:            8090,
 		LoopbackPort:    8091,
 		XRayConfigDir:   "/opt/etc/xray/configs",
+		XRayAPIPort:     10085,
 		XKeenBinary:     findXKeen(),
 		MihomoConfigDir: "/opt/etc/mihomo",
 		MihomoBinary:    "/opt/sbin/mihomo",
@@ -120,6 +122,10 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg.ConfigPath = path
+
+	if cfg.XRayAPIPort == 0 {
+		cfg.XRayAPIPort = 10085
+	}
 
 	if cfg.XCPLogPath == "" {
 		cfg.XCPLogPath = "/opt/var/log/xcp.log"
