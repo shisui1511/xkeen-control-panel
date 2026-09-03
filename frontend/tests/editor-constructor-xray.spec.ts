@@ -284,4 +284,259 @@ test.describe('Xray Constructor integration test suite', () => {
     // Теги из mock (direct, block, dns-out, my-proxy) должны присутствовать в списке
     await expect(page.locator('text=direct').first()).toBeVisible({ timeout: 3000 });
   });
+
+  // -------------------------------------------------------------------------
+  // XRAY-07 (D-06, D-02): Тестирование маршрутов и ротация журналов
+  // -------------------------------------------------------------------------
+  test('тест маршрута отображает исходящий тег и группы (D-06)', async ({ page }) => {
+    await page.route('**/api/xray/test-route', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            outbound_tag: 'proxy-out',
+            rule_groups: ['streaming', 'direct-bypass'],
+            matched: true
+          }
+        })
+      });
+    });
+
+    await page.goto('/#/constructor');
+    const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await xrayBtn.click();
+
+    const panel = page.locator('[data-testid="test-route-panel"]');
+    await expect(panel).toBeVisible({ timeout: 5000 });
+
+    await page.locator('[data-testid="test-route-domain"]').fill('example.com');
+    await page.locator('[data-testid="test-route-submit-btn"]').click();
+
+    await expect(page.locator('[data-testid="test-route-outbound-tag"]')).toHaveText('proxy-out');
+    await expect(page.locator('[data-testid="test-route-rule-group"]').first()).toHaveText(
+      'streaming'
+    );
+  });
+
+  test('тест маршрута без совпадений показывает no_match (D-06)', async ({ page }) => {
+    await page.route('**/api/xray/test-route', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            outbound_tag: '',
+            rule_groups: [],
+            matched: false
+          }
+        })
+      });
+    });
+
+    await page.goto('/#/constructor');
+    const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await xrayBtn.click();
+
+    await page.locator('[data-testid="test-route-domain"]').fill('unknown-target.org');
+    await page.locator('[data-testid="test-route-submit-btn"]').click();
+
+    await expect(page.locator('[data-testid="test-route-no-match"]')).toBeVisible({
+      timeout: 3000
+    });
+  });
+
+  test('тест маршрута при ошибке/недоступности ядра показывает alert', async ({ page }) => {
+    await page.route('**/api/xray/test-route', async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Xray core is unavailable' })
+      });
+    });
+
+    await page.goto('/#/constructor');
+    const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await xrayBtn.click();
+
+    await page.locator('[data-testid="test-route-domain"]').fill('example.com');
+    await page.locator('[data-testid="test-route-submit-btn"]').click();
+
+    await expect(page.locator('[data-testid="test-route-error"]')).toBeVisible({ timeout: 3000 });
+  });
+
+  test('панель теста маршрутов отсутствует при активном ядре Mihomo (D-05)', async ({ page }) => {
+    await page.route('**/api/capabilities', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            kernels: {
+              xray: { installed: true },
+              mihomo: { installed: true }
+            },
+            active_kernel: 'mihomo'
+          }
+        })
+      });
+    });
+
+    await page.goto('/#/constructor');
+    const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await xrayBtn.click();
+
+    await expect(page.locator('[data-testid="test-route-panel"]')).toHaveCount(0);
+  });
+
+  test('кнопка ротации логов обращается к /api/xray/restart-logger (D-02)', async ({ page }) => {
+    let restartLoggerCalled = false;
+    await page.route('**/api/xray/restart-logger', async (route) => {
+      restartLoggerCalled = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, message: 'Log files reopened' })
+      });
+    });
+
+    await page.goto('/#/constructor');
+    const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await xrayBtn.click();
+
+    const restartBtn = page.locator('[data-testid="restart-logger-btn"]');
+    await expect(restartBtn).toBeVisible({ timeout: 5000 });
+    await restartBtn.click();
+
+    expect(restartLoggerCalled).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // XRAY-07 (D-15): Проверка TLS-рукопожатия в блоке Reality
+  // -------------------------------------------------------------------------
+  test('проверка TLS: успешный запрос отображает версию и число дней до истечения (D-15)', async ({
+    page
+  }) => {
+    await page.route('**/api/xray/tls-ping', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            ok: true,
+            tls_version: 'TLS 1.3',
+            alpn: 'h2',
+            cipher_suite: 'TLS_AES_128_GCM_SHA256',
+            peer_cn: 'yahoo.com',
+            days_until_expiry: 42,
+            handshake_ms: 115
+          }
+        })
+      });
+    });
+
+    await page.goto('/#/constructor');
+    const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await xrayBtn.click();
+
+    // Перейти во вкладку Outbounds
+    const outboundsTab = page
+      .locator(
+        '[data-testid="xray-section-tabs"] button:has-text("Outbounds"), [data-tab="outbounds"]'
+      )
+      .first();
+    await outboundsTab.click();
+
+    // Нажать добавление outbound
+    const addBtn = page.locator('button.add-btn');
+    await expect(addBtn).toBeVisible({ timeout: 3000 });
+    await addBtn.click();
+
+    // Заполнить VLESS и Reality
+    await page.locator('#outbound-protocol').selectOption('vless');
+    await page.locator('#outbound-security').selectOption('reality');
+    await page.locator('#outbound-address').fill('yahoo.com');
+
+    // Нажать TLS Ping
+    const pingBtn = page.locator('[data-testid="tls-ping-btn"]');
+    await expect(pingBtn).toBeVisible({ timeout: 3000 });
+    await pingBtn.click();
+
+    // Проверить отображение версии TLS и срока
+    await expect(page.locator('[data-testid="tls-ping-version"]')).toHaveText('TLS 1.3');
+    await expect(page.locator('[data-testid="tls-ping-days"]')).toHaveText('42');
+  });
+
+  test('проверка TLS: ошибка соединения показывает диагностику (D-15)', async ({ page }) => {
+    await page.route('**/api/xray/tls-ping', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            ok: false,
+            error: 'connection refused by target host',
+            handshake_ms: 45
+          }
+        })
+      });
+    });
+
+    await page.goto('/#/constructor');
+    const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await xrayBtn.click();
+
+    const outboundsTab = page
+      .locator(
+        '[data-testid="xray-section-tabs"] button:has-text("Outbounds"), [data-tab="outbounds"]'
+      )
+      .first();
+    await outboundsTab.click();
+
+    await page.locator('button.add-btn').click();
+    await page.locator('#outbound-protocol').selectOption('vless');
+    await page.locator('#outbound-security').selectOption('reality');
+    await page.locator('#outbound-address').fill('unreachable.host');
+
+    await page.locator('[data-testid="tls-ping-btn"]').click();
+    await expect(page.locator('[data-testid="tls-ping-failure"]')).toContainText(
+      'connection refused'
+    );
+  });
+
+  test('проверка TLS: кнопка заблокирована при пустом адресе назначения (D-15)', async ({
+    page
+  }) => {
+    await page.goto('/#/constructor');
+    const xrayBtn = page.locator('.constructor-kernel-toggle button:has-text("Xray")');
+    await expect(xrayBtn).toBeVisible({ timeout: 5000 });
+    await xrayBtn.click();
+
+    const outboundsTab = page
+      .locator(
+        '[data-testid="xray-section-tabs"] button:has-text("Outbounds"), [data-tab="outbounds"]'
+      )
+      .first();
+    await outboundsTab.click();
+
+    await page.locator('button.add-btn').click();
+    await page.locator('#outbound-protocol').selectOption('vless');
+    await page.locator('#outbound-security').selectOption('reality');
+
+    // Адрес пустой
+    await page.locator('#outbound-address').fill('');
+    await expect(page.locator('[data-testid="tls-ping-btn"]')).toBeDisabled();
+  });
 });

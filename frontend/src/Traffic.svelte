@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t, currentLang } from './i18n';
-  import { showToast, showConfirm } from './stores';
-  import { apiFetchJSON } from './lib/api';
+  import { showToast, showConfirm, capabilities, fetchCapabilities } from './stores';
+  import { apiFetch, apiFetchJSON } from './lib/api';
 
   interface TrafficPoint {
     up: number;
@@ -343,12 +343,117 @@
     }
   }
 
+  // Xray live statistics (D-05, D-06)
+  interface XrayOutboundStat {
+    tag: string;
+    uplink: number;
+    downlink: number;
+    total: number;
+  }
+
+  let xrayStats = $state<XrayOutboundStat[]>([]);
+  let xrayMonitoringToggling = $state(false);
+  let xrayStatsInterval: any = null;
+
+  async function fetchXrayStats() {
+    if (typeof document !== 'undefined' && document.hidden) return;
+    if ($capabilities?.active_kernel !== 'xray' || !$capabilities?.xray?.grpc_ready) return;
+
+    try {
+      const res = await apiFetchJSON<
+        | { data?: Record<string, { uplink?: number; downlink?: number }> }
+        | Record<string, { uplink?: number; downlink?: number }>
+      >('/api/xray/stats');
+      const raw = (res as any)?.data || res;
+      if (raw && typeof raw === 'object') {
+        const list: XrayOutboundStat[] = [];
+        for (const [tag, pair] of Object.entries(raw)) {
+          if (!pair || typeof pair !== 'object') continue;
+          const up = Number((pair as any).uplink || 0);
+          const down = Number((pair as any).downlink || 0);
+          list.push({
+            tag,
+            uplink: up,
+            downlink: down,
+            total: up + down
+          });
+        }
+        list.sort((a, b) => b.total - a.total || a.tag.localeCompare(b.tag));
+        xrayStats = list;
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+    }
+  }
+
+  function startXrayStatsPolling() {
+    stopXrayStatsPolling();
+    if ($capabilities?.active_kernel === 'xray' && $capabilities?.xray?.grpc_ready) {
+      fetchXrayStats();
+      xrayStatsInterval = setInterval(fetchXrayStats, 2000);
+    }
+  }
+
+  function stopXrayStatsPolling() {
+    if (xrayStatsInterval) {
+      clearInterval(xrayStatsInterval);
+      xrayStatsInterval = null;
+    }
+  }
+
+  async function toggleXrayMonitoring() {
+    if (xrayMonitoringToggling) return;
+    const targetState = !$capabilities?.xray?.grpc_ready;
+    xrayMonitoringToggling = true;
+    try {
+      const res = await apiFetch('/api/xray/grpc/monitoring', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: targetState })
+      });
+      const data = await res.json();
+      if (res.status === 401) return;
+      if (res.status === 409) {
+        showToast('error', data?.error || $t('xray.grpc.port_conflict'));
+        return;
+      }
+      if (!res.ok) {
+        showToast('error', data?.error || $t('xray.grpc.unavailable'));
+        return;
+      }
+      showToast('success', targetState ? $t('xray.grpc.enabled') : $t('xray.grpc.disabled'));
+      await fetchCapabilities();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e?.message || $t('xray.grpc.unavailable'));
+    } finally {
+      xrayMonitoringToggling = false;
+    }
+  }
+
+  $effect(() => {
+    const isXray = $capabilities?.active_kernel === 'xray';
+    const isGrpc = $capabilities?.xray?.grpc_ready;
+    if (isXray && isGrpc) {
+      startXrayStatsPolling();
+    } else {
+      stopXrayStatsPolling();
+      xrayStats = [];
+    }
+    return () => {
+      stopXrayStatsPolling();
+    };
+  });
+
   function handleVisibilityChange() {
     if (!document.hidden) {
       lastTickTime = 0; // avoid huge elapsedSec spike from messages dropped while hidden
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         connect();
       }
+      startXrayStatsPolling();
+    } else {
+      stopXrayStatsPolling();
     }
   }
 
@@ -382,6 +487,7 @@
 
   onDestroy(() => {
     disconnect();
+    stopXrayStatsPolling();
     window.removeEventListener('visibilitychange', handleVisibilityChange);
   });
 
@@ -981,6 +1087,89 @@
         </div>
       {/if}
     </div>
+
+    {#if $capabilities?.active_kernel === 'xray'}
+      <!-- Xray Live Statistics Section (D-05, D-06) -->
+      <div
+        class="card analytics-section-card xray-stats-card"
+        data-testid="xray-stats-section"
+        style="margin-top: 16px;"
+      >
+        <div
+          class="analytics-head"
+          style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;"
+        >
+          <div>
+            <div class="analytics-title">{$t('traffic.xray.section_title')}</div>
+            <div class="analytics-subtitle text-muted">{$t('traffic.xray.hint')}</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button
+              type="button"
+              class="btn btn-sm"
+              class:btn-primary={$capabilities?.xray?.grpc_ready}
+              class:btn-secondary={!$capabilities?.xray?.grpc_ready}
+              data-testid="xray-grpc-toggle-btn"
+              onclick={toggleXrayMonitoring}
+              disabled={xrayMonitoringToggling}
+              title={$t('xray.grpc.hint')}
+            >
+              {$capabilities?.xray?.grpc_ready ? $t('xray.grpc.disable') : $t('xray.grpc.enable')}
+            </button>
+          </div>
+        </div>
+
+        {#if !$capabilities?.xray?.grpc_ready}
+          <div class="alert alert-info" data-testid="xray-stats-disabled-hint">
+            {$t('traffic.xray.unavailable')}
+          </div>
+        {:else if xrayStats.length === 0}
+          <div
+            class="text-muted"
+            data-testid="xray-stats-empty"
+            style="padding: 16px 0; text-align: center;"
+          >
+            {$t('traffic.xray.no_data')}
+          </div>
+        {:else}
+          <div class="table-responsive" data-testid="xray-stats-table">
+            <table class="data-table" style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                  <th style="padding: 8px;">{$t('traffic.xray.outbound')}</th>
+                  <th style="padding: 8px;">{$t('traffic.xray.downlink')}</th>
+                  <th style="padding: 8px;">{$t('traffic.xray.uplink')}</th>
+                  <th style="padding: 8px;">{$t('traffic.total') || 'Total'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each xrayStats as item (item.tag)}
+                  <tr
+                    style="border-bottom: 1px solid var(--border-subtle);"
+                    data-testid="xray-stats-row"
+                  >
+                    <td style="padding: 8px;">
+                      <span class="badge badge-tag badge-proxy" data-testid="xray-stats-tag"
+                        >{item.tag}</span
+                      >
+                    </td>
+                    <td style="padding: 8px;" class="mono download-color">
+                      ↓ {formatBytes(item.downlink)}
+                    </td>
+                    <td style="padding: 8px;" class="mono upload-color">
+                      ↑ {formatBytes(item.uplink)}
+                    </td>
+                    <td style="padding: 8px;" class="mono text-muted">
+                      {formatBytes(item.total)}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
+    {/if}
   </div>
 </div>
 

@@ -233,3 +233,187 @@ test.describe('Traffic empty state and auto-reconnect tests', () => {
     );
   });
 });
+
+test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
+  test('активный Xray с включенным мониторингом показывает таблицу статистики исходящих тегов', async ({
+    page
+  }) => {
+    await disableServiceWorker(page);
+
+    await page.route('**/api/**', async (route: Route) => {
+      const url = route.request().url();
+      if (url.includes('/api/auth/me')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ authenticated: true, csrf_token: 'mock-csrf' })
+        });
+      } else if (url.includes('/api/capabilities')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              kernels: { xray: { installed: true, version: '1.8.24' } },
+              active_kernel: 'xray',
+              xray: { conf_dir: '/opt/etc/xray', conf_dir_exists: true, grpc_ready: true }
+            }
+          })
+        });
+      } else if (url.includes('/api/xray/stats')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              'proxy-out': { uplink: 1048576, downlink: 5242880 },
+              direct: { uplink: 512, downlink: 1024 }
+            }
+          })
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: {} })
+        });
+      }
+    });
+
+    await page.routeWebSocket('**/api/traffic/ws', async (ws) => {});
+
+    await page.goto('/#/traffic');
+
+    const section = page.locator('[data-testid="xray-stats-section"]');
+    await expect(section).toBeVisible({ timeout: 5000 });
+
+    const table = page.locator('[data-testid="xray-stats-table"]');
+    await expect(table).toBeVisible({ timeout: 5000 });
+
+    const tags = page.locator('[data-testid="xray-stats-tag"]');
+    await expect(tags.first()).toHaveText('proxy-out');
+  });
+
+  test('активное ядро Mihomo скрывает раздел статистики Xray (D-05)', async ({ page }) => {
+    await disableServiceWorker(page);
+    await setupRestMocks(page, true);
+    await page.routeWebSocket('**/api/traffic/ws', async (ws) => {});
+
+    await page.goto('/#/traffic');
+
+    await expect(page.locator('[data-testid="xray-stats-section"]')).toHaveCount(0);
+  });
+
+  test('выключенный мониторинг показывает подсказку и не опрашивает статистику', async ({
+    page
+  }) => {
+    await disableServiceWorker(page);
+    let statsPolled = false;
+
+    await page.route('**/api/**', async (route: Route) => {
+      const url = route.request().url();
+      if (url.includes('/api/auth/me')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ authenticated: true, csrf_token: 'mock-csrf' })
+        });
+      } else if (url.includes('/api/capabilities')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              kernels: { xray: { installed: true } },
+              active_kernel: 'xray',
+              xray: { conf_dir: '/opt/etc/xray', conf_dir_exists: true, grpc_ready: false }
+            }
+          })
+        });
+      } else if (url.includes('/api/xray/stats')) {
+        statsPolled = true;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: {} })
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: {} })
+        });
+      }
+    });
+
+    await page.routeWebSocket('**/api/traffic/ws', async (ws) => {});
+
+    await page.goto('/#/traffic');
+
+    const hint = page.locator('[data-testid="xray-stats-disabled-hint"]');
+    await expect(hint).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[data-testid="xray-stats-table"]')).toHaveCount(0);
+
+    // Wait a short moment to ensure interval isn't polling
+    await page.waitForTimeout(500);
+    expect(statsPolled).toBe(false);
+  });
+
+  test('ошибка переключения мониторинга (конфликт порта 409) отображает уведомление', async ({
+    page
+  }) => {
+    await disableServiceWorker(page);
+
+    await page.route('**/api/**', async (route: Route) => {
+      const url = route.request().url();
+      if (url.includes('/api/auth/me')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ authenticated: true, csrf_token: 'mock-csrf' })
+        });
+      } else if (url.includes('/api/capabilities')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              kernels: { xray: { installed: true } },
+              active_kernel: 'xray',
+              xray: { conf_dir: '/opt/etc/xray', conf_dir_exists: true, grpc_ready: false }
+            }
+          })
+        });
+      } else if (url.includes('/api/xray/grpc/monitoring')) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'Port 10085 is already in use by another service' })
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: {} })
+        });
+      }
+    });
+
+    await page.routeWebSocket('**/api/traffic/ws', async (ws) => {});
+
+    await page.goto('/#/traffic');
+
+    const toggleBtn = page.locator('[data-testid="xray-grpc-toggle-btn"]');
+    await expect(toggleBtn).toBeVisible({ timeout: 5000 });
+    await toggleBtn.click();
+
+    // Toast должен появиться с текстом ошибки
+    const toast = page.locator('.toast, [role="alert"]');
+    await expect(toast.first()).toBeVisible({ timeout: 3000 });
+    await expect(toast.first()).toContainText(/10085|already in use|конфликт/i);
+  });
+});

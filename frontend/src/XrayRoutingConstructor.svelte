@@ -899,6 +899,141 @@
     }
   }
 
+  // Routing Test state (D-06)
+  let testRouteForm = $state({
+    domain: '',
+    ip: '',
+    port: 443,
+    network: '',
+    protocol: '',
+    inboundTag: ''
+  });
+  let testRouteRunning = $state(false);
+  let testRouteResult = $state<{
+    outbound_tag?: string;
+    rule_groups?: string[];
+    matched?: boolean;
+  } | null>(null);
+  let testRouteError = $state<string | null>(null);
+
+  async function runTestRoute() {
+    if (!testRouteForm.domain.trim() && !testRouteForm.ip.trim()) {
+      return;
+    }
+    testRouteRunning = true;
+    testRouteError = null;
+    testRouteResult = null;
+    try {
+      const payload: Record<string, any> = {};
+      if (testRouteForm.domain.trim()) payload.domain = testRouteForm.domain.trim();
+      if (testRouteForm.ip.trim()) payload.ip = testRouteForm.ip.trim();
+      if (testRouteForm.port) payload.port = Number(testRouteForm.port);
+      if (testRouteForm.network.trim()) payload.network = testRouteForm.network.trim();
+      if (testRouteForm.protocol.trim()) payload.protocol = testRouteForm.protocol.trim();
+      if (testRouteForm.inboundTag.trim()) payload.inbound_tag = testRouteForm.inboundTag.trim();
+
+      const res = await apiFetch('/api/xray/test-route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.status === 401) return;
+      if (res.status === 503) {
+        testRouteError = $t('xray.grpc.core_unavailable');
+        return;
+      }
+      if (!res.ok) {
+        testRouteError = data?.error || $t('xray.test_route.error');
+        return;
+      }
+      testRouteResult = data?.data || data;
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      testRouteError = e.message || $t('xray.test_route.error');
+    } finally {
+      testRouteRunning = false;
+    }
+  }
+
+  // Restart logger (D-02)
+  let restartingLogger = $state(false);
+  async function restartLogger() {
+    restartingLogger = true;
+    try {
+      const res = await apiFetch('/api/xray/restart-logger', {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (res.status === 401) return;
+      if (res.ok) {
+        showToast('success', $t('xray.restart_logger.success'));
+      } else {
+        showToast('error', data?.error || $t('xray.restart_logger.error'));
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e.message || $t('xray.restart_logger.error'));
+    } finally {
+      restartingLogger = false;
+    }
+  }
+
+  // TLS Ping state (D-15)
+  let tlsPingRunning = $state(false);
+  let tlsPingResult = $state<{
+    ok: boolean;
+    tls_version?: string;
+    cipher_suite?: string;
+    alpn?: string;
+    peer_cn?: string;
+    dns_names?: string[];
+    not_before?: string;
+    not_after?: string;
+    days_until_expiry?: number;
+    chain_length?: number;
+    handshake_ms?: number;
+    error?: string;
+  } | null>(null);
+  let tlsPingError = $state<string | null>(null);
+
+  async function runTLSPing() {
+    if (!outboundForm.address.trim()) return;
+    tlsPingRunning = true;
+    tlsPingResult = null;
+    tlsPingError = null;
+    try {
+      let dest = outboundForm.address.trim();
+      if (!dest.includes(':')) {
+        dest = `${dest}:${outboundForm.port || 443}`;
+      }
+      const serverName = (outboundForm.sni || outboundForm.address).trim();
+      const alpnList = (outboundForm as any).alpn ? [(outboundForm as any).alpn] : [];
+
+      const res = await apiFetch('/api/xray/tls-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dest,
+          server_name: serverName,
+          alpn: alpnList
+        })
+      });
+      const data = await res.json();
+      if (res.status === 401) return;
+      if (!res.ok) {
+        tlsPingError = data?.error || $t('xray.tls_ping.error');
+        return;
+      }
+      tlsPingResult = data?.data || data;
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      tlsPingError = e.message || $t('xray.tls_ping.error');
+    } finally {
+      tlsPingRunning = false;
+    }
+  }
+
   function saveOutbound() {
     if (!outboundForm.tag.trim() || !outboundForm.address.trim() || !outboundForm.port) {
       showToast('error', $t('xray.fill_required_fields'));
@@ -2095,6 +2230,177 @@
               </select>
             </div>
 
+            {#if $capabilities?.active_kernel === 'xray'}
+              <!-- Test Route & Logger Rotation Panel (D-05, D-06, D-02) -->
+              <div
+                class="card test-route-card"
+                data-testid="test-route-panel"
+                style="margin-bottom: 20px;"
+              >
+                <div
+                  class="test-route-header"
+                  style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;"
+                >
+                  <div>
+                    <div class="section-title" style="margin: 0 0 4px 0;">
+                      {$t('xray.test_route.title')}
+                    </div>
+                    <div class="form-hint" style="margin: 0;">{$t('xray.test_route.hint')}</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    data-testid="restart-logger-btn"
+                    onclick={restartLogger}
+                    disabled={restartingLogger}
+                    title={$t('xray.restart_logger.hint')}
+                  >
+                    {restartingLogger
+                      ? $t('xray.restart_logger.running')
+                      : $t('xray.restart_logger.button')}
+                  </button>
+                </div>
+
+                <div class="form-row2">
+                  <div class="form-col">
+                    <label class="form-label" for="test-route-domain"
+                      >{$t('xray.test_route.target_domain')}</label
+                    >
+                    <input
+                      id="test-route-domain"
+                      class="form-input"
+                      data-testid="test-route-domain"
+                      bind:value={testRouteForm.domain}
+                      placeholder="example.com"
+                    />
+                  </div>
+                  <div class="form-col">
+                    <label class="form-label" for="test-route-ip"
+                      >{$t('xray.test_route.target_ip')}</label
+                    >
+                    <input
+                      id="test-route-ip"
+                      class="form-input"
+                      data-testid="test-route-ip"
+                      bind:value={testRouteForm.ip}
+                      placeholder="1.2.3.4"
+                    />
+                  </div>
+                </div>
+
+                <div class="form-row2" style="margin-top: 8px;">
+                  <div class="form-col">
+                    <label class="form-label" for="test-route-port"
+                      >{$t('xray.test_route.target_port')}</label
+                    >
+                    <input
+                      id="test-route-port"
+                      type="number"
+                      class="form-input"
+                      data-testid="test-route-port"
+                      bind:value={testRouteForm.port}
+                      min="1"
+                      max="65535"
+                    />
+                  </div>
+                  <div class="form-col">
+                    <label class="form-label" for="test-route-protocol"
+                      >{$t('xray.test_route.protocol')}</label
+                    >
+                    <select
+                      id="test-route-protocol"
+                      class="form-select"
+                      data-testid="test-route-protocol"
+                      bind:value={testRouteForm.protocol}
+                    >
+                      <option value="">{$t('xray.all_protocols') || 'Default'}</option>
+                      <option value="http">http</option>
+                      <option value="tls">tls</option>
+                      <option value="bittorrent">bittorrent</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="form-row" style="margin-top: 8px;">
+                  <label class="form-label" for="test-route-inbound"
+                    >{$t('xray.test_route.inbound_tag')}</label
+                  >
+                  <input
+                    id="test-route-inbound"
+                    class="form-input"
+                    data-testid="test-route-inbound"
+                    bind:value={testRouteForm.inboundTag}
+                    placeholder="proxy-in"
+                  />
+                </div>
+
+                <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    data-testid="test-route-submit-btn"
+                    onclick={runTestRoute}
+                    disabled={testRouteRunning ||
+                      (!testRouteForm.domain.trim() && !testRouteForm.ip.trim())}
+                  >
+                    {testRouteRunning ? $t('xray.test_route.running') : $t('xray.test_route.run')}
+                  </button>
+                </div>
+
+                {#if testRouteError}
+                  <div
+                    class="alert alert-danger"
+                    data-testid="test-route-error"
+                    style="margin-top: 12px;"
+                  >
+                    {testRouteError}
+                  </div>
+                {/if}
+
+                {#if testRouteResult}
+                  <div
+                    class="test-route-result card"
+                    data-testid="test-route-result"
+                    style="margin-top: 12px; padding: 12px; background: var(--bg-card-subtle);"
+                  >
+                    {#if testRouteResult.outbound_tag}
+                      <div
+                        style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;"
+                      >
+                        <span class="form-label" style="margin: 0;"
+                          >{$t('xray.test_route.result_outbound')}:</span
+                        >
+                        <span
+                          class="badge badge-tag badge-proxy"
+                          data-testid="test-route-outbound-tag">{testRouteResult.outbound_tag}</span
+                        >
+                      </div>
+                    {:else}
+                      <div
+                        class="text-muted"
+                        data-testid="test-route-no-match"
+                        style="margin-bottom: 8px;"
+                      >
+                        {$t('xray.test_route.no_match')}
+                      </div>
+                    {/if}
+                    {#if testRouteResult.rule_groups && testRouteResult.rule_groups.length > 0}
+                      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <span class="form-label" style="margin: 0;"
+                          >{$t('xray.test_route.result_groups')}:</span
+                        >
+                        {#each testRouteResult.rule_groups as group}
+                          <span class="badge badge-tag" data-testid="test-route-rule-group"
+                            >{group}</span
+                          >
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+            {/if}
+
             <div class="section-title">{$t('xray.routing_rules')}</div>
 
             <div class="routing-rules-list" data-testid="routing-rules-list" role="list">
@@ -2962,7 +3268,9 @@
                 </div>
 
                 {#if outboundForm.security === 'reality'}
-                  <div style="margin-bottom: 12px; display: flex; justify-content: flex-end;">
+                  <div
+                    style="margin-bottom: 12px; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;"
+                  >
                     <button
                       type="button"
                       class="btn btn-secondary btn-sm"
@@ -2973,7 +3281,121 @@
                         ? $t('xray.generating')
                         : $t('xray.generate_reality_keys')}
                     </button>
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      data-testid="tls-ping-btn"
+                      onclick={runTLSPing}
+                      disabled={tlsPingRunning || !outboundForm.address.trim()}
+                      title={$t('xray.tls_ping.hint')}
+                    >
+                      {tlsPingRunning ? $t('xray.tls_ping.running') : $t('xray.tls_ping.button')}
+                    </button>
                   </div>
+
+                  {#if tlsPingError}
+                    <div
+                      class="alert alert-danger"
+                      data-testid="tls-ping-error"
+                      style="margin-bottom: 12px;"
+                    >
+                      {tlsPingError}
+                    </div>
+                  {/if}
+
+                  {#if tlsPingResult}
+                    <div
+                      class="card tls-ping-result"
+                      data-testid="tls-ping-result"
+                      style="margin-bottom: 12px; padding: 12px; background: var(--bg-card-subtle);"
+                    >
+                      <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;"
+                      >
+                        <span style="font-weight: 600; font-size: 13px;"
+                          >{$t('xray.tls_ping.title')}</span
+                        >
+                        {#if tlsPingResult.ok}
+                          <span class="badge badge-tag badge-direct"
+                            >OK ({tlsPingResult.handshake_ms}ms)</span
+                          >
+                        {:else}
+                          <span class="badge badge-tag badge-block">FAIL</span>
+                        {/if}
+                      </div>
+
+                      {#if !tlsPingResult.ok && tlsPingResult.error}
+                        <div
+                          class="text-danger"
+                          data-testid="tls-ping-failure"
+                          style="font-size: 12px; margin-bottom: 6px;"
+                        >
+                          {tlsPingResult.error}
+                        </div>
+                      {/if}
+
+                      {#if tlsPingResult.ok}
+                        <div
+                          class="tls-grid"
+                          style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; font-size: 12px;"
+                        >
+                          <div>
+                            <span class="text-muted">{$t('xray.tls_ping.version')}:</span>
+                            <span data-testid="tls-ping-version" style="font-weight: 500;"
+                              >{tlsPingResult.tls_version || '—'}</span
+                            >
+                          </div>
+                          <div>
+                            <span class="text-muted">{$t('xray.tls_ping.alpn')}:</span>
+                            <span data-testid="tls-ping-alpn" style="font-weight: 500;"
+                              >{tlsPingResult.alpn || '—'}</span
+                            >
+                          </div>
+                          <div>
+                            <span class="text-muted">{$t('xray.tls_ping.cipher')}:</span>
+                            <span data-testid="tls-ping-cipher" style="font-weight: 500;"
+                              >{tlsPingResult.cipher_suite || '—'}</span
+                            >
+                          </div>
+                          <div>
+                            <span class="text-muted">{$t('xray.tls_ping.peer_cn')}:</span>
+                            <span data-testid="tls-ping-cn" style="font-weight: 500;"
+                              >{tlsPingResult.peer_cn || '—'}</span
+                            >
+                          </div>
+                          <div>
+                            <span class="text-muted">{$t('xray.tls_ping.expires')}:</span>
+                            <span data-testid="tls-ping-expires" style="font-weight: 500;"
+                              >{tlsPingResult.not_after || '—'}</span
+                            >
+                          </div>
+                          <div>
+                            <span class="text-muted">{$t('xray.tls_ping.days_left')}:</span>
+                            {#if tlsPingResult.days_until_expiry !== undefined}
+                              <span
+                                class="badge badge-tag"
+                                class:badge-block={tlsPingResult.days_until_expiry < 14}
+                                class:badge-direct={tlsPingResult.days_until_expiry >= 14}
+                                data-testid="tls-ping-days"
+                              >
+                                {tlsPingResult.days_until_expiry}
+                              </span>
+                            {:else}
+                              <span>—</span>
+                            {/if}
+                          </div>
+                        </div>
+                        {#if tlsPingResult.dns_names && tlsPingResult.dns_names.length > 0}
+                          <div style="margin-top: 8px; font-size: 12px;">
+                            <span class="text-muted">{$t('xray.tls_ping.dns_names')}:</span>
+                            <span style="word-break: break-all;"
+                              >{tlsPingResult.dns_names.join(', ')}</span
+                            >
+                          </div>
+                        {/if}
+                      {/if}
+                    </div>
+                  {/if}
                   <div class="form-row2">
                     <div class="form-col">
                       <label class="form-label" for="outbound-pubkey">Reality Public Key</label>
