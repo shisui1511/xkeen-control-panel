@@ -51,6 +51,8 @@ type API struct {
 	sslDaysCache          int
 	sslDaysCacheTime      time.Time
 	sslDaysCacheMutex     sync.Mutex
+	lastRestartLogger     time.Time
+	restartLoggerMutex    sync.Mutex
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {

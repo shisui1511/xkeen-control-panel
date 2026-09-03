@@ -19,6 +19,8 @@ import (
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
+	logpb "github.com/shisui1511/xkeen-control-panel/internal/xrayapi/gen/xray/app/log/command"
+	routerpb "github.com/shisui1511/xkeen-control-panel/internal/xrayapi/gen/xray/app/router/command"
 	statspb "github.com/shisui1511/xkeen-control-panel/internal/xrayapi/gen/xray/app/stats/command"
 	"github.com/shisui1511/xkeen-control-panel/internal/xrayapi/testutil"
 )
@@ -369,4 +371,190 @@ func TestCapabilitiesGRPCReady(t *testing.T) {
 		t.Errorf("expected GRPCReady to be false when config lacks api inbound")
 	}
 }
+
+func TestXrayTestRoute(t *testing.T) {
+	api := &API{}
+
+	// 1. Method not allowed (GET)
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/xray/test-route", nil)
+	rrGet := httptest.NewRecorder()
+	api.XrayTestRoute(rrGet, reqGet)
+	if rrGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 on GET, got %d", rrGet.Code)
+	}
+
+	// 2. Nil service -> 503
+	body := bytes.NewBufferString(`{"domain": "example.com"}`)
+	reqNil := httptest.NewRequest(http.MethodPost, "/api/xray/test-route", body)
+	rrNil := httptest.NewRecorder()
+	api.XrayTestRoute(rrNil, reqNil)
+	if rrNil.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when service is nil, got %d", rrNil.Code)
+	}
+
+	// 3. Validation tests
+	valCases := []struct {
+		name string
+		json string
+	}{
+		{"empty target", `{}`},
+		{"invalid ip", `{"ip": "999.999.999.999"}`},
+		{"port out of range", `{"domain": "example.com", "port": 70000}`},
+		{"domain control char", `{"domain": "example\n.com"}`},
+		{"domain too long", fmt.Sprintf(`{"domain": "%s.com"}`, string(make([]byte, 255)))},
+	}
+
+	for _, tc := range valCases {
+		t.Run("val_"+tc.name, func(t *testing.T) {
+			reqVal := httptest.NewRequest(http.MethodPost, "/api/xray/test-route", bytes.NewBufferString(tc.json))
+			rrVal := httptest.NewRecorder()
+			api.XrayTestRoute(rrVal, reqVal)
+			if rrVal.Code != http.StatusBadRequest {
+				t.Errorf("expected 400 for case %s, got %d: %s", tc.name, rrVal.Code, rrVal.Body.String())
+			}
+		})
+	}
+
+	// 4. Success path with mock server
+	mock := testutil.NewMockXrayServer()
+	mock.SetRouteResult("example.com", "proxy-out", []string{"auto-group"})
+	mock.SetDefaultRoute("direct", nil)
+
+	lis := bufconn.Listen(1024 * 1024)
+	s := grpc.NewServer()
+	statspb.RegisterStatsServiceServer(s, mock)
+	routerpb.RegisterRoutingServiceServer(s, mock)
+	logpb.RegisterLoggerServiceServer(s, mock)
+	go func() { _ = s.Serve(lis) }()
+	defer func() {
+		s.Stop()
+		_ = lis.Close()
+	}()
+
+	svc := services.NewXrayGRPCService("127.0.0.1:10085")
+	svc.SetActiveKernelFunc(func() string { return "xray" })
+	svc.SetDialerFunc(func(ctx context.Context, target string) (*grpc.ClientConn, error) {
+		return grpc.NewClient("passthrough://bufnet",
+			grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+				return lis.Dial()
+			}),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+	})
+	api.SetXrayGRPCService(svc)
+
+	// Test route domain -> 200
+	reqOk := httptest.NewRequest(http.MethodPost, "/api/xray/test-route", bytes.NewBufferString(`{"domain": "example.com", "port": 443}`))
+	rrOk := httptest.NewRecorder()
+	api.XrayTestRoute(rrOk, reqOk)
+	if rrOk.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rrOk.Code, rrOk.Body.String())
+	}
+
+	var respOk struct {
+		Success bool `json:"success"`
+		Data    struct {
+			OutboundTag       string   `json:"outbound_tag"`
+			OutboundGroupTags []string `json:"outbound_group_tags"`
+			Matched           bool     `json:"matched"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rrOk.Body.Bytes(), &respOk); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !respOk.Success || !respOk.Data.Matched || respOk.Data.OutboundTag != "proxy-out" {
+		t.Errorf("unexpected route response: %+v", respOk)
+	}
+
+	// Test route IP -> 200
+	reqIP := httptest.NewRequest(http.MethodPost, "/api/xray/test-route", bytes.NewBufferString(`{"ip": "1.1.1.1"}`))
+	rrIP := httptest.NewRecorder()
+	api.XrayTestRoute(rrIP, reqIP)
+	if rrIP.Code != http.StatusOK {
+		t.Fatalf("expected 200 for IP, got %d: %s", rrIP.Code, rrIP.Body.String())
+	}
+
+	// Test route unavailable -> 503
+	svcDown := services.NewXrayGRPCService("127.0.0.1:10085")
+	svcDown.SetActiveKernelFunc(func() string { return "xray" })
+	svcDown.SetDialerFunc(func(ctx context.Context, target string) (*grpc.ClientConn, error) {
+		return nil, fmt.Errorf("connection refused")
+	})
+	api.SetXrayGRPCService(svcDown)
+
+	reqDown := httptest.NewRequest(http.MethodPost, "/api/xray/test-route", bytes.NewBufferString(`{"domain": "example.com"}`))
+	rrDown := httptest.NewRecorder()
+	api.XrayTestRoute(rrDown, reqDown)
+	if rrDown.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 on core unavailable, got %d", rrDown.Code)
+	}
+}
+
+func TestXrayRestartLogger(t *testing.T) {
+	api := &API{}
+
+	// 1. Method not allowed (GET)
+	reqGet := httptest.NewRequest(http.MethodGet, "/api/xray/restart-logger", nil)
+	rrGet := httptest.NewRecorder()
+	api.XrayRestartLogger(rrGet, reqGet)
+	if rrGet.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 on GET, got %d", rrGet.Code)
+	}
+
+	// 2. Nil service -> 503
+	reqNil := httptest.NewRequest(http.MethodPost, "/api/xray/restart-logger", nil)
+	rrNil := httptest.NewRecorder()
+	api.XrayRestartLogger(rrNil, reqNil)
+	if rrNil.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when service is nil, got %d", rrNil.Code)
+	}
+
+	// 3. Mock server setup
+	mock := testutil.NewMockXrayServer()
+	lis := bufconn.Listen(1024 * 1024)
+	s := grpc.NewServer()
+	statspb.RegisterStatsServiceServer(s, mock)
+	routerpb.RegisterRoutingServiceServer(s, mock)
+	logpb.RegisterLoggerServiceServer(s, mock)
+	go func() { _ = s.Serve(lis) }()
+	defer func() {
+		s.Stop()
+		_ = lis.Close()
+	}()
+
+	svc := services.NewXrayGRPCService("127.0.0.1:10085")
+	svc.SetActiveKernelFunc(func() string { return "xray" })
+	svc.SetDialerFunc(func(ctx context.Context, target string) (*grpc.ClientConn, error) {
+		return grpc.NewClient("passthrough://bufnet",
+			grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
+				return lis.Dial()
+			}),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+	})
+	api.SetXrayGRPCService(svc)
+
+	// 4. Success -> 200
+	reqOk := httptest.NewRequest(http.MethodPost, "/api/xray/restart-logger", nil)
+	rrOk := httptest.NewRecorder()
+	api.XrayRestartLogger(rrOk, reqOk)
+	if rrOk.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rrOk.Code, rrOk.Body.String())
+	}
+	if mock.RestartLoggerCount() != 1 {
+		t.Errorf("expected restartLoggerCount 1, got %d", mock.RestartLoggerCount())
+	}
+
+	// 5. Rate limited -> 429
+	reqRate := httptest.NewRequest(http.MethodPost, "/api/xray/restart-logger", nil)
+	rrRate := httptest.NewRecorder()
+	api.XrayRestartLogger(rrRate, reqRate)
+	if rrRate.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 on immediate repeat, got %d", rrRate.Code)
+	}
+	if rrRate.Header().Get("Retry-After") == "" {
+		t.Errorf("expected Retry-After header to be set")
+	}
+}
+
 

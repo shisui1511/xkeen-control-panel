@@ -3,16 +3,22 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
+	"github.com/shisui1511/xkeen-control-panel/internal/xrayapi"
 )
 
 // XrayRealityKeygen handles GET /api/xray/reality/keygen to generate Reality keypairs.
@@ -161,5 +167,165 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSONSuccess(w, map[string]interface{}{"enabled": false})
+}
+
+// XrayTestRouteRequest defines parameters for testing an Xray route.
+type XrayTestRouteRequest struct {
+	Domain     string            `json:"domain"`
+	IP         string            `json:"ip"`
+	Port       int               `json:"port"`
+	Network    string            `json:"network"`
+	Protocol   string            `json:"protocol"`
+	InboundTag string            `json:"inbound_tag"`
+	Attributes map[string]string `json:"attributes"`
+}
+
+// XrayTestRoute handles POST /api/xray/test-route to test which routing rule matches a destination.
+func (a *API) XrayTestRoute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req XrayTestRouteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.errorResponse(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	domain := strings.TrimSpace(req.Domain)
+	ipStr := strings.TrimSpace(req.IP)
+
+	if domain == "" && ipStr == "" {
+		a.errorResponse(w, "domain or ip is required", http.StatusBadRequest)
+		return
+	}
+
+	if domain != "" {
+		if len(domain) > 253 {
+			a.errorResponse(w, "domain exceeds maximum length of 253 characters", http.StatusBadRequest)
+			return
+		}
+		for _, c := range domain {
+			if unicode.IsControl(c) || unicode.IsSpace(c) {
+				a.errorResponse(w, "domain contains invalid or control characters", http.StatusBadRequest)
+				return
+			}
+		}
+	}
+
+	if ipStr != "" {
+		if parsed := net.ParseIP(ipStr); parsed == nil {
+			a.errorResponse(w, "invalid IP address format", http.StatusBadRequest)
+			return
+		}
+	}
+
+	if req.Port < 0 || req.Port > 65535 {
+		a.errorResponse(w, "port must be between 1 and 65535", http.StatusBadRequest)
+		return
+	}
+
+	targetPort := req.Port
+	if targetPort == 0 {
+		targetPort = 443
+	}
+
+	if len(req.Attributes) > 50 {
+		a.errorResponse(w, "too many attributes", http.StatusBadRequest)
+		return
+	}
+
+	if a.xrayGRPCSvc == nil {
+		a.errorResponse(w, "Xray gRPC service is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	client, release, err := a.xrayGRPCSvc.Acquire(ctx)
+	if err != nil {
+		a.errorResponse(w, "Xray core is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer release()
+
+	result, err := client.TestRoute(ctx, xrayapi.RouteTestInput{
+		Domain:     domain,
+		IP:         ipStr,
+		Port:       uint32(targetPort),
+		Network:    req.Network,
+		Protocol:   req.Protocol,
+		InboundTag: req.InboundTag,
+		Attributes: req.Attributes,
+	})
+	if err != nil {
+		if errors.Is(err, xrayapi.ErrCoreUnavailable) {
+			a.errorResponse(w, "Xray core is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if errors.Is(err, xrayapi.ErrInvalidArgument) {
+			a.errorResponse(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		a.errorResponse(w, fmt.Sprintf("Failed to test route: %v", err), http.StatusServiceUnavailable)
+		return
+	}
+
+	JSONSuccess(w, result)
+}
+
+// XrayRestartLogger handles POST /api/xray/restart-logger to request Xray core
+// to reopen its log files for safe external log rotation (e.g. logrotate).
+func (a *API) XrayRestartLogger(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	a.restartLoggerMutex.Lock()
+	now := time.Now()
+	if !a.lastRestartLogger.IsZero() && now.Sub(a.lastRestartLogger) < 5*time.Second {
+		remSec := int(math.Ceil(5 - now.Sub(a.lastRestartLogger).Seconds()))
+		a.restartLoggerMutex.Unlock()
+		w.Header().Set("Retry-After", strconv.Itoa(remSec))
+		a.errorResponse(w, fmt.Sprintf("Too many requests: retry after %d seconds", remSec), http.StatusTooManyRequests)
+		return
+	}
+	a.restartLoggerMutex.Unlock()
+
+	if a.xrayGRPCSvc == nil {
+		a.errorResponse(w, "Xray gRPC service is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	client, release, err := a.xrayGRPCSvc.Acquire(ctx)
+	if err != nil {
+		a.errorResponse(w, "Xray core is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer release()
+
+	if err := client.RestartLogger(ctx); err != nil {
+		if errors.Is(err, xrayapi.ErrCoreUnavailable) {
+			a.errorResponse(w, "Xray core is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		a.errorResponse(w, fmt.Sprintf("Failed to restart logger: %v", err), http.StatusServiceUnavailable)
+		return
+	}
+
+	a.restartLoggerMutex.Lock()
+	a.lastRestartLogger = time.Now()
+	a.restartLoggerMutex.Unlock()
+
+	JSONSuccess(w, map[string]interface{}{
+		"success": true,
+		"message": "Log files reopened successfully for rotation",
+	})
 }
 
