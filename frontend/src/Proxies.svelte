@@ -223,6 +223,7 @@
   let refreshLoading = $state<Record<string, boolean>>({});
   let subNodesError = $state<Record<string, boolean>>({});
   let activeDropdownId = $state<string | null>(null);
+  let dialerProxyTargets = $state<Record<string, any[]>>({});
 
   // Form modal states for subscriptions
   let showAddModal = $state(false);
@@ -241,6 +242,9 @@
   let formEnabled = $state(true);
   let formUseProviderInterval = $state(false);
   let availableMihomoGroups = $state<string[]>([]);
+  let formSockoptMark = $state<number | null>(null);
+  let formSockoptFastOpen = $state(false);
+  let formSockoptMptcp = $state(false);
 
   // Diagnostic states
   let showDiagnosticModal = $state(false);
@@ -1221,7 +1225,11 @@
       filter_type: formFilterType,
       filter_transport: formFilterTransport,
       mihomo_groups: formMihomoGroups,
-      routing_mode: formRoutingMode
+      routing_mode: formRoutingMode,
+      sockopt_mark:
+        formSockoptMark !== null && formSockoptMark !== undefined ? Number(formSockoptMark) : 0,
+      sockopt_fast_open: formSockoptFastOpen,
+      sockopt_mptcp: formSockoptMptcp
     };
 
     try {
@@ -1298,6 +1306,9 @@
     formFilterType = '';
     formFilterTransport = '';
     formMihomoGroups = [];
+    formSockoptMark = null;
+    formSockoptFastOpen = false;
+    formSockoptMptcp = false;
     showAddModal = true;
     loadAvailableMihomoGroups();
   }
@@ -1317,6 +1328,12 @@
     formFilterType = sub.filter_type ?? '';
     formFilterTransport = sub.filter_transport ?? '';
     formMihomoGroups = sub.mihomo_groups ?? [];
+    formSockoptMark =
+      (sub as any).sockopt_mark !== undefined && (sub as any).sockopt_mark !== 0
+        ? (sub as any).sockopt_mark
+        : null;
+    formSockoptFastOpen = !!(sub as any).sockopt_fast_open;
+    formSockoptMptcp = !!(sub as any).sockopt_mptcp;
     showAddModal = true;
     loadAvailableMihomoGroups();
   }
@@ -1428,10 +1445,54 @@
     }
   }
 
+  async function loadDialerProxyTargets(subId: string) {
+    const sub = subscriptions.find((s) => s.id === subId);
+    if (!sub || !sub.enable_xray) return;
+    try {
+      const res = await apiFetch(`/api/subscriptions/dialer-proxy-targets?id=${subId}&node_tag=_`);
+      if (res.ok) {
+        const json = await res.json();
+        dialerProxyTargets[subId] = json?.data || json || [];
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+    }
+  }
+
+  async function handleSetDialerProxy(subId: string, nodeTag: string, targetTag: string) {
+    try {
+      const res = await apiFetch(`/api/subscriptions/node-dialer-proxy?id=${subId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          node_tag: nodeTag,
+          target_tag: targetTag
+        })
+      });
+      const data = await res.json();
+      if (res.status === 401) return;
+      if (res.status === 409) {
+        showToast('error', $t('subscr.dialer_proxy.chain_limit'));
+        return;
+      }
+      if (!res.ok) {
+        showToast('error', data?.error || $t('subscr.dialer_proxy.error'));
+        return;
+      }
+      showToast('success', $t('subscr.dialer_proxy.saved'));
+      await loadNodesBySource(subId);
+      await loadDialerProxyTargets(subId);
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e.message || $t('subscr.dialer_proxy.error'));
+    }
+  }
+
   async function toggleExpand(subId: string) {
     expandedSubs[subId] = !expandedSubs[subId];
     if (expandedSubs[subId]) {
       await loadNodesBySource(subId);
+      await loadDialerProxyTargets(subId);
     }
   }
 
@@ -2526,6 +2587,8 @@
           onCheckNodeHealth={checkNodeHealth}
           onToggleDropdown={toggleDropdown}
           onRetryNodes={loadMihomoNodes}
+          {dialerProxyTargets}
+          onSetDialerProxy={handleSetDialerProxy}
         />
       {/if}
     </div>
@@ -2548,6 +2611,9 @@
   bind:formMihomoGroups
   bind:formEnabled
   bind:formUseProviderInterval
+  bind:formSockoptMark
+  bind:formSockoptFastOpen
+  bind:formSockoptMptcp
   {availableMihomoGroups}
   onClose={closeModal}
   onSave={saveSubscription}

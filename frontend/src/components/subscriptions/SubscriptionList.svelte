@@ -92,7 +92,9 @@
     onSetActiveNode,
     onCheckNodeHealth,
     onToggleDropdown,
-    onRetryNodes
+    onRetryNodes,
+    dialerProxyTargets = {},
+    onSetDialerProxy
   }: {
     subscriptions: Subscription[];
     expandedSubs: Record<string, boolean>;
@@ -115,6 +117,8 @@
     onCheckNodeHealth: (subId: string, tag: string) => void;
     onToggleDropdown: (subId: string) => void;
     onRetryNodes: (subId: string) => Promise<void>;
+    dialerProxyTargets?: Record<string, any[]>;
+    onSetDialerProxy?: (subId: string, nodeTag: string, targetTag: string) => void;
   } = $props();
 
   function isFormatError(err?: string): boolean {
@@ -677,8 +681,10 @@
                 nodes={subNodes[sub.id]}
                 health={subHealth[sub.id] || {}}
                 checkingNodes={checkingNodes[sub.id] || {}}
+                dialerProxyTargets={dialerProxyTargets[sub.id] || []}
                 {onSetActiveNode}
                 {onCheckNodeHealth}
+                {onSetDialerProxy}
               />
             {/if}
           {/if}
