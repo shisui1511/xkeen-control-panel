@@ -911,6 +911,7 @@
   let testRouteRunning = $state(false);
   let testRouteResult = $state<{
     outbound_tag?: string;
+    outbound_group_tags?: string[];
     rule_groups?: string[];
     matched?: boolean;
   } | null>(null);
@@ -2384,12 +2385,12 @@
                         {$t('xray.test_route.no_match')}
                       </div>
                     {/if}
-                    {#if testRouteResult.rule_groups && testRouteResult.rule_groups.length > 0}
+                    {#if (testRouteResult.outbound_group_tags || testRouteResult.rule_groups) && ((testRouteResult.outbound_group_tags || testRouteResult.rule_groups)?.length ?? 0) > 0}
                       <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                         <span class="form-label" style="margin: 0;"
                           >{$t('xray.test_route.result_groups')}:</span
                         >
-                        {#each testRouteResult.rule_groups as group}
+                        {#each testRouteResult.outbound_group_tags || testRouteResult.rule_groups as group}
                           <span class="badge badge-tag" data-testid="test-route-rule-group"
                             >{group}</span
                           >

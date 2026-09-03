@@ -64,6 +64,7 @@ type RouteTestInput struct {
 type RouteTestResult struct {
 	OutboundTag       string   `json:"outbound_tag"`
 	OutboundGroupTags []string `json:"outbound_group_tags,omitempty"`
+	RuleGroups        []string `json:"rule_groups,omitempty"`
 	Matched           bool     `json:"matched"`
 }
 
@@ -182,9 +183,11 @@ func (c *Client) TestRoute(ctx context.Context, input RouteTestInput) (*RouteTes
 	}
 
 	outTag := resp.GetOutboundTag()
+	groups := resp.GetOutboundGroupTags()
 	return &RouteTestResult{
 		OutboundTag:       outTag,
-		OutboundGroupTags: resp.GetOutboundGroupTags(),
+		OutboundGroupTags: groups,
+		RuleGroups:        groups,
 		Matched:           outTag != "",
 	}, nil
 }

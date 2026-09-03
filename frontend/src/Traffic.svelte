@@ -133,18 +133,21 @@
   });
 
   function formatSpeed(bytesPerSecond: number): string {
-    if (bytesPerSecond === 0) return '0 B/s';
+    if (!bytesPerSecond || bytesPerSecond <= 0) return '0 B/s';
     const k = 1024;
-    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-    const i = Math.floor(Math.log(bytesPerSecond) / Math.log(k));
+    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
+    const i = Math.max(
+      0,
+      Math.min(sizes.length - 1, Math.floor(Math.log(bytesPerSecond) / Math.log(k)))
+    );
     return parseFloat((bytesPerSecond / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   }
 
   function formatBytes(bytes: number): string {
-    if (bytes < 1) return `${bytes.toFixed(0)} B`;
+    if (!bytes || bytes <= 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
+    const i = Math.max(0, Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k))));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
@@ -225,8 +228,6 @@
         // Retain max 3600 points (1 hour buffer)
         if (allTrafficData.length > 3600) {
           allTrafficData = allTrafficData.slice(-3600);
-        } else {
-          allTrafficData = allTrafficData;
         }
 
         const elapsedSec = lastTickTime > 0 ? (now - lastTickTime) / 1000 : 0;
@@ -250,7 +251,6 @@
 
           connHistory.push({ ts: now, count: activeConnectionsCount });
           if (connHistory.length > CONN_HISTORY_MAX) connHistory.shift();
-          connHistory = connHistory;
 
           if (data.peaks) {
             peaks = data.peaks;
