@@ -1360,7 +1360,7 @@ func (s *SubscriptionService) refreshXrayFragmentLocked(sub *Subscription) error
 	}
 
 	var wrapper struct {
-		Outbounds []Outbound `json:"outbounds"`
+		Outbounds []map[string]interface{} `json:"outbounds"`
 	}
 	if err := json.Unmarshal(data, &wrapper); err != nil {
 		return fmt.Errorf("parse fragment outbounds: %w", err)
@@ -1371,15 +1371,27 @@ func (s *SubscriptionService) refreshXrayFragmentLocked(sub *Subscription) error
 		nodeByTag[sub.Nodes[i].Tag] = &sub.Nodes[i]
 	}
 
-	activeTags := s.collectActiveXrayTags(sub, wrapper.Outbounds)
+	tempOutbounds := make([]Outbound, 0, len(wrapper.Outbounds))
+	for _, m := range wrapper.Outbounds {
+		tag, _ := m["tag"].(string)
+		proto, _ := m["protocol"].(string)
+		tempOutbounds = append(tempOutbounds, Outbound{Tag: tag, Protocol: proto})
+	}
+	activeTags := s.collectActiveXrayTags(sub, tempOutbounds)
 
 	for i := range wrapper.Outbounds {
-		ob := &wrapper.Outbounds[i]
-		node := nodeByTag[ob.Tag]
+		obMap := wrapper.Outbounds[i]
+		tag, _ := obMap["tag"].(string)
+		node := nodeByTag[tag]
+
+		var streamSettings map[string]interface{}
+		if ss, ok := obMap["streamSettings"].(map[string]interface{}); ok {
+			streamSettings = ss
+		}
 
 		// Clean previously merged managed sockopt keys
-		if ob.StreamSettings != nil {
-			if sockopt, ok := ob.StreamSettings["sockopt"].(map[string]interface{}); ok {
+		if streamSettings != nil {
+			if sockopt, ok := streamSettings["sockopt"].(map[string]interface{}); ok {
 				delete(sockopt, "mark")
 				delete(sockopt, "tcpFastOpen")
 				delete(sockopt, "tcpMptcp")
@@ -1387,14 +1399,59 @@ func (s *SubscriptionService) refreshXrayFragmentLocked(sub *Subscription) error
 			}
 		}
 
-		mergeSockopt(ob, sub, node, activeTags)
-
-		if ob.StreamSettings != nil {
-			if sockopt, ok := ob.StreamSettings["sockopt"].(map[string]interface{}); ok && len(sockopt) == 0 {
-				delete(ob.StreamSettings, "sockopt")
+		// Merge sockopt and dialerProxy
+		sockopt := make(map[string]interface{})
+		if sub != nil {
+			if sub.SockoptMark > 0 {
+				sockopt["mark"] = sub.SockoptMark
 			}
-			if len(ob.StreamSettings) == 0 {
-				ob.StreamSettings = nil
+			if sub.SockoptFastOpen {
+				sockopt["tcpFastOpen"] = true
+			}
+			if sub.SockoptMptcp {
+				sockopt["tcpMptcp"] = true
+			}
+		}
+
+		if node != nil && node.DialerProxy != "" {
+			hasProxySettings := false
+			if ps, ok := obMap["proxySettings"]; ok && ps != nil {
+				hasProxySettings = true
+			}
+			if streamSettings != nil {
+				if ps, ok := streamSettings["proxySettings"]; ok && ps != nil {
+					hasProxySettings = true
+				}
+			}
+			if hasProxySettings {
+				log.Printf("[Subscriptions] Outbound %q already has proxySettings configured; skipping dialerProxy cascade to %q", tag, node.DialerProxy)
+			} else if activeTags != nil && !activeTags[node.DialerProxy] {
+				log.Printf("[Subscriptions] Target node %q for dialerProxy cascade of %q is not found in active Xray subscriptions; skipping", node.DialerProxy, tag)
+			} else {
+				sockopt["dialerProxy"] = node.DialerProxy
+			}
+		}
+
+		if len(sockopt) > 0 {
+			if streamSettings == nil {
+				streamSettings = make(map[string]interface{})
+				obMap["streamSettings"] = streamSettings
+			}
+			if existingSockopt, ok := streamSettings["sockopt"].(map[string]interface{}); ok {
+				for k, v := range sockopt {
+					existingSockopt[k] = v
+				}
+			} else {
+				streamSettings["sockopt"] = sockopt
+			}
+		}
+
+		if streamSettings != nil {
+			if sockopt, ok := streamSettings["sockopt"].(map[string]interface{}); ok && len(sockopt) == 0 {
+				delete(streamSettings, "sockopt")
+			}
+			if len(streamSettings) == 0 {
+				delete(obMap, "streamSettings")
 			}
 		}
 	}

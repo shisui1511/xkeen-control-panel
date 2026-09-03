@@ -684,3 +684,77 @@ func TestRefreshXrayFragmentOnDialerProxyAndSockoptUpdate(t *testing.T) {
 	}
 }
 
+func TestXrayFragmentPreservesUnknownOutboundFields(t *testing.T) {
+	svc, _ := setupTestStorage(t)
+	sub := &Subscription{
+		ID:         "sub-custom",
+		Name:       "Custom Sub",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []SubscriptionNode{
+			{Tag: "node-1", Protocol: "vless"},
+			{Tag: "node-2", Protocol: "vless"},
+		},
+	}
+	if err := svc.Add(sub); err != nil {
+		t.Fatalf("Add failed: %v", err)
+	}
+
+	fragPath := svc.getFragmentPath(sub)
+	initialFrag := `{
+  "outbounds": [
+    {
+      "tag": "node-1",
+      "protocol": "vless",
+      "mux": {"enabled": true, "concurrency": 8},
+      "sendThrough": "192.168.1.50",
+      "customProperty": "must_survive",
+      "settings": {}
+    },
+    {
+      "tag": "node-2",
+      "protocol": "vless",
+      "settings": {}
+    }
+  ]
+}`
+	if err := os.WriteFile(fragPath, []byte(initialFrag), 0600); err != nil {
+		t.Fatalf("failed to write initial fragment: %v", err)
+	}
+
+	// Update dialerProxy which calls refreshXrayFragmentLocked
+	if err := svc.SetNodeDialerProxy("sub-custom", "node-1", "node-2"); err != nil {
+		t.Fatalf("SetNodeDialerProxy failed: %v", err)
+	}
+
+	data, err := os.ReadFile(fragPath)
+	if err != nil {
+		t.Fatalf("read fragment failed: %v", err)
+	}
+	var parsed struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal fragment failed: %v", err)
+	}
+
+	node1 := parsed.Outbounds[0]
+	if node1["sendThrough"] != "192.168.1.50" {
+		t.Errorf("expected sendThrough='192.168.1.50' preserved, got %v", node1["sendThrough"])
+	}
+	if node1["customProperty"] != "must_survive" {
+		t.Errorf("expected customProperty='must_survive' preserved, got %v", node1["customProperty"])
+	}
+	mux, ok := node1["mux"].(map[string]interface{})
+	if !ok || mux["enabled"] != true || int(mux["concurrency"].(float64)) != 8 {
+		t.Errorf("expected mux preserved, got %+v", node1["mux"])
+	}
+
+	ss := node1["streamSettings"].(map[string]interface{})
+	sockopt := ss["sockopt"].(map[string]interface{})
+	if sockopt["dialerProxy"] != "node-2" {
+		t.Errorf("expected dialerProxy='node-2', got %v", sockopt["dialerProxy"])
+	}
+}
+
+

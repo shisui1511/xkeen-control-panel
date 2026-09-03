@@ -805,6 +805,9 @@ func mergeSockopt(ob *Outbound, sub *Subscription, node *SubscriptionNode, activ
 
 	if node != nil && node.DialerProxy != "" {
 		hasProxySettings := false
+		if ob.ProxySettings != nil {
+			hasProxySettings = true
+		}
 		if ob.StreamSettings != nil {
 			if ps, ok := ob.StreamSettings["proxySettings"]; ok && ps != nil {
 				hasProxySettings = true

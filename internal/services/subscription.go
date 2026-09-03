@@ -196,6 +196,9 @@ type Outbound struct {
 	Protocol       string                 `json:"protocol"`
 	Settings       map[string]interface{} `json:"settings"`
 	StreamSettings map[string]interface{} `json:"streamSettings,omitempty"`
+	ProxySettings  map[string]interface{} `json:"proxySettings,omitempty"`
+	Mux            map[string]interface{} `json:"mux,omitempty"`
+	SendThrough    string                 `json:"sendThrough,omitempty"`
 }
 
 // SkipReason описывает причину пропуска конкретной строки/прокси при парсинге.
