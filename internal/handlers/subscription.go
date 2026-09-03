@@ -438,3 +438,82 @@ func (a *API) MihomoProviderRedirect(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, target, http.StatusFound)
 }
+
+// SubscriptionSetNodeDialerProxy handles POST /api/subscriptions/node-dialer-proxy.
+func (a *API) SubscriptionSetNodeDialerProxy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		a.errorResponse(w, "ID is required", http.StatusBadRequest)
+		return
+	}
+
+	var body struct {
+		NodeTag   string `json:"node_tag"`
+		TargetTag string `json:"target_tag"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.NodeTag == "" {
+		a.errorResponse(w, "node_tag is required", http.StatusBadRequest)
+		return
+	}
+
+	if a.subscriptionSvc == nil {
+		a.errorResponse(w, "subscription service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := a.subscriptionSvc.SetNodeDialerProxy(id, body.NodeTag, body.TargetTag); err != nil {
+		status := http.StatusInternalServerError
+		switch err.Error() {
+		case "node not found":
+			status = http.StatusNotFound
+		case "target not available", "chain limited to one level", "cannot cascade node to itself":
+			status = http.StatusConflict
+		}
+		a.errorResponse(w, err.Error(), status)
+		return
+	}
+
+	JSONSuccess(w, map[string]string{"target_tag": body.TargetTag})
+}
+
+// SubscriptionDialerProxyTargets handles GET /api/subscriptions/dialer-proxy-targets.
+func (a *API) SubscriptionDialerProxyTargets(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	nodeTag := r.URL.Query().Get("node_tag")
+	if id == "" || nodeTag == "" {
+		a.errorResponse(w, "id and node_tag are required", http.StatusBadRequest)
+		return
+	}
+
+	if a.subscriptionSvc == nil {
+		a.errorResponse(w, "subscription service not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	targets, err := a.subscriptionSvc.DialerProxyTargets(id, nodeTag)
+	if err != nil {
+		if err.Error() == "node not found" {
+			a.errorResponse(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if targets == nil {
+		targets = []services.DialerProxyTarget{}
+	}
+
+	JSONSuccess(w, targets)
+}
+

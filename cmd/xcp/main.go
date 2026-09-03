@@ -227,6 +227,8 @@ func main() {
 	srv.HandleProtected("/api/subscriptions/nodes", api.SubscriptionNodes)
 	srv.HandleProtected("/api/subscriptions/health", api.SubscriptionHealth)
 	srv.HandleProtected("/api/subscriptions/active", api.SubscriptionSetActive)
+	srv.HandleProtected("/api/subscriptions/node-dialer-proxy", api.SubscriptionSetNodeDialerProxy)
+	srv.HandleProtected("/api/subscriptions/dialer-proxy-targets", api.SubscriptionDialerProxyTargets)
 	srv.HandleProtected("/api/proxy-providers", api.ProxyProvidersRouter)
 	srv.HandleProtected("/api/proxy-providers/", api.ProxyProvidersRouter)
 
