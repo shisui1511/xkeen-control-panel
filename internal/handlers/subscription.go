@@ -471,7 +471,7 @@ func (a *API) SubscriptionSetNodeDialerProxy(w http.ResponseWriter, r *http.Requ
 		switch err.Error() {
 		case "node not found":
 			status = http.StatusNotFound
-		case "target not available", "chain limited to one level", "cannot cascade node to itself":
+		case "target not available", "chain limited to one level", "cannot cascade node to itself", "cannot cascade node that is already used as a proxy target":
 			status = http.StatusConflict
 		}
 		a.errorResponse(w, err.Error(), status)

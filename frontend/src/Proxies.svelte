@@ -1472,7 +1472,11 @@
       const data = await res.json();
       if (res.status === 401) return;
       if (res.status === 409) {
-        showToast('error', $t('subscr.dialer_proxy.chain_limit'));
+        if (data?.error === 'cannot cascade node that is already used as a proxy target') {
+          showToast('error', $t('subscr.dialer_proxy.already_target'));
+        } else {
+          showToast('error', $t('subscr.dialer_proxy.chain_limit'));
+        }
         return;
       }
       if (!res.ok) {

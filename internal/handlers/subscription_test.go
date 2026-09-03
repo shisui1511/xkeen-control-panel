@@ -674,6 +674,14 @@ func TestSubscriptionNodeDialerProxy(t *testing.T) {
 		t.Errorf("expected 409 for chain limit, got %d", rrChain.Code)
 	}
 
+	// 8b. Already used as a proxy target (409)
+	reqAlreadyTarget := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=sub-1", strings.NewReader(`{"node_tag":"node-target","target_tag":"node-src"}`))
+	rrAlreadyTarget := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rrAlreadyTarget, reqAlreadyTarget)
+	if rrAlreadyTarget.Code != http.StatusConflict {
+		t.Errorf("expected 409 for node already used as proxy target, got %d", rrAlreadyTarget.Code)
+	}
+
 	// 9. Success set target (200)
 	reqSuccess := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=sub-1", strings.NewReader(`{"node_tag":"node-src","target_tag":"node-target"}`))
 	rrSuccess := httptest.NewRecorder()

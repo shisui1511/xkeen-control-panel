@@ -1825,6 +1825,7 @@
   "subscr.dialer_proxy.saved": "Proxy chaining settings saved",
   "subscr.dialer_proxy.error": "Failed to save proxy chaining",
   "subscr.dialer_proxy.no_targets": "No nodes available for chaining",
+  "subscr.dialer_proxy.already_target": "Cannot cascade a node that is already used as a proxy target",
   "subscr.sockopt.title": "Socket Options (Sockopt)",
   "subscr.sockopt.hint": "Low-level socket options tuning for subscription nodes",
   "subscr.sockopt.mark": "Socket Mark (SO_MARK)",

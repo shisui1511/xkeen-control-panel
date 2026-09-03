@@ -1824,6 +1824,7 @@
   "subscr.dialer_proxy.saved": "Настройки каскада сохранены",
   "subscr.dialer_proxy.error": "Ошибка сохранения каскада",
   "subscr.dialer_proxy.no_targets": "Нет доступных узлов для каскадирования",
+  "subscr.dialer_proxy.already_target": "Невозможно каскадировать узел, который уже используется как целевой прокси",
   "subscr.sockopt.title": "Параметры сокета (Sockopt)",
   "subscr.sockopt.hint": "Низкоуровневая настройка сетевых сокетов для узлов подписки",
   "subscr.sockopt.mark": "Метка сокета (SO_MARK)",
