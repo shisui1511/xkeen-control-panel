@@ -284,6 +284,11 @@ func (a *API) XrayRestartLogger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if a.xrayGRPCSvc == nil {
+		a.errorResponse(w, "Xray gRPC service is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
 	a.restartLoggerMutex.Lock()
 	now := time.Now()
 	if !a.lastRestartLogger.IsZero() && now.Sub(a.lastRestartLogger) < 5*time.Second {
@@ -293,12 +298,8 @@ func (a *API) XrayRestartLogger(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, fmt.Sprintf("Too many requests: retry after %d seconds", remSec), http.StatusTooManyRequests)
 		return
 	}
+	a.lastRestartLogger = now
 	a.restartLoggerMutex.Unlock()
-
-	if a.xrayGRPCSvc == nil {
-		a.errorResponse(w, "Xray gRPC service is not configured", http.StatusServiceUnavailable)
-		return
-	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
@@ -318,10 +319,6 @@ func (a *API) XrayRestartLogger(w http.ResponseWriter, r *http.Request) {
 		a.errorResponse(w, fmt.Sprintf("Failed to restart logger: %v", err), http.StatusServiceUnavailable)
 		return
 	}
-
-	a.restartLoggerMutex.Lock()
-	a.lastRestartLogger = time.Now()
-	a.restartLoggerMutex.Unlock()
 
 	JSONSuccess(w, map[string]interface{}{
 		"success": true,
