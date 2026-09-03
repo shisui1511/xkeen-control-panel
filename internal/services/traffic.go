@@ -1212,17 +1212,15 @@ func (s *TrafficQuotaService) checkQuotas() {
 	defer s.checkQuotasMu.Unlock()
 
 	s.mu.RLock()
+	if len(s.quotas) == 0 && len(s.blockedProxies) == 0 {
+		s.mu.RUnlock()
+		return
+	}
 	quotasCopy := make([]TrafficQuota, len(s.quotas))
 	copy(quotasCopy, s.quotas)
+	hasBlockedProxies := len(s.blockedProxies) > 0
 	s.mu.RUnlock()
 
-	mihomoProxies, err := s.getMihomoProxies()
-	hasMihomo := err == nil
-	if err != nil {
-		log.Printf("TrafficQuota: failed to fetch Mihomo proxies: %v", err)
-	}
-
-	shouldBlock := make(map[string]string)
 	alertsToCreate := make([]struct {
 		quotaID  string
 		severity string
@@ -1232,6 +1230,12 @@ func (s *TrafficQuotaService) checkQuotas() {
 		limit    int64
 		percent  float64
 	}, 0)
+
+	type quotaFallback struct {
+		groupName string
+		fallback  string
+	}
+	var neededActions []quotaFallback
 
 	for i := range quotasCopy {
 		q := &quotasCopy[i]
@@ -1268,23 +1272,14 @@ func (s *TrafficQuotaService) checkQuotas() {
 				fallback = "DIRECT"
 			}
 
-			if fallback != "" && hasMihomo {
+			if fallback != "" {
 				var groupName string
 				if q.TargetType == "proxy" {
 					groupName = q.TargetID
 				} else {
 					groupName = "GLOBAL"
 				}
-
-				if group, ok := mihomoProxies[groupName]; ok {
-					if contains(group.All, fallback) {
-						shouldBlock[groupName] = fallback
-					} else {
-						if globalGroup, ok := mihomoProxies["GLOBAL"]; ok && contains(globalGroup.All, fallback) {
-							shouldBlock["GLOBAL"] = fallback
-						}
-					}
-				}
+				neededActions = append(neededActions, quotaFallback{groupName: groupName, fallback: fallback})
 			}
 		} else if q.AlertThreshold > 0 && percent >= float64(q.AlertThreshold) {
 			alertsToCreate = append(alertsToCreate, struct {
@@ -1304,6 +1299,49 @@ func (s *TrafficQuotaService) checkQuotas() {
 				limit:    q.LimitBytes,
 				percent:  percent,
 			})
+		}
+	}
+
+	// Always process and record alerts
+	if len(alertsToCreate) > 0 {
+		s.mu.Lock()
+		for _, alert := range alertsToCreate {
+			var quotaPtr *TrafficQuota
+			for i := range s.quotas {
+				if s.quotas[i].ID == alert.quotaID {
+					quotaPtr = &s.quotas[i]
+					break
+				}
+			}
+			if quotaPtr != nil {
+				s.addAlert(quotaPtr, alert.severity, alert.message, alert.kind, alert.current, alert.limit, alert.percent)
+			}
+		}
+		s.mu.Unlock()
+	}
+
+	// If no group actions (blocking/redirection) and no previously blocked proxies need restoration,
+	// skip fetching Mihomo proxies entirely!
+	if len(neededActions) == 0 && !hasBlockedProxies {
+		return
+	}
+
+	mihomoProxies, err := s.getMihomoProxies()
+	hasMihomo := err == nil
+	if err != nil {
+		log.Printf("TrafficQuota: failed to fetch Mihomo proxies: %v", err)
+	}
+
+	shouldBlock := make(map[string]string)
+	if hasMihomo {
+		for _, action := range neededActions {
+			if group, ok := mihomoProxies[action.groupName]; ok {
+				if contains(group.All, action.fallback) {
+					shouldBlock[action.groupName] = action.fallback
+				} else if globalGroup, ok := mihomoProxies["GLOBAL"]; ok && contains(globalGroup.All, action.fallback) {
+					shouldBlock["GLOBAL"] = action.fallback
+				}
+			}
 		}
 	}
 
@@ -1371,20 +1409,6 @@ func (s *TrafficQuotaService) checkQuotas() {
 			delete(s.blockedProxies, groupName)
 		}
 	}
-
-	for _, alert := range alertsToCreate {
-		var quotaPtr *TrafficQuota
-		for i := range s.quotas {
-			if s.quotas[i].ID == alert.quotaID {
-				quotaPtr = &s.quotas[i]
-				break
-			}
-		}
-		if quotaPtr != nil {
-			s.addAlert(quotaPtr, alert.severity, alert.message, alert.kind, alert.current, alert.limit, alert.percent)
-		}
-	}
-
 	s.mu.Unlock()
 }
 
