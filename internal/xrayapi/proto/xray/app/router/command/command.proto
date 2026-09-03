@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package xray.app.router.command;
+option go_package = "github.com/shisui1511/xkeen-control-panel/internal/xrayapi/gen/xray/app/router/command";
+
+import "xray/common/net/network.proto";
+
+message RoutingContext {
+  string InboundTag = 1;
+  xray.common.net.Network Network = 2;
+  repeated bytes SourceIPs = 3;
+  repeated bytes TargetIPs = 4;
+  uint32 SourcePort = 5;
+  uint32 TargetPort = 6;
+  string TargetDomain = 7;
+  string Protocol = 8;
+  string User = 9;
+  map<string, string> Attributes = 10;
+  repeated string OutboundGroupTags = 11;
+  string OutboundTag = 12;
+  repeated bytes LocalIPs = 13;
+  uint32 LocalPort = 14;
+  uint32 VlessRoute = 15;
+}
+
+message TestRouteRequest {
+  RoutingContext RoutingContext = 1;
+  repeated string FieldSelectors = 2;
+  bool PublishResult = 3;
+}
+
+service RoutingService {
+  rpc TestRoute(TestRouteRequest) returns (RoutingContext) {}
+}

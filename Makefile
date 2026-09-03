@@ -65,4 +65,6 @@ proto:
 		--go_out=. --go_opt=module=github.com/shisui1511/xkeen-control-panel \
 		--go-grpc_out=. --go-grpc_opt=module=github.com/shisui1511/xkeen-control-panel \
 		internal/xrayapi/proto/xray/common/net/network.proto \
-		internal/xrayapi/proto/xray/app/stats/command/command.proto
+		internal/xrayapi/proto/xray/app/stats/command/command.proto \
+		internal/xrayapi/proto/xray/app/router/command/command.proto \
+		internal/xrayapi/proto/xray/app/log/command/config.proto
