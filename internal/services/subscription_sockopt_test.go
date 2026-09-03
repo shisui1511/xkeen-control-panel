@@ -1,22 +1,23 @@
-package services_test
+package services
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
-
-	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 func TestSubscriptionSockoptFields(t *testing.T) {
-	sub := &services.Subscription{
+	sub := &Subscription{
 		ID:              "sub-test",
 		Name:            "Test Sub",
 		SockoptMark:     255,
 		SockoptFastOpen: true,
 		SockoptMptcp:    true,
-		Nodes: []services.SubscriptionNode{
+		Nodes: []SubscriptionNode{
 			{
 				Tag:         "sub-test-1",
 				Name:        "Node 1",
@@ -31,7 +32,7 @@ func TestSubscriptionSockoptFields(t *testing.T) {
 		t.Fatalf("failed to marshal subscription: %v", err)
 	}
 
-	var decoded services.Subscription
+	var decoded Subscription
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("failed to unmarshal subscription: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestSubscriptionBackwardCompat(t *testing.T) {
 		]
 	}`
 
-	var sub services.Subscription
+	var sub Subscription
 	if err := json.Unmarshal([]byte(oldJSON), &sub); err != nil {
 		t.Fatalf("failed to unmarshal legacy subscription: %v", err)
 	}
@@ -87,14 +88,14 @@ func TestSubscriptionBackwardCompat(t *testing.T) {
 	}
 }
 
-func setupTestStorage(t *testing.T) (*services.SubscriptionService, string) {
+func setupTestStorage(t *testing.T) (*SubscriptionService, string) {
 	tmpDir := t.TempDir()
 	xrayDir := filepath.Join(tmpDir, "xray")
 	mihomoDir := filepath.Join(tmpDir, "mihomo")
 	_ = os.MkdirAll(xrayDir, 0755)
 	_ = os.MkdirAll(mihomoDir, 0755)
 
-	svc := services.NewSubscriptionService(tmpDir, xrayDir, mihomoDir)
+	svc := NewSubscriptionService(tmpDir, xrayDir, mihomoDir)
 	return svc, tmpDir
 }
 
@@ -102,12 +103,12 @@ func TestSetNodeDialerProxy(t *testing.T) {
 	svc, _ := setupTestStorage(t)
 
 	// Create sub1 with node1 and node2
-	sub1 := &services.Subscription{
+	sub1 := &Subscription{
 		ID:         "sub1",
 		Name:       "Sub 1",
 		Enabled:    true,
 		EnableXray: true,
-		Nodes: []services.SubscriptionNode{
+		Nodes: []SubscriptionNode{
 			{Tag: "node1", Name: "Node 1", Protocol: "vless"},
 			{Tag: "node2", Name: "Node 2", Protocol: "vless"},
 		},
@@ -117,12 +118,12 @@ func TestSetNodeDialerProxy(t *testing.T) {
 	}
 
 	// Create sub2 with node3 and node4
-	sub2 := &services.Subscription{
+	sub2 := &Subscription{
 		ID:         "sub2",
 		Name:       "Sub 2",
 		Enabled:    true,
 		EnableXray: true,
-		Nodes: []services.SubscriptionNode{
+		Nodes: []SubscriptionNode{
 			{Tag: "node3", Name: "Node 3", Protocol: "vmess"},
 			{Tag: "node4", Name: "Node 4", Protocol: "vmess"},
 		},
@@ -177,12 +178,12 @@ func TestDialerProxyTargets(t *testing.T) {
 	svc, _ := setupTestStorage(t)
 
 	// sub1: node1 (source), node2
-	sub1 := &services.Subscription{
+	sub1 := &Subscription{
 		ID:         "sub1",
 		Name:       "Sub 1",
 		Enabled:    true,
 		EnableXray: true,
-		Nodes: []services.SubscriptionNode{
+		Nodes: []SubscriptionNode{
 			{Tag: "node1", Name: "Node 1", Protocol: "vless"},
 			{Tag: "node2", Name: "Node 2", Protocol: "vless"},
 		},
@@ -190,12 +191,12 @@ func TestDialerProxyTargets(t *testing.T) {
 	_ = svc.Add(sub1)
 
 	// sub2: node3 (available), node4 (has its own dialerProxy -> excluded)
-	sub2 := &services.Subscription{
+	sub2 := &Subscription{
 		ID:         "sub2",
 		Name:       "Sub 2",
 		Enabled:    true,
 		EnableXray: true,
-		Nodes: []services.SubscriptionNode{
+		Nodes: []SubscriptionNode{
 			{Tag: "node3", Name: "Node 3", Protocol: "vmess"},
 			{Tag: "node4", Name: "Node 4", Protocol: "vmess", DialerProxy: "node2"},
 		},
@@ -203,12 +204,12 @@ func TestDialerProxyTargets(t *testing.T) {
 	_ = svc.Add(sub2)
 
 	// sub3: disabled Xray -> all nodes excluded
-	sub3 := &services.Subscription{
+	sub3 := &Subscription{
 		ID:         "sub3",
 		Name:       "Sub 3",
 		Enabled:    true,
 		EnableXray: false,
-		Nodes: []services.SubscriptionNode{
+		Nodes: []SubscriptionNode{
 			{Tag: "node5", Name: "Node 5", Protocol: "trojan"},
 		},
 	}
@@ -236,12 +237,12 @@ func TestDialerProxyTargets(t *testing.T) {
 
 	// Test single sub with no other nodes:
 	svcEmpty, _ := setupTestStorage(t)
-	singleSub := &services.Subscription{
+	singleSub := &Subscription{
 		ID:         "single",
 		Name:       "Single",
 		Enabled:    true,
 		EnableXray: true,
-		Nodes: []services.SubscriptionNode{
+		Nodes: []SubscriptionNode{
 			{Tag: "only-node", Name: "Only Node", Protocol: "vless"},
 		},
 	}
@@ -253,5 +254,330 @@ func TestDialerProxyTargets(t *testing.T) {
 	}
 	if len(emptyTargets) != 0 {
 		t.Errorf("expected 0 targets for single node, got %d: %+v", len(emptyTargets), emptyTargets)
+	}
+}
+
+func TestWriteFragmentSockoptEmpty(t *testing.T) {
+	svc, tmpDir := setupTestStorage(t)
+	fragPath := filepath.Join(tmpDir, "xray", "02_sub_empty.json")
+
+	sub := &Subscription{
+		ID:         "sub-empty",
+		Name:       "Empty Sockopt Sub",
+		Enabled:    true,
+		EnableXray: true,
+	}
+	outbounds := []Outbound{
+		{
+			Tag:      "node-1",
+			Protocol: "vless",
+			Settings: map[string]interface{}{"vnext": []interface{}{}},
+		},
+		{
+			Tag:      "node-2",
+			Protocol: "vmess",
+			Settings: map[string]interface{}{"vnext": []interface{}{}},
+			StreamSettings: map[string]interface{}{
+				"network": "ws",
+			},
+		},
+	}
+
+	nodes, err := svc.writeFragment(fragPath, outbounds, sub)
+	if err != nil {
+		t.Fatalf("writeFragment failed: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(nodes))
+	}
+
+	data, err := os.ReadFile(fragPath)
+	if err != nil {
+		t.Fatalf("failed to read fragment: %v", err)
+	}
+
+	var parsed struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal written fragment: %v", err)
+	}
+
+	for i, ob := range parsed.Outbounds {
+		if ss, ok := ob["streamSettings"].(map[string]interface{}); ok {
+			if _, hasSockopt := ss["sockopt"]; hasSockopt {
+				t.Errorf("outbound %d has unexpected sockopt property: %+v", i, ss)
+			}
+		}
+	}
+}
+
+func TestWriteFragmentSockopt(t *testing.T) {
+	svc, tmpDir := setupTestStorage(t)
+	fragPath := filepath.Join(tmpDir, "xray", "02_sub_sockopt.json")
+
+	sub := &Subscription{
+		ID:              "sub-sockopt",
+		Name:            "Sockopt Sub",
+		Enabled:         true,
+		EnableXray:      true,
+		SockoptMark:     255,
+		SockoptFastOpen: true,
+		SockoptMptcp:    true,
+	}
+	outbounds := []Outbound{
+		{
+			Tag:      "node-tcp",
+			Protocol: "vless",
+			Settings: map[string]interface{}{"vnext": []interface{}{}},
+		},
+		{
+			Tag:      "node-ws",
+			Protocol: "vmess",
+			Settings: map[string]interface{}{"vnext": []interface{}{}},
+			StreamSettings: map[string]interface{}{
+				"network": "ws",
+				"wsSettings": map[string]interface{}{
+					"path": "/ws",
+				},
+			},
+		},
+	}
+
+	_, err := svc.writeFragment(fragPath, outbounds, sub)
+	if err != nil {
+		t.Fatalf("writeFragment failed: %v", err)
+	}
+
+	data, err := os.ReadFile(fragPath)
+	if err != nil {
+		t.Fatalf("failed to read fragment: %v", err)
+	}
+
+	var parsed struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal written fragment: %v", err)
+	}
+
+	if len(parsed.Outbounds) != 2 {
+		t.Fatalf("expected 2 outbounds, got %d", len(parsed.Outbounds))
+	}
+
+	for i, ob := range parsed.Outbounds {
+		ss, ok := ob["streamSettings"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("outbound %d missing streamSettings", i)
+		}
+		sockopt, ok := ss["sockopt"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("outbound %d missing sockopt", i)
+		}
+
+		mark, ok := sockopt["mark"].(float64)
+		if !ok || int(mark) != 255 {
+			t.Errorf("outbound %d expected mark=255, got %v", i, sockopt["mark"])
+		}
+		if tfo, ok := sockopt["tcpFastOpen"].(bool); !ok || !tfo {
+			t.Errorf("outbound %d expected tcpFastOpen=true, got %v", i, sockopt["tcpFastOpen"])
+		}
+		if mptcp, ok := sockopt["tcpMptcp"].(bool); !ok || !mptcp {
+			t.Errorf("outbound %d expected tcpMptcp=true, got %v", i, sockopt["tcpMptcp"])
+		}
+	}
+
+	// Verify preservation of other streamSettings keys on node-ws
+	wsOb := parsed.Outbounds[1]
+	wsSS := wsOb["streamSettings"].(map[string]interface{})
+	if wsSS["network"] != "ws" {
+		t.Errorf("expected network=ws preserved, got %v", wsSS["network"])
+	}
+	if wsSS["wsSettings"] == nil {
+		t.Errorf("expected wsSettings preserved")
+	}
+}
+
+func TestWriteFragmentDialerProxy(t *testing.T) {
+	svc, tmpDir := setupTestStorage(t)
+
+	// sub2 contains target node
+	sub2 := &Subscription{
+		ID:         "sub2",
+		Name:       "Sub 2",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []SubscriptionNode{
+			{Tag: "target-node", Name: "Target Node", Protocol: "vmess"},
+		},
+	}
+	_ = svc.Add(sub2)
+
+	fragPath := filepath.Join(tmpDir, "xray", "02_sub1.json")
+	sub1 := &Subscription{
+		ID:         "sub1",
+		Name:       "Sub 1",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []SubscriptionNode{
+			{Tag: "node-with-cascade", Name: "Node 1", Protocol: "vless", DialerProxy: "target-node"},
+			{Tag: "node-direct", Name: "Node 2", Protocol: "vless"},
+		},
+	}
+	_ = svc.Add(sub1)
+
+	outbounds := []Outbound{
+		{Tag: "node-with-cascade", Protocol: "vless", Settings: map[string]interface{}{"vnext": []interface{}{}}},
+		{Tag: "node-direct", Protocol: "vless", Settings: map[string]interface{}{"vnext": []interface{}{}}},
+	}
+
+	_, err := svc.writeFragment(fragPath, outbounds, sub1)
+	if err != nil {
+		t.Fatalf("writeFragment failed: %v", err)
+	}
+
+	data, err := os.ReadFile(fragPath)
+	if err != nil {
+		t.Fatalf("failed to read fragment: %v", err)
+	}
+
+	var parsed struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	// First outbound should have dialerProxy
+	ob1SS := parsed.Outbounds[0]["streamSettings"].(map[string]interface{})
+	ob1Sockopt := ob1SS["sockopt"].(map[string]interface{})
+	if ob1Sockopt["dialerProxy"] != "target-node" {
+		t.Errorf("expected dialerProxy=target-node, got %v", ob1Sockopt["dialerProxy"])
+	}
+
+	// Second outbound should NOT have dialerProxy (no sockopt at all since sub1 has no sockopt flags)
+	if ob2SS, ok := parsed.Outbounds[1]["streamSettings"].(map[string]interface{}); ok {
+		if _, hasSockopt := ob2SS["sockopt"]; hasSockopt {
+			t.Errorf("unexpected sockopt in direct node: %+v", ob2SS)
+		}
+	}
+}
+
+func TestWriteFragmentDialerProxy_MissingTarget(t *testing.T) {
+	svc, tmpDir := setupTestStorage(t)
+	fragPath := filepath.Join(tmpDir, "xray", "02_sub_missing.json")
+
+	sub := &Subscription{
+		ID:         "sub-missing",
+		Name:       "Sub Missing",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []SubscriptionNode{
+			{Tag: "node1", Name: "Node 1", Protocol: "vless", DialerProxy: "phantom-target"},
+		},
+	}
+	outbounds := []Outbound{
+		{Tag: "node1", Protocol: "vless", Settings: map[string]interface{}{"vnext": []interface{}{}}},
+	}
+
+	// Capture log output
+	var logBuf bytes.Buffer
+	origOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(origOutput)
+
+	_, err := svc.writeFragment(fragPath, outbounds, sub)
+	if err != nil {
+		t.Fatalf("writeFragment failed: %v", err)
+	}
+
+	data, err := os.ReadFile(fragPath)
+	if err != nil {
+		t.Fatalf("failed to read fragment: %v", err)
+	}
+
+	var parsed struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to parse JSON: %v", err)
+	}
+
+	// Target was missing -> dialerProxy must NOT be present in sockopt
+	if ss, ok := parsed.Outbounds[0]["streamSettings"].(map[string]interface{}); ok {
+		if sockopt, ok := ss["sockopt"].(map[string]interface{}); ok {
+			if dp, exists := sockopt["dialerProxy"]; exists {
+				t.Errorf("expected dialerProxy omitted for missing target, got %v", dp)
+			}
+		}
+	}
+
+	// Warning must be logged
+	logStr := logBuf.String()
+	if !strings.Contains(logStr, "phantom-target") || !strings.Contains(logStr, "not found in active Xray subscriptions") {
+		t.Errorf("expected warning in log for missing target, got: %s", logStr)
+	}
+}
+
+func TestWriteFragmentDialerProxy_ProxySettingsConflict(t *testing.T) {
+	svc, tmpDir := setupTestStorage(t)
+	fragPath := filepath.Join(tmpDir, "xray", "02_sub_conflict.json")
+
+	sub := &Subscription{
+		ID:         "sub-conflict",
+		Name:       "Sub Conflict",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []SubscriptionNode{
+			{Tag: "node1", Name: "Node 1", Protocol: "vless", DialerProxy: "valid-target"},
+		},
+	}
+	outbounds := []Outbound{
+		{
+			Tag:      "node1",
+			Protocol: "vless",
+			Settings: map[string]interface{}{"vnext": []interface{}{}},
+			StreamSettings: map[string]interface{}{
+				"proxySettings": map[string]interface{}{
+					"tag": "existing-proxy",
+				},
+			},
+		},
+		{
+			Tag:      "valid-target",
+			Protocol: "vless",
+			Settings: map[string]interface{}{"vnext": []interface{}{}},
+		},
+	}
+
+	var logBuf bytes.Buffer
+	origOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(origOutput)
+
+	_, err := svc.writeFragment(fragPath, outbounds, sub)
+	if err != nil {
+		t.Fatalf("writeFragment failed: %v", err)
+	}
+
+	data, err := os.ReadFile(fragPath)
+	if err != nil {
+		t.Fatalf("failed to read fragment: %v", err)
+	}
+
+	var parsed struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+	}
+	_ = json.Unmarshal(data, &parsed)
+
+	ss := parsed.Outbounds[0]["streamSettings"].(map[string]interface{})
+	if sockopt, ok := ss["sockopt"].(map[string]interface{}); ok {
+		if dp, exists := sockopt["dialerProxy"]; exists {
+			t.Errorf("expected dialerProxy omitted due to proxySettings conflict, got %v", dp)
+		}
+	}
+
+	if !strings.Contains(logBuf.String(), "already has proxySettings configured") {
+		t.Errorf("expected conflict log, got: %s", logBuf.String())
 	}
 }

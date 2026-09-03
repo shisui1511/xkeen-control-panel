@@ -81,6 +81,23 @@ func (s *SubscriptionService) outboundsToNodes(outbounds []Outbound, sub *Subscr
 		node.Transport = "tcp"
 		node.Security = "none"
 
+		// Preserve DialerProxy if already set in sub.Nodes or existing StreamSettings
+		if sub != nil {
+			for _, prev := range sub.Nodes {
+				if prev.Tag == node.Tag {
+					node.DialerProxy = prev.DialerProxy
+					break
+				}
+			}
+		}
+		if node.DialerProxy == "" && outbounds[i].StreamSettings != nil {
+			if sopt, ok := outbounds[i].StreamSettings["sockopt"].(map[string]interface{}); ok {
+				if dp, _ := sopt["dialerProxy"].(string); dp != "" {
+					node.DialerProxy = dp
+				}
+			}
+		}
+
 		// Извлекаем детальные настройки протокола
 		switch node.Protocol {
 		case "vless":
@@ -712,12 +729,20 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 	nodes := s.outboundsToNodes(outbounds, sub)
 
 	allowedOutbounds := make([]Outbound, 0, len(outbounds))
+	allowedNodes := make([]SubscriptionNode, 0, len(outbounds))
 	for i, node := range nodes {
 		if allowedXrayProtocols[node.Protocol] {
 			allowedOutbounds = append(allowedOutbounds, outbounds[i])
+			allowedNodes = append(allowedNodes, node)
 		} else {
 			log.Printf("[Subscriptions] Skipping outbound %q for Xray configuration: unsupported protocol %q", outbounds[i].Tag, node.Protocol)
 		}
+	}
+
+	// Merge sockopt and dialerProxy into allowed outbounds
+	activeTags := s.collectActiveXrayTags(sub, allowedOutbounds)
+	for i := range allowedOutbounds {
+		mergeSockopt(&allowedOutbounds[i], sub, &allowedNodes[i], activeTags)
 	}
 
 	wrapper := struct {
@@ -736,6 +761,76 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 	}
 
 	return nodes, nil
+}
+
+func (s *SubscriptionService) collectActiveXrayTags(currentSub *Subscription, currentOutbounds []Outbound) map[string]bool {
+	tags := make(map[string]bool)
+	if s != nil {
+		for i := range s.subscriptions {
+			sub := &s.subscriptions[i]
+			if !sub.Enabled || !sub.EnableXray {
+				continue
+			}
+			if currentSub != nil && sub.ID == currentSub.ID {
+				continue
+			}
+			for _, node := range sub.Nodes {
+				if allowedXrayProtocols[node.Protocol] && node.Tag != "" {
+					tags[node.Tag] = true
+				}
+			}
+		}
+	}
+	for _, ob := range currentOutbounds {
+		if allowedXrayProtocols[ob.Protocol] && ob.Tag != "" {
+			tags[ob.Tag] = true
+		}
+	}
+	return tags
+}
+
+func mergeSockopt(ob *Outbound, sub *Subscription, node *SubscriptionNode, activeTags map[string]bool) {
+	sockopt := make(map[string]interface{})
+	if sub != nil {
+		if sub.SockoptMark > 0 {
+			sockopt["mark"] = sub.SockoptMark
+		}
+		if sub.SockoptFastOpen {
+			sockopt["tcpFastOpen"] = true
+		}
+		if sub.SockoptMptcp {
+			sockopt["tcpMptcp"] = true
+		}
+	}
+
+	if node != nil && node.DialerProxy != "" {
+		hasProxySettings := false
+		if ob.StreamSettings != nil {
+			if ps, ok := ob.StreamSettings["proxySettings"]; ok && ps != nil {
+				hasProxySettings = true
+			}
+		}
+		if hasProxySettings {
+			log.Printf("[Subscriptions] Outbound %q already has proxySettings configured; skipping dialerProxy cascade to %q", ob.Tag, node.DialerProxy)
+		} else if activeTags != nil && !activeTags[node.DialerProxy] {
+			log.Printf("[Subscriptions] Target node %q for dialerProxy cascade of %q is not found in active Xray subscriptions; skipping", node.DialerProxy, ob.Tag)
+		} else {
+			sockopt["dialerProxy"] = node.DialerProxy
+		}
+	}
+
+	if len(sockopt) > 0 {
+		if ob.StreamSettings == nil {
+			ob.StreamSettings = make(map[string]interface{})
+		}
+		if existingSockopt, ok := ob.StreamSettings["sockopt"].(map[string]interface{}); ok {
+			for k, v := range sockopt {
+				existingSockopt[k] = v
+			}
+		} else {
+			ob.StreamSettings["sockopt"] = sockopt
+		}
+	}
 }
 
 func extractServer(ob *Outbound) string {
