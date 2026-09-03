@@ -339,6 +339,17 @@ func TestSmartMergeXrayAPIBlock(t *testing.T) {
 		t.Errorf("expected success on re-provisioning when port is already configured in existingContent, got error: %v", idemErr)
 	}
 
+	// 3c. String port idempotency test
+	stringPortConfig := fmt.Sprintf(`{"inbounds":[{"tag":"api","port":"%d"}]}`, testPort)
+	busyLn3, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", testPort))
+	if err == nil {
+		_, strPortErr := ProvisionXrayAPIBlock(stringPortConfig, testPort)
+		_ = busyLn3.Close()
+		if strPortErr != nil {
+			t.Errorf("expected success for string-typed port idempotency, got %v", strPortErr)
+		}
+	}
+
 	// 4. Deprovisioning test
 	deprov, err := DeprovisionXrayAPIBlock(prov)
 	if err != nil {

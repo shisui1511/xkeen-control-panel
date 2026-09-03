@@ -158,19 +158,30 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 		resp.XRay.ConfDirExists = true
 	}
 	if resp.ActiveKernel == "xray" && resp.XRay.ConfDirExists {
-		cfgPath := filepath.Join(a.cfg.XRayConfigDir, "config.json")
-		if data, err := os.ReadFile(cfgPath); err == nil {
-			var root map[string]interface{}
-			if json.Unmarshal(data, &root) == nil {
-				if inbs, ok := root["inbounds"].([]interface{}); ok {
-					for _, inb := range inbs {
-						if m, ok := inb.(map[string]interface{}); ok {
-							if m["tag"] == "api" {
-								resp.XRay.GRPCReady = true
-								break
+		if entries, err := os.ReadDir(a.cfg.XRayConfigDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+					continue
+				}
+				data, err := os.ReadFile(filepath.Join(a.cfg.XRayConfigDir, entry.Name()))
+				if err != nil {
+					continue
+				}
+				var root map[string]interface{}
+				if json.Unmarshal(data, &root) == nil {
+					if inbs, ok := root["inbounds"].([]interface{}); ok {
+						for _, inb := range inbs {
+							if m, ok := inb.(map[string]interface{}); ok {
+								if m["tag"] == "api" {
+									resp.XRay.GRPCReady = true
+									break
+								}
 							}
 						}
 					}
+				}
+				if resp.XRay.GRPCReady {
+					break
 				}
 			}
 		}

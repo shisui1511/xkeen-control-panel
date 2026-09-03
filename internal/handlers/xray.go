@@ -93,6 +93,31 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 
 	configPath := filepath.Join(a.cfg.XRayConfigDir, "config.json")
+	existedBefore := true
+	if _, err := os.Stat(configPath); err != nil {
+		modularPath := filepath.Join(a.cfg.XRayConfigDir, "00_api.json")
+		if _, errMod := os.Stat(modularPath); errMod == nil {
+			configPath = modularPath
+		} else {
+			// Check if any other .json files exist in XRayConfigDir (modular deployment)
+			entries, _ := os.ReadDir(a.cfg.XRayConfigDir)
+			hasOtherJSON := false
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+					hasOtherJSON = true
+					break
+				}
+			}
+			if hasOtherJSON {
+				configPath = modularPath
+				existedBefore = false
+			} else {
+				a.errorResponse(w, "Xray configuration file not found or not readable", http.StatusServiceUnavailable)
+				return
+			}
+		}
+	}
+
 	if a.pathVal != nil {
 		cleanPath, err := a.pathVal.Validate(configPath)
 		if err != nil {
@@ -102,13 +127,15 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 		configPath = cleanPath
 	}
 
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		a.errorResponse(w, "Xray configuration file not found or not readable", http.StatusServiceUnavailable)
-		return
+	var originalContent string
+	if existedBefore {
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			a.errorResponse(w, "Xray configuration file not found or not readable", http.StatusServiceUnavailable)
+			return
+		}
+		originalContent = string(data)
 	}
-
-	originalContent := string(data)
 
 	if req.Enabled {
 		port := a.cfg.XRayAPIPort
@@ -141,10 +168,21 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if p, err := exec.LookPath(xrayBin); err == nil {
-			cmd := exec.Command(p, "-test", "-config", configPath)
+			var cmd *exec.Cmd
+			if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
+				cmd = exec.Command(p, "-test", "-confdir", a.cfg.XRayConfigDir)
+				setupXrayCmdEnv(cmd, a.cfg.XRayConfigDir)
+			} else {
+				cmd = exec.Command(p, "-test", "-config", configPath)
+				setupXrayCmdEnv(cmd, filepath.Dir(configPath))
+			}
 			if out, err := cmd.CombinedOutput(); err != nil {
 				// Rollback
-				_ = utils.AtomicWriteFile(configPath, []byte(originalContent), 0600)
+				if existedBefore {
+					_ = utils.AtomicWriteFile(configPath, []byte(originalContent), 0600)
+				} else {
+					_ = os.Remove(configPath)
+				}
 				a.errorResponse(w, fmt.Sprintf("Xray config validation failed, rolled back: %s", string(out)), http.StatusServiceUnavailable)
 				return
 			}

@@ -424,6 +424,10 @@ func ProvisionXrayAPIBlock(existingContent string, apiPort int) (string, error) 
 						if p == apiPort {
 							alreadyConfigured = true
 						}
+					case string:
+						if pInt, err := strconv.Atoi(strings.TrimSpace(p)); err == nil && pInt == apiPort {
+							alreadyConfigured = true
+						}
 					}
 				}
 			}

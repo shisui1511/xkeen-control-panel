@@ -283,6 +283,40 @@ func TestXrayGRPCMonitoring(t *testing.T) {
 	if _, ok := disabledObj["stats"]; !ok {
 		t.Errorf("stats object should remain after disable")
 	}
+	// 7. Modular layout test: directory has other .json files, but no config.json
+	modularDir := t.TempDir()
+	pvModular := utils.NewPathValidator([]string{modularDir})
+	cfgModular := &config.Config{
+		XRayConfigDir: modularDir,
+		XRayAPIPort:   testPort,
+	}
+	apiModular := &API{
+		cfg:     cfgModular,
+		pathVal: pvModular,
+	}
+	// Add an existing modular file (e.g. 04_outbounds.json)
+	_ = os.WriteFile(filepath.Join(modularDir, "04_outbounds.json"), []byte(`{"outbounds":[]}`), 0600)
+
+	bodyModEnable := bytes.NewBufferString(`{"enabled": true}`)
+	reqModEnable := httptest.NewRequest(http.MethodPost, "/api/xray/grpc/monitoring", bodyModEnable)
+	rrModEnable := httptest.NewRecorder()
+	apiModular.XrayGRPCMonitoring(rrModEnable, reqModEnable)
+	if rrModEnable.Code != http.StatusOK {
+		t.Fatalf("expected 200 on modular config enable, got %d: %s", rrModEnable.Code, rrModEnable.Body.String())
+	}
+
+	apiJSONPath := filepath.Join(modularDir, "00_api.json")
+	if _, err := os.Stat(apiJSONPath); err != nil {
+		t.Errorf("expected 00_api.json to be created in modular layout, err: %v", err)
+	}
+
+	bodyModDisable := bytes.NewBufferString(`{"enabled": false}`)
+	reqModDisable := httptest.NewRequest(http.MethodPost, "/api/xray/grpc/monitoring", bodyModDisable)
+	rrModDisable := httptest.NewRecorder()
+	apiModular.XrayGRPCMonitoring(rrModDisable, reqModDisable)
+	if rrModDisable.Code != http.StatusOK {
+		t.Fatalf("expected 200 on modular config disable, got %d: %s", rrModDisable.Code, rrModDisable.Body.String())
+	}
 }
 
 func TestCapabilitiesGRPCReady(t *testing.T) {
@@ -372,6 +406,22 @@ func TestCapabilitiesGRPCReady(t *testing.T) {
 	_ = json.Unmarshal(rrNoAPI.Body.Bytes(), &respNoAPI)
 	if respNoAPI.Data.XRay.GRPCReady {
 		t.Errorf("expected GRPCReady to be false when config lacks api inbound")
+	}
+
+	// 4. Modular layout (00_api.json instead of config.json) -> grpc_ready: true
+	_ = os.Remove(cfgPath)
+	apiJSONPath := filepath.Join(tmpDir, "00_api.json")
+	_ = os.WriteFile(apiJSONPath, []byte(configWithAPI), 0600)
+	api.capsCache = nil
+	rrModular := httptest.NewRecorder()
+	api.Capabilities(rrModular, req)
+	var respModular struct {
+		Success bool                 `json:"success"`
+		Data    CapabilitiesResponse `json:"data"`
+	}
+	_ = json.Unmarshal(rrModular.Body.Bytes(), &respModular)
+	if !respModular.Data.XRay.GRPCReady {
+		t.Errorf("expected GRPCReady to be true for modular 00_api.json")
 	}
 }
 
