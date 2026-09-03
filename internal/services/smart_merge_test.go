@@ -1,6 +1,9 @@
 package services
 
 import (
+	"encoding/json"
+	"fmt"
+	"net"
 	"strings"
 	"testing"
 )
@@ -183,3 +186,190 @@ func TestUserRulesService(t *testing.T) {
 		t.Errorf("unexpected mihomo rule: %s", mihomoRules[1])
 	}
 }
+
+func TestSmartMergeXrayAPIBlock(t *testing.T) {
+	// Find a free port for testing
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	testPort := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+
+	initialConfig := `{
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "port": 10808,
+      "protocol": "socks"
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "outboundTag": "direct",
+        "ip": ["127.0.0.53"]
+      }
+    ]
+  }
+}`
+
+	// 1. Provisioning on existing config
+	prov, err := ProvisionXrayAPIBlock(initialConfig, testPort)
+	if err != nil {
+		t.Fatalf("ProvisionXrayAPIBlock failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(prov), &parsed); err != nil {
+		t.Fatalf("failed to parse provisioned json: %v", err)
+	}
+
+	// Verify stats
+	if _, ok := parsed["stats"]; !ok {
+		t.Errorf("expected stats object in config")
+	}
+
+	// Verify api object
+	apiObj, ok := parsed["api"].(map[string]interface{})
+	if !ok || apiObj["tag"] != "api" {
+		t.Errorf("expected api object with tag 'api', got: %+v", parsed["api"])
+	}
+
+	// Verify policy.system
+	policyMap, _ := parsed["policy"].(map[string]interface{})
+	systemMap, _ := policyMap["system"].(map[string]interface{})
+	if systemMap["statsOutboundUplink"] != true || systemMap["statsOutboundDownlink"] != true {
+		t.Errorf("expected statsOutbound flags true in policy.system: %+v", systemMap)
+	}
+
+	// Verify inbounds: socks-in preserved, api inbound added
+	inbounds, _ := parsed["inbounds"].([]interface{})
+	if len(inbounds) != 2 {
+		t.Fatalf("expected 2 inbounds, got %d", len(inbounds))
+	}
+	var apiInb map[string]interface{}
+	var socksInb map[string]interface{}
+	for _, inb := range inbounds {
+		m := inb.(map[string]interface{})
+		if m["tag"] == "api" {
+			apiInb = m
+		} else if m["tag"] == "socks-in" {
+			socksInb = m
+		}
+	}
+	if socksInb == nil {
+		t.Errorf("user inbound socks-in was lost")
+	}
+	if apiInb == nil || apiInb["listen"] != "127.0.0.1" || apiInb["protocol"] != "dokodemo-door" {
+		t.Errorf("api inbound invalid: %+v", apiInb)
+	}
+
+	// Verify rule ordering: rule 0 is api, rule 1 is DNS protection
+	routingMap, _ := parsed["routing"].(map[string]interface{})
+	rules, _ := routingMap["rules"].([]interface{})
+	if len(rules) != 2 {
+		t.Fatalf("expected 2 rules, got %d", len(rules))
+	}
+	rule0 := rules[0].(map[string]interface{})
+	if rule0["outboundTag"] != "api" {
+		t.Errorf("expected rule 0 outboundTag to be 'api', got %v", rule0["outboundTag"])
+	}
+	rule1 := rules[1].(map[string]interface{})
+	if rule1["outboundTag"] != "direct" {
+		t.Errorf("expected rule 1 outboundTag to be 'direct', got %v", rule1["outboundTag"])
+	}
+
+	// 2. Double provisioning idempotency test
+	prov2, err := ProvisionXrayAPIBlock(prov, testPort)
+	if err != nil {
+		t.Fatalf("second ProvisionXrayAPIBlock failed: %v", err)
+	}
+
+	var parsed2 map[string]interface{}
+	_ = json.Unmarshal([]byte(prov2), &parsed2)
+	inbounds2, _ := parsed2["inbounds"].([]interface{})
+	apiInboundCount := 0
+	for _, inb := range inbounds2 {
+		if inb.(map[string]interface{})["tag"] == "api" {
+			apiInboundCount++
+		}
+	}
+	if apiInboundCount != 1 {
+		t.Errorf("expected exactly 1 api inbound after double provisioning, got %d", apiInboundCount)
+	}
+
+	rules2, _ := parsed2["routing"].(map[string]interface{})["rules"].([]interface{})
+	apiRuleCount := 0
+	for _, r := range rules2 {
+		if r.(map[string]interface{})["outboundTag"] == "api" {
+			apiRuleCount++
+		}
+	}
+	if apiRuleCount != 1 {
+		t.Errorf("expected exactly 1 api rule after double provisioning, got %d", apiRuleCount)
+	}
+
+	// 3. Busy port test
+	busyLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", testPort))
+	if err != nil {
+		t.Fatalf("failed to hold test port: %v", err)
+	}
+	_, busyErr := ProvisionXrayAPIBlock(initialConfig, testPort)
+	_ = busyLn.Close()
+	if busyErr == nil {
+		t.Errorf("expected error when port is busy, got nil")
+	}
+
+	// 4. Deprovisioning test
+	deprov, err := DeprovisionXrayAPIBlock(prov)
+	if err != nil {
+		t.Fatalf("DeprovisionXrayAPIBlock failed: %v", err)
+	}
+
+	var parsedDeprov map[string]interface{}
+	_ = json.Unmarshal([]byte(deprov), &parsedDeprov)
+
+	// Inbound with tag api is gone
+	for _, inb := range parsedDeprov["inbounds"].([]interface{}) {
+		if inb.(map[string]interface{})["tag"] == "api" {
+			t.Errorf("api inbound still present after deprovision")
+		}
+	}
+
+	// Rule with outboundTag api is gone
+	for _, r := range parsedDeprov["routing"].(map[string]interface{})["rules"].([]interface{}) {
+		if r.(map[string]interface{})["outboundTag"] == "api" {
+			t.Errorf("api rule still present after deprovision")
+		}
+	}
+
+	// Stats and policy remain
+	if _, ok := parsedDeprov["stats"]; !ok {
+		t.Errorf("stats object should remain after deprovision")
+	}
+	if _, ok := parsedDeprov["policy"]; !ok {
+		t.Errorf("policy object should remain after deprovision")
+	}
+
+	// 5. Empty config provisioning test
+	provEmpty, err := ProvisionXrayAPIBlock("", testPort)
+	if err != nil {
+		t.Fatalf("ProvisionXrayAPIBlock on empty config failed: %v", err)
+	}
+	var parsedEmpty map[string]interface{}
+	if err := json.Unmarshal([]byte(provEmpty), &parsedEmpty); err != nil {
+		t.Fatalf("failed to parse empty provisioned config: %v", err)
+	}
+	if _, ok := parsedEmpty["api"]; !ok {
+		t.Errorf("expected api object in empty provisioned config")
+	}
+}
+
