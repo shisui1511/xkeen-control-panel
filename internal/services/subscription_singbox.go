@@ -223,10 +223,14 @@ func convertSingBoxOutbound(sb *singBoxOutbound) *Outbound {
 
 		reserved := decodeWireguardReserved(sb.Reserved)
 		pubKey := sb.PeerPublicKey
+		var serverAddr string
+		if sb.Server != "" && sb.ServerPort > 0 {
+			serverAddr = net.JoinHostPort(sb.Server, strconv.Itoa(sb.ServerPort))
+		}
 		node := &SubscriptionNode{
 			Tag:            tag,
 			Protocol:       "wireguard",
-			Server:         net.JoinHostPort(sb.Server, strconv.Itoa(sb.ServerPort)),
+			Server:         serverAddr,
 			PublicKey:      pubKey,
 			SecretKey:      sb.PrivateKey,
 			PreSharedKey:   sb.PreSharedKey,
