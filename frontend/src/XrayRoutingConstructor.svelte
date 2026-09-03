@@ -940,7 +940,7 @@
       const data = await res.json();
       if (res.status === 401) return;
       if (res.status === 503) {
-        testRouteError = $t('xray.grpc.core_unavailable');
+        testRouteError = $t('xray.grpc.unavailable');
         return;
       }
       if (!res.ok) {
