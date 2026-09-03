@@ -237,11 +237,13 @@ func TestXrayGRPCMonitoring(t *testing.T) {
 		t.Errorf("saved config does not contain api inbound")
 	}
 
-	// 5. Busy port test -> 409 and file unchanged
-	busyLn, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", testPort))
+	// 5. Busy port test on a different port that is not yet configured -> 409 and file unchanged
+	busyLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to occupy test port: %v", err)
 	}
+	busyPort := busyLn.Addr().(*net.TCPAddr).Port
+	cfg.XRayAPIPort = busyPort
 	contentBeforeBusy := string(savedData)
 
 	bodyBusy := bytes.NewBufferString(`{"enabled": true}`)
@@ -249,6 +251,7 @@ func TestXrayGRPCMonitoring(t *testing.T) {
 	rrBusy := httptest.NewRecorder()
 	api.XrayGRPCMonitoring(rrBusy, reqBusy)
 	_ = busyLn.Close()
+	cfg.XRayAPIPort = testPort // restore
 
 	if rrBusy.Code != http.StatusConflict {
 		t.Errorf("expected 409 Conflict on busy port, got %d: %s", rrBusy.Code, rrBusy.Body.String())

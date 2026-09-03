@@ -397,12 +397,7 @@ func ProvisionXrayAPIBlock(existingContent string, apiPort int) (string, error) 
 		return existingContent, fmt.Errorf("invalid api port: %d", apiPort)
 	}
 
-	// 1. Port availability test before making any changes
-	if err := CheckPortAvailable(apiPort); err != nil {
-		return existingContent, err
-	}
-
-	// 2. Parse existing JSON
+	// 1. Parse existing JSON
 	var root map[string]interface{}
 	trimmed := strings.TrimSpace(existingContent)
 	if trimmed != "" {
@@ -412,6 +407,34 @@ func ProvisionXrayAPIBlock(existingContent string, apiPort int) (string, error) 
 	}
 	if root == nil {
 		root = make(map[string]interface{})
+	}
+
+	// 2. Check if API inbound is already configured on this port
+	alreadyConfigured := false
+	if inbs, ok := root["inbounds"].([]interface{}); ok {
+		for _, inb := range inbs {
+			if m, ok := inb.(map[string]interface{}); ok {
+				if tag, _ := m["tag"].(string); tag == "api" {
+					switch p := m["port"].(type) {
+					case float64:
+						if int(p) == apiPort {
+							alreadyConfigured = true
+						}
+					case int:
+						if p == apiPort {
+							alreadyConfigured = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Port availability test only if port is not already configured
+	if !alreadyConfigured {
+		if err := CheckPortAvailable(apiPort); err != nil {
+			return existingContent, err
+		}
 	}
 
 	// 3. Ensure "stats": {}

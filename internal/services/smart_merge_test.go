@@ -328,6 +328,17 @@ func TestSmartMergeXrayAPIBlock(t *testing.T) {
 		t.Errorf("expected error when port is busy, got nil")
 	}
 
+	// 3b. Idempotency test: when port is already configured in config, busy port (e.g. running Xray) should not trigger conflict
+	busyLn2, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", testPort))
+	if err != nil {
+		t.Fatalf("failed to hold test port for idempotency test: %v", err)
+	}
+	_, idemErr := ProvisionXrayAPIBlock(prov, testPort)
+	_ = busyLn2.Close()
+	if idemErr != nil {
+		t.Errorf("expected success on re-provisioning when port is already configured in existingContent, got error: %v", idemErr)
+	}
+
 	// 4. Deprovisioning test
 	deprov, err := DeprovisionXrayAPIBlock(prov)
 	if err != nil {
