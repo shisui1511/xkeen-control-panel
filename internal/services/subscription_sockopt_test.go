@@ -172,6 +172,15 @@ func TestSetNodeDialerProxy(t *testing.T) {
 	if err := svc.SetNodeDialerProxy("sub1", "node1", "node3"); err == nil || err.Error() != "chain limited to one level" {
 		t.Errorf("expected 'chain limited to one level', got: %v", err)
 	}
+
+	// 7. Error: source node is already used as a proxy target
+	_ = svc.SetNodeDialerProxy("sub2", "node3", "")
+	if err := svc.SetNodeDialerProxy("sub1", "node1", "node3"); err != nil {
+		t.Fatalf("failed to set node1 -> node3: %v", err)
+	}
+	if err := svc.SetNodeDialerProxy("sub2", "node3", "node4"); err == nil || err.Error() != "cannot cascade node that is already used as a proxy target" {
+		t.Errorf("expected 'cannot cascade node that is already used as a proxy target', got: %v", err)
+	}
 }
 
 func TestDialerProxyTargets(t *testing.T) {
@@ -581,3 +590,97 @@ func TestWriteFragmentDialerProxy_ProxySettingsConflict(t *testing.T) {
 		t.Errorf("expected conflict log, got: %s", logBuf.String())
 	}
 }
+
+func TestRefreshXrayFragmentOnDialerProxyAndSockoptUpdate(t *testing.T) {
+	svc, _ := setupTestStorage(t)
+
+	sub := &Subscription{
+		ID:         "sub-frag",
+		Name:       "Sub Fragment",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []SubscriptionNode{
+			{Tag: "node-src", Name: "Src Node", Protocol: "vless"},
+			{Tag: "node-dst", Name: "Dst Node", Protocol: "vless"},
+		},
+	}
+	if err := svc.Add(sub); err != nil {
+		t.Fatalf("failed to add sub: %v", err)
+	}
+
+	fragPath := svc.getFragmentPath(sub)
+	outbounds := []Outbound{
+		{
+			Tag:      "node-src",
+			Protocol: "vless",
+			Settings: map[string]interface{}{"vnext": []interface{}{}},
+		},
+		{
+			Tag:      "node-dst",
+			Protocol: "vless",
+			Settings: map[string]interface{}{"vnext": []interface{}{}},
+		},
+	}
+	if _, err := svc.writeFragment(fragPath, outbounds, sub); err != nil {
+		t.Fatalf("initial writeFragment failed: %v", err)
+	}
+
+	// 1. Update dialerProxy via SetNodeDialerProxy and check fragment on disk
+	if err := svc.SetNodeDialerProxy("sub-frag", "node-src", "node-dst"); err != nil {
+		t.Fatalf("SetNodeDialerProxy failed: %v", err)
+	}
+
+	data, err := os.ReadFile(fragPath)
+	if err != nil {
+		t.Fatalf("failed to read fragment after dialerProxy update: %v", err)
+	}
+	var parsed struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal fragment failed: %v", err)
+	}
+
+	srcOutbound := parsed.Outbounds[0]
+	ss, ok := srcOutbound["streamSettings"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected streamSettings in fragment for node-src")
+	}
+	sockopt, ok := ss["sockopt"].(map[string]interface{})
+	if !ok || sockopt["dialerProxy"] != "node-dst" {
+		t.Errorf("expected dialerProxy=node-dst in fragment, got %+v", sockopt)
+	}
+
+	// 2. Update sockopt via Update and check fragment on disk
+	updatedSub := *sub
+	updatedSub.SockoptFastOpen = true
+	updatedSub.SockoptMark = 123
+	if err := svc.Update("sub-frag", &updatedSub); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+
+	data2, err := os.ReadFile(fragPath)
+	if err != nil {
+		t.Fatalf("failed to read fragment after sockopt update: %v", err)
+	}
+	var parsed2 struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data2, &parsed2); err != nil {
+		t.Fatalf("unmarshal fragment2 failed: %v", err)
+	}
+
+	ss2 := parsed2.Outbounds[0]["streamSettings"].(map[string]interface{})
+	sockopt2 := ss2["sockopt"].(map[string]interface{})
+	if sockopt2["tcpFastOpen"] != true {
+		t.Errorf("expected tcpFastOpen=true in fragment, got %v", sockopt2["tcpFastOpen"])
+	}
+	if int(sockopt2["mark"].(float64)) != 123 {
+		t.Errorf("expected mark=123 in fragment, got %v", sockopt2["mark"])
+	}
+	// dialerProxy should still be retained
+	if sockopt2["dialerProxy"] != "node-dst" {
+		t.Errorf("expected dialerProxy=node-dst preserved, got %v", sockopt2["dialerProxy"])
+	}
+}
+
