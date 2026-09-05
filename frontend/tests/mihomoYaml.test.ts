@@ -414,6 +414,14 @@ proxy-providers:
           password: 'pass'
         },
         {
+          name: 'socks5-proxy',
+          type: 'socks5',
+          server: 'server5.com',
+          port: 1085,
+          username: 'user5',
+          password: 'pass5'
+        },
+        {
           name: 'http-proxy',
           type: 'http',
           server: 'server.com',
@@ -443,6 +451,11 @@ proxy-providers:
     expect(yaml).toContain('    type: socks');
     expect(yaml).toContain('    username: "user"');
     expect(yaml).toContain('    password: "pass"');
+
+    expect(yaml).toContain('  - name: "socks5-proxy"');
+    expect(yaml).toContain('    type: socks5');
+    expect(yaml).toContain('    username: "user5"');
+    expect(yaml).toContain('    password: "pass5"');
 
     expect(yaml).toContain('  - name: "http-proxy"');
     expect(yaml).toContain('    type: http');

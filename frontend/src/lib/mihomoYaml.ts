@@ -925,7 +925,7 @@ export function generateYAML(state: MihomoConfigState): string {
             lines.push(`      path: ${yamlSafeString(p.wsPath || '/')}`);
           }
         }
-      } else if (p.type === 'socks') {
+      } else if (p.type === 'socks' || p.type === 'socks5') {
         if (p.username) lines.push(`    username: ${yamlSafeString(p.username)}`);
         if (p.password) lines.push(`    password: ${yamlSafeString(p.password)}`);
       } else if (p.type === 'http') {
