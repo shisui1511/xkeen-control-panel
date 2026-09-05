@@ -1,0 +1,115 @@
+# ==============================================================================
+# gaming-low-latency.yaml — Gaming & Low-Latency
+# Сценарий: Минимальный пинг для игр: прямой UDP, обход P2P/торрентов, блокировка QUIC.
+# Внимание: для минимального пинга в играх убедитесь, что в XKeen port_proxying.lst
+# не перехватываются игровые UDP-порты (TMPL-03).
+# Требует Mihomo Meta >= 1.15 (поддержка include-all: true, format: mrs).
+# ==============================================================================
+mixed-port: 7890
+redir-port: 5000
+tproxy-port: 5001
+routing-mark: 255
+allow-lan: true
+mode: rule
+log-level: warning
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+find-process-mode: off
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "*.keenetic.pro"
+    - "*.keenetic.link"
+    - "*.keenetic.name"
+    - "*.my.keenetic.net"
+  default-nameserver:
+    - 77.88.8.8
+    - 1.1.1.1
+  nameserver:
+    - 77.88.8.8
+    - https://common.dot.dns.yandex.net/dns-query
+  fallback:
+    - https://cloudflare-dns.com/dns-query
+
+# Снайфер без разбора QUIC ради низких задержек
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+
+proxy-providers:
+  sub:
+    type: http
+    url: "https://example.com/sub"
+    interval: 86400
+    path: ./providers/sub.yaml
+    header:
+      User-Agent:
+        - "Mihomo"
+      x-hwid:
+        - "keenetic-router-hwid"
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+    override:
+      udp: true
+      tfo: true
+
+proxy-groups:
+  - name: "Gaming-Proxy"
+    type: select
+    include-all: true
+    proxies:
+      - DIRECT
+
+rule-providers:
+  re-filter:
+    type: http
+    format: mrs
+    behavior: domain
+    url: "https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs"
+    path: ./rules/re-filter.mrs
+    interval: 86400
+
+rules:
+  # Блокировка QUIC
+  - AND,((DST-PORT,443),(NETWORK,udp)),REJECT
+
+  # Защита портов управления
+  - DST-PORT,3389,DIRECT
+  - DST-PORT,22,DIRECT
+  - DST-PORT,445,DIRECT
+  - DST-PORT,1194,DIRECT
+  - DST-PORT,51820,DIRECT
+
+  # Игровой UDP-трафик и голосовой чат напрямую для минимального пинга
+  - AND,((DST-PORT,27000-27050),(NETWORK,udp)),DIRECT
+  - AND,((DST-PORT,3074),(NETWORK,udp)),DIRECT
+  - AND,((DST-PORT,3478),(NETWORK,udp)),DIRECT
+
+  # P2P и BitTorrent трафик строго напрямую
+  - DST-PORT,6881-6889,DIRECT
+  - DST-PORT,51413,DIRECT
+
+  # Локальные адреса
+  - GEOIP,private,DIRECT,no-resolve
+
+  # Заблокированные ресурсы через игровой прокси
+  - RULE-SET,re-filter,Gaming-Proxy
+
+  # Все остальное напрямую
+  - MATCH,DIRECT

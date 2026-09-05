@@ -1,6 +1,6 @@
 {
-  "version": "3.0.0",
-  "updated_at": "2026-06-11",
+  "version": "3.1.0",
+  "updated_at": "2026-09-05",
   "templates": [
     {
       "name": "Xray: Routing — Selective (GeoSite/GeoIP)",
@@ -55,6 +55,42 @@
       "description": "Observatory + routing.balancers со strategy leastPing. Outbound-теги должны начинаться с 'proxy'. Совместим с inbound-тегами redirect/tproxy XKeen.",
       "type": "xray",
       "filename": "observatory.json"
+    },
+    {
+      "name": "Mihomo: Умный Антифильтр",
+      "description": "Все российские сайты напрямую, заблокированные через прокси. Защита портов управления и приватных сетей.",
+      "type": "mihomo",
+      "filename": "smart-antifilter.yaml"
+    },
+    {
+      "name": "Mihomo: Раздельный по сервисам",
+      "description": "Раздельные группы для YouTube, Discord, AI, Telegram, Steam с иконками дашборда",
+      "type": "mihomo",
+      "filename": "split-services.yaml"
+    },
+    {
+      "name": "Mihomo: Облегченный Low-RAM для MIPS/128MB",
+      "description": "Минимальное потребление памяти для роутеров со 128-256MB RAM: 1 rule-provider, без тяжелых гео-баз",
+      "type": "mihomo",
+      "filename": "low-memory.yaml"
+    },
+    {
+      "name": "Mihomo: Мульти-подписка с Remnawave HWID",
+      "description": "Мульти-подписка с поддержкой Remnawave Device Limit (HWID) и автоматическим fallback",
+      "type": "mihomo",
+      "filename": "multi-sub-hwid.yaml"
+    },
+    {
+      "name": "Mihomo: Gaming & Low-Latency",
+      "description": "Минимальный пинг для игр: прямой UDP, обход P2P/торрентов, блокировка QUIC",
+      "type": "mihomo",
+      "filename": "gaming-low-latency.yaml"
+    },
+    {
+      "name": "Mihomo: Полный туннель",
+      "description": "Весь трафик через прокси (mode: rule) с защитой LAN, системного резолвера и удаленного доступа",
+      "type": "mihomo",
+      "filename": "full-tunnel.yaml"
     }
   ]
 }

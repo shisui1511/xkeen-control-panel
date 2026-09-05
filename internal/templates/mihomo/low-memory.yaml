@@ -1,0 +1,103 @@
+# ==============================================================================
+# low-memory.yaml — Облегченный шаблон для MIPS/EcoNet (128-256MB RAM)
+# Минимальное потребление памяти: без тяжелых гео-баз, 1 компактный rule-provider.
+# Пользователь добавляет proxy-providers через страницу Subscriptions.
+# Требует Mihomo Meta >= 1.15 (поддержка include-all: true, format: mrs).
+# ==============================================================================
+mixed-port: 7890
+redir-port: 5000
+tproxy-port: 5001
+routing-mark: 255
+allow-lan: true
+mode: rule
+log-level: error
+ipv6: false
+find-process-mode: off
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "*.keenetic.pro"
+    - "*.keenetic.link"
+    - "*.keenetic.name"
+    - "*.my.keenetic.net"
+  default-nameserver:
+    - 77.88.8.8
+    - 1.1.1.1
+  nameserver:
+    - 77.88.8.8
+    - https://common.dot.dns.yandex.net/dns-query
+  fallback:
+    - https://cloudflare-dns.com/dns-query
+
+sniffer:
+  enable: true
+  parse-pure-ip: false
+  sniff:
+    TLS:
+      ports: [443]
+
+proxy-providers:
+  sub:
+    type: http
+    url: "https://example.com/sub"
+    interval: 86400
+    path: ./providers/sub.yaml
+    header:
+      User-Agent:
+        - "Mihomo"
+      x-hwid:
+        - "keenetic-mips-hwid"
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 600
+    override:
+      udp: true
+
+proxy-groups:
+  - name: "Proxy"
+    type: select
+    include-all: true
+    proxies:
+      - DIRECT
+
+rule-providers:
+  re-filter:
+    type: http
+    format: mrs
+    behavior: domain
+    url: "https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs"
+    path: ./rules/re-filter.mrs
+    interval: 86400
+
+rules:
+  # Блокировка QUIC
+  - AND,((DST-PORT,443),(NETWORK,udp)),REJECT
+
+  # Защита портов управления
+  - DST-PORT,3389,DIRECT
+  - DST-PORT,22,DIRECT
+  - DST-PORT,445,DIRECT
+  - DST-PORT,1194,DIRECT
+  - DST-PORT,51820,DIRECT
+
+  # Локальные адреса
+  - GEOIP,private,DIRECT,no-resolve
+
+  # Компактный пропуск российских доменов без тяжелых geo-баз
+  - DOMAIN-SUFFIX,ru,DIRECT
+  - DOMAIN-SUFFIX,xn--p1ai,DIRECT
+  - DOMAIN-SUFFIX,su,DIRECT
+
+  # Заблокированные ресурсы через прокси
+  - RULE-SET,re-filter,Proxy
+
+  # Все остальное напрямую
+  - MATCH,DIRECT
