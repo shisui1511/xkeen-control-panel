@@ -196,6 +196,9 @@
   let listenerSSPasswordValid = $derived(
     newListener.type !== 'shadowsocks' || String(newListener.password || '').trim().length > 0
   );
+  let listenerFormValid = $derived(
+    listenerNameValid && listenerPortValid && listenerSSPasswordValid
+  );
 
   function openListenerForm(l?: Listener) {
     if (l) {
@@ -217,6 +220,7 @@
   }
 
   function saveListener() {
+    if (!listenerFormValid) return;
     const toSave: Listener = {
       ...newListener,
       name: newListener.name.trim(),
@@ -3292,7 +3296,12 @@
                   <button type="button" class="btn btn-secondary" onclick={cancelListenerForm}>
                     {$t('app.cancel')}
                   </button>
-                  <button type="button" class="btn btn-primary" onclick={saveListener}>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    disabled={!listenerFormValid}
+                    onclick={saveListener}
+                  >
                     {editingListenerId ? $t('app.save') : $t('app.add')}
                   </button>
                 </div>
