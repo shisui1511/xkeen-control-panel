@@ -627,7 +627,7 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult)
 			}
 
 			getInt := func(k string) int {
-				v, _ := awgMap[k]
+				v := awgMap[k]
 				n, _ := strconv.Atoi(fmt.Sprintf("%v", v))
 				return n
 			}
