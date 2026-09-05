@@ -1746,11 +1746,13 @@
 
   function collectListenerPortWarnings(extraYaml?: string): PreflightWarning[] {
     const yaml = generateYAML();
-    const topPorts = [...parseMihomoPorts(yaml), ...(extraYaml ? parseMihomoPorts(extraYaml) : [])];
-    const listenerPorts = [
-      ...parseMihomoListenerPorts(yaml),
-      ...(extraYaml ? parseMihomoListenerPorts(extraYaml) : [])
-    ];
+    const rawTopPorts = parseMihomoPorts(yaml);
+    const topKeys = new Set(rawTopPorts.map((p) => `${p.port}:${p.purpose}`));
+    const extraTopPorts = extraYaml
+      ? parseMihomoPorts(extraYaml).filter((p) => !topKeys.has(`${p.port}:${p.purpose}`))
+      : [];
+    const topPorts = [...rawTopPorts, ...extraTopPorts];
+    const listenerPorts = parseMihomoListenerPorts(yaml);
     const reserved: PortAllocation[] = [
       { port: 5000, engine: 'mihomo', purpose: 'redir-port' },
       { port: 5001, engine: 'mihomo', purpose: 'tproxy-port' },
