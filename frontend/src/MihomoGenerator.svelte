@@ -167,6 +167,88 @@
   let listeners = $state<Listener[]>([]);
   let listenersRaw = $state<string | null>(null);
   let listenersReadOnly = $state(false);
+
+  let showListenerForm = $state(false);
+  let editingListenerId = $state<string | null>(null);
+
+  function newListenerDefaults(): Listener {
+    return {
+      id: crypto.randomUUID(),
+      name: '',
+      type: 'mixed',
+      listen: '0.0.0.0',
+      port: '',
+      udp: true,
+      users: []
+    };
+  }
+
+  let newListener = $state<Listener>(newListenerDefaults());
+
+  let listenerNameValid = $derived(newListener.name.trim().length > 0);
+  let listenerPortValid = $derived.by(() => {
+    if (!newListener.port || !newListener.port.trim()) return false;
+    const n = Number(newListener.port);
+    return Number.isInteger(n) && n >= 1 && n <= 65535;
+  });
+  let listenerSSPasswordValid = $derived(
+    newListener.type !== 'shadowsocks' || (newListener.password?.trim().length ?? 0) > 0
+  );
+
+  function openListenerForm(l?: Listener) {
+    if (l) {
+      editingListenerId = l.id;
+      newListener = {
+        ...l,
+        users: l.users ? l.users.map((u) => ({ ...u })) : []
+      };
+    } else {
+      editingListenerId = null;
+      newListener = newListenerDefaults();
+    }
+    showListenerForm = true;
+  }
+
+  function cancelListenerForm() {
+    showListenerForm = false;
+    editingListenerId = null;
+  }
+
+  function saveListener() {
+    const toSave: Listener = {
+      ...newListener,
+      name: newListener.name.trim(),
+      listen: newListener.listen.trim() || '0.0.0.0',
+      port: String(newListener.port).trim(),
+      proxy: newListener.proxy?.trim() || undefined,
+      users:
+        newListener.type === 'mixed' || newListener.type === 'socks' || newListener.type === 'http'
+          ? (newListener.users || []).filter((u) => u.username.trim() || u.password.trim())
+          : undefined,
+      cipher: newListener.type === 'shadowsocks' ? newListener.cipher || 'aes-256-gcm' : undefined,
+      password: newListener.type === 'shadowsocks' ? newListener.password || '' : undefined,
+      udp:
+        newListener.type !== 'http' && newListener.type !== 'redirect'
+          ? !!newListener.udp
+          : undefined
+    };
+
+    if (editingListenerId) {
+      listeners = listeners.map((item) => (item.id === editingListenerId ? toSave : item));
+    } else {
+      listeners = [...listeners, toSave];
+    }
+    showListenerForm = false;
+    editingListenerId = null;
+  }
+
+  function addListenerUser() {
+    newListener.users = [...(newListener.users || []), { username: '', password: '' }];
+  }
+
+  function removeListenerUser(index: number) {
+    newListener.users = (newListener.users || []).filter((_, i) => i !== index);
+  }
   let activePreset: string = $state('');
   let activeRuleProvider = $state<'none' | 'zkeen' | 'metacubex'>('none');
   let externalControllerType = $state<'unix' | 'tcp'>('unix');
@@ -2217,6 +2299,7 @@
                 showProxyForm = false;
                 showGroupForm = false;
                 showRuleForm = false;
+                showListenerForm = false;
               }}
             >
               {label}
@@ -2924,6 +3007,240 @@
                   <span class="directive-tag"><code>listeners</code></span>
                 </div>
               </div>
+            {:else if showListenerForm}
+              <div class="form-card">
+                <div class="form-row">
+                  <label class="form-label" for="listener-name">{$t('mihomo.listener_name')}</label>
+                  <input
+                    id="listener-name"
+                    class="form-input"
+                    bind:value={newListener.name}
+                    placeholder="my-listener"
+                  />
+                  {#if !listenerNameValid}
+                    <span
+                      class="form-validation-msg"
+                      style="font-size: 11px; color: var(--warning); margin-top: 2px;"
+                    >
+                      {$t('mihomo.listener_name_required')}
+                    </span>
+                  {/if}
+                </div>
+
+                <div class="form-row2">
+                  <div class="form-col">
+                    <label class="form-label" for="listener-type"
+                      >{$t('mihomo.listener_type')}</label
+                    >
+                    <select
+                      id="listener-type"
+                      class="form-select"
+                      bind:value={newListener.type}
+                      onchange={() => {
+                        if (newListener.type === 'shadowsocks' && !newListener.cipher) {
+                          newListener.cipher = 'aes-256-gcm';
+                        }
+                      }}
+                    >
+                      <option value="mixed">mixed</option>
+                      <option value="socks">socks</option>
+                      <option value="http">http</option>
+                      <option value="shadowsocks">shadowsocks</option>
+                      <option value="tproxy">tproxy</option>
+                      <option value="redirect">redirect</option>
+                    </select>
+                  </div>
+
+                  <div class="form-col">
+                    <label class="form-label" for="listener-listen"
+                      >{$t('mihomo.listener_listen')}</label
+                    >
+                    <input
+                      id="listener-listen"
+                      class="form-input"
+                      bind:value={newListener.listen}
+                      placeholder="0.0.0.0"
+                    />
+                  </div>
+
+                  <div class="form-col form-col-sm">
+                    <label class="form-label" for="listener-port"
+                      >{$t('mihomo.listener_port')}</label
+                    >
+                    <input
+                      id="listener-port"
+                      type="number"
+                      min="1"
+                      max="65535"
+                      class="form-input"
+                      bind:value={newListener.port}
+                      placeholder="7890"
+                    />
+                    {#if !listenerPortValid}
+                      <span
+                        class="form-validation-msg"
+                        style="font-size: 11px; color: var(--warning); margin-top: 2px;"
+                      >
+                        {$t('mihomo.listener_port_required')}
+                      </span>
+                    {/if}
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <label class="form-label" for="listener-destination"
+                    >{$t('mihomo.listener_destination')}</label
+                  >
+                  <select
+                    id="listener-destination"
+                    class="form-select"
+                    value={newListener.proxy &&
+                    (groups.some((g) => g.name === newListener.proxy) ||
+                      proxies.some((p) => p.name === newListener.proxy))
+                      ? newListener.proxy
+                      : ''}
+                    onchange={(e) => {
+                      newListener.proxy = e.currentTarget.value || undefined;
+                    }}
+                  >
+                    <option value="">{$t('mihomo.listener_dest_rules')}</option>
+                    {#if groups.length > 0}
+                      <optgroup label={$t('mihomo.listener_dest_groups')}>
+                        {#each groups as g}
+                          <option value={g.name}>{g.name}</option>
+                        {/each}
+                      </optgroup>
+                    {/if}
+                    {#if proxies.length > 0}
+                      <optgroup label={$t('mihomo.listener_dest_nodes')}>
+                        {#each proxies as p}
+                          <option value={p.name}>{p.name}</option>
+                        {/each}
+                      </optgroup>
+                    {/if}
+                  </select>
+                  <div
+                    class="form-hint"
+                    style="font-size: 12px; color: var(--fg-dim); margin-top: 4px;"
+                  >
+                    {$t('mihomo.listener_destination_hint')}
+                  </div>
+                </div>
+
+                {#if newListener.type !== 'http' && newListener.type !== 'redirect'}
+                  <div class="toggle-row" style="margin-top: 4px;">
+                    <label class="toggle-label">
+                      <input type="checkbox" bind:checked={newListener.udp} />
+                      <span>{$t('mihomo.listener_udp')}</span>
+                    </label>
+                  </div>
+                {/if}
+
+                {#if newListener.type === 'shadowsocks'}
+                  <div class="form-row">
+                    <label class="form-label" for="listener-cipher"
+                      >{$t('mihomo.listener_cipher')}</label
+                    >
+                    <select
+                      id="listener-cipher"
+                      class="form-select"
+                      bind:value={newListener.cipher}
+                    >
+                      {#each CIPHERS as c}
+                        <option value={c}>{c}</option>
+                      {/each}
+                    </select>
+                  </div>
+                  <div class="form-row">
+                    <label class="form-label" for="listener-password"
+                      >{$t('mihomo.listener_password')}</label
+                    >
+                    <input
+                      id="listener-password"
+                      type="password"
+                      class="form-input"
+                      bind:value={newListener.password}
+                    />
+                    {#if !listenerSSPasswordValid}
+                      <span
+                        class="form-validation-msg"
+                        style="font-size: 11px; color: var(--warning); margin-top: 2px;"
+                      >
+                        {$t('mihomo.listener_ss_password_required')}
+                      </span>
+                    {/if}
+                  </div>
+                {/if}
+
+                {#if newListener.type === 'mixed' || newListener.type === 'socks' || newListener.type === 'http'}
+                  <div class="form-row" style="margin-top: 6px;">
+                    <div
+                      style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;"
+                    >
+                      <span class="form-label" style="margin-bottom: 0;"
+                        >{$t('mihomo.listener_users')}</span
+                      >
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        style="font-size: 11px; padding: 2px 8px;"
+                        onclick={addListenerUser}
+                      >
+                        + {$t('mihomo.listener_add_user')}
+                      </button>
+                    </div>
+                    {#if newListener.users && newListener.users.length > 0}
+                      <div
+                        style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;"
+                      >
+                        {#each newListener.users as user, uIdx}
+                          <div style="display: flex; gap: 8px; align-items: center;">
+                            <input
+                              type="text"
+                              class="form-input"
+                              placeholder={$t('mihomo.listener_username')}
+                              bind:value={user.username}
+                            />
+                            <input
+                              type="password"
+                              class="form-input"
+                              placeholder={$t('mihomo.listener_password')}
+                              bind:value={user.password}
+                            />
+                            <button
+                              type="button"
+                              class="item-del"
+                              aria-label={$t('app.delete')}
+                              title={$t('app.delete')}
+                              onclick={() => removeListenerUser(uIdx)}
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
+                    <div
+                      class="form-hint"
+                      style="font-size: 12px; color: var(--fg-dim); margin-top: 6px;"
+                    >
+                      {$t('mihomo.listener_open_proxy_hint')}
+                    </div>
+                  </div>
+                {/if}
+
+                <div
+                  class="form-actions"
+                  style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px;"
+                >
+                  <button type="button" class="btn btn-secondary" onclick={cancelListenerForm}>
+                    {$t('app.cancel')}
+                  </button>
+                  <button type="button" class="btn btn-primary" onclick={saveListener}>
+                    {editingListenerId ? $t('app.save') : $t('app.add')}
+                  </button>
+                </div>
+              </div>
             {:else if listeners.length === 0}
               <div
                 class="rulesets-hint"
@@ -2931,23 +3248,7 @@
               >
                 {$t('mihomo.listeners_hint')}
               </div>
-              <button
-                type="button"
-                class="add-btn"
-                onclick={() => {
-                  listeners = [
-                    ...listeners,
-                    {
-                      id: crypto.randomUUID(),
-                      name: '',
-                      type: 'mixed',
-                      listen: '0.0.0.0',
-                      port: '',
-                      udp: true
-                    }
-                  ];
-                }}
-              >
+              <button type="button" class="add-btn" onclick={() => openListenerForm()}>
                 + {$t('mihomo.add_listener')}
               </button>
             {:else}
@@ -2956,14 +3257,15 @@
                   <span class="item-badge type-{l.type}">{l.type}</span>
                   <span class="item-name">{l.name}</span>
                   <span class="item-meta">{l.listen}:{l.port}</span>
+                  <span class="item-meta">
+                    {l.proxy ? `→ ${l.proxy}` : $t('mihomo.listener_dest_rules')}
+                  </span>
                   <button
                     type="button"
                     class="item-edit"
                     aria-label={$t('app.edit')}
                     title={$t('app.edit')}
-                    onclick={() => {
-                      /* Listener editing form to be fully implemented in 106-02 */
-                    }}
+                    onclick={() => openListenerForm(l)}
                   >
                     ✎
                   </button>
@@ -2980,23 +3282,7 @@
                   </button>
                 </div>
               {/each}
-              <button
-                type="button"
-                class="add-btn"
-                onclick={() => {
-                  listeners = [
-                    ...listeners,
-                    {
-                      id: crypto.randomUUID(),
-                      name: '',
-                      type: 'mixed',
-                      listen: '0.0.0.0',
-                      port: '',
-                      udp: true
-                    }
-                  ];
-                }}
-              >
+              <button type="button" class="add-btn" onclick={() => openListenerForm()}>
                 + {$t('mihomo.add_listener')}
               </button>
             {/if}
