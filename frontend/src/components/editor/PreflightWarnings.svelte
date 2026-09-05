@@ -66,13 +66,13 @@
 
 <style>
   .preflight-warnings {
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--spacing-sm, 8px);
   }
 
   .preflight-warnings-content {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--spacing-xs, 4px);
     width: 100%;
   }
 
@@ -81,7 +81,7 @@
     padding-left: 20px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--spacing-xs, 4px);
   }
 
   .preflight-warnings-list li {

@@ -4,7 +4,7 @@
   import DraftRestoreBanner from './components/DraftRestoreBanner.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { activateRestartGrace } from './lib/serviceGrace';
-  import { currentLang, t } from './i18n';
+  import { currentLang, t, tp } from './i18n';
   import { capabilities, showToast, fetchCapabilities, showConfirm } from './stores';
   import { apiFetch, apiFetchJSON } from './lib/api';
   import { parseValidationError } from './lib/errorParser';
@@ -1834,10 +1834,10 @@
       showToast(
         'success',
         $t('editor.smart_merge_applied', {
-          nodes: stats.proxies ?? 0,
-          providers: stats.proxy_providers ?? 0,
-          rules: stats.rules ?? 0,
-          userRules: stats.user_rules ?? 0
+          nodes: $tp('editor.smart_merge_applied_nodes', stats.proxies ?? 0),
+          providers: $tp('editor.smart_merge_applied_providers', stats.proxy_providers ?? 0),
+          rules: $tp('editor.smart_merge_applied_rules', stats.rules ?? 0),
+          userRules: $tp('editor.smart_merge_applied_user_rules', stats.user_rules ?? 0)
         })
       );
     } catch (err: any) {

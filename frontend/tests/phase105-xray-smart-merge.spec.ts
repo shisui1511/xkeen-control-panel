@@ -223,8 +223,8 @@ test.describe('Phase 105: Xray Constructor Smart-Merge (TMPL-01, TMPL-07)', () =
     await expect(toast.first()).toBeVisible({ timeout: 5000 });
     const toastText = await toast.first().textContent();
     expect(toastText).toContain('Конфигурация применена через Smart Merge');
-    expect(toastText).toContain('4 правил');
-    expect(toastText).toContain('из них 1 ваших исключений');
+    expect(toastText).toContain('4 правила');
+    expect(toastText).toContain('из них 1 ваше исключение');
 
     // 1. Проверяем вызов smart-merge
     expect(smartMergeCalled).toBe(true);

@@ -497,11 +497,23 @@ input[type='number'] {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent) !important;
 }
 
+.input-warning {
+  border-color: var(--warning) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 20%, transparent) !important;
+}
+
 .error-text {
   display: block;
   margin-top: 6px;
   font-size: 11.5px;
   color: var(--danger);
+}
+
+.warning-text {
+  display: block;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--warning);
 }
 
 .form-label {

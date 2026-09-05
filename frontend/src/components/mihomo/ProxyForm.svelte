@@ -28,16 +28,33 @@
 
   // Ограничения AmneziaWG (TMPL-08, D-07):
   // H1–H4 попарно различны и > 4, Jmin < Jmax, S1 + 56 ≠ S2
+  const awgCountsH = $derived.by(() => {
+    const counts = new Map<number, number>();
+    for (const h of [Number(np.awgH1), Number(np.awgH2), Number(np.awgH3), Number(np.awgH4)]) {
+      counts.set(h, (counts.get(h) || 0) + 1);
+    }
+    return counts;
+  });
+
+  const isH1Invalid = $derived(
+    np.awgEnabled && (Number(np.awgH1) <= 4 || (awgCountsH.get(Number(np.awgH1)) || 0) > 1)
+  );
+  const isH2Invalid = $derived(
+    np.awgEnabled && (Number(np.awgH2) <= 4 || (awgCountsH.get(Number(np.awgH2)) || 0) > 1)
+  );
+  const isH3Invalid = $derived(
+    np.awgEnabled && (Number(np.awgH3) <= 4 || (awgCountsH.get(Number(np.awgH3)) || 0) > 1)
+  );
+  const isH4Invalid = $derived(
+    np.awgEnabled && (Number(np.awgH4) <= 4 || (awgCountsH.get(Number(np.awgH4)) || 0) > 1)
+  );
+
+  const isJInvalid = $derived(np.awgEnabled && Number(np.awgJmin) >= Number(np.awgJmax));
+  const isSInvalid = $derived(np.awgEnabled && Number(np.awgS1) + 56 === Number(np.awgS2));
+
   const awgConstraintsOk = $derived(
     !np.awgEnabled ||
-      (Number(np.awgJmin) < Number(np.awgJmax) &&
-        Number(np.awgS1) + 56 !== Number(np.awgS2) &&
-        Number(np.awgH1) > 4 &&
-        Number(np.awgH2) > 4 &&
-        Number(np.awgH3) > 4 &&
-        Number(np.awgH4) > 4 &&
-        new Set([Number(np.awgH1), Number(np.awgH2), Number(np.awgH3), Number(np.awgH4)]).size ===
-          4)
+      (!isJInvalid && !isSInvalid && !isH1Invalid && !isH2Invalid && !isH3Invalid && !isH4Invalid)
   );
 </script>
 
@@ -367,8 +384,8 @@
             <input
               id="proxy-awg-jmin"
               class="form-input"
-              class:input-invalid={Number(np.awgJmin) >= Number(np.awgJmax)}
-              aria-invalid={Number(np.awgJmin) >= Number(np.awgJmax)}
+              class:input-warning={isJInvalid}
+              aria-invalid={isJInvalid}
               type="number"
               bind:value={np.awgJmin}
               min="0"
@@ -379,8 +396,8 @@
             <input
               id="proxy-awg-jmax"
               class="form-input"
-              class:input-invalid={Number(np.awgJmin) >= Number(np.awgJmax)}
-              aria-invalid={Number(np.awgJmin) >= Number(np.awgJmax)}
+              class:input-warning={isJInvalid}
+              aria-invalid={isJInvalid}
               type="number"
               bind:value={np.awgJmax}
               min="0"
@@ -395,8 +412,8 @@
             <input
               id="proxy-awg-s1"
               class="form-input"
-              class:input-invalid={Number(np.awgS1) + 56 === Number(np.awgS2)}
-              aria-invalid={Number(np.awgS1) + 56 === Number(np.awgS2)}
+              class:input-warning={isSInvalid}
+              aria-invalid={isSInvalid}
               type="number"
               bind:value={np.awgS1}
               min="0"
@@ -407,8 +424,8 @@
             <input
               id="proxy-awg-s2"
               class="form-input"
-              class:input-invalid={Number(np.awgS1) + 56 === Number(np.awgS2)}
-              aria-invalid={Number(np.awgS1) + 56 === Number(np.awgS2)}
+              class:input-warning={isSInvalid}
+              aria-invalid={isSInvalid}
               type="number"
               bind:value={np.awgS2}
               min="0"
@@ -417,14 +434,14 @@
         </div>
 
         <div class="awg-group-title" style="margin-top: 8px;">{$t('proxies.awg_headers')}</div>
-        <div class="form-row2" style="grid-template-columns: repeat(4, 1fr); gap: 8px;">
+        <div class="form-row2 awg-headers-grid">
           <div class="form-col">
             <label class="form-label" for="proxy-awg-h1">H1</label>
             <input
               id="proxy-awg-h1"
               class="form-input"
-              class:input-invalid={Number(np.awgH1) <= 4}
-              aria-invalid={Number(np.awgH1) <= 4}
+              class:input-warning={isH1Invalid}
+              aria-invalid={isH1Invalid}
               type="number"
               bind:value={np.awgH1}
             />
@@ -434,8 +451,8 @@
             <input
               id="proxy-awg-h2"
               class="form-input"
-              class:input-invalid={Number(np.awgH2) <= 4}
-              aria-invalid={Number(np.awgH2) <= 4}
+              class:input-warning={isH2Invalid}
+              aria-invalid={isH2Invalid}
               type="number"
               bind:value={np.awgH2}
             />
@@ -445,8 +462,8 @@
             <input
               id="proxy-awg-h3"
               class="form-input"
-              class:input-invalid={Number(np.awgH3) <= 4}
-              aria-invalid={Number(np.awgH3) <= 4}
+              class:input-warning={isH3Invalid}
+              aria-invalid={isH3Invalid}
               type="number"
               bind:value={np.awgH3}
             />
@@ -456,8 +473,8 @@
             <input
               id="proxy-awg-h4"
               class="form-input"
-              class:input-invalid={Number(np.awgH4) <= 4}
-              aria-invalid={Number(np.awgH4) <= 4}
+              class:input-warning={isH4Invalid}
+              aria-invalid={isH4Invalid}
               type="number"
               bind:value={np.awgH4}
             />
@@ -639,7 +656,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 10px 12px;
+    padding: 12px;
     background: var(--bg-surface-raised, rgba(255, 255, 255, 0.03));
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -647,7 +664,19 @@
   }
 
   .awg-options-block.has-warning {
-    border-color: color-mix(in srgb, var(--color-warning, #f59e0b) 50%, var(--border));
+    border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+  }
+
+  .awg-headers-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+
+  @media (max-width: 480px) {
+    .awg-headers-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
 
   .awg-group-title {
@@ -663,9 +692,5 @@
     color: var(--fg-secondary);
     line-height: 1.4;
     margin: 0;
-  }
-
-  .form-input.input-invalid {
-    border-color: var(--color-warning, #f59e0b);
   }
 </style>

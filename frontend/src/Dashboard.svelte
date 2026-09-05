@@ -1479,6 +1479,19 @@
     }
   }
 
+  /* D-13: Адаптивная раскладка для сверхшироких экранов (>2400px / 4K/8K) */
+  @container dashgrid (min-width: 2400px) {
+    .dashboard-layout-grid {
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+    }
+  }
+
+  @media (min-width: 2401px) {
+    .dashboard-layout-grid {
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+    }
+  }
+
   .dash-col-left,
   .dash-col-right {
     display: flex;
