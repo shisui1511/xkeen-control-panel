@@ -240,6 +240,7 @@
     } else {
       listeners = [...listeners, toSave];
     }
+    isDirty = true;
     showListenerForm = false;
     editingListenerId = null;
   }
@@ -1746,7 +1747,10 @@
   function collectListenerPortWarnings(extraYaml?: string): PreflightWarning[] {
     const yaml = generateYAML();
     const topPorts = [...parseMihomoPorts(yaml), ...(extraYaml ? parseMihomoPorts(extraYaml) : [])];
-    const listenerPorts = parseMihomoListenerPorts(yaml);
+    const listenerPorts = [
+      ...parseMihomoListenerPorts(yaml),
+      ...(extraYaml ? parseMihomoListenerPorts(extraYaml) : [])
+    ];
     const reserved: PortAllocation[] = [
       { port: 5000, engine: 'mihomo', purpose: 'redir-port' },
       { port: 5001, engine: 'mihomo', purpose: 'tproxy-port' },
@@ -3247,12 +3251,14 @@
                               type="text"
                               class="form-input"
                               placeholder={$t('mihomo.listener_username')}
+                              aria-label={$t('mihomo.listener_username')}
                               bind:value={user.username}
                             />
                             <input
                               type="password"
                               class="form-input"
                               placeholder={$t('mihomo.listener_password')}
+                              aria-label={$t('mihomo.listener_password')}
                               bind:value={user.password}
                             />
                             <button
@@ -3324,6 +3330,7 @@
                     title={$t('app.delete')}
                     onclick={() => {
                       listeners = listeners.filter((item) => item.id !== l.id);
+                      isDirty = true;
                     }}
                   >
                     ✕
