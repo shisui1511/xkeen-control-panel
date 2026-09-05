@@ -395,3 +395,68 @@ func TestSmartMergeXrayAPIBlock(t *testing.T) {
 	}
 }
 
+func TestSmartMergeXray_PreservesAPIRule(t *testing.T) {
+	existingWithAPI := `{
+  "inbounds": [
+    {
+      "tag": "api",
+      "port": 10085,
+      "protocol": "dokodemo-door"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["api"],
+        "outboundTag": "api"
+      }
+    ]
+  }
+}`
+
+	template := `{
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "outboundTag": "PROXY_TAG",
+        "domain": ["geosite:google"]
+      }
+    ]
+  }
+}`
+
+	merged, err := SmartMergeXray(existingWithAPI, template, "05_routing.json", "my-proxy", nil)
+	if err != nil {
+		t.Fatalf("SmartMergeXray failed: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(merged), &parsed); err != nil {
+		t.Fatalf("failed to parse merged JSON: %v", err)
+	}
+
+	routingObj := parsed
+	if r, ok := parsed["routing"].(map[string]interface{}); ok {
+		routingObj = r
+	}
+	rules, ok := routingObj["rules"].([]interface{})
+	if !ok || len(rules) == 0 {
+		t.Fatalf("expected rules in merged routing, got: %+v", routingObj)
+	}
+
+	// Rule 0 MUST be the api routing rule
+	rule0, ok := rules[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("rule 0 is not a map: %+v", rules[0])
+	}
+	if rule0["outboundTag"] != "api" {
+		t.Errorf("expected rule 0 outboundTag to be 'api', got %v", rule0["outboundTag"])
+	}
+	inbTags, ok := rule0["inboundTag"].([]interface{})
+	if !ok || len(inbTags) == 0 || inbTags[0] != "api" {
+		t.Errorf("expected rule 0 inboundTag to be ['api'], got %v", rule0["inboundTag"])
+	}
+}
+

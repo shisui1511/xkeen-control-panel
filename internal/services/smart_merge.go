@@ -270,6 +270,67 @@ func SmartMergeXray(existingContent string, templateContent string, targetFilena
 
 	var finalRules []interface{}
 
+	// Check if api routing rule or inbound was present in existing configuration or template
+	hasAPIRule := false
+	checkHasAPIRule := func(rules []interface{}) bool {
+		for _, r := range rules {
+			if m, ok := r.(map[string]interface{}); ok {
+				if outTag, _ := m["outboundTag"].(string); outTag == "api" {
+					return true
+				}
+				if inb, ok := m["inboundTag"].([]interface{}); ok {
+					for _, tag := range inb {
+						if tag == "api" {
+							return true
+						}
+					}
+				} else if inb, ok := m["inboundTag"].(string); ok && inb == "api" {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	if checkHasAPIRule(templateRules) {
+		hasAPIRule = true
+	} else if strings.TrimSpace(existingContent) != "" {
+		var existObj map[string]interface{}
+		if err := json.Unmarshal([]byte(existingContent), &existObj); err == nil && existObj != nil {
+			if r, ok := existObj["routing"].(map[string]interface{}); ok && r != nil {
+				if rs, ok := r["rules"].([]interface{}); ok {
+					if checkHasAPIRule(rs) {
+						hasAPIRule = true
+					}
+				}
+			} else if rs, ok := existObj["rules"].([]interface{}); ok {
+				if checkHasAPIRule(rs) {
+					hasAPIRule = true
+				}
+			}
+			if !hasAPIRule {
+				if inbs, ok := existObj["inbounds"].([]interface{}); ok {
+					for _, inb := range inbs {
+						if m, ok := inb.(map[string]interface{}); ok {
+							if tag, _ := m["tag"].(string); tag == "api" {
+								hasAPIRule = true
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if hasAPIRule {
+		finalRules = append(finalRules, map[string]interface{}{
+			"type":        "field",
+			"inboundTag":  []string{"api"},
+			"outboundTag": "api",
+		})
+	}
+
 	// 1. Mandatory Keenetic DNS-over-VLESS Resolver Protection (127.0.0.53 DIRECT)
 	finalRules = append(finalRules, map[string]interface{}{
 		"type":        "field",
@@ -337,6 +398,13 @@ func SmartMergeXray(existingContent string, templateContent string, targetFilena
 
 	// 4. Append template rules
 	for _, tr := range templateRules {
+		if hasAPIRule {
+			if m, ok := tr.(map[string]interface{}); ok {
+				if outTag, _ := m["outboundTag"].(string); outTag == "api" {
+					continue
+				}
+			}
+		}
 		finalRules = append(finalRules, tr)
 	}
 
