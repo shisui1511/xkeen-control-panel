@@ -28,6 +28,7 @@ export function parseMihomoPorts(yamlText: string): PortAllocation[] {
   const ports: PortAllocation[] = [];
   const lines = yamlText.split('\n');
   for (const line of lines) {
+    if (line.startsWith(' ') || line.startsWith('\t')) continue;
     const trimmed = line.trim();
     if (trimmed.startsWith('#') || !trimmed.includes(':')) continue;
     const parts = trimmed.split(':');
@@ -56,6 +57,78 @@ export function parseMihomoPorts(yamlText: string): PortAllocation[] {
       }
     }
   }
+  return ports;
+}
+
+export function parseMihomoListenerPorts(yamlText: string): PortAllocation[] {
+  const ports: PortAllocation[] = [];
+  const lines = yamlText.split('\n');
+  let inListeners = false;
+  let currentName = '';
+  let currentPort: number | null = null;
+
+  function flush() {
+    if (currentName && currentPort !== null && currentPort > 0) {
+      ports.push({
+        port: currentPort,
+        engine: 'mihomo',
+        purpose: 'listener:' + currentName
+      });
+    }
+    currentName = '';
+    currentPort = null;
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const isTopLevel = !line.startsWith(' ') && !line.startsWith('\t');
+    if (isTopLevel) {
+      if (trimmed.startsWith('listeners:')) {
+        inListeners = true;
+        flush();
+        continue;
+      } else if (inListeners) {
+        flush();
+        inListeners = false;
+        continue;
+      }
+    }
+
+    if (!inListeners) continue;
+
+    if (trimmed.startsWith('-')) {
+      flush();
+      const afterDash = trimmed.replace(/^-\s*/, '');
+      if (afterDash.includes(':')) {
+        const idx = afterDash.indexOf(':');
+        const k = afterDash.slice(0, idx).trim();
+        const v = afterDash.slice(idx + 1).trim();
+        if (k === 'name') {
+          currentName = v.replace(/^["']|["']$/g, '');
+        } else if (k === 'port') {
+          const p = parseInt(v, 10);
+          if (!isNaN(p)) currentPort = p;
+        }
+      }
+      continue;
+    }
+
+    if (trimmed.includes(':')) {
+      const idx = trimmed.indexOf(':');
+      const k = trimmed.slice(0, idx).trim();
+      const v = trimmed.slice(idx + 1).trim();
+      if (k === 'name') {
+        currentName = v.replace(/^["']|["']$/g, '');
+      } else if (k === 'port') {
+        const p = parseInt(v, 10);
+        if (!isNaN(p)) currentPort = p;
+      }
+    }
+  }
+
+  flush();
   return ports;
 }
 

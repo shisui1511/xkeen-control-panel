@@ -12,6 +12,7 @@
     findPortCollisions,
     parseXrayPorts,
     parseMihomoPorts,
+    parseMihomoListenerPorts,
     type PortAllocation
   } from './lib/portChecker';
   import {
@@ -1741,6 +1742,50 @@
 
   // findTopLevelSection and replaceMihomoTopLevelSection are imported from './lib/mihomoYaml'
 
+  function collectListenerPortWarnings(): PreflightWarning[] {
+    const yaml = generateYAML();
+    const topPorts = parseMihomoPorts(yaml);
+    const listenerPorts = parseMihomoListenerPorts(yaml);
+    const reserved: PortAllocation[] = [
+      { port: 5000, engine: 'mihomo', purpose: 'redir-port' },
+      { port: 5001, engine: 'mihomo', purpose: 'tproxy-port' },
+      { port: 1053, engine: 'mihomo', purpose: 'dns' }
+    ];
+
+    const existingKeys = new Set(topPorts.map((p) => `${p.port}:${p.purpose}`));
+    const uniqueReserved = reserved.filter((r) => !existingKeys.has(`${r.port}:${r.purpose}`));
+    const allAllocations = [...topPorts, ...uniqueReserved, ...listenerPorts];
+
+    const collisions = findPortCollisions(allAllocations);
+    const warnings: PreflightWarning[] = [];
+    const seenPorts = new Set<number>();
+
+    for (const group of collisions) {
+      const hasListener = group.some((p) => p.purpose.startsWith('listener:'));
+      if (!hasListener) continue;
+
+      const portNum = group[0].port;
+      if (seenPorts.has(portNum)) continue;
+      seenPorts.add(portNum);
+
+      const firstListenerIdx = group.findIndex((p) => p.purpose.startsWith('listener:'));
+      const other = group.find((p, idx) => idx !== firstListenerIdx) || group[0];
+      const conflictName = other.purpose.startsWith('listener:')
+        ? other.purpose.slice(9)
+        : other.purpose;
+
+      warnings.push({
+        code: 'listener_port_collision',
+        message: $t('mihomo.listener_port_collision', {
+          port: String(portNum),
+          conflict: conflictName
+        })
+      });
+    }
+
+    return warnings;
+  }
+
   async function handleApplyMihomo(skipConfirm: boolean | unknown = false) {
     const shouldSkipConfirm = skipConfirm === true;
     if (!shouldSkipConfirm && !showApplyConfirm && proxies.length === 0) {
@@ -1836,6 +1881,7 @@
       const yamlContent = generateYAML();
       validationError = '';
       saveWarnings = [];
+      const listenerWarnings = collectListenerPortWarnings();
 
       let mergeRes: { content: string; stats?: any; warnings?: PreflightWarning[] };
       try {
@@ -1898,7 +1944,8 @@
         : Array.isArray((mergeRes as any)?.data?.warnings)
           ? (mergeRes as any).data.warnings
           : [];
-      saveWarnings = saveResWarnings.length > 0 ? saveResWarnings : mergeWarnings;
+      const backendWarnings = saveResWarnings.length > 0 ? saveResWarnings : mergeWarnings;
+      saveWarnings = [...listenerWarnings, ...backendWarnings];
 
       let restartUrl = '/api/service/control?action=restart';
       const activeKernel = $capabilities?.active_kernel;
