@@ -1,5 +1,30 @@
 import { describe, it, expect } from 'vitest';
 import { mihomoSchema } from './mihomo';
+import { BUILDER_LISTENER_TYPES } from '../lib/mihomoYaml';
+
+// Verified against MetaCubeX/mihomo listener/parse.go on release tag v1.19.30 (2026-09-06)
+export const CORE_LISTENER_TYPES = [
+  'socks',
+  'http',
+  'tproxy',
+  'redir',
+  'mixed',
+  'tunnel',
+  'tun',
+  'shadowsocks',
+  'snell',
+  'vmess',
+  'vless',
+  'trojan',
+  'hysteria2',
+  'hysteria2-realm',
+  'tuic',
+  'shadowquic',
+  'anytls',
+  'mieru',
+  'sudoku',
+  'trusttunnel'
+] as const;
 
 describe('mihomoSchema listeners', () => {
   it('defines listeners as an array in properties', () => {
@@ -55,5 +80,45 @@ describe('mihomoSchema listeners', () => {
 
   it('does not define top-level required array', () => {
     expect((mihomoSchema as any).required).toBeUndefined();
+  });
+});
+
+describe('mihomoSchema listeners type enum', () => {
+  const typeProp = (mihomoSchema as any).properties.listeners.items.properties.type;
+  const enumList: string[] = typeProp?.enum;
+
+  it('strictly equals CORE_LISTENER_TYPES in order and content', () => {
+    expect(enumList).toEqual(CORE_LISTENER_TYPES);
+  });
+
+  it('contains only unique types without duplicates', () => {
+    expect(enumList).toBeDefined();
+    const uniqueSet = new Set(enumList);
+    expect(uniqueSet.size).toBe(enumList.length);
+  });
+
+  it('does not contain invalid redirect alias', () => {
+    expect(enumList).not.toContain('redirect');
+    expect(enumList).toContain('redir');
+  });
+
+  it('does not contain sub-options as top-level types', () => {
+    const subOptions = ['restls', 'jls', 'kcptun', 'shadowtls', 'mkcp', 'mekya', 'tlsmirror'];
+    for (const opt of subOptions) {
+      expect(enumList).not.toContain(opt);
+    }
+  });
+
+  it('contains every builder listener type', () => {
+    for (const builderType of BUILDER_LISTENER_TYPES) {
+      const expectedSchemaType = builderType === 'redirect' ? 'redir' : builderType;
+      expect(enumList).toContain(expectedSchemaType);
+    }
+  });
+
+  it('defines rule property strictly as string (not boolean)', () => {
+    const ruleProp = (mihomoSchema as any).properties.listeners.items.properties.rule;
+    expect(ruleProp.type).toBe('string');
+    expect(ruleProp.type).not.toBe('boolean');
   });
 });

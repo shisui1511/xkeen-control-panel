@@ -330,6 +330,28 @@ export const mihomoSchema = {
           name: { type: 'string', description: 'Listener name (matchable with IN-NAME)' },
           type: {
             type: 'string',
+            enum: [
+              'socks',
+              'http',
+              'tproxy',
+              'redir',
+              'mixed',
+              'tunnel',
+              'tun',
+              'shadowsocks',
+              'snell',
+              'vmess',
+              'vless',
+              'trojan',
+              'hysteria2',
+              'hysteria2-realm',
+              'tuic',
+              'shadowquic',
+              'anytls',
+              'mieru',
+              'sudoku',
+              'trusttunnel'
+            ],
             description: 'Inbound listener protocol type'
           },
           listen: { type: 'string', description: 'Binding IP address (defaults to 0.0.0.0)' },
