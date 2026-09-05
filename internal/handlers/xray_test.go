@@ -317,6 +317,19 @@ func TestXrayGRPCMonitoring(t *testing.T) {
 	if rrModDisable.Code != http.StatusOK {
 		t.Fatalf("expected 200 on modular config disable, got %d: %s", rrModDisable.Code, rrModDisable.Body.String())
 	}
+	if _, err := os.Stat(apiJSONPath); !os.IsNotExist(err) {
+		t.Errorf("expected 00_api.json to be deleted after disabling, but it exists")
+	}
+
+	// Calling disable again when already disabled is idempotent and does not create 00_api.json
+	rrModDisable2 := httptest.NewRecorder()
+	apiModular.XrayGRPCMonitoring(rrModDisable2, httptest.NewRequest(http.MethodPost, "/api/xray/grpc/monitoring", bytes.NewBufferString(`{"enabled": false}`)))
+	if rrModDisable2.Code != http.StatusOK {
+		t.Fatalf("expected 200 on repeated disable, got %d", rrModDisable2.Code)
+	}
+	if _, err := os.Stat(apiJSONPath); !os.IsNotExist(err) {
+		t.Errorf("expected 00_api.json to not be created on repeated disable")
+	}
 }
 
 func TestCapabilitiesGRPCReady(t *testing.T) {

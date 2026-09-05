@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -73,6 +72,14 @@ type XrayGRPCMonitoringRequest struct {
 	Enabled bool `json:"enabled"`
 }
 
+func (a *API) reloadXrayIfRunning() {
+	if a.consoleSvc != nil && a.kernelSvc != nil {
+		if k := a.kernelSvc.Get("xray"); k != nil && k.ProcessStatus == "running" {
+			_, _ = a.consoleSvc.Execute("-restart")
+		}
+	}
+}
+
 // XrayGRPCMonitoring handles POST /api/xray/grpc/monitoring to enable or disable
 // the gRPC api block in Xray's config.json.
 func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
@@ -92,32 +99,12 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	configPath := filepath.Join(a.cfg.XRayConfigDir, "config.json")
-	existedBefore := true
-	if _, err := os.Stat(configPath); err != nil {
-		modularPath := filepath.Join(a.cfg.XRayConfigDir, "00_api.json")
-		if _, errMod := os.Stat(modularPath); errMod == nil {
-			configPath = modularPath
-		} else {
-			// Check if any other .json files exist in XRayConfigDir (modular deployment)
-			entries, _ := os.ReadDir(a.cfg.XRayConfigDir)
-			hasOtherJSON := false
-			for _, entry := range entries {
-				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
-					hasOtherJSON = true
-					break
-				}
-			}
-			if hasOtherJSON {
-				configPath = modularPath
-				existedBefore = false
-			} else {
-				a.errorResponse(w, "Xray configuration file not found or not readable", http.StatusServiceUnavailable)
-				return
-			}
-		}
+	info := services.FindXrayAPIFragment(a.cfg.XRayConfigDir)
+	if !info.FileExists && !info.HasAnyJSON {
+		a.errorResponse(w, "Xray configuration file not found or not readable", http.StatusServiceUnavailable)
+		return
 	}
-
+	configPath := info.Path
 	if a.pathVal != nil {
 		cleanPath, err := a.pathVal.Validate(configPath)
 		if err != nil {
@@ -128,7 +115,7 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var originalContent string
-	if existedBefore {
+	if info.FileExists {
 		data, err := os.ReadFile(configPath)
 		if err != nil {
 			a.errorResponse(w, "Xray configuration file not found or not readable", http.StatusServiceUnavailable)
@@ -159,51 +146,65 @@ func (a *API) XrayGRPCMonitoring(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Dry-run verification if xray binary exists
-		xrayBin := "xray"
-		if a.cfg.XKeenBinary != "" {
-			binDir := filepath.Dir(a.cfg.XKeenBinary)
-			candidate := filepath.Join(binDir, "xray")
-			if _, err := os.Stat(candidate); err == nil {
-				xrayBin = candidate
-			}
-		}
-		if p, err := exec.LookPath(xrayBin); err == nil {
-			var cmd *exec.Cmd
-			if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
-				cmd = exec.Command(p, "-test", "-confdir", a.cfg.XRayConfigDir)
-				setupXrayCmdEnv(cmd, a.cfg.XRayConfigDir)
+		if ok, out := services.ValidateXrayConfigDir(a.cfg.XRayConfigDir); !ok {
+			// Rollback
+			if info.FileExists {
+				_ = utils.AtomicWriteFile(configPath, []byte(originalContent), 0600)
 			} else {
-				cmd = exec.Command(p, "-test", "-config", configPath)
-				setupXrayCmdEnv(cmd, filepath.Dir(configPath))
+				_ = os.Remove(configPath)
 			}
-			if out, err := cmd.CombinedOutput(); err != nil {
-				// Rollback
-				if existedBefore {
-					_ = utils.AtomicWriteFile(configPath, []byte(originalContent), 0600)
-				} else {
-					_ = os.Remove(configPath)
-				}
-				a.errorResponse(w, fmt.Sprintf("Xray config validation failed, rolled back: %s", string(out)), http.StatusServiceUnavailable)
-				return
-			}
+			a.errorResponse(w, fmt.Sprintf("Xray config validation failed, rolled back: %s", out), http.StatusServiceUnavailable)
+			return
 		}
 
+		a.reloadXrayIfRunning()
 		JSONSuccess(w, map[string]interface{}{"enabled": true})
 		return
 	}
 
 	// Disable monitoring
+	if !info.APIPresent {
+		// Already disabled or no api block found
+		JSONSuccess(w, map[string]interface{}{"enabled": false})
+		return
+	}
+
 	newContent, err := services.DeprovisionXrayAPIBlock(originalContent)
 	if err != nil {
 		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if err := utils.AtomicWriteFile(configPath, []byte(newContent), 0600); err != nil {
-		a.errorResponse(w, fmt.Sprintf("failed to write config: %v", err), http.StatusInternalServerError)
+	// If it was modular 00_api.json and no other inbounds remain, remove the file entirely
+	shouldRemoveModular := false
+	if info.IsModular && filepath.Base(configPath) == "00_api.json" {
+		var checkRoot map[string]interface{}
+		if err := json.Unmarshal([]byte(newContent), &checkRoot); err == nil {
+			inbs, _ := checkRoot["inbounds"].([]interface{})
+			if len(inbs) == 0 {
+				shouldRemoveModular = true
+			}
+		}
+	}
+
+	if shouldRemoveModular {
+		_ = os.Remove(configPath)
+	} else {
+		if err := utils.AtomicWriteFile(configPath, []byte(newContent), 0600); err != nil {
+			a.errorResponse(w, fmt.Sprintf("failed to write config: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Dry-run verification on disable path
+	if ok, out := services.ValidateXrayConfigDir(a.cfg.XRayConfigDir); !ok {
+		// Rollback
+		_ = utils.AtomicWriteFile(configPath, []byte(originalContent), 0600)
+		a.errorResponse(w, fmt.Sprintf("Xray config validation failed, rolled back: %s", out), http.StatusServiceUnavailable)
 		return
 	}
 
+	a.reloadXrayIfRunning()
 	JSONSuccess(w, map[string]interface{}{"enabled": false})
 }
 

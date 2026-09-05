@@ -6,9 +6,13 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -158,10 +162,24 @@ func isProhibitedIP(ip net.IP) error {
 	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return errors.New("link-local destination IP is prohibited")
 	}
-	// CGNAT 100.64.0.0/10
+	if ip.IsMulticast() {
+		return errors.New("multicast destination IP is prohibited")
+	}
 	if v4 := ip.To4(); v4 != nil {
+		if v4[0] == 0 {
+			return errors.New("unspecified destination IP is prohibited")
+		}
+		// CGNAT 100.64.0.0/10
 		if v4[0] == 100 && (v4[1]&0xc0) == 64 {
 			return errors.New("carrier-grade NAT destination IP is prohibited")
+		}
+		// Benchmarking 198.18.0.0/15
+		if v4[0] == 198 && (v4[1]&0xfe) == 18 {
+			return errors.New("benchmarking network destination IP is prohibited")
+		}
+		// Reserved 240.0.0.0/4 (240..255)
+		if v4[0] >= 240 {
+			return errors.New("reserved network destination IP is prohibited")
 		}
 	}
 	return nil
@@ -227,4 +245,179 @@ func TLSPing(dest string, serverName string, alpn []string) (*TLSPingResult, err
 	}
 
 	return res, nil
+}
+
+// XrayAPIFragmentInfo describes where the Xray API inbound is located in a config directory.
+type XrayAPIFragmentInfo struct {
+	// Path is the full path to the file containing the API inbound, or the recommended path if none exists.
+	Path string
+	// APIPresent indicates whether an inbound with tag "api" was found.
+	APIPresent bool
+	// FileExists indicates whether the file at Path exists on disk.
+	FileExists bool
+	// IsModular indicates whether the directory uses a modular multi-file layout.
+	IsModular bool
+	// HasAnyJSON indicates whether any JSON files exist in the configuration directory.
+	HasAnyJSON bool
+}
+
+// FindXrayAPIFragment scans the given Xray config directory to find which JSON fragment
+// contains the "api" inbound. If not found, it returns 00_api.json for modular deployments
+// or config.json for monolithic deployments.
+func FindXrayAPIFragment(configDir string) XrayAPIFragmentInfo {
+	if configDir == "" {
+		return XrayAPIFragmentInfo{Path: "config.json"}
+	}
+
+	entries, err := os.ReadDir(configDir)
+	if err != nil {
+		p := filepath.Join(configDir, "config.json")
+		_, statErr := os.Stat(p)
+		return XrayAPIFragmentInfo{
+			Path:       p,
+			FileExists: statErr == nil,
+			HasAnyJSON: statErr == nil,
+		}
+	}
+
+	var jsonFiles []string
+	hasConfigJSON := false
+	hasModularAPI := false
+
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			jsonFiles = append(jsonFiles, entry.Name())
+			if entry.Name() == "config.json" {
+				hasConfigJSON = true
+			}
+			if entry.Name() == "00_api.json" {
+				hasModularAPI = true
+			}
+		}
+	}
+
+	if len(jsonFiles) == 0 {
+		return XrayAPIFragmentInfo{
+			Path:       filepath.Join(configDir, "config.json"),
+			APIPresent: false,
+			FileExists: false,
+			IsModular:  false,
+			HasAnyJSON: false,
+		}
+	}
+
+	isModular := len(jsonFiles) > 1 || (len(jsonFiles) == 1 && !hasConfigJSON)
+
+	// Scan all JSON files to see if any already contains inbound with tag "api"
+	for _, name := range jsonFiles {
+		filePath := filepath.Join(configDir, name)
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			continue
+		}
+		var root map[string]interface{}
+		if json.Unmarshal(data, &root) != nil || root == nil {
+			continue
+		}
+		if inbs, ok := root["inbounds"].([]interface{}); ok {
+			for _, inb := range inbs {
+				if m, ok := inb.(map[string]interface{}); ok {
+					if tag, _ := m["tag"].(string); tag == "api" {
+						return XrayAPIFragmentInfo{
+							Path:       filePath,
+							APIPresent: true,
+							FileExists: true,
+							IsModular:  isModular,
+							HasAnyJSON: true,
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Not found in any file: determine target path
+	if isModular {
+		targetPath := filepath.Join(configDir, "00_api.json")
+		return XrayAPIFragmentInfo{
+			Path:       targetPath,
+			APIPresent: false,
+			FileExists: hasModularAPI,
+			IsModular:  true,
+			HasAnyJSON: true,
+		}
+	}
+
+	targetPath := filepath.Join(configDir, "config.json")
+	return XrayAPIFragmentInfo{
+		Path:       targetPath,
+		APIPresent: false,
+		FileExists: hasConfigJSON,
+		IsModular:  false,
+		HasAnyJSON: true,
+	}
+}
+
+// ValidateXrayConfigDir validates an Xray configuration directory or file using `xray -test`.
+// If xray binary is not found on the system, it returns (true, "") to allow environments without
+// Entware (such as CI or local dev) to pass. If validation fails, it returns (false, combinedOutput).
+func ValidateXrayConfigDir(configPath string) (bool, string) {
+	if configPath == "" {
+		return true, ""
+	}
+
+	xrayBin := ""
+	candidates := []string{"xray", "/opt/sbin/xray", "/opt/bin/xray", "/usr/bin/xray", "/usr/local/bin/xray"}
+	for _, c := range candidates {
+		if p, err := exec.LookPath(c); err == nil {
+			xrayBin = p
+			break
+		}
+	}
+	if xrayBin == "" {
+		return true, ""
+	}
+
+	var cmd *exec.Cmd
+	st, err := os.Stat(configPath)
+	if err == nil && st.IsDir() {
+		cmd = exec.Command(xrayBin, "-test", "-confdir", configPath)
+	} else {
+		cmd = exec.Command(xrayBin, "-test", "-config", configPath)
+	}
+
+	// Setup asset location env
+	env := os.Environ()
+	assetEnvFound := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "XRAY_LOCATION_ASSET=") {
+			assetEnvFound = true
+			break
+		}
+	}
+	if !assetEnvFound {
+		assetCandidates := []string{
+			"/opt/etc/xray/dat",
+			"/opt/share/xray",
+			"/opt/etc/xray",
+		}
+		if st != nil && st.IsDir() {
+			assetCandidates = append(assetCandidates, filepath.Dir(configPath), configPath)
+		} else {
+			assetCandidates = append(assetCandidates, filepath.Dir(configPath))
+		}
+		for _, dir := range assetCandidates {
+			if dSt, dErr := os.Stat(dir); dErr == nil && dSt.IsDir() {
+				env = append(env, "XRAY_LOCATION_ASSET="+dir)
+				break
+			}
+		}
+	}
+	cmd.Env = env
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, string(out)
+	}
+	return true, ""
 }
