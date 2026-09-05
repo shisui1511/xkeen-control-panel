@@ -69,11 +69,11 @@ export function parseMihomoListenerPorts(yamlText: string): PortAllocation[] {
   let currentPort: number | null = null;
 
   function flush() {
-    if (currentName && currentPort !== null && currentPort > 0) {
+    if (currentPort !== null && currentPort > 0) {
       ports.push({
         port: currentPort,
         engine: 'mihomo',
-        purpose: 'listener:' + currentName
+        purpose: 'listener:' + (currentName || 'unnamed')
       });
     }
     currentName = '';

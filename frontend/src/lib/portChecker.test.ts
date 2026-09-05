@@ -144,6 +144,21 @@ listeners:
     });
   });
 
+  it('parseMihomoListenerPorts captures ports from unnamed listeners with fallback (WR-03)', () => {
+    const yaml = `
+listeners:
+  - type: mixed
+    port: 7895
+`;
+    const allocations = parseMihomoListenerPorts(yaml);
+    expect(allocations).toHaveLength(1);
+    expect(allocations[0]).toEqual({
+      port: 7895,
+      engine: 'mihomo',
+      purpose: 'listener:unnamed'
+    });
+  });
+
   it('detects collision between listener and top-level port or another listener', () => {
     const yaml = `
 mixed-port: 7890
