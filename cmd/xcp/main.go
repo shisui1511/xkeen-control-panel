@@ -159,7 +159,6 @@ func main() {
 	srv.HandleProtected("/api/config/list", api.ConfigList)
 	srv.HandleProtected("/api/config/read", api.ConfigRead)
 	srv.HandleProtected("/api/config/save", api.ConfigSave)
-	srv.HandleProtected("/api/config/mihomo-merge", api.MihomoMergeSave)
 	srv.HandleProtected("/api/config/backups", api.ConfigBackups)
 	srv.HandleProtected("/api/config/create", api.ConfigCreate)
 	srv.HandleProtected("/api/config/delete", api.ConfigDelete)

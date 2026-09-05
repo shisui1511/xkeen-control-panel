@@ -15,7 +15,6 @@ import (
 
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
-	"gopkg.in/yaml.v3"
 )
 
 const maxConfigBytes = 1 * 1024 * 1024 // 1 MB
@@ -636,125 +635,7 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type MihomoMergeRequest struct {
-	Path     string            `json:"path"`
-	Sections map[string]string `json:"sections"`
-}
 
-func (a *API) MihomoMergeSave(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
-		return
-	}
-
-	r.Body = http.MaxBytesReader(nil, r.Body, maxConfigBytes)
-	var req MihomoMergeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) || err.Error() == "http: request body too large" {
-			a.errorResponse(w, "request body too large", http.StatusRequestEntityTooLarge)
-			return
-		}
-		a.errorResponse(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	if req.Path == "" {
-		a.errorResponse(w, "path is required", http.StatusBadRequest)
-		return
-	}
-
-	cleanPath, err := a.pathVal.Validate(req.Path)
-	if err != nil {
-		a.errorResponse(w, a.t(r, "config.path_not_allowed"), http.StatusForbidden)
-		return
-	}
-
-	ext := filepath.Ext(cleanPath)
-	if ext != ".yaml" && ext != ".yml" {
-		a.errorResponse(w, "only .yaml, .yml files are allowed for merge", http.StatusForbidden)
-		return
-	}
-
-	mihomoConfigPath := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yaml"))
-	mihomoConfigPathYml := filepath.Clean(filepath.Join(a.cfg.MihomoConfigDir, "config.yml"))
-	isMihomoConfig := (cleanPath == mihomoConfigPath || cleanPath == mihomoConfigPathYml)
-
-	if isMihomoConfig && a.subscriptionSvc != nil {
-		a.subscriptionSvc.LockMihomo()
-		defer a.subscriptionSvc.UnlockMihomo()
-	}
-
-	data, err := a.configSvc.Read(cleanPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			data = []byte{}
-		} else {
-			a.errorResponse(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	}
-
-	content := string(data)
-	if strings.TrimSpace(content) == "" {
-		content = `log-level: silent
-allow-lan: true
-routing-mark: 255
-find-process-mode: off
-unified-delay: true
-tproxy-port: 5001
-redir-port: 5000
-external-controller: 0.0.0.0:9090
-profile:
-  store-selected: true
-`
-	}
-
-	for sectionName, newSecContent := range req.Sections {
-		if sectionName != "proxy-groups" && sectionName != "rule-providers" && sectionName != "rules" &&
-			sectionName != "proxies" && sectionName != "dns" && sectionName != "tun" &&
-			sectionName != "proxy-providers" {
-			a.errorResponse(w, "invalid section name: "+sectionName, http.StatusBadRequest)
-			return
-		}
-		if strings.TrimSpace(newSecContent) != "" {
-			var temp interface{}
-			if err := yaml.Unmarshal([]byte(newSecContent), &temp); err != nil {
-				a.errorResponse(w, "invalid YAML syntax in section "+sectionName+": "+err.Error(), http.StatusBadRequest)
-				return
-			}
-		}
-		content = services.ReplaceMihomoTopLevelSection(content, sectionName, newSecContent)
-	}
-
-	var resultTemp interface{}
-	if err := yaml.Unmarshal([]byte(content), &resultTemp); err != nil {
-		a.errorResponse(w, "invalid resulting YAML config: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	var backupData []byte
-	var backupExists bool
-	if _, statErr := os.Stat(cleanPath); statErr == nil {
-		if d, readErr := os.ReadFile(cleanPath); readErr == nil {
-			backupData = d
-			backupExists = true
-		}
-	}
-
-	err = a.configSvc.Save(cleanPath, []byte(content))
-	if err != nil {
-		a.errorResponse(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	if errStr := a.validateConfigAndRollback(r, cleanPath, []byte(content), backupExists, backupData); errStr != "" {
-		a.errorResponse(w, errStr, http.StatusUnprocessableEntity)
-		return
-	}
-
-	JSONSuccess(w, nil)
-}
 
 func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data []byte, backupExists bool, backupData []byte) string {
 	ext := filepath.Ext(cleanPath)
