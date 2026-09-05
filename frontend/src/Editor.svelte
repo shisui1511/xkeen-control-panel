@@ -1323,9 +1323,14 @@
           const mergeData: any = mergeRes;
           const w = mergeData?.data?.warnings ?? mergeData?.warnings;
           saveWarnings = Array.isArray(w) ? w : [];
+        } else {
+          throw new Error('empty merge result');
         }
-      } catch (mergeErr) {
-        console.warn('Smart merge fallback to raw template:', mergeErr);
+      } catch (mergeErr: any) {
+        if (mergeErr?.status === 401) return;
+        console.error('Smart merge failed:', mergeErr);
+        showToast('error', $t('editor.smart_merge_failed'));
+        return;
       }
 
       editorView.dispatch({
