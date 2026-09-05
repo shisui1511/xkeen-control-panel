@@ -988,6 +988,7 @@
   "mihomo.listener_dest_rules": "По общим правилам маршрутизации",
   "mihomo.listener_dest_groups": "Группы",
   "mihomo.listener_dest_nodes": "Ноды",
+  "mihomo.listener_dest_special": "Специальные",
   "mihomo.listener_destination_hint": "Трафик с этого слушателя направляется напрямую в выбранное назначение, минуя список правил.",
   "mihomo.listener_udp": "Пропускать UDP",
   "mihomo.listener_users": "Авторизация (необязательно)",

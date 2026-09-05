@@ -989,6 +989,7 @@
   "mihomo.listener_dest_rules": "By general routing rules",
   "mihomo.listener_dest_groups": "Groups",
   "mihomo.listener_dest_nodes": "Nodes",
+  "mihomo.listener_dest_special": "Special",
   "mihomo.listener_destination_hint": "Traffic from this listener is routed directly to the selected destination, bypassing the routing rules.",
   "mihomo.listener_udp": "Forward UDP",
   "mihomo.listener_users": "Authentication (optional)",

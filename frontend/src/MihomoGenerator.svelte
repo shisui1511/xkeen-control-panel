@@ -3153,7 +3153,9 @@
                     id="listener-destination"
                     class="form-select"
                     value={newListener.proxy &&
-                    (groups.some((g) => g.name === newListener.proxy) ||
+                    (newListener.proxy === 'DIRECT' ||
+                      newListener.proxy === 'REJECT' ||
+                      groups.some((g) => g.name === newListener.proxy) ||
                       proxies.some((p) => p.name === newListener.proxy))
                       ? newListener.proxy
                       : ''}
@@ -3162,6 +3164,10 @@
                     }}
                   >
                     <option value="">{$t('mihomo.listener_dest_rules')}</option>
+                    <optgroup label={$t('mihomo.listener_dest_special')}>
+                      <option value="DIRECT">DIRECT</option>
+                      <option value="REJECT">REJECT</option>
+                    </optgroup>
                     {#if groups.length > 0}
                       <optgroup label={$t('mihomo.listener_dest_groups')}>
                         {#each groups as g}
