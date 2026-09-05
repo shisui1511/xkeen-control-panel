@@ -30,13 +30,31 @@ type LogEntry struct {
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
+// LogRateLimit constants define throttling parameters for LogDispatcher (LOGHUB-07).
+const (
+	// LogRateLimitMaxPerWindow is the maximum number of logs allowed per source per window.
+	LogRateLimitMaxPerWindow = 100
+	// LogRateLimitWindowDuration is the duration of a rate limit window (1 second).
+	LogRateLimitWindowDuration = 1 * time.Second
+	// LogBatchFlushInterval defines the broadcast cadence for subscribers (120ms, within 100-150ms).
+	LogBatchFlushInterval = 120 * time.Millisecond
+)
+
 // FlashHealthInfo represents the status of flash memory and log files.
 type FlashHealthInfo struct {
-	TotalLogsBytes   int64 `json:"total_logs_bytes"`
+	TotalLogsBytes   int64  `json:"total_logs_bytes"`
 	FreeSpaceBytes   uint64 `json:"free_space_bytes"`
 	TotalSpaceBytes  uint64 `json:"total_space_bytes"`
 	IsUnderPressure  bool   `json:"is_under_pressure"`
 	EmergencyActions int    `json:"emergency_actions"`
+	SuppressedLogs   int64  `json:"suppressed_logs"`
+}
+
+type rateLimitState struct {
+	mu          sync.Mutex
+	windowStart time.Time
+	passCount   int
+	suppressed  int
 }
 
 // RingBuffer stores a fixed-capacity circular buffer of LogEntry items in RAM.
@@ -115,6 +133,9 @@ type LogDispatcher struct {
 	wg     sync.WaitGroup
 
 	emergencyActions atomic.Int32
+	rateLimiters     map[string]*rateLimitState
+	suppressedTotal  atomic.Int64
+	nowFunc          func() time.Time
 }
 
 var (
@@ -142,6 +163,15 @@ func NewLogDispatcher(logSources []string, logDir string, mihomoAPI string) *Log
 		mihomoAPI:   mihomoAPI,
 		ctx:         ctx,
 		cancel:      cancel,
+		rateLimiters: map[string]*rateLimitState{
+			"mihomo":      {},
+			"xray-error":  {},
+			"xray-access": {},
+			"xkeen":       {},
+			"syslog":      {},
+			"xcp":         {},
+		},
+		nowFunc: time.Now,
 	}
 
 	return d
@@ -187,6 +217,55 @@ func (d *LogDispatcher) Unsubscribe(ch chan []LogEntry) {
 	d.mu.Unlock()
 }
 
+// checkRateLimit evaluates per-source throttling against LogRateLimitMaxPerWindow.
+// If window has rolled and logs were suppressed, returns an aggregate LogEntry for batchQueue.
+func (d *LogDispatcher) checkRateLimit(bufKey string) (bool, *LogEntry) {
+	d.mu.RLock()
+	limiter, ok := d.rateLimiters[bufKey]
+	if !ok {
+		limiter = d.rateLimiters["xkeen"]
+	}
+	d.mu.RUnlock()
+
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+
+	now := time.Now()
+	if d.nowFunc != nil {
+		now = d.nowFunc()
+	}
+
+	if limiter.windowStart.IsZero() {
+		limiter.windowStart = now
+	}
+
+	var aggregate *LogEntry
+	if now.Sub(limiter.windowStart) >= LogRateLimitWindowDuration {
+		if limiter.suppressed > 0 {
+			aggregate = &LogEntry{
+				ID:        d.idCounter.Add(1),
+				Timestamp: now.Format("15:04:05"),
+				Source:    bufKey,
+				Level:     "warning",
+				Subsystem: "system",
+				Message:   fmt.Sprintf("[system] %d messages suppressed (rate limit)", limiter.suppressed),
+			}
+		}
+		limiter.windowStart = now
+		limiter.passCount = 0
+		limiter.suppressed = 0
+	}
+
+	if limiter.passCount < LogRateLimitMaxPerWindow {
+		limiter.passCount++
+		return true, aggregate
+	}
+
+	limiter.suppressed++
+	d.suppressedTotal.Add(1)
+	return false, aggregate
+}
+
 // IngestLine parses, redacts, stores and queues a log line.
 func (d *LogDispatcher) IngestLine(rawLine string, fallbackSource string) LogEntry {
 	redacted := RedactSensitiveText(rawLine)
@@ -209,6 +288,18 @@ func (d *LogDispatcher) IngestLine(rawLine string, fallbackSource string) LogEnt
 		buf = d.buffers["xkeen"]
 	}
 	d.mu.RUnlock()
+
+	// Check per-source rate limit (LOGHUB-07)
+	allowed, aggregate := d.checkRateLimit(bufKey)
+	if aggregate != nil {
+		d.batchMu.Lock()
+		d.batchQueue = append(d.batchQueue, *aggregate)
+		d.batchMu.Unlock()
+	}
+
+	if !allowed {
+		return entry
+	}
 
 	if buf != nil {
 		buf.Add(entry)
@@ -316,7 +407,7 @@ func (d *LogDispatcher) parseRedactedLine(line string, fallbackSource string) Lo
 // batchFlusherLoop flushes queued logs to WebSocket clients every 120ms.
 func (d *LogDispatcher) batchFlusherLoop() {
 	defer d.wg.Done()
-	ticker := time.NewTicker(120 * time.Millisecond)
+	ticker := time.NewTicker(LogBatchFlushInterval)
 	defer ticker.Stop()
 
 	for {
@@ -442,7 +533,13 @@ func (d *LogDispatcher) GetFlashHealth() FlashHealthInfo {
 		TotalSpaceBytes:  totalBytes,
 		IsUnderPressure:  isUnderPressure,
 		EmergencyActions: int(d.emergencyActions.Load()),
+		SuppressedLogs:   d.suppressedTotal.Load(),
 	}
+}
+
+// SuppressedTotal returns total number of suppressed log entries across all sources.
+func (d *LogDispatcher) SuppressedTotal() int64 {
+	return d.suppressedTotal.Load()
 }
 
 // GetHistory returns historical entries for a given source and level filter.
