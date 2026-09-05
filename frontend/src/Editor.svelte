@@ -24,6 +24,9 @@
   import EditorKernelWidget from './components/status/EditorKernelWidget.svelte';
   import { registerDirtySource, getDraft, clearDraft, type DraftRecord } from './lib/dirtyRegistry';
   import { activateRestartGrace } from './lib/serviceGrace';
+  import PreflightWarnings, {
+    type PreflightWarning
+  } from './components/editor/PreflightWarnings.svelte';
 
   interface Template {
     name: string;
@@ -82,6 +85,7 @@
   let selectedBackup = $state('');
   let diffGroups = $state<any[]>([]);
   let backupLoading = $state(false);
+  let saveWarnings = $state<PreflightWarning[]>([]);
 
   // Directory management
   const xrayDir = '/opt/etc/xray/configs';
@@ -788,6 +792,7 @@
     if (!selectedFile || !editorView) return;
 
     saving = true;
+    saveWarnings = [];
 
     try {
       const content = editorView.state.doc.toString();
@@ -805,6 +810,10 @@
         const parsedErr = parseValidationError(text, ru ? 'ru' : 'en');
         throw new Error(parsedErr || 'Failed to save file');
       }
+
+      const saveJson = await res.json().catch(() => null);
+      const data = saveJson?.data ?? saveJson;
+      saveWarnings = Array.isArray(data?.warnings) ? data.warnings : [];
 
       showSaveConfirmModal = false;
       showToast('success', $t('editor.file_saved'));
@@ -834,6 +843,7 @@
   async function handleSaveAndApply() {
     if (!selectedFile || !editorView) return;
     applyLoading = true;
+    saveWarnings = [];
     await tick();
     backgroundStatusText = $t('editor.saving');
 
@@ -854,6 +864,10 @@
         const parsedErr = parseValidationError(text, ru ? 'ru' : 'en');
         throw new Error(parsedErr || 'Failed to save file');
       }
+
+      const saveJson = await saveRes.json().catch(() => null);
+      const data = saveJson?.data ?? saveJson;
+      saveWarnings = Array.isArray(data?.warnings) ? data.warnings : [];
 
       originalContent = content;
       isDirty = false;
@@ -1280,6 +1294,7 @@
       return;
 
     templateLoading = true;
+    saveWarnings = [];
     try {
       const data = await apiFetchJSON<{ content: string }>(
         `/api/templates/fetch?name=${encodeURIComponent(template.name)}`
@@ -1290,7 +1305,10 @@
       let finalContent = data.content;
       try {
         const currentContent = editorView.state.doc.toString();
-        const mergeRes = await apiFetchJSON<{ content: string }>('/api/config/smart-merge', {
+        const mergeRes = await apiFetchJSON<{
+          content: string;
+          warnings?: PreflightWarning[];
+        }>('/api/config/smart-merge', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1302,6 +1320,9 @@
         });
         if (mergeRes && mergeRes.content) {
           finalContent = mergeRes.content;
+          const mergeData: any = mergeRes;
+          const w = mergeData?.data?.warnings ?? mergeData?.warnings;
+          saveWarnings = Array.isArray(w) ? w : [];
         }
       } catch (mergeErr) {
         console.warn('Smart merge fallback to raw template:', mergeErr);
@@ -1813,6 +1834,13 @@
               {/each}
             </div>
           {/if}
+
+          <PreflightWarnings
+            warnings={saveWarnings}
+            onDismiss={() => {
+              saveWarnings = [];
+            }}
+          />
 
           <!-- CodeMirror editor component -->
           <div style="flex: 1; min-height: 0; position:relative; background: var(--cm-bg);">

@@ -27,6 +27,9 @@
   import ProxyForm from './components/mihomo/ProxyForm.svelte';
   import GroupForm from './components/mihomo/GroupForm.svelte';
   import RuleForm from './components/mihomo/RuleForm.svelte';
+  import PreflightWarnings, {
+    type PreflightWarning
+  } from './components/editor/PreflightWarnings.svelte';
 
   let {
     onSwitchTab = () => {},
@@ -167,6 +170,7 @@
   let subscriptions: any[] = $state([]);
   let mihomoProviders: any[] = $state([]);
   let lastParsedProviders: any[] = $state([]);
+  let saveWarnings = $state<PreflightWarning[]>([]);
 
   function mergeMihomoProviders(dbSubs: any[], parsedProviders: any[]) {
     const dbMapByUrl = new Map<string, any>();
@@ -1734,10 +1738,15 @@
 
       const yamlContent = generateYAML();
       validationError = '';
+      saveWarnings = [];
 
-      let mergeRes: { content: string; stats?: any };
+      let mergeRes: { content: string; stats?: any; warnings?: PreflightWarning[] };
       try {
-        mergeRes = await apiFetchJSON<{ content: string; stats?: any }>('/api/config/smart-merge', {
+        mergeRes = await apiFetchJSON<{
+          content: string;
+          stats?: any;
+          warnings?: PreflightWarning[];
+        }>('/api/config/smart-merge', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -1783,6 +1792,16 @@
         const errorText = await saveRes.text();
         throw new Error(errorText || 'Failed to save config');
       }
+
+      const saveJson = await saveRes.json().catch(() => null);
+      const saveData = saveJson?.data ?? saveJson;
+      const saveResWarnings = Array.isArray(saveData?.warnings) ? saveData.warnings : [];
+      const mergeWarnings = Array.isArray((mergeRes as any)?.warnings)
+        ? (mergeRes as any).warnings
+        : Array.isArray((mergeRes as any)?.data?.warnings)
+          ? (mergeRes as any).data.warnings
+          : [];
+      saveWarnings = saveResWarnings.length > 0 ? saveResWarnings : mergeWarnings;
 
       let restartUrl = '/api/service/control?action=restart';
       const activeKernel = $capabilities?.active_kernel;
@@ -2109,6 +2128,13 @@
             <span class="preset-modified-chip">{$t('xray.preset_modified')}</span>
           {/if}
         </div>
+
+        <PreflightWarnings
+          warnings={saveWarnings}
+          onDismiss={() => {
+            saveWarnings = [];
+          }}
+        />
 
         {#if activePreset === 'zkeen-selective' && !hasZkeenGeodata && !dismissZkeenGeodataWarning}
           <div

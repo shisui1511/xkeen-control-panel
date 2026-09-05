@@ -10,6 +10,9 @@
   import { parseValidationError } from './lib/errorParser';
   import { findPortCollisions, parseMihomoPorts, type PortAllocation } from './lib/portChecker';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import PreflightWarnings, {
+    type PreflightWarning
+  } from './components/editor/PreflightWarnings.svelte';
 
   let {
     onSwitchTab = () => {},
@@ -392,6 +395,7 @@
   let showApplyConfirm = $state(false);
   let loadErrors = $state<Record<string, string>>({});
   let xrayFiles = $state<Record<string, any>>({});
+  let saveWarnings = $state<PreflightWarning[]>([]);
 
   // Import Node states (runes)
   let showImportModal = $state(false);
@@ -1290,6 +1294,8 @@
       checkUndo();
 
       validationError = '';
+      saveWarnings = [];
+      const collectedWarnings: PreflightWarning[] = [];
 
       // 1. Сохранить изменённые файлы
       for (const file of changed) {
@@ -1313,7 +1319,13 @@
           }
           throw new Error(`Failed to save ${file.name}`);
         }
+        const saveJson = await saveRes.json().catch(() => null);
+        const data = saveJson?.data ?? saveJson;
+        if (Array.isArray(data?.warnings) && data.warnings.length > 0) {
+          collectedWarnings.push(...data.warnings);
+        }
       }
+      saveWarnings = collectedWarnings;
 
       // 2. Рестарт XKeen
       activateRestartGrace(6000);
@@ -1700,6 +1712,7 @@
     const tag = proxyTag && outboundTags.includes(proxyTag) ? proxyTag : 'direct';
 
     applyLoading = true;
+    saveWarnings = [];
     try {
       // 04_outbounds.json: сохранение кастомных outbounds (все кроме direct и block).
       // services.SmartMergeXray не реализует семантику outbounds, поэтому здесь выполняется локальное объединение.
@@ -1782,6 +1795,20 @@
         }
         throw new Error('Failed to save 05_routing.json');
       }
+
+      const collected: PreflightWarning[] = [];
+      const outJson = await saveOutboundsRes.json().catch(() => null);
+      const outData = outJson?.data ?? outJson;
+      if (Array.isArray(outData?.warnings)) collected.push(...outData.warnings);
+
+      const routJson = await saveRoutingRes.json().catch(() => null);
+      const routData = routJson?.data ?? routJson;
+      if (Array.isArray(routData?.warnings)) {
+        collected.push(...routData.warnings);
+      } else if (Array.isArray((mergeRes as any)?.warnings)) {
+        collected.push(...(mergeRes as any).warnings);
+      }
+      saveWarnings = collected;
 
       if (!silent) {
         const stats = mergeRes.stats || {};
@@ -2174,6 +2201,13 @@
         </div>
       </div>
     {/if}
+
+    <PreflightWarnings
+      warnings={saveWarnings}
+      onDismiss={() => {
+        saveWarnings = [];
+      }}
+    />
 
     <div class="gen-layout" class:resizing={isResizingPreview}>
       <!-- Left Panel -->
