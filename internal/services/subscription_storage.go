@@ -1234,6 +1234,7 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 		if sourceSub.EnableXray {
 			if err := s.refreshXrayFragmentLocked(sourceSub); err != nil {
 				log.Printf("[Subscriptions] failed to refresh Xray fragment for %s: %v", sourceSub.ID, err)
+				return err
 			}
 		}
 		if s.consoleSvc != nil && sourceSub.EnableXray {
@@ -1291,6 +1292,9 @@ func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag strin
 	if sourceSub.EnableXray {
 		if err := s.refreshXrayFragmentLocked(sourceSub); err != nil {
 			log.Printf("[Subscriptions] failed to refresh Xray fragment for %s: %v", sourceSub.ID, err)
+			sourceNode.DialerProxy = ""
+			_ = s.save()
+			return err
 		}
 	}
 
@@ -1461,7 +1465,19 @@ func (s *SubscriptionService) refreshXrayFragmentLocked(sub *Subscription) error
 		return fmt.Errorf("marshal fragment: %w", err)
 	}
 
-	return utils.AtomicWriteFile(fragmentPath, newData, 0600)
+	if err := utils.AtomicWriteFile(fragmentPath, newData, 0600); err != nil {
+		return err
+	}
+
+	if s.configDir != "" {
+		if ok, out := ValidateXrayConfigDir(s.configDir); !ok {
+			// Rollback to previous working fragment content
+			_ = utils.AtomicWriteFile(fragmentPath, data, 0600)
+			return fmt.Errorf("Xray fragment validation failed, rolled back: %s", out)
+		}
+	}
+
+	return nil
 }
 
 

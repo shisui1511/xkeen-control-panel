@@ -726,6 +726,14 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 		return nil, err
 	}
 
+	// Backup existing data for rollback if validation fails
+	var oldData []byte
+	existed := false
+	if d, readErr := os.ReadFile(path); readErr == nil {
+		oldData = d
+		existed = true
+	}
+
 	nodes := s.outboundsToNodes(outbounds, sub)
 
 	allowedOutbounds := make([]Outbound, 0, len(outbounds))
@@ -737,6 +745,10 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 		} else {
 			log.Printf("[Subscriptions] Skipping outbound %q for Xray configuration: unsupported protocol %q", outbounds[i].Tag, node.Protocol)
 		}
+	}
+
+	if len(allowedNodes) != len(allowedOutbounds) {
+		return nil, fmt.Errorf("mismatch between allowed nodes (%d) and outbounds (%d)", len(allowedNodes), len(allowedOutbounds))
 	}
 
 	// Merge sockopt and dialerProxy into allowed outbounds
@@ -758,6 +770,18 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 
 	if err := utils.AtomicWriteFile(path, data, 0600); err != nil {
 		return nil, err
+	}
+
+	if s.configDir != "" {
+		if ok, out := ValidateXrayConfigDir(s.configDir); !ok {
+			// Rollback
+			if existed {
+				_ = utils.AtomicWriteFile(path, oldData, 0600)
+			} else {
+				_ = os.Remove(path)
+			}
+			return nil, fmt.Errorf("Xray fragment validation failed, rolled back: %s", out)
+		}
 	}
 
 	return nodes, nil
