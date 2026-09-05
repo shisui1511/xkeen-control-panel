@@ -229,7 +229,7 @@
       proxy: newListener.proxy?.trim() || undefined,
       users:
         newListener.type === 'mixed' || newListener.type === 'socks' || newListener.type === 'http'
-          ? (newListener.users || []).filter((u) => u.username.trim() || u.password.trim())
+          ? (newListener.users || []).filter((u) => u.username.trim() && u.password.trim())
           : undefined,
       cipher: newListener.type === 'shadowsocks' ? newListener.cipher || 'aes-256-gcm' : undefined,
       password: newListener.type === 'shadowsocks' ? newListener.password || '' : undefined,
