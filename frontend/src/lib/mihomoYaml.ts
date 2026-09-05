@@ -1354,6 +1354,8 @@ export function parseListenersSection(rawBlock: string): {
       const trimmed = rawLine.trim();
       if (trimmed === '' || trimmed.startsWith('#')) continue;
 
+      const indent = rawLine.search(/\S/);
+
       if (inUsers) {
         // Match user item start: e.g. "- username: alice" or "- password: ..." or "- "
         const userItemMatch = rawLine.match(/^\s*-\s*(.*)$/);
@@ -1373,21 +1375,24 @@ export function parseListenersSection(rawBlock: string): {
           continue;
         }
 
-        // Inside a user item: e.g. "password: secret"
-        const userPropMatch = trimmed.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
-        if (userPropMatch && currentUser) {
-          const k = userPropMatch[1];
-          const v = unquote(userPropMatch[2]);
-          if (k === 'username') currentUser.username = v;
-          else if (k === 'password') currentUser.password = v;
-          continue;
-        }
-
         // Left the users list if we reached another property at listener indent
-        inUsers = false;
-        if (currentUser && (currentUser.username || currentUser.password)) {
-          users.push(currentUser);
-          currentUser = null;
+        const isListenerPropertyIndent = indent > 0 && indent <= baseIndent + 2;
+        if (isListenerPropertyIndent) {
+          inUsers = false;
+          if (currentUser && (currentUser.username || currentUser.password)) {
+            users.push(currentUser);
+            currentUser = null;
+          }
+        } else {
+          // Inside a user item: e.g. "password: secret"
+          const userPropMatch = trimmed.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
+          if (userPropMatch && currentUser) {
+            const k = userPropMatch[1];
+            const v = unquote(userPropMatch[2]);
+            if (k === 'username') currentUser.username = v;
+            else if (k === 'password') currentUser.password = v;
+            continue;
+          }
         }
       }
 
@@ -1424,8 +1429,9 @@ export function parseListenersSection(rawBlock: string): {
       }
     }
 
-    if (inUsers && currentUser && (currentUser.username || currentUser.password)) {
+    if (currentUser && (currentUser.username || currentUser.password)) {
       users.push(currentUser);
+      currentUser = null;
     }
 
     if (!type) {

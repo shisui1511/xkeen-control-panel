@@ -1152,6 +1152,32 @@ describe('listeners round-trip', () => {
     expect(l.users![1]).toEqual({ username: 'guest', password: '123' });
   });
 
+  test('свойства слушателя после блока users (port, udp, proxy) корректно парсятся и не теряются', () => {
+    const yamlBlock = `
+  - name: "post-users-props"
+    type: mixed
+    users:
+      - username: "admin"
+        password: "secretpassword"
+    port: 7890
+    udp: true
+    proxy: DIRECT
+    routing-mark: 666
+`;
+    const res = parseListenersSection(yamlBlock);
+    expect(res.unrecognized).toBe(false);
+    expect(res.listeners).toHaveLength(1);
+    const l = res.listeners[0];
+    expect(l.name).toBe('post-users-props');
+    expect(l.type).toBe('mixed');
+    expect(l.port).toBe('7890');
+    expect(l.udp).toBe(true);
+    expect(l.proxy).toBe('DIRECT');
+    expect(l.routingMark).toBe(666);
+    expect(l.users).toHaveLength(1);
+    expect(l.users![0]).toEqual({ username: 'admin', password: 'secretpassword' });
+  });
+
   test('элемент с неподдерживаемым типом переводит в unrecognized: true с rawText', () => {
     const yamlBlock = `
   - name: "valid"
