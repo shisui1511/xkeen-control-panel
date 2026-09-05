@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 func TestZkeenYamlStructure(t *testing.T) {
@@ -675,6 +677,18 @@ func TestReferenceTemplatesTMPL05(t *testing.T) {
 				}
 			}
 
+			// Наличие правила защиты системного резолвера Keenetic (DNS-over-VLESS)
+			foundDnsProtect := false
+			for _, r := range rulesList {
+				if rStr, ok := r.(string); ok && (strings.TrimSpace(rStr) == "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve" || strings.TrimSpace(rStr) == "IP-CIDR,127.0.0.53/32,DIRECT,no-resolve") {
+					foundDnsProtect = true
+					break
+				}
+			}
+			if !foundDnsProtect {
+				t.Errorf("%s must include IP-CIDR,127.0.0.0/8,DIRECT,no-resolve for DNS-over-VLESS resolver protection", fn)
+			}
+
 			// Для low-memory.yaml проверяем ровно 1 rule-provider
 			if fn == "low-memory.yaml" {
 				rpVal, ok := parsed["rule-providers"]
@@ -682,6 +696,34 @@ func TestReferenceTemplatesTMPL05(t *testing.T) {
 					t.Errorf("%s must have rule-providers", fn)
 				} else if rpMap, ok := rpVal.(map[string]interface{}); !ok || len(rpMap) != 1 {
 					t.Errorf("%s must have exactly 1 rule-provider, got %d", fn, len(rpMap))
+				}
+			}
+		})
+	}
+}
+
+func TestReferenceTemplatesPassPreflightDnsOverVless(t *testing.T) {
+	referenceFiles := []string{
+		"smart-antifilter.yaml",
+		"split-services.yaml",
+		"low-memory.yaml",
+		"multi-sub-hwid.yaml",
+		"gaming-low-latency.yaml",
+		"full-tunnel.yaml",
+	}
+
+	for _, fn := range referenceFiles {
+		t.Run(fn, func(t *testing.T) {
+			path := filepath.Join("mihomo", fn)
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("Failed to read %s: %v", path, err)
+			}
+
+			res := services.ValidateConfigContent("mihomo", fn, string(content))
+			for _, w := range res.Warnings {
+				if w.Code == "preflight.dns_over_vless" {
+					t.Errorf("Template %s failed preflight with warning: %s", fn, w.Message)
 				}
 			}
 		})

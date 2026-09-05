@@ -189,7 +189,8 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 	// 6. Build Rules: [Safety Bypasses] -> [User Rules] -> [Template Rules]
 	var finalRules []interface{}
 
-	// A) Safety direct ports (RDP, SMB, SSH, VPN)
+	// A) Mandatory Keenetic DNS-over-VLESS Resolver Protection & Safety direct ports
+	finalRules = append(finalRules, "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve")
 	for _, port := range SafetyDirectPorts {
 		finalRules = append(finalRules, fmt.Sprintf("DST-PORT,%s,DIRECT", port))
 	}
@@ -239,7 +240,12 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 	if tmplRules, ok := tmpl["rules"].([]interface{}); ok {
 		for _, r := range tmplRules {
 			if rStr, ok := r.(string); ok {
-				// Avoid duplicate safety rules
+				// Avoid duplicate safety rules and DNS resolver protection
+				if strings.EqualFold(rStr, "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve") ||
+					strings.EqualFold(rStr, "IP-CIDR,127.0.0.53/32,DIRECT,no-resolve") ||
+					strings.EqualFold(rStr, "IP-CIDR,127.0.0.53,DIRECT,no-resolve") {
+					continue
+				}
 				isDupe := false
 				for _, port := range SafetyDirectPorts {
 					if strings.EqualFold(rStr, fmt.Sprintf("DST-PORT,%s,DIRECT", port)) {

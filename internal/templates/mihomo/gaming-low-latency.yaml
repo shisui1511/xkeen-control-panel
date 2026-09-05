@@ -106,6 +106,7 @@ rules:
   - DST-PORT,51413,DIRECT
 
   # Локальные адреса
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
   - GEOIP,private,DIRECT,no-resolve
 
   # Заблокированные ресурсы через игровой прокси

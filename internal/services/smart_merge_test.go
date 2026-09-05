@@ -666,8 +666,8 @@ rules:
 	if stats.UserRules != 2 {
 		t.Errorf("expected 2 active user rules, got %d", stats.UserRules)
 	}
-	// Rules: 5 safety ports + 2 user rules + 2 template rules = 9
-	expectedRules := len(SafetyDirectPorts) + 2 + 2
+	// Rules: 1 DNS resolver protection + 5 safety ports + 2 user rules + 2 template rules = 10
+	expectedRules := 1 + len(SafetyDirectPorts) + 2 + 2
 	if stats.Rules != expectedRules {
 		t.Errorf("expected %d total rules, got %d", expectedRules, stats.Rules)
 	}

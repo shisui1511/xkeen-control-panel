@@ -194,6 +194,7 @@ rules:
   - RULE-SET,telegram-ip,Telegram
 
   # Локальные адреса и РФ
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
   - GEOIP,private,DIRECT,no-resolve
   - RULE-SET,ru-domains,DIRECT
   - GEOIP,RU,DIRECT
