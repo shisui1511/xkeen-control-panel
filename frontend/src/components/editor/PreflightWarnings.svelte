@@ -15,13 +15,14 @@
   } = $props();
 
   function getWarningText(w: PreflightWarning): string {
+    if (w.message) return w.message;
     if (w.code) {
       const translated = $t(w.code);
       if (translated && translated !== w.code) {
         return translated;
       }
     }
-    return w.message || w.code || '';
+    return w.code || '';
   }
 
   let activeWarnings = $derived.by(() => {

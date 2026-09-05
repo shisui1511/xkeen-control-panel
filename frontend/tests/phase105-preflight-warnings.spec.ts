@@ -100,12 +100,10 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
           data: {
             warnings: [
               {
-                code: 'preflight.lan_rdp',
-                message: 'LAN RDP risk warning'
+                code: 'preflight.lan_rdp'
               },
               {
-                code: 'preflight.dns_loop',
-                message: 'DNS loop warning'
+                code: 'preflight.dns_loop'
               }
             ]
           }
@@ -192,12 +190,10 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
           data: {
             warnings: [
               {
-                code: 'preflight.awg_flat_fields',
-                message: 'AWG flat fields warning'
+                code: 'preflight.awg_flat_fields'
               },
               {
-                code: 'preflight.dns_loop',
-                message: 'DNS loop warning'
+                code: 'preflight.dns_loop'
               }
             ]
           }
@@ -299,12 +295,10 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
             warnings: isRouting
               ? [
                   {
-                    code: 'preflight.dns_over_vless',
-                    message: 'DNS over VLESS warning'
+                    code: 'preflight.dns_over_vless'
                   },
                   {
-                    code: 'preflight.lan_rdp',
-                    message: 'LAN RDP warning'
+                    code: 'preflight.lan_rdp'
                   }
                 ]
               : []
@@ -438,8 +432,7 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
           data: {
             warnings: [
               {
-                code: 'preflight.lan_rdp',
-                message: 'LAN RDP warning'
+                code: 'preflight.lan_rdp'
               }
             ]
           }
@@ -486,5 +479,77 @@ test.describe('Phase 105: Preflight Validation Warnings (TMPL-08, D-07, D-08)', 
     await saveBtn.click();
     await expect(page.locator('.preflight-warnings')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.preflight-warnings li')).toHaveCount(1);
+  });
+
+  test('Сценарий 6: Несколько предупреждений с одним кодом, но разными сообщениями отображаются без дедупликации (WR-01)', async ({
+    page
+  }) => {
+    await setupMocks(page, 'mihomo');
+
+    await page.route('**/api/config/list**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { name: 'config.yaml', path: '/opt/etc/mihomo/config.yaml', size: 128 }
+        ])
+      });
+    });
+
+    await page.route('**/api/config/read**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/plain',
+        body: 'port: 7890\nmode: rule\n'
+      });
+    });
+
+    await page.route('**/api/config/save**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            warnings: [
+              {
+                code: 'preflight.port_conflict',
+                message: 'Port conflict: port 1053 used by dns.listen'
+              },
+              {
+                code: 'preflight.port_conflict',
+                message: 'Port conflict: port 5000 used by redir-port'
+              }
+            ]
+          }
+        })
+      });
+    });
+
+    await page.route('**/api/service/control**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
+    });
+
+    await page.goto('/#/editor');
+
+    const fileRow = page.locator('.file-row:has-text("config.yaml")').first();
+    await expect(fileRow).toBeVisible({ timeout: 10000 });
+    await fileRow.click();
+
+    const saveBtn = page.locator('button[title="Сохранить и применить"]');
+    await expect(saveBtn).toBeVisible({ timeout: 10000 });
+    await saveBtn.click();
+
+    const warningsBlock = page.locator('.preflight-warnings');
+    await expect(warningsBlock).toBeVisible({ timeout: 10000 });
+
+    const items = warningsBlock.locator('li');
+    await expect(items).toHaveCount(2);
+    await expect(items.nth(0)).toHaveText('Port conflict: port 1053 used by dns.listen');
+    await expect(items.nth(1)).toHaveText('Port conflict: port 5000 used by redir-port');
   });
 });
