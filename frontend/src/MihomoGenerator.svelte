@@ -2912,43 +2912,94 @@
         <!-- LISTENERS -->
         {#if activeSection === 'listeners'}
           <div class="sec-body">
-            {#each listeners as l (l.id)}
-              <div class="item-row">
-                <span class="item-badge type-{l.type}">{l.type}</span>
-                <span class="item-name">{l.name}</span>
-                <span class="item-meta">{l.listen}:{l.port}</span>
-                <button
-                  type="button"
-                  class="item-del"
-                  aria-label={$t('common.delete')}
-                  title={$t('common.delete')}
-                  onclick={() => {
-                    listeners = listeners.filter((item) => item.id !== l.id);
-                  }}
-                >
-                  ✕
-                </button>
+            {#if listenersReadOnly}
+              <div class="alert alert-warning" role="status">
+                <div style="font-weight: 600; margin-bottom: 4px;">
+                  {$t('mihomo.listener_readonly_title')}
+                </div>
+                <div style="font-size: 13px; margin-bottom: 8px;">
+                  {$t('mihomo.listener_readonly_body')}
+                </div>
+                <div class="safe-merge-tags">
+                  <span class="directive-tag"><code>listeners</code></span>
+                </div>
               </div>
-            {/each}
-            <button
-              type="button"
-              class="add-btn"
-              onclick={() => {
-                listeners = [
-                  ...listeners,
-                  {
-                    id: crypto.randomUUID(),
-                    name: '',
-                    type: 'mixed',
-                    listen: '0.0.0.0',
-                    port: '',
-                    udp: true
-                  }
-                ];
-              }}
-            >
-              + {$t('mihomo.add_listener')}
-            </button>
+            {:else if listeners.length === 0}
+              <div
+                class="rulesets-hint"
+                style="font-size: 12px; color: var(--fg-dim); margin-bottom: 12px;"
+              >
+                {$t('mihomo.listeners_hint')}
+              </div>
+              <button
+                type="button"
+                class="add-btn"
+                onclick={() => {
+                  listeners = [
+                    ...listeners,
+                    {
+                      id: crypto.randomUUID(),
+                      name: '',
+                      type: 'mixed',
+                      listen: '0.0.0.0',
+                      port: '',
+                      udp: true
+                    }
+                  ];
+                }}
+              >
+                + {$t('mihomo.add_listener')}
+              </button>
+            {:else}
+              {#each listeners as l (l.id)}
+                <div class="item-row">
+                  <span class="item-badge type-{l.type}">{l.type}</span>
+                  <span class="item-name">{l.name}</span>
+                  <span class="item-meta">{l.listen}:{l.port}</span>
+                  <button
+                    type="button"
+                    class="item-edit"
+                    aria-label={$t('app.edit')}
+                    title={$t('app.edit')}
+                    onclick={() => {
+                      /* Listener editing form to be fully implemented in 106-02 */
+                    }}
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    class="item-del"
+                    aria-label={$t('app.delete')}
+                    title={$t('app.delete')}
+                    onclick={() => {
+                      listeners = listeners.filter((item) => item.id !== l.id);
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              {/each}
+              <button
+                type="button"
+                class="add-btn"
+                onclick={() => {
+                  listeners = [
+                    ...listeners,
+                    {
+                      id: crypto.randomUUID(),
+                      name: '',
+                      type: 'mixed',
+                      listen: '0.0.0.0',
+                      port: '',
+                      udp: true
+                    }
+                  ];
+                }}
+              >
+                + {$t('mihomo.add_listener')}
+              </button>
+            {/if}
           </div>
         {/if}
       </div>
