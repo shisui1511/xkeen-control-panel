@@ -1213,6 +1213,34 @@ export function generateYAML(state: MihomoConfigState): string {
       if (l.proxy) {
         lines.push(`    proxy: ${yamlSafeString(l.proxy)}`);
       }
+      if (
+        l.type === 'mixed' ||
+        l.type === 'socks' ||
+        l.type === 'tproxy' ||
+        l.type === 'shadowsocks'
+      ) {
+        if (typeof l.udp === 'boolean') {
+          lines.push(`    udp: ${l.udp}`);
+        }
+      }
+      if (l.type === 'shadowsocks') {
+        lines.push(`    cipher: ${l.cipher || 'aes-256-gcm'}`);
+        lines.push(`    password: ${yamlSafeString(l.password || '')}`);
+      }
+      if (
+        (l.type === 'mixed' || l.type === 'socks' || l.type === 'http') &&
+        l.users &&
+        l.users.length > 0
+      ) {
+        lines.push('    users:');
+        for (const u of l.users) {
+          lines.push(`      - username: ${yamlSafeString(u.username)}`);
+          lines.push(`        password: ${yamlSafeString(u.password)}`);
+        }
+      }
+      if (typeof l.routingMark === 'number' && l.routingMark > 0) {
+        lines.push(`    routing-mark: ${l.routingMark}`);
+      }
     }
     lines.push('');
   }

@@ -847,4 +847,220 @@ describe('listeners emission', () => {
     const yaml = generateYAML(state);
     expect(yaml).toContain('listeners:\n' + initialBlock);
   });
+
+  test('матрица ключа udp: для mixed/socks/tproxy/shadowsocks эмитируется, для http/redirect не эмитируется', () => {
+    const state: any = {
+      ...baseState,
+      listeners: [
+        { id: '1', name: 'l-mixed', type: 'mixed', listen: '0.0.0.0', port: '1001', udp: true },
+        { id: '2', name: 'l-socks', type: 'socks', listen: '0.0.0.0', port: '1002', udp: false },
+        { id: '3', name: 'l-tproxy', type: 'tproxy', listen: '0.0.0.0', port: '1003', udp: true },
+        {
+          id: '4',
+          name: 'l-ss',
+          type: 'shadowsocks',
+          listen: '0.0.0.0',
+          port: '1004',
+          udp: true,
+          password: 'p'
+        },
+        { id: '5', name: 'l-http', type: 'http', listen: '0.0.0.0', port: '1005', udp: true },
+        { id: '6', name: 'l-redir', type: 'redirect', listen: '0.0.0.0', port: '1006', udp: true }
+      ]
+    };
+    const yaml = generateYAML(state);
+    const lines = yaml.split('\n');
+
+    const getBlockLines = (name: string) => {
+      const startIdx = lines.findIndex((l) => l.includes(`name: "${name}"`));
+      const endIdx = lines.findIndex((l, idx) => idx > startIdx && l.startsWith('  - name:'));
+      return lines.slice(startIdx, endIdx === -1 ? undefined : endIdx);
+    };
+
+    expect(getBlockLines('l-mixed').some((l) => l.trim() === 'udp: true')).toBe(true);
+    expect(getBlockLines('l-socks').some((l) => l.trim() === 'udp: false')).toBe(true);
+    expect(getBlockLines('l-tproxy').some((l) => l.trim() === 'udp: true')).toBe(true);
+    expect(getBlockLines('l-ss').some((l) => l.trim() === 'udp: true')).toBe(true);
+    expect(getBlockLines('l-http').some((l) => l.trim().startsWith('udp:'))).toBe(false);
+    expect(getBlockLines('l-redir').some((l) => l.trim().startsWith('udp:'))).toBe(false);
+  });
+
+  test('вложенный список users эмитируется только для mixed, socks, http с отступами 4, 6, 8', () => {
+    const users = [
+      { username: 'alice', password: 'secret:password' },
+      { username: 'bob', password: '123' }
+    ];
+    const state: any = {
+      ...baseState,
+      listeners: [
+        { id: '1', name: 'l-mixed', type: 'mixed', listen: '0.0.0.0', port: '1001', users },
+        { id: '2', name: 'l-socks', type: 'socks', listen: '0.0.0.0', port: '1002', users },
+        { id: '3', name: 'l-http', type: 'http', listen: '0.0.0.0', port: '1003', users },
+        {
+          id: '4',
+          name: 'l-ss',
+          type: 'shadowsocks',
+          listen: '0.0.0.0',
+          port: '1004',
+          users,
+          password: 'p'
+        },
+        { id: '5', name: 'l-tproxy', type: 'tproxy', listen: '0.0.0.0', port: '1005', users },
+        { id: '6', name: 'l-redir', type: 'redirect', listen: '0.0.0.0', port: '1006', users }
+      ]
+    };
+    const yaml = generateYAML(state);
+    const lines = yaml.split('\n');
+
+    expect(yaml).toContain(
+      '    users:\n      - username: "alice"\n        password: "secret:password"\n      - username: "bob"\n        password: "123"'
+    );
+
+    const getBlockLines = (name: string) => {
+      const startIdx = lines.findIndex((l) => l.includes(`name: "${name}"`));
+      const endIdx = lines.findIndex((l, idx) => idx > startIdx && l.startsWith('  - name:'));
+      return lines.slice(startIdx, endIdx === -1 ? undefined : endIdx);
+    };
+
+    expect(getBlockLines('l-mixed').some((l) => l.trim() === 'users:')).toBe(true);
+    expect(getBlockLines('l-socks').some((l) => l.trim() === 'users:')).toBe(true);
+    expect(getBlockLines('l-http').some((l) => l.trim() === 'users:')).toBe(true);
+    expect(getBlockLines('l-ss').some((l) => l.trim() === 'users:')).toBe(false);
+    expect(getBlockLines('l-tproxy').some((l) => l.trim() === 'users:')).toBe(false);
+    expect(getBlockLines('l-redir').some((l) => l.trim() === 'users:')).toBe(false);
+  });
+
+  test('shadowsocks эмитирует cipher и password; дефолтный cipher aes-256-gcm при пустом значении', () => {
+    const state: any = {
+      ...baseState,
+      listeners: [
+        {
+          id: '1',
+          name: 'ss-1',
+          type: 'shadowsocks',
+          listen: '0.0.0.0',
+          port: '8388',
+          password: 'my:pass'
+        },
+        {
+          id: '2',
+          name: 'ss-2',
+          type: 'shadowsocks',
+          listen: '0.0.0.0',
+          port: '8389',
+          cipher: 'chacha20-poly1305',
+          password: 'p2'
+        },
+        {
+          id: '3',
+          name: 'mixed-1',
+          type: 'mixed',
+          listen: '0.0.0.0',
+          port: '7890',
+          cipher: 'aes-256-gcm',
+          password: 'p3'
+        }
+      ]
+    };
+    const yaml = generateYAML(state);
+    const lines = yaml.split('\n');
+
+    const getBlockLines = (name: string) => {
+      const startIdx = lines.findIndex((l) => l.includes(`name: "${name}"`));
+      const endIdx = lines.findIndex((l, idx) => idx > startIdx && l.startsWith('  - name:'));
+      return lines.slice(startIdx, endIdx === -1 ? undefined : endIdx);
+    };
+
+    const ss1Lines = getBlockLines('ss-1');
+    expect(ss1Lines.some((l) => l === '    cipher: aes-256-gcm')).toBe(true);
+    expect(ss1Lines.some((l) => l === '    password: "my:pass"')).toBe(true);
+
+    const ss2Lines = getBlockLines('ss-2');
+    expect(ss2Lines.some((l) => l === '    cipher: chacha20-poly1305')).toBe(true);
+    expect(ss2Lines.some((l) => l === '    password: "p2"')).toBe(true);
+
+    const mixedLines = getBlockLines('mixed-1');
+    expect(mixedLines.some((l) => l.trim().startsWith('cipher:'))).toBe(false);
+    expect(mixedLines.some((l) => l.trim().startsWith('password:'))).toBe(false);
+  });
+
+  test('routing-mark эмитируется только при положительном числе', () => {
+    const state: any = {
+      ...baseState,
+      listeners: [
+        {
+          id: '1',
+          name: 'l-tproxy-mark',
+          type: 'tproxy',
+          listen: '0.0.0.0',
+          port: '1234',
+          routingMark: 666
+        },
+        {
+          id: '2',
+          name: 'l-zero-mark',
+          type: 'tproxy',
+          listen: '0.0.0.0',
+          port: '1235',
+          routingMark: 0
+        },
+        { id: '3', name: 'l-no-mark', type: 'tproxy', listen: '0.0.0.0', port: '1236' }
+      ]
+    };
+    const yaml = generateYAML(state);
+    const lines = yaml.split('\n');
+
+    const getBlockLines = (name: string) => {
+      const startIdx = lines.findIndex((l) => l.includes(`name: "${name}"`));
+      const endIdx = lines.findIndex((l, idx) => idx > startIdx && l.startsWith('  - name:'));
+      return lines.slice(startIdx, endIdx === -1 ? undefined : endIdx);
+    };
+
+    expect(getBlockLines('l-tproxy-mark').some((l) => l === '    routing-mark: 666')).toBe(true);
+    expect(getBlockLines('l-zero-mark').some((l) => l.trim().startsWith('routing-mark:'))).toBe(
+      false
+    );
+    expect(getBlockLines('l-no-mark').some((l) => l.trim().startsWith('routing-mark:'))).toBe(
+      false
+    );
+  });
+
+  test('фиксированный порядок ключей элемента: name, type, listen, port, proxy, udp, cipher/password, users, routing-mark', () => {
+    const state: any = {
+      ...baseState,
+      listeners: [
+        {
+          id: '1',
+          name: 'full-mixed',
+          type: 'mixed',
+          listen: '127.0.0.1',
+          port: '7899',
+          proxy: 'DIRECT',
+          udp: true,
+          users: [{ username: 'u', password: 'p' }],
+          routingMark: 123
+        }
+      ]
+    };
+    const yaml = generateYAML(state);
+    const lines = yaml.split('\n');
+
+    const nameIdx = lines.findIndex((l) => l.includes('name: "full-mixed"'));
+    const typeIdx = lines.findIndex((l) => l.includes('type: mixed'));
+    const listenIdx = lines.findIndex((l) => l.includes('listen: 127.0.0.1'));
+    const portIdx = lines.findIndex((l) => l.includes('port: 7899'));
+    const proxyIdx = lines.findIndex((l) => l.includes('proxy: "DIRECT"'));
+    const udpIdx = lines.findIndex((l) => l.includes('udp: true'));
+    const usersIdx = lines.findIndex((l) => l.includes('users:'));
+    const markIdx = lines.findIndex((l) => l.includes('routing-mark: 123'));
+
+    expect(nameIdx).toBeGreaterThan(-1);
+    expect(typeIdx).toBeGreaterThan(nameIdx);
+    expect(listenIdx).toBeGreaterThan(typeIdx);
+    expect(portIdx).toBeGreaterThan(listenIdx);
+    expect(proxyIdx).toBeGreaterThan(portIdx);
+    expect(udpIdx).toBeGreaterThan(proxyIdx);
+    expect(usersIdx).toBeGreaterThan(udpIdx);
+    expect(markIdx).toBeGreaterThan(usersIdx);
+  });
 });
