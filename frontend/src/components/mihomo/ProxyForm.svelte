@@ -13,8 +13,32 @@
     isEdit?: boolean;
   } = $props();
 
-  const PROXY_TYPES = ['vless', 'hysteria2', 'tuic', 'ss', 'vmess', 'trojan', 'socks', 'http'];
+  const PROXY_TYPES = [
+    'vless',
+    'hysteria2',
+    'tuic',
+    'ss',
+    'vmess',
+    'trojan',
+    'wireguard',
+    'socks5',
+    'http'
+  ];
   const CIPHERS = ['aes-256-gcm', 'aes-128-gcm', 'chacha20-poly1305', '2022-blake3-aes-256-gcm'];
+
+  // Ограничения AmneziaWG (TMPL-08, D-07):
+  // H1–H4 попарно различны и > 4, Jmin < Jmax, S1 + 56 ≠ S2
+  const awgConstraintsOk = $derived(
+    !np.awgEnabled ||
+      (Number(np.awgJmin) < Number(np.awgJmax) &&
+        Number(np.awgS1) + 56 !== Number(np.awgS2) &&
+        Number(np.awgH1) > 4 &&
+        Number(np.awgH2) > 4 &&
+        Number(np.awgH3) > 4 &&
+        Number(np.awgH4) > 4 &&
+        new Set([Number(np.awgH1), Number(np.awgH2), Number(np.awgH3), Number(np.awgH4)]).size ===
+          4)
+  );
 </script>
 
 <div class="form-card">
@@ -268,7 +292,184 @@
         <span>{$t('editor.skipCertVerify')}</span>
       </label>
     </div>
-  {:else if np.type === 'socks'}
+  {:else if np.type === 'wireguard'}
+    <div class="form-row">
+      <label class="form-label" for="proxy-wg-private-key">{$t('proxies.wg_private_key')}</label>
+      <input
+        id="proxy-wg-private-key"
+        class="form-input"
+        bind:value={np.wgPrivateKey}
+        placeholder="private-key"
+      />
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="proxy-wg-public-key">{$t('proxies.wg_public_key')}</label>
+      <input
+        id="proxy-wg-public-key"
+        class="form-input"
+        bind:value={np.wgPublicKey}
+        placeholder="public-key"
+      />
+    </div>
+    <div class="form-row2">
+      <div class="form-col">
+        <label class="form-label" for="proxy-wg-ip">{$t('proxies.wg_ip')}</label>
+        <input id="proxy-wg-ip" class="form-input" bind:value={np.wgIp} placeholder="10.2.0.2/32" />
+      </div>
+      <div class="form-col form-col-sm">
+        <label class="form-label" for="proxy-wg-mtu">MTU</label>
+        <input
+          id="proxy-wg-mtu"
+          class="form-input"
+          type="number"
+          bind:value={np.wgMtu}
+          min="1280"
+          max="1500"
+        />
+      </div>
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="proxy-wg-preshared-key">Pre-shared Key</label>
+      <input
+        id="proxy-wg-preshared-key"
+        class="form-input"
+        bind:value={np.wgPresharedKey}
+        placeholder="pre-shared-key (optional)"
+      />
+    </div>
+    <div class="form-row">
+      <label
+        class="toggle-label"
+        style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;"
+      >
+        <input type="checkbox" id="proxy-awg-enabled" bind:checked={np.awgEnabled} />
+        <span>{$t('proxies.awg_section')}</span>
+      </label>
+    </div>
+
+    {#if np.awgEnabled}
+      <div class="awg-options-block" class:has-warning={!awgConstraintsOk}>
+        <div class="awg-group-title">{$t('proxies.awg_junk')}</div>
+        <div class="form-row2" style="grid-template-columns: repeat(3, 1fr); gap: 8px;">
+          <div class="form-col">
+            <label class="form-label" for="proxy-awg-jc">Jc</label>
+            <input
+              id="proxy-awg-jc"
+              class="form-input"
+              type="number"
+              bind:value={np.awgJc}
+              min="1"
+              max="128"
+            />
+          </div>
+          <div class="form-col">
+            <label class="form-label" for="proxy-awg-jmin">Jmin</label>
+            <input
+              id="proxy-awg-jmin"
+              class="form-input"
+              class:input-invalid={Number(np.awgJmin) >= Number(np.awgJmax)}
+              aria-invalid={Number(np.awgJmin) >= Number(np.awgJmax)}
+              type="number"
+              bind:value={np.awgJmin}
+              min="0"
+            />
+          </div>
+          <div class="form-col">
+            <label class="form-label" for="proxy-awg-jmax">Jmax</label>
+            <input
+              id="proxy-awg-jmax"
+              class="form-input"
+              class:input-invalid={Number(np.awgJmin) >= Number(np.awgJmax)}
+              aria-invalid={Number(np.awgJmin) >= Number(np.awgJmax)}
+              type="number"
+              bind:value={np.awgJmax}
+              min="0"
+            />
+          </div>
+        </div>
+
+        <div class="awg-group-title" style="margin-top: 8px;">{$t('proxies.awg_padding')}</div>
+        <div class="form-row2" style="grid-template-columns: 1fr 1fr; gap: 8px;">
+          <div class="form-col">
+            <label class="form-label" for="proxy-awg-s1">S1</label>
+            <input
+              id="proxy-awg-s1"
+              class="form-input"
+              class:input-invalid={Number(np.awgS1) + 56 === Number(np.awgS2)}
+              aria-invalid={Number(np.awgS1) + 56 === Number(np.awgS2)}
+              type="number"
+              bind:value={np.awgS1}
+              min="0"
+            />
+          </div>
+          <div class="form-col">
+            <label class="form-label" for="proxy-awg-s2">S2</label>
+            <input
+              id="proxy-awg-s2"
+              class="form-input"
+              class:input-invalid={Number(np.awgS1) + 56 === Number(np.awgS2)}
+              aria-invalid={Number(np.awgS1) + 56 === Number(np.awgS2)}
+              type="number"
+              bind:value={np.awgS2}
+              min="0"
+            />
+          </div>
+        </div>
+
+        <div class="awg-group-title" style="margin-top: 8px;">{$t('proxies.awg_headers')}</div>
+        <div class="form-row2" style="grid-template-columns: repeat(4, 1fr); gap: 8px;">
+          <div class="form-col">
+            <label class="form-label" for="proxy-awg-h1">H1</label>
+            <input
+              id="proxy-awg-h1"
+              class="form-input"
+              class:input-invalid={Number(np.awgH1) <= 4}
+              aria-invalid={Number(np.awgH1) <= 4}
+              type="number"
+              bind:value={np.awgH1}
+            />
+          </div>
+          <div class="form-col">
+            <label class="form-label" for="proxy-awg-h2">H2</label>
+            <input
+              id="proxy-awg-h2"
+              class="form-input"
+              class:input-invalid={Number(np.awgH2) <= 4}
+              aria-invalid={Number(np.awgH2) <= 4}
+              type="number"
+              bind:value={np.awgH2}
+            />
+          </div>
+          <div class="form-col">
+            <label class="form-label" for="proxy-awg-h3">H3</label>
+            <input
+              id="proxy-awg-h3"
+              class="form-input"
+              class:input-invalid={Number(np.awgH3) <= 4}
+              aria-invalid={Number(np.awgH3) <= 4}
+              type="number"
+              bind:value={np.awgH3}
+            />
+          </div>
+          <div class="form-col">
+            <label class="form-label" for="proxy-awg-h4">H4</label>
+            <input
+              id="proxy-awg-h4"
+              class="form-input"
+              class:input-invalid={Number(np.awgH4) <= 4}
+              aria-invalid={Number(np.awgH4) <= 4}
+              type="number"
+              bind:value={np.awgH4}
+            />
+          </div>
+        </div>
+
+        <p class="form-hint" style="margin-top: 8px;">
+          {$t('proxies.awg_hint')}
+        </p>
+      </div>
+    {/if}
+  {:else if np.type === 'socks5' || np.type === 'socks'}
     <div class="form-row">
       <label class="form-label" for="proxy-socks-username">{$t('proxies.username_optional')}</label>
       <input
@@ -432,5 +633,39 @@
     gap: 8px;
     justify-content: flex-end;
     margin-top: 4px;
+  }
+
+  .awg-options-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-surface-raised, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 12px;
+  }
+
+  .awg-options-block.has-warning {
+    border-color: color-mix(in srgb, var(--color-warning, #f59e0b) 50%, var(--border));
+  }
+
+  .awg-group-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--fg-secondary);
+  }
+
+  .form-hint {
+    font-size: 12px;
+    color: var(--fg-secondary);
+    line-height: 1.4;
+    margin: 0;
+  }
+
+  .form-input.input-invalid {
+    border-color: var(--color-warning, #f59e0b);
   }
 </style>

@@ -91,6 +91,22 @@
     // Advanced options (Phase 102)
     dialerProxy?: string;
     ports?: string;
+    // WireGuard & AmneziaWG (TMPL-08)
+    wgPrivateKey?: string;
+    wgPublicKey?: string;
+    wgIp?: string;
+    wgPresharedKey?: string;
+    wgMtu?: number;
+    awgEnabled?: boolean;
+    awgJc?: number;
+    awgJmin?: number;
+    awgJmax?: number;
+    awgS1?: number;
+    awgS2?: number;
+    awgH1?: number;
+    awgH2?: number;
+    awgH3?: number;
+    awgH4?: number;
   }
 
   interface ProxyGroup {
@@ -301,7 +317,7 @@
       name: '',
       type,
       server: '',
-      port: 443,
+      port: type === 'wireguard' ? 51820 : 443,
       uuid: crypto.randomUUID(),
       flow: 'xtls-rprx-vision',
       publicKey: '',
@@ -317,14 +333,31 @@
       network: 'ws',
       wsPath: '/',
       tls: true,
-      fingerprint: 'chrome'
+      fingerprint: 'chrome',
+      // WireGuard / AmneziaWG defaults (TMPL-08)
+      wgPrivateKey: '',
+      wgPublicKey: '',
+      wgIp: '',
+      wgPresharedKey: '',
+      wgMtu: 1420,
+      awgEnabled: false,
+      awgJc: 4,
+      awgJmin: 40,
+      awgJmax: 70,
+      awgS1: 15,
+      awgS2: 40,
+      awgH1: 1000000001,
+      awgH2: 1000000002,
+      awgH3: 1000000003,
+      awgH4: 1000000004
     };
   }
   let lastType = 'vless';
   $effect(() => {
     if (np.type && np.type !== lastType) {
+      const port = np.type === 'wireguard' ? 51820 : lastType === 'wireguard' ? 443 : np.port;
       lastType = np.type;
-      np = { ...newProxyDefaults(np.type), name: np.name, server: np.server, port: np.port };
+      np = { ...newProxyDefaults(np.type), name: np.name, server: np.server, port };
     }
   });
 

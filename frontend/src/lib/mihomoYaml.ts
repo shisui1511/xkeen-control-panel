@@ -24,6 +24,22 @@ export interface Proxy {
   username?: string;
   dialerProxy?: string;
   ports?: string;
+  // WireGuard & AmneziaWG (TMPL-08)
+  wgPrivateKey?: string;
+  wgPublicKey?: string;
+  wgIp?: string;
+  wgPresharedKey?: string;
+  wgMtu?: number;
+  awgEnabled?: boolean;
+  awgJc?: number;
+  awgJmin?: number;
+  awgJmax?: number;
+  awgS1?: number;
+  awgS2?: number;
+  awgH1?: number;
+  awgH2?: number;
+  awgH3?: number;
+  awgH4?: number;
 }
 
 export interface ProxyGroup {
@@ -917,6 +933,26 @@ export function generateYAML(state: MihomoConfigState): string {
         if (p.password) lines.push(`    password: ${yamlSafeString(p.password)}`);
         if (p.tls) lines.push(`    tls: true`);
         if (p.skipCertVerify) lines.push(`    skip-cert-verify: true`);
+      } else if (p.type === 'wireguard') {
+        if (p.wgPrivateKey) lines.push(`    private-key: ${yamlSafeString(p.wgPrivateKey)}`);
+        if (p.wgPublicKey) lines.push(`    public-key: ${yamlSafeString(p.wgPublicKey)}`);
+        if (p.wgIp) lines.push(`    ip: ${yamlSafeString(p.wgIp)}`);
+        if (p.wgPresharedKey) lines.push(`    pre-shared-key: ${yamlSafeString(p.wgPresharedKey)}`);
+        if (p.wgMtu) lines.push(`    mtu: ${p.wgMtu}`);
+        lines.push(`    udp: true`);
+
+        if (p.awgEnabled) {
+          lines.push(`    amnezia-wg-option:`);
+          lines.push(`      jc: ${p.awgJc ?? 4}`);
+          lines.push(`      jmin: ${p.awgJmin ?? 40}`);
+          lines.push(`      jmax: ${p.awgJmax ?? 70}`);
+          lines.push(`      s1: ${p.awgS1 ?? 15}`);
+          lines.push(`      s2: ${p.awgS2 ?? 40}`);
+          lines.push(`      h1: ${p.awgH1 ?? 1000000001}`);
+          lines.push(`      h2: ${p.awgH2 ?? 1000000002}`);
+          lines.push(`      h3: ${p.awgH3 ?? 1000000003}`);
+          lines.push(`      h4: ${p.awgH4 ?? 1000000004}`);
+        }
       }
       if (p.dialerProxy) {
         lines.push(`    dialer-proxy: ${yamlSafeString(p.dialerProxy)}`);
@@ -1437,10 +1473,72 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
 
         if (!currentProxy) continue;
 
+        if (currentParentKey && lineIndent <= parentKeyIndent) {
+          currentParentKey = '';
+          parentKeyIndent = 0;
+        }
+
         if (trimmed.endsWith(':') && !trimmed.startsWith('-')) {
           currentParentKey = trimmed.slice(0, -1).trim();
           parentKeyIndent = lineIndent;
           continue;
+        }
+
+        if (currentParentKey === 'amnezia-wg-option') {
+          const jcMatch = trimmed.match(/^jc:\s*(.+)$/);
+          if (jcMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgJc = parseInt(unquote(jcMatch[1]), 10);
+            continue;
+          }
+          const jminMatch = trimmed.match(/^jmin:\s*(.+)$/);
+          if (jminMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgJmin = parseInt(unquote(jminMatch[1]), 10);
+            continue;
+          }
+          const jmaxMatch = trimmed.match(/^jmax:\s*(.+)$/);
+          if (jmaxMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgJmax = parseInt(unquote(jmaxMatch[1]), 10);
+            continue;
+          }
+          const s1Match = trimmed.match(/^s1:\s*(.+)$/);
+          if (s1Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgS1 = parseInt(unquote(s1Match[1]), 10);
+            continue;
+          }
+          const s2Match = trimmed.match(/^s2:\s*(.+)$/);
+          if (s2Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgS2 = parseInt(unquote(s2Match[1]), 10);
+            continue;
+          }
+          const h1Match = trimmed.match(/^h1:\s*(.+)$/);
+          if (h1Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgH1 = parseInt(unquote(h1Match[1]), 10);
+            continue;
+          }
+          const h2Match = trimmed.match(/^h2:\s*(.+)$/);
+          if (h2Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgH2 = parseInt(unquote(h2Match[1]), 10);
+            continue;
+          }
+          const h3Match = trimmed.match(/^h3:\s*(.+)$/);
+          if (h3Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgH3 = parseInt(unquote(h3Match[1]), 10);
+            continue;
+          }
+          const h4Match = trimmed.match(/^h4:\s*(.+)$/);
+          if (h4Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgH4 = parseInt(unquote(h4Match[1]), 10);
+            continue;
+          }
         }
 
         const nameMatch = trimmed.match(/^name:\s*(.+)$/);
@@ -1486,9 +1584,33 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           currentProxy.flow = unquote(flowMatch[1]);
           continue;
         }
+        const privateKeyMatch = trimmed.match(/^private-key:\s*(.+)$/);
+        if (privateKeyMatch && !currentParentKey) {
+          currentProxy.wgPrivateKey = unquote(privateKeyMatch[1]);
+          continue;
+        }
         const publicKeyMatch = trimmed.match(/^public-key:\s*(.+)$/);
-        if (publicKeyMatch && currentParentKey === 'reality-opts') {
-          currentProxy.publicKey = unquote(publicKeyMatch[1]);
+        if (publicKeyMatch) {
+          if (currentParentKey === 'reality-opts') {
+            currentProxy.publicKey = unquote(publicKeyMatch[1]);
+          } else if (!currentParentKey) {
+            currentProxy.wgPublicKey = unquote(publicKeyMatch[1]);
+          }
+          continue;
+        }
+        const ipMatch = trimmed.match(/^ip:\s*(.+)$/);
+        if (ipMatch && !currentParentKey) {
+          currentProxy.wgIp = unquote(ipMatch[1]);
+          continue;
+        }
+        const presharedKeyMatch = trimmed.match(/^pre-shared-key:\s*(.+)$/);
+        if (presharedKeyMatch && !currentParentKey) {
+          currentProxy.wgPresharedKey = unquote(presharedKeyMatch[1]);
+          continue;
+        }
+        const mtuMatch = trimmed.match(/^mtu:\s*(.+)$/);
+        if (mtuMatch && !currentParentKey) {
+          currentProxy.wgMtu = parseInt(unquote(mtuMatch[1]), 10);
           continue;
         }
         const shortIdMatch = trimmed.match(/^short-id:\s*(.+)$/);

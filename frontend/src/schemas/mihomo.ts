@@ -260,7 +260,28 @@ export const mihomoSchema = {
           network: { type: 'string', enum: ['tcp', 'udp', 'ws', 'grpc', 'h2'] },
           'dialer-proxy': { type: 'string', description: 'Chain dialer proxy' },
           ports: { type: 'string', description: 'Port hopping range' },
-          smux: { type: 'object', description: 'Multiplexing settings' }
+          smux: { type: 'object', description: 'Multiplexing settings' },
+          // WireGuard & AmneziaWG (TMPL-08)
+          'private-key': { type: 'string', description: 'WireGuard private key' },
+          'public-key': { type: 'string', description: 'WireGuard or Reality public key' },
+          'pre-shared-key': { type: 'string', description: 'WireGuard pre-shared key (optional)' },
+          ip: { type: 'string', description: 'WireGuard interface local IP' },
+          mtu: { type: 'integer', description: 'WireGuard interface MTU' },
+          'amnezia-wg-option': {
+            type: 'object',
+            description: 'AmneziaWG obfuscation options',
+            properties: {
+              jc: { type: 'integer', description: 'Junk packet count' },
+              jmin: { type: 'integer', description: 'Minimum junk packet size' },
+              jmax: { type: 'integer', description: 'Maximum junk packet size' },
+              s1: { type: 'integer', description: 'Handshake response padding size' },
+              s2: { type: 'integer', description: 'Initiation response padding size' },
+              h1: { type: 'integer', description: 'Initiation packet magic header' },
+              h2: { type: 'integer', description: 'Response packet magic header' },
+              h3: { type: 'integer', description: 'Underload packet magic header' },
+              h4: { type: 'integer', description: 'Transport packet magic header' }
+            }
+          }
         },
         required: ['name', 'type', 'server', 'port']
       }

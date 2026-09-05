@@ -484,3 +484,213 @@ describe('Virtual proxy-providers in generateYAML', () => {
     expect(yaml).not.toContain('  legacy-ui-provider-');
   });
 });
+
+describe('WireGuard and AmneziaWG support (TMPL-08)', () => {
+  test('узел wireguard с включенной обфускацией генерирует вложенный блок amnezia-wg-option и не содержит плоских полей', () => {
+    const mockState: any = {
+      existingTproxyPort: 12345,
+      existingRedirPort: 12346,
+      subscriptions: [],
+      mihomoProviders: [],
+      proxies: [
+        {
+          id: 'wg-1',
+          name: 'awg-node',
+          type: 'wireguard',
+          server: '198.51.100.1',
+          port: 51820,
+          wgPrivateKey: 'aWdQcml2YXRlS2V5MQ==',
+          wgPublicKey: 'aWdQdWJsaWNLZXkx==',
+          wgIp: '10.2.0.2/32',
+          wgPresharedKey: 'cHJlc2hhcmVkS2V5MQ==',
+          wgMtu: 1420,
+          awgEnabled: true,
+          awgJc: 4,
+          awgJmin: 40,
+          awgJmax: 70,
+          awgS1: 15,
+          awgS2: 40,
+          awgH1: 1000000001,
+          awgH2: 1000000002,
+          awgH3: 1000000003,
+          awgH4: 1000000004
+        }
+      ],
+      groups: [],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: {}
+    };
+
+    const yaml = generateYAML(mockState);
+
+    // 1. Позитивные проверки: поля узла на отступе 4 пробела
+    expect(yaml).toContain('  - name: "awg-node"');
+    expect(yaml).toContain('    type: wireguard');
+    expect(yaml).toContain('    server: "198.51.100.1"');
+    expect(yaml).toContain('    port: 51820');
+    expect(yaml).toContain('    private-key: "aWdQcml2YXRlS2V5MQ=="');
+    expect(yaml).toContain('    public-key: "aWdQdWJsaWNLZXkx=="');
+    expect(yaml).toContain('    ip: "10.2.0.2/32"');
+    expect(yaml).toContain('    pre-shared-key: "cHJlc2hhcmVkS2V5MQ=="');
+    expect(yaml).toContain('    mtu: 1420');
+    expect(yaml).toContain('    udp: true');
+
+    // 2. Вложенный блок amnezia-wg-option на отступе 4 пробела, а параметры на отступе 6 пробелов
+    expect(yaml).toContain('    amnezia-wg-option:');
+    expect(yaml).toContain('      jc: 4');
+    expect(yaml).toContain('      jmin: 40');
+    expect(yaml).toContain('      jmax: 70');
+    expect(yaml).toContain('      s1: 15');
+    expect(yaml).toContain('      s2: 40');
+    expect(yaml).toContain('      h1: 1000000001');
+    expect(yaml).toContain('      h2: 1000000002');
+    expect(yaml).toContain('      h3: 1000000003');
+    expect(yaml).toContain('      h4: 1000000004');
+
+    // 3. Негативные проверки: ни один из параметров обфускации НЕ встречается на 4 пробелах (уровне узла)
+    const lines = yaml.split('\n');
+    for (const key of ['jc:', 'jmin:', 'jmax:', 's1:', 's2:', 'h1:', 'h2:', 'h3:', 'h4:']) {
+      const flatMatches = lines.filter((line) => line.startsWith(`    ${key}`));
+      expect(flatMatches).toHaveLength(0);
+    }
+  });
+
+  test('узел wireguard с выключенной обфускацией не генерирует блок amnezia-wg-option', () => {
+    const mockState: any = {
+      existingTproxyPort: 12345,
+      existingRedirPort: 12346,
+      subscriptions: [],
+      mihomoProviders: [],
+      proxies: [
+        {
+          id: 'wg-clean',
+          name: 'clean-wg',
+          type: 'wireguard',
+          server: '198.51.100.2',
+          port: 51820,
+          wgPrivateKey: 'privKey==',
+          wgPublicKey: 'pubKey==',
+          wgIp: '10.2.0.3/32',
+          wgMtu: 1420,
+          awgEnabled: false
+        }
+      ],
+      groups: [],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: {}
+    };
+
+    const yaml = generateYAML(mockState);
+    expect(yaml).toContain('  - name: "clean-wg"');
+    expect(yaml).toContain('    type: wireguard');
+    expect(yaml).toContain('    private-key: "privKey=="');
+    expect(yaml).toContain('    public-key: "pubKey=="');
+    expect(yaml).toContain('    ip: "10.2.0.3/32"');
+    expect(yaml).toContain('    udp: true');
+
+    // amnezia-wg-option и pre-shared-key отсутствуют
+    expect(yaml).not.toContain('amnezia-wg-option');
+    expect(yaml).not.toContain('pre-shared-key');
+  });
+
+  test('круговой проход генерация -> разбор -> генерация сохраняет все параметры без потерь', () => {
+    const mockState: any = {
+      existingTproxyPort: 12345,
+      existingRedirPort: 12346,
+      subscriptions: [],
+      mihomoProviders: [],
+      proxies: [
+        {
+          id: 'wg-roundtrip',
+          name: 'roundtrip-node',
+          type: 'wireguard',
+          server: '198.51.100.5',
+          port: 51820,
+          wgPrivateKey: 'aWdQcml2YXRlS2V5MQ==',
+          wgPublicKey: 'aWdQdWJsaWNLZXkx==',
+          wgIp: '10.2.0.2/32',
+          wgPresharedKey: 'cHJlc2hhcmVkS2V5MQ==',
+          wgMtu: 1420,
+          awgEnabled: true,
+          awgJc: 4,
+          awgJmin: 40,
+          awgJmax: 70,
+          awgS1: 15,
+          awgS2: 40,
+          awgH1: 1000000001,
+          awgH2: 1000000002,
+          awgH3: 1000000003,
+          awgH4: 1000000004
+        }
+      ],
+      groups: [],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: {}
+    };
+
+    const firstYaml = generateYAML(mockState);
+    const parsedState = populateMihomoFromYAML(firstYaml);
+
+    expect(parsedState.proxies).toHaveLength(1);
+    const p = parsedState.proxies[0];
+    expect(p.type).toBe('wireguard');
+    expect(p.wgPrivateKey).toBe('aWdQcml2YXRlS2V5MQ==');
+    expect(p.wgPublicKey).toBe('aWdQdWJsaWNLZXkx==');
+    expect(p.wgIp).toBe('10.2.0.2/32');
+    expect(p.wgPresharedKey).toBe('cHJlc2hhcmVkS2V5MQ==');
+    expect(p.wgMtu).toBe(1420);
+    expect(p.awgEnabled).toBe(true);
+    expect(p.awgJc).toBe(4);
+    expect(p.awgJmin).toBe(40);
+    expect(p.awgJmax).toBe(70);
+    expect(p.awgS1).toBe(15);
+    expect(p.awgS2).toBe(40);
+    expect(p.awgH1).toBe(1000000001);
+    expect(p.awgH2).toBe(1000000002);
+    expect(p.awgH3).toBe(1000000003);
+    expect(p.awgH4).toBe(1000000004);
+
+    const secondYaml = generateYAML({
+      ...mockState,
+      proxies: parsedState.proxies
+    });
+
+    // Строгое побайтовое равенство последовательных генераций
+    expect(secondYaml).toBe(firstYaml);
+  });
+
+  test('разбор конфигурации с плоскими полями обфускации не включает awgEnabled', () => {
+    const flatYaml = `
+proxies:
+  - name: "flat-awg"
+    type: wireguard
+    server: 198.51.100.10
+    port: 51820
+    private-key: "privKey"
+    public-key: "pubKey"
+    ip: "10.2.0.5/32"
+    jc: 4
+    jmin: 40
+    jmax: 70
+    s1: 15
+    s2: 40
+    h1: 1000000001
+    h2: 1000000002
+    h3: 1000000003
+    h4: 1000000004
+`;
+    const parsedState = populateMihomoFromYAML(flatYaml);
+    expect(parsedState.proxies).toHaveLength(1);
+    const p = parsedState.proxies[0];
+    expect(p.type).toBe('wireguard');
+    expect(p.wgPrivateKey).toBe('privKey');
+    // awgEnabled обязан быть ложным, так как параметры не были внутри amnezia-wg-option
+    expect(p.awgEnabled).toBeFalsy();
+  });
+});
