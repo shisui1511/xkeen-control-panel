@@ -186,14 +186,15 @@
 
   let newListener = $state<Listener>(newListenerDefaults());
 
-  let listenerNameValid = $derived(newListener.name.trim().length > 0);
+  let listenerNameValid = $derived(String(newListener.name || '').trim().length > 0);
   let listenerPortValid = $derived.by(() => {
-    if (!newListener.port || !newListener.port.trim()) return false;
-    const n = Number(newListener.port);
+    const raw = String(newListener.port ?? '').trim();
+    if (!raw) return false;
+    const n = Number(raw);
     return Number.isInteger(n) && n >= 1 && n <= 65535;
   });
   let listenerSSPasswordValid = $derived(
-    newListener.type !== 'shadowsocks' || (newListener.password?.trim().length ?? 0) > 0
+    newListener.type !== 'shadowsocks' || String(newListener.password || '').trim().length > 0
   );
 
   function openListenerForm(l?: Listener) {
@@ -1742,9 +1743,9 @@
 
   // findTopLevelSection and replaceMihomoTopLevelSection are imported from './lib/mihomoYaml'
 
-  function collectListenerPortWarnings(): PreflightWarning[] {
+  function collectListenerPortWarnings(extraYaml?: string): PreflightWarning[] {
     const yaml = generateYAML();
-    const topPorts = parseMihomoPorts(yaml);
+    const topPorts = [...parseMihomoPorts(yaml), ...(extraYaml ? parseMihomoPorts(extraYaml) : [])];
     const listenerPorts = parseMihomoListenerPorts(yaml);
     const reserved: PortAllocation[] = [
       { port: 5000, engine: 'mihomo', purpose: 'redir-port' },
@@ -1881,7 +1882,7 @@
       const yamlContent = generateYAML();
       validationError = '';
       saveWarnings = [];
-      const listenerWarnings = collectListenerPortWarnings();
+      const listenerWarnings = collectListenerPortWarnings(currentYAML);
 
       let mergeRes: { content: string; stats?: any; warnings?: PreflightWarning[] };
       try {
