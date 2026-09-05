@@ -189,7 +189,13 @@ func (a *API) ConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONSuccess(w, nil)
+	kernelType := detectKernelFromPath(cleanPath)
+	filename := filepath.Base(cleanPath)
+	preflightRes := services.ValidateConfigContent(kernelType, filename, string(data))
+
+	JSONSuccess(w, map[string]interface{}{
+		"warnings": mapIssues(preflightRes.Warnings),
+	})
 }
 
 func (a *API) ConfigBackups(w http.ResponseWriter, r *http.Request) {
@@ -637,16 +643,19 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 
 
 
-func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data []byte, backupExists bool, backupData []byte) string {
+func detectKernelFromPath(cleanPath string) string {
 	ext := filepath.Ext(cleanPath)
-	var kernelType string
 	if strings.Contains(cleanPath, "xray") || ext == ".json" {
-		kernelType = "xray"
-	} else if strings.Contains(cleanPath, "mihomo") || ext == ".yaml" || ext == ".yml" {
-		kernelType = "mihomo"
-	} else {
-		kernelType = "xray"
+		return "xray"
 	}
+	if strings.Contains(cleanPath, "mihomo") || ext == ".yaml" || ext == ".yml" {
+		return "mihomo"
+	}
+	return "xray"
+}
+
+func (a *API) validateConfigAndRollback(r *http.Request, cleanPath string, data []byte, backupExists bool, backupData []byte) string {
+	kernelType := detectKernelFromPath(cleanPath)
 
 	binaryPath := a.getBinaryPath(kernelType)
 	if binaryPath == "" {
@@ -733,5 +742,20 @@ func (a *API) ConfigSmartMerge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONSuccess(w, map[string]interface{}{"content": merged, "stats": stats})
+	kernelType := strings.ToLower(req.Type)
+	targetFile := req.TargetFile
+	if targetFile == "" {
+		if kernelType == "mihomo" {
+			targetFile = "config.yaml"
+		} else {
+			targetFile = "05_routing.json"
+		}
+	}
+	preflightRes := services.ValidateConfigContent(kernelType, targetFile, merged)
+
+	JSONSuccess(w, map[string]interface{}{
+		"content":  merged,
+		"stats":    stats,
+		"warnings": mapIssues(preflightRes.Warnings),
+	})
 }

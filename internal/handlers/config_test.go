@@ -494,4 +494,104 @@ func TestCopyDirConfigs_Symlink(t *testing.T) {
 	}
 }
 
+func TestConfigSave_PreflightWarnings(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	// Config with port 5000 reserved port warning
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("port: 7890\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	bodyWarn := []byte("tproxy-port: 5000\n")
+	req := httptest.NewRequest(http.MethodPost, "/api/config/save?path="+cfgPath, bytes.NewReader(bodyWarn))
+	rr := httptest.NewRecorder()
+	api.ConfigSave(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Warnings []struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"warnings"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Errorf("expected success to be true")
+	}
+
+	hasConflictWarn := false
+	for _, w := range resp.Data.Warnings {
+		if w.Code == "preflight.port_conflict" {
+			hasConflictWarn = true
+			break
+		}
+	}
+	if !hasConflictWarn {
+		t.Errorf("expected preflight.port_conflict warning in response, got %+v", resp.Data.Warnings)
+	}
+}
+
+func TestConfigSmartMerge_PreflightWarnings(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	mergeReq := ConfigSmartMergeRequest{
+		Type:            "mihomo",
+		ExistingContent: "mixed-port: 7890\n",
+		TemplateContent: "mixed-port: 7890\nport: 7890\n",
+	}
+	payload, _ := json.Marshal(mergeReq)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/smart-merge", bytes.NewReader(payload))
+	rr := httptest.NewRecorder()
+	api.ConfigSmartMerge(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Content  string `json:"content"`
+			Warnings []struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"warnings"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Errorf("expected success to be true")
+	}
+	if resp.Data.Content == "" {
+		t.Errorf("expected non-empty merged content")
+	}
+
+	hasPortConflict := false
+	for _, w := range resp.Data.Warnings {
+		if w.Code == "preflight.port_conflict" {
+			hasPortConflict = true
+			break
+		}
+	}
+	if !hasPortConflict {
+		t.Errorf("expected preflight.port_conflict in smart-merge warnings, got %+v", resp.Data.Warnings)
+	}
+}
+
 
