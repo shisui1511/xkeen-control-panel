@@ -620,6 +620,36 @@ export function replaceMihomoTopLevelSection(
   return out.join('\n');
 }
 
+export type ListenerType = 'mixed' | 'socks' | 'http' | 'shadowsocks' | 'tproxy' | 'redirect';
+
+export interface ListenerUser {
+  username: string;
+  password: string;
+}
+
+export interface Listener {
+  id: string;
+  name: string;
+  type: ListenerType;
+  listen: string;
+  port: string;
+  proxy?: string;
+  udp?: boolean;
+  users?: ListenerUser[];
+  cipher?: string;
+  password?: string;
+  routingMark?: number;
+}
+
+export const BUILDER_LISTENER_TYPES: readonly string[] = [
+  'mixed',
+  'socks',
+  'http',
+  'shadowsocks',
+  'tproxy',
+  'redir'
+];
+
 export interface MihomoConfigState {
   proxies: Proxy[];
   groups: ProxyGroup[];
@@ -639,6 +669,9 @@ export interface MihomoConfigState {
   capabilities?: any;
   hasZkeenGeodata?: boolean;
   ruleProviders?: RuleProvider[];
+  listeners?: Listener[];
+  listenersRaw?: string | null;
+  listenersReadOnly?: boolean;
 }
 
 const CYRILLIC_MAP: Record<string, string> = {
@@ -1161,6 +1194,29 @@ export function generateYAML(state: MihomoConfigState): string {
   }
   lines.push('');
 
+  // Listeners
+  if (state.listenersReadOnly && state.listenersRaw) {
+    lines.push('listeners:');
+    const rawLines = state.listenersRaw.split('\n');
+    for (const rl of rawLines) {
+      lines.push(rl);
+    }
+    lines.push('');
+  } else if (state.listeners && state.listeners.length > 0) {
+    lines.push('listeners:');
+    for (const l of state.listeners) {
+      lines.push(`  - name: ${yamlSafeString(l.name)}`);
+      const yamlType = l.type === 'redirect' ? 'redir' : l.type;
+      lines.push(`    type: ${yamlType}`);
+      lines.push(`    listen: ${l.listen || '0.0.0.0'}`);
+      lines.push(`    port: ${l.port}`);
+      if (l.proxy) {
+        lines.push(`    proxy: ${yamlSafeString(l.proxy)}`);
+      }
+    }
+    lines.push('');
+  }
+
   return lines.join('\n').trimEnd();
 }
 
@@ -1179,6 +1235,98 @@ export interface ParsedMihomoConfig {
   externalControllerType?: 'unix' | 'tcp';
   externalControllerTarget?: string;
   mihomoProviders: any[];
+  listeners: Listener[];
+  listenersRaw: string | null;
+  listenersReadOnly: boolean;
+}
+
+export function parseListenersSection(rawBlock: string): {
+  listeners: Listener[];
+  unrecognized: boolean;
+  rawText: string;
+} {
+  if (!rawBlock || rawBlock.trim() === '') {
+    return { listeners: [], unrecognized: false, rawText: '' };
+  }
+
+  const lines = rawBlock.split('\n');
+  const chunks: string[][] = [];
+  let currentChunk: string[] | null = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) {
+      if (currentChunk) currentChunk.push(line);
+      continue;
+    }
+    if (/^\s*-\s+/.test(line) || /^\s*-\s*$/.test(line)) {
+      if (currentChunk) {
+        chunks.push(currentChunk);
+      }
+      currentChunk = [line];
+    } else {
+      if (currentChunk) {
+        currentChunk.push(line);
+      } else {
+        currentChunk = [line];
+      }
+    }
+  }
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
+
+  if (chunks.length === 0) {
+    return { listeners: [], unrecognized: true, rawText: rawBlock };
+  }
+
+  const listeners: Listener[] = [];
+
+  for (const chunk of chunks) {
+    let name = '';
+    let type = '';
+    let listen = '0.0.0.0';
+    let port = '';
+    let proxy: string | undefined;
+
+    for (const rawLine of chunk) {
+      const lineWithoutDash = rawLine.replace(/^\s*-\s+/, '  ');
+      const match = lineWithoutDash.match(/^\s*([a-zA-Z0-9_-]+):\s*(.*)$/);
+      if (match) {
+        const key = match[1];
+        const val = unquote(match[2].trim());
+        if (key === 'name') {
+          name = val;
+        } else if (key === 'type') {
+          type = val;
+        } else if (key === 'listen') {
+          listen = val;
+        } else if (key === 'port') {
+          port = val;
+        } else if (key === 'proxy') {
+          proxy = val;
+        }
+      }
+    }
+
+    if (!type || !BUILDER_LISTENER_TYPES.includes(type)) {
+      return { listeners: [], unrecognized: true, rawText: rawBlock };
+    }
+
+    const normalizedType: ListenerType =
+      type === 'redir' || type === 'redirect' ? 'redirect' : (type as ListenerType);
+
+    listeners.push({
+      id: crypto.randomUUID(),
+      name,
+      type: normalizedType,
+      listen: listen || '0.0.0.0',
+      port,
+      ...(proxy ? { proxy } : {})
+    });
+  }
+
+  return { listeners, unrecognized: false, rawText: '' };
 }
 
 export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
@@ -1213,7 +1361,10 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     existingRedirPort: null,
     externalControllerType: 'unix',
     externalControllerTarget: '/opt/var/run/mihomo.sock',
-    mihomoProviders: []
+    mihomoProviders: [],
+    listeners: [],
+    listenersRaw: null,
+    listenersReadOnly: false
   };
 
   if (!text || text.trim() === '') {
@@ -1272,7 +1423,8 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
             sec !== 'redir-port' &&
             sec !== 'external-controller' &&
             sec !== 'external-controller-unix' &&
-            sec !== 'proxy-providers'
+            sec !== 'proxy-providers' &&
+            sec !== 'listeners'
           ) {
             if (!parsed.preservedKeys.includes(sec)) {
               parsed.preservedKeys = [...parsed.preservedKeys, sec];
@@ -1919,6 +2071,15 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     }
     if (currentProvider) {
       parsed.mihomoProviders.push(currentProvider);
+    }
+
+    const listenersSec = findTopLevelSection(lines, 'listeners');
+    if (listenersSec.start !== -1) {
+      const rawBlock = lines.slice(listenersSec.start + 1, listenersSec.end).join('\n');
+      const parsedListeners = parseListenersSection(rawBlock);
+      parsed.listeners = parsedListeners.listeners;
+      parsed.listenersReadOnly = parsedListeners.unrecognized;
+      parsed.listenersRaw = parsedListeners.unrecognized ? parsedListeners.rawText : null;
     }
   } catch (e) {
     console.error('Failed to parse Mihomo config:', e);

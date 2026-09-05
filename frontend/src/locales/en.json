@@ -976,6 +976,8 @@
   "mihomo.tab_groups": "Groups",
   "mihomo.tab_rulesets": "Rule Sets",
   "mihomo.tab_rules": "Rules",
+  "mihomo.tab_listeners": "Listeners",
+  "mihomo.add_listener": "Add listener",
   "mihomo.config_applied": "Mihomo configuration updated and restarted",
   "mihomo.save_error": "Save error",
   "mihomo.breadcrumb_generator": "Mihomo Generator",

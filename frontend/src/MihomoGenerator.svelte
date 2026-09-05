@@ -22,7 +22,8 @@
     generateYAML as generateMihomoYAML,
     populateMihomoFromYAML as populateMihomoFromYAML_raw,
     ZKEEN_RULE_PROVIDERS,
-    type RuleProvider
+    type RuleProvider,
+    type Listener
   } from './lib/mihomoYaml';
   import ProxyForm from './components/mihomo/ProxyForm.svelte';
   import GroupForm from './components/mihomo/GroupForm.svelte';
@@ -157,12 +158,15 @@
   }
 
   // State
-  let activeSection = $state<'proxies' | 'groups' | 'rules' | 'dns' | 'tun' | 'rulesets'>(
-    'proxies'
-  );
+  let activeSection = $state<
+    'proxies' | 'groups' | 'rules' | 'dns' | 'tun' | 'rulesets' | 'listeners'
+  >('proxies');
   let proxies: Proxy[] = $state([]);
   let groups: ProxyGroup[] = $state([]);
   let rules: Rule[] = $state([]);
+  let listeners = $state<Listener[]>([]);
+  let listenersRaw = $state<string | null>(null);
+  let listenersReadOnly = $state(false);
   let activePreset: string = $state('');
   let activeRuleProvider = $state<'none' | 'zkeen' | 'metacubex'>('none');
   let externalControllerType = $state<'unix' | 'tcp'>('unix');
@@ -1108,6 +1112,9 @@
       existingRedirPort = res.existingRedirPort;
       externalControllerType = res.externalControllerType || 'unix';
       externalControllerTarget = res.externalControllerTarget || '127.0.0.1:9090';
+      listeners = res.listeners || [];
+      listenersRaw = res.listenersRaw || null;
+      listenersReadOnly = res.listenersReadOnly || false;
 
       lastParsedProviders = res.mihomoProviders || [];
       mihomoProviders = mergeMihomoProviders(
@@ -1431,7 +1438,10 @@
       mihomoProviders,
       capabilities: $capabilities,
       hasZkeenGeodata,
-      ruleProviders
+      ruleProviders,
+      listeners,
+      listenersRaw,
+      listenersReadOnly
     });
   }
 
@@ -1440,6 +1450,9 @@
     void proxies;
     void groups;
     void rules;
+    void listeners;
+    void listenersRaw;
+    void listenersReadOnly;
     void activeRuleProvider;
     void selectedMetaRuleSets;
     void subscriptions;
@@ -1602,7 +1615,8 @@
     ...(activeRuleProvider === 'metacubex' ? [['rulesets', $t('mihomo.tab_rulesets')]] : []),
     ['rules', $t('mihomo.tab_rules')],
     ['dns', 'DNS'],
-    ['tun', 'TUN']
+    ['tun', 'TUN'],
+    ['listeners', $t('mihomo.tab_listeners')]
   ]);
 
   $effect(() => {
@@ -1613,7 +1627,8 @@
       activeSection !== 'groups' &&
       activeSection !== 'rules' &&
       activeSection !== 'dns' &&
-      activeSection !== 'tun'
+      activeSection !== 'tun' &&
+      activeSection !== 'listeners'
     ) {
       activeSection = 'rulesets';
     }
@@ -2234,6 +2249,9 @@
                 >
                   {tun.enabled ? $t('mihomo.tab_status_on') : $t('mihomo.tab_status_off')}
                 </span>
+              {/if}
+              {#if id === 'listeners' && listeners.length > 0}
+                <span class="sec-count">{listeners.length}</span>
               {/if}
             </button>
           {/each}
@@ -2888,6 +2906,49 @@
                 </div>
               {/if}
             {/if}
+          </div>
+        {/if}
+
+        <!-- LISTENERS -->
+        {#if activeSection === 'listeners'}
+          <div class="sec-body">
+            {#each listeners as l (l.id)}
+              <div class="item-row">
+                <span class="item-badge type-{l.type}">{l.type}</span>
+                <span class="item-name">{l.name}</span>
+                <span class="item-meta">{l.listen}:{l.port}</span>
+                <button
+                  type="button"
+                  class="item-del"
+                  aria-label={$t('common.delete')}
+                  title={$t('common.delete')}
+                  onclick={() => {
+                    listeners = listeners.filter((item) => item.id !== l.id);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            {/each}
+            <button
+              type="button"
+              class="add-btn"
+              onclick={() => {
+                listeners = [
+                  ...listeners,
+                  {
+                    id: crypto.randomUUID(),
+                    name: '',
+                    type: 'mixed',
+                    listen: '0.0.0.0',
+                    port: '',
+                    udp: true
+                  }
+                ];
+              }}
+            >
+              + {$t('mihomo.add_listener')}
+            </button>
           </div>
         {/if}
       </div>

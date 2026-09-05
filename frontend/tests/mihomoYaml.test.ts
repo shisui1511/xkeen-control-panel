@@ -3,7 +3,12 @@
  */
 
 import { test, describe, expect } from 'vitest';
-import { slugifyProviderName, generateYAML, populateMihomoFromYAML } from '../src/lib/mihomoYaml';
+import {
+  slugifyProviderName,
+  generateYAML,
+  populateMihomoFromYAML,
+  parseListenersSection
+} from '../src/lib/mihomoYaml';
 
 describe('slugifyProviderName', () => {
   test('транслитерация кириллических имен подписок', () => {
@@ -705,5 +710,141 @@ proxies:
     expect(p.wgPrivateKey).toBe('privKey');
     // awgEnabled обязан быть ложным, так как параметры не были внутри amnezia-wg-option
     expect(p.awgEnabled).toBeFalsy();
+  });
+});
+
+describe('listeners emission', () => {
+  const baseState: any = {
+    proxies: [],
+    groups: [],
+    rules: [],
+    dns: { enabled: false },
+    tun: { enabled: false },
+    sniffer: { enabled: false },
+    activeRuleProvider: 'none',
+    selectedMetaRuleSets: new Map(),
+    preservedKeys: [],
+    existingTproxyPort: null,
+    existingRedirPort: null,
+    subscriptions: [],
+    mihomoProviders: []
+  };
+
+  test('один слушатель mixed эмитируется корректно', () => {
+    const state: any = {
+      ...baseState,
+      listeners: [
+        {
+          id: '1',
+          name: 'tv-box',
+          type: 'mixed',
+          listen: '0.0.0.0',
+          port: '7899'
+        }
+      ]
+    };
+    const yaml = generateYAML(state);
+    const lines = yaml.split('\n');
+
+    expect(lines.filter((l) => l.trim() === 'listeners:').length).toBe(1);
+    expect(yaml).toContain(
+      'listeners:\n  - name: "tv-box"\n    type: mixed\n    listen: 0.0.0.0\n    port: 7899'
+    );
+  });
+
+  test('непустое поле proxy эмитируется как proxy:; ключ rule не эмитируется', () => {
+    const state: any = {
+      ...baseState,
+      listeners: [
+        {
+          id: '1',
+          name: 'tv-box',
+          type: 'mixed',
+          listen: '0.0.0.0',
+          port: '7899',
+          proxy: 'ProxyGroup1'
+        }
+      ]
+    };
+    const yaml = generateYAML(state);
+    const lines = yaml.split('\n');
+
+    expect(yaml).toContain('    proxy: "ProxyGroup1"');
+    expect(lines.some((l) => l.trim().startsWith('rule:'))).toBe(false);
+    expect(lines.some((l) => l.trim().startsWith('proxy-group:'))).toBe(false);
+  });
+
+  test('отсутствие ключа listeners при пустом состоянии', () => {
+    const state: any = {
+      ...baseState,
+      listeners: []
+    };
+    const yaml = generateYAML(state);
+    expect(yaml).not.toContain('listeners:');
+  });
+
+  test('экранирование имени слушателя со спецсимволом', () => {
+    const state: any = {
+      ...baseState,
+      listeners: [
+        {
+          id: '1',
+          name: 'tv: box',
+          type: 'mixed',
+          listen: '0.0.0.0',
+          port: '7899'
+        }
+      ]
+    };
+    const yaml = generateYAML(state);
+    expect(yaml).toContain('  - name: "tv: box"');
+    const listenersCount = (yaml.match(/- name:/g) || []).length;
+    expect(listenersCount).toBe(1);
+  });
+
+  test('разбор одного слушателя mixed через parseListenersSection', () => {
+    const block = `
+  - name: "tv-box"
+    type: mixed
+    listen: 0.0.0.0
+    port: 7899
+`;
+    const res = parseListenersSection(block);
+    expect(res.unrecognized).toBe(false);
+    expect(res.listeners).toHaveLength(1);
+    const l = res.listeners[0];
+    expect(l.name).toBe('tv-box');
+    expect(l.type).toBe('mixed');
+    expect(l.listen).toBe('0.0.0.0');
+    expect(l.port).toBe('7899');
+    expect(typeof l.port).toBe('string');
+    expect(l.id).toBeDefined();
+  });
+
+  test('признак unrecognized для экзотического типа', () => {
+    const block = `
+  - name: "exotic-listener"
+    type: anytls
+    listen: 0.0.0.0
+    port: 9443
+`;
+    const res = parseListenersSection(block);
+    expect(res.unrecognized).toBe(true);
+    expect(res.listeners).toHaveLength(0);
+    expect(res.rawText).toBe(block);
+  });
+
+  test('идемпотентность кругового рейса одного mixed слушателя', () => {
+    const initialBlock = `  - name: "tv-box"\n    type: mixed\n    listen: 0.0.0.0\n    port: 7899`;
+    const parsed = parseListenersSection(initialBlock);
+    expect(parsed.unrecognized).toBe(false);
+    expect(parsed.listeners).toHaveLength(1);
+
+    const state: any = {
+      ...baseState,
+      listeners: parsed.listeners
+    };
+    const yaml = generateYAML(state);
+    expect(yaml).toContain('listeners:\n' + initialBlock);
   });
 });

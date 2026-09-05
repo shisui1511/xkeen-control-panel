@@ -673,3 +673,86 @@ rules:
 	}
 }
 
+func TestSmartMergeMihomo_PreservesListeners(t *testing.T) {
+	// Case 1: Template contains listeners: -> listeners: appears exactly once and listener is preserved
+	existingYAML := `
+proxies:
+  - name: "P1"
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+`
+	templateYAML1 := `
+proxies:
+  - name: "P1"
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+listeners:
+  - name: "tv-box"
+    type: mixed
+    port: 7899
+    listen: 0.0.0.0
+`
+	merged1, _, err := SmartMergeMihomo(existingYAML, templateYAML1, nil, true)
+	if err != nil {
+		t.Fatalf("SmartMergeMihomo failed: %v", err)
+	}
+	if strings.Count(merged1, "listeners:") != 1 {
+		t.Errorf("expected listeners: to appear exactly once, got:\n%s", merged1)
+	}
+	if !strings.Contains(merged1, "tv-box") {
+		t.Errorf("expected tv-box listener to be present, got:\n%s", merged1)
+	}
+
+	// Case 2: Template contains handwritten exotic block (e.g. type: anytls) -> block is preserved verbatim
+	templateYAML2 := `
+proxies:
+  - name: "P1"
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+listeners:
+  - name: "exotic-listener"
+    type: anytls
+    port: 9443
+    listen: 0.0.0.0
+    certificate: /etc/cert.pem
+`
+	merged2, _, err := SmartMergeMihomo(existingYAML, templateYAML2, nil, true)
+	if err != nil {
+		t.Fatalf("SmartMergeMihomo failed: %v", err)
+	}
+	if !strings.Contains(merged2, "type: anytls") || !strings.Contains(merged2, "exotic-listener") {
+		t.Errorf("expected exotic anytls listener to be preserved, got:\n%s", merged2)
+	}
+
+	// Case 3: Template WITHOUT listeners: and existing config WITH listeners: -> listeners: is omitted
+	// (demonstrates why the builder must always emit listeners:)
+	existingWithListeners := `
+proxies:
+  - name: "P1"
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+listeners:
+  - name: "old-listener"
+    type: mixed
+    port: 7899
+`
+	templateWithoutListeners := `
+proxies:
+  - name: "P1"
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+`
+	merged3, _, err := SmartMergeMihomo(existingWithListeners, templateWithoutListeners, nil, true)
+	if err != nil {
+		t.Fatalf("SmartMergeMihomo failed: %v", err)
+	}
+	if strings.Contains(merged3, "listeners:") || strings.Contains(merged3, "old-listener") {
+		t.Errorf("expected listeners: to be absent when template lacks it, got:\n%s", merged3)
+	}
+}
+

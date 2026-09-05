@@ -975,6 +975,8 @@
   "mihomo.tab_groups": "Группы",
   "mihomo.tab_rulesets": "Наборы",
   "mihomo.tab_rules": "Правила",
+  "mihomo.tab_listeners": "Слушатели",
+  "mihomo.add_listener": "Добавить слушатель",
   "mihomo.config_applied": "Конфигурация Mihomo обновлена и перезапущена",
   "mihomo.save_error": "Ошибка сохранения",
   "mihomo.breadcrumb_generator": "Генератор Mihomo",
