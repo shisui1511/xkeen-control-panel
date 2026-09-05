@@ -1417,7 +1417,8 @@ export function parseListenersSection(rawBlock: string): {
         } else if (key === 'proxy') {
           proxy = val;
         } else if (key === 'udp') {
-          udp = val === 'true';
+          const lower = val.toLowerCase();
+          udp = lower === 'true' || lower === 'yes';
         } else if (key === 'cipher') {
           cipher = val;
         } else if (key === 'password') {

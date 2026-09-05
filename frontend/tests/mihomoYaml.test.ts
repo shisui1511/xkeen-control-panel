@@ -1178,6 +1178,24 @@ describe('listeners round-trip', () => {
     expect(l.users![0]).toEqual({ username: 'admin', password: 'secretpassword' });
   });
 
+  test('регистронезависимый парсинг булевого флага udp (True, TRUE, yes)', () => {
+    const yamlBlock = `
+  - name: "udp-casing"
+    type: mixed
+    port: 7891
+    udp: True
+  - name: "udp-yes"
+    type: socks
+    port: 1081
+    udp: YES
+`;
+    const res = parseListenersSection(yamlBlock);
+    expect(res.unrecognized).toBe(false);
+    expect(res.listeners).toHaveLength(2);
+    expect(res.listeners[0].udp).toBe(true);
+    expect(res.listeners[1].udp).toBe(true);
+  });
+
   test('элемент с неподдерживаемым типом переводит в unrecognized: true с rawText', () => {
     const yamlBlock = `
   - name: "valid"
