@@ -1816,6 +1816,7 @@
   "traffic.xray.downlink": "Загружено",
   "traffic.xray.no_data": "Нет данных статистики",
   "traffic.xray.unavailable": "Статистика Xray недоступна. Включите gRPC-мониторинг в настройках",
+  "traffic.xray.connection_lost": "Соединение с gRPC-статистикой Xray потеряно",
   "traffic.total": "Всего",
   "subscr.dialer_proxy.label": "Каскад прокси (Dialer Proxy)",
   "subscr.dialer_proxy.none": "Без каскада (прямое подключение)",

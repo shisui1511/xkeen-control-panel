@@ -353,6 +353,7 @@
 
   let xrayStats = $state<XrayOutboundStat[]>([]);
   let xrayMonitoringToggling = $state(false);
+  let xrayStatsError = $state<string | null>(null);
   let xrayStatsInterval: any = null;
 
   async function fetchXrayStats() {
@@ -364,6 +365,7 @@
         | { data?: Record<string, { uplink?: number; downlink?: number }> }
         | Record<string, { uplink?: number; downlink?: number }>
       >('/api/xray/stats');
+      xrayStatsError = null;
       const raw = (res as any)?.data || res;
       if (raw && typeof raw === 'object') {
         const list: XrayOutboundStat[] = [];
@@ -383,6 +385,7 @@
       }
     } catch (e: any) {
       if (e?.status === 401) return;
+      xrayStatsError = e?.message || 'Connection lost';
     }
   }
 
@@ -399,6 +402,7 @@
       clearInterval(xrayStatsInterval);
       xrayStatsInterval = null;
     }
+    xrayStatsError = null;
   }
 
   async function toggleXrayMonitoring() {
@@ -1118,6 +1122,17 @@
             </button>
           </div>
         </div>
+
+        {#if xrayStatsError && $capabilities?.xray?.grpc_ready}
+          <div
+            class="alert alert-warning"
+            data-testid="xray-stats-error-alert"
+            style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;"
+          >
+            <span>⚠️</span>
+            <span>{$t('traffic.xray.connection_lost')} ({xrayStatsError})</span>
+          </div>
+        {/if}
 
         {#if !$capabilities?.xray?.grpc_ready}
           <div class="alert alert-info" data-testid="xray-stats-disabled-hint">

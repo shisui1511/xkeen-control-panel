@@ -416,4 +416,54 @@ test.describe('Traffic Xray Live Statistics test suite (XRAY-07)', () => {
     await expect(toast.first()).toBeVisible({ timeout: 3000 });
     await expect(toast.first()).toContainText(/10085|already in use|конфликт/i);
   });
+
+  test('ошибка опроса статистики при включенном мониторинге отображает предупреждение (WR-06)', async ({
+    page
+  }) => {
+    await disableServiceWorker(page);
+
+    await page.route('**/api/**', async (route: Route) => {
+      const url = route.request().url();
+      if (url.includes('/api/auth/me')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ authenticated: true, csrf_token: 'mock-csrf' })
+        });
+      } else if (url.includes('/api/capabilities')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              kernels: { xray: { installed: true } },
+              active_kernel: 'xray',
+              xray: { conf_dir: '/opt/etc/xray', conf_dir_exists: true, grpc_ready: true }
+            }
+          })
+        });
+      } else if (url.includes('/api/xray/stats')) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'gRPC stats service unreachable' })
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: true, data: {} })
+        });
+      }
+    });
+
+    await page.routeWebSocket('**/api/traffic/ws', async (ws) => {});
+
+    await page.goto('/#/traffic');
+
+    const alert = page.locator('[data-testid="xray-stats-error-alert"]');
+    await expect(alert).toBeVisible({ timeout: 5000 });
+    await expect(alert).toContainText(/gRPC|потеряно|Connection/i);
+  });
 });

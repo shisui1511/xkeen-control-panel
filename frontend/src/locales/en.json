@@ -1817,6 +1817,7 @@
   "traffic.xray.downlink": "Downlink",
   "traffic.xray.no_data": "No statistics available",
   "traffic.xray.unavailable": "Xray stats unavailable. Enable gRPC monitoring in settings",
+  "traffic.xray.connection_lost": "Connection to Xray gRPC statistics lost",
   "traffic.total": "Total",
   "subscr.dialer_proxy.label": "Chained Proxy (Dialer Proxy)",
   "subscr.dialer_proxy.none": "None (Direct connection)",
