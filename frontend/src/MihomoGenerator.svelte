@@ -3076,10 +3076,7 @@
                     placeholder="my-listener"
                   />
                   {#if !listenerNameValid}
-                    <span
-                      class="form-validation-msg"
-                      style="font-size: 11px; color: var(--warning); margin-top: 2px;"
-                    >
+                    <span class="form-validation-msg">
                       {$t('mihomo.listener_name_required')}
                     </span>
                   {/if}
@@ -3135,10 +3132,7 @@
                       placeholder="7890"
                     />
                     {#if !listenerPortValid}
-                      <span
-                        class="form-validation-msg"
-                        style="font-size: 11px; color: var(--warning); margin-top: 2px;"
-                      >
+                      <span class="form-validation-msg">
                         {$t('mihomo.listener_port_required')}
                       </span>
                     {/if}
@@ -3183,10 +3177,7 @@
                       </optgroup>
                     {/if}
                   </select>
-                  <div
-                    class="form-hint"
-                    style="font-size: 12px; color: var(--fg-dim); margin-top: 4px;"
-                  >
+                  <div class="form-hint">
                     {$t('mihomo.listener_destination_hint')}
                   </div>
                 </div>
@@ -3226,10 +3217,7 @@
                       bind:value={newListener.password}
                     />
                     {#if !listenerSSPasswordValid}
-                      <span
-                        class="form-validation-msg"
-                        style="font-size: 11px; color: var(--warning); margin-top: 2px;"
-                      >
+                      <span class="form-validation-msg">
                         {$t('mihomo.listener_ss_password_required')}
                       </span>
                     {/if}
@@ -3238,27 +3226,20 @@
 
                 {#if newListener.type === 'mixed' || newListener.type === 'socks' || newListener.type === 'http'}
                   <div class="form-row" style="margin-top: 6px;">
-                    <div
-                      style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;"
-                    >
-                      <span class="form-label" style="margin-bottom: 0;"
-                        >{$t('mihomo.listener_users')}</span
-                      >
+                    <div class="form-users-header">
+                      <span class="form-label">{$t('mihomo.listener_users')}</span>
                       <button
                         type="button"
-                        class="btn btn-secondary btn-sm"
-                        style="font-size: 11px; padding: 2px 8px;"
+                        class="btn btn-secondary btn-sm form-users-add-btn"
                         onclick={addListenerUser}
                       >
                         + {$t('mihomo.listener_add_user')}
                       </button>
                     </div>
                     {#if newListener.users && newListener.users.length > 0}
-                      <div
-                        style="display: flex; flex-direction: column; gap: 8px; margin-top: 4px;"
-                      >
+                      <div class="form-users-list">
                         {#each newListener.users as user, uIdx}
-                          <div style="display: flex; gap: 8px; align-items: center;">
+                          <div class="form-user-row">
                             <input
                               type="text"
                               class="form-input"
@@ -3286,19 +3267,13 @@
                         {/each}
                       </div>
                     {/if}
-                    <div
-                      class="form-hint"
-                      style="font-size: 12px; color: var(--fg-dim); margin-top: 6px;"
-                    >
+                    <div class="form-hint">
                       {$t('mihomo.listener_open_proxy_hint')}
                     </div>
                   </div>
                 {/if}
 
-                <div
-                  class="form-actions"
-                  style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px;"
-                >
+                <div class="form-actions form-actions-spaced">
                   <button type="button" class="btn btn-secondary" onclick={cancelListenerForm}>
                     {$t('app.cancel')}
                   </button>
@@ -3313,10 +3288,7 @@
                 </div>
               </div>
             {:else if listeners.length === 0}
-              <div
-                class="rulesets-hint"
-                style="font-size: 12px; color: var(--fg-dim); margin-bottom: 12px;"
-              >
+              <div class="rulesets-hint form-hint-spaced">
                 {$t('mihomo.listeners_hint')}
               </div>
               <button type="button" class="add-btn" onclick={() => openListenerForm()}>
@@ -3326,32 +3298,37 @@
               {#each listeners as l (l.id)}
                 <div class="item-row">
                   <span class="item-badge type-{l.type}">{l.type}</span>
-                  <span class="item-name">{l.name}</span>
+                  <span class="item-name" title={l.name}>{l.name}</span>
                   <span class="item-meta">{l.listen}:{l.port}</span>
-                  <span class="item-meta">
+                  <span
+                    class="item-meta item-dest-meta"
+                    title={l.proxy ? `→ ${l.proxy}` : $t('mihomo.listener_dest_rules')}
+                  >
                     {l.proxy ? `→ ${l.proxy}` : $t('mihomo.listener_dest_rules')}
                   </span>
-                  <button
-                    type="button"
-                    class="item-edit"
-                    aria-label={$t('app.edit')}
-                    title={$t('app.edit')}
-                    onclick={() => openListenerForm(l)}
-                  >
-                    ✎
-                  </button>
-                  <button
-                    type="button"
-                    class="item-del"
-                    aria-label={$t('app.delete')}
-                    title={$t('app.delete')}
-                    onclick={() => {
-                      listeners = listeners.filter((item) => item.id !== l.id);
-                      isDirty = true;
-                    }}
-                  >
-                    ✕
-                  </button>
+                  <div class="item-actions">
+                    <button
+                      type="button"
+                      class="item-edit"
+                      aria-label={$t('app.edit')}
+                      title={$t('app.edit')}
+                      onclick={() => openListenerForm(l)}
+                    >
+                      ✎
+                    </button>
+                    <button
+                      type="button"
+                      class="item-del"
+                      aria-label={$t('app.delete')}
+                      title={$t('app.delete')}
+                      onclick={() => {
+                        listeners = listeners.filter((item) => item.id !== l.id);
+                        isDirty = true;
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
               {/each}
               <button type="button" class="add-btn" onclick={() => openListenerForm()}>
@@ -3834,10 +3811,17 @@
     border-radius: var(--radius);
     padding: 4px;
     margin-bottom: 16px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sec-tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .sec-tab {
-    flex: 1;
+    flex: 1 0 auto;
+    white-space: nowrap;
     background: none;
     border: none;
     color: var(--fg-secondary);
@@ -3922,6 +3906,8 @@
     border-radius: 10px;
     text-transform: uppercase;
     flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--fg-secondary);
   }
 
   .type-vless {
@@ -3953,9 +3939,35 @@
     color: var(--fg-dim);
     font-size: 9px;
   }
+  .type-mixed {
+    background: rgba(41, 194, 240, 0.15);
+    color: var(--primary);
+  }
+  .type-socks {
+    background: rgba(70, 209, 138, 0.15);
+    color: var(--success);
+  }
+  .type-http {
+    background: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+  }
+  .type-shadowsocks {
+    background: rgba(239, 91, 107, 0.15);
+    color: var(--danger);
+  }
+  .type-tproxy {
+    background: rgba(240, 180, 80, 0.15);
+    color: var(--warning);
+  }
+  .type-redirect,
+  .type-redir {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+  }
 
   .item-name {
     flex: 1;
+    min-width: 50px;
     font-size: 13px;
     font-weight: 500;
     color: var(--fg-primary);
@@ -3973,6 +3985,13 @@
     font-size: 11px;
     color: var(--fg-dim);
     flex-shrink: 0;
+  }
+
+  .item-dest-meta {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .item-actions {
@@ -4087,15 +4106,64 @@
   .form-row2 {
     display: flex;
     gap: 10px;
+    flex-wrap: wrap;
   }
   .form-col {
     display: flex;
     flex-direction: column;
     gap: 4px;
     flex: 1;
+    min-width: 120px;
   }
   .form-col-sm {
     flex: 0 0 100px;
+    min-width: 80px;
+  }
+
+  .form-validation-msg {
+    font-size: 11px;
+    color: var(--warning);
+    margin-top: 2px;
+  }
+
+  .form-hint {
+    font-size: 12px;
+    color: var(--fg-dim);
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+
+  .form-hint-spaced {
+    margin-bottom: 12px;
+  }
+
+  .form-users-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+
+  .form-users-add-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+
+  .form-users-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .form-user-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .form-actions-spaced {
+    margin-top: 12px;
   }
 
   .form-label {
@@ -4355,6 +4423,22 @@
       flex: 1 1 auto !important;
     }
     .mihomo-splitter {
+      display: none;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .form-row2 {
+      flex-direction: column;
+      gap: 8px;
+    }
+    .form-col,
+    .form-col-sm {
+      flex: 1 1 auto;
+      min-width: 0;
+      width: 100%;
+    }
+    .item-dest-meta {
       display: none;
     }
   }
