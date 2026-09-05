@@ -1278,16 +1278,47 @@ export function parseListenersSection(rawBlock: string): {
   }
 
   const lines = rawBlock.split('\n');
+
+  // Find the first element and determine base indent
+  let firstElementIdx = -1;
+  let baseIndent = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    const match = line.match(/^(\s*)-\s+/);
+    if (match) {
+      firstElementIdx = i;
+      baseIndent = match[1].length;
+      break;
+    } else {
+      // Non-comment, non-empty line before any element start
+      return { listeners: [], unrecognized: true, rawText: rawBlock };
+    }
+  }
+
+  if (firstElementIdx === -1) {
+    return { listeners: [], unrecognized: true, rawText: rawBlock };
+  }
+
   const chunks: string[][] = [];
   let currentChunk: string[] | null = null;
 
-  for (const line of lines) {
+  for (let i = firstElementIdx; i < lines.length; i++) {
+    const line = lines[i];
     const trimmed = line.trim();
     if (trimmed === '' || trimmed.startsWith('#')) {
       if (currentChunk) currentChunk.push(line);
       continue;
     }
-    if (/^\s*-\s+/.test(line) || /^\s*-\s*$/.test(line)) {
+
+    // Check if line starts an element at baseIndent
+    const isNewElement =
+      line.length >= baseIndent + 2 &&
+      line.slice(0, baseIndent).trim() === '' &&
+      line.slice(baseIndent).startsWith('- ');
+
+    if (isNewElement) {
       if (currentChunk) {
         chunks.push(currentChunk);
       }
@@ -1295,17 +1326,11 @@ export function parseListenersSection(rawBlock: string): {
     } else {
       if (currentChunk) {
         currentChunk.push(line);
-      } else {
-        currentChunk = [line];
       }
     }
   }
   if (currentChunk) {
     chunks.push(currentChunk);
-  }
-
-  if (chunks.length === 0) {
-    return { listeners: [], unrecognized: true, rawText: rawBlock };
   }
 
   const listeners: Listener[] = [];
@@ -1316,8 +1341,61 @@ export function parseListenersSection(rawBlock: string): {
     let listen = '0.0.0.0';
     let port = '';
     let proxy: string | undefined;
+    let udp: boolean | undefined;
+    let cipher: string | undefined;
+    let password: string | undefined;
+    let routingMark: number | undefined;
+    const users: ListenerUser[] = [];
+
+    let inUsers = false;
+    let currentUser: ListenerUser | null = null;
 
     for (const rawLine of chunk) {
+      const trimmed = rawLine.trim();
+      if (trimmed === '' || trimmed.startsWith('#')) continue;
+
+      if (inUsers) {
+        // Match user item start: e.g. "- username: alice" or "- password: ..." or "- "
+        const userItemMatch = rawLine.match(/^\s*-\s*(.*)$/);
+        if (userItemMatch) {
+          if (currentUser && (currentUser.username || currentUser.password)) {
+            users.push(currentUser);
+          }
+          currentUser = { username: '', password: '' };
+          const rest = userItemMatch[1].trim();
+          if (rest) {
+            const m = rest.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
+            if (m) {
+              if (m[1] === 'username') currentUser.username = unquote(m[2]);
+              else if (m[1] === 'password') currentUser.password = unquote(m[2]);
+            }
+          }
+          continue;
+        }
+
+        // Inside a user item: e.g. "password: secret"
+        const userPropMatch = trimmed.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
+        if (userPropMatch && currentUser) {
+          const k = userPropMatch[1];
+          const v = unquote(userPropMatch[2]);
+          if (k === 'username') currentUser.username = v;
+          else if (k === 'password') currentUser.password = v;
+          continue;
+        }
+
+        // Left the users list if we reached another property at listener indent
+        inUsers = false;
+        if (currentUser && (currentUser.username || currentUser.password)) {
+          users.push(currentUser);
+          currentUser = null;
+        }
+      }
+
+      if (trimmed.startsWith('users:')) {
+        inUsers = true;
+        continue;
+      }
+
       const lineWithoutDash = rawLine.replace(/^\s*-\s+/, '  ');
       const match = lineWithoutDash.match(/^\s*([a-zA-Z0-9_-]+):\s*(.*)$/);
       if (match) {
@@ -1333,11 +1411,31 @@ export function parseListenersSection(rawBlock: string): {
           port = val;
         } else if (key === 'proxy') {
           proxy = val;
+        } else if (key === 'udp') {
+          udp = val === 'true';
+        } else if (key === 'cipher') {
+          cipher = val;
+        } else if (key === 'password') {
+          password = val;
+        } else if (key === 'routing-mark' || key === 'routingMark') {
+          const m = parseInt(val, 10);
+          if (!isNaN(m) && m > 0) routingMark = m;
         }
       }
     }
 
-    if (!type || !BUILDER_LISTENER_TYPES.includes(type)) {
+    if (inUsers && currentUser && (currentUser.username || currentUser.password)) {
+      users.push(currentUser);
+    }
+
+    if (!type) {
+      return { listeners: [], unrecognized: true, rawText: rawBlock };
+    }
+
+    const isSupported =
+      type === 'redir' || type === 'redirect' || BUILDER_LISTENER_TYPES.includes(type);
+
+    if (!isSupported) {
       return { listeners: [], unrecognized: true, rawText: rawBlock };
     }
 
@@ -1350,7 +1448,12 @@ export function parseListenersSection(rawBlock: string): {
       type: normalizedType,
       listen: listen || '0.0.0.0',
       port,
-      ...(proxy ? { proxy } : {})
+      ...(proxy ? { proxy } : {}),
+      ...(typeof udp === 'boolean' ? { udp } : {}),
+      ...(cipher ? { cipher } : {}),
+      ...(password ? { password } : {}),
+      ...(typeof routingMark === 'number' ? { routingMark } : {}),
+      ...(users.length > 0 ? { users } : {})
     });
   }
 

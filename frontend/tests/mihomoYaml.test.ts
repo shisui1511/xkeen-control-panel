@@ -1064,3 +1064,246 @@ describe('listeners emission', () => {
     expect(markIdx).toBeGreaterThan(usersIdx);
   });
 });
+
+describe('listeners round-trip', () => {
+  const baseState: any = {
+    proxies: [],
+    groups: [],
+    rules: [],
+    dns: { enabled: false },
+    tun: { enabled: false },
+    sniffer: { enabled: false },
+    activeRuleProvider: 'none',
+    selectedMetaRuleSets: new Map(),
+    preservedKeys: [],
+    existingTproxyPort: null,
+    existingRedirPort: null,
+    subscriptions: [],
+    mihomoProviders: []
+  };
+
+  test('разбор блока из трёх слушателей с сохранением порядка и генерацией id', () => {
+    const yamlBlock = `
+  - name: "mix-1"
+    type: mixed
+    listen: 0.0.0.0
+    port: 7890
+    udp: true
+  - name: "redir-1"
+    type: redir
+    listen: 127.0.0.1
+    port: 7891
+  - name: "ss-1"
+    type: shadowsocks
+    listen: 0.0.0.0
+    port: 8388
+    cipher: aes-256-gcm
+    password: "secret:pass"
+`;
+    const res = parseListenersSection(yamlBlock);
+    expect(res.unrecognized).toBe(false);
+    expect(res.listeners).toHaveLength(3);
+    expect(res.listeners[0].name).toBe('mix-1');
+    expect(res.listeners[0].type).toBe('mixed');
+    expect(res.listeners[1].name).toBe('redir-1');
+    expect(res.listeners[1].type).toBe('redirect');
+    expect(res.listeners[2].name).toBe('ss-1');
+    expect(res.listeners[2].type).toBe('shadowsocks');
+    expect(res.listeners[2].password).toBe('secret:pass');
+    expect(new Set(res.listeners.map((l) => l.id)).size).toBe(3);
+  });
+
+  test('redir и redirect нормализуются в redirect в состоянии и обратно в redir при эмиссии', () => {
+    const yaml1 = `  - name: "r1"\n    type: redir\n    listen: 0.0.0.0\n    port: 1001`;
+    const res1 = parseListenersSection(yaml1);
+    expect(res1.listeners[0].type).toBe('redirect');
+
+    const yaml2 = `  - name: "r2"\n    type: redirect\n    listen: 0.0.0.0\n    port: 1002`;
+    const res2 = parseListenersSection(yaml2);
+    expect(res2.listeners[0].type).toBe('redirect');
+
+    const emitted = generateYAML({
+      ...baseState,
+      listeners: [res1.listeners[0], res2.listeners[0]]
+    });
+    expect(emitted).toContain('    type: redir');
+    expect(emitted).not.toContain('type: redirect');
+  });
+
+  test('разбор вложенного списка users в массив пар логин/пароль с unquote', () => {
+    const yamlBlock = `
+  - name: "auth-http"
+    type: http
+    listen: 0.0.0.0
+    port: 8080
+    users:
+      - username: "admin"
+        password: "p@ss:word"
+      - username: guest
+        password: '123'
+`;
+    const res = parseListenersSection(yamlBlock);
+    expect(res.unrecognized).toBe(false);
+    expect(res.listeners).toHaveLength(1);
+    const l = res.listeners[0];
+    expect(l.users).toBeDefined();
+    expect(l.users).toHaveLength(2);
+    expect(l.users![0]).toEqual({ username: 'admin', password: 'p@ss:word' });
+    expect(l.users![1]).toEqual({ username: 'guest', password: '123' });
+  });
+
+  test('элемент с неподдерживаемым типом переводит в unrecognized: true с rawText', () => {
+    const yamlBlock = `
+  - name: "valid"
+    type: mixed
+    listen: 0.0.0.0
+    port: 7890
+  - name: "exotic"
+    type: vless
+    listen: 0.0.0.0
+    port: 443
+`;
+    const res = parseListenersSection(yamlBlock);
+    expect(res.unrecognized).toBe(true);
+    expect(res.listeners).toHaveLength(0);
+    expect(res.rawText).toBe(yamlBlock);
+  });
+
+  test('отсутствие секции listeners: в populateMihomoFromYAML', () => {
+    const fullConfig = `
+proxies:
+  - name: "p1"
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+`;
+    const parsed = populateMihomoFromYAML(fullConfig);
+    expect(parsed.listeners).toEqual([]);
+    expect(parsed.listenersReadOnly).toBe(false);
+    expect(parsed.listenersRaw).toBeNull();
+  });
+
+  test('секция listeners со списком на нулевом отступе сохраняется в rawText', () => {
+    const fullConfig = `
+proxies:
+  - name: "p1"
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+listeners:
+- name: "zero-indent"
+  type: mixed
+  port: 7890
+`;
+    const parsed = populateMihomoFromYAML(fullConfig);
+    expect(parsed.listeners).toHaveLength(1);
+    expect(parsed.listeners[0].name).toBe('zero-indent');
+    expect(parsed.listeners[0].type).toBe('mixed');
+  });
+
+  test('идемпотентность кругового рейса: две подряд идущие эмиссии байт-идентичны', () => {
+    const initialConfig = `proxies:
+  - name: "p1"
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+
+listeners:
+  - name: "l1"
+    type: mixed
+    listen: 0.0.0.0
+    port: 7890
+    udp: true
+    users:
+      - username: "u1"
+        password: "p1"
+  - name: "l2"
+    type: redir
+    listen: 127.0.0.1
+    port: 7891`;
+
+    const parsed1 = populateMihomoFromYAML(initialConfig);
+    const emit1 = generateYAML({
+      ...baseState,
+      proxies: parsed1.proxies,
+      listeners: parsed1.listeners
+    });
+
+    const parsed2 = populateMihomoFromYAML(emit1);
+    const emit2 = generateYAML({
+      ...baseState,
+      proxies: parsed2.proxies,
+      listeners: parsed2.listeners
+    });
+
+    expect(emit1).toBe(emit2);
+  });
+});
+
+describe('listeners safety-valve', () => {
+  const baseState: any = {
+    proxies: [],
+    groups: [],
+    rules: [],
+    dns: { enabled: false },
+    tun: { enabled: false },
+    sniffer: { enabled: false },
+    activeRuleProvider: 'none',
+    selectedMetaRuleSets: new Map(),
+    preservedKeys: [],
+    existingTproxyPort: null,
+    existingRedirPort: null,
+    subscriptions: [],
+    mihomoProviders: []
+  };
+
+  test('generateYAML при listenersReadOnly === true эмитирует listenersRaw дословно', () => {
+    const exoticRaw = `  - name: "anytls-in"
+    type: anytls
+    listen: 0.0.0.0
+    port: 8443
+    certificate: /etc/cert.crt
+    private-key: /etc/priv.key`;
+
+    const state: any = {
+      ...baseState,
+      listenersReadOnly: true,
+      listenersRaw: exoticRaw
+    };
+
+    const yaml = generateYAML(state);
+    expect(yaml).toContain('listeners:\n' + exoticRaw);
+  });
+
+  test('круговой рейс экзотического блока через populateMihomoFromYAML не теряет ни одной строки', () => {
+    const exoticBlock = `  - name: "exotic-listener"
+    type: custom-listener
+    listen: 0.0.0.0
+    port: 9999
+    custom-opt: true`;
+
+    const fullConfig = `proxies:
+  - name: "p1"
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+
+listeners:
+${exoticBlock}`;
+
+    const parsed = populateMihomoFromYAML(fullConfig);
+    expect(parsed.listenersReadOnly).toBe(true);
+    expect(parsed.listenersRaw).toBe(exoticBlock);
+
+    const reEmitted = generateYAML({
+      ...baseState,
+      proxies: parsed.proxies,
+      listenersReadOnly: parsed.listenersReadOnly,
+      listenersRaw: parsed.listenersRaw
+    });
+
+    for (const line of exoticBlock.split('\n')) {
+      expect(reEmitted).toContain(line);
+    }
+  });
+});
