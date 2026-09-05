@@ -1851,7 +1851,7 @@
   "proxies.wg_ip": "Client IP address",
   "proxies.awg_section": "AmneziaWG Obfuscation Options",
   "proxies.awg_junk": "Junk packet count (Jc / Jmin / Jmax)",
-  "proxies.awg_padding": "Padding / Init packet (H1 / H2 / H3 / H4)",
-  "proxies.awg_headers": "Custom headers (S1 / S2)",
+  "proxies.awg_padding": "Padding / Init packet (S1 / S2)",
+  "proxies.awg_headers": "Custom headers (H1 / H2 / H3 / H4)",
   "proxies.awg_hint": "Options are serialized under nested amnezia-wg-option block. Constraints: H1–H4 must be distinct and > 4, Jmin < Jmax, S1 + 56 ≠ S2."
 }

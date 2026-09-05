@@ -1850,7 +1850,7 @@
   "proxies.wg_ip": "IP адрес клиента",
   "proxies.awg_section": "Параметры обфускации AmneziaWG",
   "proxies.awg_junk": "Junk packet count (Jc / Jmin / Jmax)",
-  "proxies.awg_padding": "Padding / Init packet (H1 / H2 / H3 / H4)",
-  "proxies.awg_headers": "Кастомные заголовки (S1 / S2)",
+  "proxies.awg_padding": "Padding / Init packet (S1 / S2)",
+  "proxies.awg_headers": "Кастомные заголовки (H1 / H2 / H3 / H4)",
   "proxies.awg_hint": "Параметры сохраняются во вложенном блоке amnezia-wg-option. Ограничения: H1–H4 попарно различны и > 4, Jmin < Jmax, S1 + 56 ≠ S2."
 }
