@@ -561,7 +561,7 @@
     const isOutboundsStub = !outboundsFile.outbounds || outboundsFile.outbounds.length === 0;
     if (isRoutingStub || isOutboundsStub) {
       if (!applyLoading) {
-        applyTemplateFiles('selective-routing', true);
+        applyTemplateFiles('selective-routing', false);
       }
     }
   }
@@ -1692,7 +1692,7 @@
     };
   }
 
-  // Apply template files: writes 04_outbounds.json + 05_routing.json (Bug C / D-06, D-07)
+  // Apply template files: writes 04_outbounds.json + 05_routing.json via SmartMergeXray (TMPL-01, D-05, D-06)
   async function applyTemplateFiles(
     templateId: 'minimal-routing' | 'selective-routing' | 'all-proxy-routing',
     silent = false
@@ -1701,7 +1701,8 @@
 
     applyLoading = true;
     try {
-      // Write 04_outbounds.json
+      // 04_outbounds.json: сохранение кастомных outbounds (все кроме direct и block).
+      // services.SmartMergeXray не реализует семантику outbounds, поэтому здесь выполняется локальное объединение.
       const outboundsPath = `${XRAY_DIR}/04_outbounds.json`;
       const existingOutbounds = (xrayFiles['04_outbounds.json']?.outbounds || []) as any[];
       const customOutbounds = existingOutbounds.filter(
@@ -1722,20 +1723,77 @@
       );
       if (!saveOutboundsRes.ok) throw new Error('Failed to save 04_outbounds.json');
 
-      // Write 05_routing.json
+      // 05_routing.json: собираем шаблон с плейсхолдером PROXY_TAG, подстановку тега выполняет бэкенд
+      const templateRouting = getRoutingForTemplate(templateId, 'PROXY_TAG');
+      const templateContent = JSON.stringify(templateRouting, null, 2);
+
+      const existingRouting = xrayFiles['05_routing.json'];
+      const existingContent = existingRouting ? JSON.stringify(existingRouting, null, 2) : '';
+
+      let mergeRes: { content: string; stats?: { user_rules?: number; rules?: number } };
+      try {
+        mergeRes = await apiFetchJSON<{
+          content: string;
+          stats?: { user_rules?: number; rules?: number };
+        }>('/api/config/smart-merge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'xray',
+            existing_content: existingContent,
+            template_content: templateContent,
+            target_file: '05_routing.json',
+            active_outbound_tag: tag
+          })
+        });
+      } catch (mergeErr: any) {
+        if (mergeErr?.status === 401) return;
+        console.error('Smart merge failed for 05_routing.json:', mergeErr);
+        if (!silent) {
+          showToast('error', $t('editor.smart_merge_failed'));
+        }
+        return;
+      }
+
+      if (!mergeRes || !mergeRes.content) {
+        if (!silent) {
+          showToast('error', $t('editor.smart_merge_failed'));
+        }
+        return;
+      }
+
       const routingPath = `${XRAY_DIR}/05_routing.json`;
       const saveRoutingRes = await apiFetch(
         `/api/config/save?path=${encodeURIComponent(routingPath)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(getRoutingForTemplate(templateId, tag), null, 2)
+          body: mergeRes.content
         }
       );
-      if (!saveRoutingRes.ok) throw new Error('Failed to save 05_routing.json');
+      if (!saveRoutingRes.ok) {
+        if (saveRoutingRes.status === 422) {
+          const resData = await saveRoutingRes.json().catch(() => ({}));
+          validationError = resData.error || 'Unknown validation error';
+          if (!silent) {
+            showToast('error', $t('editor.validation_failed'));
+          }
+          return;
+        }
+        throw new Error('Failed to save 05_routing.json');
+      }
 
       if (!silent) {
-        showToast('success', $t('editor.preset_applied'));
+        const stats = mergeRes.stats || {};
+        showToast(
+          'success',
+          $t('editor.smart_merge_applied', {
+            nodes: customOutbounds.length,
+            providers: 0,
+            rules: stats.rules ?? 0,
+            userRules: stats.user_rules ?? 0
+          })
+        );
       }
       await loadAllConfigs();
     } catch (e: any) {
