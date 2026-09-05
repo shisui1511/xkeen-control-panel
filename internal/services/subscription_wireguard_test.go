@@ -3,20 +3,26 @@ package services
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
 func TestWireguardNodeToOutbound(t *testing.T) {
 	// 1. Full node test
+	keyA := "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=" // 32 'a's
+	keyB := "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI=" // 32 bytes
+	keyC := "Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M=" // 32 'c's
+
 	fullNode := &SubscriptionNode{
 		Tag:            "wg-node-1",
 		Protocol:       "wireguard",
 		Server:         "1.2.3.4:51820",
-		PublicKey:      "peer-pub-key-123",
-		SecretKey:      "priv-key-abc",
-		PreSharedKey:   "psk-456",
+		PublicKey:      keyB,
+		SecretKey:      keyA,
+		PreSharedKey:   keyC,
 		KeepAlive:      25,
 		AllowedIPs:     []string{"0.0.0.0/0", "::/0"},
 		LocalAddresses: []string{"10.0.0.2", "fd00::2"},
@@ -40,8 +46,8 @@ func TestWireguardNodeToOutbound(t *testing.T) {
 	var settings map[string]interface{}
 	_ = json.Unmarshal(jsonBytes, &settings)
 
-	if settings["secretKey"] != "priv-key-abc" {
-		t.Errorf("expected secretKey priv-key-abc, got %v", settings["secretKey"])
+	if settings["secretKey"] != keyA {
+		t.Errorf("expected secretKey %s, got %v", keyA, settings["secretKey"])
 	}
 	if settings["mtu"] != float64(1420) {
 		t.Errorf("expected mtu 1420, got %v", settings["mtu"])
@@ -52,11 +58,11 @@ func TestWireguardNodeToOutbound(t *testing.T) {
 		t.Fatalf("expected 1 peer, got %+v", settings["peers"])
 	}
 	peer := peers[0].(map[string]interface{})
-	if peer["endpoint"] != "1.2.3.4:51820" || peer["publicKey"] != "peer-pub-key-123" {
+	if peer["endpoint"] != "1.2.3.4:51820" || peer["publicKey"] != keyB {
 		t.Errorf("unexpected peer endpoint/pubkey: %+v", peer)
 	}
-	if peer["preSharedKey"] != "psk-456" {
-		t.Errorf("expected preSharedKey psk-456, got %v", peer["preSharedKey"])
+	if peer["preSharedKey"] != keyC {
+		t.Errorf("expected preSharedKey %s, got %v", keyC, peer["preSharedKey"])
 	}
 
 	addrs, ok := settings["address"].([]interface{})
@@ -102,8 +108,8 @@ func TestWireguardNodeToOutbound(t *testing.T) {
 	minimalNode := &SubscriptionNode{
 		Tag:       "wg-minimal",
 		Server:    "1.2.3.4:51820",
-		PublicKey: "peer-pub",
-		SecretKey: "my-sec",
+		PublicKey: keyB,
+		SecretKey: keyA,
 	}
 	obMin, reasonMin := wireguardNodeToOutbound(minimalNode)
 	if obMin == nil || reasonMin != "" {
@@ -124,6 +130,41 @@ func TestWireguardNodeToOutbound(t *testing.T) {
 		if _, exists := minPeer[key]; exists {
 			t.Errorf("key %s should not exist in minimal peer", key)
 		}
+	}
+
+	// 4. Invalid keys tests
+	invalidSecretNode := &SubscriptionNode{
+		Tag:       "wg-invalid-sec",
+		Server:    "1.2.3.4:51820",
+		PublicKey: keyB,
+		SecretKey: "not-base64!",
+	}
+	obInvSec, reasonInvSec := wireguardNodeToOutbound(invalidSecretNode)
+	if obInvSec != nil || !strings.Contains(reasonInvSec, "secretKey") {
+		t.Errorf("expected rejection of invalid secretKey, got ob: %v, reason: %s", obInvSec, reasonInvSec)
+	}
+
+	invalidPubNode := &SubscriptionNode{
+		Tag:       "wg-invalid-pub",
+		Server:    "1.2.3.4:51820",
+		PublicKey: "short",
+		SecretKey: keyA,
+	}
+	obInvPub, reasonInvPub := wireguardNodeToOutbound(invalidPubNode)
+	if obInvPub != nil || !strings.Contains(reasonInvPub, "publicKey") {
+		t.Errorf("expected rejection of invalid publicKey, got ob: %v, reason: %s", obInvPub, reasonInvPub)
+	}
+
+	invalidPskNode := &SubscriptionNode{
+		Tag:          "wg-invalid-psk",
+		Server:       "1.2.3.4:51820",
+		PublicKey:    keyB,
+		SecretKey:    keyA,
+		PreSharedKey: "wrong-length-psk",
+	}
+	obInvPsk, reasonInvPsk := wireguardNodeToOutbound(invalidPskNode)
+	if obInvPsk != nil || !strings.Contains(reasonInvPsk, "preSharedKey") {
+		t.Errorf("expected rejection of invalid preSharedKey, got ob: %v, reason: %s", obInvPsk, reasonInvPsk)
 	}
 }
 
@@ -233,20 +274,24 @@ func TestParseWireguard_Clash(t *testing.T) {
 }
 
 func TestParseWireguard_SingBox(t *testing.T) {
-	singBoxJSON := `[
+	keyA := "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+	keyB := "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI="
+	keyC := "Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M="
+
+	singBoxJSON := fmt.Sprintf(`[
   {
     "type": "wireguard",
     "tag": "wg-singbox",
     "server": "singbox.example.com",
     "server_port": 51820,
     "local_address": ["10.0.0.5/32"],
-    "private_key": "sb-priv",
-    "peer_public_key": "sb-pub",
-    "pre_shared_key": "sb-psk",
+    "private_key": "%s",
+    "peer_public_key": "%s",
+    "pre_shared_key": "%s",
     "mtu": 1280,
     "reserved": [0, 0, 0]
   }
-]`
+]`, keyA, keyB, keyC)
 	outbounds, err := parseSingBoxJSON([]byte(singBoxJSON))
 	if err != nil {
 		t.Fatalf("parseSingBoxJSON failed: %v", err)
@@ -258,19 +303,23 @@ func TestParseWireguard_SingBox(t *testing.T) {
 	if ob.Protocol != "wireguard" || ob.Tag != "wg-singbox" {
 		t.Errorf("unexpected protocol/tag: %s / %s", ob.Protocol, ob.Tag)
 	}
-	if ob.Settings["secretKey"] != "sb-priv" {
-		t.Errorf("expected secretKey sb-priv, got %v", ob.Settings["secretKey"])
+	if ob.Settings["secretKey"] != keyA {
+		t.Errorf("expected secretKey %s, got %v", keyA, ob.Settings["secretKey"])
 	}
 	peers := ob.Settings["peers"].([]interface{})
 	peer := peers[0].(map[string]interface{})
-	if peer["endpoint"] != "singbox.example.com:51820" || peer["publicKey"] != "sb-pub" || peer["preSharedKey"] != "sb-psk" {
+	if peer["endpoint"] != "singbox.example.com:51820" || peer["publicKey"] != keyB || peer["preSharedKey"] != keyC {
 		t.Errorf("peer mismatch: %+v", peer)
 	}
 }
 
 func TestWireguardShareLink(t *testing.T) {
+	keyA := "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+	keyB := "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI="
+	keyC := "Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M="
+
 	// 1. Valid link
-	validLink := "wireguard://privKey123@1.2.3.4:51820?publickey=pubKey456&presharedkey=psk789&ip=10.0.0.2&reserved=1,2,3&mtu=1420#MyWireGuard"
+	validLink := fmt.Sprintf("wireguard://%s@1.2.3.4:51820?publickey=%s&presharedkey=%s&ip=10.0.0.2&reserved=1,2,3&mtu=1420#MyWireGuard", keyA, keyB, keyC)
 	ob := parseShareLink(validLink)
 	if ob == nil {
 		t.Fatalf("expected parseShareLink to succeed for valid link")
@@ -278,16 +327,19 @@ func TestWireguardShareLink(t *testing.T) {
 	if ob.Protocol != "wireguard" || ob.Tag != "MyWireGuard" {
 		t.Errorf("unexpected outbound: %+v", ob)
 	}
-	if ob.Settings["secretKey"] != "privKey123" {
-		t.Errorf("expected secretKey privKey123, got %v", ob.Settings["secretKey"])
+	if ob.Settings["secretKey"] != keyA {
+		t.Errorf("expected secretKey %s, got %v", keyA, ob.Settings["secretKey"])
 	}
 
 	// 2. Broken links -> returns nil, skip reason non-empty
 	brokenLinks := []string{
-		"wireguard://privKey@1.2.3.4:51820?ip=10.0.0.2",               // missing public key
-		"wireguard://privKey@1.2.3.4?publickey=pub",                   // missing port
-		"wireguard://privKey@1.2.3.4:99999?publickey=pub",             // port out of range
-		"wireguard://:::invalid-url-here",                             // malformed URL
+		fmt.Sprintf("wireguard://%s@1.2.3.4:51820?ip=10.0.0.2", keyA),                          // missing public key
+		fmt.Sprintf("wireguard://%s@1.2.3.4?publickey=%s", keyA, keyB),                          // missing port
+		fmt.Sprintf("wireguard://%s@1.2.3.4:99999?publickey=%s", keyA, keyB),                    // port out of range
+		"wireguard://:::invalid-url-here",                                                        // malformed URL
+		fmt.Sprintf("wireguard://not-valid-base64@1.2.3.4:51820?publickey=%s", keyB),            // invalid secret key base64
+		fmt.Sprintf("wireguard://%s@1.2.3.4:51820?publickey=short", keyA),                       // truncated public key
+		fmt.Sprintf("wireguard://%s@1.2.3.4:51820?publickey=%s&presharedkey=short", keyA, keyB), // truncated preshared key
 	}
 
 	for _, bl := range brokenLinks {
@@ -308,11 +360,13 @@ func TestWireguardShareLink(t *testing.T) {
 }
 
 func TestParseWireguard_Mixed(t *testing.T) {
-	mixedContent := `
+	keyA := "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+	keyB := "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI="
+	mixedContent := fmt.Sprintf(`
 vless://uuid-1@server1.com:443?security=none#VLESS-1
-wireguard://privKey@1.2.3.4:99999?publickey=pub#Broken-WG
+wireguard://%s@1.2.3.4:99999?publickey=%s#Broken-WG
 trojan://pass-2@server2.com:443#Trojan-2
-`
+`, keyA, keyB)
 	sub := &Subscription{}
 	outbounds, skipReasons, err := parseSubscriptionBody([]byte(mixedContent), "", sub)
 	if err != nil {
@@ -344,10 +398,15 @@ func TestParseWireguard_Empty(t *testing.T) {
 }
 
 func TestWireguardOrderStable(t *testing.T) {
-	content := `
-wireguard://priv1@1.2.3.4:51820?publickey=pub1#WG-Alpha
-wireguard://priv2@5.6.7.8:51820?publickey=pub2#WG-Beta
-`
+	keyA := "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+	keyB := "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI="
+	keyC := "Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M="
+	keyD := "ZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGQ="
+
+	content := fmt.Sprintf(`
+wireguard://%s@1.2.3.4:51820?publickey=%s#WG-Alpha
+wireguard://%s@5.6.7.8:51820?publickey=%s#WG-Beta
+`, keyA, keyB, keyC, keyD)
 	sub1 := &Subscription{}
 	res1, _, _ := parseSubscriptionBody([]byte(content), "", sub1)
 	sub2 := &Subscription{}

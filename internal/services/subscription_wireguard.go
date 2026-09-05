@@ -88,6 +88,20 @@ func decodeWireguardReserved(raw interface{}) []int {
 	return nil
 }
 
+// isValidWireguardKey validates that a WireGuard key (secretKey, publicKey, preSharedKey)
+// is a valid base64 string decoding to exactly 32 bytes (Curve25519 key size).
+func isValidWireguardKey(key string) bool {
+	clean := strings.TrimSpace(key)
+	if clean == "" {
+		return false
+	}
+	b, err := base64.StdEncoding.DecodeString(clean)
+	if err != nil {
+		b, err = base64.RawStdEncoding.DecodeString(clean)
+	}
+	return err == nil && len(b) == 32
+}
+
 // wireguardNodeToOutbound converts a SubscriptionNode into an Xray WireGuard Outbound.
 // Returns (outbound, "") on success, or (nil, reason) if essential data is missing.
 func wireguardNodeToOutbound(n *SubscriptionNode) (*Outbound, string) {
@@ -98,6 +112,9 @@ func wireguardNodeToOutbound(n *SubscriptionNode) (*Outbound, string) {
 	if secretKey == "" {
 		return nil, "missing secretKey"
 	}
+	if !isValidWireguardKey(secretKey) {
+		return nil, "invalid wireguard secretKey: expected 32-byte base64"
+	}
 	server := strings.TrimSpace(n.Server)
 	if server == "" {
 		return nil, "missing peer endpoint"
@@ -106,12 +123,18 @@ func wireguardNodeToOutbound(n *SubscriptionNode) (*Outbound, string) {
 	if publicKey == "" {
 		return nil, "missing peer publicKey"
 	}
+	if !isValidWireguardKey(publicKey) {
+		return nil, "invalid wireguard peer publicKey: expected 32-byte base64"
+	}
 
 	peer := map[string]interface{}{
 		"endpoint":  server,
 		"publicKey": publicKey,
 	}
 	if psk := strings.TrimSpace(n.PreSharedKey); psk != "" {
+		if !isValidWireguardKey(psk) {
+			return nil, "invalid wireguard preSharedKey: expected 32-byte base64"
+		}
 		peer["preSharedKey"] = psk
 	}
 	if n.KeepAlive > 0 {
@@ -177,6 +200,9 @@ func parseWireGuardLink(link string) (*Outbound, string) {
 	if secretKey == "" {
 		return nil, "missing secret key in userinfo"
 	}
+	if !isValidWireguardKey(secretKey) {
+		return nil, "invalid wireguard secretKey: expected 32-byte base64"
+	}
 
 	host := u.Hostname()
 	portStr := u.Port()
@@ -200,6 +226,9 @@ func parseWireGuardLink(link string) (*Outbound, string) {
 	if publicKey == "" {
 		return nil, "missing public key in query parameters"
 	}
+	if !isValidWireguardKey(publicKey) {
+		return nil, "invalid wireguard peer publicKey: expected 32-byte base64"
+	}
 
 	psk := q.Get("presharedkey")
 	if psk == "" {
@@ -217,6 +246,9 @@ func parseWireGuardLink(link string) (*Outbound, string) {
 		"publicKey": publicKey,
 	}
 	if psk != "" {
+		if !isValidWireguardKey(psk) {
+			return nil, "invalid wireguard preSharedKey: expected 32-byte base64"
+		}
 		peer["preSharedKey"] = psk
 	}
 
