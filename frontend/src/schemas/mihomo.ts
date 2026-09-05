@@ -321,6 +321,52 @@ export const mihomoSchema = {
         required: ['name', 'type']
       }
     },
+    listeners: {
+      type: 'array',
+      description: 'Inbound listener definitions',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Listener name (matchable with IN-NAME)' },
+          type: {
+            type: 'string',
+            description: 'Inbound listener protocol type'
+          },
+          listen: { type: 'string', description: 'Binding IP address (defaults to 0.0.0.0)' },
+          port: {
+            oneOf: [{ type: 'integer' }, { type: 'string' }],
+            description: 'Listening port or port range'
+          },
+          proxy: {
+            type: 'string',
+            description: 'Forward traffic directly to proxy/group bypassing rules'
+          },
+          rule: {
+            type: 'string',
+            description: 'Name of sub-rules section to match traffic against'
+          },
+          'routing-mark': {
+            type: 'integer',
+            description: 'Linux socket SO_MARK value'
+          },
+          udp: { type: 'boolean', description: 'Enable UDP support' },
+          users: {
+            type: 'array',
+            description: 'Inbound authentication credentials',
+            items: {
+              type: 'object',
+              properties: {
+                username: { type: 'string', description: 'Username' },
+                password: { type: 'string', description: 'Password' }
+              }
+            }
+          },
+          cipher: { type: 'string', description: 'Shadowsocks cipher' },
+          password: { type: 'string', description: 'Shadowsocks password' }
+        },
+        required: ['name', 'type']
+      }
+    },
     rules: {
       type: 'array',
       description: 'Traffic routing rules',
