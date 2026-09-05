@@ -64,6 +64,7 @@ export function parseMihomoListenerPorts(yamlText: string): PortAllocation[] {
   const ports: PortAllocation[] = [];
   const lines = yamlText.split('\n');
   let inListeners = false;
+  let listenerIndent: number | null = null;
   let currentName = '';
   let currentPort: number | null = null;
 
@@ -87,31 +88,44 @@ export function parseMihomoListenerPorts(yamlText: string): PortAllocation[] {
     if (isTopLevel) {
       if (trimmed.startsWith('listeners:')) {
         inListeners = true;
+        listenerIndent = null;
         flush();
         continue;
       } else if (inListeners) {
         flush();
         inListeners = false;
+        listenerIndent = null;
         continue;
       }
     }
 
     if (!inListeners) continue;
 
+    const indent = line.search(/\S/);
+
     if (trimmed.startsWith('-')) {
-      flush();
-      const afterDash = trimmed.replace(/^-\s*/, '');
-      if (afterDash.includes(':')) {
-        const idx = afterDash.indexOf(':');
-        const k = afterDash.slice(0, idx).trim();
-        const v = afterDash.slice(idx + 1).trim();
-        if (k === 'name') {
-          currentName = v.replace(/^["']|["']$/g, '');
-        } else if (k === 'port') {
-          const p = parseInt(v, 10);
-          if (!isNaN(p)) currentPort = p;
+      if (listenerIndent === null || indent <= listenerIndent) {
+        listenerIndent = indent;
+        flush();
+        const afterDash = trimmed.replace(/^-\s*/, '');
+        if (afterDash.includes(':')) {
+          const idx = afterDash.indexOf(':');
+          const k = afterDash.slice(0, idx).trim();
+          const v = afterDash.slice(idx + 1).trim();
+          if (k === 'name') {
+            currentName = v.replace(/^["']|["']$/g, '');
+          } else if (k === 'port') {
+            const unquoted = v.replace(/^["']|["']$/g, '').trim();
+            const p = parseInt(unquoted, 10);
+            if (!isNaN(p)) currentPort = p;
+          }
         }
+        continue;
       }
+      continue;
+    }
+
+    if (listenerIndent !== null && indent > listenerIndent + 2) {
       continue;
     }
 
@@ -122,7 +136,8 @@ export function parseMihomoListenerPorts(yamlText: string): PortAllocation[] {
       if (k === 'name') {
         currentName = v.replace(/^["']|["']$/g, '');
       } else if (k === 'port') {
-        const p = parseInt(v, 10);
+        const unquoted = v.replace(/^["']|["']$/g, '').trim();
+        const p = parseInt(unquoted, 10);
         if (!isNaN(p)) currentPort = p;
       }
     }

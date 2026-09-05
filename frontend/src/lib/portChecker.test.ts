@@ -105,6 +105,45 @@ listeners:
     });
   });
 
+  it('parseMihomoListenerPorts extracts ports specified with single and double quotes (WR-01)', () => {
+    const yaml = `
+listeners:
+  - name: double-quote
+    type: mixed
+    port: "7890"
+  - name: 'single-quote'
+    type: socks
+    port: '1080'
+`;
+    const allocations = parseMihomoListenerPorts(yaml);
+    expect(allocations).toHaveLength(2);
+    expect(allocations).toEqual([
+      { port: 7890, engine: 'mihomo', purpose: 'listener:double-quote' },
+      { port: 1080, engine: 'mihomo', purpose: 'listener:single-quote' }
+    ]);
+  });
+
+  it('parseMihomoListenerPorts handles users block before port without false flush (WR-02)', () => {
+    const yaml = `
+listeners:
+  - name: listener-with-users
+    type: mixed
+    users:
+      - username: alice
+        password: 123
+      - username: bob
+        password: 456
+    port: 7892
+`;
+    const allocations = parseMihomoListenerPorts(yaml);
+    expect(allocations).toHaveLength(1);
+    expect(allocations[0]).toEqual({
+      port: 7892,
+      engine: 'mihomo',
+      purpose: 'listener:listener-with-users'
+    });
+  });
+
   it('detects collision between listener and top-level port or another listener', () => {
     const yaml = `
 mixed-port: 7890
