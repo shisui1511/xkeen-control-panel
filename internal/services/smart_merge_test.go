@@ -57,7 +57,7 @@ dns:
 		},
 	}
 
-	merged, err := SmartMergeMihomo(existingYAML, templateYAML, userRules)
+	merged, _, err := SmartMergeMihomo(existingYAML, templateYAML, userRules, false)
 	if err != nil {
 		t.Fatalf("SmartMergeMihomo failed: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestSmartMergeXray(t *testing.T) {
 		},
 	}
 
-	merged, err := SmartMergeXray(existingConfig, templateContent, "05_routing.json", "vless-reality-node", userRules)
+	merged, _, err := SmartMergeXray(existingConfig, templateContent, "05_routing.json", "vless-reality-node", userRules)
 	if err != nil {
 		t.Fatalf("SmartMergeXray failed: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestSmartMergeXray_PreservesAPIRule(t *testing.T) {
   }
 }`
 
-	merged, err := SmartMergeXray(existingWithAPI, template, "05_routing.json", "my-proxy", nil)
+	merged, _, err := SmartMergeXray(existingWithAPI, template, "05_routing.json", "my-proxy", nil)
 	if err != nil {
 		t.Fatalf("SmartMergeXray failed: %v", err)
 	}
@@ -457,6 +457,219 @@ func TestSmartMergeXray_PreservesAPIRule(t *testing.T) {
 	inbTags, ok := rule0["inboundTag"].([]interface{})
 	if !ok || len(inbTags) == 0 || inbTags[0] != "api" {
 		t.Errorf("expected rule 0 inboundTag to be ['api'], got %v", rule0["inboundTag"])
+	}
+}
+
+func TestSmartMergeMihomo_ConstructorOwnsNodes(t *testing.T) {
+	existingYAML := `
+proxies:
+  - name: "Old-Node"
+    type: ss
+    server: old.com
+    port: 8388
+proxy-providers:
+  old-provider:
+    type: http
+    url: "https://old.com/sub"
+`
+	templateYAML := `
+proxies:
+  - name: "New-Node"
+    type: vless
+    server: new.com
+    port: 443
+proxy-providers:
+  new-provider:
+    type: http
+    url: "https://new.com/sub"
+rules:
+  - MATCH,DIRECT
+`
+	// 1. When templateOwnsNodes = true (constructor mode), template proxies & providers win
+	mergedConstructor, stats, err := SmartMergeMihomo(existingYAML, templateYAML, nil, true)
+	if err != nil {
+		t.Fatalf("SmartMergeMihomo failed: %v", err)
+	}
+	if !strings.Contains(mergedConstructor, "New-Node") {
+		t.Errorf("expected New-Node to be present when templateOwnsNodes=true, got:\n%s", mergedConstructor)
+	}
+	if strings.Contains(mergedConstructor, "Old-Node") {
+		t.Errorf("expected Old-Node to be replaced when templateOwnsNodes=true, got:\n%s", mergedConstructor)
+	}
+	if !strings.Contains(mergedConstructor, "new-provider") {
+		t.Errorf("expected new-provider to be present when templateOwnsNodes=true, got:\n%s", mergedConstructor)
+	}
+	if strings.Contains(mergedConstructor, "old-provider") {
+		t.Errorf("expected old-provider to be replaced when templateOwnsNodes=true, got:\n%s", mergedConstructor)
+	}
+	if stats.Proxies != 1 || stats.ProxyProviders != 1 {
+		t.Errorf("expected 1 proxy and 1 provider in stats, got %+v", stats)
+	}
+
+	// 2. When templateOwnsNodes = false (editor mode), existing proxies & providers win
+	mergedEditor, _, err := SmartMergeMihomo(existingYAML, templateYAML, nil, false)
+	if err != nil {
+		t.Fatalf("SmartMergeMihomo failed: %v", err)
+	}
+	if !strings.Contains(mergedEditor, "Old-Node") {
+		t.Errorf("expected Old-Node to be preserved when templateOwnsNodes=false, got:\n%s", mergedEditor)
+	}
+	if strings.Contains(mergedEditor, "New-Node") {
+		t.Errorf("expected New-Node to be overwritten when templateOwnsNodes=false, got:\n%s", mergedEditor)
+	}
+	if !strings.Contains(mergedEditor, "old-provider") {
+		t.Errorf("expected old-provider to be preserved when templateOwnsNodes=false, got:\n%s", mergedEditor)
+	}
+}
+
+func TestSmartMergeMihomo_EmptyAndCorruptExisting(t *testing.T) {
+	templateYAML := `
+mode: rule
+proxies:
+  - name: "Node-1"
+    type: vless
+    server: ex.com
+    port: 443
+rules:
+  - MATCH,DIRECT
+`
+	userRules := []UserRule{
+		{ID: "r1", Type: "domain", Value: "custom.org", Target: "proxy", Enabled: true},
+	}
+
+	// Test empty existing
+	mergedEmpty, stats, err := SmartMergeMihomo("", templateYAML, userRules, true)
+	if err != nil {
+		t.Fatalf("failed with empty existing: %v", err)
+	}
+	if !strings.Contains(mergedEmpty, "Node-1") || !strings.Contains(mergedEmpty, "DOMAIN,custom.org") {
+		t.Errorf("empty existing output missing expected rules/proxies:\n%s", mergedEmpty)
+	}
+	if stats.UserRules != 1 || stats.Proxies != 1 {
+		t.Errorf("unexpected stats on empty existing: %+v", stats)
+	}
+
+	// Test corrupted existing
+	corruptExisting := ":::corrupted YAML content [not valid]:::"
+	mergedCorrupt, _, err := SmartMergeMihomo(corruptExisting, templateYAML, userRules, true)
+	if err != nil {
+		t.Fatalf("failed with corrupt existing: %v", err)
+	}
+	if !strings.Contains(mergedCorrupt, "Node-1") || !strings.Contains(mergedCorrupt, "DOMAIN,custom.org") {
+		t.Errorf("corrupt existing output missing expected rules/proxies:\n%s", mergedCorrupt)
+	}
+}
+
+func TestSmartMergeMihomo_RuleOrderStable(t *testing.T) {
+	templateYAML := `
+rules:
+  - GEOSITE,category-ru,DIRECT
+  - MATCH,PROXY
+`
+	userRules := []UserRule{
+		{ID: "r1", Type: "domain", Value: "first.com", Target: "proxy", Enabled: true},
+		{ID: "r2", Type: "domain_suffix", Value: "second.com", Target: "direct", Enabled: true},
+	}
+
+	merged1, _, err := SmartMergeMihomo("", templateYAML, userRules, true)
+	if err != nil {
+		t.Fatalf("merge 1 failed: %v", err)
+	}
+	merged2, _, err := SmartMergeMihomo("", templateYAML, userRules, true)
+	if err != nil {
+		t.Fatalf("merge 2 failed: %v", err)
+	}
+
+	// Order must be completely stable across multiple merges
+	if merged1 != merged2 {
+		t.Errorf("repeated merge gave different outputs:\n--- 1 ---\n%s\n--- 2 ---\n%s", merged1, merged2)
+	}
+
+	// Check ordering: Safety direct ports -> User rules -> Template rules
+	idxSafety := strings.Index(merged1, "DST-PORT,3389,DIRECT")
+	idxUser1 := strings.Index(merged1, "DOMAIN,first.com,PROXY")
+	idxUser2 := strings.Index(merged1, "DOMAIN-SUFFIX,second.com,DIRECT")
+	idxTmpl := strings.Index(merged1, "GEOSITE,category-ru,DIRECT")
+
+	if idxSafety == -1 || idxUser1 == -1 || idxUser2 == -1 || idxTmpl == -1 {
+		t.Fatalf("missing one of the expected rules in:\n%s", merged1)
+	}
+
+	if !(idxSafety < idxUser1 && idxUser1 < idxUser2 && idxUser2 < idxTmpl) {
+		t.Errorf("incorrect rule ordering: safety=%d, user1=%d, user2=%d, tmpl=%d", idxSafety, idxUser1, idxUser2, idxTmpl)
+	}
+}
+
+func TestSmartMergeMihomo_DuplicateUserRuleKept(t *testing.T) {
+	templateYAML := `
+rules:
+  - DOMAIN,duplicate.com,DIRECT
+  - MATCH,PROXY
+`
+	userRules := []UserRule{
+		{ID: "r1", Type: "domain", Value: "duplicate.com", Target: "proxy", Enabled: true},
+	}
+
+	merged, _, err := SmartMergeMihomo("", templateYAML, userRules, true)
+	if err != nil {
+		t.Fatalf("merge failed: %v", err)
+	}
+
+	// Both should be present
+	idxUser := strings.Index(merged, "DOMAIN,duplicate.com,PROXY")
+	idxTmpl := strings.Index(merged, "DOMAIN,duplicate.com,DIRECT")
+
+	if idxUser == -1 {
+		t.Errorf("expected user duplicate rule to be present, got:\n%s", merged)
+	}
+	if idxTmpl == -1 {
+		t.Errorf("expected template duplicate rule to be present, got:\n%s", merged)
+	}
+	if idxUser >= idxTmpl {
+		t.Errorf("expected user rule (%d) to appear BEFORE template rule (%d)", idxUser, idxTmpl)
+	}
+}
+
+func TestSmartMergeMihomo_Stats(t *testing.T) {
+	templateYAML := `
+proxies:
+  - name: "P1"
+    type: direct
+  - name: "P2"
+    type: direct
+proxy-providers:
+  sub1:
+    type: http
+    url: "https://sub1.com"
+rules:
+  - GEOSITE,google,PROXY
+  - MATCH,DIRECT
+`
+	userRules := []UserRule{
+		{ID: "r1", Type: "domain", Value: "u1.com", Target: "proxy", Enabled: true},
+		{ID: "r2", Type: "domain", Value: "u2.com", Target: "direct", Enabled: true},
+		{ID: "r3", Type: "domain", Value: "", Target: "direct", Enabled: true},       // empty value, should be skipped
+		{ID: "r4", Type: "domain", Value: "u4.com", Target: "direct", Enabled: false}, // disabled, should be skipped
+	}
+
+	_, stats, err := SmartMergeMihomo("", templateYAML, userRules, true)
+	if err != nil {
+		t.Fatalf("merge failed: %v", err)
+	}
+
+	if stats.Proxies != 2 {
+		t.Errorf("expected 2 proxies, got %d", stats.Proxies)
+	}
+	if stats.ProxyProviders != 1 {
+		t.Errorf("expected 1 proxy provider, got %d", stats.ProxyProviders)
+	}
+	if stats.UserRules != 2 {
+		t.Errorf("expected 2 active user rules, got %d", stats.UserRules)
+	}
+	// Rules: 5 safety ports + 2 user rules + 2 template rules = 9
+	expectedRules := len(SafetyDirectPorts) + 2 + 2
+	if stats.Rules != expectedRules {
+		t.Errorf("expected %d total rules, got %d", expectedRules, stats.Rules)
 	}
 }
 

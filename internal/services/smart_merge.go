@@ -27,12 +27,23 @@ var KeeneticFakeIPExclusions = []string{
 // SafetyDirectPorts defines ports that must default to DIRECT bypass to avoid breaking LAN & remote work.
 var SafetyDirectPorts = []string{"3389", "22", "445", "1194", "51820"}
 
+// MergeStats contains counters calculated from the actual smart merge result.
+type MergeStats struct {
+	Proxies        int `json:"proxies"`
+	ProxyProviders int `json:"proxy_providers"`
+	UserRules      int `json:"user_rules"`
+	Rules          int `json:"rules"`
+}
+
 // SmartMergeMihomo merges a configuration template into an existing Mihomo YAML config.
 // It strictly preserves user proxies, proxy-providers, ports and secrets, while applying
 // template rules, rule-providers, proxy-groups, and injecting safety bypasses & user rules.
-func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []UserRule) (string, error) {
+// When templateOwnsNodes is true and templateYAML contains non-empty proxies or proxy-providers,
+// those template nodes are preserved in the result instead of being overwritten by existing nodes.
+func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []UserRule, templateOwnsNodes bool) (string, MergeStats, error) {
 	var existing map[string]interface{}
 	var tmpl map[string]interface{}
+	var stats MergeStats
 
 	if strings.TrimSpace(existingYAML) != "" {
 		if err := yaml.Unmarshal([]byte(existingYAML), &existing); err != nil {
@@ -42,9 +53,12 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 	} else {
 		existing = make(map[string]interface{})
 	}
+	if existing == nil {
+		existing = make(map[string]interface{})
+	}
 
 	if err := yaml.Unmarshal([]byte(templateYAML), &tmpl); err != nil {
-		return "", fmt.Errorf("failed to parse template YAML: %w", err)
+		return "", stats, fmt.Errorf("failed to parse template YAML: %w", err)
 	}
 
 	result := make(map[string]interface{})
@@ -77,15 +91,27 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 	}
 
 	// 3. Preserve User Proxies and Proxy Providers
-	if existingProxies, ok := existing["proxies"]; ok && existingProxies != nil {
-		if exSlice, isSlice := existingProxies.([]interface{}); isSlice && len(exSlice) > 0 {
-			result["proxies"] = existingProxies
+	tmplHasProxies := false
+	if tp, ok := tmpl["proxies"].([]interface{}); ok && len(tp) > 0 {
+		tmplHasProxies = true
+	}
+	if !templateOwnsNodes || !tmplHasProxies {
+		if existingProxies, ok := existing["proxies"]; ok && existingProxies != nil {
+			if exSlice, isSlice := existingProxies.([]interface{}); isSlice && len(exSlice) > 0 {
+				result["proxies"] = existingProxies
+			}
 		}
 	}
 
-	if existingProviders, ok := existing["proxy-providers"]; ok && existingProviders != nil {
-		if exMap, isMap := existingProviders.(map[string]interface{}); isMap && len(exMap) > 0 {
-			result["proxy-providers"] = existingProviders
+	tmplHasProviders := false
+	if tprov, ok := tmpl["proxy-providers"].(map[string]interface{}); ok && len(tprov) > 0 {
+		tmplHasProviders = true
+	}
+	if !templateOwnsNodes || !tmplHasProviders {
+		if existingProviders, ok := existing["proxy-providers"]; ok && existingProviders != nil {
+			if exMap, isMap := existingProviders.(map[string]interface{}); isMap && len(exMap) > 0 {
+				result["proxy-providers"] = existingProviders
+			}
 		}
 	}
 
@@ -178,10 +204,12 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 		}
 	}
 
+	userRulesCount := 0
 	for _, ur := range userRules {
 		if !ur.Enabled || strings.TrimSpace(ur.Value) == "" {
 			continue
 		}
+		userRulesCount++
 		target := strings.ToUpper(ur.Target)
 		if target == "PROXY" {
 			target = proxyGroupName
@@ -228,18 +256,28 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 
 	result["rules"] = finalRules
 
+	if pSlice, ok := result["proxies"].([]interface{}); ok {
+		stats.Proxies = len(pSlice)
+	}
+	if pMap, ok := result["proxy-providers"].(map[string]interface{}); ok {
+		stats.ProxyProviders = len(pMap)
+	}
+	stats.UserRules = userRulesCount
+	stats.Rules = len(finalRules)
+
 	out, err := yaml.Marshal(result)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal merged YAML: %w", err)
+		return "", stats, fmt.Errorf("failed to marshal merged YAML: %w", err)
 	}
 
-	return string(out), nil
+	return string(out), stats, nil
 }
 
 // SmartMergeXray merges an Xray routing template into an existing Xray configuration.
 // It auto-detects modular routing vs monolithic files, auto-replaces "PROXY_TAG" with active outbound tag,
 // and injects Keenetic DNS-over-VLESS protection (127.0.0.53 DIRECT) and user rules.
-func SmartMergeXray(existingContent string, templateContent string, targetFilename string, activeOutboundTag string, userRules []UserRule) (string, error) {
+func SmartMergeXray(existingContent string, templateContent string, targetFilename string, activeOutboundTag string, userRules []UserRule) (string, MergeStats, error) {
+	var stats MergeStats
 	if activeOutboundTag == "" {
 		activeOutboundTag = "proxy"
 	}
@@ -249,7 +287,7 @@ func SmartMergeXray(existingContent string, templateContent string, targetFilena
 
 	var tmplObj map[string]interface{}
 	if err := json.Unmarshal([]byte(templateContent), &tmplObj); err != nil {
-		return "", fmt.Errorf("invalid template JSON: %w", err)
+		return "", stats, fmt.Errorf("invalid template JSON: %w", err)
 	}
 
 	// Extract routing object from template
@@ -347,10 +385,12 @@ func SmartMergeXray(existingContent string, templateContent string, targetFilena
 	})
 
 	// 3. User Custom Rules
+	userRulesCount := 0
 	for _, ur := range userRules {
 		if !ur.Enabled || strings.TrimSpace(ur.Value) == "" {
 			continue
 		}
+		userRulesCount++
 		target := strings.ToLower(ur.Target)
 		if target == "proxy" {
 			target = activeOutboundTag
@@ -438,12 +478,15 @@ func SmartMergeXray(existingContent string, templateContent string, targetFilena
 		outputObj = existingObj
 	}
 
+	stats.UserRules = userRulesCount
+	stats.Rules = len(finalRules)
+
 	out, err := json.MarshalIndent(outputObj, "", "  ")
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal merged Xray JSON: %w", err)
+		return "", stats, fmt.Errorf("failed to marshal merged Xray JSON: %w", err)
 	}
 
-	return string(out), nil
+	return string(out), stats, nil
 }
 
 // CheckPortAvailable tests whether the given TCP port can be bound on loopback.

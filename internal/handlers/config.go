@@ -816,6 +816,7 @@ type ConfigSmartMergeRequest struct {
 	TemplateContent   string `json:"template_content"`
 	TargetFile        string `json:"target_file,omitempty"`
 	ActiveOutboundTag string `json:"active_outbound_tag,omitempty"`
+	TemplateOwnsNodes bool   `json:"template_owns_nodes,omitempty"`
 }
 
 // ConfigSmartMerge handles smart merging of configuration templates without destroying user proxies or settings.
@@ -837,12 +838,13 @@ func (a *API) ConfigSmartMerge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var merged string
+	var stats services.MergeStats
 	var err error
 
 	if strings.EqualFold(req.Type, "xray") {
-		merged, err = services.SmartMergeXray(req.ExistingContent, req.TemplateContent, req.TargetFile, req.ActiveOutboundTag, userRules)
+		merged, stats, err = services.SmartMergeXray(req.ExistingContent, req.TemplateContent, req.TargetFile, req.ActiveOutboundTag, userRules)
 	} else {
-		merged, err = services.SmartMergeMihomo(req.ExistingContent, req.TemplateContent, userRules)
+		merged, stats, err = services.SmartMergeMihomo(req.ExistingContent, req.TemplateContent, userRules, req.TemplateOwnsNodes)
 	}
 
 	if err != nil {
@@ -850,5 +852,5 @@ func (a *API) ConfigSmartMerge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	JSONSuccess(w, map[string]string{"content": merged})
+	JSONSuccess(w, map[string]interface{}{"content": merged, "stats": stats})
 }

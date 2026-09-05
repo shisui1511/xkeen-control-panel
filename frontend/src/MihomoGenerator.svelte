@@ -19,8 +19,6 @@
     yamlSafeString,
     sanitizeUrl,
     unquote,
-    extractSection,
-    replaceMihomoTopLevelSection,
     generateYAML as generateMihomoYAML,
     populateMihomoFromYAML as populateMihomoFromYAML_raw,
     ZKEEN_RULE_PROVIDERS,
@@ -1693,44 +1691,64 @@
       const path = selectedFile || '/opt/etc/mihomo/config.yaml';
 
       // Save previous state to localStorage for Undo
+      let currentYAML = '';
       const readRes = await apiFetch(`/api/config/read?path=${encodeURIComponent(path)}`);
       if (readRes.ok) {
-        const currentYAML = await readRes.text();
+        currentYAML = await readRes.text();
         localStorage.setItem('xcp_prev_mihomo_yaml', currentYAML);
         checkUndo();
       }
 
       const yamlContent = generateYAML();
-      const sections: Record<string, string> = {
-        'rule-providers': extractSection(yamlContent, 'rule-providers'),
-        'proxy-groups': extractSection(yamlContent, 'proxy-groups'),
-        rules: extractSection(yamlContent, 'rules'),
-        proxies: extractSection(yamlContent, 'proxies'),
-        dns: extractSection(yamlContent, 'dns'),
-        tun: extractSection(yamlContent, 'tun'),
-        'proxy-providers': extractSection(yamlContent, 'proxy-providers')
-      };
-
       validationError = '';
 
-      const mergeRes = await apiFetch('/api/config/mihomo-merge', {
+      let mergeRes: { content: string; stats?: any };
+      try {
+        mergeRes = await apiFetchJSON<{ content: string; stats?: any }>('/api/config/smart-merge', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            type: 'mihomo',
+            existing_content: currentYAML,
+            template_content: yamlContent,
+            target_file: path,
+            template_owns_nodes: true
+          })
+        });
+      } catch (mergeErr: any) {
+        if (mergeErr?.status === 401) return;
+        console.error('Smart merge failed:', mergeErr);
+        showToast('error', $t('editor.smart_merge_failed'));
+        applyLoading = false;
+        return;
+      }
+
+      if (!mergeRes || !mergeRes.content) {
+        showToast('error', $t('editor.smart_merge_failed'));
+        applyLoading = false;
+        return;
+      }
+
+      const saveRes = await apiFetch(`/api/config/save?path=${encodeURIComponent(path)}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ path, sections })
+        body: mergeRes.content
       });
 
-      if (!mergeRes.ok) {
-        if (mergeRes.status === 422) {
-          const resData = await mergeRes.json();
+      if (!saveRes.ok) {
+        if (saveRes.status === 422) {
+          const resData = await saveRes.json();
           validationError = resData.error || 'Unknown validation error';
           showToast('error', $t('editor.validation_failed'));
           applyLoading = false;
           return;
         }
-        const errorText = await mergeRes.text();
-        throw new Error(errorText || 'Failed to merge config');
+        const errorText = await saveRes.text();
+        throw new Error(errorText || 'Failed to save config');
       }
 
       let restartUrl = '/api/service/control?action=restart';
@@ -1760,7 +1778,16 @@
       await fetchCapabilities();
 
       isDirty = false;
-      showToast('success', $t('mihomo.config_applied'));
+      const stats = mergeRes.stats || {};
+      showToast(
+        'success',
+        $t('editor.smart_merge_applied', {
+          nodes: stats.proxies ?? 0,
+          providers: stats.proxy_providers ?? 0,
+          rules: stats.rules ?? 0,
+          userRules: stats.user_rules ?? 0
+        })
+      );
     } catch (err: any) {
       if (err?.status === 401) return;
       console.error(err);
