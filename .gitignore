@@ -79,3 +79,5 @@ coverage/
 .cache/
 tmp/
 scratch/
+ideas/
+ideas-audit/

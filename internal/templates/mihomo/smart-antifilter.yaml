@@ -1,0 +1,190 @@
+# ==============================================================================
+# smart-antifilter.yaml — Умный Антифильтр
+# Сценарий: Все российские сайты напрямую, заблокированные через прокси.
+# Пользователь добавляет proxy-providers через страницу Subscriptions.
+# Требует Mihomo Meta >= 1.15 (поддержка include-all: true, format: mrs).
+# ==============================================================================
+mixed-port: 7890
+redir-port: 5000
+tproxy-port: 5001
+routing-mark: 255
+allow-lan: true
+mode: rule
+log-level: warning
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+
+find-process-mode: off
+global-client-fingerprint: chrome
+
+# --- Подсистема DNS с защитой от DNS Loop и Fake-IP ---
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "*.keenetic.pro"
+    - "*.keenetic.link"
+    - "*.keenetic.name"
+    - "*.my.keenetic.net"
+    - "router.local"
+    - "time.*.com"
+    - "ntp.*"
+    - "*.ntp.org"
+    - "+.stun.*"
+    - "+.pool.ntp.org"
+  default-nameserver:
+    - 77.88.8.8
+    - 1.1.1.1
+  nameserver:
+    - 77.88.8.8
+    - https://common.dot.dns.yandex.net/dns-query
+  fallback:
+    - https://cloudflare-dns.com/dns-query
+    - https://dns.google/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: RU
+    ipcidr:
+      - 240.0.0.0/4
+
+# --- Снайфер SNI для точной идентификации доменов ---
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  skip-domain:
+    - "Mijia Cloud"
+    - "dlg.io.mi.com"
+    - "+.apple.com"
+
+# --- Провайдеры подписок (с поддержкой Remnawave HWID) ---
+proxy-providers:
+  default-subscription:
+    type: http
+    url: "https://example.com/subscription-token"
+    interval: 86400
+    path: ./providers/default-subscription.yaml
+    header:
+      User-Agent:
+        - "Mihomo"
+      x-hwid:
+        - "keenetic-router-hwid"
+      x-device-os:
+        - "xKeen"
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+    override:
+      udp: true
+      tfo: true
+
+# --- Группы прокси ---
+proxy-groups:
+  - name: "Антифильтр (Прокси)"
+    type: select
+    include-all: true
+    proxies:
+      - "Автовыбор (Fastest)"
+      - "Отказоустойчивый (Fallback)"
+      - DIRECT
+
+  - name: "Автовыбор (Fastest)"
+    type: url-test
+    include-all: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+
+  - name: "Отказоустойчивый (Fallback)"
+    type: fallback
+    include-all: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    max-failed-times: 3
+
+# --- Провайдеры правил (MRS бинарный формат) ---
+rule-providers:
+  re-filter:
+    type: http
+    format: mrs
+    behavior: domain
+    url: "https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs"
+    path: ./rules/re-filter.mrs
+    interval: 86400
+
+  antifilter-ip:
+    type: http
+    format: mrs
+    behavior: ipcidr
+    url: "https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/antifilter@ipcidr.mrs"
+    path: ./rules/antifilter-ip.mrs
+    interval: 86400
+
+  russia-domains:
+    type: http
+    format: mrs
+    behavior: domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.mrs"
+    path: ./rules/category-ru.mrs
+    interval: 86400
+
+  ads:
+    type: http
+    format: mrs
+    behavior: domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ads-all.mrs"
+    path: ./rules/category-ads-all.mrs
+    interval: 86400
+
+  private-ip:
+    type: http
+    format: mrs
+    behavior: ipcidr
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/private.mrs"
+    path: ./rules/private-ip.mrs
+    interval: 86400
+
+# --- Правила маршрутизации (Сверху вниз) ---
+rules:
+  # 1. Блокировка рекламы
+  - RULE-SET,ads,REJECT
+
+  # 2. Блокировка QUIC (UDP 443) для стабильности HTTPS
+  - AND,((DST-PORT,443),(NETWORK,udp)),REJECT
+
+  # 3. Защита RDP, SSH, SMB, локальных VPN — строго DIRECT
+  - DST-PORT,3389,DIRECT
+  - DST-PORT,22,DIRECT
+  - DST-PORT,445,DIRECT
+  - DST-PORT,1194,DIRECT
+  - DST-PORT,51820,DIRECT
+
+  # 4. Локальные адреса — строго DIRECT
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - RULE-SET,private-ip,DIRECT
+  - GEOIP,private,DIRECT,no-resolve
+
+  # 5. Российские домены и сервисы — строго DIRECT
+  - RULE-SET,russia-domains,DIRECT
+  - GEOIP,RU,DIRECT
+
+  # 6. Заблокированные ресурсы — через прокси
+  - RULE-SET,re-filter,Антифильтр (Прокси)
+  - RULE-SET,antifilter-ip,Антифильтр (Прокси)
+
+  # 7. Все остальное — DIRECT
+  - MATCH,DIRECT

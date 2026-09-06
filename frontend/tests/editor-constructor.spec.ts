@@ -161,6 +161,37 @@ test.describe('Xray Constructor integration test suite', () => {
     await expect(xrayKernelBtn).toBeVisible({ timeout: 5000 });
     await xrayKernelBtn.click();
 
+    // Добавляем правило с тегом my-proxy
+    const addRuleBtn = page
+      .locator('[data-testid="add-routing-rule"], button:has-text("Добавить правило")')
+      .first();
+    await expect(addRuleBtn).toBeVisible({ timeout: 5000 });
+    await addRuleBtn.click();
+
+    const domainInput = page
+      .locator(
+        '[data-testid="rule-domain-input"], input[placeholder*="домен"], input[placeholder*="domain"]'
+      )
+      .first();
+    await expect(domainInput).toBeVisible({ timeout: 3000 });
+    await domainInput.fill('geosite:youtube');
+
+    const outboundSelect = page
+      .locator(
+        '[data-testid="rule-outbound-select"], select[data-testid="outbound-tag"], .rule-outbound-select'
+      )
+      .first();
+    await expect(outboundSelect).toBeVisible({ timeout: 3000 });
+    await outboundSelect.selectOption('my-proxy');
+
+    const saveRuleBtn = page
+      .locator(
+        '.form-card button.btn-primary:has-text("Создать"), .form-card button:has-text("Create")'
+      )
+      .first();
+    await expect(saveRuleBtn).toBeVisible({ timeout: 3000 });
+    await saveRuleBtn.click();
+
     // Находим JSON preview-панель
     const previewPane = page
       .locator(

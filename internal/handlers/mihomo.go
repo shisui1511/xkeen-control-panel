@@ -197,3 +197,56 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 
 	proxy.ServeHTTP(w, r)
 }
+
+// MihomoDNSQuery handles interactive DNS resolution via /api/mihomo/dns/query.
+func (a *API) MihomoDNSQuery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	name := r.URL.Query().Get("name")
+	if strings.TrimSpace(name) == "" {
+		a.errorResponse(w, "name query parameter is required", http.StatusBadRequest)
+		return
+	}
+	qtype := r.URL.Query().Get("type")
+	if qtype == "" {
+		qtype = "A"
+	}
+
+	if a.mihomoSvc == nil {
+		a.errorResponse(w, "mihomo service not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	res, err := a.mihomoSvc.DNSQuery(r.Context(), name, qtype)
+	if err != nil {
+		a.errorResponse(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(res)
+}
+
+// MihomoFlushFakeIP handles Fake-IP cache flush via /api/mihomo/cache/fakeip/flush.
+func (a *API) MihomoFlushFakeIP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	if a.mihomoSvc == nil {
+		a.errorResponse(w, "mihomo service not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	if err := a.mihomoSvc.FlushFakeIPCache(r.Context()); err != nil {
+		a.errorResponse(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	JSONSuccess(w, nil)
+}

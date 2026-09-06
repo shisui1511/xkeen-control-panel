@@ -28,6 +28,7 @@ export interface CapabilitiesData {
   xray?: {
     conf_dir: string;
     conf_dir_exists: boolean;
+    grpc_ready?: boolean;
   };
   global_hwid?: string;
 }

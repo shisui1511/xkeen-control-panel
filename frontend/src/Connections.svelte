@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { t } from './i18n';
+  import { t, pluralize, currentLang } from './i18n';
   import { capabilities, fetchCapabilities, showToast, showConfirm } from './stores';
   import { apiFetch } from './lib/api';
   import Skeleton from './components/Skeleton.svelte';
@@ -18,7 +18,12 @@
       sourcePort: string;
       destinationPort: string;
       host: string;
-      process?: string; // Mihomo populates when find-process-mode=always
+      process?: string;
+      sniffHost?: string;
+      inboundIP?: string;
+      inboundPort?: string;
+      inboundName?: string;
+      inboundUser?: string;
     };
     upload: number;
     download: number;
@@ -42,6 +47,8 @@
   let connections = $state<Connection[]>([]);
   let clients = $state<Record<string, ClientInfo>>({});
   let clientsRefreshTimer: ReturnType<typeof setInterval> | null = null;
+  let launchTimer1: ReturnType<typeof setTimeout> | null = null;
+  let launchTimer2: ReturnType<typeof setTimeout> | null = null;
 
   interface TrafficHistory {
     upload: number;
@@ -55,6 +62,7 @@
   let error = $state('');
   let wsConnected = $state(false);
   let wsReconnecting = $state(false);
+  let paused = $state(false);
   let destroyed = $state(false);
 
   // WebSocket
@@ -63,15 +71,21 @@
   let reconnectDelay = 2000;
   const MAX_RECONNECT_DELAY = 30000;
 
-  // Filters
-  let filterSource = $state('');
-  let filterDest = $state('');
-  let filterRule = $state('');
-  let filterProxy = $state('');
+  // Search & Filters (CONN-02)
+  let searchQuery = $state('');
+  let quickFilter = $state<'all' | 'proxy' | 'direct' | 'active'>('all');
+  let groupingMode = $state<'none' | 'client' | 'host' | 'route'>('none');
+  let collapsedGroups = $state<Record<string, boolean>>({});
 
-  let uniqueRules = $derived([...new Set(connections.map((c) => c.rule).filter(Boolean))].sort());
-  let uniqueChains = $derived(
-    [...new Set(connections.map((c) => getChainPath(c)).filter(Boolean))].sort()
+  // Sorting (CONN-05)
+  type SortKey = 'start' | 'upload' | 'download' | 'speed';
+  let sortKey = $state<SortKey>('download');
+  let sortAsc = $state(false);
+
+  // Connection Inspector Drawer (CONN-06)
+  let selectedConnectionId = $state<string | null>(null);
+  let selectedConnection = $derived(
+    selectedConnectionId ? connections.find((c) => c.id === selectedConnectionId) : null
   );
 
   async function loadClients() {
@@ -104,13 +118,14 @@
     };
 
     ws.onmessage = (event) => {
+      if (document.hidden || paused) return;
       try {
         const data = JSON.parse(event.data);
         const now = Date.now();
         const nextSpeeds = new Map<string, { uploadSpeed: number; downloadSpeed: number }>();
         const nextHistory = new Map<string, TrafficHistory>();
 
-        const rawConnections = data.connections || [];
+        const rawConnections: Connection[] = data.connections || [];
         for (const conn of rawConnections) {
           const prev = trafficHistory.get(conn.id);
           let uploadSpeed = 0;
@@ -118,7 +133,7 @@
 
           if (prev) {
             const durationSec = (now - prev.timestamp) / 1000;
-            if (durationSec > 0.2) {
+            if (durationSec > 0.2 && durationSec <= 5) {
               uploadSpeed = Math.max(0, (conn.upload - prev.upload) / durationSec);
               downloadSpeed = Math.max(0, (conn.download - prev.download) / durationSec);
               nextHistory.set(conn.id, {
@@ -126,14 +141,18 @@
                 download: conn.download,
                 timestamp: now
               });
+            } else if (durationSec > 5) {
+              nextHistory.set(conn.id, {
+                upload: conn.upload,
+                download: conn.download,
+                timestamp: now
+              });
             } else {
-              // Carry forward the previous speed if interval is too small
               const prevSpeed = connectionSpeeds.get(conn.id);
               if (prevSpeed) {
                 uploadSpeed = prevSpeed.uploadSpeed;
                 downloadSpeed = prevSpeed.downloadSpeed;
               }
-              // Carry forward the previous history entry without updating timestamp to accumulate delta
               nextHistory.set(conn.id, prev);
             }
           } else {
@@ -184,13 +203,16 @@
     wsReconnecting = false;
   }
 
-  async function closeConnection(id: string) {
+  async function closeConnection(id: string, e?: Event) {
+    if (e) e.stopPropagation();
     try {
       const res = await apiFetch(`/api/mihomo/proxy/connections/${encodeURIComponent(id)}`, {
         method: 'DELETE'
       });
 
       if (!res.ok) throw new Error('Failed to close connection');
+      connections = connections.filter((c) => c.id !== id);
+      if (selectedConnectionId === id) selectedConnectionId = null;
       showToast('success', $t('conn.close_success'));
     } catch (e: any) {
       if (e?.status === 401) return;
@@ -201,14 +223,12 @@
 
   async function closeAllConnections() {
     const count = connections.length;
-    const confirmed = await showConfirm({
-      title: $t('conn.close_all_title'),
-      message: $t('conn.close_all_desc', { count }),
-      consequence: $t('conn.close_all_consequence'),
-      variant: 'danger',
-      confirmLabel: $t('conn.close_all_confirm_btn'),
-      cancelLabel: $t('app.cancel')
-    });
+    const confirmed = await showConfirm(
+      $t('conn.close_all_title'),
+      $t('conn.close_all_desc', { count }) + ' ' + $t('conn.close_all_consequence'),
+      $t('conn.close_all_confirm_btn'),
+      $t('app.cancel')
+    );
     if (!confirmed) return;
     try {
       const res = await apiFetch('/api/mihomo/proxy/connections', {
@@ -216,6 +236,8 @@
       });
 
       if (!res.ok) throw new Error('Failed to close all connections');
+      connections = [];
+      selectedConnectionId = null;
       showToast('success', $t('conn.close_all_success'));
     } catch (e: any) {
       if (e?.status === 401) return;
@@ -224,14 +246,13 @@
     }
   }
 
-  function getProxyName(conn: Connection): string {
-    if (!conn.chains || conn.chains.length === 0) return 'DIRECT';
-    return conn.chains[conn.chains.length - 1];
+  function isDirect(conn: Connection): boolean {
+    return !conn.chains || conn.chains.length === 0 || conn.chains[0].toUpperCase() === 'DIRECT';
   }
 
-  function getChainPath(conn: Connection): string {
-    if (!conn.chains || conn.chains.length === 0) return 'DIRECT';
-    return conn.chains.join(' → ');
+  function getChainNodes(conn: Connection): string[] {
+    if (isDirect(conn)) return ['DIRECT'];
+    return conn.chains;
   }
 
   function getHost(conn: Connection): string {
@@ -248,20 +269,12 @@
     const ip = (conn.metadata.sourceIP || '').trim();
     const port = conn.metadata.sourcePort;
     const hasValidPort = port !== undefined && port !== null && Number(port) > 0;
-
-    if (!ip) {
-      return hasValidPort ? `localhost:${port}` : 'localhost';
-    }
+    if (!ip) return hasValidPort ? `localhost:${port}` : 'localhost';
     return hasValidPort ? `${ip}:${port}` : ip;
   }
 
-  function getHostTooltip(conn: Connection): string {
-    const host = conn.metadata.host || conn.metadata.destinationIP;
-    return `${host}:${conn.metadata.destinationPort}`;
-  }
-
   function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
+    if (!bytes || bytes <= 0 || isNaN(bytes)) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
@@ -273,13 +286,13 @@
       const start = new Date(startStr);
       if (isNaN(start.getTime())) return '—';
       const diffMs = Date.now() - start.getTime();
-      if (diffMs < 0) return `0${$t('conn.sec')}`;
+      if (diffMs < 0) return `0 ${$t('conn.sec')}`;
       const diffSec = Math.floor(diffMs / 1000);
-      if (diffSec < 60) return `${diffSec}${$t('conn.sec')}`;
+      if (diffSec < 60) return `${diffSec} ${$t('conn.sec')}`;
       const diffMin = Math.floor(diffSec / 60);
-      if (diffMin < 60) return `${diffMin}${$t('conn.min')}`;
+      if (diffMin < 60) return `${diffMin} ${$t('conn.min')} ${diffSec % 60} ${$t('conn.sec')}`;
       const diffHrs = Math.floor(diffMin / 60);
-      return `${diffHrs}${$t('conn.hrs')} ${diffMin % 60}${$t('conn.min')}`;
+      return `${diffHrs} ${$t('conn.hrs')} ${diffMin % 60} ${$t('conn.min')}`;
     } catch (_) {
       return '—';
     }
@@ -292,18 +305,19 @@
     try {
       const res = await apiFetch('/api/mihomo/control', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'start' })
       });
       if (!res.ok) throw new Error('Failed to start Mihomo');
-      setTimeout(async () => {
+      launchTimer1 = setTimeout(async () => {
+        if (destroyed) return;
         await fetchCapabilities();
+        if (destroyed) return;
         connectWS();
         mihomoLaunching = false;
       }, 1500);
-      setTimeout(async () => {
+      launchTimer2 = setTimeout(async () => {
+        if (destroyed) return;
         await fetchCapabilities();
       }, 4000);
     } catch (e: any) {
@@ -313,43 +327,171 @@
     }
   }
 
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      sortAsc = !sortAsc;
+    } else {
+      sortKey = key;
+      sortAsc = false;
+    }
+  }
+
+  function toggleGroup(groupKey: string) {
+    collapsedGroups[groupKey] = !collapsedGroups[groupKey];
+  }
+
   let totalUpload = $derived(connections.reduce((acc, c) => acc + c.upload, 0));
   let totalDownload = $derived(connections.reduce((acc, c) => acc + c.download, 0));
-  let filteredConnections = $derived(
-    connections.filter((conn) => {
-      if (filterSource) {
-        const q = filterSource.toLowerCase();
+
+  // Filtered connections list
+  let filteredConnections = $derived.by(() => {
+    let list = connections.filter((conn) => {
+      // Search query
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
         const endpoint = formatEndpoint(conn).toLowerCase();
-        const process = (conn.metadata.process || '').toLowerCase();
+        const host = getHost(conn).toLowerCase();
+        const destIP = (conn.metadata.destinationIP || '').toLowerCase();
+        const rule = (conn.rule || '').toLowerCase();
+        const rulePayload = (conn.rulePayload || '').toLowerCase();
+        const chainStr = (conn.chains || []).join(' ').toLowerCase();
         const client = getClientForConn(conn);
         const clientName = (client?.display_name || '').toLowerCase();
         const clientHost = (client?.hostname || '').toLowerCase();
         const clientMac = (client?.mac || '').toLowerCase();
+        const process = (conn.metadata.process || '').toLowerCase();
 
         const matches =
           endpoint.includes(q) ||
-          process.includes(q) ||
+          host.includes(q) ||
+          destIP.includes(q) ||
+          rule.includes(q) ||
+          rulePayload.includes(q) ||
+          chainStr.includes(q) ||
           clientName.includes(q) ||
           clientHost.includes(q) ||
-          clientMac.includes(q);
+          clientMac.includes(q) ||
+          process.includes(q);
 
         if (!matches) return false;
       }
-      if (
-        filterDest &&
-        !(conn.metadata.host || '').toLowerCase().includes(filterDest.toLowerCase()) &&
-        !(conn.metadata.destinationIP || '').toLowerCase().includes(filterDest.toLowerCase())
-      )
-        return false;
-      if (filterRule && conn.rule !== filterRule) return false;
-      if (filterProxy && getChainPath(conn) !== filterProxy) return false;
+
+      // Quick filter chips
+      if (quickFilter === 'proxy' && isDirect(conn)) return false;
+      if (quickFilter === 'direct' && !isDirect(conn)) return false;
+      if (quickFilter === 'active') {
+        const sp = connectionSpeeds.get(conn.id);
+        const isTrafficActive = sp && (sp.uploadSpeed > 0 || sp.downloadSpeed > 0);
+        if (!isTrafficActive) return false;
+      }
+
       return true;
-    })
-  );
+    });
+
+    // Sorting
+    list.sort((a, b) => {
+      let valA = 0;
+      let valB = 0;
+      if (sortKey === 'start') {
+        const timeA = new Date(a.start).getTime() || Date.now();
+        const timeB = new Date(b.start).getTime() || Date.now();
+        valA = Date.now() - timeA;
+        valB = Date.now() - timeB;
+      } else if (sortKey === 'upload') {
+        valA = a.upload;
+        valB = b.upload;
+      } else if (sortKey === 'download') {
+        valA = a.download;
+        valB = b.download;
+      } else if (sortKey === 'speed') {
+        const spA = connectionSpeeds.get(a.id);
+        const spB = connectionSpeeds.get(b.id);
+        valA = (spA?.downloadSpeed || 0) + (spA?.uploadSpeed || 0);
+        valB = (spB?.downloadSpeed || 0) + (spB?.uploadSpeed || 0);
+      }
+      return sortAsc ? valA - valB : valB - valA;
+    });
+
+    return list;
+  });
+
+  // Grouped structure (CONN-01)
+  interface ConnectionGroup {
+    key: string;
+    title: string;
+    subtitle?: string;
+    activeCount: number;
+    uploadTotal: number;
+    downloadTotal: number;
+    items: Connection[];
+  }
+
+  let groupedConnections = $derived.by(() => {
+    if (groupingMode === 'none') return [];
+
+    const map = new Map<string, ConnectionGroup>();
+
+    for (const conn of filteredConnections) {
+      let key = '';
+      let title = '';
+      let subtitle = '';
+
+      if (groupingMode === 'client') {
+        const client = getClientForConn(conn);
+        const ip = conn.metadata.sourceIP || 'Unknown IP';
+        key = ip;
+        title = client?.display_name || ip;
+        subtitle = client?.mac ? `${ip} · ${client.mac}` : ip;
+      } else if (groupingMode === 'host') {
+        const host = getHost(conn);
+        key = host;
+        title = host;
+        subtitle = conn.metadata.destinationIP ? `IP: ${conn.metadata.destinationIP}` : '';
+      } else if (groupingMode === 'route') {
+        const chainStr = isDirect(conn) ? 'DIRECT' : (conn.chains || []).join(' → ');
+        key = chainStr;
+        title = chainStr;
+        subtitle = isDirect(conn) ? $t('conn.route_direct_sub') : $t('conn.route_proxy_sub');
+      }
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          title,
+          subtitle,
+          activeCount: 0,
+          uploadTotal: 0,
+          downloadTotal: 0,
+          items: []
+        });
+      }
+
+      const grp = map.get(key)!;
+      grp.activeCount += 1;
+      grp.uploadTotal += conn.upload;
+      grp.downloadTotal += conn.download;
+      grp.items.push(conn);
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.downloadTotal - a.downloadTotal);
+  });
+
+  function handleVisibilityChange() {
+    if (document.visibilityState === 'visible') {
+      trafficHistory = new Map();
+    }
+  }
+
+  function handleWindowKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && selectedConnectionId) {
+      selectedConnectionId = null;
+    }
+  }
 
   onMount(() => {
     loadClients();
     clientsRefreshTimer = setInterval(loadClients, 20000);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
     if ($capabilities === null || $capabilities.mihomo.reachable) {
       loading = true;
       connectWS();
@@ -362,36 +504,93 @@
       clearInterval(clientsRefreshTimer);
       clientsRefreshTimer = null;
     }
+    if (launchTimer1) {
+      clearTimeout(launchTimer1);
+      launchTimer1 = null;
+    }
+    if (launchTimer2) {
+      clearTimeout(launchTimer2);
+      launchTimer2 = null;
+    }
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
     disconnectWS();
   });
 </script>
 
+<svelte:window onkeydown={handleWindowKeyDown} />
+
 <div class="container">
+  <!-- page-head -->
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.group_observability')} <span class="crumb-sep">›</span>
         {$t('conn.title')}
       </div>
       <h1>
         {$t('conn.title')}
-        {#if wsConnected}
-          <span class="live-indicator" title={$t('conn.ws_active')}>{$t('conn.live')}</span>
+        {#if wsConnected && !paused}
+          <span class="live-badge running">
+            <span class="live-dot success"></span>{$t('traffic.live_badge')}
+          </span>
+        {:else if wsConnected && paused}
+          <span class="live-badge paused">
+            <span class="live-dot warning"></span>{$t('traffic.paused_badge')}
+          </span>
         {:else if wsReconnecting}
-          <span class="live-indicator live-reconnecting">{$t('conn.ws_reconnecting')}</span>
+          <span class="live-badge warning">
+            <span class="live-dot warning"></span>{$t('conn.ws_reconnecting')}
+          </span>
+        {:else}
+          <span class="live-badge stopped">
+            <span class="live-dot error"></span>{$t('conn.ws_offline')}
+          </span>
         {/if}
       </h1>
-      <p class="sub">{$t('conn.active')}</p>
+      <p class="sub">{$t('conn.h1_sub')}</p>
     </div>
     <div class="ph-actions">
       <button
         class="btn btn-secondary"
-        style="color:var(--danger);"
+        onclick={() => (paused = !paused)}
+        title={paused ? $t('conn.resume') : $t('conn.pause')}
+      >
+        {#if paused}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
+            ><polygon points="5 3 19 12 5 21 5 3" /></svg
+          >
+          <span>{$t('conn.resume')}</span>
+        {:else}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
+            ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
+              x="14"
+              y="5"
+              width="4"
+              height="14"
+              rx="1"
+            /></svg
+          >
+          <span>{$t('conn.pause')}</span>
+        {/if}
+      </button>
+      <button
+        class="btn btn-danger-soft"
         onclick={closeAllConnections}
         disabled={connections.length === 0}
         title={$t('conn.close_all')}
       >
-        {$t('conn.close_all')}
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          ><polyline points="3 6 5 6 21 6" /><path
+            d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
+          /></svg
+        >
+        <span>{$t('conn.close_all')}</span>
       </button>
     </div>
   </div>
@@ -418,420 +617,1301 @@
       oncta={connectWS}
     />
   {:else}
-    <div class="toolbar mb-2">
-      <div class="filters">
-        <label for="filter-source" class="sr-only">{$t('conn.source')}</label>
-        <input
-          id="filter-source"
-          type="text"
-          placeholder={$t('conn.source_filter_placeholder')}
-          bind:value={filterSource}
-          class="filter-input filter-src"
-          title={$t('conn.source')}
-        />
-        <label for="filter-dest" class="sr-only">{$t('conn.destination')}</label>
-        <input
-          id="filter-dest"
-          type="text"
-          placeholder={$t('conn.destination') + ' (host / IP)...'}
-          bind:value={filterDest}
-          class="filter-input filter-dest"
-          title={$t('conn.destination')}
-        />
-        <label for="filter-rule" class="sr-only">{$t('conn.rule')}</label>
-        <select
-          id="filter-rule"
-          bind:value={filterRule}
-          class="filter-select filter-rule"
-          title={$t('conn.rule')}
+    <!-- Monolithic Smart Toolbar (CONN-02) -->
+    <div class="conn-toolbar">
+      <!-- Search Input with Clear and Counter -->
+      <div class="search-wrap">
+        <div class="search-field">
+          <svg
+            class="search-icon"
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            ><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg
+          >
+          <input
+            type="text"
+            id="filter-source"
+            class="search-input"
+            placeholder={$t('conn.search_placeholder')}
+            bind:value={searchQuery}
+          />
+          {#if searchQuery}
+            <button
+              class="clear-search-btn"
+              onclick={() => (searchQuery = '')}
+              aria-label={$t('app.clear')}>×</button
+            >
+          {/if}
+        </div>
+        {#if searchQuery}
+          <span class="match-badge"
+            >{$t('conn.match_found')} {filteredConnections.length}/{connections.length}</span
+          >
+        {/if}
+      </div>
+
+      <!-- Quick Filter Chips -->
+      <div class="filter-chips">
+        <button
+          type="button"
+          class="f-chip"
+          class:active={quickFilter === 'all'}
+          onclick={() => (quickFilter = 'all')}
         >
-          <option value="">{$t('conn.all_rules')}</option>
-          {#each uniqueRules as rule}
-            <option value={rule}>{rule}</option>
-          {/each}
-        </select>
-        <label for="filter-proxy" class="sr-only">{$t('conn.chain')}</label>
-        <select
-          id="filter-proxy"
-          bind:value={filterProxy}
-          class="filter-select filter-proxy"
-          title={$t('conn.chain')}
+          {$t('conn.filter_all')}
+        </button>
+        <button
+          type="button"
+          class="f-chip"
+          class:active={quickFilter === 'proxy'}
+          onclick={() => (quickFilter = 'proxy')}
         >
-          <option value="">{$t('conn.all_chains')}</option>
-          {#each uniqueChains as chain}
-            <option value={chain}>{chain}</option>
-          {/each}
+          {$t('conn.filter_proxy')}
+        </button>
+        <button
+          type="button"
+          class="f-chip"
+          class:active={quickFilter === 'direct'}
+          onclick={() => (quickFilter = 'direct')}
+        >
+          {$t('conn.filter_direct')}
+        </button>
+        <button
+          type="button"
+          class="f-chip"
+          class:active={quickFilter === 'active'}
+          onclick={() => (quickFilter = 'active')}
+        >
+          {$t('conn.filter_active')}
+        </button>
+      </div>
+
+      <!-- Grouping Selector -->
+      <div class="grouping-control">
+        <span class="group-lbl">{$t('conn.group_by')}</span>
+        <select bind:value={groupingMode} class="group-select">
+          <option value="none">{$t('conn.group_none')}</option>
+          <option value="client">{$t('conn.group_client')}</option>
+          <option value="host">{$t('conn.group_host')}</option>
+          <option value="route">{$t('conn.group_route')}</option>
         </select>
+      </div>
+
+      <!-- Live Totals Summary -->
+      <div class="metrics-pill">
+        <span class="m-stat"
+          ><b>{filteredConnections.length}</b>
+          {$t('conn.shown', { count: '' }).replace(/:\s*$/, '').trim()}</span
+        >
+        <span class="m-sep">·</span>
+        <span class="m-stat text-upload">↑ {formatBytes(totalUpload)}</span>
+        <span class="m-sep">·</span>
+        <span class="m-stat text-download">↓ {formatBytes(totalDownload)}</span>
       </div>
     </div>
 
-    <div class="stats mb-2">
-      <span class="stat"
-        ><b>{connections.length}</b>
-        {$t('conn.total', { count: '' }).replace(/:\s*$/, '').trim()}</span
-      >
-      <span class="stat"
-        ><b>{filteredConnections.length}</b>
-        {$t('conn.shown', { count: '' }).replace(/:\s*$/, '').trim()}</span
-      >
-      <span class="stat">↑ {formatBytes(totalUpload)}</span>
-      <span class="stat">↓ {formatBytes(totalDownload)}</span>
-    </div>
+    <!-- Main Content Area: Grouped Accordions or Flat Table -->
+    {#if groupingMode !== 'none'}
+      <!-- Grouped View (CONN-01) -->
+      <div class="grouped-container">
+        {#each groupedConnections as grp (grp.key)}
+          <div class="group-card">
+            <!-- Group Header Button -->
+            <button
+              type="button"
+              class="group-header"
+              onclick={() => toggleGroup(grp.key)}
+              aria-expanded={!collapsedGroups[grp.key]}
+            >
+              <div class="grp-title-group">
+                <span class="grp-chevron" class:collapsed={collapsedGroups[grp.key]}>▾</span>
+                <div>
+                  <div class="grp-title">{grp.title}</div>
+                  {#if grp.subtitle}
+                    <div class="grp-sub">{grp.subtitle}</div>
+                  {/if}
+                </div>
+              </div>
+              <div class="grp-metrics">
+                <span class="badge badge-neutral">
+                  {pluralize(
+                    grp.activeCount,
+                    $t('conn.sessions_count_one', { count: String(grp.activeCount) }),
+                    $t('conn.sessions_count_few', { count: String(grp.activeCount) }),
+                    $t('conn.sessions_count_many', { count: String(grp.activeCount) }),
+                    $currentLang
+                  )}
+                </span>
+                <span class="m-stat text-upload">↑ {formatBytes(grp.uploadTotal)}</span>
+                <span class="m-stat text-download">↓ {formatBytes(grp.downloadTotal)}</span>
+              </div>
+            </button>
 
-    <div class="table-container conn-table-container">
-      <table class="connections-table">
-        <thead>
-          <tr>
-            <th class="col-src">{$t('conn.source')}</th>
-            <th class="col-host">{$t('conn.host')}</th>
-            <th>{$t('conn.rule')}</th>
-            <th class="col-chain">{$t('conn.chain')}</th>
-            <th class="col-network">{$t('conn.network')}</th>
-            <th class="col-traffic col-upload">↑ {$t('conn.upload')}</th>
-            <th class="col-traffic col-download">↓ {$t('conn.download')}</th>
-            <th class="col-duration">⏱ {$t('conn.duration')}</th>
-            <th style="width: 40px;"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {#if loading && connections.length === 0}
-            {#each Array(5) as _}
-              <tr>
-                <td class="col-src"><Skeleton type="text-line" width="120px" /></td>
-                <td class="col-host"><Skeleton type="text-line" width="160px" /></td>
-                <td><Skeleton type="text-line" width="80px" /></td>
-                <td class="col-chain"><Skeleton type="text-line" width="100px" /></td>
-                <td class="col-network"><Skeleton type="text-line" width="40px" /></td>
-                <td class="col-traffic col-upload"><Skeleton type="text-line" width="50px" /></td>
-                <td class="col-traffic col-download"><Skeleton type="text-line" width="50px" /></td>
-                <td class="col-duration"><Skeleton type="text-line" width="30px" /></td>
-                <td></td>
-              </tr>
-            {/each}
-          {:else}
-            {#each filteredConnections as conn (conn.id)}
-              {@const speed = connectionSpeeds.get(conn.id)}
-              {@const client = getClientForConn(conn)}
-              <tr class="conn-row">
-                <td class="col-src">
-                  <div class="src-cell">
-                    {#if client && client.display_name && client.display_name !== client.ip}
-                      <div
-                        class="src-main"
-                        title={`${client.display_name}${client.mac ? ' (' + client.mac + ')' : ''}`}
+            <!-- Group Table Body -->
+            {#if !collapsedGroups[grp.key]}
+              <div class="table-container conn-table-container">
+                <table class="connections-table">
+                  <thead>
+                    <tr>
+                      <th class="col-src">{$t('conn.source')}</th>
+                      <th class="col-host">{$t('conn.host')}</th>
+                      <th>{$t('conn.rule')}</th>
+                      <th class="col-chain">{$t('conn.chain')}</th>
+                      <th class="col-network">{$t('conn.network')}</th>
+                      <th
+                        class="col-traffic col-upload right-align pointer"
+                        role="columnheader"
+                        tabindex="0"
+                        aria-sort={sortKey === 'upload'
+                          ? sortAsc
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'}
+                        onclick={() => toggleSort('upload')}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleSort('upload');
+                          }
+                        }}
                       >
-                        <span class="src-name">{client.display_name}</span>
-                        {#if conn.metadata.process}
-                          <span
-                            class="badge-process-mini"
-                            title={`${$t('conn.process_name')}: ${conn.metadata.process}`}
-                          >
-                            {conn.metadata.process}
-                          </span>
-                        {/if}
-                      </div>
-                      <span class="mono src-sub">{formatEndpoint(conn)}</span>
-                    {:else if conn.metadata.process}
-                      <div class="src-main">
-                        <span class="badge-process-mini">{conn.metadata.process}</span>
-                      </div>
-                      <span class="mono src-sub">{formatEndpoint(conn)}</span>
-                    {:else}
-                      <span class="mono src-main-ip">{formatEndpoint(conn)}</span>
-                    {/if}
-                  </div>
-                </td>
-                <td class="mono col-host">
-                  <span title={getHostTooltip(conn)} class="host-cell">
-                    {getHost(conn)}
-                    <span class="host-port">:{conn.metadata.destinationPort}</span>
-                  </span>
-                </td>
-                <td>
-                  <span class="badge badge-info">
-                    {conn.rule}
-                  </span>
-                  {#if conn.rulePayload}
-                    <div class="rule-payload mono">{conn.rulePayload}</div>
-                  {/if}
-                </td>
-                <td class="col-chain cell-route">{getChainPath(conn)}</td>
-                <td class="col-network">
-                  <span
-                    class="badge net-badge"
-                    class:net-tcp={conn.metadata.network?.toUpperCase() === 'TCP'}
-                    class:net-udp={conn.metadata.network?.toUpperCase() === 'UDP'}
+                        ↑ {$t('conn.upload')}
+                        {sortKey === 'upload' ? (sortAsc ? '▲' : '▼') : ''}
+                      </th>
+                      <th
+                        class="col-traffic col-download right-align pointer"
+                        role="columnheader"
+                        tabindex="0"
+                        aria-sort={sortKey === 'download'
+                          ? sortAsc
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'}
+                        onclick={() => toggleSort('download')}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleSort('download');
+                          }
+                        }}
+                      >
+                        ↓ {$t('conn.download')}
+                        {sortKey === 'download' ? (sortAsc ? '▲' : '▼') : ''}
+                      </th>
+                      <th
+                        class="col-traffic col-speed right-align pointer"
+                        role="columnheader"
+                        tabindex="0"
+                        aria-sort={sortKey === 'speed'
+                          ? sortAsc
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'}
+                        onclick={() => toggleSort('speed')}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleSort('speed');
+                          }
+                        }}
+                      >
+                        ⚡ {$t('conn.speed')}
+                        {sortKey === 'speed' ? (sortAsc ? '▲' : '▼') : ''}
+                      </th>
+                      <th
+                        class="col-duration right-align pointer"
+                        role="columnheader"
+                        tabindex="0"
+                        aria-sort={sortKey === 'start'
+                          ? sortAsc
+                            ? 'ascending'
+                            : 'descending'
+                          : 'none'}
+                        onclick={() => toggleSort('start')}
+                        onkeydown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            toggleSort('start');
+                          }
+                        }}
+                      >
+                        ⏱ {$t('conn.duration')}
+                        {sortKey === 'start' ? (sortAsc ? '▲' : '▼') : ''}
+                      </th>
+                      <th style="width: 44px;"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each grp.items as conn (conn.id)}
+                      {@render connectionRow(conn)}
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            {/if}
+          </div>
+        {:else}
+          <div class="empty-table-state">
+            <p>{$t('conn.empty_title')}</p>
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <!-- Flat Table View -->
+      <div class="table-container conn-table-container">
+        <table class="connections-table">
+          <thead>
+            <tr>
+              <th class="col-src">{$t('conn.source')}</th>
+              <th class="col-host">{$t('conn.host')}</th>
+              <th>{$t('conn.rule')}</th>
+              <th class="col-chain">{$t('conn.chain')}</th>
+              <th class="col-network">{$t('conn.network')}</th>
+              <th
+                class="col-traffic col-upload right-align pointer"
+                role="columnheader"
+                tabindex="0"
+                aria-sort={sortKey === 'upload' ? (sortAsc ? 'ascending' : 'descending') : 'none'}
+                onclick={() => toggleSort('upload')}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('upload');
+                  }
+                }}
+              >
+                ↑ {$t('conn.upload')}
+                {sortKey === 'upload' ? (sortAsc ? '▲' : '▼') : ''}
+              </th>
+              <th
+                class="col-traffic col-download right-align pointer"
+                role="columnheader"
+                tabindex="0"
+                aria-sort={sortKey === 'download' ? (sortAsc ? 'ascending' : 'descending') : 'none'}
+                onclick={() => toggleSort('download')}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('download');
+                  }
+                }}
+              >
+                ↓ {$t('conn.download')}
+                {sortKey === 'download' ? (sortAsc ? '▲' : '▼') : ''}
+              </th>
+              <th
+                class="col-traffic col-speed right-align pointer"
+                role="columnheader"
+                tabindex="0"
+                aria-sort={sortKey === 'speed' ? (sortAsc ? 'ascending' : 'descending') : 'none'}
+                onclick={() => toggleSort('speed')}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('speed');
+                  }
+                }}
+              >
+                ⚡ {$t('conn.speed')}
+                {sortKey === 'speed' ? (sortAsc ? '▲' : '▼') : ''}
+              </th>
+              <th
+                class="col-duration right-align pointer"
+                role="columnheader"
+                tabindex="0"
+                aria-sort={sortKey === 'start' ? (sortAsc ? 'ascending' : 'descending') : 'none'}
+                onclick={() => toggleSort('start')}
+                onkeydown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    toggleSort('start');
+                  }
+                }}
+              >
+                ⏱ {$t('conn.duration')}
+                {sortKey === 'start' ? (sortAsc ? '▲' : '▼') : ''}
+              </th>
+              <th style="width: 44px;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#if loading && connections.length === 0}
+              {#each Array(6) as _}
+                <tr>
+                  <td class="col-src"><Skeleton type="text-line" width="120px" /></td>
+                  <td class="col-host"><Skeleton type="text-line" width="160px" /></td>
+                  <td><Skeleton type="text-line" width="80px" /></td>
+                  <td class="col-chain"><Skeleton type="text-line" width="100px" /></td>
+                  <td class="col-network"><Skeleton type="text-line" width="40px" /></td>
+                  <td class="col-traffic col-upload"><Skeleton type="text-line" width="50px" /></td>
+                  <td class="col-traffic col-download"
+                    ><Skeleton type="text-line" width="50px" /></td
                   >
-                    {conn.metadata.network?.toUpperCase() || '—'}
-                  </span>
-                </td>
-                <td
-                  class="mono col-traffic col-upload"
-                  style="text-align:right;color:var(--accent);"
-                >
-                  <div>{formatBytes(conn.upload)}</div>
-                  {#if speed}
-                    <div class="speed-sub">{formatBytes(speed.uploadSpeed)}/s</div>
-                  {/if}
-                </td>
-                <td
-                  class="mono col-traffic col-download"
-                  style="text-align:right;color:var(--accent);"
-                >
-                  <div>{formatBytes(conn.download)}</div>
-                  {#if speed}
-                    <div class="speed-sub">{formatBytes(speed.downloadSpeed)}/s</div>
-                  {/if}
-                </td>
-                <td class="mono col-duration" style="text-align:right;color:var(--fg-dim);">
-                  {getDuration(conn.start)}
-                </td>
-                <td style="text-align:center;">
-                  <button
-                    class="btn btn-secondary btn-close-conn"
-                    style="padding: 4px 8px; color: var(--danger); border-color: transparent;"
-                    onclick={() => closeConnection(conn.id)}
-                    title={$t('app.close')}
-                    aria-label={$t('app.close')}
-                  >
-                    ×
-                  </button>
-                </td>
-              </tr>
+                  <td class="col-traffic col-speed"><Skeleton type="text-line" width="60px" /></td>
+                  <td class="col-duration"><Skeleton type="text-line" width="30px" /></td>
+                  <td></td>
+                </tr>
+              {/each}
             {:else}
-              <tr>
-                <td colspan="9" style="text-align: center; padding: 30px; color: var(--fg-dim);">
-                  {wsConnected ? $t('conn.no_connections') : $t('conn.ws_offline')}
-                </td>
-              </tr>
-            {/each}
-          {/if}
-        </tbody>
-      </table>
-    </div>
+              {#each filteredConnections as conn (conn.id)}
+                {@render connectionRow(conn)}
+              {:else}
+                <tr>
+                  <td colspan="10" style="text-align: center; padding: 40px; color: var(--fg-dim);">
+                    {wsConnected ? $t('conn.no_connections') : $t('conn.ws_offline')}
+                  </td>
+                </tr>
+              {/each}
+            {/if}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {/if}
 </div>
 
+<!-- Table Row Snippet -->
+{#snippet connectionRow(conn: Connection)}
+  {@const speed = connectionSpeeds.get(conn.id)}
+  {@const client = getClientForConn(conn)}
+  {@const nodes = getChainNodes(conn)}
+  <tr
+    class="conn-row"
+    class:selected={selectedConnectionId === conn.id}
+    tabindex="0"
+    role="button"
+    aria-label={`${getHost(conn)}:${conn.metadata.destinationPort}`}
+    onclick={() => (selectedConnectionId = conn.id)}
+    onkeydown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        if ((e.target as HTMLElement)?.tagName !== 'BUTTON') {
+          e.preventDefault();
+          selectedConnectionId = conn.id;
+        }
+      }
+    }}
+  >
+    <!-- Source Column -->
+    <td class="col-src">
+      <div class="src-cell">
+        {#if client && client.display_name && client.display_name !== client.ip}
+          <div class="src-main">
+            <span class="src-name">{client.display_name}</span>
+            {#if conn.metadata.process}
+              <span class="badge-process">{conn.metadata.process}</span>
+            {/if}
+          </div>
+          <span class="monospace src-sub">{formatEndpoint(conn)}</span>
+        {:else if conn.metadata.process}
+          <div class="src-main">
+            <span class="badge-process">{conn.metadata.process}</span>
+          </div>
+          <span class="monospace src-sub">{formatEndpoint(conn)}</span>
+        {:else}
+          <span class="monospace src-main-ip">{formatEndpoint(conn)}</span>
+        {/if}
+      </div>
+    </td>
+
+    <!-- Host Column -->
+    <td class="monospace col-host">
+      <span class="host-cell" title={`${getHost(conn)}:${conn.metadata.destinationPort}`}>
+        {getHost(conn)}<span class="host-port">:{conn.metadata.destinationPort}</span>
+      </span>
+    </td>
+
+    <!-- Rule Column -->
+    <td>
+      <span class="badge badge-rule">{conn.rule || 'Match'}</span>
+      {#if conn.rulePayload}
+        <div class="rule-payload monospace">{conn.rulePayload}</div>
+      {/if}
+    </td>
+
+    <!-- Chain / Route Column (CONN-03) -->
+    <td class="col-chain">
+      {#if isDirect(conn)}
+        <span class="badge badge-direct">DIRECT</span>
+      {:else}
+        <div class="chain-flow">
+          {#each nodes as node, idx}
+            <span class="chain-node">{node}</span>
+            {#if idx < nodes.length - 1}
+              <span class="chain-sep">›</span>
+            {/if}
+          {/each}
+        </div>
+      {/if}
+    </td>
+
+    <!-- Network Column -->
+    <td class="col-network">
+      <span
+        class="badge net-badge"
+        class:net-tcp={conn.metadata.network?.toUpperCase() === 'TCP'}
+        class:net-udp={conn.metadata.network?.toUpperCase() === 'UDP'}
+      >
+        {conn.metadata.network?.toUpperCase() || '—'}
+      </span>
+    </td>
+
+    <!-- Upload Column (CONN-04: Mute 0 B/s) -->
+    <td class="monospace col-traffic col-upload right-align">
+      <div class="bytes-val text-upload">{formatBytes(conn.upload)}</div>
+    </td>
+
+    <!-- Download Column (CONN-04: Mute 0 B/s) -->
+    <td class="monospace col-traffic col-download right-align">
+      <div class="bytes-val text-download">{formatBytes(conn.download)}</div>
+    </td>
+
+    <!-- Speed Column (CONN-04: Mute 0 B/s, CONN-05: sortable) -->
+    <td class="monospace col-traffic col-speed right-align">
+      {#if speed && speed.uploadSpeed > 0}
+        <div class="speed-active">↑ {formatBytes(speed.uploadSpeed)}/s</div>
+      {/if}
+      {#if speed && speed.downloadSpeed > 0}
+        <div class="speed-active">↓ {formatBytes(speed.downloadSpeed)}/s</div>
+      {/if}
+    </td>
+
+    <!-- Duration Column -->
+    <td class="monospace col-duration right-align">
+      {getDuration(conn.start)}
+    </td>
+
+    <!-- Action Close Column -->
+    <td style="text-align:center;">
+      <button
+        class="btn-close-conn"
+        onclick={(e) => closeConnection(conn.id, e)}
+        title={$t('conn.close_this')}
+        aria-label={$t('conn.close_this')}
+      >
+        ×
+      </button>
+    </td>
+  </tr>
+{/snippet}
+
+<!-- Connection Inspector Drawer (CONN-06) -->
+{#if selectedConnection}
+  {@const conn = selectedConnection}
+  {@const speed = connectionSpeeds.get(conn.id)}
+  {@const client = getClientForConn(conn)}
+  <button
+    type="button"
+    class="drawer-backdrop"
+    onclick={() => (selectedConnectionId = null)}
+    aria-label={$t('app.close')}
+  ></button>
+  <div class="inspector-drawer" role="dialog" aria-modal="true" aria-labelledby="inspector-title">
+    <div class="drawer-header">
+      <div class="drawer-title-group">
+        <h3 class="drawer-title" id="inspector-title">{$t('conn.inspector_title')}</h3>
+        <span class="drawer-subtitle monospace">{conn.id}</span>
+      </div>
+      <button
+        class="drawer-close"
+        onclick={() => (selectedConnectionId = null)}
+        aria-label={$t('app.close')}
+      >
+        ✕
+      </button>
+    </div>
+
+    <div class="drawer-body">
+      <!-- Section 1: Network Transport -->
+      <div class="drawer-section">
+        <h4 class="section-heading">{$t('conn.section_network')}</h4>
+        <div class="meta-grid">
+          <div class="m-row">
+            <span class="m-key">{$t('conn.host')}:</span>
+            <span class="m-val monospace">{getHost(conn)}:{conn.metadata.destinationPort}</span>
+          </div>
+          <div class="m-row">
+            <span class="m-key">{$t('conn.destination')} IP:</span>
+            <span class="m-val monospace">{conn.metadata.destinationIP || '—'}</span>
+          </div>
+          <div class="m-row">
+            <span class="m-key">{$t('conn.source')}:</span>
+            <span class="m-val monospace">{formatEndpoint(conn)}</span>
+          </div>
+          {#if client}
+            <div class="m-row">
+              <span class="m-key">{$t('conn.client_device')}:</span>
+              <span class="m-val">{client.display_name} {client.mac ? `(${client.mac})` : ''}</span>
+            </div>
+          {/if}
+          <div class="m-row">
+            <span class="m-key">{$t('conn.network')}:</span>
+            <span class="m-val"
+              >{conn.metadata.network?.toUpperCase()} / {conn.metadata.type || 'Direct'}</span
+            >
+          </div>
+          {#if conn.metadata.process}
+            <div class="m-row">
+              <span class="m-key">{$t('conn.process_name')}:</span>
+              <span class="m-val monospace">{conn.metadata.process}</span>
+            </div>
+          {/if}
+        </div>
+      </div>
+
+      <!-- Section 2: Routing & Rules -->
+      <div class="drawer-section">
+        <h4 class="section-heading">{$t('conn.section_routing')}</h4>
+        <div class="meta-grid">
+          <div class="m-row">
+            <span class="m-key">{$t('conn.rule')}:</span>
+            <span class="m-val badge badge-rule">{conn.rule || 'Match'}</span>
+          </div>
+          {#if conn.rulePayload}
+            <div class="m-row">
+              <span class="m-key">{$t('conn.rule_payload')}:</span>
+              <span class="m-val monospace">{conn.rulePayload}</span>
+            </div>
+          {/if}
+          <div class="m-row">
+            <span class="m-key">{$t('conn.chain')}:</span>
+            <div class="m-val chain-flow">
+              {#each getChainNodes(conn) as node, idx}
+                <span class="chain-node">{node}</span>
+                {#if idx < getChainNodes(conn).length - 1}
+                  <span class="chain-sep">›</span>
+                {/if}
+              {/each}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 3: Traffic Telemetry -->
+      <div class="drawer-section">
+        <h4 class="section-heading">{$t('conn.section_traffic')}</h4>
+        <div class="meta-grid">
+          <div class="m-row">
+            <span class="m-key">{$t('conn.upload')}:</span>
+            <span class="m-val monospace text-upload">
+              {formatBytes(conn.upload)}
+              {#if speed && speed.uploadSpeed > 0}
+                ({formatBytes(speed.uploadSpeed)}/s)
+              {/if}
+            </span>
+          </div>
+          <div class="m-row">
+            <span class="m-key">{$t('conn.download')}:</span>
+            <span class="m-val monospace text-download">
+              {formatBytes(conn.download)}
+              {#if speed && speed.downloadSpeed > 0}
+                ({formatBytes(speed.downloadSpeed)}/s)
+              {/if}
+            </span>
+          </div>
+          <div class="m-row">
+            <span class="m-key">{$t('conn.duration')}:</span>
+            <span class="m-val monospace">{getDuration(conn.start)}</span>
+          </div>
+          <div class="m-row">
+            <span class="m-key">{$t('conn.start_time')}:</span>
+            <span class="m-val monospace">{new Date(conn.start).toLocaleString()}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="drawer-footer">
+      <button class="btn btn-danger-soft w-100" onclick={() => closeConnection(conn.id)}>
+        ✕ {$t('conn.close_this')}
+      </button>
+    </div>
+  </div>
+{/if}
+
 <style>
-  /* Filters toolbar layout and controls */
-  .filters {
+  .page-head {
     display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    width: 100%;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    gap: 16px;
   }
-  .filters .filter-input,
-  .filters .filter-select {
-    flex: 1;
-    min-width: 140px;
-    height: var(--input-h, 34px);
-    padding: 6px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm, 6px);
-    background: var(--bg-card);
-    color: var(--fg-primary);
-    box-sizing: border-box;
-    font-family: inherit;
+
+  .page-head h1 {
+    margin: 4px 0 6px;
+    font-size: 22px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .page-head .sub {
+    margin: 0;
+    color: var(--fg-secondary);
     font-size: 13px;
-    outline: none;
-    cursor: pointer;
-    transition:
-      border-color 0.2s,
-      box-shadow var(--transition-fast);
-  }
-  .filters .filter-input {
-    cursor: text;
-  }
-  .filters .filter-input:focus,
-  .filters .filter-select:focus {
-    border-color: var(--color-accent, var(--accent, #29c2f0));
-    box-shadow: 0 0 0 3px var(--accent-soft);
-  }
-  .filters .filter-dest {
-    min-width: 180px;
   }
 
-  /* Speed and latency displays in connections table */
-  .speed-sub {
-    font-size: 11px;
+  .crumbs {
+    font-size: 12px;
     color: var(--fg-dim);
-    margin-top: 2px;
+    margin-bottom: 2px;
   }
 
-  /* Live indicator */
-  .live-indicator {
+  .crumb-sep {
+    color: var(--fg-faint);
+    margin: 0 6px;
+  }
+
+  .ph-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 6px;
+  }
+
+  .live-badge {
     display: inline-flex;
     align-items: center;
-    font-size: 12px;
-    font-weight: 500;
-    color: #22d3ee;
-    margin-left: 10px;
-    letter-spacing: 0.03em;
-    vertical-align: middle;
-    animation: live-pulse 2s ease-in-out infinite;
-  }
-  .live-reconnecting {
-    color: var(--fg-dim);
-    animation: none;
-  }
-  @keyframes live-pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.45;
-    }
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
   }
 
+  .live-badge.running {
+    color: #46d18a;
+    border-color: rgba(70, 209, 138, 0.3);
+  }
+
+  .live-badge.paused {
+    color: #f5a623;
+    border-color: rgba(245, 166, 35, 0.3);
+  }
+
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
+  .live-dot.success {
+    background: #46d18a;
+    box-shadow: 0 0 6px rgba(70, 209, 138, 0.6);
+  }
+
+  .live-dot.warning {
+    background: #f5a623;
+    box-shadow: 0 0 6px rgba(245, 166, 35, 0.6);
+  }
+
+  .live-dot.error {
+    background: #f4707f;
+  }
+
+  /* Monolithic Smart Toolbar (CONN-02) */
+  .conn-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    margin-bottom: 16px;
+  }
+
+  .search-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .search-field {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .search-icon {
+    position: absolute;
+    left: 10px;
+    color: var(--fg-dim);
+    pointer-events: none;
+  }
+
+  .search-input {
+    height: 32px;
+    padding: 0 26px 0 28px;
+    font-size: 12.5px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--fg-primary);
+    width: 220px;
+    transition: all 0.15s ease;
+  }
+
+  .search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(41, 194, 240, 0.2);
+    width: 260px;
+  }
+
+  .match-badge {
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 700;
+    font-family: var(--font-family-mono);
+    white-space: nowrap;
+  }
+
+  .clear-search-btn {
+    position: absolute;
+    right: 6px;
+    background: transparent;
+    border: none;
+    color: var(--fg-dim);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 4px;
+  }
+
+  /* Filter Chips */
+  .filter-chips {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg-secondary);
+    padding: 1px;
+  }
+
+  .f-chip {
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg-dim);
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .f-chip:hover:not(.active) {
+    color: var(--fg-primary);
+    background: var(--bg-hover);
+  }
+
+  .f-chip.active {
+    background: var(--accent);
+    color: #03182a;
+    font-weight: 700;
+  }
+
+  /* Grouping Control */
+  .grouping-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .group-lbl {
+    font-size: 12px;
+    color: var(--fg-dim);
+  }
+
+  .group-select {
+    height: 30px;
+    padding: 0 8px;
+    font-size: 11.5px;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--fg-primary);
+    cursor: pointer;
+  }
+
+  /* Metrics Pill */
+  .metrics-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11.5px;
+    padding: 4px 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light, rgba(255, 255, 255, 0.06));
+    border-radius: var(--radius-sm);
+    font-family: var(--font-family-mono);
+  }
+
+  .m-stat b {
+    color: var(--fg-primary);
+  }
+
+  .m-sep {
+    color: var(--fg-faint);
+  }
+
+  .text-upload {
+    color: #46d18a;
+  }
+
+  .text-download {
+    color: #29c2f0;
+  }
+
+  .btn-danger-soft {
+    background: rgba(244, 112, 127, 0.15);
+    color: var(--danger, #f4707f);
+    border: 1px solid rgba(244, 112, 127, 0.3);
+  }
+
+  .btn-danger-soft:hover {
+    background: rgba(244, 112, 127, 0.25);
+  }
+
+  /* Tables & Groups (CONN-01) */
+  .grouped-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .group-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+
+  .group-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--bg-secondary);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+  }
+
+  .group-header:hover {
+    background: var(--bg-hover);
+  }
+
+  .grp-title-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .grp-chevron {
+    font-size: 14px;
+    color: var(--accent);
+    transition: transform 0.2s ease;
+  }
+
+  .grp-chevron.collapsed {
+    transform: rotate(-90deg);
+  }
+
+  .grp-title {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--fg-primary);
+  }
+
+  .grp-sub {
+    font-size: 11px;
+    color: var(--fg-dim);
+    font-family: var(--font-family-mono);
+  }
+
+  .grp-metrics {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 11.5px;
+    font-family: var(--font-family-mono);
+  }
+
+  /* Connections Table */
   .conn-table-container {
     overflow-x: auto;
     width: 100%;
   }
+
   .connections-table {
     width: 100%;
-    min-width: 800px;
+    min-width: 900px;
+    border-collapse: collapse;
   }
-  .rule-payload {
+
+  .connections-table th {
     font-size: 11px;
     color: var(--fg-dim);
-    margin-top: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    user-select: none;
   }
-  .btn-close-conn {
-    position: relative;
+
+  .pointer {
+    cursor: pointer;
+  }
+
+  .pointer:hover {
+    color: var(--fg-primary);
+  }
+
+  .connections-table th.pointer:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .right-align {
+    text-align: right;
+  }
+
+  .conn-row {
+    border-bottom: 1px solid var(--border-light, rgba(255, 255, 255, 0.04));
+    cursor: pointer;
+    transition: background 0.1s ease;
+  }
+
+  .conn-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .conn-row:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    background: rgba(41, 194, 240, 0.08);
+  }
+
+  .conn-row.selected {
+    background: rgba(41, 194, 240, 0.08);
+  }
+
+  .conn-row td {
+    padding: 8px 12px;
+    font-size: 12.5px;
+    vertical-align: middle;
+  }
+
+  .monospace {
+    font-family: var(--font-family-mono);
+  }
+
+  /* Source Cell */
+  .src-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .src-main {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    min-width: 28px;
-    min-height: 28px;
-    padding: 4px 8px;
-    border-radius: var(--radius-sm);
-    transition:
-      background var(--transition-fast),
-      color var(--transition-fast);
+    gap: 6px;
   }
 
-  /* Расширенный сенсорный хитбокс 44x44px без изменения визуального размера строки */
-  .btn-close-conn::before {
-    content: '';
-    position: absolute;
-    inset: -8px;
-    min-width: 44px;
-    min-height: 44px;
-    border-radius: var(--radius-sm);
+  .src-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-primary);
   }
 
-  .btn-close-conn:hover {
-    background: var(--danger) !important;
-    color: white !important;
+  .src-main-ip {
+    font-size: 12px;
+    color: var(--fg-primary);
   }
 
-  /* Host cell */
+  .src-sub {
+    font-size: 11px;
+    color: var(--fg-dim);
+  }
+
+  .badge-process {
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(167, 139, 250, 0.15);
+    color: #c4b5fd;
+  }
+
+  /* Host Cell */
   .host-cell {
     display: inline-block;
-    max-width: min(40vw, 420px);
+    max-width: min(35vw, 360px);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    vertical-align: middle;
-    cursor: default;
   }
+
   .host-port {
     color: var(--fg-dim);
     font-size: 11px;
   }
 
-  /* Network badge */
-  .net-badge {
+  /* Badges & Route (CONN-03) */
+  .badge-rule {
+    background: rgba(255, 255, 255, 0.06);
+    color: #94a3b8;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .rule-payload {
+    font-size: 10px;
+    color: var(--fg-dim);
+    margin-top: 2px;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .badge-direct {
+    background: rgba(70, 209, 138, 0.15);
+    color: #46d18a;
     font-size: 10px;
     font-weight: 700;
     padding: 2px 6px;
     border-radius: 4px;
-    letter-spacing: 0.05em;
   }
+
+  .chain-flow {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .chain-node {
+    font-size: 11px;
+    color: #29c2f0;
+    background: rgba(41, 194, 240, 0.08);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .chain-sep {
+    color: var(--fg-faint);
+    font-size: 11px;
+  }
+
+  .net-badge {
+    font-size: 9.5px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
   .net-tcp {
     background: rgba(56, 189, 248, 0.15);
     color: #38bdf8;
-    border: 1px solid rgba(56, 189, 248, 0.25);
   }
+
   .net-udp {
     background: rgba(167, 139, 250, 0.15);
     color: #a78bfa;
-    border: 1px solid rgba(167, 139, 250, 0.25);
   }
 
-  /* Source cell with client device names and process info */
-  .src-cell {
+  /* Speeds (CONN-04) */
+  .speed-active {
+    font-size: 10.5px;
+    color: #29c2f0;
+    font-weight: 600;
+    margin-top: 2px;
+  }
+
+  .col-speed {
+    width: 92px;
+    white-space: nowrap;
+  }
+
+  .btn-close-conn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--danger, #f4707f);
+    font-size: 16px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .btn-close-conn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 44px;
+  }
+
+  .btn-close-conn:hover {
+    background: rgba(244, 112, 127, 0.2);
+  }
+
+  /* Inspector Drawer (CONN-06) */
+  .drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    z-index: 100;
+  }
+
+  .inspector-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 420px;
+    max-width: 90vw;
+    background: #0d2338;
+    border-left: 1px solid var(--border);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.5);
+    z-index: 101;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-    align-items: flex-start;
-    justify-content: center;
-    min-width: 120px;
-    max-width: min(30vw, 320px);
-  }
-  .src-main {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 100%;
-  }
-  .src-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--fg-primary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1.25;
-    letter-spacing: -0.01em;
-  }
-  .src-main-ip {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--fg-primary);
-    line-height: 1.25;
-  }
-  .src-sub {
-    font-size: 11px;
-    color: var(--fg-dim);
-    line-height: 1.2;
-    letter-spacing: 0.01em;
-    opacity: 0.85;
-  }
-  .badge-process-mini {
-    display: inline-flex;
-    align-items: center;
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 1;
-    padding: 2px 5px;
-    border-radius: 4px;
-    background: rgba(167, 139, 250, 0.15);
-    color: #c4b5fd;
-    border: 1px solid rgba(167, 139, 250, 0.25);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 110px;
   }
 
-  /* Column priority — hide tier-2/3 columns on mobile */
-  @media (max-width: 640px) {
-    .col-src,
-    .col-traffic,
-    .col-duration,
-    .col-network {
-      display: none;
-    }
-    .connections-table {
-      min-width: 0;
-    }
+  .drawer-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
   }
-  @media (max-width: 480px) {
-    .col-chain,
-    .col-host {
-      display: none;
+
+  .drawer-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--fg-primary);
+  }
+
+  .drawer-subtitle {
+    font-size: 11px;
+    color: var(--fg-dim);
+  }
+
+  .drawer-close {
+    background: transparent;
+    border: none;
+    color: var(--fg-dim);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px;
+  }
+
+  .drawer-close:hover {
+    color: var(--fg-primary);
+  }
+
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .drawer-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .section-heading {
+    margin: 0;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  .meta-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--bg-card);
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-light, rgba(255, 255, 255, 0.04));
+  }
+
+  .m-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .m-key {
+    color: var(--fg-dim);
+    flex-shrink: 0;
+  }
+
+  .m-val {
+    color: var(--fg-primary);
+    text-align: right;
+    word-break: break-all;
+  }
+
+  .drawer-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+  }
+
+  .w-100 {
+    width: 100%;
+  }
+
+  @media (max-width: 768px) {
+    .conn-toolbar {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .search-input {
+      width: 100%;
+    }
+
+    .search-input:focus {
+      width: 100%;
     }
   }
 </style>

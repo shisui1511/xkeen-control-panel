@@ -1,53 +1,107 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { t, pluralize } from './i18n';
+  import { t, currentLang, pluralize } from './i18n';
+  import { showToast, showConfirm } from './stores';
+  import { apiFetch } from './lib/api';
+  import { formatBytes } from './lib/format';
 
   interface LogEntry {
+    id: number;
     timestamp: string;
-    source: string;
-    level: string; // 'info' | 'warning' | 'error' | 'debug' | ''
-    text: string;
-    raw: string;
+    source: string; // 'mihomo' | 'xray' | 'xkeen' | 'syslog' | 'xcp'
+    level: string; // 'info' | 'warning' | 'error' | 'debug' | 'fatal'
+    subsystem?: string;
+    message: string;
+    metadata?: Record<string, string>;
   }
 
-  const MAX_LOG_BUFFER = 500;
-  const ROW_HEIGHT = 24;
+  interface FlashHealthInfo {
+    total_logs_bytes: number;
+    free_space_bytes: number;
+    total_space_bytes: number;
+    is_under_pressure: boolean;
+    emergency_actions: number;
+  }
+
+  const MAX_LOG_BUFFER = 1000;
+  const ROW_HEIGHT = 28;
   const BUFFER_ROWS = 10;
 
   let destroyed = false;
+  let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  let flashHealthInterval: ReturnType<typeof setInterval> | null = null;
+  let logIdCounter = 0;
+
   let logs = $state<LogEntry[]>([]);
+  let incomingBuffer: LogEntry[] = [];
+  let rafId: number | null = null;
+
   let ws = $state<WebSocket | null>(null);
   let containerHeight = $state(0);
   let scrollTop = $state(0);
 
-  function handleScroll(e: Event) {
-    const target = e.currentTarget as HTMLElement;
-    scrollTop = target.scrollTop;
-  }
   let connected = $state(false);
   let paused = $state(false);
+  let pausedNewCount = $state(0);
   let filter = $state('');
   let sourceFilter = $state('');
   let levelFilter = $state('');
   let autoScroll = $state(true);
+  let wordWrap = $state(false);
   let logContainer = $state<HTMLDivElement>();
   let availableSources = $state<string[]>([]);
 
-  // Предопределённые вкладки источников
-  const KNOWN_SOURCES = ['xkeen', 'xray', 'mihomo', 'xcp'];
+  // Flash health and runtime level
+  let flashHealth = $state<FlashHealthInfo | null>(null);
+  let runtimeLevel = $state('info');
+  let isUpdatingLevel = $state(false);
+
+  // Filter sources
+  const SOURCE_TABS = [
+    { id: '', label: 'logs.all_sources' },
+    { id: 'mihomo', label: 'Mihomo' },
+    { id: 'xray', label: 'Xray' },
+    { id: 'xkeen', label: 'XKeen' },
+    { id: 'syslog', label: 'logs.source_syslog' },
+    { id: 'xcp', label: 'logs.source_xcp' },
+    { id: 'errors', label: 'logs.errors_tab', isError: true }
+  ];
 
   const filteredLogs = $derived.by(() => {
     let result = logs;
-    if (filter) {
-      const lf = filter.toLowerCase();
-      result = result.filter((log) => log.raw.toLowerCase().includes(lf));
-    }
-    if (sourceFilter) {
+
+    // Source / Priority filter
+    if (sourceFilter === 'errors') {
+      result = result.filter((log) => log.level === 'error' || log.level === 'fatal');
+    } else if (sourceFilter) {
       result = result.filter((log) => log.source.toLowerCase() === sourceFilter.toLowerCase());
     }
+
+    // Severity level filter
     if (levelFilter) {
-      result = result.filter((log) => log.level === levelFilter);
+      result = result.filter((log) => log.level.toLowerCase() === levelFilter.toLowerCase());
     }
+
+    // Search query: supports inversion '!term' and text search
+    if (filter) {
+      const q = filter.trim();
+      if (q.startsWith('!') && q.length > 1) {
+        const excludeTerm = q.substring(1).toLowerCase();
+        result = result.filter((log) => {
+          const haystack =
+            `${log.timestamp} ${log.source} ${log.level} ${log.subsystem || ''} ${log.message}`.toLowerCase();
+          return !haystack.includes(excludeTerm);
+        });
+      } else {
+        const includeTerm = q.toLowerCase();
+        result = result.filter((log) => {
+          const haystack =
+            `${log.timestamp} ${log.source} ${log.level} ${log.subsystem || ''} ${log.message}`.toLowerCase();
+          return haystack.includes(includeTerm);
+        });
+      }
+    }
+
     return result;
   });
 
@@ -57,108 +111,18 @@
   const endIndex = $derived(Math.min(totalItems, startIndex + visibleCount + 2 * BUFFER_ROWS));
 
   const visibleLogs = $derived.by(() => {
+    if (wordWrap) {
+      return filteredLogs.map((log) => ({ log, y: 0 }));
+    }
     return filteredLogs.slice(startIndex, endIndex).map((log, idx) => ({
       log,
       y: (startIndex + idx) * ROW_HEIGHT
     }));
   });
 
-  function parseLogLine(raw: string): LogEntry {
-    let timestamp = '';
-    let source = '';
-    let level = '';
-    let text = raw.trim();
-
-    // 1. Сначала извлекаем префикс источника, добавляемый бэкендом: ^\[([^\]]+)\]\s*
-    const bracketMatch = text.match(/^\[([^\]]+)\]\s*/);
-    if (bracketMatch) {
-      const tag = bracketMatch[1].toLowerCase();
-      // Нормализуем источник
-      if (tag.includes('access.log') || tag.includes('error.log') || tag === 'xray') {
-        source = 'xray';
-      } else if (tag.includes('mihomo.log') || tag === 'mihomo') {
-        source = 'mihomo';
-      } else if (tag.includes('xkeen-detached') || tag.includes('xkeen.log') || tag === 'xkeen') {
-        source = 'xkeen';
-      } else if (tag.includes('xcp.log') || tag === 'xcp') {
-        source = 'xcp';
-      } else {
-        source = bracketMatch[1];
-      }
-      text = text.substring(bracketMatch[0].length).trim();
-    }
-
-    // 2. Теперь извлекаем таймстамп из начала строки
-    // Поддерживаем форматы: 2026/05/23 00:58:33, 2026-05-23T00:58:33+03:00, 2026-05-23 00:58:33, 00:58:33
-    const tsMatch = text.match(
-      /^(\d{4}[-/]\d{2}[-/]\d{2}[T\s]|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\s*)?(\d{2}:\d{2}:\d{2})/
-    );
-    if (tsMatch) {
-      timestamp = tsMatch[2];
-      text = text.substring(tsMatch[0].length).trim();
-    } else {
-      const now = new Date();
-      timestamp = now.toTimeString().split(' ')[0];
-    }
-
-    // 3. Парсим Bracket теги в оставшемся тексте (например, уровень лога [INF], [Warning])
-    const tags: string[] = [];
-    let tempText = text;
-    while (true) {
-      const tagMatch = tempText.match(/^\[([^\]]+)\]\s*/);
-      if (!tagMatch) break;
-      tags.push(tagMatch[1]);
-      tempText = tempText.substring(tagMatch[0].length).trim();
-    }
-
-    // Ищем уровень лога в тегах
-    for (const tag of tags) {
-      const lowerTag = tag.toLowerCase();
-      if (['info', 'inf', 'information'].includes(lowerTag)) {
-        level = 'info';
-      } else if (['warning', 'warn', 'wrn'].includes(lowerTag)) {
-        level = 'warning';
-      } else if (['error', 'err'].includes(lowerTag)) {
-        level = 'error';
-      } else if (['debug', 'dbg'].includes(lowerTag)) {
-        level = 'debug';
-      } else if (!source) {
-        // Если источник еще не определен, берем первый неизвестный тег
-        if (lowerTag === 'xray') source = 'xray';
-        else if (lowerTag === 'mihomo') source = 'mihomo';
-        else if (lowerTag === 'xkeen') source = 'xkeen';
-      }
-    }
-
-    // Дефолтный источник на основе содержимого, если не определен
-    if (!source) {
-      const lowerRaw = raw.toLowerCase();
-      if (lowerRaw.includes('xray')) {
-        source = 'xray';
-      } else if (lowerRaw.includes('mihomo')) {
-        source = 'mihomo';
-      } else {
-        source = 'xkeen';
-      }
-    }
-
-    // Fallback детекция уровня из текста
-    if (!level) {
-      const lowerText = text.toLowerCase();
-      if (lowerText.includes('error') || lowerText.includes('err:')) {
-        level = 'error';
-      } else if (lowerText.includes('warning') || lowerText.includes('warn:')) {
-        level = 'warning';
-      } else if (lowerText.includes('debug') || lowerText.includes('dbg:')) {
-        level = 'debug';
-      } else {
-        level = 'info';
-      }
-    }
-
-    text = tempText;
-
-    return { timestamp, source, level, text, raw };
+  function handleScroll(e: Event) {
+    const target = e.currentTarget as HTMLElement;
+    scrollTop = target.scrollTop;
   }
 
   function updateSources() {
@@ -169,7 +133,141 @@
     availableSources = Array.from(sources).sort();
   }
 
+  function scheduleBatchFlush() {
+    if (rafId !== null) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = null;
+      if (incomingBuffer.length === 0) return;
+
+      if (paused) {
+        pausedNewCount += incomingBuffer.length;
+        incomingBuffer = [];
+        return;
+      }
+
+      const toAppend = incomingBuffer;
+      incomingBuffer = [];
+      logs = [...logs, ...toAppend].slice(-MAX_LOG_BUFFER);
+      updateSources();
+
+      if (autoScroll && logContainer) {
+        setTimeout(() => {
+          if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
+        }, 0);
+      }
+    });
+  }
+
+  function parseFallbackLogLine(raw: string): LogEntry {
+    logIdCounter += 1;
+    let text = raw.trim();
+    let source = 'xkeen';
+    let level = 'info';
+    let subsystem = '';
+    let timestamp = new Date().toTimeString().split(' ')[0];
+
+    const bracketMatch = text.match(/^\[([^\]]+)\]\s*/);
+    if (bracketMatch) {
+      const tag = bracketMatch[1].toLowerCase();
+      if (tag.includes('xray') || tag.includes('access') || tag.includes('error.log')) {
+        source = 'xray';
+      } else if (tag.includes('mihomo')) {
+        source = 'mihomo';
+      } else if (tag.includes('xkeen')) {
+        source = 'xkeen';
+      } else if (tag.includes('syslog') || tag.includes('messages')) {
+        source = 'syslog';
+      } else if (tag.includes('xcp')) {
+        source = 'xcp';
+      }
+      text = text.substring(bracketMatch[0].length).trim();
+    }
+
+    const tsMatch = text.match(
+      /^(\d{4}[-/]\d{2}[-/]\d{2}[T\s]|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}\s*)?(\d{2}:\d{2}:\d{2})/
+    );
+    if (tsMatch) {
+      timestamp = tsMatch[2];
+      text = text.substring(tsMatch[0].length).trim();
+    }
+
+    const lower = text.toLowerCase();
+    if (lower.includes('error') || lower.includes('fatal') || lower.includes('failed')) {
+      level = 'error';
+    } else if (lower.includes('warn')) {
+      level = 'warning';
+    } else if (lower.includes('debug')) {
+      level = 'debug';
+    }
+
+    return {
+      id: logIdCounter,
+      timestamp,
+      source,
+      level,
+      subsystem,
+      message: text
+    };
+  }
+
+  async function loadHistory() {
+    try {
+      const res = await apiFetch('/api/logs/history');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.entries && Array.isArray(data.entries) && data.entries.length > 0) {
+          logs = data.entries;
+          updateSources();
+          if (autoScroll && logContainer) {
+            setTimeout(() => {
+              if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
+            }, 50);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load initial log history:', e);
+    }
+  }
+
+  async function fetchFlashHealth() {
+    try {
+      const res = await apiFetch('/api/logs/flash-health');
+      if (res.ok) {
+        flashHealth = await res.json();
+      }
+    } catch {}
+  }
+
+  async function changeLogLevel(newLevel: string) {
+    if (isUpdatingLevel) return;
+    isUpdatingLevel = true;
+    try {
+      const res = await apiFetch('/api/logs/level', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'mihomo', level: newLevel })
+      });
+      if (res.ok) {
+        runtimeLevel = newLevel;
+        showToast('success', $t('logs.level_updated', { level: newLevel.toUpperCase() }));
+      } else {
+        const err = await res.json();
+        showToast('error', err?.error || 'Failed to update level');
+      }
+    } catch (e: any) {
+      showToast('error', e?.message || 'Failed to change log level');
+    } finally {
+      isUpdatingLevel = false;
+    }
+  }
+
   function connect() {
+    if (destroyed) return;
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/api/logs/ws`;
 
@@ -177,58 +275,130 @@
 
     ws.onopen = () => {
       connected = true;
-      const msg = $t('logs.connected');
-      logs = [...logs, parseLogLine(`[xkeen] ${msg}`)];
     };
 
     ws.onmessage = (event) => {
-      if (document.hidden) return;
-      if (!paused) {
-        const entry = parseLogLine(event.data);
-        logs = [...logs, entry].slice(-MAX_LOG_BUFFER);
-        updateSources();
+      if (document.hidden || destroyed) return;
 
-        if (autoScroll && logContainer) {
-          setTimeout(() => {
-            if (logContainer) {
-              logContainer.scrollTop = logContainer.scrollHeight;
-            }
-          }, 0);
+      try {
+        const parsed = JSON.parse(event.data);
+        if (Array.isArray(parsed)) {
+          for (const item of parsed) {
+            logIdCounter += 1;
+            incomingBuffer.push({
+              id: item.id || logIdCounter,
+              timestamp: item.timestamp || new Date().toTimeString().split(' ')[0],
+              source: item.source || 'sys',
+              level: item.level || 'info',
+              subsystem: item.subsystem || '',
+              message: item.message || ''
+            });
+          }
+          scheduleBatchFlush();
+          return;
+        } else if (parsed && typeof parsed === 'object') {
+          logIdCounter += 1;
+          incomingBuffer.push({
+            id: parsed.id || logIdCounter,
+            timestamp: parsed.timestamp || new Date().toTimeString().split(' ')[0],
+            source: parsed.source || 'sys',
+            level: parsed.level || 'info',
+            subsystem: parsed.subsystem || '',
+            message: parsed.message || ''
+          });
+          scheduleBatchFlush();
+          return;
         }
+      } catch {
+        // Fallback for plain text streams
+        const entry = parseFallbackLogLine(event.data);
+        incomingBuffer.push(entry);
+        scheduleBatchFlush();
       }
     };
 
     ws.onerror = () => {
       connected = false;
-      const msg = $t('logs.connection_error');
-      logs = [...logs, parseLogLine(`[error] ${msg}`)];
     };
 
     ws.onclose = () => {
       connected = false;
-      const msg = $t('logs.disconnected');
-      logs = [...logs, parseLogLine(`[xkeen] ${msg}`)];
-
-      // Auto-reconnect after 3 seconds if not paused and component is still mounted
       if (!paused && !destroyed) {
-        setTimeout(connect, 3000);
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        reconnectTimeout = setTimeout(connect, 3000);
       }
     };
   }
 
   function disconnect() {
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
     if (ws) {
       ws.close();
       ws = null;
     }
   }
 
-  function clearLogs() {
+  async function handleClearLogs() {
+    const confirmed = await showConfirm($t('logs.clear_confirm'));
+    if (!confirmed) return;
+    try {
+      await apiFetch('/api/logs/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'all' })
+      });
+    } catch {}
     logs = [];
-    availableSources = [];
+    incomingBuffer = [];
+    pausedNewCount = 0;
+    showToast('success', $t('logs.cleared_success'));
+    fetchFlashHealth();
   }
 
-  function exportLogs() {
+  function togglePause() {
+    paused = !paused;
+    if (!paused) {
+      pausedNewCount = 0;
+      if (autoScroll && logContainer) {
+        setTimeout(() => {
+          if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
+        }, 0);
+      }
+    }
+  }
+
+  function unpauseAndScroll() {
+    paused = false;
+    pausedNewCount = 0;
+    if (logContainer) {
+      setTimeout(() => {
+        if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
+      }, 0);
+    }
+  }
+
+  function exportFiltered() {
+    const textContent = filteredLogs
+      .map(
+        (l) =>
+          `[${l.timestamp}] [${l.source}] [${l.level.toUpperCase()}] ${l.subsystem ? `[${l.subsystem}] ` : ''}${l.message}`
+      )
+      .join('\n');
+    const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `xcp_logs_filtered_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportFull() {
     const a = document.createElement('a');
     a.href = '/api/logs/download';
     document.body.appendChild(a);
@@ -236,33 +406,57 @@
     document.body.removeChild(a);
   }
 
-  function togglePause() {
-    paused = !paused;
-  }
-
-  function getFilteredLogs(): LogEntry[] {
-    return filteredLogs;
-  }
-
-  function getSourceColor(source: string): string {
-    if (!source) return 'var(--fg-dim)';
-    // Beautiful pastel colors for dark terminal theme
-    const colors = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#f87171'];
-    let hash = 0;
-    for (let i = 0; i < source.length; i++) {
-      hash = source.charCodeAt(i) + ((hash << 5) - hash);
+  async function copyRow(entry: LogEntry) {
+    try {
+      const line = `[${entry.timestamp}] [${entry.source}] [${entry.level.toUpperCase()}] ${entry.subsystem ? `[${entry.subsystem}] ` : ''}${entry.message}`;
+      await navigator.clipboard.writeText(line);
+      showToast('success', $t('logs.copied'));
+    } catch {
+      showToast('error', 'Failed to copy');
     }
-    return colors[Math.abs(hash) % colors.length];
+  }
+
+  function highlightMatches(text: string, query: string): string {
+    if (!query) return escapeHtml(text);
+    const cleanQuery = query.startsWith('!') ? query.substring(1).trim() : query.trim();
+    if (!cleanQuery) return escapeHtml(text);
+
+    const safeQuery = cleanQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${safeQuery})`, 'gi');
+    const parts = text.split(regex);
+    return parts
+      .map((part) => {
+        if (!part) return '';
+        if (part.toLowerCase() === cleanQuery.toLowerCase()) {
+          return `<mark class="log-mark">${escapeHtml(part)}</mark>`;
+        }
+        return escapeHtml(part);
+      })
+      .join('');
+  }
+
+  function escapeHtml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 
   function handleVisibilityChange() {
     if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN) && !paused && !destroyed) {
       connect();
+      fetchFlashHealth();
     }
   }
 
   onMount(() => {
+    loadHistory();
+    fetchFlashHealth();
+    flashHealthInterval = setInterval(fetchFlashHealth, 30000);
     connect();
+
     window.addEventListener('visibilitychange', handleVisibilityChange);
     const mainContent = document.querySelector('.main-content') as HTMLElement;
     if (mainContent) {
@@ -272,6 +466,14 @@
 
   onDestroy(() => {
     destroyed = true;
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (flashHealthInterval) {
+      clearInterval(flashHealthInterval);
+      flashHealthInterval = null;
+    }
     disconnect();
     window.removeEventListener('visibilitychange', handleVisibilityChange);
     const mainContent = document.querySelector('.main-content') as HTMLElement;
@@ -286,52 +488,82 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_services')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.group_system')} <span class="crumb-sep">›</span>
         {$t('nav.logs')}
       </div>
       <h1>{$t('logs.h1')}</h1>
       <p class="sub">{$t('logs.h1_sub')}</p>
     </div>
     <div class="ph-actions">
-      <span class="status-indicator" class:connected>
-        {connected ? $t('logs.status_connected') : $t('logs.status_disconnected')}
-      </span>
-      {#if !connected}
-        <button onclick={connect} class="btn btn-primary" title={$t('logs.connect')}
-          >{$t('logs.connect')}</button
+      <!-- Flash Health Badge -->
+      {#if flashHealth}
+        <div
+          class="flash-health-badge"
+          class:pressure={flashHealth.is_under_pressure}
+          title={$t('logs.flash_health_desc')}
         >
+          <span class="flash-icon">💾</span>
+          <span class="flash-stat"
+            >{$t('logs.flash_total_logs', {
+              size: formatBytes(flashHealth.total_logs_bytes)
+            })}</span
+          >
+          <span class="flash-divider">•</span>
+          <span class="flash-stat"
+            >{$t('logs.flash_free', { free: formatBytes(flashHealth.free_space_bytes) })}</span
+          >
+          {#if flashHealth.emergency_actions > 0}
+            <span class="flash-alert-tag">⚡ {flashHealth.emergency_actions}</span>
+          {/if}
+        </div>
+      {/if}
+
+      {#if !connected}
+        <span class="status-badge stopped">
+          <span class="status-dot error"></span>{$t('logs.status_disconnected')}
+        </span>
+        <button onclick={connect} class="btn btn-primary btn-sm" title={$t('logs.connect')}>
+          {$t('logs.connect')}
+        </button>
+      {:else if paused}
+        <span class="status-badge warning">
+          <span class="status-dot warning"></span>{$t('logs.status_paused')}
+        </span>
+      {:else}
+        <span class="status-badge running">
+          <span class="status-dot success"></span>{$t('logs.status_connected')}
+        </span>
       {/if}
     </div>
   </div>
 
+  {#if flashHealth && flashHealth.is_under_pressure}
+    <div class="pressure-banner">
+      <span class="pressure-icon">⚠️</span>
+      <span>{$t('logs.flash_pressure_alert')}</span>
+      <button class="btn btn-sm btn-secondary" onclick={handleClearLogs}>
+        {$t('logs.clear')}
+      </button>
+    </div>
+  {/if}
+
   <div class="logs-page-container">
-    <!-- filter toolbar -->
-    <div class="toolbar">
-      <div class="toolbar-left">
+    <!-- Unified Balanced Toolbar (LOGHUB-08) -->
+    <div class="logs-toolbar">
+      <!-- Left Controls: Stream Lifecycle -->
+      <div class="tb-group tb-stream">
         <button
-          class="btn btn-secondary"
+          class="btn btn-secondary btn-sm"
           onclick={togglePause}
           title={paused ? $t('logs.resume') : $t('logs.pause')}
         >
           {#if paused}
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              style="margin-right: 6px;"><polygon points="5 3 19 12 5 21 5 3" /></svg
-            >{$t('logs.resume')}
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
+              ><polygon points="5 3 19 12 5 21 5 3" /></svg
+            >
+            <span>{$t('logs.resume')}</span>
           {:else}
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              style="margin-right: 6px;"
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"
               ><rect x="6" y="5" width="4" height="14" rx="1" /><rect
                 x="14"
                 y="5"
@@ -339,11 +571,12 @@
                 height="14"
                 rx="1"
               /></svg
-            >{$t('logs.pause')}
+            >
+            <span>{$t('logs.pause')}</span>
           {/if}
         </button>
 
-        <button class="btn btn-secondary" onclick={clearLogs} title={$t('logs.clear')}>
+        <button class="btn btn-secondary btn-sm" onclick={handleClearLogs} title={$t('logs.clear')}>
           <svg
             width="13"
             height="13"
@@ -351,14 +584,19 @@
             fill="none"
             stroke="currentColor"
             stroke-width="2"
-            style="margin-right: 6px;"
             ><polyline points="3 6 5 6 21 6" /><path
               d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
             /></svg
-          >{$t('logs.clear')}
+          >
+          <span>{$t('logs.clear')}</span>
         </button>
 
-        <button class="btn btn-secondary" onclick={exportLogs} title={$t('logs.export')}>
+        <button
+          class="btn btn-secondary btn-sm"
+          class:btn-active={autoScroll}
+          onclick={() => (autoScroll = !autoScroll)}
+          title={$t('logs.autoscroll')}
+        >
           <svg
             width="13"
             height="13"
@@ -366,164 +604,283 @@
             fill="none"
             stroke="currentColor"
             stroke-width="2"
-            style="margin-right: 6px;"
-            ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
-              points="7 10 12 15 17 10"
-            /><line x1="12" y1="15" x2="12" y2="3" /></svg
-          >{$t('logs.export')}
-        </button>
-      </div>
-
-      <div class="toolbar-right">
-        <input
-          type="text"
-          class="filter-input"
-          placeholder={$t('logs.filter')}
-          bind:value={filter}
-        />
-
-        <!-- Вкладки источников -->
-        <div class="source-tabs" role="group" aria-label={$t('logs.source')}>
-          <button
-            class="stab"
-            class:stab-active={sourceFilter === ''}
-            onclick={() => (sourceFilter = '')}>{$t('logs.all_sources')}</button
+            ><polyline points="7 13 12 18 17 13" /><polyline points="7 6 12 11 17 6" /></svg
           >
-          {#each KNOWN_SOURCES as src}
-            <button
-              class="stab"
-              class:stab-active={sourceFilter === src}
-              onclick={() => (sourceFilter = sourceFilter === src ? '' : src)}>{src}</button
-            >
-          {/each}
-        </div>
+          <span>{$t('logs.autoscroll')}</span>
+        </button>
 
-        <select bind:value={levelFilter} class="source-select">
-          <option value="">{$t('logs.all_levels')}</option>
-          <option value="info">info</option>
-          <option value="warning">warning</option>
-          <option value="error">error</option>
-          <option value="debug">debug</option>
-        </select>
-
-        <label class="toggle-label">
-          <label class="toggle-switch">
-            <input type="checkbox" bind:checked={autoScroll} />
-            <span class="toggle-slider"></span>
-          </label>
-          {$t('logs.autoscroll')}
-        </label>
-      </div>
-    </div>
-
-    {#if !connected}
-      <div
-        class="alert alert-danger"
-        style="margin: 0; padding: 10px 14px; border-radius: var(--radius-md); font-size: 13px; display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--border);"
-      >
-        <span
-          ><strong>{$t('logs.disconnected_title')}</strong> — {$t('logs.disconnected_desc')}</span
-        >
         <button
-          onclick={connect}
-          class="btn btn-secondary btn-small"
-          style="padding: 4px 8px; font-size: 12px;"
+          class="btn btn-secondary btn-sm"
+          class:btn-active={wordWrap}
+          onclick={() => (wordWrap = !wordWrap)}
+          title={$t('logs.word_wrap')}
         >
-          {$t('logs.reconnect')}
-        </button>
-      </div>
-    {/if}
-
-    <div
-      class="logs-pane"
-      bind:this={logContainer}
-      bind:clientHeight={containerHeight}
-      onscroll={handleScroll}
-      style="position: relative;"
-    >
-      {#if totalItems > 0}
-        <div
-          class="logs-spacer"
-          style="height: {totalItems *
-            ROW_HEIGHT}px; width: 100%; pointer-events: none; position: absolute; top: 0; left: 0;"
-        ></div>
-
-        {#each visibleLogs as item}
-          <div
-            class="line"
-            style="position: absolute; top: 0; left: 16px; right: 16px; height: {ROW_HEIGHT}px; transform: translateY({item.y}px); display: flex; align-items: center; box-sizing: border-box;"
-          >
-            <span class="ts">{item.log.timestamp}</span>
-            {#if item.log.source}
-              <span class="src" style="color: {getSourceColor(item.log.source)};"
-                >[{item.log.source}]</span
-              >
-            {/if}
-            <span class="lv-{item.log.level || 'info'}">{item.log.text}</span>
-          </div>
-        {/each}
-      {/if}
-
-      {#if totalItems === 0}
-        <div class="logs-empty-placeholder">
           <svg
-            width="24"
-            height="24"
+            width="13"
+            height="13"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             stroke-width="2"
-            class="empty-icon"
-            style="margin-bottom: 12px; opacity: 0.6;"
+            ><polyline points="9 10 4 15 9 20" /><path d="M20 4v7a4 4 0 0 1-4 4H4" /></svg
           >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="8" y1="12" x2="16" y2="12" />
-          </svg>
+          <span>{$t('logs.word_wrap')}</span>
+        </button>
+
+        <div class="export-split">
+          <button
+            class="btn btn-secondary btn-sm"
+            onclick={exportFiltered}
+            title={$t('logs.export_filtered')}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              ><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline
+                points="7 10 12 15 17 10"
+              /><line x1="12" y1="15" x2="12" y2="3" /></svg
+            >
+            <span>{$t('logs.export_filtered')}</span>
+          </button>
+          <button
+            class="btn btn-secondary btn-sm btn-icon"
+            onclick={exportFull}
+            title={$t('logs.export_full')}
+            aria-label={$t('logs.export_full')}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"><path d="M6 9l6 6 6-6" /></svg
+            >
+          </button>
+        </div>
+
+        <!-- Runtime Core Log-Level Switcher -->
+        <div class="runtime-level-control" title={$t('logs.runtime_level')}>
+          <span class="ctrl-label">Mihomo:</span>
+          <select
+            class="runtime-select"
+            value={runtimeLevel}
+            disabled={isUpdatingLevel}
+            onchange={(e) => changeLogLevel((e.target as HTMLSelectElement).value)}
+            aria-label={$t('logs.runtime_level')}
+          >
+            <option value="silent">SILENT</option>
+            <option value="error">ERROR</option>
+            <option value="warning">WARN</option>
+            <option value="info">INFO</option>
+            <option value="debug">DEBUG</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Right Controls: Search & Filtering -->
+      <div class="tb-group tb-filters">
+        <!-- Search Input with Inversion & Match Counter -->
+        <div class="search-wrap">
+          <svg
+            class="search-icon"
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            ><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg
+          >
+          <input
+            type="text"
+            class="search-input"
+            placeholder={$t('logs.search_placeholder')}
+            bind:value={filter}
+          />
+          {#if filter}
+            <span class="match-badge">
+              {filteredLogs.length}/{logs.length}
+            </span>
+            <button
+              class="clear-search-btn"
+              onclick={() => (filter = '')}
+              title="Clear search"
+              aria-label="Clear search"
+            >
+              ×
+            </button>
+          {/if}
+        </div>
+
+        <!-- Source Tabs -->
+        <div class="source-pills" role="group" aria-label={$t('logs.source')}>
+          {#each SOURCE_TABS as tab}
+            <button
+              type="button"
+              class="source-pill"
+              class:error-tab={tab.isError}
+              class:active={sourceFilter === tab.id}
+              onclick={() => (sourceFilter = sourceFilter === tab.id ? '' : tab.id)}
+            >
+              {tab.label.startsWith('logs.') ? $t(tab.label) : tab.label}
+            </button>
+          {/each}
+        </div>
+
+        <!-- Severity Level Dropdown -->
+        <select bind:value={levelFilter} class="level-select" aria-label={$t('logs.level')}>
+          <option value="">{$t('logs.all_levels')}</option>
+          <option value="error">ERROR</option>
+          <option value="warning">WARN</option>
+          <option value="info">INFO</option>
+          <option value="debug">DEBUG</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Log Console Pane (Virtual Scroll + Fluid Layout) -->
+    <div
+      class="logs-console"
+      class:wrap-mode={wordWrap}
+      bind:this={logContainer}
+      bind:clientHeight={containerHeight}
+      onscroll={handleScroll}
+    >
+      {#if totalItems > 0}
+        {#if !wordWrap}
           <div
-            class="empty-title"
-            style="font-size: 14px; font-weight: 500; color: var(--fg-secondary); margin-bottom: 6px;"
+            class="logs-spacer"
+            style="height: {totalItems *
+              ROW_HEIGHT}px; width: 100%; pointer-events: none; position: absolute; top: 0; left: 0;"
+          ></div>
+        {/if}
+
+        <div class="lines-container" class:static-layout={wordWrap}>
+          {#each visibleLogs as item (item.log.id)}
+            <div
+              class="log-row"
+              class:row-error={item.log.level === 'error' || item.log.level === 'fatal'}
+              class:row-warning={item.log.level === 'warning'}
+              class:row-debug={item.log.level === 'debug'}
+              style={!wordWrap
+                ? `position: absolute; top: 0; left: 0; right: 0; height: ${ROW_HEIGHT}px; transform: translateY(${item.y}px);`
+                : ''}
+            >
+              <span class="col-ts monospace">{item.log.timestamp}</span>
+              <span class="col-src">
+                <span class="src-tag">{item.log.source || 'sys'}</span>
+              </span>
+              <span class="col-level">
+                {#if item.log.level === 'error' || item.log.level === 'fatal'}
+                  <span class="lvl-badge lvl-error">ERR</span>
+                {:else if item.log.level === 'warning'}
+                  <span class="lvl-badge lvl-warn">WRN</span>
+                {:else if item.log.level === 'debug'}
+                  <span class="lvl-badge lvl-debug">DBG</span>
+                {:else}
+                  <span class="lvl-badge lvl-info">INF</span>
+                {/if}
+              </span>
+              {#if item.log.subsystem}
+                <span class="col-subsystem">[{item.log.subsystem}]</span>
+              {/if}
+              <span class="col-msg">
+                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                {@html highlightMatches(item.log.message, filter)}
+              </span>
+
+              <button
+                type="button"
+                class="copy-row-btn"
+                onclick={() => copyRow(item.log)}
+                title={$t('logs.copy_row')}
+                aria-label={$t('logs.copy_row')}
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  ><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path
+                    d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                  /></svg
+                >
+              </button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      {#if totalItems === 0}
+        <div class="empty-state">
+          <svg
+            width="32"
+            height="32"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            ><circle cx="12" cy="12" r="10" /><line x1="8" y1="12" x2="16" y2="12" /></svg
           >
+          <div class="empty-title">
             {!connected
               ? $t('logs.disconnected_title')
               : filter || sourceFilter || levelFilter
                 ? $t('logs.no_filtered_logs')
                 : $t('logs.no_logs')}
           </div>
-          <div
-            class="empty-desc"
-            style="font-size: 12px; color: var(--fg-faint); max-width: 280px; line-height: 1.4;"
-          >
+          <div class="empty-desc">
             {!connected
               ? $t('logs.disconnected_desc')
               : connected
                 ? $t('logs.waiting')
                 : $t('logs.connect_hint')}
           </div>
-          {#if !connected}
-            <button
-              onclick={connect}
-              class="btn btn-secondary btn-small"
-              style="margin-top: 14px; padding: 4px 8px; font-size: 12px;"
-            >
-              {$t('logs.reconnect')}
-            </button>
-          {/if}
+        </div>
+      {/if}
+
+      <!-- Floating Paused Notification Banner -->
+      {#if paused && pausedNewCount > 0}
+        <div class="floating-pause-banner">
+          <span>{$t('logs.paused_notice', { count: String(pausedNewCount) })}</span>
+          <button class="btn btn-sm btn-primary" onclick={unpauseAndScroll}>
+            {$t('logs.scroll_to_bottom')}
+          </button>
         </div>
       {/if}
     </div>
 
-    <div class="stats">
-      <span class="stat">{$t('logs.buffer_count', { count: String(logs.length) })}</span>
-      <span class="stat"
-        ><b>{availableSources.length}</b>
+    <!-- Status Bar / Stats Footer -->
+    <div class="logs-footer">
+      <div class="footer-stat">
+        {pluralize(
+          logs.length,
+          $t('logs.buffer_count_one', { count: String(logs.length) }),
+          $t('logs.buffer_count_few', { count: String(logs.length) }),
+          $t('logs.buffer_count_many', { count: String(logs.length) }),
+          $currentLang
+        )}
+      </div>
+      <div class="footer-stat">
         {pluralize(
           availableSources.length,
-          $t('logs.source_count_one', { count: '' }).trim(),
-          $t('logs.source_count_few', { count: '' }).trim(),
-          $t('logs.source_count_many', { count: '' }).trim()
-        )}</span
-      >
-      <span class="stat">{$t('logs.realtime_label')}</span>
+          $t('logs.active_sources_count_one', { count: String(availableSources.length) }),
+          $t('logs.active_sources_count_few', { count: String(availableSources.length) }),
+          $t('logs.active_sources_count_many', { count: String(availableSources.length) }),
+          $currentLang
+        )}
+      </div>
+      <div class="footer-stat footer-live">
+        <span class="live-dot" class:paused class:disconnected={!connected}></span>
+        {$t('logs.realtime_label')}
+      </div>
     </div>
   </div>
 </div>
@@ -534,259 +891,581 @@
     flex-direction: column;
     height: 100vh;
     box-sizing: border-box;
-    padding: 28px 36px 16px;
-    gap: 16px;
+    padding: 24px 32px 16px;
+    gap: 14px;
     background: var(--bg);
   }
 
   @media (max-width: 768px) {
     .logs-page {
       height: calc(100vh - 50px);
-      padding: 16px 16px 12px;
-      gap: 12px;
+      padding: 16px;
+      gap: 10px;
     }
+  }
+
+  .page-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .page-head h1 {
+    margin: 4px 0 6px;
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  .page-head .sub {
+    margin: 0;
+    color: var(--fg-secondary);
+    font-size: 13px;
+  }
+
+  .crumbs {
+    font-size: 12px;
+    color: var(--fg-dim);
+    margin-bottom: 2px;
+  }
+
+  .crumb-sep {
+    color: var(--fg-faint);
+    margin: 0 6px;
+  }
+
+  .ph-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 6px;
+  }
+
+  .flash-health-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    font-size: 12px;
+    font-family: var(--font-family-mono);
+    color: var(--fg-secondary);
+  }
+
+  .flash-health-badge.pressure {
+    border-color: var(--color-error);
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--color-error);
+  }
+
+  .flash-divider {
+    color: var(--fg-dim);
+    opacity: 0.5;
+  }
+
+  .flash-alert-tag {
+    background: var(--color-error);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .pressure-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid var(--color-error);
+    border-radius: var(--radius-md);
+    padding: 8px 14px;
+    font-size: 13px;
+    color: var(--color-error);
+    font-weight: 600;
   }
 
   .logs-page-container {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    flex: 1;
-    min-height: 0;
-  }
-
-  .logs-pane {
-    flex: 1;
-    min-height: 0;
-    background: #050d16;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 16px;
-    font-family: var(--font-family-mono);
-    font-size: 12.5px;
-    line-height: 1.5;
-    overflow-y: auto;
-    overflow-x: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
-  }
-
-  .logs-pane .line {
-    display: flex;
     gap: 10px;
-    align-items: center;
-    white-space: nowrap;
-    overflow-x: visible;
-    text-overflow: clip;
-  }
-
-  .logs-pane .ts {
-    color: var(--fg-faint);
-    flex-shrink: 0;
-    user-select: none;
-  }
-
-  .logs-pane .src {
-    font-weight: 600;
-    min-width: 60px;
-    flex-shrink: 0;
-    text-align: right;
-    user-select: none;
-  }
-
-  .logs-pane .lv-info {
-    color: var(--fg-primary);
-    white-space: nowrap;
-    overflow-x: visible;
-    text-overflow: clip;
     flex: 1;
+    min-height: 0;
   }
 
-  .logs-pane .lv-warning {
-    color: var(--warning);
-    white-space: nowrap;
-    overflow-x: visible;
-    text-overflow: clip;
-    flex: 1;
-  }
-
-  .logs-pane .lv-error {
-    color: var(--danger);
-    white-space: nowrap;
-    overflow-x: visible;
-    text-overflow: clip;
-    flex: 1;
-  }
-
-  .toolbar {
+  /* Unified Toolbar */
+  .logs-toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     flex-wrap: wrap;
-    background: var(--bg);
-    padding: 4px 0 10px;
-    border-bottom: 1px solid var(--border-light);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
   }
 
-  .toolbar-left {
+  .tb-group {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-shrink: 0;
+    flex-wrap: wrap;
   }
 
-  .toolbar-right {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex: 1;
-    min-width: 300px;
-    justify-content: flex-end;
+  .btn-active {
+    background: rgba(41, 194, 240, 0.15) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
   }
 
-  /* Unified sizing and style for all toolbar controls */
-  .toolbar :global(.btn) {
-    height: 34px;
-    padding: 0 14px;
-    font-size: 13px;
-    font-weight: 600;
-    border-radius: var(--radius-md);
+  .export-split {
     display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    box-sizing: border-box;
-  }
-
-  .toolbar .filter-input {
-    height: 34px;
-    padding: 0 12px;
-    font-size: 12.5px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    color: var(--fg-primary);
-    box-sizing: border-box;
-    flex: 1;
-    max-width: 280px;
-    min-width: 120px;
-    transition:
-      border-color var(--transition-fast),
-      box-shadow var(--transition-fast);
-  }
-  .toolbar .filter-input:focus {
-    outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-  }
-
-  .toolbar .source-select {
-    height: 34px;
-    padding: 0 28px 0 12px;
-    font-size: 12.5px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    color: var(--fg-primary);
-    box-sizing: border-box;
-    cursor: pointer;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%238aa0b7' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
-    background-size: 10px;
-    transition:
-      border-color var(--transition-fast),
-      box-shadow var(--transition-fast);
-  }
-  .toolbar .source-select:focus {
-    outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-  }
-
-  .toolbar .source-tabs {
-    display: inline-flex;
-    height: 34px;
-    border: 1px solid var(--border);
     border-radius: var(--radius-md);
     overflow: hidden;
-    background: var(--bg-secondary);
-    box-sizing: border-box;
-    padding: 2px;
   }
 
-  .toolbar .stab {
-    height: 100%;
+  .export-split button:first-child {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+  .export-split button:last-child {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    border-left: 1px solid var(--border);
+    padding: 0 6px;
+  }
+
+  .runtime-level-control {
     display: inline-flex;
     align-items: center;
-    padding: 0 14px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--fg-secondary);
-    background: transparent;
-    border: none;
-    border-radius: calc(var(--radius-md) - 2px);
-    cursor: pointer;
-    transition:
-      background 0.15s,
-      color 0.15s;
-    white-space: nowrap;
-  }
-  .toolbar .stab:hover:not(.stab-active) {
-    background: var(--bg-hover);
-    color: var(--fg-primary);
-  }
-  .toolbar .stab.stab-active {
-    background: var(--accent);
-    color: #03182a;
+    gap: 6px;
+    padding: 2px 6px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
   }
 
-  .toggle-label {
+  .ctrl-label {
+    color: var(--fg-dim);
+    font-weight: 600;
+  }
+
+  .runtime-select {
+    height: 24px;
+    padding: 0 4px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-family-mono);
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--accent);
+    cursor: pointer;
+  }
+
+  /* Search Input */
+  .search-wrap {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--fg-secondary);
-    cursor: pointer;
-    flex-shrink: 0;
   }
 
-  .status-indicator {
-    font-size: 12px;
+  .search-icon {
+    position: absolute;
+    left: 10px;
     color: var(--fg-dim);
-    padding: 3px 8px;
-    border-radius: 8px;
+    pointer-events: none;
+  }
+
+  .search-input {
+    height: 30px;
+    padding: 0 54px 0 28px;
+    font-size: 12px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--fg-primary);
+    width: 200px;
+    transition: all 0.15s ease;
+  }
+
+  .search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(41, 194, 240, 0.2);
+    width: 240px;
+  }
+
+  .match-badge {
+    position: absolute;
+    right: 22px;
+    font-size: 10px;
+    color: var(--accent);
+    font-weight: 700;
+    font-family: var(--font-family-mono);
+  }
+
+  .clear-search-btn {
+    position: absolute;
+    right: 6px;
+    background: transparent;
+    border: none;
+    color: var(--fg-dim);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+    line-height: 1;
+  }
+
+  .clear-search-btn:hover {
+    color: var(--fg-primary);
+  }
+
+  /* Source Pills */
+  .source-pills {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg-secondary);
+    padding: 1px;
+  }
+
+  .source-pill {
+    padding: 3px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg-dim);
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .source-pill:hover:not(.active) {
+    color: var(--fg-primary);
+    background: var(--bg-hover);
+  }
+
+  .source-pill.active {
+    background: var(--accent);
+    color: #03182a;
+    font-weight: 700;
+  }
+
+  .source-pill.error-tab.active {
+    background: var(--color-error);
+    color: #fff;
+  }
+
+  /* Level Select */
+  .level-select {
+    height: 30px;
+    padding: 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--fg-primary);
+    cursor: pointer;
+  }
+
+  .level-select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  /* Log Console Pane */
+  .logs-console {
+    position: relative;
+    flex: 1;
+    min-height: 200px;
+    background: var(--bg-terminal);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow-y: auto;
+    overflow-x: hidden;
+    font-family: var(--font-family-mono);
+    font-size: 12px;
+    line-height: 28px;
+    color: var(--fg-terminal);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .logs-console.wrap-mode {
+    overflow-x: hidden;
+    line-height: 1.5;
+  }
+
+  .lines-container {
+    width: 100%;
+  }
+
+  .lines-container.static-layout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .log-row {
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    box-sizing: border-box;
+    white-space: nowrap;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    transition: background 0.1s ease;
+  }
+
+  .wrap-mode .log-row {
+    white-space: normal;
+    padding: 6px 12px;
+    align-items: flex-start;
+  }
+
+  .log-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .log-row:hover .copy-row-btn {
+    opacity: 1;
+  }
+
+  .row-error {
+    background: rgba(239, 68, 68, 0.08);
+    color: #fca5a5;
+  }
+
+  .row-error:hover {
+    background: rgba(239, 68, 68, 0.14);
+  }
+
+  .row-warning {
+    background: rgba(245, 158, 11, 0.06);
+    color: #fcd34d;
+  }
+
+  .row-warning:hover {
+    background: rgba(245, 158, 11, 0.12);
+  }
+
+  .row-debug {
+    color: #94a3b8;
+  }
+
+  .col-ts {
+    flex-shrink: 0;
+    width: 70px;
+    color: var(--fg-dim);
+    font-size: 11px;
+  }
+
+  .col-src {
+    flex-shrink: 0;
+    width: 75px;
+    margin-right: 6px;
+  }
+
+  .src-tag {
+    display: inline-block;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--fg-dim);
+    max-width: 70px;
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .status-indicator.connected {
-    color: #4ade80;
-    border-color: rgba(74, 222, 128, 0.3);
-    background: rgba(74, 222, 128, 0.06);
+
+  .col-level {
+    flex-shrink: 0;
+    width: 40px;
+    margin-right: 6px;
   }
 
-  .stats {
-    display: flex;
-    gap: 16px;
-    font-size: 11.5px;
+  .lvl-badge {
+    display: inline-block;
+    padding: 1px 4px;
+    font-size: 9px;
+    font-weight: 800;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
+  }
+
+  .lvl-error {
+    background: var(--color-error);
+    color: #fff;
+  }
+
+  .lvl-warn {
+    background: #d97706;
+    color: #fff;
+  }
+
+  .lvl-info {
+    background: rgba(41, 194, 240, 0.2);
+    color: var(--accent);
+  }
+
+  .lvl-debug {
+    background: rgba(148, 163, 184, 0.2);
+    color: #94a3b8;
+  }
+
+  .col-subsystem {
+    flex-shrink: 0;
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    margin-right: 8px;
+  }
+
+  .col-msg {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .wrap-mode .col-msg {
+    overflow: visible;
+    text-overflow: clip;
+    word-break: break-word;
+  }
+
+  :global(.log-mark) {
+    background: #fbbf24;
+    color: #0f172a;
+    padding: 0 2px;
+    border-radius: 2px;
+    font-weight: 700;
+  }
+
+  .copy-row-btn {
+    opacity: 0;
+    background: transparent;
+    border: none;
     color: var(--fg-dim);
-    padding: 4px 0;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition:
+      opacity 0.15s,
+      color 0.15s;
+    margin-left: 6px;
     flex-shrink: 0;
   }
-  .stat b {
-    color: var(--fg-secondary);
+
+  .copy-row-btn:hover {
+    color: var(--fg-primary);
+    background: rgba(255, 255, 255, 0.1);
   }
 
-  .logs-empty-placeholder {
+  /* Empty State */
+  .empty-state {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 60px 20px;
-    text-align: center;
-    color: var(--fg-dim);
     height: 100%;
+    min-height: 180px;
+    color: var(--fg-dim);
+    text-align: center;
+    gap: 8px;
+  }
+
+  .empty-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg-secondary);
+  }
+
+  .empty-desc {
+    font-size: 12px;
+    color: var(--fg-dim);
+  }
+
+  /* Floating Pause Banner */
+  .floating-pause-banner {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid var(--accent);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    border-radius: var(--radius-full);
+    padding: 6px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--fg-primary);
+    z-index: 10;
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translate(-50%, 8px);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+  }
+
+  /* Status Bar / Footer */
+  .logs-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 16px;
+    padding: 2px 4px;
+    font-size: 11px;
+    color: var(--fg-dim);
+  }
+
+  .footer-stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .footer-live {
+    font-weight: 600;
+  }
+
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-success);
+    box-shadow: 0 0 6px var(--color-success);
+    transition:
+      background 0.2s,
+      box-shadow 0.2s;
+  }
+
+  .live-dot.paused {
+    background: var(--color-warning);
+    box-shadow: 0 0 6px var(--color-warning);
+  }
+
+  .live-dot.disconnected {
+    background: var(--color-error);
+    box-shadow: 0 0 6px var(--color-error);
   }
 </style>

@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"bufio"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 const (
@@ -46,6 +49,72 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
+	ctx := r.Context()
+
+	// Ping goroutine: sends a ping every wsPingInterval and closes conn on failure.
+	stopPing := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(wsPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					return
+				}
+			case <-stopPing:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	defer close(stopPing)
+
+	if a.logDispatcher != nil {
+		ch := a.logDispatcher.Subscribe()
+		defer a.logDispatcher.Unsubscribe(ch)
+
+		// Send initial history
+		initialHistory := a.logDispatcher.GetHistory("all", "", 200)
+		if len(initialHistory) > 0 {
+			if data, err := json.Marshal(initialHistory); err == nil {
+				if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+					return
+				}
+			}
+		}
+
+		// Read pump to handle client pongs/closes
+		go func() {
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					break
+				}
+			}
+		}()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case batch, ok := <-ch:
+				if !ok {
+					return
+				}
+				if len(batch) > 0 {
+					data, err := json.Marshal(batch)
+					if err != nil {
+						continue
+					}
+					if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+						return
+					}
+				}
+			}
+		}
+	}
+
 	sources := a.cfg.LogSources
 	if len(sources) == 0 {
 		sources = []string{a.cfg.LogPath}
@@ -71,28 +140,6 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
-	ctx := r.Context()
-
-	// Ping goroutine: sends a ping every wsPingInterval and closes conn on failure.
-	stopPing := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(wsPingInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
-					return
-				}
-			case <-stopPing:
-				return
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	defer close(stopPing)
 
 	// Validate log sources using pathVal
 	var validSources []string
@@ -164,7 +211,15 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 					if currentSource != "" && len(existingSources) > 1 {
 						line = "[" + filepath.Base(currentSource) + "] " + line
 					}
-					if err := conn.WriteMessage(websocket.TextMessage, []byte(line+"\n")); err != nil {
+					redacted := services.RedactSensitiveText(line)
+					entry := services.LogEntry{
+						Timestamp: time.Now().Format("15:04:05"),
+						Source:    filepath.Base(currentSource),
+						Level:     "info",
+						Message:   redacted,
+					}
+					data, _ := json.Marshal([]services.LogEntry{entry})
+					if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 						return err
 					}
 				}
@@ -199,6 +254,87 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// LogsHistory returns recent entries from in-memory ring buffers.
+func (a *API) LogsHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	source := r.URL.Query().Get("source")
+	level := r.URL.Query().Get("level")
+	limit := 300
+
+	if a.logDispatcher == nil {
+		a.jsonResponse(w, map[string]interface{}{"entries": []services.LogEntry{}})
+		return
+	}
+
+	entries := a.logDispatcher.GetHistory(source, level, limit)
+	a.jsonResponse(w, map[string]interface{}{"entries": entries})
+}
+
+// LogsFlashHealth returns flash memory health and storage metrics.
+func (a *API) LogsFlashHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	if a.logDispatcher == nil {
+		a.jsonResponse(w, services.FlashHealthInfo{})
+		return
+	}
+
+	health := a.logDispatcher.GetFlashHealth()
+	a.jsonResponse(w, health)
+}
+
+// LogsSetLevel updates runtime log-level dynamically.
+func (a *API) LogsSetLevel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Source string `json:"source"`
+		Level  string `json:"level"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		a.errorResponse(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if a.logDispatcher != nil {
+		if err := a.logDispatcher.SetLogLevel(req.Source, req.Level); err != nil {
+			a.errorResponse(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	a.jsonResponse(w, map[string]bool{"success": true})
+}
+
+// LogsClear clears in-memory ring buffers and optionally truncates log files.
+func (a *API) LogsClear(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Source string `json:"source"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if a.logDispatcher != nil {
+		a.logDispatcher.ClearBuffers(req.Source)
+	}
+
+	a.jsonResponse(w, map[string]bool{"success": true})
+}
+
 func (a *API) LogsDownload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -220,7 +356,15 @@ func (a *API) LogsDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	f, err := os.Open(cleanPath)
+	if err != nil {
+		a.errorResponse(w, "Failed to read log file", http.StatusInternalServerError)
+		return
+	}
+	defer f.Close()
+
 	w.Header().Set("Content-Disposition", "attachment; filename="+filepath.Base(cleanPath))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	http.ServeFile(w, r, cleanPath)
+	redactedReader := services.NewRedactionReader(f)
+	_, _ = io.Copy(w, redactedReader)
 }

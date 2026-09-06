@@ -524,3 +524,252 @@ func TestMihomoProviderRedirect(t *testing.T) {
 		t.Errorf("expected all original query params preserved, got %q", loc)
 	}
 }
+
+func TestSubscriptionUpdate_SockoptPreserve(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+
+	sub := &services.Subscription{
+		ID:              "sub-test",
+		Name:            "Original Name",
+		URL:             "https://example.com/sub",
+		Enabled:         true,
+		EnableXray:      true,
+		SockoptMark:     123,
+		SockoptFastOpen: true,
+		SockoptMptcp:    true,
+	}
+	if err := subSvc.Add(sub); err != nil {
+		t.Fatalf("failed to add sub: %v", err)
+	}
+
+	// 1. Partial update without any sockopt fields in JSON
+	updateBody := `{"name": "Renamed Sub"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/update?id=sub-test", strings.NewReader(updateBody))
+	rr := httptest.NewRecorder()
+	api.SubscriptionUpdate(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	updated := subSvc.Get("sub-test")
+	if updated == nil {
+		t.Fatalf("subscription not found after update")
+	}
+	if updated.Name != "Renamed Sub" {
+		t.Errorf("expected Name='Renamed Sub', got %q", updated.Name)
+	}
+	if updated.SockoptMark != 123 {
+		t.Errorf("expected SockoptMark=123 preserved, got %d", updated.SockoptMark)
+	}
+	if !updated.SockoptFastOpen {
+		t.Errorf("expected SockoptFastOpen=true preserved")
+	}
+	if !updated.SockoptMptcp {
+		t.Errorf("expected SockoptMptcp=true preserved")
+	}
+
+	// 2. Explicit update of sockopt fields
+	explicitBody := `{"sockopt_mark": 456, "sockopt_fast_open": false}`
+	req2 := httptest.NewRequest(http.MethodPost, "/api/subscriptions/update?id=sub-test", strings.NewReader(explicitBody))
+	rr2 := httptest.NewRecorder()
+	api.SubscriptionUpdate(rr2, req2)
+
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 on second update, got %d", rr2.Code)
+	}
+
+	updated2 := subSvc.Get("sub-test")
+	if updated2.SockoptMark != 456 {
+		t.Errorf("expected updated SockoptMark=456, got %d", updated2.SockoptMark)
+	}
+	if updated2.SockoptFastOpen {
+		t.Errorf("expected updated SockoptFastOpen=false, got true")
+	}
+	if !updated2.SockoptMptcp {
+		t.Errorf("expected SockoptMptcp=true preserved when omitted, got false")
+	}
+}
+
+func TestSubscriptionNodeDialerProxy(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+
+	sub := &services.Subscription{
+		ID:         "sub-1",
+		Name:       "Sub 1",
+		URL:        "http://example.com/sub",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []services.SubscriptionNode{
+			{Tag: "node-src", Name: "Source Node", Protocol: "vless"},
+			{Tag: "node-target", Name: "Target Node", Protocol: "vless"},
+			{Tag: "node-chained", Name: "Chained Node", Protocol: "vless", DialerProxy: "node-target"},
+		},
+	}
+	if err := subSvc.Add(sub); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Method not allowed (GET)
+	req405 := httptest.NewRequest(http.MethodGet, "/api/subscriptions/node-dialer-proxy?id=sub-1", nil)
+	rr405 := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rr405, req405)
+	if rr405.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", rr405.Code)
+	}
+
+	// 2. Missing id (400)
+	reqNoID := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy", strings.NewReader(`{"node_tag":"node-src","target_tag":"node-target"}`))
+	rrNoID := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rrNoID, reqNoID)
+	if rrNoID.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing id, got %d", rrNoID.Code)
+	}
+
+	// 3. Missing node_tag in body (400)
+	reqNoNode := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=sub-1", strings.NewReader(`{"target_tag":"node-target"}`))
+	rrNoNode := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rrNoNode, reqNoNode)
+	if rrNoNode.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing node_tag, got %d", rrNoNode.Code)
+	}
+
+	// 4. Non-existent sub (404)
+	req404Sub := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=nonexistent", strings.NewReader(`{"node_tag":"node-src","target_tag":"node-target"}`))
+	rr404Sub := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rr404Sub, req404Sub)
+	if rr404Sub.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for missing sub, got %d", rr404Sub.Code)
+	}
+
+	// 5. Non-existent node (404)
+	req404Node := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=sub-1", strings.NewReader(`{"node_tag":"nonexistent","target_tag":"node-target"}`))
+	rr404Node := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rr404Node, req404Node)
+	if rr404Node.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for missing node, got %d", rr404Node.Code)
+	}
+
+	// 6. Self-cascade (409)
+	reqSelf := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=sub-1", strings.NewReader(`{"node_tag":"node-src","target_tag":"node-src"}`))
+	rrSelf := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rrSelf, reqSelf)
+	if rrSelf.Code != http.StatusConflict {
+		t.Errorf("expected 409 for self-cascade, got %d", rrSelf.Code)
+	}
+
+	// 7. Target not available (409)
+	reqMissingTarget := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=sub-1", strings.NewReader(`{"node_tag":"node-src","target_tag":"ghost"}`))
+	rrMissingTarget := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rrMissingTarget, reqMissingTarget)
+	if rrMissingTarget.Code != http.StatusConflict {
+		t.Errorf("expected 409 for missing target, got %d", rrMissingTarget.Code)
+	}
+
+	// 8. Chain limited to one level (409)
+	reqChain := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=sub-1", strings.NewReader(`{"node_tag":"node-src","target_tag":"node-chained"}`))
+	rrChain := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rrChain, reqChain)
+	if rrChain.Code != http.StatusConflict {
+		t.Errorf("expected 409 for chain limit, got %d", rrChain.Code)
+	}
+
+	// 8b. Already used as a proxy target (409)
+	reqAlreadyTarget := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=sub-1", strings.NewReader(`{"node_tag":"node-target","target_tag":"node-src"}`))
+	rrAlreadyTarget := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rrAlreadyTarget, reqAlreadyTarget)
+	if rrAlreadyTarget.Code != http.StatusConflict {
+		t.Errorf("expected 409 for node already used as proxy target, got %d", rrAlreadyTarget.Code)
+	}
+
+	// 9. Success set target (200)
+	reqSuccess := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=sub-1", strings.NewReader(`{"node_tag":"node-src","target_tag":"node-target"}`))
+	rrSuccess := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rrSuccess, reqSuccess)
+	if rrSuccess.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rrSuccess.Code, rrSuccess.Body.String())
+	}
+
+	// 10. Success clear target (200)
+	reqClear := httptest.NewRequest(http.MethodPost, "/api/subscriptions/node-dialer-proxy?id=sub-1", strings.NewReader(`{"node_tag":"node-src","target_tag":""}`))
+	rrClear := httptest.NewRecorder()
+	api.SubscriptionSetNodeDialerProxy(rrClear, reqClear)
+	if rrClear.Code != http.StatusOK {
+		t.Fatalf("expected 200 for clear, got %d: %s", rrClear.Code, rrClear.Body.String())
+	}
+}
+
+func TestSubscriptionDialerProxyTargets(t *testing.T) {
+	api, subSvc := newSubTestAPI(t)
+
+	sub := &services.Subscription{
+		ID:         "sub-a",
+		Name:       "Sub A",
+		URL:        "http://example.com/sub-a",
+		Enabled:    true,
+		EnableXray: true,
+		Nodes: []services.SubscriptionNode{
+			{Tag: "node-1", Name: "Node 1", Protocol: "vless"},
+			{Tag: "node-2", Name: "Node 2", Protocol: "vless"},
+		},
+	}
+	if err := subSvc.Add(sub); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Method not allowed (POST)
+	req405 := httptest.NewRequest(http.MethodPost, "/api/subscriptions/dialer-proxy-targets?id=sub-a&node_tag=node-1", nil)
+	rr405 := httptest.NewRecorder()
+	api.SubscriptionDialerProxyTargets(rr405, req405)
+	if rr405.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", rr405.Code)
+	}
+
+	// 2. Missing params (400)
+	req400 := httptest.NewRequest(http.MethodGet, "/api/subscriptions/dialer-proxy-targets?id=sub-a", nil)
+	rr400 := httptest.NewRecorder()
+	api.SubscriptionDialerProxyTargets(rr400, req400)
+	if rr400.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rr400.Code)
+	}
+
+	// 3. Success list targets (200)
+	reqSuccess := httptest.NewRequest(http.MethodGet, "/api/subscriptions/dialer-proxy-targets?id=sub-a&node_tag=node-1", nil)
+	rrSuccess := httptest.NewRecorder()
+	api.SubscriptionDialerProxyTargets(rrSuccess, reqSuccess)
+	if rrSuccess.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rrSuccess.Code)
+	}
+	var resp struct {
+		Success bool                         `json:"success"`
+		Data    []services.DialerProxyTarget `json:"data"`
+	}
+	if err := json.Unmarshal(rrSuccess.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].Tag != "node-2" {
+		t.Errorf("expected 1 target node-2, got %+v", resp.Data)
+	}
+
+	// 4. Empty list returns 200 and []
+	// Disable sub-a to leave 0 active targets
+	sub.Enabled = false
+	subSvc.Update(sub.ID, sub)
+
+	reqEmpty := httptest.NewRequest(http.MethodGet, "/api/subscriptions/dialer-proxy-targets?id=sub-a&node_tag=node-1", nil)
+	rrEmpty := httptest.NewRecorder()
+	api.SubscriptionDialerProxyTargets(rrEmpty, reqEmpty)
+	if rrEmpty.Code != http.StatusOK {
+		t.Fatalf("expected 200 for empty targets, got %d", rrEmpty.Code)
+	}
+	var emptyResp struct {
+		Success bool                         `json:"success"`
+		Data    []services.DialerProxyTarget `json:"data"`
+	}
+	if err := json.Unmarshal(rrEmpty.Body.Bytes(), &emptyResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(emptyResp.Data) != 0 {
+		t.Errorf("expected 0 targets, got %d", len(emptyResp.Data))
+	}
+}

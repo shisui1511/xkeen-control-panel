@@ -1,3 +1,14 @@
+export const shadowsocksCiphers = [
+  '2022-blake3-aes-128-gcm',
+  '2022-blake3-aes-256-gcm',
+  '2022-blake3-chacha20-poly1305',
+  'aes-256-gcm',
+  'aes-128-gcm',
+  'chacha20-poly1305',
+  'xchacha20-poly1305',
+  'none'
+] as const;
+
 export const xraySchema = {
   $schema: 'http://json-schema.org/draft-07/schema#',
   type: 'object',
@@ -143,10 +154,35 @@ export const xraySchema = {
               destOverride: { type: 'array', items: { type: 'string' } }
             }
           },
-          settings: { type: 'object', description: 'Protocol-specific settings' },
+          settings: {
+            type: 'object',
+            description: 'Protocol-specific settings',
+            properties: {
+              method: {
+                type: 'string',
+                enum: [...shadowsocksCiphers],
+                description: 'Shadowsocks encryption method'
+              }
+            }
+          },
           streamSettings: {
             type: 'object',
-            description: 'Transport settings (TLS, WebSocket, etc.)'
+            description: 'Transport settings (TLS, WebSocket, etc.)',
+            properties: {
+              sockopt: {
+                type: 'object',
+                description: 'Socket options for connection tuning and proxy chaining',
+                properties: {
+                  mark: { type: 'integer', description: 'SO_MARK value for routing' },
+                  tcpFastOpen: {
+                    oneOf: [{ type: 'boolean' }, { type: 'integer' }],
+                    description: 'TCP Fast Open (TFO)'
+                  },
+                  tcpMptcp: { type: 'boolean', description: 'Multipath TCP (MPTCP)' },
+                  dialerProxy: { type: 'string', description: 'Outbound tag for chained proxying' }
+                }
+              }
+            }
           }
         }
       }
@@ -168,12 +204,86 @@ export const xraySchema = {
               'freedom',
               'blackhole',
               'dns',
-              'loopback'
+              'loopback',
+              'wireguard'
             ],
             description: 'Outbound protocol'
           },
-          settings: { type: 'object', description: 'Protocol-specific settings' },
-          streamSettings: { type: 'object', description: 'Transport settings' },
+          settings: {
+            type: 'object',
+            description: 'Protocol-specific settings',
+            properties: {
+              secretKey: { type: 'string', description: 'WireGuard private key' },
+              address: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Local tunnel IP addresses with CIDR mask'
+              },
+              peers: {
+                type: 'array',
+                description: 'Peer list',
+                items: {
+                  type: 'object',
+                  properties: {
+                    endpoint: { type: 'string', description: 'Remote server address:port' },
+                    publicKey: { type: 'string', description: 'Remote server public key' },
+                    preSharedKey: { type: 'string', description: 'Pre-shared key (PSK)' },
+                    keepAlive: { type: 'integer', description: 'Keepalive interval in seconds' },
+                    allowedIPs: {
+                      type: 'array',
+                      items: { type: 'string' },
+                      description: 'Allowed IPs routing CIDR'
+                    }
+                  }
+                }
+              },
+              mtu: { type: 'integer', description: 'Interface MTU' },
+              reserved: {
+                type: 'array',
+                items: { type: 'integer' },
+                description: 'Reserved bytes for handshake padding'
+              },
+              method: {
+                type: 'string',
+                enum: [...shadowsocksCiphers],
+                description: 'Shadowsocks encryption method'
+              },
+              servers: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    method: {
+                      type: 'string',
+                      enum: [...shadowsocksCiphers],
+                      description: 'Shadowsocks encryption method'
+                    }
+                  }
+                }
+              }
+            }
+          },
+          streamSettings: {
+            type: 'object',
+            description: 'Transport settings',
+            properties: {
+              network: { type: 'string' },
+              security: { type: 'string' },
+              sockopt: {
+                type: 'object',
+                description: 'Socket options for connection tuning and proxy chaining',
+                properties: {
+                  mark: { type: 'integer', description: 'SO_MARK value for routing' },
+                  tcpFastOpen: {
+                    oneOf: [{ type: 'boolean' }, { type: 'integer' }],
+                    description: 'TCP Fast Open (TFO)'
+                  },
+                  tcpMptcp: { type: 'boolean', description: 'Multipath TCP (MPTCP)' },
+                  dialerProxy: { type: 'string', description: 'Outbound tag for chained proxying' }
+                }
+              }
+            }
+          },
           proxySettings: { type: 'object', description: 'Proxy forwarding settings' },
           mux: {
             type: 'object',
@@ -225,6 +335,23 @@ export const xraySchema = {
       properties: {
         bridges: { type: 'array', items: { type: 'object' } },
         portals: { type: 'array', items: { type: 'object' } }
+      }
+    },
+    fakedns: {
+      type: 'object',
+      description: 'FakeDNS pool configuration',
+      properties: {
+        ipPool: { type: 'string', description: 'Fake-IP address pool CIDR (e.g. 198.18.0.0/15)' },
+        poolSize: { type: 'integer', description: 'Fake-IP pool size' }
+      }
+    },
+    burstObservatory: {
+      type: 'object',
+      description: 'Burst health monitoring',
+      properties: {
+        subjectSelector: { type: 'array', items: { type: 'string' } },
+        probeURL: { type: 'string', description: 'URL for burst health probes' },
+        probeInterval: { type: 'string', description: 'Probe interval' }
       }
     },
     observatory: {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
 )
 
@@ -209,5 +210,65 @@ func TestLogsWebSocket_Sources(t *testing.T) {
 
 	if !receivedExpectedLog {
 		t.Errorf("expected to receive log line with 'mihomo.log' prefix and message content")
+	}
+}
+
+func TestLogsEndpoints_WithDispatcher(t *testing.T) {
+	tmpDir := t.TempDir()
+	dispatcher := services.NewLogDispatcher(nil, tmpDir, "")
+	dispatcher.Start()
+	defer dispatcher.Stop()
+
+	dispatcher.IngestLine("[mihomo] [INFO] Mihomo running", "mihomo")
+	dispatcher.IngestLine("[xray] [ERROR] Xray failed with timeout", "xray")
+
+	api := &API{}
+	api.SetLogDispatcher(dispatcher)
+
+	// 1. Test History
+	reqHistory := httptest.NewRequest(http.MethodGet, "/api/logs/history?source=mihomo", nil)
+	recHistory := httptest.NewRecorder()
+	api.LogsHistory(recHistory, reqHistory)
+
+	if recHistory.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for LogsHistory, got %d", recHistory.Code)
+	}
+	if !strings.Contains(recHistory.Body.String(), "Mihomo running") {
+		t.Errorf("expected history to contain 'Mihomo running', got %s", recHistory.Body.String())
+	}
+
+	// 2. Test Flash Health
+	reqHealth := httptest.NewRequest(http.MethodGet, "/api/logs/flash-health", nil)
+	recHealth := httptest.NewRecorder()
+	api.LogsFlashHealth(recHealth, reqHealth)
+
+	if recHealth.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for FlashHealth, got %d", recHealth.Code)
+	}
+	if !strings.Contains(recHealth.Body.String(), "total_logs_bytes") {
+		t.Errorf("expected flash health response, got %s", recHealth.Body.String())
+	}
+
+	// 3. Test SetLevel
+	reqLevel := httptest.NewRequest(http.MethodPost, "/api/logs/level", strings.NewReader(`{"source":"mihomo","level":"debug"}`))
+	recLevel := httptest.NewRecorder()
+	api.LogsSetLevel(recLevel, reqLevel)
+
+	if recLevel.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for SetLevel, got %d", recLevel.Code)
+	}
+
+	// 4. Test Clear
+	reqClear := httptest.NewRequest(http.MethodPost, "/api/logs/clear", strings.NewReader(`{"source":"all"}`))
+	recClear := httptest.NewRecorder()
+	api.LogsClear(recClear, reqClear)
+
+	if recClear.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for LogsClear, got %d", recClear.Code)
+	}
+
+	historyAfterClear := dispatcher.GetHistory("all", "", 10)
+	if len(historyAfterClear) != 0 {
+		t.Errorf("expected 0 entries after clear, got %d", len(historyAfterClear))
 	}
 }

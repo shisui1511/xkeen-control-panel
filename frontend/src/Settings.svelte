@@ -812,7 +812,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_core')} <span class="crumb-sep">/</span>
+        {$t('nav.group_system')} <span class="crumb-sep">›</span>
         {$t('settings.h1')}
       </div>
       <h1>{$t('settings.h1')}</h1>

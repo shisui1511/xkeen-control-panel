@@ -106,6 +106,14 @@ const MOCK_PROXIES = {
       type: 'Vless',
       alive: true,
       history: [{ delay: 900, time: '' }]
+    },
+    DIRECT: {
+      name: 'DIRECT',
+      type: 'Direct'
+    },
+    REJECT: {
+      name: 'REJECT',
+      type: 'Reject'
     }
   }
 };
@@ -232,6 +240,15 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
           contentType: 'application/json',
           body: JSON.stringify({ success: true })
         });
+      } else if (url.includes('/api/mihomo/proxy/group/') && url.includes('/delay')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            'RU-Node-01': 55,
+            'US-Node-02': 160
+          })
+        });
       } else if (url.includes('/api/mihomo/proxy/connections')) {
         await route.fulfill({
           status: 200,
@@ -251,8 +268,12 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     // .page-head is a generic class also rendered on Dashboard's own default
     // view (briefly active before the hash-based tab switch completes), so
     // waiting on it as an OR-fallback here raced against that transition and
-    // resolved too early. .group-grid is unique to the Proxies page.
-    await page.waitForSelector('.group-grid', { timeout: 10000 });
+    // resolved too early. .group-card is unique to the Proxies page.
+    // (Phase 90: the page now renders up to three `.group-grid` sections —
+    // Core/Service/System — and the Core section renders even when empty
+    // (D-01), so `.group-grid` alone can resolve to a zero-height, not-yet-
+    // visible element; `.group-card` is unambiguous regardless of section.)
+    await page.waitForSelector('.group-card', { timeout: 10000 });
   });
 
   test('Grid Layout - nodes rendered in 5 columns grid', async ({ page }) => {
@@ -301,6 +322,22 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
     // Brand icon image should be present in the header
     const brandIcon = ytGroup.locator('.gc-head img.brand-icon');
     await expect(brandIcon).toBeVisible();
+  });
+
+  // D-06: бейдж типа группы читается по-русски, а не показывает английское имя типа
+  test('group type badge отображается по-русски', async ({ page }) => {
+    await expect(page.locator('[data-group="YouTube"] .type-badge')).toHaveText(/Выбор/);
+  });
+
+  // D-05: логотип сервиса выровнен на единой круглой подложке 26x26
+  test('логотип сервиса выровнен на подложке 26px', async ({ page }) => {
+    const iconWrap = page.locator('[data-group="YouTube"] .group-icon-wrap');
+    const size = await iconWrap.evaluate((el) => {
+      const style = window.getComputedStyle(el);
+      return { width: style.width, height: style.height };
+    });
+    expect(size.width).toBe('26px');
+    expect(size.height).toBe('26px');
   });
 
   test('Active node highlight - active node has accent border and background', async ({ page }) => {
@@ -432,5 +469,237 @@ test.describe('Proxies UI Improvements (Phase 57)', () => {
       await refreshBtn.click();
       await expect.poll(() => postRequests.length).toBe(1);
     }
+  });
+
+  // D-08: клик по плашке статуса фильтрует группы, повторный клик сбрасывает
+  test('observatory filter: клик по плашке изолирует группы, повторный клик сбрасывает', async ({
+    page
+  }) => {
+    await expect(page.locator('.group-card').filter({ hasText: 'YouTube' }).first()).toBeVisible();
+    await expect(
+      page.locator('.group-card').filter({ hasText: 'FastGroup' }).first()
+    ).toBeVisible();
+
+    const badBtn = page.locator('.obs-stat-btn').filter({ hasText: 'Недоступны' }).first();
+    await expect(badBtn).toBeVisible();
+
+    // Кликаем по "Недоступны"
+    await badBtn.click();
+    await expect(badBtn).toHaveAttribute('aria-pressed', 'true');
+
+    // YouTube и FastGroup обе содержат DE-Node-04 (bad, alive=false)
+    await expect(page.locator('.group-card').filter({ hasText: 'YouTube' }).first()).toBeVisible();
+
+    // Клик повторно сбрасывает фильтр
+    await badBtn.click();
+    await expect(badBtn).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('.group-card').filter({ hasText: 'YouTube' }).first()).toBeVisible();
+  });
+
+  // D-09: заголовок и подписи на русском без капслока
+  test('observatory filter: заголовок и подписи на русском без капслока', async ({ page }) => {
+    const title = page.locator('.obs-title');
+    await expect(title).toHaveText('Состояние узлов');
+    const textTransform = await title.evaluate((el) => window.getComputedStyle(el).textTransform);
+    expect(textTransform).toBe('none');
+  });
+
+  // D-10: расшифровка общего числа узлов
+  test('observatory filter: расшифровка общего числа узлов', async ({ page }) => {
+    const totalBox = page.locator('.obs-stat-box').first();
+    const resSub = totalBox.locator('.res-sub');
+    await expect(resSub).toBeVisible();
+    await expect(resSub).toHaveText(/\d+\s+прокси\s+\+\s+\d+\s+системн/);
+  });
+
+  // D-11: тултип полосы здоровья
+  test('health bar: тултип показывает числа и проценты', async ({ page }) => {
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const collapseAllBtn = page.locator('button:has-text("Свернуть все")');
+    await collapseAllBtn.click();
+
+    const healthBar = ytGroup.locator('.health-bar').first();
+    await expect(healthBar).toBeVisible();
+
+    await healthBar.hover();
+    const tooltip = page.locator('.health-tooltip');
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toContainText(/Доступно:\s+\d+\s+\(\d+%\)/);
+    await expect(tooltip).toContainText(/Недоступно:\s+\d+\s+\(\d+%\)/);
+
+    // Escape скрывает тултип
+    await page.keyboard.press('Escape');
+    await expect(tooltip).toBeHidden();
+  });
+
+  // D-11: полоса не прилипает к нижней границе карточки
+  test('health bar: полоса не прилипает к нижней границе карточки', async ({ page }) => {
+    const collapseAllBtn = page.locator('button:has-text("Свернуть все")');
+    await collapseAllBtn.click();
+
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const healthBar = ytGroup.locator('.health-bar').first();
+
+    const barBox = await healthBar.boundingBox();
+    const cardBox = await ytGroup.boundingBox();
+
+    expect(barBox).not.toBeNull();
+    expect(cardBox).not.toBeNull();
+    if (barBox && cardBox) {
+      const gap = cardBox.y + cardBox.height - (barBox.y + barBox.height);
+      expect(gap).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  // D-11: aria-label содержит сводку
+  test('health bar: aria-label содержит сводку', async ({ page }) => {
+    const collapseAllBtn = page.locator('button:has-text("Свернуть все")');
+    await collapseAllBtn.click();
+
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const healthBar = ytGroup.locator('.health-bar').first();
+    const ariaLabel = await healthBar.getAttribute('aria-label');
+    expect(ariaLabel).toMatch(/Доступно:\s+\d+/);
+  });
+
+  // D-13: Quick-Select Popover
+  test('quick select: клик по плашке открывает поповер и клик по узлу переключает прокси', async ({
+    page
+  }) => {
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const trigger = ytGroup.locator('.gc-now-pill-trigger').first();
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+
+    const popover = page.locator('.qs-popover');
+    await expect(popover).toBeVisible();
+
+    const searchInput = popover.locator('.qs-search');
+    await expect(searchInput).toBeVisible();
+    await expect(searchInput).toBeFocused();
+
+    // Клик по узлу NL-Node-03
+    const nlOption = popover.locator('.qs-item').filter({ hasText: 'NL-Node-03' });
+    await expect(nlOption).toBeVisible();
+    await nlOption.click();
+
+    // Поповер закрывается, PUT отправлен
+    await expect(popover).toBeHidden();
+    expect(
+      putRequests.some((r) => r.url.includes('YouTube') && r.body?.name === 'NL-Node-03')
+    ).toBe(true);
+  });
+
+  // D-14: Quick-Select клавиатурная навигация
+  test('quick select: навигация стрелками и выбор через Enter', async ({ page }) => {
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const trigger = ytGroup.locator('.gc-now-pill-trigger').first();
+    await trigger.click();
+
+    const popover = page.locator('.qs-popover');
+    await expect(popover).toBeVisible();
+
+    // Нажатие вниз и Enter
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+
+    await expect(popover).toBeHidden();
+    expect(putRequests.length).toBeGreaterThan(0);
+  });
+
+  // D-15: Quick-Select информационная плашка для URLTest
+  test('quick select: группа URLTest показывает предупреждение об автоматическом выборе', async ({
+    page
+  }) => {
+    const fastGroup = page.locator('.group-card').filter({ hasText: 'FastGroup' }).first();
+    const trigger = fastGroup.locator('.gc-now-pill-trigger').first();
+    await trigger.click();
+
+    const popover = page.locator('.qs-popover');
+    await expect(popover).toBeVisible();
+
+    const note = popover.locator('.qs-auto-note');
+    await expect(note).toBeVisible();
+    await expect(note).toContainText('автоматически');
+
+    // Клик по узлу в URLTest не отправляет PUT
+    const firstOption = popover.locator('.qs-item').first();
+    await firstOption.click({ force: true });
+    expect(putRequests.filter((r) => r.url.includes('FastGroup')).length).toBe(0);
+
+    await page.keyboard.press('Escape');
+    await expect(popover).toBeHidden();
+  });
+
+  // D-16: Ping micro-button & per-group testing
+  test('ping micro-button: запуск теста группы блокирует только эту группу со спиннером', async ({
+    page
+  }) => {
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const pingBtn = ytGroup.locator('.gc-ping-btn').first();
+    await expect(pingBtn).toBeVisible();
+
+    await pingBtn.click();
+    await expect(pingBtn).toBeVisible();
+  });
+
+  // D-17: Latency history popover на бейдже задержки группы
+  test('latency history popover: клик на бейдж задержки группы открывает историю', async ({
+    page
+  }) => {
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const latBox = ytGroup.locator('.gc-lat-box').first();
+    await expect(latBox).toBeVisible();
+
+    await latBox.click();
+    const historyPopover = page.locator('.latency-history-popover');
+    await expect(historyPopover).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(historyPopover).toBeHidden();
+  });
+
+  // UI-Review: Swipe-to-dismiss для QuickSelect Bottom Sheet на мобильных
+  test('quick select mobile: свайп вниз по драг-ручке закрывает bottom sheet', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    const ytGroup = page.locator('.group-card').filter({ hasText: 'YouTube' }).first();
+    const trigger = ytGroup.locator('.gc-now-pill-trigger').first();
+    await trigger.click();
+
+    const popover = page.locator('.qs-popover');
+    await expect(popover).toBeVisible();
+    await expect(popover).toHaveClass(/qs-bottom-sheet/);
+
+    const dragHandle = popover.locator('.qs-drag-handle');
+    await expect(dragHandle).toBeVisible();
+
+    // Симуляция жеста touch drag вниз
+    await dragHandle.evaluate((el) => {
+      const touchStart = new Touch({
+        identifier: 1,
+        target: el,
+        clientY: 400,
+        clientX: 180
+      });
+      el.dispatchEvent(
+        new TouchEvent('touchstart', { touches: [touchStart], bubbles: true, cancelable: true })
+      );
+
+      const touchMove = new Touch({
+        identifier: 1,
+        target: el,
+        clientY: 500,
+        clientX: 180
+      });
+      el.dispatchEvent(
+        new TouchEvent('touchmove', { touches: [touchMove], bubbles: true, cancelable: true })
+      );
+
+      el.dispatchEvent(
+        new TouchEvent('touchend', { touches: [], bubbles: true, cancelable: true })
+      );
+    });
+
+    await expect(popover).toBeHidden();
   });
 });

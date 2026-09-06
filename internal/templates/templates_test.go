@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
 func TestZkeenYamlStructure(t *testing.T) {
@@ -494,4 +496,236 @@ func extractMihomoRuleOutbound(ruleStr string) string {
 		return ""
 	}
 	return lastPart
+}
+
+func TestCatalogMihomoTemplatesResolve(t *testing.T) {
+	data, err := os.ReadFile("catalog.json")
+	if err != nil {
+		t.Fatalf("Failed to read catalog.json: %v", err)
+	}
+
+	var catalog struct {
+		Templates []struct {
+			Name     string `json:"name"`
+			Type     string `json:"type"`
+			Filename string `json:"filename"`
+		} `json:"templates"`
+	}
+
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		t.Fatalf("Failed to unmarshal catalog.json: %v", err)
+	}
+
+	for _, tmpl := range catalog.Templates {
+		if tmpl.Type != "mihomo" {
+			continue
+		}
+
+		t.Run(tmpl.Name, func(t *testing.T) {
+			path := filepath.Join("mihomo", tmpl.Filename)
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("Referenced file %s not found: %v", path, err)
+			}
+
+			var parsed map[string]interface{}
+			if err := yaml.Unmarshal(content, &parsed); err != nil {
+				t.Fatalf("Failed to parse %s as YAML: %v", path, err)
+			}
+
+			if _, hasProxies := parsed["proxies"]; hasProxies {
+				t.Errorf("Template %s must not declare hardcoded proxies section", path)
+			}
+
+			rulesVal, ok := parsed["rules"]
+			if !ok {
+				t.Fatalf("Template %s is missing rules section", path)
+			}
+
+			rulesList, ok := rulesVal.([]interface{})
+			if !ok || len(rulesList) == 0 {
+				t.Fatalf("Template %s rules must be a non-empty list", path)
+			}
+
+			lastRule, ok := rulesList[len(rulesList)-1].(string)
+			if !ok || !strings.HasPrefix(lastRule, "MATCH,") {
+				t.Errorf("Template %s last rule must start with MATCH,, got: %v", path, rulesList[len(rulesList)-1])
+			}
+		})
+	}
+}
+
+func TestReferenceTemplatesTMPL05(t *testing.T) {
+	data, err := os.ReadFile("catalog.json")
+	if err != nil {
+		t.Fatalf("Failed to read catalog.json: %v", err)
+	}
+
+	var catalog struct {
+		Templates []struct {
+			Name     string `json:"name"`
+			Type     string `json:"type"`
+			Filename string `json:"filename"`
+		} `json:"templates"`
+	}
+
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		t.Fatalf("Failed to unmarshal catalog.json: %v", err)
+	}
+
+	expectedReference := []string{
+		"Mihomo: Умный Антифильтр",
+		"Mihomo: Раздельный по сервисам",
+		"Mihomo: Мульти-подписка с Remnawave HWID",
+		"Mihomo: Gaming & Low-Latency",
+		"Mihomo: Облегченный Low-RAM для MIPS/128MB",
+		"Mihomo: Полный туннель",
+	}
+
+	historicalGeneric := []string{
+		"global-proxy.yaml",
+		"rule-based.yaml",
+		"zkeen.yaml",
+	}
+
+	catalogMap := make(map[string]string)
+	for _, tmpl := range catalog.Templates {
+		catalogMap[tmpl.Name] = tmpl.Filename
+	}
+
+	// 1. Проверяем наличие всех 6 эталонных шаблонов
+	for _, name := range expectedReference {
+		if _, exists := catalogMap[name]; !exists {
+			t.Errorf("Catalog missing expected reference template: %s", name)
+		}
+	}
+
+	// 2. Проверяем сохранность 3 исторических generic шаблонов
+	for _, genFile := range historicalGeneric {
+		found := false
+		for _, fn := range catalogMap {
+			if fn == genFile {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Catalog missing historical generic template: %s", genFile)
+		}
+	}
+
+	// 3. Проверяем конвенции для каждого из 6 эталонных файлов
+	referenceFiles := []string{
+		"smart-antifilter.yaml",
+		"split-services.yaml",
+		"low-memory.yaml",
+		"multi-sub-hwid.yaml",
+		"gaming-low-latency.yaml",
+		"full-tunnel.yaml",
+	}
+
+	for _, fn := range referenceFiles {
+		t.Run(fn, func(t *testing.T) {
+			path := filepath.Join("mihomo", fn)
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("Failed to read %s: %v", path, err)
+			}
+
+			var parsed map[string]interface{}
+			if err := yaml.Unmarshal(content, &parsed); err != nil {
+				t.Fatalf("Failed to parse %s as YAML: %v", path, err)
+			}
+
+			// Ни в одном из шести нет ключа proxies
+			if _, hasProxies := parsed["proxies"]; hasProxies {
+				t.Errorf("%s must not declare proxies", fn)
+			}
+
+			// Наличие DST-PORT,3389,DIRECT
+			rulesList, ok := parsed["rules"].([]interface{})
+			if !ok {
+				t.Fatalf("%s rules must be a slice", fn)
+			}
+			found3389 := false
+			for _, r := range rulesList {
+				if rStr, ok := r.(string); ok && strings.TrimSpace(rStr) == "DST-PORT,3389,DIRECT" {
+					found3389 = true
+					break
+				}
+			}
+			if !found3389 {
+				t.Errorf("%s must include DST-PORT,3389,DIRECT for admin access protection", fn)
+			}
+
+			// Проверка заголовков proxy-providers (списки строк по TMPL-02)
+			if providersVal, ok := parsed["proxy-providers"]; ok {
+				if providersMap, ok := providersVal.(map[string]interface{}); ok {
+					for pName, pData := range providersMap {
+						if pMap, ok := pData.(map[string]interface{}); ok {
+							if headerVal, ok := pMap["header"]; ok {
+								if headerMap, ok := headerVal.(map[string]interface{}); ok {
+									for hKey, hVal := range headerMap {
+										if _, isList := hVal.([]interface{}); !isList {
+											t.Errorf("%s provider %s header %s must be a list of strings, got %T", fn, pName, hKey, hVal)
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Наличие правила защиты системного резолвера Keenetic (DNS-over-VLESS)
+			foundDNSProtect := false
+			for _, r := range rulesList {
+				if rStr, ok := r.(string); ok && (strings.TrimSpace(rStr) == "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve" || strings.TrimSpace(rStr) == "IP-CIDR,127.0.0.53/32,DIRECT,no-resolve") {
+					foundDNSProtect = true
+					break
+				}
+			}
+			if !foundDNSProtect {
+				t.Errorf("%s must include IP-CIDR,127.0.0.0/8,DIRECT,no-resolve for DNS-over-VLESS resolver protection", fn)
+			}
+
+			// Для low-memory.yaml проверяем ровно 1 rule-provider
+			if fn == "low-memory.yaml" {
+				rpVal, ok := parsed["rule-providers"]
+				if !ok {
+					t.Errorf("%s must have rule-providers", fn)
+				} else if rpMap, ok := rpVal.(map[string]interface{}); !ok || len(rpMap) != 1 {
+					t.Errorf("%s must have exactly 1 rule-provider, got %d", fn, len(rpMap))
+				}
+			}
+		})
+	}
+}
+
+func TestReferenceTemplatesPassPreflightDnsOverVless(t *testing.T) {
+	referenceFiles := []string{
+		"smart-antifilter.yaml",
+		"split-services.yaml",
+		"low-memory.yaml",
+		"multi-sub-hwid.yaml",
+		"gaming-low-latency.yaml",
+		"full-tunnel.yaml",
+	}
+
+	for _, fn := range referenceFiles {
+		t.Run(fn, func(t *testing.T) {
+			path := filepath.Join("mihomo", fn)
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("Failed to read %s: %v", path, err)
+			}
+
+			res := services.ValidateConfigContent("mihomo", fn, string(content))
+			for _, w := range res.Warnings {
+				if w.Code == "preflight.dns_over_vless" {
+					t.Errorf("Template %s failed preflight with warning: %s", fn, w.Message)
+				}
+			}
+		})
+	}
 }

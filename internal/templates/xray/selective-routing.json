@@ -40,6 +40,21 @@
       {
         "type": "field",
         "ip": [
+          "127.0.0.53",
+          "127.0.0.1",
+          "geoip:private"
+        ],
+        "port": "53",
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "port": "3389,22,445,1194,51820",
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ip": [
           "geoip:private"
         ],
         "outboundTag": "direct"

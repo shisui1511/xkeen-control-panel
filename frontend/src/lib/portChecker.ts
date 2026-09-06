@@ -28,6 +28,7 @@ export function parseMihomoPorts(yamlText: string): PortAllocation[] {
   const ports: PortAllocation[] = [];
   const lines = yamlText.split('\n');
   for (const line of lines) {
+    if (line.startsWith(' ') || line.startsWith('\t')) continue;
     const trimmed = line.trim();
     if (trimmed.startsWith('#') || !trimmed.includes(':')) continue;
     const parts = trimmed.split(':');
@@ -56,6 +57,93 @@ export function parseMihomoPorts(yamlText: string): PortAllocation[] {
       }
     }
   }
+  return ports;
+}
+
+export function parseMihomoListenerPorts(yamlText: string): PortAllocation[] {
+  const ports: PortAllocation[] = [];
+  const lines = yamlText.split('\n');
+  let inListeners = false;
+  let listenerIndent: number | null = null;
+  let currentName = '';
+  let currentPort: number | null = null;
+
+  function flush() {
+    if (currentPort !== null && currentPort > 0) {
+      ports.push({
+        port: currentPort,
+        engine: 'mihomo',
+        purpose: 'listener:' + (currentName || 'unnamed')
+      });
+    }
+    currentName = '';
+    currentPort = null;
+  }
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    const isTopLevel = !line.startsWith(' ') && !line.startsWith('\t');
+    if (isTopLevel) {
+      if (trimmed.startsWith('listeners:')) {
+        inListeners = true;
+        listenerIndent = null;
+        flush();
+        continue;
+      } else if (inListeners) {
+        flush();
+        inListeners = false;
+        listenerIndent = null;
+        continue;
+      }
+    }
+
+    if (!inListeners) continue;
+
+    const indent = line.search(/\S/);
+
+    if (trimmed.startsWith('-')) {
+      if (listenerIndent === null || indent <= listenerIndent) {
+        listenerIndent = indent;
+        flush();
+        const afterDash = trimmed.replace(/^-\s*/, '');
+        if (afterDash.includes(':')) {
+          const idx = afterDash.indexOf(':');
+          const k = afterDash.slice(0, idx).trim();
+          const v = afterDash.slice(idx + 1).trim();
+          if (k === 'name') {
+            currentName = v.replace(/^["']|["']$/g, '');
+          } else if (k === 'port') {
+            const unquoted = v.replace(/^["']|["']$/g, '').trim();
+            const p = parseInt(unquoted, 10);
+            if (!isNaN(p)) currentPort = p;
+          }
+        }
+        continue;
+      }
+      continue;
+    }
+
+    if (listenerIndent !== null && indent > listenerIndent + 2) {
+      continue;
+    }
+
+    if (trimmed.includes(':')) {
+      const idx = trimmed.indexOf(':');
+      const k = trimmed.slice(0, idx).trim();
+      const v = trimmed.slice(idx + 1).trim();
+      if (k === 'name') {
+        currentName = v.replace(/^["']|["']$/g, '');
+      } else if (k === 'port') {
+        const unquoted = v.replace(/^["']|["']$/g, '').trim();
+        const p = parseInt(unquoted, 10);
+        if (!isNaN(p)) currentPort = p;
+      }
+    }
+  }
+
+  flush();
   return ports;
 }
 

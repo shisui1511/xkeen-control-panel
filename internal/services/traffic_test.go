@@ -940,3 +940,51 @@ func TestProcessConnSnapshot_FirstSnapshotNoDelta(t *testing.T) {
 		t.Fatalf("expected delta 50/50, got up=%d, down=%d", statsA2.UploadBytes, statsA2.DownloadBytes)
 	}
 }
+
+func TestCheckQuotas_NoQuotasNoAPIQuery(t *testing.T) {
+	tmp := t.TempDir()
+	apiCalled := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+		t.Errorf("unexpected Mihomo API call to %s", r.URL.Path)
+	}))
+	defer ts.Close()
+
+	svc := NewTrafficQuotaService(tmp, ts.URL, "")
+	// Empty quotas and no blocked proxies -> must not call Mihomo API
+	svc.checkQuotas()
+
+	if apiCalled {
+		t.Fatal("expected no API calls when quotas list is empty")
+	}
+}
+
+func TestCheckQuotas_QuotasUnderLimitNoAPIQuery(t *testing.T) {
+	tmp := t.TempDir()
+	apiCalled := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiCalled = true
+		t.Errorf("unexpected Mihomo API call to %s", r.URL.Path)
+	}))
+	defer ts.Close()
+
+	svc := NewTrafficQuotaService(tmp, ts.URL, "")
+	svc.quotas = []TrafficQuota{
+		{
+			ID:             "q1",
+			Name:           "Under Limit",
+			LimitBytes:     1000,
+			CurrentBytes:   500, // 50%
+			AlertThreshold: 80,
+			Enabled:        true,
+			Action:         "block",
+		},
+	}
+
+	// Usage is below 100% -> must not call Mihomo API
+	svc.checkQuotas()
+
+	if apiCalled {
+		t.Fatal("expected no API calls when quota is not exceeded")
+	}
+}

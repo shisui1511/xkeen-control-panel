@@ -115,9 +115,7 @@ test.describe('Phase 15.4 Visual and Logic Fixes', () => {
     await page.waitForLoadState('networkidle');
 
     // Проверяем наличие .ct-actions обертки вокруг кнопки в заголовке истории перезапусков
-    const restartHeader = page
-      .locator('h2.card-title')
-      .filter({ hasText: /(История запусков|Restart History)/ });
+    const restartHeader = page.locator('.restart-card .card-head-row');
     await expect(restartHeader).toBeVisible();
     const ctActions = restartHeader.locator('.ct-actions');
     await expect(ctActions).toBeVisible();

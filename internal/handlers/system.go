@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -338,7 +339,9 @@ func (a *API) checkActiveConfigsInvalid() bool {
 		xrayBin := a.getBinaryPath("xray")
 		if xrayBin != "" {
 			if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
-				cmd := exec.Command(xrayBin, "-test", "-confdir", a.cfg.XRayConfigDir)
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, xrayBin, "-test", "-confdir", a.cfg.XRayConfigDir)
 				setupXrayCmdEnv(cmd, a.cfg.XRayConfigDir)
 				if err := cmd.Run(); err != nil {
 					return true
@@ -352,7 +355,9 @@ func (a *API) checkActiveConfigsInvalid() bool {
 		mihomoBin := a.getBinaryPath("mihomo")
 		if mihomoBin != "" {
 			if _, err := os.Stat(a.cfg.MihomoConfigDir); err == nil {
-				cmd := exec.Command(mihomoBin, "-t", "-d", a.cfg.MihomoConfigDir)
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, mihomoBin, "-t", "-d", a.cfg.MihomoConfigDir)
 				if err := cmd.Run(); err != nil {
 					return true
 				}
@@ -430,15 +435,59 @@ func getPrimaryLANIP() string {
 	return ""
 }
 
+// posixTZOffsetRe matches the "std offset" portion of a POSIX TZ string,
+// e.g. the "-3" in "MSK-3", "<+03>-3", or the "6" in "CST6CDT".
+var posixTZOffsetRe = regexp.MustCompile(`^(?:<[^>]+>|[A-Za-z]+)([+-]?\d+)`)
+
+// posixTZOffsetHours extracts the UTC offset in hours encoded in a POSIX TZ
+// string such as "MSK-3" (used by /etc/TZ on OpenWrt/Keenetic/Entware).
+// POSIX offsets are inverted relative to everyday usage — the offset is the
+// amount added to local time to reach UTC, so local = UTC - offset. That
+// makes "MSK-3" (offset -3) an actual UTC+3, not UTC-3.
+func posixTZOffsetHours(tz string) (int, bool) {
+	m := posixTZOffsetRe.FindStringSubmatch(tz)
+	if m == nil {
+		return 0, false
+	}
+	posixOffset, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, false
+	}
+	return -posixOffset, true
+}
+
+// systemUTCOffsetHours resolves the router's actual UTC offset in hours.
+// It prefers parsing the POSIX offset out of /etc/TZ (or equivalents)
+// directly, because the Go process's own zone (time.Now().Zone()) reflects
+// the $TZ environment variable it was started with, which on these routers
+// is often unset and defaults to UTC regardless of the configured system
+// timezone — the very mismatch that produced "MSK-3 · UTC+0" on screen.
+func systemUTCOffsetHours() int {
+	tzPaths := []string{"/etc/TZ", "/opt/etc/TZ", "/etc/timezone"}
+	for _, p := range tzPaths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		tz := strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", ""))
+		if tz == "" {
+			continue
+		}
+		if hours, ok := posixTZOffsetHours(tz); ok {
+			return hours
+		}
+	}
+	_, offset := time.Now().Zone()
+	return offset / 3600
+}
+
 func getSystemTimezone() string {
-	// Check standard OpenWrt/Keenetic/Entware timezone files (e.g. "MSK-3")
+	hours := systemUTCOffsetHours()
 	tzPaths := []string{"/etc/TZ", "/opt/etc/TZ", "/etc/timezone"}
 	for _, p := range tzPaths {
 		if data, err := os.ReadFile(p); err == nil {
 			tz := strings.TrimSpace(strings.ReplaceAll(string(data), "\x00", ""))
 			if tz != "" {
-				_, offset := time.Now().Zone()
-				hours := offset / 3600
 				if hours >= 0 {
 					return fmt.Sprintf("%s · UTC+%d", tz, hours)
 				}
@@ -446,8 +495,7 @@ func getSystemTimezone() string {
 			}
 		}
 	}
-	name, offset := time.Now().Zone()
-	hours := offset / 3600
+	name, _ := time.Now().Zone()
 	if hours >= 0 {
 		return fmt.Sprintf("%s · UTC+%d", name, hours)
 	}
@@ -455,8 +503,7 @@ func getSystemTimezone() string {
 }
 
 func getUTCOffset() string {
-	_, offset := time.Now().Zone()
-	hours := offset / 3600
+	hours := systemUTCOffsetHours()
 	if hours >= 0 {
 		return fmt.Sprintf("UTC+%d", hours)
 	}

@@ -207,6 +207,70 @@ func TestSubscription_ConcurrencyRace(t *testing.T) {
 	wg.Wait()
 }
 
+// TestCleanOrphanedSubscriptions_SkipsWhileAlreadyRunning verifies the
+// cleaning atomic.Bool guard (STAB-03): a call that arrives while another
+// cleanup is already in flight must return immediately without touching
+// lastCleanup, instead of running a second overlapping directory scan.
+func TestCleanOrphanedSubscriptions_SkipsWhileAlreadyRunning(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+
+	if !svc.cleaning.CompareAndSwap(false, true) {
+		t.Fatal("expected to acquire the cleaning flag for the test setup")
+	}
+
+	before := svc.lastCleanup
+	svc.CleanOrphanedSubscriptions()
+
+	svc.mu.RLock()
+	after := svc.lastCleanup
+	svc.mu.RUnlock()
+
+	if !after.Equal(before) {
+		t.Fatal("expected CleanOrphanedSubscriptions to skip work (lastCleanup unchanged) while cleaning flag is already held")
+	}
+
+	// Release the flag as if the in-flight run finished, then confirm a
+	// fresh call actually proceeds.
+	svc.cleaning.Store(false)
+	svc.CleanOrphanedSubscriptions()
+
+	svc.mu.RLock()
+	final := svc.lastCleanup
+	svc.mu.RUnlock()
+	if final.Equal(before) {
+		t.Fatal("expected CleanOrphanedSubscriptions to run once the cleaning flag was released")
+	}
+}
+
+// TestCleanOrphanedSubscriptions_ConcurrentCallsAreSafe fires many concurrent
+// calls (as GetSystemStats would when Disk.Free stays under 10 MB across
+// several poll cycles) and relies on `go test -race` to catch any data race
+// introduced by the atomic.Bool guard, plus asserts exactly one run actually
+// touched lastCleanup.
+func TestCleanOrphanedSubscriptions_ConcurrentCallsAreSafe(t *testing.T) {
+	tmp := t.TempDir()
+	svc := NewSubscriptionService(tmp, tmp, tmp)
+
+	const n = 20
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			svc.CleanOrphanedSubscriptions()
+		}()
+	}
+	wg.Wait()
+
+	svc.mu.RLock()
+	last := svc.lastCleanup
+	svc.mu.RUnlock()
+	if last.IsZero() {
+		t.Fatal("expected at least one of the concurrent calls to have run and updated lastCleanup")
+	}
+}
+
 func TestSubscriptionService_MigrateFromMihomoConfig(t *testing.T) {
 	tmp := t.TempDir()
 	xcpDir := filepath.Join(tmp, "xcp")

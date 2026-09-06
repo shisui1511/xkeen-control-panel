@@ -193,7 +193,7 @@ test.describe('Phase 15.5 Observatory & Xray Outbounds', () => {
     await page.waitForLoadState('networkidle');
 
     // Observatory statistics header should be visible
-    const observatoryHeader = page.locator('h2.card-title').filter({ hasText: 'OBSERVATORY' });
+    const observatoryHeader = page.locator('.obs-card .obs-title');
     await expect(observatoryHeader).toBeVisible();
   });
 

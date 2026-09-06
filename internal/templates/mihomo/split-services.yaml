@@ -1,0 +1,203 @@
+# ==============================================================================
+# split-services.yaml — Раздельный по сервисам с иконками дашборда
+# Сценарий: Отдельные группы для YouTube, Discord, AI, Telegram, Steam
+# Пользователь добавляет proxy-providers через страницу Subscriptions.
+# Требует Mihomo Meta >= 1.15 (поддержка include-all: true, format: mrs).
+# ==============================================================================
+mixed-port: 7890
+redir-port: 5000
+tproxy-port: 5001
+routing-mark: 255
+allow-lan: true
+mode: rule
+log-level: warning
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+find-process-mode: off
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "*.keenetic.pro"
+    - "*.keenetic.link"
+    - "*.keenetic.name"
+    - "*.my.keenetic.net"
+  default-nameserver:
+    - 77.88.8.8
+    - 1.1.1.1
+  nameserver:
+    - 77.88.8.8
+    - https://common.dot.dns.yandex.net/dns-query
+  fallback:
+    - https://cloudflare-dns.com/dns-query
+
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+
+proxy-providers:
+  main-sub:
+    type: http
+    url: "https://example.com/sub"
+    interval: 86400
+    path: ./providers/main-sub.yaml
+    header:
+      User-Agent:
+        - "Mihomo"
+      x-hwid:
+        - "keenetic-router-hwid"
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+    override:
+      udp: true
+      tfo: true
+
+proxy-groups:
+  - name: "VPN"
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Rocket.png
+    include-all: true
+    proxies:
+      - DIRECT
+
+  - name: "YouTube"
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png
+    include-all: true
+    proxies:
+      - VPN
+      - DIRECT
+
+  - name: "Discord"
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png
+    include-all: true
+    proxies:
+      - VPN
+      - DIRECT
+
+  - name: "AI & ChatGPT"
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png
+    include-all: true
+    proxies:
+      - VPN
+      - DIRECT
+
+  - name: "Telegram"
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png
+    include-all: true
+    proxies:
+      - VPN
+      - DIRECT
+
+  - name: "Steam & Games"
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png
+    include-all: true
+    proxies:
+      - DIRECT
+      - VPN
+
+rule-providers:
+  youtube:
+    type: http
+    format: mrs
+    behavior: domain
+    url: https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/youtube.mrs
+    path: ./rules/youtube.mrs
+    interval: 86400
+
+  discord-domain:
+    type: http
+    format: mrs
+    behavior: domain
+    url: https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/discord.mrs
+    path: ./rules/discord.mrs
+    interval: 86400
+
+  discord-voice:
+    type: http
+    format: mrs
+    behavior: ipcidr
+    url: https://github.com/legiz-ru/mihomo-rule-sets/raw/main/other/discord-voice-ip-list.mrs
+    path: ./rules/discord-voice.mrs
+    interval: 86400
+
+  openai:
+    type: http
+    format: mrs
+    behavior: domain
+    url: https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/openai.mrs
+    path: ./rules/openai.mrs
+    interval: 86400
+
+  telegram-domain:
+    type: http
+    format: mrs
+    behavior: domain
+    url: https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/telegram.mrs
+    path: ./rules/telegram.mrs
+    interval: 86400
+
+  telegram-ip:
+    type: http
+    format: mrs
+    behavior: ipcidr
+    url: https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geoip/telegram.mrs
+    path: ./rules/telegram-ip.mrs
+    interval: 86400
+
+  ru-domains:
+    type: http
+    format: mrs
+    behavior: domain
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.mrs
+    path: ./rules/category-ru.mrs
+    interval: 86400
+
+rules:
+  # Блокировка QUIC
+  - AND,((DST-PORT,443),(NETWORK,udp)),REJECT
+
+  # Защита RDP, SSH, SMB, VPN
+  - DST-PORT,3389,DIRECT
+  - DST-PORT,22,DIRECT
+  - DST-PORT,445,DIRECT
+  - DST-PORT,1194,DIRECT
+  - DST-PORT,51820,DIRECT
+
+  # Маршрутизация сервисов
+  - RULE-SET,youtube,YouTube
+  - RULE-SET,discord-domain,Discord
+  - RULE-SET,discord-voice,Discord
+  - RULE-SET,openai,AI & ChatGPT
+  - RULE-SET,telegram-domain,Telegram
+  - RULE-SET,telegram-ip,Telegram
+
+  # Локальные адреса и РФ
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - GEOIP,private,DIRECT,no-resolve
+  - RULE-SET,ru-domains,DIRECT
+  - GEOIP,RU,DIRECT
+
+  # Все остальное напрямую
+  - MATCH,DIRECT

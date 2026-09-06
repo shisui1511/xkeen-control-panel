@@ -12,7 +12,7 @@
 </script>
 
 <!-- Visual rules live in global.css under .breadcrumbs etc. -->
-<nav class="breadcrumbs">
+<nav class="breadcrumbs" aria-label={$t('nav.breadcrumbs') || 'Breadcrumbs'}>
   {#if !hideHome}
     <button class="breadcrumb-home" onclick={() => onNavigate('dashboard')}>
       <Icon name="dashboard" size={12} />
@@ -21,14 +21,14 @@
   {/if}
   {#each items as item, i}
     {#if !hideHome || i > 0}
-      <span class="breadcrumb-separator">/</span>
+      <span class="breadcrumb-separator">›</span>
     {/if}
     {#if item.tab && i < items.length - 1}
       <button class="breadcrumb-link" onclick={() => onNavigate(item.tab || '')}
         >{item.label}</button
       >
     {:else}
-      <span class="breadcrumb-current">{item.label}</span>
+      <span class="breadcrumb-current" aria-current="page">{item.label}</span>
     {/if}
   {/each}
 </nav>

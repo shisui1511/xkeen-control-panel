@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -501,6 +502,21 @@ func (s *SubscriptionService) Update(id string, sub *Subscription) error {
 			existing.EnableXray = sub.EnableXray
 			existing.EnableMihomo = sub.EnableMihomo
 
+			sockoptChanged := existing.SockoptMark != sub.SockoptMark ||
+				existing.SockoptFastOpen != sub.SockoptFastOpen ||
+				existing.SockoptMptcp != sub.SockoptMptcp
+
+			existing.SockoptMark = sub.SockoptMark
+			existing.SockoptFastOpen = sub.SockoptFastOpen
+			existing.SockoptMptcp = sub.SockoptMptcp
+
+			if existing.EnableXray && sockoptChanged {
+				if err := s.refreshXrayFragmentLocked(existing); err != nil {
+					log.Printf("[Subscriptions] failed to refresh Xray fragment for %s: %v", existing.ID, err)
+				}
+				needRestart = true
+			}
+
 			if sub.RoutingMode != "" {
 				existing.RoutingMode = sub.RoutingMode
 			}
@@ -850,6 +866,15 @@ func (s *SubscriptionService) GetParseReport(id string) (*ParseReport, error) {
 // but only if those files are older than 7 days, and system time is synchronized (at least 2026-01-01).
 // This execution is throttled to run at most once per hour.
 func (s *SubscriptionService) CleanOrphanedSubscriptions() {
+	// Prevent concurrent execution: GetSystemStats() may spawn a new goroutine
+	// calling this method on every poll cycle while free disk space stays low.
+	// Without this guard, dozens of goroutines could pile up doing redundant
+	// directory scans in parallel (STAB-03).
+	if !s.cleaning.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.cleaning.Store(false)
+
 	if time.Now().Before(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)) {
 		log.Println("[Cleanup] System time is before 2026-01-01, skipping orphaned subscription cleanup")
 		return
@@ -1172,4 +1197,283 @@ func (s *SubscriptionService) PersistHeaderMetadata(id string, subCopy *Subscrip
 	live.LastError = subCopy.LastError
 
 	return s.save()
+}
+
+// SetNodeDialerProxy sets or clears the dialerProxy target node tag for a specific node in a subscription.
+func (s *SubscriptionService) SetNodeDialerProxy(subID, nodeTag, targetTag string) error {
+	safeID := filepath.Base(subID)
+	safeID = invalidIDCharsRe.ReplaceAllString(strings.ToLower(safeID), "_")
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var sourceSub *Subscription
+	var sourceNode *SubscriptionNode
+	for i := range s.subscriptions {
+		if s.subscriptions[i].ID == safeID {
+			sourceSub = &s.subscriptions[i]
+			for j := range sourceSub.Nodes {
+				if sourceSub.Nodes[j].Tag == nodeTag {
+					sourceNode = &sourceSub.Nodes[j]
+					break
+				}
+			}
+			break
+		}
+	}
+
+	if sourceSub == nil || sourceNode == nil {
+		return errors.New("node not found")
+	}
+
+	if targetTag == "" {
+		sourceNode.DialerProxy = ""
+		if err := s.save(); err != nil {
+			return err
+		}
+		if sourceSub.EnableXray {
+			if err := s.refreshXrayFragmentLocked(sourceSub); err != nil {
+				log.Printf("[Subscriptions] failed to refresh Xray fragment for %s: %v", sourceSub.ID, err)
+				return err
+			}
+		}
+		if s.consoleSvc != nil && sourceSub.EnableXray {
+			if _, err := s.consoleSvc.Execute("-restart"); err != nil {
+				log.Printf("subscription %s: xkeen -restart after dialerProxy clear: %v", sourceSub.ID, err)
+			}
+		}
+		return nil
+	}
+
+	if targetTag == nodeTag {
+		return errors.New("cannot cascade node to itself")
+	}
+
+	// Cannot cascade if nodeTag is already used as a dialerProxy target by another node
+	for i := range s.subscriptions {
+		for j := range s.subscriptions[i].Nodes {
+			if s.subscriptions[i].Nodes[j].DialerProxy == nodeTag {
+				return errors.New("cannot cascade node that is already used as a proxy target")
+			}
+		}
+	}
+
+	// Target must belong to an active Xray subscription and not have its own dialerProxy
+	var targetFound bool
+	for i := range s.subscriptions {
+		sub := &s.subscriptions[i]
+		if !sub.Enabled || !sub.EnableXray {
+			continue
+		}
+		for j := range sub.Nodes {
+			node := &sub.Nodes[j]
+			if node.Tag == targetTag {
+				targetFound = true
+				if node.DialerProxy != "" {
+					return errors.New("chain limited to one level")
+				}
+				break
+			}
+		}
+		if targetFound {
+			break
+		}
+	}
+
+	if !targetFound {
+		return errors.New("target not available")
+	}
+
+	sourceNode.DialerProxy = targetTag
+	if err := s.save(); err != nil {
+		return err
+	}
+
+	if sourceSub.EnableXray {
+		if err := s.refreshXrayFragmentLocked(sourceSub); err != nil {
+			log.Printf("[Subscriptions] failed to refresh Xray fragment for %s: %v", sourceSub.ID, err)
+			sourceNode.DialerProxy = ""
+			_ = s.save()
+			return err
+		}
+	}
+
+	if s.consoleSvc != nil && sourceSub.EnableXray {
+		if _, err := s.consoleSvc.Execute("-restart"); err != nil {
+			log.Printf("subscription %s: xkeen -restart after dialerProxy update: %v", sourceSub.ID, err)
+		}
+	}
+
+	return nil
+}
+
+// DialerProxyTargets returns all candidate nodes across active Xray subscriptions
+// that can be used as dialerProxy targets for the specified source node.
+func (s *SubscriptionService) DialerProxyTargets(subID, nodeTag string) ([]DialerProxyTarget, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	targets := make([]DialerProxyTarget, 0)
+	if nodeTag != "" && nodeTag != "_" {
+		for i := range s.subscriptions {
+			for j := range s.subscriptions[i].Nodes {
+				if s.subscriptions[i].Nodes[j].DialerProxy == nodeTag {
+					return targets, nil
+				}
+			}
+		}
+	}
+	for i := range s.subscriptions {
+		sub := &s.subscriptions[i]
+		if !sub.Enabled || !sub.EnableXray {
+			continue
+		}
+		for j := range sub.Nodes {
+			node := &sub.Nodes[j]
+			if node.Tag == nodeTag {
+				continue
+			}
+			if node.DialerProxy != "" {
+				continue
+			}
+			targets = append(targets, DialerProxyTarget{
+				SubscriptionID:   sub.ID,
+				SubscriptionName: sub.Name,
+				Tag:              node.Tag,
+				Name:             node.Name,
+			})
+		}
+	}
+
+	return targets, nil
+}
+
+// refreshXrayFragmentLocked updates the on-disk Xray fragment for the given subscription,
+// updating dialerProxy and sockopt in the outbounds according to current subscription and node settings.
+func (s *SubscriptionService) refreshXrayFragmentLocked(sub *Subscription) error {
+	if sub == nil || !sub.EnableXray {
+		return nil
+	}
+	fragmentPath := s.getFragmentPath(sub)
+	data, err := os.ReadFile(fragmentPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read fragment: %w", err)
+	}
+
+	var wrapper struct {
+		Outbounds []map[string]interface{} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return fmt.Errorf("parse fragment outbounds: %w", err)
+	}
+
+	nodeByTag := make(map[string]*SubscriptionNode, len(sub.Nodes))
+	for i := range sub.Nodes {
+		nodeByTag[sub.Nodes[i].Tag] = &sub.Nodes[i]
+	}
+
+	tempOutbounds := make([]Outbound, 0, len(wrapper.Outbounds))
+	for _, m := range wrapper.Outbounds {
+		tag, _ := m["tag"].(string)
+		proto, _ := m["protocol"].(string)
+		tempOutbounds = append(tempOutbounds, Outbound{Tag: tag, Protocol: proto})
+	}
+	activeTags := s.collectActiveXrayTags(sub, tempOutbounds)
+
+	for i := range wrapper.Outbounds {
+		obMap := wrapper.Outbounds[i]
+		tag, _ := obMap["tag"].(string)
+		node := nodeByTag[tag]
+
+		var streamSettings map[string]interface{}
+		if ss, ok := obMap["streamSettings"].(map[string]interface{}); ok {
+			streamSettings = ss
+		}
+
+		// Clean previously merged managed sockopt keys
+		if streamSettings != nil {
+			if sockopt, ok := streamSettings["sockopt"].(map[string]interface{}); ok {
+				delete(sockopt, "mark")
+				delete(sockopt, "tcpFastOpen")
+				delete(sockopt, "tcpMptcp")
+				delete(sockopt, "dialerProxy")
+			}
+		}
+
+		// Merge sockopt and dialerProxy
+		sockopt := make(map[string]interface{})
+		if sub.SockoptMark > 0 {
+			sockopt["mark"] = sub.SockoptMark
+		}
+		if sub.SockoptFastOpen {
+			sockopt["tcpFastOpen"] = true
+		}
+		if sub.SockoptMptcp {
+			sockopt["tcpMptcp"] = true
+		}
+
+		if node != nil && node.DialerProxy != "" {
+			hasProxySettings := false
+			if ps, ok := obMap["proxySettings"]; ok && ps != nil {
+				hasProxySettings = true
+			}
+			if streamSettings != nil {
+				if ps, ok := streamSettings["proxySettings"]; ok && ps != nil {
+					hasProxySettings = true
+				}
+			}
+			if hasProxySettings {
+				log.Printf("[Subscriptions] Outbound %q already has proxySettings configured; skipping dialerProxy cascade to %q", tag, node.DialerProxy)
+			} else if activeTags != nil && !activeTags[node.DialerProxy] {
+				log.Printf("[Subscriptions] Target node %q for dialerProxy cascade of %q is not found in active Xray subscriptions; skipping", node.DialerProxy, tag)
+			} else {
+				sockopt["dialerProxy"] = node.DialerProxy
+			}
+		}
+
+		if len(sockopt) > 0 {
+			if streamSettings == nil {
+				streamSettings = make(map[string]interface{})
+				obMap["streamSettings"] = streamSettings
+			}
+			if existingSockopt, ok := streamSettings["sockopt"].(map[string]interface{}); ok {
+				for k, v := range sockopt {
+					existingSockopt[k] = v
+				}
+			} else {
+				streamSettings["sockopt"] = sockopt
+			}
+		}
+
+		if streamSettings != nil {
+			if sockopt, ok := streamSettings["sockopt"].(map[string]interface{}); ok && len(sockopt) == 0 {
+				delete(streamSettings, "sockopt")
+			}
+			if len(streamSettings) == 0 {
+				delete(obMap, "streamSettings")
+			}
+		}
+	}
+
+	newData, err := json.MarshalIndent(wrapper, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal fragment: %w", err)
+	}
+
+	if err := utils.AtomicWriteFile(fragmentPath, newData, 0600); err != nil {
+		return err
+	}
+
+	if s.configDir != "" {
+		if ok, out := ValidateXrayConfigDir(s.configDir); !ok {
+			// Rollback to previous working fragment content
+			_ = utils.AtomicWriteFile(fragmentPath, data, 0600)
+			return fmt.Errorf("Xray fragment validation failed, rolled back: %s", out)
+		}
+	}
+
+	return nil
 }

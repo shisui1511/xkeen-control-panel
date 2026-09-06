@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
+	"strings"
 	"syscall"
 	"time"
 
@@ -37,6 +40,28 @@ func main() {
 
 	flag.Parse()
 
+	// Router-grade RAM/GC limits (STAB-06): Keenetic devices typically have
+	// 128-256 MB total RAM shared with the kernel and other services. A
+	// soft-memory-limit plus a moderately aggressive GC target keeps XCP's
+	// own footprint predictable instead of relying on the Go runtime's
+	// default heap-doubling behavior, which can otherwise contribute to
+	// OOM-killer intervention on a loaded router (see Phase 99 analysis).
+	//
+	// 96 MiB (not a tighter 45 MiB) leaves headroom for existing code paths
+	// that already buffer multi-MB payloads fully in memory in a single
+	// allocation — kernel binary downloads (KernelService.FetchBinary), DAT
+	// geodata updates, and diagnostics snapshot .tar.gz creation — so a
+	// single such operation doesn't push the soft limit into continuous-GC
+	// territory (SetMemoryLimit trades memory for CPU once resident heap
+	// approaches it; on low-power router CPUs that trade can itself produce
+	// the sluggishness this phase is meant to prevent). GOGC=50 is a milder
+	// target than the previous 30 for the same reason — enough headroom
+	// between collections to avoid GC thrashing under normal operation,
+	// while SetMemoryLimit remains the hard backstop against unbounded
+	// growth.
+	debug.SetMemoryLimit(96 * 1024 * 1024) // 96 MiB
+	debug.SetGCPercent(50)
+
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Printf("Failed to load config: %v. Creating default...", err)
@@ -56,6 +81,19 @@ func main() {
 		} else {
 			log.Printf("Failed to initialize log rotator for %s: %v", cfg.XCPLogPath, err)
 		}
+	}
+
+	// System sysctl profile (STAB-06): no-op on non-Entware machines (see
+	// DeploySysctlProfile's "/opt/etc missing" detection), so this is safe
+	// to always call, including during local development.
+	if err := services.DeploySysctlProfile(""); err != nil {
+		log.Printf("Failed to deploy sysctl profile: %v", err)
+	}
+
+	// Auto-recover a missing Mihomo config.yaml so the kernel has something
+	// valid to start with instead of crash-looping (STAB-04).
+	if err := services.EnsureDefaultMihomoConfig(cfg.MihomoConfigDir); err != nil {
+		log.Printf("Failed to ensure default Mihomo config: %v", err)
 	}
 
 	srvCfg := &server.Config{
@@ -103,6 +141,13 @@ func main() {
 	api := handlers.NewAPI(cfg, srv)
 	srv.HandleProtected("/api/auth/change-password", api.ChangePassword)
 
+	// Profiling endpoints (protected)
+	srv.HandleProtected("/debug/pprof/", pprof.Index)
+	srv.HandleProtected("/debug/pprof/cmdline", pprof.Cmdline)
+	srv.HandleProtected("/debug/pprof/profile", pprof.Profile)
+	srv.HandleProtected("/debug/pprof/symbol", pprof.Symbol)
+	srv.HandleProtected("/debug/pprof/trace", pprof.Trace)
+
 	// Public endpoints
 	srv.Handle("/api/version", api.Version)
 	srv.HandleProtected("/api/capabilities", api.Capabilities)
@@ -114,13 +159,20 @@ func main() {
 	srv.HandleProtected("/api/config/list", api.ConfigList)
 	srv.HandleProtected("/api/config/read", api.ConfigRead)
 	srv.HandleProtected("/api/config/save", api.ConfigSave)
-	srv.HandleProtected("/api/config/mihomo-merge", api.MihomoMergeSave)
 	srv.HandleProtected("/api/config/backups", api.ConfigBackups)
 	srv.HandleProtected("/api/config/create", api.ConfigCreate)
 	srv.HandleProtected("/api/config/delete", api.ConfigDelete)
 	srv.HandleProtected("/api/config/rename", api.ConfigRename)
 	srv.HandleProtected("/api/config/validate", api.ConfigValidate)
 	srv.HandleProtected("/api/config/preflight", api.ConfigPreflight)
+	srv.HandleProtected("/api/config/smart-merge", api.ConfigSmartMerge)
+	srv.HandleProtected("/api/rules/custom", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			api.UserRulesList(w, r)
+		} else {
+			api.UserRulesSave(w, r)
+		}
+	})
 	srv.HandleProtected("/api/config/mihomo-migrate-socket", api.MihomoMigrateSocket)
 	srv.HandleProtected("/api/settings", api.SettingsGet)
 	srv.HandleProtected("/api/settings/https", api.SettingsHTTPS)
@@ -130,10 +182,22 @@ func main() {
 	srv.HandleProtected("/api/service/dns-redirect", api.ServiceDNSRedirect)
 	srv.HandleProtected("/api/service/restart-log", api.ServiceRestartLog)
 	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
+	srv.HandleProtected("/api/logs/history", api.LogsHistory)
+	srv.HandleProtected("/api/logs/flash-health", api.LogsFlashHealth)
+	srv.HandleProtected("/api/logs/level", api.LogsSetLevel)
+	srv.HandleProtected("/api/logs/clear", api.LogsClear)
 	srv.HandleProtected("/api/logs/download", api.LogsDownload)
 	srv.HandleProtected("/api/mihomo/status", api.MihomoStatus)
 	srv.HandleProtected("/api/mihomo/groups", api.MihomoGroups)
+	srv.HandleProtected("/api/mihomo/dns/query", api.MihomoDNSQuery)
+	srv.HandleProtected("/api/mihomo/cache/fakeip/flush", api.MihomoFlushFakeIP)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
+	srv.HandleProtected("/api/xray/reality/keygen", api.XrayRealityKeygen)
+	srv.HandleProtected("/api/xray/stats", api.XrayStats)
+	srv.HandleProtected("/api/xray/grpc/monitoring", api.XrayGRPCMonitoring)
+	srv.HandleProtected("/api/xray/test-route", api.XrayTestRoute)
+	srv.HandleProtected("/api/xray/restart-logger", api.XrayRestartLogger)
+	srv.HandleProtected("/api/xray/tls-ping", api.XrayTLSPing)
 	srv.HandleProtected("/api/system/stats", api.SystemStats)
 	srv.HandleProtected("/api/system/clients", api.SystemClients)
 	srv.HandleProtected("/api/system/diagnostics", api.DiagnosticsDownload)
@@ -162,6 +226,8 @@ func main() {
 	srv.HandleProtected("/api/subscriptions/nodes", api.SubscriptionNodes)
 	srv.HandleProtected("/api/subscriptions/health", api.SubscriptionHealth)
 	srv.HandleProtected("/api/subscriptions/active", api.SubscriptionSetActive)
+	srv.HandleProtected("/api/subscriptions/node-dialer-proxy", api.SubscriptionSetNodeDialerProxy)
+	srv.HandleProtected("/api/subscriptions/dialer-proxy-targets", api.SubscriptionDialerProxyTargets)
 	srv.HandleProtected("/api/proxy-providers", api.ProxyProvidersRouter)
 	srv.HandleProtected("/api/proxy-providers/", api.ProxyProvidersRouter)
 
@@ -211,6 +277,49 @@ func main() {
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
 
+	xrayGRPCSvc := services.NewXrayGRPCService(fmt.Sprintf("127.0.0.1:%d", cfg.XRayAPIPort))
+	xrayGRPCSvc.SetActiveKernelFunc(func() string {
+		if kSvc := api.KernelService(); kSvc != nil {
+			for _, info := range kSvc.List() {
+				if info.ProcessStatus == "running" {
+					return info.Name
+				}
+			}
+		}
+		if xSvc := api.XKeenService(); xSvc != nil {
+			if status, err := xSvc.Status(); err == nil {
+				lower := strings.ToLower(status)
+				if strings.Contains(lower, "xray") {
+					return "xray"
+				} else if strings.Contains(lower, "mihomo") {
+					return "mihomo"
+				}
+			}
+		}
+		return "xray"
+	})
+	xrayGRPCSvc.Start()
+	api.SetXrayGRPCService(xrayGRPCSvc)
+	defer xrayGRPCSvc.Stop()
+
+	// Watchdog / circuit breaker (STAB-05): supervises the active kernel and
+	// disarms the XKEEN_TPROXY iptables interception after 3 consecutive
+	// failed health checks, so a wedged proxy kernel doesn't leave the LAN
+	// without internet access.
+	watchdogSvc := services.NewWatchdogService(api.XKeenService(), cfg.MihomoConfigDir, cfg.XRayConfigDir)
+	watchdogSvc.Start()
+	defer watchdogSvc.Stop()
+
+	// Unified Log Dispatcher (LOGHUB-04, LOGHUB-05, LOGHUB-06)
+	logDir := filepath.Dir(cfg.XCPLogPath)
+	if logDir == "" || logDir == "." {
+		logDir = "/opt/var/log"
+	}
+	logDispatcher := services.NewLogDispatcher(cfg.LogSources, logDir, cfg.MihomoAPIURL)
+	logDispatcher.Start()
+	defer logDispatcher.Stop()
+	api.SetLogDispatcher(logDispatcher)
+
 	// Config Snapshots
 	xrayDir := filepath.Dir(cfg.XRayConfigDir)                            // e.g. /opt/etc/xray
 	xkeenDir := filepath.Join(filepath.Dir(cfg.MihomoConfigDir), "xkeen") // e.g. /opt/etc/xkeen
@@ -250,6 +359,10 @@ func main() {
 
 	// Assets Service
 	srv.HandleProtected("/api/assets/definition", api.AssetsDefinition)
+
+	// User Custom Rules Service (TMPL-06, TMPL-07)
+	userRulesSvc := services.NewUserRulesService(cfg.DataDir)
+	api.SetUserRulesService(userRulesSvc)
 
 	// Templates
 	templatesFS, err := xkeencontrolpanel.GetTemplatesFS()

@@ -6,7 +6,7 @@ test.describe('Proxy Kernels switching test suite', () => {
   test.beforeEach(async ({ page }) => {
     switchRequested = false;
 
-    // Отключаем Service Worker в тестах, чтобы запросы к API перехватывались через page.route
+    // Disable Service Worker in tests so requests are intercepted
     await page.addInitScript(() => {
       Object.defineProperty(window.navigator, 'serviceWorker', {
         value: undefined,
@@ -15,7 +15,7 @@ test.describe('Proxy Kernels switching test suite', () => {
       });
     });
 
-    // Перехватываем все запросы к API
+    // Intercept API routes
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
 
@@ -40,12 +40,12 @@ test.describe('Proxy Kernels switching test suite', () => {
                 xray: { installed: true, version: '1.8.4', channel: 'stable' },
                 mihomo: { installed: true, version: '1.18.0', channel: 'stable' }
               },
-              active_kernel: 'xray',
+              active_kernel: switchRequested ? 'mihomo' : 'xray',
               mihomo: {
                 reachable: true,
-                process_running: false,
-                api_reachable: false,
-                api_authenticated: false
+                process_running: switchRequested,
+                api_reachable: switchRequested,
+                api_authenticated: switchRequested
               }
             }
           })
@@ -74,10 +74,21 @@ test.describe('Proxy Kernels switching test suite', () => {
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify([])
+          body: JSON.stringify(
+            switchRequested
+              ? [
+                  {
+                    timestamp: Math.floor(Date.now() / 1000),
+                    action: 'switch_kernel:mihomo',
+                    success: true,
+                    exit_code: 0,
+                    output: 'switched to mihomo'
+                  }
+                ]
+              : []
+          )
         });
       } else if (url.includes('/api/kernels')) {
-        // Динамический ответ для ядер в зависимости от состояния переключения
         if (switchRequested) {
           await route.fulfill({
             status: 200,
@@ -167,14 +178,13 @@ test.describe('Proxy Kernels switching test suite', () => {
         });
       } else if (url.includes('/api/service/control') && url.includes('action=switch_kernel')) {
         switchRequested = true;
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 500));
         await route.fulfill({
           status: 200,
           contentType: 'text/plain',
           body: 'Ядро успешно переключено на mihomo'
         });
       } else {
-        // Заглушка для любых других запросов к API (Clash, subscriptions и т.д.)
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -184,41 +194,33 @@ test.describe('Proxy Kernels switching test suite', () => {
     });
   });
 
-  test('successfully switches active kernel xray -> mihomo with optimistic UI spinner', async ({
+  test('successfully switches active kernel xray -> mihomo via radio selector and confirm dialog', async ({
     page
   }) => {
-    // Переходим на страницу
     await page.goto('/#/services');
 
-    // 1. Проверяем исходное состояние UI
-    const xrayButton = page.locator('button.ks-btn:has-text("Xray")');
-    const mihomoButton = page.locator('button.ks-btn:has-text("Mihomo")');
+    // 1. Check initial Hero state
+    const xrayRadio = page.locator('.core-radio-card:has-text("Xray")');
+    const mihomoRadio = page.locator('.core-radio-card:has-text("Mihomo")');
 
-    await expect(xrayButton).toHaveClass(/ks-active/);
-    await expect(mihomoButton).not.toHaveClass(/ks-active/);
+    await expect(xrayRadio).toHaveClass(/active/);
+    await expect(mihomoRadio).not.toHaveClass(/active/);
 
-    // Проверяем статус-бейдж в строке Xray и Mihomo
-    const xrayRow = page.locator('.kernel-card:has-text("Xray")');
-    const mihomoRow = page.locator('.kernel-card:has-text("Mihomo")');
-    await expect(xrayRow.locator('.status-badge.running')).toBeVisible();
-    await expect(mihomoRow.locator('.status-badge.stopped')).toBeVisible();
+    // 2. Click Mihomo radio option
+    await mihomoRadio.click();
 
-    // Кликаем по кнопке Mihomo для запуска смены ядра
-    await mihomoButton.click();
+    // 3. Confirm modal appears and confirm switch
+    const confirmBtn = page.locator(
+      '.modal button.btn-primary, .confirm-dialog button.btn-primary, button:has-text("Сделать активным"), button:has-text("Make active")'
+    );
+    await expect(confirmBtn.first()).toBeVisible();
+    await confirmBtn.first().click();
 
-    // 2. Проверяем Optimistic UI во время запроса
-    await expect(mihomoButton).toHaveClass(/ks-switching/);
-    await expect(mihomoButton.locator('.ks-dot-spin')).toBeVisible();
-    await expect(mihomoButton).toBeDisabled();
+    // 4. Wait for UI update
+    await page.waitForTimeout(1000);
 
-    // Ждем окончания запроса и обновления UI
-    await page.waitForTimeout(1500);
-
-    // 3. Проверяем финальное состояние после успешной смены
-    await expect(mihomoButton).toHaveClass(/ks-active/);
-    await expect(xrayButton).not.toHaveClass(/ks-active/);
-
-    await expect(mihomoRow.locator('.status-badge.running')).toBeVisible();
-    await expect(xrayRow.locator('.status-badge.stopped')).toBeVisible();
+    // 5. Check final state
+    await expect(mihomoRadio).toHaveClass(/active/);
+    await expect(xrayRadio).not.toHaveClass(/active/);
   });
 });

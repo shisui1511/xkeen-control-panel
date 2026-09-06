@@ -34,7 +34,85 @@
   let searchQuery = $state('');
   let typeFilter = $state('');
   let proxyFilter = $state('');
-  let activeTab: 'rules' | 'providers' = $state('rules');
+  let activeTab: 'rules' | 'providers' | 'custom' = $state('rules');
+
+  interface UserRule {
+    id: string;
+    type: string;
+    value: string;
+    target: string;
+    comment?: string;
+    enabled: boolean;
+  }
+
+  let customRules: UserRule[] = $state([]);
+  let loadingCustom = $state(false);
+  let savingCustom = $state(false);
+  let newRuleValue = $state('');
+  let newRuleType = $state('domain_suffix');
+  let newRuleTarget = $state('proxy');
+  let newRuleComment = $state('');
+
+  async function fetchCustomRules() {
+    loadingCustom = true;
+    try {
+      const res = await apiFetch('/api/rules/custom');
+      if (res.ok) {
+        const data = await res.json();
+        customRules = data.data || data.rules || data || [];
+      }
+    } catch (e: any) {
+      if (e?.status === 401) return;
+    } finally {
+      loadingCustom = false;
+    }
+  }
+
+  async function saveCustomRules() {
+    savingCustom = true;
+    try {
+      const res = await apiFetch('/api/rules/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rules: customRules })
+      });
+      if (!res.ok) throw new Error('Failed to save rules');
+      showToast('success', $t('rules.custom_saved'));
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e.message);
+    } finally {
+      savingCustom = false;
+    }
+  }
+
+  function addCustomRule() {
+    if (!newRuleValue.trim()) return;
+    customRules = [
+      {
+        id: 'rule_' + Date.now(),
+        type: newRuleType,
+        value: newRuleValue.trim(),
+        target: newRuleTarget,
+        comment: newRuleComment.trim(),
+        enabled: true
+      },
+      ...customRules
+    ];
+    newRuleValue = '';
+    newRuleComment = '';
+    saveCustomRules();
+  }
+
+  function removeCustomRule(id: string) {
+    customRules = customRules.filter((r) => r.id !== id);
+    saveCustomRules();
+  }
+
+  function toggleCustomRule(id: string) {
+    customRules = customRules.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r));
+    saveCustomRules();
+  }
 
   let ruleProviders: RuleProvider[] = $state([]);
   let loadingProviders = $state(false);
@@ -299,7 +377,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_proxy')} <span style="color:var(--fg-faint);margin:0 6px;">/</span>
+        {$t('nav.group_routing')} <span class="crumb-sep">›</span>
         {$t('nav.rules')}
       </div>
       <h1>{$t('rules.title')}</h1>
@@ -340,6 +418,14 @@
       class="tab-btn"
       class:active={activeTab === 'providers'}
       onclick={() => (activeTab = 'providers')}>{$t('rules.tab_providers')}</button
+    >
+    <button
+      class="tab-btn"
+      class:active={activeTab === 'custom'}
+      onclick={() => {
+        activeTab = 'custom';
+        fetchCustomRules();
+      }}>{$t('rules.tab_custom')}</button
     >
   </div>
 
@@ -474,7 +560,104 @@
         </table>
       </div>
     {/if}
-  {:else}
+  {:else if activeTab === 'custom'}
+    <div class="custom-rules-section">
+      <div class="custom-add-card mb-3">
+        <h3 class="custom-form-title">{$t('rules.add_custom_rule')}</h3>
+        <div class="custom-form-row">
+          <input
+            type="text"
+            class="filter-input"
+            placeholder={$t('rules.value_placeholder')}
+            bind:value={newRuleValue}
+            style="flex: 2; min-width: 180px;"
+          />
+          <select bind:value={newRuleType} class="source-select" style="flex: 1; min-width: 140px;">
+            <option value="domain_suffix">{$t('rules.custom_type_suffix')}</option>
+            <option value="domain">{$t('rules.custom_type_domain')}</option>
+            <option value="domain_keyword">{$t('rules.custom_type_keyword')}</option>
+            <option value="ip_cidr">{$t('rules.custom_type_ip')}</option>
+            <option value="port">{$t('rules.custom_type_port')}</option>
+          </select>
+          <select
+            bind:value={newRuleTarget}
+            class="source-select"
+            style="flex: 1; min-width: 130px;"
+          >
+            <option value="proxy">{$t('rules.target_proxy')}</option>
+            <option value="direct">{$t('rules.target_direct')}</option>
+            <option value="reject">{$t('rules.target_reject')}</option>
+          </select>
+          <input
+            type="text"
+            class="filter-input"
+            placeholder={$t('rules.custom_comment')}
+            bind:value={newRuleComment}
+            style="flex: 1.5; min-width: 140px;"
+          />
+          <button class="btn btn-primary" onclick={addCustomRule} disabled={!newRuleValue.trim()}>
+            {$t('rules.add_custom_rule')}
+          </button>
+        </div>
+      </div>
+
+      {#if loadingCustom}
+        <div class="loading-state">
+          <span class="spinner"></span>
+        </div>
+      {:else if customRules.length === 0}
+        <div class="empty-providers">
+          <p style="color: var(--fg-dim);">{$t('rules.no_custom_rules')}</p>
+        </div>
+      {:else}
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 50px;">{$t('rules.enabled_col')}</th>
+                <th>{$t('rules.type_col')}</th>
+                <th>{$t('rules.value')}</th>
+                <th>{$t('rules.target')}</th>
+                <th>{$t('rules.comment_col')}</th>
+                <th style="width: 50px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each customRules as rule}
+                <tr style={!rule.enabled ? 'opacity: 0.5;' : ''}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={rule.enabled}
+                      onchange={() => toggleCustomRule(rule.id)}
+                    />
+                  </td>
+                  <td>
+                    <span class={getRuleBadgeClass(rule.type)}>{rule.type}</span>
+                  </td>
+                  <td class="mono">{rule.value}</td>
+                  <td>
+                    <span class={getTargetBadgeClass(rule.target)}>{rule.target}</span>
+                  </td>
+                  <td style="color: var(--fg-dim); font-size: 0.8125rem;">{rule.comment || '—'}</td>
+                  <td style="text-align: right;">
+                    <button
+                      class="btn btn-danger btn-sm"
+                      onclick={() => removeCustomRule(rule.id)}
+                      title={$t('app.delete')}
+                      style="padding: 2px 8px; font-size: 11px;"
+                    >
+                      ✕
+                    </button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </div>
+  {:else if activeTab === 'providers'}
     {#if loadingProviders}
       <div class="loading-state">
         <span class="spinner"></span>
@@ -832,6 +1015,27 @@
 
   .filters .filter-input {
     flex: 1;
+  }
+
+  .custom-add-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+  }
+
+  .custom-form-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--fg-primary);
+  }
+
+  .custom-form-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
   }
 
   /* Column priority on mobile — hide # index, truncate payload */

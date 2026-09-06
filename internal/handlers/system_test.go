@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/cert"
 	"github.com/shisui1511/xkeen-control-panel/internal/config"
@@ -183,5 +184,67 @@ func TestCheckActiveConfigsInvalid(t *testing.T) {
 	// Should default to false when no binary errors out or no running kernel active
 	if invalid := api.checkActiveConfigsInvalid(); invalid {
 		t.Errorf("expected checkActiveConfigsInvalid to be false for empty valid dirs, got %v", invalid)
+	}
+}
+
+// TestCheckActiveConfigsInvalid_TimeoutBound verifies checkMihomo's exec.CommandContext
+// timeout (STAB-01): a hung `mihomo -t` process must be killed and the call must return
+// well within its own 30s validation cache TTL, instead of blocking this goroutine forever.
+func TestCheckActiveConfigsInvalid_TimeoutBound(t *testing.T) {
+	tmpDir := t.TempDir()
+	hangingBin := filepath.Join(tmpDir, "mihomo")
+	// Sleeps far longer than the 3s exec.CommandContext timeout so the test
+	// proves the call is actually bounded, not merely fast by coincidence.
+	if err := os.WriteFile(hangingBin, []byte("#!/bin/sh\nsleep 10\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	mihomoConfigDir := filepath.Join(tmpDir, "mihomo-config")
+	if err := os.MkdirAll(mihomoConfigDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		MihomoConfigDir: mihomoConfigDir,
+		MihomoBinary:    hangingBin,
+		AllowedRoots:    []string{tmpDir},
+	}
+	api := &API{
+		cfg:     cfg,
+		pathVal: utils.NewPathValidator(cfg.AllowedRoots),
+	}
+
+	start := time.Now()
+	invalid := api.checkActiveConfigsInvalid()
+	elapsed := time.Since(start)
+
+	if elapsed > 8*time.Second {
+		t.Fatalf("expected checkActiveConfigsInvalid to return within ~3s (exec.CommandContext timeout), took %s", elapsed)
+	}
+	if !invalid {
+		t.Error("expected checkActiveConfigsInvalid to report invalid=true when mihomo -t times out")
+	}
+}
+
+func TestPosixTZOffsetHours(t *testing.T) {
+	cases := []struct {
+		tz        string
+		wantHours int
+		wantOK    bool
+	}{
+		{"MSK-3", 3, true},   // Moscow: POSIX offset -3 means actual UTC+3
+		{"<+03>-3", 3, true}, // Posix angle brackets timezone name
+		{"<MSK>-3", 3, true}, // Posix angle brackets timezone name
+		{"UTC0", 0, true},
+		{"CST6CDT", -6, true}, // US Central: POSIX offset 6 means actual UTC-6
+		{"JST-9", 9, true},
+		{"", 0, false},
+		{"Europe/Moscow", 0, false}, // IANA name, not POSIX — must not be parsed as an offset
+	}
+	for _, c := range cases {
+		hours, ok := posixTZOffsetHours(c.tz)
+		if ok != c.wantOK || hours != c.wantHours {
+			t.Errorf("posixTZOffsetHours(%q) = (%d, %v), want (%d, %v)", c.tz, hours, ok, c.wantHours, c.wantOK)
+		}
 	}
 }

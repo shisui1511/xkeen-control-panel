@@ -381,3 +381,71 @@ func TestAddFileToTar(t *testing.T) {
 		t.Errorf("expected 'hello world', got %q", string(content))
 	}
 }
+
+func TestDiagnosticsDownload_RedactsLogs(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	logFile := filepath.Join(tmpDir, "test.log")
+	logContent := "2026-08-24 INFO [DNS] Fetching https://example.com/sub?token=secrettoken123 from 192.168.1.100 password: supersecretpass\n"
+	if err := os.WriteFile(logFile, []byte(logContent), 0644); err != nil {
+		t.Fatalf("failed to write log file: %v", err)
+	}
+
+	api.cfg.LogSources = []string{logFile}
+	api.cfg.LogPath = logFile
+	api.cfg.AllowedRoots = append(api.cfg.AllowedRoots, tmpDir)
+	api.pathVal = utils.NewPathValidator(api.cfg.AllowedRoots)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/system/diagnostics", nil)
+	rec := httptest.NewRecorder()
+
+	api.DiagnosticsDownload(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	gr, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatalf("failed to create gzip reader: %v", err)
+	}
+	defer gr.Close()
+
+	tr := tar.NewReader(gr)
+	var foundLogContent string
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar reader error: %v", err)
+		}
+		if hdr.Name == "logs/test.log" {
+			data, err := io.ReadAll(tr)
+			if err != nil {
+				t.Fatalf("failed to read tar content: %v", err)
+			}
+			foundLogContent = string(data)
+			break
+		}
+	}
+
+	if foundLogContent == "" {
+		t.Fatal("expected logs/test.log in archive")
+	}
+
+	if strings.Contains(foundLogContent, "secrettoken123") {
+		t.Errorf("token leaked in diagnostics log: %s", foundLogContent)
+	}
+	if strings.Contains(foundLogContent, "supersecretpass") {
+		t.Errorf("password leaked in diagnostics log: %s", foundLogContent)
+	}
+	if strings.Contains(foundLogContent, "192.168.1.100") {
+		t.Errorf("LAN IP leaked in diagnostics log: %s", foundLogContent)
+	}
+	if !strings.Contains(foundLogContent, "*REDACTED*") {
+		t.Errorf("missing *REDACTED* in diagnostics log: %s", foundLogContent)
+	}
+}

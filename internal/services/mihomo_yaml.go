@@ -523,6 +523,110 @@ func ParseClashProxyNode(blockStr string) SubscriptionNode {
 		}
 	}
 
+	if proxyType == "wireguard" {
+		pubKey := p.get("public-key")
+		if pubKey == "" {
+			pubKey = p.get("publicKey")
+		}
+		if pubKey == "" {
+			pubKey = p.get("public_key")
+		}
+		node.PublicKey = pubKey
+
+		secKey := p.get("private-key")
+		if secKey == "" {
+			secKey = p.get("private_key")
+		}
+		if secKey == "" {
+			secKey = p.get("secret-key")
+		}
+		if secKey == "" {
+			secKey = p.get("secret_key")
+		}
+		node.SecretKey = secKey
+
+		psk := p.get("preshared-key")
+		if psk == "" {
+			psk = p.get("pre-shared-key")
+		}
+		if psk == "" {
+			psk = p.get("preshared_key")
+		}
+		if psk == "" {
+			psk = p.get("pre_shared_key")
+		}
+		if psk == "" {
+			psk = p.get("psk")
+		}
+		node.PreSharedKey = psk
+
+		var localAddrs []string
+		if ip := p.get("ip"); ip != "" {
+			localAddrs = append(localAddrs, ip)
+		}
+		if ipv6 := p.get("ipv6"); ipv6 != "" {
+			localAddrs = append(localAddrs, ipv6)
+		}
+		if len(localAddrs) == 0 {
+			if addrs := p.get("address"); addrs != "" {
+				localAddrs = append(localAddrs, strings.Split(addrs, ",")...)
+			} else if addrs := p.get("address._list"); addrs != "" {
+				localAddrs = append(localAddrs, strings.Split(addrs, ",")...)
+			}
+		}
+		node.LocalAddresses = localAddrs
+
+		if mtuStr := p.get("mtu"); mtuStr != "" {
+			if mtu, err := strconv.Atoi(mtuStr); err == nil {
+				node.MTU = mtu
+			}
+		}
+
+		if kaStr := p.get("keepalive"); kaStr != "" {
+			if ka, err := strconv.Atoi(kaStr); err == nil {
+				node.KeepAlive = ka
+			}
+		}
+
+		resRaw := p.get("reserved")
+		if resRaw == "" {
+			resRaw = p.get("reserved._list")
+		}
+		if resRaw != "" {
+			clean := strings.Trim(resRaw, "[] ")
+			node.Reserved = decodeWireguardReserved(clean)
+		}
+
+		allowed := p.get("allowed-ips")
+		if allowed == "" {
+			allowed = p.get("allowed-ips._list")
+		}
+		if allowed == "" {
+			allowed = p.get("allowed-subnets")
+		}
+		if allowed == "" {
+			allowed = p.get("allowed-subnets._list")
+		}
+		if allowed == "" {
+			allowed = p.get("allowed_ips")
+		}
+		if allowed == "" {
+			allowed = p.get("allowed_subnets")
+		}
+		if allowed != "" {
+			clean := strings.Trim(allowed, "[] ")
+			var parts []string
+			for _, part := range strings.Split(clean, ",") {
+				if s := strings.Trim(strings.TrimSpace(part), `"'`); s != "" {
+					parts = append(parts, s)
+				}
+			}
+			if len(parts) > 0 {
+				node.AllowedIPs = parts
+			}
+		}
+	}
+
 	return node
 }
 
@@ -763,46 +867,6 @@ func UpdateMihomoGroupProviders(content, groupName string, providerID string, re
 		out = append(out, lines[gStart+1:]...)
 	}
 
-	return strings.Join(out, "\n")
-}
-
-// ReplaceMihomoTopLevelSection заменяет всю секцию sectionName: ... до следующего
-// top-level ключа. Используется для "rule-providers:", "rules:", "proxy-groups:".
-// Сохраняет комментарии и ключи вне управляемой секции.
-func ReplaceMihomoTopLevelSection(content string, sectionName string, newContent string) string {
-	lines := strings.Split(content, "\n")
-	start, end, _ := findTopLevelSection(lines, sectionName)
-
-	var newLines []string
-	if strings.TrimSpace(newContent) != "" {
-		newLines = strings.Split(strings.TrimRight(newContent, "\n"), "\n")
-	}
-
-	if start == -1 {
-		// Секции нет — добавить в конец
-		var sb strings.Builder
-		sb.WriteString("\n")
-		sb.WriteString(sectionName)
-		sb.WriteString(":\n")
-		for _, l := range newLines {
-			sb.WriteString(l)
-			sb.WriteString("\n")
-		}
-
-		appended := sb.String()
-		if strings.HasSuffix(content, "\n") {
-			return content + strings.TrimPrefix(appended, "\n")
-		}
-		return content + appended
-	}
-
-	var out []string
-	out = append(out, lines[:start]...)
-	out = append(out, sectionName+":")
-	out = append(out, newLines...)
-	if end < len(lines) {
-		out = append(out, lines[end:]...)
-	}
 	return strings.Join(out, "\n")
 }
 

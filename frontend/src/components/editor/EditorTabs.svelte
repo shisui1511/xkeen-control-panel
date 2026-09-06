@@ -24,7 +24,7 @@
 </script>
 
 {#if tabs.length > 0}
-  <div class="editor-tab-strip">
+  <div class="editor-tab-strip" role="tablist">
     {#each tabs as tab (tab.path)}
       <div
         class="editor-tab"
@@ -34,6 +34,8 @@
         <button
           type="button"
           class="tab-main"
+          role="tab"
+          aria-selected={tab.path === activeTabPath}
           onclick={() => onSwitchTab(tab.path)}
           ondblclick={() => onPinTab(tab.path)}
         >
@@ -70,8 +72,8 @@
   .editor-tab-strip {
     display: flex;
     gap: 2px;
-    background: var(--bg-card);
-    border-bottom: 1px solid var(--border);
+    background: transparent;
+    border-bottom: none;
     overflow-x: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;

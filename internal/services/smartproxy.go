@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -282,7 +283,7 @@ func (s *SmartProxyService) applyProxyToGroup(groupName, proxyName string) error
 		}
 	}
 
-	url := fmt.Sprintf("%s/proxies/%s", baseURL, groupName)
+	url := fmt.Sprintf("%s/proxies/%s", baseURL, url.PathEscape(groupName))
 	bodyMap := map[string]string{"name": proxyName}
 	bodyBytes, err := json.Marshal(bodyMap)
 	if err != nil {
@@ -392,10 +393,22 @@ func (s *SmartProxyService) CurrentStatus() map[string]interface{} {
 		}
 	}
 
+	tzName, tzOffset := now.Zone()
+	tzFormatted := tzName
+	if tzFormatted == "" || strings.HasPrefix(tzFormatted, "+") || strings.HasPrefix(tzFormatted, "-") {
+		hours := tzOffset / 3600
+		if hours >= 0 {
+			tzFormatted = fmt.Sprintf("UTC+%d", hours)
+		} else {
+			tzFormatted = fmt.Sprintf("UTC%d", hours)
+		}
+	}
+
 	return map[string]interface{}{
-		"active": activeProfiles,
-		"next":   nextProfiles,
-		"time":   currentTime,
-		"day":    currentDay,
+		"active":   activeProfiles,
+		"next":     nextProfiles,
+		"time":     currentTime,
+		"day":      currentDay,
+		"timezone": tzFormatted,
 	}
 }

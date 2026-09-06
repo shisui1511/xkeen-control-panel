@@ -298,116 +298,6 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
-func TestMihomoMergeSave(t *testing.T) {
-	tmpDir := t.TempDir()
-	api := newTestAPI(t, tmpDir)
-
-	targetPath := filepath.Join(tmpDir, "mihomo-config.yaml")
-	initialContent := `
-proxies:
-  - name: "my-proxy"
-    type: ss
-    server: 1.1.1.1
-    port: 8388
-    cipher: aes-128-gcm
-    password: pass
-
-proxy-providers:
-  provider1:
-    type: http
-    url: "http://example.com"
-    path: ./provider1.yaml
-
-geox-url:
-  geoip: "http://example.com/geoip.dat"
-
-proxy-groups:
-  - name: "original-group"
-    type: select
-    proxies:
-      - DIRECT
-
-rule-providers:
-  original-rp:
-    type: http
-    behavior: domain
-    url: "http://example.com"
-    path: ./original-rp.yaml
-
-rules:
-  - MATCH,DIRECT
-`
-	if err := os.WriteFile(targetPath, []byte(initialContent), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	body := `{
-		"path": "` + strings.ReplaceAll(targetPath, "\\", "\\\\") + `",
-		"sections": {
-			"proxy-groups": "  - name: \"new-group\"\n    type: select\n    proxies:\n      - DIRECT",
-			"rule-providers": "  new-rp:\n    type: http\n    behavior: domain\n    url: \"http://new.com\"\n    path: ./new-rp.yaml",
-			"rules": "  - DOMAIN,google.com,new-group\n  - MATCH,DIRECT"
-		}
-	}`
-
-	req := httptest.NewRequest(http.MethodPost, "/api/config/mihomo-merge", strings.NewReader(body))
-	rr := httptest.NewRecorder()
-
-	api.MihomoMergeSave(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	mergedData, err := os.ReadFile(targetPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mergedStr := string(mergedData)
-
-	if !strings.Contains(mergedStr, "new-group") {
-		t.Error("expected new-group to be in merged config")
-	}
-	if !strings.Contains(mergedStr, "new-rp:") {
-		t.Error("expected new-rp to be in merged config")
-	}
-	if !strings.Contains(mergedStr, "DOMAIN,google.com,new-group") {
-		t.Error("expected new rules to be in merged config")
-	}
-
-	if !strings.Contains(mergedStr, "my-proxy") {
-		t.Error("expected proxies section to be preserved")
-	}
-	if !strings.Contains(mergedStr, "provider1:") {
-		t.Error("expected proxy-providers section to be preserved")
-	}
-	if !strings.Contains(mergedStr, "geoip: \"http://example.com/geoip.dat\"") {
-		t.Error("expected geox-url section to be preserved")
-	}
-
-	invalidBody := `{"path": "/etc/passwd", "sections": {}}`
-	req = httptest.NewRequest(http.MethodPost, "/api/config/mihomo-merge", strings.NewReader(invalidBody))
-	rr = httptest.NewRecorder()
-	api.MihomoMergeSave(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Errorf("expected 403 for forbidden path, got %d", rr.Code)
-	}
-
-	// Invalid YAML in section
-	invalidYAMLBody := `{
-		"path": "` + strings.ReplaceAll(targetPath, "\\", "\\\\") + `",
-		"sections": {
-			"rules": "  - [MATCH,DIRECT"
-		}
-	}`
-	req = httptest.NewRequest(http.MethodPost, "/api/config/mihomo-merge", strings.NewReader(invalidYAMLBody))
-	rr = httptest.NewRecorder()
-	api.MihomoMergeSave(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 for invalid YAML, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
 // TestConfigRead_FileNotFound verifies that ConfigRead returns 404 when file does not exist.
 func TestConfigRead_FileNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -602,51 +492,102 @@ func TestCopyDirConfigs_Symlink(t *testing.T) {
 	}
 }
 
-func TestMihomoMergeSave_CleanInstall(t *testing.T) {
+func TestConfigSave_PreflightWarnings(t *testing.T) {
 	tmpDir := t.TempDir()
 	api := newTestAPI(t, tmpDir)
 
-	targetPath := filepath.Join(tmpDir, "non-existent-mihomo.yaml")
+	// Config with port 5000 reserved port warning
+	cfgPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("port: 7890\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
-	body := `{
-		"path": "` + strings.ReplaceAll(targetPath, "\\", "\\\\") + `",
-		"sections": {
-			"proxy-groups": "  - name: \"new-group\"\n    type: select\n    proxies:\n      - DIRECT",
-			"rules": "  - DOMAIN,google.com,new-group\n  - MATCH,DIRECT"
-		}
-	}`
-
-	req := httptest.NewRequest(http.MethodPost, "/api/config/mihomo-merge", strings.NewReader(body))
+	bodyWarn := []byte("tproxy-port: 5000\n")
+	req := httptest.NewRequest(http.MethodPost, "/api/config/save?path="+cfgPath, bytes.NewReader(bodyWarn))
 	rr := httptest.NewRecorder()
-
-	api.MihomoMergeSave(rr, req)
+	api.ConfigSave(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
-	mergedData, err := os.ReadFile(targetPath)
-	if err != nil {
-		t.Fatal(err)
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Warnings []struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"warnings"`
+		} `json:"data"`
 	}
-	mergedStr := string(mergedData)
-
-	// Check for default system parameters
-	if !strings.Contains(mergedStr, "log-level: silent") {
-		t.Error("expected default 'log-level: silent' in config")
-	}
-	if !strings.Contains(mergedStr, "allow-lan: true") {
-		t.Error("expected default 'allow-lan: true' in config")
-	}
-	if !strings.Contains(mergedStr, "routing-mark: 255") {
-		t.Error("expected default 'routing-mark: 255' in config")
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	// Check for merged sections
-	if !strings.Contains(mergedStr, "new-group") {
-		t.Error("expected new-group to be in merged config")
+	if !resp.Success {
+		t.Errorf("expected success to be true")
 	}
-	if !strings.Contains(mergedStr, "DOMAIN,google.com,new-group") {
-		t.Error("expected new rules to be in merged config")
+
+	hasConflictWarn := false
+	for _, w := range resp.Data.Warnings {
+		if w.Code == "preflight.port_conflict" {
+			hasConflictWarn = true
+			break
+		}
+	}
+	if !hasConflictWarn {
+		t.Errorf("expected preflight.port_conflict warning in response, got %+v", resp.Data.Warnings)
+	}
+}
+
+func TestConfigSmartMerge_PreflightWarnings(t *testing.T) {
+	tmpDir := t.TempDir()
+	api := newTestAPI(t, tmpDir)
+
+	mergeReq := ConfigSmartMergeRequest{
+		Type:            "mihomo",
+		ExistingContent: "mixed-port: 7890\n",
+		TemplateContent: "mixed-port: 7890\nport: 7890\n",
+	}
+	payload, _ := json.Marshal(mergeReq)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/config/smart-merge", bytes.NewReader(payload))
+	rr := httptest.NewRecorder()
+	api.ConfigSmartMerge(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Content  string `json:"content"`
+			Warnings []struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"warnings"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Errorf("expected success to be true")
+	}
+	if resp.Data.Content == "" {
+		t.Errorf("expected non-empty merged content")
+	}
+
+	hasPortConflict := false
+	for _, w := range resp.Data.Warnings {
+		if w.Code == "preflight.port_conflict" {
+			hasPortConflict = true
+			break
+		}
+	}
+	if !hasPortConflict {
+		t.Errorf("expected preflight.port_conflict in smart-merge warnings, got %+v", resp.Data.Warnings)
 	}
 }

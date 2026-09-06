@@ -22,6 +22,24 @@ export interface Proxy {
   fingerprint?: string;
   alterID?: number;
   username?: string;
+  dialerProxy?: string;
+  ports?: string;
+  // WireGuard & AmneziaWG (TMPL-08)
+  wgPrivateKey?: string;
+  wgPublicKey?: string;
+  wgIp?: string;
+  wgPresharedKey?: string;
+  wgMtu?: number;
+  awgEnabled?: boolean;
+  awgJc?: number;
+  awgJmin?: number;
+  awgJmax?: number;
+  awgS1?: number;
+  awgS2?: number;
+  awgH1?: number;
+  awgH2?: number;
+  awgH3?: number;
+  awgH4?: number;
 }
 
 export interface ProxyGroup {
@@ -40,6 +58,9 @@ export interface ProxyGroup {
   maxFailedTimes?: number;
   useProviders?: string[];
   strategy?: 'round-robin' | 'consistent-hashing' | 'sticky-sessions';
+  lazy?: boolean;
+  expectedStatus?: string;
+  excludeType?: string;
 }
 
 export interface Rule {
@@ -599,6 +620,36 @@ export function replaceMihomoTopLevelSection(
   return out.join('\n');
 }
 
+export type ListenerType = 'mixed' | 'socks' | 'http' | 'shadowsocks' | 'tproxy' | 'redirect';
+
+export interface ListenerUser {
+  username: string;
+  password: string;
+}
+
+export interface Listener {
+  id: string;
+  name: string;
+  type: ListenerType;
+  listen: string;
+  port: string;
+  proxy?: string;
+  udp?: boolean;
+  users?: ListenerUser[];
+  cipher?: string;
+  password?: string;
+  routingMark?: number;
+}
+
+export const BUILDER_LISTENER_TYPES: readonly string[] = [
+  'mixed',
+  'socks',
+  'http',
+  'shadowsocks',
+  'tproxy',
+  'redir'
+];
+
 export interface MihomoConfigState {
   proxies: Proxy[];
   groups: ProxyGroup[];
@@ -618,6 +669,9 @@ export interface MihomoConfigState {
   capabilities?: any;
   hasZkeenGeodata?: boolean;
   ruleProviders?: RuleProvider[];
+  listeners?: Listener[];
+  listenersRaw?: string | null;
+  listenersReadOnly?: boolean;
 }
 
 const CYRILLIC_MAP: Record<string, string> = {
@@ -904,7 +958,7 @@ export function generateYAML(state: MihomoConfigState): string {
             lines.push(`      path: ${yamlSafeString(p.wsPath || '/')}`);
           }
         }
-      } else if (p.type === 'socks') {
+      } else if (p.type === 'socks' || p.type === 'socks5') {
         if (p.username) lines.push(`    username: ${yamlSafeString(p.username)}`);
         if (p.password) lines.push(`    password: ${yamlSafeString(p.password)}`);
       } else if (p.type === 'http') {
@@ -912,6 +966,32 @@ export function generateYAML(state: MihomoConfigState): string {
         if (p.password) lines.push(`    password: ${yamlSafeString(p.password)}`);
         if (p.tls) lines.push(`    tls: true`);
         if (p.skipCertVerify) lines.push(`    skip-cert-verify: true`);
+      } else if (p.type === 'wireguard') {
+        if (p.wgPrivateKey) lines.push(`    private-key: ${yamlSafeString(p.wgPrivateKey)}`);
+        if (p.wgPublicKey) lines.push(`    public-key: ${yamlSafeString(p.wgPublicKey)}`);
+        if (p.wgIp) lines.push(`    ip: ${yamlSafeString(p.wgIp)}`);
+        if (p.wgPresharedKey) lines.push(`    pre-shared-key: ${yamlSafeString(p.wgPresharedKey)}`);
+        if (p.wgMtu) lines.push(`    mtu: ${p.wgMtu}`);
+        lines.push(`    udp: true`);
+
+        if (p.awgEnabled) {
+          lines.push(`    amnezia-wg-option:`);
+          lines.push(`      jc: ${p.awgJc ?? 4}`);
+          lines.push(`      jmin: ${p.awgJmin ?? 40}`);
+          lines.push(`      jmax: ${p.awgJmax ?? 70}`);
+          lines.push(`      s1: ${p.awgS1 ?? 15}`);
+          lines.push(`      s2: ${p.awgS2 ?? 40}`);
+          lines.push(`      h1: ${p.awgH1 ?? 1000000001}`);
+          lines.push(`      h2: ${p.awgH2 ?? 1000000002}`);
+          lines.push(`      h3: ${p.awgH3 ?? 1000000003}`);
+          lines.push(`      h4: ${p.awgH4 ?? 1000000004}`);
+        }
+      }
+      if (p.dialerProxy) {
+        lines.push(`    dialer-proxy: ${yamlSafeString(p.dialerProxy)}`);
+      }
+      if (p.ports) {
+        lines.push(`    ports: ${yamlSafeString(p.ports)}`);
       }
     }
     lines.push('');
@@ -942,6 +1022,9 @@ export function generateYAML(state: MihomoConfigState): string {
       if (g.excludeFilter) {
         lines.push(`    exclude-filter: ${yamlSafeString(g.excludeFilter)}`);
       }
+      if (g.excludeType) {
+        lines.push(`    exclude-type: ${yamlSafeString(g.excludeType)}`);
+      }
       if (g.includeAll === true) {
         lines.push(`    include-all: true`);
       }
@@ -956,11 +1039,17 @@ export function generateYAML(state: MihomoConfigState): string {
         lines.push(`    proxies:`);
         for (const p of g.proxies) lines.push(`      - ${yamlSafeString(p)}`);
       }
-      if (g.type !== 'select') {
+      if (g.type !== 'select' && g.type !== 'relay') {
         lines.push(`    url: ${g.url || 'https://www.gstatic.com/generate_204'}`);
         lines.push(`    interval: ${g.interval || 300}`);
         if (g.hidden === true) {
           lines.push(`    hidden: true`);
+        }
+        if (g.lazy === true) {
+          lines.push(`    lazy: true`);
+        }
+        if (g.expectedStatus) {
+          lines.push(`    expected-status: ${g.expectedStatus}`);
         }
         if (g.tolerance !== undefined && g.tolerance > 0) {
           lines.push(`    tolerance: ${g.tolerance}`);
@@ -1105,6 +1194,57 @@ export function generateYAML(state: MihomoConfigState): string {
   }
   lines.push('');
 
+  // Listeners
+  if (state.listenersReadOnly && state.listenersRaw) {
+    lines.push('listeners:');
+    const rawLines = state.listenersRaw.split('\n');
+    for (const rl of rawLines) {
+      lines.push(rl);
+    }
+    lines.push('');
+  } else if (state.listeners && state.listeners.length > 0) {
+    lines.push('listeners:');
+    for (const l of state.listeners) {
+      lines.push(`  - name: ${yamlSafeString(l.name)}`);
+      const yamlType = l.type === 'redirect' ? 'redir' : l.type;
+      lines.push(`    type: ${yamlType}`);
+      lines.push(`    listen: ${l.listen || '0.0.0.0'}`);
+      lines.push(`    port: ${l.port}`);
+      if (l.proxy) {
+        lines.push(`    proxy: ${yamlSafeString(l.proxy)}`);
+      }
+      if (
+        l.type === 'mixed' ||
+        l.type === 'socks' ||
+        l.type === 'tproxy' ||
+        l.type === 'shadowsocks'
+      ) {
+        if (typeof l.udp === 'boolean') {
+          lines.push(`    udp: ${l.udp}`);
+        }
+      }
+      if (l.type === 'shadowsocks') {
+        lines.push(`    cipher: ${l.cipher || 'aes-256-gcm'}`);
+        lines.push(`    password: ${yamlSafeString(l.password || '')}`);
+      }
+      if (
+        (l.type === 'mixed' || l.type === 'socks' || l.type === 'http') &&
+        l.users &&
+        l.users.length > 0
+      ) {
+        lines.push('    users:');
+        for (const u of l.users) {
+          lines.push(`      - username: ${yamlSafeString(u.username)}`);
+          lines.push(`        password: ${yamlSafeString(u.password)}`);
+        }
+      }
+      if (typeof l.routingMark === 'number' && l.routingMark > 0) {
+        lines.push(`    routing-mark: ${l.routingMark}`);
+      }
+    }
+    lines.push('');
+  }
+
   return lines.join('\n').trimEnd();
 }
 
@@ -1123,6 +1263,208 @@ export interface ParsedMihomoConfig {
   externalControllerType?: 'unix' | 'tcp';
   externalControllerTarget?: string;
   mihomoProviders: any[];
+  listeners: Listener[];
+  listenersRaw: string | null;
+  listenersReadOnly: boolean;
+}
+
+export function parseListenersSection(rawBlock: string): {
+  listeners: Listener[];
+  unrecognized: boolean;
+  rawText: string;
+} {
+  if (!rawBlock || rawBlock.trim() === '') {
+    return { listeners: [], unrecognized: false, rawText: '' };
+  }
+
+  const lines = rawBlock.split('\n');
+
+  // Find the first element and determine base indent
+  let firstElementIdx = -1;
+  let baseIndent = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    const match = line.match(/^(\s*)-\s+/);
+    if (match) {
+      firstElementIdx = i;
+      baseIndent = match[1].length;
+      break;
+    } else {
+      // Non-comment, non-empty line before any element start
+      return { listeners: [], unrecognized: true, rawText: rawBlock };
+    }
+  }
+
+  if (firstElementIdx === -1) {
+    return { listeners: [], unrecognized: true, rawText: rawBlock };
+  }
+
+  const chunks: string[][] = [];
+  let currentChunk: string[] | null = null;
+
+  for (let i = firstElementIdx; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) {
+      if (currentChunk) currentChunk.push(line);
+      continue;
+    }
+
+    // Check if line starts an element at baseIndent
+    const isNewElement =
+      line.length >= baseIndent + 2 &&
+      line.slice(0, baseIndent).trim() === '' &&
+      line.slice(baseIndent).startsWith('- ');
+
+    if (isNewElement) {
+      if (currentChunk) {
+        chunks.push(currentChunk);
+      }
+      currentChunk = [line];
+    } else {
+      if (currentChunk) {
+        currentChunk.push(line);
+      }
+    }
+  }
+  if (currentChunk) {
+    chunks.push(currentChunk);
+  }
+
+  const listeners: Listener[] = [];
+
+  for (const chunk of chunks) {
+    let name = '';
+    let type = '';
+    let listen = '0.0.0.0';
+    let port = '';
+    let proxy: string | undefined;
+    let udp: boolean | undefined;
+    let cipher: string | undefined;
+    let password: string | undefined;
+    let routingMark: number | undefined;
+    const users: ListenerUser[] = [];
+
+    let inUsers = false;
+    let currentUser: ListenerUser | null = null;
+
+    for (const rawLine of chunk) {
+      const trimmed = rawLine.trim();
+      if (trimmed === '' || trimmed.startsWith('#')) continue;
+
+      const indent = rawLine.search(/\S/);
+
+      if (inUsers) {
+        // Match user item start: e.g. "- username: alice" or "- password: ..." or "- "
+        const userItemMatch = rawLine.match(/^\s*-\s*(.*)$/);
+        if (userItemMatch) {
+          if (currentUser && (currentUser.username || currentUser.password)) {
+            users.push(currentUser);
+          }
+          currentUser = { username: '', password: '' };
+          const rest = userItemMatch[1].trim();
+          if (rest) {
+            const m = rest.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
+            if (m) {
+              if (m[1] === 'username') currentUser.username = unquote(m[2]);
+              else if (m[1] === 'password') currentUser.password = unquote(m[2]);
+            }
+          }
+          continue;
+        }
+
+        // Left the users list if we reached another property at listener indent
+        const isListenerPropertyIndent = indent > 0 && indent <= baseIndent + 2;
+        if (isListenerPropertyIndent) {
+          inUsers = false;
+          if (currentUser && (currentUser.username || currentUser.password)) {
+            users.push(currentUser);
+            currentUser = null;
+          }
+        } else {
+          // Inside a user item: e.g. "password: secret"
+          const userPropMatch = trimmed.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
+          if (userPropMatch && currentUser) {
+            const k = userPropMatch[1];
+            const v = unquote(userPropMatch[2]);
+            if (k === 'username') currentUser.username = v;
+            else if (k === 'password') currentUser.password = v;
+            continue;
+          }
+        }
+      }
+
+      if (trimmed.startsWith('users:')) {
+        inUsers = true;
+        continue;
+      }
+
+      const lineWithoutDash = rawLine.replace(/^\s*-\s+/, '  ');
+      const match = lineWithoutDash.match(/^\s*([a-zA-Z0-9_-]+):\s*(.*)$/);
+      if (match) {
+        const key = match[1];
+        const val = unquote(match[2].trim());
+        if (key === 'name') {
+          name = val;
+        } else if (key === 'type') {
+          type = val;
+        } else if (key === 'listen') {
+          listen = val;
+        } else if (key === 'port') {
+          port = val;
+        } else if (key === 'proxy') {
+          proxy = val;
+        } else if (key === 'udp') {
+          const lower = val.toLowerCase();
+          udp = lower === 'true' || lower === 'yes';
+        } else if (key === 'cipher') {
+          cipher = val;
+        } else if (key === 'password') {
+          password = val;
+        } else if (key === 'routing-mark' || key === 'routingMark') {
+          const m = parseInt(val, 10);
+          if (!isNaN(m) && m > 0) routingMark = m;
+        }
+      }
+    }
+
+    if (currentUser && (currentUser.username || currentUser.password)) {
+      users.push(currentUser);
+      currentUser = null;
+    }
+
+    if (!type) {
+      return { listeners: [], unrecognized: true, rawText: rawBlock };
+    }
+
+    const isSupported =
+      type === 'redir' || type === 'redirect' || BUILDER_LISTENER_TYPES.includes(type);
+
+    if (!isSupported) {
+      return { listeners: [], unrecognized: true, rawText: rawBlock };
+    }
+
+    const normalizedType: ListenerType =
+      type === 'redir' || type === 'redirect' ? 'redirect' : (type as ListenerType);
+
+    listeners.push({
+      id: crypto.randomUUID(),
+      name,
+      type: normalizedType,
+      listen: listen || '0.0.0.0',
+      port,
+      ...(proxy ? { proxy } : {}),
+      ...(typeof udp === 'boolean' ? { udp } : {}),
+      ...(cipher ? { cipher } : {}),
+      ...(password ? { password } : {}),
+      ...(typeof routingMark === 'number' ? { routingMark } : {}),
+      ...(users.length > 0 ? { users } : {})
+    });
+  }
+
+  return { listeners, unrecognized: false, rawText: '' };
 }
 
 export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
@@ -1157,7 +1499,10 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     existingRedirPort: null,
     externalControllerType: 'unix',
     externalControllerTarget: '/opt/var/run/mihomo.sock',
-    mihomoProviders: []
+    mihomoProviders: [],
+    listeners: [],
+    listenersRaw: null,
+    listenersReadOnly: false
   };
 
   if (!text || text.trim() === '') {
@@ -1216,7 +1561,8 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
             sec !== 'redir-port' &&
             sec !== 'external-controller' &&
             sec !== 'external-controller-unix' &&
-            sec !== 'proxy-providers'
+            sec !== 'proxy-providers' &&
+            sec !== 'listeners'
           ) {
             if (!parsed.preservedKeys.includes(sec)) {
               parsed.preservedKeys = [...parsed.preservedKeys, sec];
@@ -1417,10 +1763,72 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
 
         if (!currentProxy) continue;
 
+        if (currentParentKey && lineIndent <= parentKeyIndent) {
+          currentParentKey = '';
+          parentKeyIndent = 0;
+        }
+
         if (trimmed.endsWith(':') && !trimmed.startsWith('-')) {
           currentParentKey = trimmed.slice(0, -1).trim();
           parentKeyIndent = lineIndent;
           continue;
+        }
+
+        if (currentParentKey === 'amnezia-wg-option') {
+          const jcMatch = trimmed.match(/^jc:\s*(.+)$/);
+          if (jcMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgJc = parseInt(unquote(jcMatch[1]), 10);
+            continue;
+          }
+          const jminMatch = trimmed.match(/^jmin:\s*(.+)$/);
+          if (jminMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgJmin = parseInt(unquote(jminMatch[1]), 10);
+            continue;
+          }
+          const jmaxMatch = trimmed.match(/^jmax:\s*(.+)$/);
+          if (jmaxMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgJmax = parseInt(unquote(jmaxMatch[1]), 10);
+            continue;
+          }
+          const s1Match = trimmed.match(/^s1:\s*(.+)$/);
+          if (s1Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgS1 = parseInt(unquote(s1Match[1]), 10);
+            continue;
+          }
+          const s2Match = trimmed.match(/^s2:\s*(.+)$/);
+          if (s2Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgS2 = parseInt(unquote(s2Match[1]), 10);
+            continue;
+          }
+          const h1Match = trimmed.match(/^h1:\s*(.+)$/);
+          if (h1Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgH1 = parseInt(unquote(h1Match[1]), 10);
+            continue;
+          }
+          const h2Match = trimmed.match(/^h2:\s*(.+)$/);
+          if (h2Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgH2 = parseInt(unquote(h2Match[1]), 10);
+            continue;
+          }
+          const h3Match = trimmed.match(/^h3:\s*(.+)$/);
+          if (h3Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgH3 = parseInt(unquote(h3Match[1]), 10);
+            continue;
+          }
+          const h4Match = trimmed.match(/^h4:\s*(.+)$/);
+          if (h4Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgH4 = parseInt(unquote(h4Match[1]), 10);
+            continue;
+          }
         }
 
         const nameMatch = trimmed.match(/^name:\s*(.+)$/);
@@ -1466,9 +1874,33 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           currentProxy.flow = unquote(flowMatch[1]);
           continue;
         }
+        const privateKeyMatch = trimmed.match(/^private-key:\s*(.+)$/);
+        if (privateKeyMatch && !currentParentKey) {
+          currentProxy.wgPrivateKey = unquote(privateKeyMatch[1]);
+          continue;
+        }
         const publicKeyMatch = trimmed.match(/^public-key:\s*(.+)$/);
-        if (publicKeyMatch && currentParentKey === 'reality-opts') {
-          currentProxy.publicKey = unquote(publicKeyMatch[1]);
+        if (publicKeyMatch) {
+          if (currentParentKey === 'reality-opts') {
+            currentProxy.publicKey = unquote(publicKeyMatch[1]);
+          } else if (!currentParentKey) {
+            currentProxy.wgPublicKey = unquote(publicKeyMatch[1]);
+          }
+          continue;
+        }
+        const ipMatch = trimmed.match(/^ip:\s*(.+)$/);
+        if (ipMatch && !currentParentKey) {
+          currentProxy.wgIp = unquote(ipMatch[1]);
+          continue;
+        }
+        const presharedKeyMatch = trimmed.match(/^pre-shared-key:\s*(.+)$/);
+        if (presharedKeyMatch && !currentParentKey) {
+          currentProxy.wgPresharedKey = unquote(presharedKeyMatch[1]);
+          continue;
+        }
+        const mtuMatch = trimmed.match(/^mtu:\s*(.+)$/);
+        if (mtuMatch && !currentParentKey) {
+          currentProxy.wgMtu = parseInt(unquote(mtuMatch[1]), 10);
           continue;
         }
         const shortIdMatch = trimmed.match(/^short-id:\s*(.+)$/);
@@ -1777,6 +2209,15 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     }
     if (currentProvider) {
       parsed.mihomoProviders.push(currentProvider);
+    }
+
+    const listenersSec = findTopLevelSection(lines, 'listeners');
+    if (listenersSec.start !== -1) {
+      const rawBlock = lines.slice(listenersSec.start + 1, listenersSec.end).join('\n');
+      const parsedListeners = parseListenersSection(rawBlock);
+      parsed.listeners = parsedListeners.listeners;
+      parsed.listenersReadOnly = parsedListeners.unrecognized;
+      parsed.listenersRaw = parsedListeners.unrecognized ? parsedListeners.rawText : null;
     }
   } catch (e) {
     console.error('Failed to parse Mihomo config:', e);

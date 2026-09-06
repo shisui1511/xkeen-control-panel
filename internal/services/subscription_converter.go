@@ -81,6 +81,23 @@ func (s *SubscriptionService) outboundsToNodes(outbounds []Outbound, sub *Subscr
 		node.Transport = "tcp"
 		node.Security = "none"
 
+		// Preserve DialerProxy if already set in sub.Nodes or existing StreamSettings
+		if sub != nil {
+			for _, prev := range sub.Nodes {
+				if prev.Tag == node.Tag {
+					node.DialerProxy = prev.DialerProxy
+					break
+				}
+			}
+		}
+		if node.DialerProxy == "" && outbounds[i].StreamSettings != nil {
+			if sopt, ok := outbounds[i].StreamSettings["sockopt"].(map[string]interface{}); ok {
+				if dp, _ := sopt["dialerProxy"].(string); dp != "" {
+					node.DialerProxy = dp
+				}
+			}
+		}
+
 		// Извлекаем детальные настройки протокола
 		switch node.Protocol {
 		case "vless":
@@ -107,6 +124,44 @@ func (s *SubscriptionService) outboundsToNodes(outbounds []Outbound, sub *Subscr
 					}
 					if op, _ := obfsMap["password"].(string); op != "" {
 						node.ObfsPassword = op
+					}
+				}
+			}
+		case "wireguard":
+			if outbounds[i].Settings != nil {
+				if secKey, _ := outbounds[i].Settings["secretKey"].(string); secKey != "" {
+					node.SecretKey = secKey
+				}
+				if mtu, _ := outbounds[i].Settings["mtu"].(float64); mtu > 0 {
+					node.MTU = int(mtu)
+				} else if mtuInt, _ := outbounds[i].Settings["mtu"].(int); mtuInt > 0 {
+					node.MTU = mtuInt
+				}
+				if res := decodeWireguardReserved(outbounds[i].Settings["reserved"]); len(res) == 3 {
+					node.Reserved = res
+				}
+				if addrs, ok := outbounds[i].Settings["address"].([]interface{}); ok {
+					var localAddrs []string
+					for _, a := range addrs {
+						if s, ok := a.(string); ok && s != "" {
+							localAddrs = append(localAddrs, s)
+						}
+					}
+					node.LocalAddresses = localAddrs
+				} else if addrs, ok := outbounds[i].Settings["address"].([]string); ok {
+					node.LocalAddresses = addrs
+				}
+				if peers, ok := outbounds[i].Settings["peers"].([]interface{}); ok && len(peers) > 0 {
+					if peer, ok := peers[0].(map[string]interface{}); ok {
+						if pubKey, _ := peer["publicKey"].(string); pubKey != "" {
+							node.PublicKey = pubKey
+						}
+						if psk, _ := peer["preSharedKey"].(string); psk != "" {
+							node.PreSharedKey = psk
+						}
+						if ep, _ := peer["endpoint"].(string); ep != "" {
+							node.Server = ep
+						}
 					}
 				}
 			}
@@ -671,15 +726,35 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 		return nil, err
 	}
 
+	// Backup existing data for rollback if validation fails
+	var oldData []byte
+	existed := false
+	if d, readErr := os.ReadFile(path); readErr == nil {
+		oldData = d
+		existed = true
+	}
+
 	nodes := s.outboundsToNodes(outbounds, sub)
 
 	allowedOutbounds := make([]Outbound, 0, len(outbounds))
+	allowedNodes := make([]SubscriptionNode, 0, len(outbounds))
 	for i, node := range nodes {
 		if allowedXrayProtocols[node.Protocol] {
 			allowedOutbounds = append(allowedOutbounds, outbounds[i])
+			allowedNodes = append(allowedNodes, node)
 		} else {
 			log.Printf("[Subscriptions] Skipping outbound %q for Xray configuration: unsupported protocol %q", outbounds[i].Tag, node.Protocol)
 		}
+	}
+
+	if len(allowedNodes) != len(allowedOutbounds) {
+		return nil, fmt.Errorf("mismatch between allowed nodes (%d) and outbounds (%d)", len(allowedNodes), len(allowedOutbounds))
+	}
+
+	// Merge sockopt and dialerProxy into allowed outbounds
+	activeTags := s.collectActiveXrayTags(sub, allowedOutbounds)
+	for i := range allowedOutbounds {
+		mergeSockopt(&allowedOutbounds[i], sub, &allowedNodes[i], activeTags)
 	}
 
 	wrapper := struct {
@@ -697,7 +772,92 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 		return nil, err
 	}
 
+	if s.configDir != "" {
+		if ok, out := ValidateXrayConfigDir(s.configDir); !ok {
+			// Rollback
+			if existed {
+				_ = utils.AtomicWriteFile(path, oldData, 0600)
+			} else {
+				_ = os.Remove(path)
+			}
+			return nil, fmt.Errorf("Xray fragment validation failed, rolled back: %s", out)
+		}
+	}
+
 	return nodes, nil
+}
+
+func (s *SubscriptionService) collectActiveXrayTags(currentSub *Subscription, currentOutbounds []Outbound) map[string]bool {
+	tags := make(map[string]bool)
+	if s != nil {
+		for i := range s.subscriptions {
+			sub := &s.subscriptions[i]
+			if !sub.Enabled || !sub.EnableXray {
+				continue
+			}
+			if currentSub != nil && sub.ID == currentSub.ID {
+				continue
+			}
+			for _, node := range sub.Nodes {
+				if allowedXrayProtocols[node.Protocol] && node.Tag != "" {
+					tags[node.Tag] = true
+				}
+			}
+		}
+	}
+	for _, ob := range currentOutbounds {
+		if allowedXrayProtocols[ob.Protocol] && ob.Tag != "" {
+			tags[ob.Tag] = true
+		}
+	}
+	return tags
+}
+
+func mergeSockopt(ob *Outbound, sub *Subscription, node *SubscriptionNode, activeTags map[string]bool) {
+	sockopt := make(map[string]interface{})
+	if sub != nil {
+		if sub.SockoptMark > 0 {
+			sockopt["mark"] = sub.SockoptMark
+		}
+		if sub.SockoptFastOpen {
+			sockopt["tcpFastOpen"] = true
+		}
+		if sub.SockoptMptcp {
+			sockopt["tcpMptcp"] = true
+		}
+	}
+
+	if node != nil && node.DialerProxy != "" {
+		hasProxySettings := false
+		if ob.ProxySettings != nil {
+			hasProxySettings = true
+		}
+		if ob.StreamSettings != nil {
+			if ps, ok := ob.StreamSettings["proxySettings"]; ok && ps != nil {
+				hasProxySettings = true
+			}
+		}
+		if hasProxySettings {
+			log.Printf("[Subscriptions] Outbound %q already has proxySettings configured; skipping dialerProxy cascade to %q", ob.Tag, node.DialerProxy)
+		} else if activeTags != nil && !activeTags[node.DialerProxy] {
+			log.Printf("[Subscriptions] Target node %q for dialerProxy cascade of %q is not found in active Xray subscriptions; skipping", node.DialerProxy, ob.Tag)
+		} else {
+			sockopt["dialerProxy"] = node.DialerProxy
+		}
+	}
+
+	if len(sockopt) > 0 {
+		if ob.StreamSettings == nil {
+			ob.StreamSettings = make(map[string]interface{})
+		}
+		if existingSockopt, ok := ob.StreamSettings["sockopt"].(map[string]interface{}); ok {
+			for k, v := range sockopt {
+				existingSockopt[k] = v
+			}
+		} else {
+			ob.StreamSettings["sockopt"] = sockopt
+		}
+	}
 }
 
 func extractServer(ob *Outbound) string {
@@ -753,6 +913,25 @@ func extractServer(ob *Outbound) string {
 			}
 			if address != "" && port > 0 {
 				return fmt.Sprintf("%s:%d", address, int(port))
+			}
+		}
+	}
+	// Для wireguard
+	if peersRaw, ok := ob.Settings["peers"]; ok {
+		var firstPeer map[string]interface{}
+		switch v := peersRaw.(type) {
+		case []interface{}:
+			if len(v) > 0 {
+				firstPeer, _ = v[0].(map[string]interface{})
+			}
+		case []map[string]interface{}:
+			if len(v) > 0 {
+				firstPeer = v[0]
+			}
+		}
+		if firstPeer != nil {
+			if ep, ok := firstPeer["endpoint"].(string); ok && ep != "" {
+				return ep
 			}
 		}
 	}

@@ -73,8 +73,8 @@
   .editor-kernel-widget {
     display: inline-flex;
     align-items: center;
-    background: var(--bg-card, #16202c);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+    background: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm, 6px);
     height: 28px;
     padding: 0 4px 0 8px;
@@ -91,7 +91,7 @@
   .widget-name {
     font-size: 11px;
     font-weight: 600;
-    color: var(--text, #e2e8f0);
+    color: var(--text);
   }
 
   .led-dot {
@@ -102,18 +102,18 @@
   }
 
   .led-green {
-    background-color: #22c55e;
-    box-shadow: 0 0 5px rgba(34, 197, 94, 0.6);
+    background-color: var(--success);
+    box-shadow: 0 0 5px color-mix(in srgb, var(--success) 55%, transparent);
   }
 
   .led-amber-pulse {
-    background-color: #f59e0b;
-    box-shadow: 0 0 7px rgba(245, 158, 11, 0.8);
+    background-color: var(--warning);
+    box-shadow: 0 0 7px color-mix(in srgb, var(--warning) 65%, transparent);
     animation: pulse-amber 1.2s infinite ease-in-out;
   }
 
   .led-gray {
-    background-color: #64748b;
+    background-color: var(--fg-dim);
   }
 
   @keyframes pulse-amber {
@@ -138,7 +138,7 @@
     background: transparent;
     border: none;
     border-radius: 4px;
-    color: var(--text-muted, #94a3b8);
+    color: var(--fg-dim);
     cursor: pointer;
     transition:
       background 0.15s ease,
@@ -146,8 +146,8 @@
   }
 
   .widget-restart-btn:hover:not(:disabled) {
-    background: var(--hover, rgba(255, 255, 255, 0.08));
-    color: var(--accent, #38bdf8);
+    background: var(--hover);
+    color: var(--accent);
   }
 
   .widget-restart-btn:disabled {

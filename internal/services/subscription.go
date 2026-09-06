@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
@@ -28,6 +29,7 @@ var (
 		"shadowsocks": true,
 		"socks":       true,
 		"http":        true,
+		"wireguard":   true,
 	}
 )
 
@@ -60,6 +62,26 @@ type SubscriptionNode struct {
 	Insecure     bool   `json:"insecure,omitempty"`
 	ObfsType     string `json:"obfs_type,omitempty"`
 	ObfsPassword string `json:"obfs_password,omitempty"`
+
+	// WireGuard fields
+	SecretKey      string   `json:"secret_key,omitempty"`
+	PreSharedKey   string   `json:"pre_shared_key,omitempty"`
+	Reserved       []int    `json:"reserved,omitempty"`
+	MTU            int      `json:"mtu,omitempty"`
+	LocalAddresses []string `json:"local_addresses,omitempty"`
+	AllowedIPs     []string `json:"allowed_ips,omitempty"`
+	KeepAlive      int      `json:"keepalive,omitempty"`
+
+	// DialerProxy holds the tag of the outbound node to chain/cascade through (D-11).
+	DialerProxy string `json:"dialer_proxy,omitempty"`
+}
+
+// DialerProxyTarget represents an eligible target node for dialing proxy chaining.
+type DialerProxyTarget struct {
+	SubscriptionID   string `json:"subscription_id"`
+	SubscriptionName string `json:"subscription_name"`
+	Tag              string `json:"tag"`
+	Name             string `json:"name"`
 }
 
 // Subscription represents a proxy subscription
@@ -85,6 +107,11 @@ type Subscription struct {
 	// "auto"         — дополнительно записывать 05_routing.{id}.json с правилом
 	//                  geosite:geolocation-!cn → balancer → все прокси подписки.
 	RoutingMode string `json:"routing_mode,omitempty"`
+
+	// Sockopt settings (Xray outbounds level, D-12)
+	SockoptMark     int  `json:"sockopt_mark,omitempty"`      // fwmark (0 = disabled)
+	SockoptFastOpen bool `json:"sockopt_fast_open,omitempty"` // TCP Fast Open
+	SockoptMptcp    bool `json:"sockopt_mptcp,omitempty"`     // Multipath TCP
 
 	ProxyCount int    `json:"proxy_count"`
 	LastError  string `json:"last_error,omitempty"`
@@ -169,6 +196,9 @@ type Outbound struct {
 	Protocol       string                 `json:"protocol"`
 	Settings       map[string]interface{} `json:"settings"`
 	StreamSettings map[string]interface{} `json:"streamSettings,omitempty"`
+	ProxySettings  map[string]interface{} `json:"proxySettings,omitempty"`
+	Mux            map[string]interface{} `json:"mux,omitempty"`
+	SendThrough    string                 `json:"sendThrough,omitempty"`
 }
 
 // SkipReason описывает причину пропуска конкретной строки/прокси при парсинге.
@@ -264,10 +294,14 @@ type SubscriptionService struct {
 	// чтение secret из config.yaml Mihomo), используется когда mihomoSecret пуст.
 	mihomoSecretResolver func() string
 	lastCleanup          time.Time
-	panelPort            int
-	panelHTTPS           bool
-	loopbackPort         int
-	localHTTPClient      *http.Client
+	// cleaning guards CleanOrphanedSubscriptions against concurrent execution:
+	// GetSystemStats() can spawn a new cleanup goroutine on every poll cycle
+	// (every few seconds) while Disk.Free stays below the emergency threshold (STAB-03).
+	cleaning        atomic.Bool
+	panelPort       int
+	panelHTTPS      bool
+	loopbackPort    int
+	localHTTPClient *http.Client
 }
 
 func NewSubscriptionService(dataDir, configDir, mihomoConfigDir string) *SubscriptionService {
@@ -324,11 +358,23 @@ func (s *SubscriptionService) generateMihomoProxyProviderBlockLocked(sub *Subscr
 	if https {
 		sb.WriteString("    skip-cert-verify: true\n")
 	}
-	// override.udp — страховка для узлов, у которых провайдер не прислал
+	// override.udp & override.tfo — страховка для узлов, у которых провайдер не прислал
 	// udp: true. Без него Mihomo не проксирует UDP (QUIC/HTTP3, игры,
-	// DNS-over-QUIC уходят мимо туннеля).
+	// звонки Telegram, Discord Voice уходят мимо туннеля).
 	sb.WriteString("    override:\n")
 	sb.WriteString("      udp: true\n")
+	sb.WriteString("      tfo: true\n")
+
+	hwid := sub.HwidToken
+	if hwid == "" {
+		hwid = s.hwid
+	}
+	if hwid != "" && !sub.HwidLocked {
+		sb.WriteString("    header:\n")
+		sb.WriteString(fmt.Sprintf("      x-hwid:\n        - \"%s\"\n", hwid))
+		sb.WriteString("      User-Agent:\n        - \"ClashMeta/v1.18.0 (XKeen-Control-Panel)\"\n")
+	}
+
 	sb.WriteString("    health-check:\n")
 	sb.WriteString("      enable: true\n")
 	sb.WriteString("      url: http://www.gstatic.com/generate_204\n")

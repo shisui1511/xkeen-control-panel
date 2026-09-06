@@ -1,0 +1,159 @@
+# ==============================================================================
+# multi-sub-hwid.yaml — Мульти-подписка с Remnawave HWID
+# Сценарий: Несколько подписок с поддержкой Device Limit (HWID) и автоматическим fallback
+# Пользователь настраивает подписки через страницу Subscriptions.
+# Требует Mihomo Meta >= 1.15 (поддержка include-all: true, format: mrs).
+# ==============================================================================
+mixed-port: 7890
+redir-port: 5000
+tproxy-port: 5001
+routing-mark: 255
+allow-lan: true
+mode: rule
+log-level: warning
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+find-process-mode: off
+
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "*.keenetic.pro"
+    - "*.keenetic.link"
+    - "*.keenetic.name"
+    - "*.my.keenetic.net"
+  default-nameserver:
+    - 77.88.8.8
+    - 1.1.1.1
+  nameserver:
+    - 77.88.8.8
+    - https://common.dot.dns.yandex.net/dns-query
+  fallback:
+    - https://cloudflare-dns.com/dns-query
+
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+
+proxy-providers:
+  sub-main:
+    type: http
+    url: "https://example.com/sub-main"
+    interval: 86400
+    path: ./providers/sub-main.yaml
+    header:
+      User-Agent:
+        - "Mihomo"
+      x-hwid:
+        - "keenetic-router-hwid"
+      x-device-os:
+        - "xKeen"
+      x-device-model:
+        - "Keenetic"
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+    override:
+      udp: true
+      tfo: true
+
+  sub-backup:
+    type: http
+    url: "https://example.com/sub-backup"
+    interval: 86400
+    path: ./providers/sub-backup.yaml
+    header:
+      User-Agent:
+        - "Mihomo"
+      x-hwid:
+        - "keenetic-router-hwid"
+      x-device-os:
+        - "xKeen"
+      x-device-model:
+        - "Keenetic"
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 300
+    override:
+      udp: true
+      tfo: true
+
+proxy-groups:
+  - name: "Основной выбор"
+    type: select
+    include-all: true
+    proxies:
+      - "Автовыбор (Fastest)"
+      - "Резерв (Fallback)"
+      - DIRECT
+
+  - name: "Автовыбор (Fastest)"
+    type: url-test
+    include-all: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+
+  - name: "Резерв (Fallback)"
+    type: fallback
+    include-all: true
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    max-failed-times: 3
+
+rule-providers:
+  re-filter:
+    type: http
+    format: mrs
+    behavior: domain
+    url: "https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs"
+    path: ./rules/re-filter.mrs
+    interval: 86400
+
+  russia-domains:
+    type: http
+    format: mrs
+    behavior: domain
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.mrs"
+    path: ./rules/category-ru.mrs
+    interval: 86400
+
+rules:
+  # Блокировка QUIC
+  - AND,((DST-PORT,443),(NETWORK,udp)),REJECT
+
+  # Защита портов управления
+  - DST-PORT,3389,DIRECT
+  - DST-PORT,22,DIRECT
+  - DST-PORT,445,DIRECT
+  - DST-PORT,1194,DIRECT
+  - DST-PORT,51820,DIRECT
+
+  # Локальные адреса
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - GEOIP,private,DIRECT,no-resolve
+
+  # РФ сервисы и домены
+  - RULE-SET,russia-domains,DIRECT
+  - GEOIP,RU,DIRECT
+
+  # Заблокированные ресурсы через пул подписок
+  - RULE-SET,re-filter,Основной выбор
+
+  # Все остальное напрямую
+  - MATCH,DIRECT

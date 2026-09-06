@@ -30,11 +30,14 @@ type API struct {
 	networkSvc            *services.NetworkToolsService
 	smartProxySvc         *services.SmartProxyService
 	trafficQuotaSvc       *services.TrafficQuotaService
+	xrayGRPCSvc           *services.XrayGRPCService
 	datSvc                *services.DATManagerService
 	snapshotSvc           *services.SnapshotService
 	consoleSvc            *services.ConsoleService
 	ptySvc                *services.PTYService
 	templateSvc           *services.TemplateService
+	logDispatcher         *services.LogDispatcher
+	userRulesSvc          *services.UserRulesService
 	clientResolver        *services.ClientResolver
 	assetsSvc             *assets.AssetsService
 	pathVal               *utils.PathValidator
@@ -48,6 +51,8 @@ type API struct {
 	sslDaysCache          int
 	sslDaysCacheTime      time.Time
 	sslDaysCacheMutex     sync.Mutex
+	lastRestartLogger     time.Time
+	restartLoggerMutex    sync.Mutex
 }
 
 func NewAPI(cfg *config.Config, srv *server.Server) *API {
@@ -81,6 +86,14 @@ func (a *API) SetTrafficQuotaService(svc *services.TrafficQuotaService) {
 	a.trafficQuotaSvc = svc
 }
 
+func (a *API) SetXrayGRPCService(svc *services.XrayGRPCService) {
+	a.xrayGRPCSvc = svc
+}
+
+func (a *API) XrayGRPCService() *services.XrayGRPCService {
+	return a.xrayGRPCSvc
+}
+
 func (a *API) SetDATManagerService(svc *services.DATManagerService) {
 	a.datSvc = svc
 }
@@ -101,6 +114,22 @@ func (a *API) SetTemplateService(svc *services.TemplateService) {
 	a.templateSvc = svc
 }
 
+func (a *API) SetLogDispatcher(svc *services.LogDispatcher) {
+	a.logDispatcher = svc
+}
+
+func (a *API) LogDispatcher() *services.LogDispatcher {
+	return a.logDispatcher
+}
+
+func (a *API) SetUserRulesService(svc *services.UserRulesService) {
+	a.userRulesSvc = svc
+}
+
+func (a *API) UserRulesService() *services.UserRulesService {
+	return a.userRulesSvc
+}
+
 func (a *API) SetAssetsService(svc *assets.AssetsService) {
 	a.assetsSvc = svc
 }
@@ -113,8 +142,16 @@ func (a *API) MihomoService() *services.MihomoService {
 	return a.mihomoSvc
 }
 
+func (a *API) XKeenService() *services.XKeenService {
+	return a.xkeenSvc
+}
+
 func (a *API) SetKernelService(svc *services.KernelService) {
 	a.kernelSvc = svc
+}
+
+func (a *API) KernelService() *services.KernelService {
+	return a.kernelSvc
 }
 
 func (a *API) SetSubscriptionService(svc *services.SubscriptionService) {

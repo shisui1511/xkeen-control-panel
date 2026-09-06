@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shisui1511/xkeen-control-panel/internal/services"
 	"gopkg.in/yaml.v3"
 )
 
@@ -196,7 +197,8 @@ func (a *API) DiagnosticsDownload(w http.ResponseWriter, r *http.Request) {
 		if _, err := os.Stat(path); err == nil {
 			f, err := os.Open(path)
 			if err == nil {
-				content, readErr := io.ReadAll(io.LimitReader(f, maxLogSize))
+				redactedReader := services.NewRedactionReader(io.LimitReader(f, maxLogSize))
+				content, readErr := io.ReadAll(redactedReader)
 				f.Close()
 				if readErr == nil {
 					_ = addFileToTar(tw, "logs/"+filepath.Base(path), content)

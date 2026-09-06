@@ -51,6 +51,17 @@ issues:
     - path: embed.go
       linters:
         - unused
+    # Исключаем сгенерированный код gRPC/Protobuf
+    - path: internal/xrayapi/gen/
+      linters:
+        - unused
+        - revive
+        - staticcheck
+        - gosimple
+        - govet
+        - ineffassign
+        - goimports
+        - misspell
     # Исключаем ложные срабатывания staticcheck в тестах
     - path: _test\.go
       linters:

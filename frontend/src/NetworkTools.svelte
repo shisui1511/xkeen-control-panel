@@ -299,6 +299,25 @@
     }
   }
 
+  let dnsResolver: 'system' | 'mihomo' = $state('system');
+  let flushingFakeIP = $state(false);
+
+  async function flushFakeIP() {
+    flushingFakeIP = true;
+    try {
+      const res = await apiFetch('/api/mihomo/cache/fakeip/flush', {
+        method: 'POST'
+      });
+      if (!res.ok) throw new Error('Failed to flush Fake-IP cache');
+      showToast('success', $t('net.fakeip_flushed'));
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', e.message);
+    } finally {
+      flushingFakeIP = false;
+    }
+  }
+
   async function runDNS() {
     if (!dnsHost) return;
     if (!validateHost(dnsHost)) {
@@ -308,6 +327,41 @@
     loading = true;
     activeTool = 'dns';
     result = null;
+
+    if (dnsResolver === 'mihomo') {
+      try {
+        const res = await apiFetch(
+          `/api/mihomo/dns/query?name=${encodeURIComponent(dnsHost)}&type=${encodeURIComponent(recordType)}`
+        );
+        const data = await res.json();
+        if (res.ok) {
+          const answers = (data.Answer || []).map((a: any) => `${a.name} (${a.type}) -> ${a.data}`);
+          result = {
+            success: true,
+            records:
+              answers.length > 0
+                ? answers
+                : [data.Status === 0 ? 'No records returned (NOERROR)' : `Status: ${data.Status}`]
+          };
+          saveHistory({
+            type: 'dns',
+            label: `[Mihomo DNS ${recordType}] ${dnsHost}`,
+            params: { host: dnsHost, record_type: recordType, resolver: 'mihomo' }
+          });
+        } else {
+          result = { success: false, error: data.message || 'Mihomo DNS query failed' };
+        }
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return;
+        if (e?.status === 401) return;
+        result = { success: false, error: e.message || 'Request failed' };
+        showToast('error', e.message || 'Request failed');
+      } finally {
+        loading = false;
+      }
+      return;
+    }
+
     try {
       const res = await apiFetch('/api/network/dns', {
         method: 'POST',
@@ -640,12 +694,31 @@
       </div>
       {#if showSettings.dns}
         <div class="extra-settings mb-2" transition:slide={{ duration: 180 }}>
-          <label for="dns-type" class="lbl">{$t('net.record_type')}</label>
-          <select id="dns-type" class="input input-sm" bind:value={recordType}>
-            {#each recordTypes as type}
-              <option value={type}>{type}</option>
-            {/each}
-          </select>
+          <div style="margin-bottom: 8px;">
+            <label for="dns-resolver" class="lbl">{$t('net.dns_resolver')}</label>
+            <select id="dns-resolver" class="input input-sm" bind:value={dnsResolver}>
+              <option value="system">{$t('net.resolver_system')}</option>
+              <option value="mihomo">{$t('net.resolver_mihomo')}</option>
+            </select>
+          </div>
+          <div style="margin-bottom: 8px;">
+            <label for="dns-type" class="lbl">{$t('net.record_type')}</label>
+            <select id="dns-type" class="input input-sm" bind:value={recordType}>
+              {#each recordTypes as type}
+                <option value={type}>{type}</option>
+              {/each}
+            </select>
+          </div>
+          <div>
+            <button
+              class="btn btn-secondary btn-sm"
+              style="width: 100%; font-size: 11.5px;"
+              onclick={flushFakeIP}
+              disabled={flushingFakeIP}
+            >
+              {flushingFakeIP ? $t('net.flushing') : $t('net.flush_fakeip')}
+            </button>
+          </div>
         </div>
       {/if}
       <div style="display:flex;gap:8px;margin-top:auto;">

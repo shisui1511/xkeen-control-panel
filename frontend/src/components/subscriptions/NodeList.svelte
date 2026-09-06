@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { t } from '../../i18n';
 
-  interface Node {
+  export interface Node {
     tag: string;
     name?: string;
     country?: string;
@@ -14,6 +14,14 @@
     transport?: string;
     security?: string;
     is_new?: boolean;
+    dialer_proxy?: string;
+  }
+
+  export interface DialerProxyTarget {
+    subscription_id: string;
+    subscription_name: string;
+    tag: string;
+    name: string;
   }
 
   interface NodeHealth {
@@ -31,8 +39,10 @@
     nodes = [],
     health = {},
     checkingNodes = {},
+    dialerProxyTargets = [],
     onSetActiveNode,
-    onCheckNodeHealth
+    onCheckNodeHealth,
+    onSetDialerProxy
   }: {
     subId: string;
     enableXray: boolean;
@@ -41,8 +51,10 @@
     nodes: Node[];
     health: Record<string, NodeHealth>;
     checkingNodes: Record<string, boolean>;
+    dialerProxyTargets?: DialerProxyTarget[];
     onSetActiveNode: (subId: string, tag: string) => void;
     onCheckNodeHealth: (subId: string, tag: string) => void;
+    onSetDialerProxy?: (subId: string, nodeTag: string, targetTag: string) => void;
   } = $props();
 
   let flagsSupported = $state(true);
@@ -334,23 +346,143 @@
             <span class="sub-node-chip-gold">{enableMihomo ? 'YAML' : 'JSON'}</span>
           </button>
 
+          <!-- Dialer Proxy (Cascade) right (D-11) -->
+          {#if enableXray}
+            <div class="sub-node-dialer-proxy-container" data-testid="dialer-proxy-container">
+              {#if dialerProxyTargets && dialerProxyTargets.length > 0}
+                <select
+                  class="form-select sub-node-dialer-select"
+                  data-testid="dialer-proxy-select"
+                  value={node.dialer_proxy || ''}
+                  onchange={(e) => {
+                    const val = (e.currentTarget as HTMLSelectElement).value;
+                    onSetDialerProxy?.(subId, node.tag, val);
+                  }}
+                  title={$t('subscr.dialer_proxy.hint')}
+                >
+                  <option value="">{$t('subscr.dialer_proxy.none')}</option>
+                  {#each dialerProxyTargets as target}
+                    {#if target.tag !== node.tag}
+                      <option value={target.tag}>
+                        {target.name || target.tag}{target.subscription_id !== subId
+                          ? ` (${target.subscription_name || target.subscription_id})`
+                          : ''}
+                      </option>
+                    {/if}
+                  {/each}
+                </select>
+              {:else if node.dialer_proxy}
+                <span class="badge badge-tag" data-testid="dialer-proxy-active-tag">
+                  {node.dialer_proxy}
+                </span>
+              {:else}
+                <span
+                  class="text-muted sub-node-no-targets"
+                  data-testid="dialer-proxy-no-targets"
+                  title={$t('subscr.dialer_proxy.no_targets')}
+                >
+                  {$t('subscr.dialer_proxy.no_targets')}
+                </span>
+              {/if}
+            </div>
+          {/if}
+
           <!-- Status / Ping right -->
           <div class="sub-node-status-container">
-            <button
-              class="sub-node-ping-btn"
-              onclick={() => {
-                onCheckNodeHealth(subId, node.tag);
-              }}
-              disabled={checkingNodes[node.tag]}
-              title={$t('subscr.check_ping')}
-            >
-              {#if checkingNodes[node.tag]}
-                <span class="spinner-xs"></span>
-              {:else if source === 'mihomo'}
-                {#if h && h.tested}
-                  <span class="sub-node-ping-val {latencyClass(h)}">{latencyLabel(h)}</span>
-                  {#if h.alive}
-                    <div class="sub-node-status-icon success">
+            {#if node.protocol === 'wireguard'}
+              <span
+                class="sub-node-na-badge"
+                data-testid="wireguard-check-na"
+                title={$t('subscr.health.not_applicable_hint')}
+              >
+                {$t('subscr.health.not_applicable')}
+              </span>
+            {:else}
+              <button
+                class="sub-node-ping-btn"
+                onclick={() => {
+                  onCheckNodeHealth(subId, node.tag);
+                }}
+                disabled={checkingNodes[node.tag]}
+                title={$t('subscr.check_ping')}
+              >
+                {#if checkingNodes[node.tag]}
+                  <span class="spinner-xs"></span>
+                {:else if source === 'mihomo'}
+                  {#if h && h.tested}
+                    <span class="sub-node-ping-val {latencyClass(h)}">{latencyLabel(h)}</span>
+                    {#if h.alive}
+                      <div class="sub-node-status-icon success">
+                        <svg
+                          width="8"
+                          height="8"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="4"
+                        >
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      </div>
+                    {:else}
+                      <div class="sub-node-status-icon danger">
+                        <svg
+                          width="8"
+                          height="8"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="4"
+                        >
+                          <line x1="18" y1="6" x2="6" y2="18" /><line
+                            x1="6"
+                            y1="6"
+                            x2="18"
+                            y2="18"
+                          />
+                        </svg>
+                      </div>
+                    {/if}
+                  {:else}
+                    <span style="color: var(--fg-faint);">—</span>
+                  {/if}
+                {:else}
+                  {#if h}
+                    <span class="sub-node-ping-val {latencyClass(h)}">{latencyLabel(h)}</span>
+                    {#if h.alive}
+                      <div class="sub-node-status-icon success">
+                        <svg
+                          width="8"
+                          height="8"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="4"
+                        >
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      </div>
+                    {:else}
+                      <div class="sub-node-status-icon danger">
+                        <svg
+                          width="8"
+                          height="8"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="4"
+                        >
+                          <line x1="18" y1="6" x2="6" y2="18" /><line
+                            x1="6"
+                            y1="6"
+                            x2="18"
+                            y2="18"
+                          />
+                        </svg>
+                      </div>
+                    {/if}
+                  {:else}
+                    <div class="sub-node-status-icon default-ok">
                       <svg
                         width="8"
                         height="8"
@@ -362,69 +494,10 @@
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
                     </div>
-                  {:else}
-                    <div class="sub-node-status-icon danger">
-                      <svg
-                        width="8"
-                        height="8"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="4"
-                      >
-                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
-                    </div>
                   {/if}
-                {:else}
-                  <span style="color: var(--fg-faint);">—</span>
                 {/if}
-              {:else}
-                {#if h}
-                  <span class="sub-node-ping-val {latencyClass(h)}">{latencyLabel(h)}</span>
-                  {#if h.alive}
-                    <div class="sub-node-status-icon success">
-                      <svg
-                        width="8"
-                        height="8"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="4"
-                      >
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    </div>
-                  {:else}
-                    <div class="sub-node-status-icon danger">
-                      <svg
-                        width="8"
-                        height="8"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="4"
-                      >
-                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
-                    </div>
-                  {/if}
-                {:else}
-                  <div class="sub-node-status-icon default-ok">
-                    <svg
-                      width="8"
-                      height="8"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="4"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  </div>
-                {/if}
-              {/if}
-            </button>
+              </button>
+            {/if}
           </div>
         </div>
       {/each}
@@ -828,5 +901,41 @@
   }
   .latency-timeout {
     color: var(--fg-faint);
+  }
+
+  .sub-node-dialer-proxy-container {
+    display: flex;
+    align-items: center;
+    margin-left: 8px;
+    margin-right: 8px;
+    flex-shrink: 0;
+  }
+
+  .sub-node-dialer-select {
+    padding: 3px 8px;
+    font-size: 11px;
+    border-radius: var(--radius-sm, 4px);
+    background: var(--bg-card);
+    color: var(--fg-primary);
+    border: 1px solid var(--border);
+    max-width: 180px;
+    cursor: pointer;
+  }
+
+  .sub-node-na-badge {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm, 4px);
+    background: var(--bg-card-subtle);
+    color: var(--fg-muted);
+    border: 1px solid var(--border-subtle);
+    cursor: default;
+    white-space: nowrap;
+  }
+
+  .sub-node-no-targets {
+    font-size: 11px;
+    color: var(--fg-faint);
+    white-space: nowrap;
   }
 </style>

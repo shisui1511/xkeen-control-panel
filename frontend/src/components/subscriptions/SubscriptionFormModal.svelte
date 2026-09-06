@@ -25,6 +25,9 @@
     formMihomoGroups = $bindable([]),
     formEnabled = $bindable(true),
     formUseProviderInterval = $bindable(false),
+    formSockoptMark = $bindable<number | null>(null),
+    formSockoptFastOpen = $bindable(false),
+    formSockoptMptcp = $bindable(false),
     availableMihomoGroups = [],
     onClose,
     onSave
@@ -44,6 +47,9 @@
     formMihomoGroups: string[];
     formEnabled: boolean;
     formUseProviderInterval: boolean;
+    formSockoptMark?: number | null;
+    formSockoptFastOpen?: boolean;
+    formSockoptMptcp?: boolean;
     availableMihomoGroups?: string[];
     onClose: () => void;
     onSave: () => void;
@@ -313,6 +319,72 @@
             {/each}
           </div>
         {/if}
+      </div>
+    {/if}
+
+    {#if formEnableXray}
+      <!-- Sockopt Settings (D-12) -->
+      <div
+        class="form-group sockopt-settings-group"
+        data-testid="sockopt-settings-group"
+        style="border-top: 1px solid var(--border-subtle); padding-top: 12px;"
+      >
+        <span class="form-label" style="display: block; margin-bottom: 4px;"
+          >{$t('subscr.sockopt.title')}</span
+        >
+        <div
+          class="form-hint"
+          style="font-size: 12px; color: var(--fg-muted); margin-bottom: 12px;"
+        >
+          {$t('subscr.sockopt.hint')}
+        </div>
+
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label for="sockopt-mark" class="form-label">{$t('subscr.sockopt.mark')}</label>
+          <input
+            id="sockopt-mark"
+            type="number"
+            class="input"
+            data-testid="sockopt-mark"
+            bind:value={formSockoptMark}
+            placeholder="0"
+            min="0"
+            max="2147483647"
+          />
+          <div class="form-hint" style="font-size: 11px; color: var(--fg-faint); margin-top: 4px;">
+            {$t('subscr.sockopt.mark_hint')}
+          </div>
+        </div>
+
+        <div class="form-group-checkbox" style="margin-bottom: 8px;">
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              id="sockopt-fast-open"
+              data-testid="sockopt-fast-open"
+              bind:checked={formSockoptFastOpen}
+            />
+            <span class="toggle-slider"></span>
+          </label>
+          <label for="sockopt-fast-open" class="checkbox-label">
+            {$t('subscr.sockopt.tcp_fast_open')}
+          </label>
+        </div>
+
+        <div class="form-group-checkbox">
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              id="sockopt-mptcp"
+              data-testid="sockopt-mptcp"
+              bind:checked={formSockoptMptcp}
+            />
+            <span class="toggle-slider"></span>
+          </label>
+          <label for="sockopt-mptcp" class="checkbox-label">
+            {$t('subscr.sockopt.tcp_mptcp')}
+          </label>
+        </div>
       </div>
     {/if}
 

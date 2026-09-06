@@ -139,6 +139,9 @@ export const mihomoSchema = {
       description: 'Traffic sniffing configuration',
       properties: {
         enable: { type: 'boolean' },
+        'force-dns-mapping': { type: 'boolean' },
+        'parse-pure-ip': { type: 'boolean' },
+        'override-destination': { type: 'boolean' },
         sniff: {
           type: 'object',
           properties: {
@@ -208,7 +211,8 @@ export const mihomoSchema = {
           additionalProperties: { type: 'string' },
           description: 'Per-domain DNS policy'
         },
-        'proxy-server-nameserver': { type: 'array', items: { type: 'string' } }
+        'proxy-server-nameserver': { type: 'array', items: { type: 'string' } },
+        'direct-nameserver': { type: 'array', items: { type: 'string' } }
       }
     },
     hosts: {
@@ -253,7 +257,31 @@ export const mihomoSchema = {
           tfo: { type: 'boolean', description: 'Enable TCP Fast Open' },
           'skip-cert-verify': { type: 'boolean' },
           tls: { type: 'boolean' },
-          network: { type: 'string', enum: ['tcp', 'udp', 'ws', 'grpc', 'h2'] }
+          network: { type: 'string', enum: ['tcp', 'udp', 'ws', 'grpc', 'h2'] },
+          'dialer-proxy': { type: 'string', description: 'Chain dialer proxy' },
+          ports: { type: 'string', description: 'Port hopping range' },
+          smux: { type: 'object', description: 'Multiplexing settings' },
+          // WireGuard & AmneziaWG (TMPL-08)
+          'private-key': { type: 'string', description: 'WireGuard private key' },
+          'public-key': { type: 'string', description: 'WireGuard or Reality public key' },
+          'pre-shared-key': { type: 'string', description: 'WireGuard pre-shared key (optional)' },
+          ip: { type: 'string', description: 'WireGuard interface local IP' },
+          mtu: { type: 'integer', description: 'WireGuard interface MTU' },
+          'amnezia-wg-option': {
+            type: 'object',
+            description: 'AmneziaWG obfuscation options',
+            properties: {
+              jc: { type: 'integer', description: 'Junk packet count' },
+              jmin: { type: 'integer', description: 'Minimum junk packet size' },
+              jmax: { type: 'integer', description: 'Maximum junk packet size' },
+              s1: { type: 'integer', description: 'Handshake response padding size' },
+              s2: { type: 'integer', description: 'Initiation response padding size' },
+              h1: { type: 'integer', description: 'Initiation packet magic header' },
+              h2: { type: 'integer', description: 'Response packet magic header' },
+              h3: { type: 'integer', description: 'Underload packet magic header' },
+              h4: { type: 'integer', description: 'Transport packet magic header' }
+            }
+          }
         },
         required: ['name', 'type', 'server', 'port']
       }
@@ -267,7 +295,7 @@ export const mihomoSchema = {
           name: { type: 'string', description: 'Group name' },
           type: {
             type: 'string',
-            enum: ['select', 'url-test', 'fallback', 'load-balance', 'relay'],
+            enum: ['select', 'url-test', 'fallback', 'load-balance'],
             description: 'Group type'
           },
           proxies: {
@@ -279,12 +307,84 @@ export const mihomoSchema = {
           interval: { type: 'integer', description: 'Test interval in seconds' },
           tolerance: { type: 'integer', description: 'Latency tolerance in ms' },
           lazy: { type: 'boolean', description: 'Lazy test (only on select)' },
+          'expected-status': { type: 'string', description: 'Expected HTTP status code' },
+          'exclude-type': { type: 'string', description: 'Exclude proxy types regex' },
+          'include-all': { type: 'boolean', description: 'Include all proxies' },
+          'include-all-providers': { type: 'boolean', description: 'Include all providers' },
           'disable-udp': { type: 'boolean' },
           strategy: {
             type: 'string',
             enum: ['consistent-hashing', 'round-robin'],
             description: 'Load balance strategy'
           }
+        },
+        required: ['name', 'type']
+      }
+    },
+    listeners: {
+      type: 'array',
+      description: 'Inbound listener definitions',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Listener name (matchable with IN-NAME)' },
+          type: {
+            type: 'string',
+            enum: [
+              'socks',
+              'http',
+              'tproxy',
+              'redir',
+              'mixed',
+              'tunnel',
+              'tun',
+              'shadowsocks',
+              'snell',
+              'vmess',
+              'vless',
+              'trojan',
+              'hysteria2',
+              'hysteria2-realm',
+              'tuic',
+              'shadowquic',
+              'anytls',
+              'mieru',
+              'sudoku',
+              'trusttunnel'
+            ],
+            description: 'Inbound listener protocol type'
+          },
+          listen: { type: 'string', description: 'Binding IP address (defaults to 0.0.0.0)' },
+          port: {
+            oneOf: [{ type: 'integer' }, { type: 'string' }],
+            description: 'Listening port or port range'
+          },
+          proxy: {
+            type: 'string',
+            description: 'Forward traffic directly to proxy/group bypassing rules'
+          },
+          rule: {
+            type: 'string',
+            description: 'Name of sub-rules section to match traffic against'
+          },
+          'routing-mark': {
+            type: 'integer',
+            description: 'Linux socket SO_MARK value'
+          },
+          udp: { type: 'boolean', description: 'Enable UDP support' },
+          users: {
+            type: 'array',
+            description: 'Inbound authentication credentials',
+            items: {
+              type: 'object',
+              properties: {
+                username: { type: 'string', description: 'Username' },
+                password: { type: 'string', description: 'Password' }
+              }
+            }
+          },
+          cipher: { type: 'string', description: 'Shadowsocks cipher' },
+          password: { type: 'string', description: 'Shadowsocks password' }
         },
         required: ['name', 'type']
       }

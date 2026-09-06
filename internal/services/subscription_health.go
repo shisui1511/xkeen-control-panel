@@ -77,6 +77,16 @@ func (s *SubscriptionHealthService) ForceCheckNode(subscriptionID, nodeTag strin
 	var targetServer string
 	for _, node := range sub.Nodes {
 		if node.Tag == nodeTag {
+			if node.Protocol == "wireguard" {
+				h := NodeHealth{Alive: false, LatencyMs: -2, Checked: time.Now()}
+				s.mu.Lock()
+				if s.cache[subscriptionID] == nil {
+					s.cache[subscriptionID] = make(map[string]NodeHealth)
+				}
+				s.cache[subscriptionID][nodeTag] = h
+				s.mu.Unlock()
+				return h, true
+			}
 			targetServer = node.Server
 			break
 		}
@@ -110,6 +120,12 @@ func (s *SubscriptionHealthService) checkSubscription(sub *Subscription) {
 
 	for _, node := range sub.Nodes {
 		if node.Server == "" {
+			continue
+		}
+		if node.Protocol == "wireguard" {
+			mu.Lock()
+			results[node.Tag] = NodeHealth{Alive: false, LatencyMs: -2, Checked: time.Now()}
+			mu.Unlock()
 			continue
 		}
 		wg.Add(1)

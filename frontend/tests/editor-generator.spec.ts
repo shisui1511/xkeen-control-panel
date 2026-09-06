@@ -101,6 +101,18 @@ test.describe('Editor & Constructor integration test suite', () => {
           contentType: 'application/json',
           body: JSON.stringify({ valid: true })
         });
+      } else if (url.includes('/api/config/smart-merge')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              content: 'port: 7890\nproxies: []\nproxy-groups: []\nrule-providers: {}\nrules: []\n',
+              stats: { proxies: 0, proxy_providers: 0, user_rules: 0, rules: 1 }
+            }
+          })
+        });
       } else {
         await route.fulfill({
           status: 200,
@@ -207,8 +219,8 @@ test.describe('Editor & Constructor integration test suite', () => {
     await expect(filesTab).toHaveClass(/active/);
     await expect(page).toHaveURL(/#\/editor/);
 
-    // Проверяем, что статус файла изменился на "Изменён" (isDirty)
-    await expect(page.locator('.status-dirty')).toBeVisible();
+    // Проверяем, что статус файла изменился на "Изменён" (isDirty, badge дизайн-системы)
+    await expect(page.locator('.eph-right .badge-warning')).toBeVisible();
   });
 
   test('metacubex rule-provider selector displays checkbox picker with categories and meta-rules-dat URL', async ({
@@ -355,6 +367,18 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
           contentType: 'application/json',
           body: JSON.stringify({ valid: true })
         });
+      } else if (url.includes('/api/config/smart-merge')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              content: 'port: 7890\nproxies: []\nproxy-groups: []\nrule-providers: {}\nrules: []\n',
+              stats: { proxies: 0, proxy_providers: 0, user_rules: 0, rules: 1 }
+            }
+          })
+        });
       } else {
         await route.fulfill({
           status: 200,
@@ -470,7 +494,7 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     // Wait for the save flow to finish
     await expect(page.locator('[data-testid="apply-changes-btn"]')).toBeEnabled({ timeout: 5000 });
 
-    const mergeCall = postRequests.some((url) => url.includes('/api/config/mihomo-merge'));
+    const mergeCall = postRequests.some((url) => url.includes('/api/config/smart-merge'));
     const restartCall = postRequests.some(
       (url) => url.includes('/api/service/control') && url.includes('action=restart')
     );
@@ -479,7 +503,7 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     expect(restartCall).toBe(true);
   });
 
-  test('displays warning banner listing preserved non-managed keys and sends 6 sections on merge', async ({
+  test('displays warning banner listing preserved non-managed keys and sends smart-merge request', async ({
     page
   }) => {
     // We override config content to contain some custom keys
@@ -493,8 +517,22 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
 
     // Capture the payload sent to merge
     let mergePayload: any = null;
-    await page.route('**/api/config/mihomo-merge', async (route) => {
+    await page.route('**/api/config/smart-merge', async (route) => {
       mergePayload = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          success: true,
+          data: {
+            content: 'merged-content',
+            stats: { proxies: 1, proxy_providers: 0, user_rules: 0, rules: 1 }
+          }
+        })
+      });
+    });
+
+    await page.route('**/api/config/save*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -536,9 +574,8 @@ test.describe('zkeen-selective generateYAML (D-13)', () => {
     await expect(page.locator('[data-testid="apply-changes-btn"]')).toBeEnabled({ timeout: 5000 });
 
     expect(mergePayload).not.toBeNull();
-    expect(mergePayload.sections).toBeDefined();
-    expect(mergePayload.sections['proxies']).toContain('test-p');
-    expect(mergePayload.sections['dns']).toBeDefined();
-    expect(mergePayload.sections['tun']).toBeDefined();
+    expect(mergePayload.type).toBe('mihomo');
+    expect(mergePayload.template_owns_nodes).toBe(true);
+    expect(mergePayload.existing_content).toContain('test-p');
   });
 });

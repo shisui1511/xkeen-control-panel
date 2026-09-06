@@ -26,6 +26,8 @@ type XRayCapability struct {
 	// ConfDirExists — true если директория существует на диске.
 	// Если false — fragment-файлы подписок не будут подхвачены XRay.
 	ConfDirExists bool `json:"conf_dir_exists"`
+	// GRPCReady — true если активное ядро Xray и в config.json есть api-блок.
+	GRPCReady bool `json:"grpc_ready"`
 }
 
 // KernelCapability holds install status for a single kernel.
@@ -152,6 +154,10 @@ func (a *API) Capabilities(w http.ResponseWriter, r *http.Request) {
 	resp.XRay.ConfDir = a.cfg.XRayConfigDir
 	if _, err := os.Stat(a.cfg.XRayConfigDir); err == nil {
 		resp.XRay.ConfDirExists = true
+	}
+	if resp.ActiveKernel == "xray" && resp.XRay.ConfDirExists {
+		apiInfo := services.FindXrayAPIFragment(a.cfg.XRayConfigDir)
+		resp.XRay.GRPCReady = apiInfo.APIPresent
 	}
 
 	if a.xkeenSvc != nil {

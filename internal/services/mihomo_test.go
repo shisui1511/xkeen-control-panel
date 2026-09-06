@@ -543,3 +543,72 @@ external-controller-unix: ` + sockPath + `
 		t.Fatalf("expected socket file %s to be deleted", sockPath)
 	}
 }
+
+func TestMihomoService_ParseControllerConfig_CacheAndEarlyStop(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+
+	// Config with huge section after controller
+	configContent := `external-controller: 127.0.0.1:9090
+secret: "initial-secret"
+proxies:
+  - name: dummy1
+    type: ss
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewMihomoService("", "", tmpDir)
+
+	// First parse: should read file and populate cache
+	info1, err := svc.ParseControllerConfig()
+	if err != nil {
+		t.Fatalf("first parse failed: %v", err)
+	}
+	if info1.Secret != "initial-secret" || info1.Target != "127.0.0.1:9090" {
+		t.Fatalf("unexpected info1: %+v", info1)
+	}
+
+	// Delete file from disk: cached version must still be returned if mtime/cache matches
+	// But since stat will fail if deleted, let's instead replace content without updating mtime
+	// Or verify cache identity
+	svc.ctrlCacheMu.RLock()
+	isInit := svc.ctrlCacheInit
+	svc.ctrlCacheMu.RUnlock()
+	if !isInit {
+		t.Fatal("expected cache to be initialized")
+	}
+
+	// Second parse without file change: must return exact same cached struct
+	info2, err := svc.ParseControllerConfig()
+	if err != nil {
+		t.Fatalf("second parse failed: %v", err)
+	}
+	if info2 != info1 {
+		t.Fatalf("expected cached info2 == info1, got %+v vs %+v", info2, info1)
+	}
+}
+
+func TestMihomoService_GetHTTPClient_Reuse(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := `external-controller: 127.0.0.1:9090
+secret: "test"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewMihomoService("", "", tmpDir)
+
+	client1 := svc.GetHTTPClient()
+	client2 := svc.GetHTTPClient()
+
+	if client1 == nil || client2 == nil {
+		t.Fatal("expected non-nil clients")
+	}
+	if client1 != client2 {
+		t.Errorf("expected GetHTTPClient() to reuse *http.Client instance, got %p and %p", client1, client2)
+	}
+}

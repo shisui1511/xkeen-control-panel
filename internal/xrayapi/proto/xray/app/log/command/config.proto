@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package xray.app.log.command;
+option go_package = "github.com/shisui1511/xkeen-control-panel/internal/xrayapi/gen/xray/app/log/command";
+
+message Config {}
+message RestartLoggerRequest {}
+message RestartLoggerResponse {}
+
+service LoggerService {
+  rpc RestartLogger(RestartLoggerRequest) returns (RestartLoggerResponse) {}
+}
