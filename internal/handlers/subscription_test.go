@@ -741,7 +741,7 @@ func TestSubscriptionDialerProxyTargets(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rrSuccess.Code)
 	}
 	var resp struct {
-		Success bool                       `json:"success"`
+		Success bool                         `json:"success"`
 		Data    []services.DialerProxyTarget `json:"data"`
 	}
 	if err := json.Unmarshal(rrSuccess.Body.Bytes(), &resp); err != nil {
@@ -763,7 +763,7 @@ func TestSubscriptionDialerProxyTargets(t *testing.T) {
 		t.Fatalf("expected 200 for empty targets, got %d", rrEmpty.Code)
 	}
 	var emptyResp struct {
-		Success bool                       `json:"success"`
+		Success bool                         `json:"success"`
 		Data    []services.DialerProxyTarget `json:"data"`
 	}
 	if err := json.Unmarshal(rrEmpty.Body.Bytes(), &emptyResp); err != nil {
@@ -773,5 +773,3 @@ func TestSubscriptionDialerProxyTargets(t *testing.T) {
 		t.Errorf("expected 0 targets, got %d", len(emptyResp.Data))
 	}
 }
-
-

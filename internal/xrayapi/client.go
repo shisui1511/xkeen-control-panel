@@ -136,14 +136,12 @@ func (c *Client) TestRoute(ctx context.Context, input RouteTestInput) (*RouteTes
 	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	netType := netpb.Network_TCP
+	var netType netpb.Network
 	switch strings.ToLower(input.Network) {
 	case "udp":
 		netType = netpb.Network_UDP
 	case "unix":
 		netType = netpb.Network_UNIX
-	case "tcp", "":
-		netType = netpb.Network_TCP
 	default:
 		netType = netpb.Network_TCP
 	}

@@ -298,8 +298,6 @@ func TestConfigValidation(t *testing.T) {
 	}
 }
 
-
-
 // TestConfigRead_FileNotFound verifies that ConfigRead returns 404 when file does not exist.
 func TestConfigRead_FileNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -593,5 +591,3 @@ func TestConfigSmartMerge_PreflightWarnings(t *testing.T) {
 		t.Errorf("expected preflight.port_conflict in smart-merge warnings, got %+v", resp.Data.Warnings)
 	}
 }
-
-

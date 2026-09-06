@@ -516,4 +516,3 @@ func (a *API) SubscriptionDialerProxyTargets(w http.ResponseWriter, r *http.Requ
 
 	JSONSuccess(w, targets)
 }
-

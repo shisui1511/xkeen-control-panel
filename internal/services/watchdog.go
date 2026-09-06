@@ -41,6 +41,11 @@ type WatchdogService struct {
 	consecutiveFailures int
 	disarmed            bool
 	disarmInFlight      bool
+
+	iptablesSaveBin  string
+	iptablesBin      string
+	ip6tablesSaveBin string
+	ip6tablesBin     string
 }
 
 // NewWatchdogService creates a watchdog for the given XKeen service instance.
@@ -219,8 +224,25 @@ var builtinMangleChains = map[string]bool{
 func (w *WatchdogService) EmergencyDisarmTProxy() bool {
 	ctx := context.Background()
 
-	removedV4, okV4 := disarmTProxyFamily(ctx, "iptables-save", "iptables")
-	removedV6, okV6 := disarmTProxyFamily(ctx, "ip6tables-save", "ip6tables")
+	saveV4 := w.iptablesSaveBin
+	if saveV4 == "" {
+		saveV4 = "iptables-save"
+	}
+	delV4 := w.iptablesBin
+	if delV4 == "" {
+		delV4 = "iptables"
+	}
+	saveV6 := w.ip6tablesSaveBin
+	if saveV6 == "" {
+		saveV6 = "ip6tables-save"
+	}
+	delV6 := w.ip6tablesBin
+	if delV6 == "" {
+		delV6 = "ip6tables"
+	}
+
+	removedV4, okV4 := disarmTProxyFamily(ctx, saveV4, delV4)
+	removedV6, okV6 := disarmTProxyFamily(ctx, saveV6, delV6)
 
 	if !okV4 || !okV6 {
 		log.Printf("Watchdog: EmergencyDisarmTProxy incomplete (ipv4 ok=%v removed=%d, ipv6 ok=%v removed=%d) — TPROXY interception may still be active",

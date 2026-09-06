@@ -684,7 +684,7 @@ func TestXrayTLSPing(t *testing.T) {
 	}
 
 	var resp struct {
-		Success bool                  `json:"success"`
+		Success bool                   `json:"success"`
 		Data    services.TLSPingResult `json:"data"`
 	}
 	if err := json.Unmarshal(rrValid.Body.Bytes(), &resp); err != nil {
@@ -694,6 +694,3 @@ func TestXrayTLSPing(t *testing.T) {
 		t.Errorf("expected success envelope to be true")
 	}
 }
-
-
-

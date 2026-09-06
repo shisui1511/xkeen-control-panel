@@ -40,8 +40,8 @@ func TestValidateConfigContent_Syntax(t *testing.T) {
 	}
 
 	// Broken JSON
-	resJson := ValidateConfigContent("xray", "05_routing.json", "{broken json")
-	if !hasWarningCode(resJson, "preflight.syntax") {
+	resJSON := ValidateConfigContent("xray", "05_routing.json", "{broken json")
+	if !hasWarningCode(resJSON, "preflight.syntax") {
 		t.Errorf("expected preflight.syntax warning for invalid JSON")
 	}
 

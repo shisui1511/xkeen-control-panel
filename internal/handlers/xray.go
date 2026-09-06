@@ -413,5 +413,3 @@ func (a *API) XrayTLSPing(w http.ResponseWriter, r *http.Request) {
 
 	JSONSuccess(w, result)
 }
-
-

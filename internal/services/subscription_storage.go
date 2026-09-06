@@ -1405,16 +1405,14 @@ func (s *SubscriptionService) refreshXrayFragmentLocked(sub *Subscription) error
 
 		// Merge sockopt and dialerProxy
 		sockopt := make(map[string]interface{})
-		if sub != nil {
-			if sub.SockoptMark > 0 {
-				sockopt["mark"] = sub.SockoptMark
-			}
-			if sub.SockoptFastOpen {
-				sockopt["tcpFastOpen"] = true
-			}
-			if sub.SockoptMptcp {
-				sockopt["tcpMptcp"] = true
-			}
+		if sub.SockoptMark > 0 {
+			sockopt["mark"] = sub.SockoptMark
+		}
+		if sub.SockoptFastOpen {
+			sockopt["tcpFastOpen"] = true
+		}
+		if sub.SockoptMptcp {
+			sockopt["tcpMptcp"] = true
 		}
 
 		if node != nil && node.DialerProxy != "" {
@@ -1479,5 +1477,3 @@ func (s *SubscriptionService) refreshXrayFragmentLocked(sub *Subscription) error
 
 	return nil
 }
-
-

@@ -15,51 +15,54 @@ test.describe('Subscriptions Dialer Proxy and Sockopt E2E tests (Plan 104-07)', 
   test.beforeEach(async ({ page }) => {
     await disableServiceWorker(page);
 
-    // Mock base endpoints
-    await page.route('**/api/auth/me', async (route: Route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          authenticated: true,
-          setup_required: false,
-          csrf_token: 'mock-csrf-token'
-        })
-      });
-    });
-
-    await page.route('**/api/capabilities', async (route: Route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          success: true,
-          data: {
-            kernels: {
-              xray: { installed: true, version: '1.8.24', channel: 'stable' },
-              mihomo: { installed: true, version: '1.18.10', channel: 'stable' }
-            },
-            active_kernel: 'xray',
-            mihomo: { api_reachable: true, process_running: true }
-          }
-        })
-      });
-    });
-
-    await page.route('**/api/proxies/**', async (route: Route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ proxies: {} })
-      });
-    });
-
-    await page.route('**/api/system/traffic/stats', async (route: Route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ total: { upload: 0, download: 0 } })
-      });
+    // Mock base endpoints with universal fallback to avoid 401 redirects to '/' when real backend is running in CI
+    await page.route('**/api/**', async (route: Route) => {
+      const url = route.request().url();
+      if (url.includes('/api/auth/me')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            authenticated: true,
+            setup_required: false,
+            csrf_token: 'mock-csrf-token'
+          })
+        });
+      } else if (url.includes('/api/capabilities')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            success: true,
+            data: {
+              kernels: {
+                xray: { installed: true, version: '1.8.24', channel: 'stable' },
+                mihomo: { installed: true, version: '1.18.10', channel: 'stable' }
+              },
+              active_kernel: 'xray',
+              mihomo: { api_reachable: true, process_running: true }
+            }
+          })
+        });
+      } else if (url.includes('/api/proxies/')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ proxies: {} })
+        });
+      } else if (url.includes('/api/system/traffic/stats')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ total: { upload: 0, download: 0 } })
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([])
+        });
+      }
     });
   });
 

@@ -12,9 +12,9 @@ import (
 // UserRule represents a custom user-defined routing rule preserved across template switches.
 type UserRule struct {
 	ID      string `json:"id"`
-	Type    string `json:"type"`    // "domain", "domain_suffix", "domain_keyword", "ip_cidr", "port"
-	Value   string `json:"value"`   // e.g. "example.com", "192.168.1.50", "8080"
-	Target  string `json:"target"`  // "direct", "proxy", "reject"
+	Type    string `json:"type"`   // "domain", "domain_suffix", "domain_keyword", "ip_cidr", "port"
+	Value   string `json:"value"`  // e.g. "example.com", "192.168.1.50", "8080"
+	Target  string `json:"target"` // "direct", "proxy", "reject"
 	Comment string `json:"comment,omitempty"`
 	Enabled bool   `json:"enabled"`
 }

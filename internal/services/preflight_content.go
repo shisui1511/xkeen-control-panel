@@ -75,13 +75,13 @@ func ValidateConfigContent(kernel string, filename string, content string) Prefl
 	// Step 3: DNS Loop Protection (preflight.dns_loop) [Mihomo only]
 	// -------------------------------------------------------------------------
 	if kernel == "mihomo" {
-		validateDnsLoop(data, &result)
+		validateDNSLoop(data, &result)
 	}
 
 	// -------------------------------------------------------------------------
 	// Step 4: DNS-over-VLESS Bypass (preflight.dns_over_vless)
 	// -------------------------------------------------------------------------
-	validateDnsOverVless(kernel, baseFilename, data, &result)
+	validateDNSOverVless(kernel, baseFilename, data, &result)
 
 	// -------------------------------------------------------------------------
 	// Step 5: LAN and RDP Bypass (preflight.lan_rdp)
@@ -165,12 +165,12 @@ func validateRemnawaveHeaders(data map[string]interface{}, res *PreflightResult)
 // -----------------------------------------------------------------------------
 // Step 3: DNS Loop Protection
 // -----------------------------------------------------------------------------
-func validateDnsLoop(data map[string]interface{}, res *PreflightResult) {
-	rawDns, ok := data["dns"]
-	if !ok || rawDns == nil {
+func validateDNSLoop(data map[string]interface{}, res *PreflightResult) {
+	rawDNS, ok := data["dns"]
+	if !ok || rawDNS == nil {
 		return
 	}
-	dnsMap, ok := rawDns.(map[string]interface{})
+	dnsMap, ok := rawDNS.(map[string]interface{})
 	if !ok {
 		return
 	}
@@ -254,7 +254,7 @@ func isLoopbackUpstream(upstream string, listenAddr string) bool {
 // -----------------------------------------------------------------------------
 // Step 4: DNS-over-VLESS Bypass (127.0.0.53 -> DIRECT)
 // -----------------------------------------------------------------------------
-func validateDnsOverVless(kernel string, filename string, data map[string]interface{}, res *PreflightResult) {
+func validateDNSOverVless(kernel string, filename string, data map[string]interface{}, res *PreflightResult) {
 	if kernel == "mihomo" {
 		rules, ok := data["rules"].([]interface{})
 		if !ok || len(rules) == 0 {
@@ -483,8 +483,8 @@ func validatePortConflicts(kernel string, filename string, data map[string]inter
 			}
 		}
 
-		if rawDns, ok := data["dns"].(map[string]interface{}); ok {
-			if rawListen, ok := rawDns["listen"]; ok {
+		if rawDNS, ok := data["dns"].(map[string]interface{}); ok {
+			if rawListen, ok := rawDNS["listen"]; ok {
 				listenStr := fmt.Sprintf("%v", rawListen)
 				if _, pStr, err := net.SplitHostPort(listenStr); err == nil {
 					if p, err := strconv.Atoi(pStr); err == nil && p > 0 {

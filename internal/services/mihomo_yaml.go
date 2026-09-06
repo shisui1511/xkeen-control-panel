@@ -870,8 +870,6 @@ func UpdateMihomoGroupProviders(content, groupName string, providerID string, re
 	return strings.Join(out, "\n")
 }
 
-
-
 // ExtractProxyGroupNames извлекает список имен всех прокси-групп из секции proxy-groups
 // конфигурации Mihomo (select, url-test, fallback, load-balance, relay).
 // Сохраняет порядок объявления в файле и исключает встроенные служебные группы DIRECT/REJECT.

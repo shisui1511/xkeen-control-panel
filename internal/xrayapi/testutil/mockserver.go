@@ -31,12 +31,12 @@ type MockXrayServer struct {
 	statsErr error
 
 	// Router
-	routeResults        map[string]*routerpb.RoutingContext
+	routeResults         map[string]*routerpb.RoutingContext
 	defaultRouteOutbound string
 	defaultRouteGroups   []string
-	routeErr            error
-	LastRoutingContext  *routerpb.RoutingContext
-	LastPublishResult   bool
+	routeErr             error
+	LastRoutingContext   *routerpb.RoutingContext
+	LastPublishResult    bool
 
 	// Logger
 	restartLoggerCount int

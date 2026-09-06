@@ -366,4 +366,3 @@ func TestSuppressedTotalAccumulates(t *testing.T) {
 		t.Fatalf("expected cumulative 50 suppressed, got %d", d.SuppressedTotal())
 	}
 }
-

@@ -333,10 +333,10 @@ func TestWireguardShareLink(t *testing.T) {
 
 	// 2. Broken links -> returns nil, skip reason non-empty
 	brokenLinks := []string{
-		fmt.Sprintf("wireguard://%s@1.2.3.4:51820?ip=10.0.0.2", keyA),                          // missing public key
+		fmt.Sprintf("wireguard://%s@1.2.3.4:51820?ip=10.0.0.2", keyA),                           // missing public key
 		fmt.Sprintf("wireguard://%s@1.2.3.4?publickey=%s", keyA, keyB),                          // missing port
 		fmt.Sprintf("wireguard://%s@1.2.3.4:99999?publickey=%s", keyA, keyB),                    // port out of range
-		"wireguard://:::invalid-url-here",                                                        // malformed URL
+		"wireguard://:::invalid-url-here",                                                       // malformed URL
 		fmt.Sprintf("wireguard://not-valid-base64@1.2.3.4:51820?publickey=%s", keyB),            // invalid secret key base64
 		fmt.Sprintf("wireguard://%s@1.2.3.4:51820?publickey=short", keyA),                       // truncated public key
 		fmt.Sprintf("wireguard://%s@1.2.3.4:51820?publickey=%s&presharedkey=short", keyA, keyB), // truncated preshared key
@@ -600,7 +600,3 @@ func TestWireguardHealthNotApplicable(t *testing.T) {
 		t.Errorf("expected LatencyMs=-2 in batch check, got %d", nodeH.LatencyMs)
 	}
 }
-
-
-
-

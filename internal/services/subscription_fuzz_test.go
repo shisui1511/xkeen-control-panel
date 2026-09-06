@@ -196,4 +196,3 @@ func FuzzParseSubscription(f *testing.F) {
 		_, _, _ = parseSubscriptionBody([]byte(data), "", sub)
 	})
 }
-

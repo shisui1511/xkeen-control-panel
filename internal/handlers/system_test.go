@@ -232,11 +232,11 @@ func TestPosixTZOffsetHours(t *testing.T) {
 		wantHours int
 		wantOK    bool
 	}{
-		{"MSK-3", 3, true},        // Moscow: POSIX offset -3 means actual UTC+3
-		{"<+03>-3", 3, true},      // Posix angle brackets timezone name
-		{"<MSK>-3", 3, true},      // Posix angle brackets timezone name
+		{"MSK-3", 3, true},   // Moscow: POSIX offset -3 means actual UTC+3
+		{"<+03>-3", 3, true}, // Posix angle brackets timezone name
+		{"<MSK>-3", 3, true}, // Posix angle brackets timezone name
 		{"UTC0", 0, true},
-		{"CST6CDT", -6, true},     // US Central: POSIX offset 6 means actual UTC-6
+		{"CST6CDT", -6, true}, // US Central: POSIX offset 6 means actual UTC-6
 		{"JST-9", 9, true},
 		{"", 0, false},
 		{"Europe/Moscow", 0, false}, // IANA name, not POSIX — must not be parsed as an offset

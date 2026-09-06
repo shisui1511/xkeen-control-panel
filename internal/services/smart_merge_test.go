@@ -648,7 +648,7 @@ rules:
 	userRules := []UserRule{
 		{ID: "r1", Type: "domain", Value: "u1.com", Target: "proxy", Enabled: true},
 		{ID: "r2", Type: "domain", Value: "u2.com", Target: "direct", Enabled: true},
-		{ID: "r3", Type: "domain", Value: "", Target: "direct", Enabled: true},       // empty value, should be skipped
+		{ID: "r3", Type: "domain", Value: "", Target: "direct", Enabled: true},        // empty value, should be skipped
 		{ID: "r4", Type: "domain", Value: "u4.com", Target: "direct", Enabled: false}, // disabled, should be skipped
 	}
 
@@ -755,4 +755,3 @@ proxies:
 		t.Errorf("expected listeners: to be absent when template lacks it, got:\n%s", merged3)
 	}
 }
-

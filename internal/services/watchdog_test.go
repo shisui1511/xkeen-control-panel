@@ -46,6 +46,11 @@ func TestWatchdogService_CheckHealth_FailureCounterAndTrip(t *testing.T) {
 	}
 	xkeenSvc := NewXKeenService(dummy, tmpDir)
 	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	saveBin, delBin, _ := installFakeIptables(t, "")
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
 
 	for i := 1; i <= watchdogMaxFailures; i++ {
 		w.CheckHealth()
@@ -192,7 +197,7 @@ COMMIT
 // so the circuit breaker can retry on a later qualifying health check
 // instead of silently giving up after one transient failure.
 func TestWatchdogService_EmergencyDisarmTProxy_FailureDoesNotLatch(t *testing.T) {
-	removed, ok := disarmTProxyFamily(context.Background(), "iptables-save", "iptables")
+	removed, ok := disarmTProxyFamily(context.Background(), "nonexistent-iptables-save", "iptables")
 	if removed != 0 {
 		t.Fatalf("expected 0 rules removed when iptables-save is unavailable, got %d", removed)
 	}
@@ -312,28 +317,28 @@ func TestWatchdogService_CheckHealth_RecoveryResetsCounter(t *testing.T) {
 
 func TestIsKernelStatusHealthy(t *testing.T) {
 	cases := map[string]bool{
-		"XKeen is running":       true,
-		"Ядро активен":           true,
-		"Служба XKeen активна":   true,
-		"Службы активны":         true,
-		"Ядро активно":           true,
-		"XKeen запущен":          true,
-		"Служба запущена":        true,
-		"XKeen is not running":   false,
-		"XKeen не запущен":       false,
-		"XKeen незапущен":        false,
-		"Служба не запущена":     false,
-		"Служба незапущена":      false,
-		"Служба не активна":      false,
-		"Служба неактивна":       false,
-		"Ядро не активно":        false,
-		"Ядро неактивно":         false,
-		"XKeen не активен":       false,
-		"XKeen неактивен":        false,
-		"XKeen остановлен":       false,
-		"Службы остановлены":     false,
-		"":                       false,
-		"stopped":                false,
+		"XKeen is running":     true,
+		"Ядро активен":         true,
+		"Служба XKeen активна": true,
+		"Службы активны":       true,
+		"Ядро активно":         true,
+		"XKeen запущен":        true,
+		"Служба запущена":      true,
+		"XKeen is not running": false,
+		"XKeen не запущен":     false,
+		"XKeen незапущен":      false,
+		"Служба не запущена":   false,
+		"Служба незапущена":    false,
+		"Служба не активна":    false,
+		"Служба неактивна":     false,
+		"Ядро не активно":      false,
+		"Ядро неактивно":       false,
+		"XKeen не активен":     false,
+		"XKeen неактивен":      false,
+		"XKeen остановлен":     false,
+		"Службы остановлены":   false,
+		"":                     false,
+		"stopped":              false,
 	}
 	for status, want := range cases {
 		if got := isKernelStatusHealthy(status); got != want {

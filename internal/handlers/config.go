@@ -641,8 +641,6 @@ func (a *API) ConfigValidate(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
-
 func detectKernelFromPath(cleanPath string) string {
 	ext := filepath.Ext(cleanPath)
 	if strings.Contains(cleanPath, "xray") || ext == ".json" {

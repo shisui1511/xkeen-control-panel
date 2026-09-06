@@ -383,8 +383,6 @@ rules: []
 	}
 }
 
-
-
 func TestParseClashProxyNode_Hysteria2(t *testing.T) {
 	block := `  - name: Hysteria2-Test
     type: hysteria2

@@ -756,5 +756,3 @@ func TestXrayFragmentPreservesUnknownOutboundFields(t *testing.T) {
 		t.Errorf("expected dialerProxy='node-2', got %v", sockopt["dialerProxy"])
 	}
 }
-
-
