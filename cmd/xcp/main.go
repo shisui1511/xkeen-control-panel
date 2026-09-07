@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -59,8 +60,14 @@ func main() {
 	// between collections to avoid GC thrashing under normal operation,
 	// while SetMemoryLimit remains the hard backstop against unbounded
 	// growth.
-	debug.SetMemoryLimit(96 * 1024 * 1024) // 96 MiB
-	debug.SetGCPercent(50)
+	memLimit := os.Getenv("GOMEMLIMIT")
+	if memLimit == "" {
+		debug.SetMemoryLimit(96 * 1024 * 1024) // 96 MiB default
+	}
+	gcPercent := os.Getenv("GOGC")
+	if gcPercent == "" {
+		debug.SetGCPercent(50) // 50 default
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -70,6 +77,19 @@ func main() {
 		if err := os.MkdirAll(filepath.Dir(*configPath), 0755); err == nil {
 			_ = config.Save(*configPath, cfg)
 		}
+	}
+
+	effectiveMemLimit := memLimit
+	if effectiveMemLimit == "" {
+		effectiveMemLimit = "96MiB (default)"
+	}
+	effectiveGC := gcPercent
+	if effectiveGC == "" {
+		effectiveGC = "50 (default)"
+	}
+	goExp := os.Getenv("GOEXPERIMENT")
+	if goExp == "" {
+		goExp = "none (greenteagc default)"
 	}
 
 	// Setup logging to file if configured with size-based rotation (1 MB)
@@ -445,7 +465,8 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/rollback", api.KernelRollback)
 	srv.HandleProtected("/api/kernels/{name}/download", api.KernelDownload)
 
-	log.Printf("XKeen Control Panel v%s starting...", Version)
+	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
+		Version, runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
 	if cfg.Auth.PasswordHash == "" {
 		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)
 	}

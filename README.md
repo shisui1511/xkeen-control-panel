@@ -142,6 +142,22 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
 /opt/etc/init.d/S99xcp status   # Статус
 ```
 
+### Настройка параметров рантайма Go
+
+Для тонкой настройки потребления памяти и сборщика мусора (Green Tea GC в Go 1.26+) используется файл оверрайдов окружения `/opt/etc/xcp/xcp.env`:
+
+```bash
+# /opt/etc/xcp/xcp.env
+# Ограничение памяти рантайма (по умолчанию 96MiB):
+# GOMEMLIMIT=96MiB
+
+# Агрессивность сборщика мусора (по умолчанию 50):
+# GOGC=50
+
+# Escape-hatch: возврат к классическому GC при необходимости:
+# export GOEXPERIMENT=nogreenteagc
+```
+
 ---
 
 ## Удаление
