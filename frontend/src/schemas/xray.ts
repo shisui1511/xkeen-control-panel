@@ -179,6 +179,14 @@ export const xraySchema = {
                     description: 'TCP Fast Open (TFO)'
                   },
                   tcpMptcp: { type: 'boolean', description: 'Multipath TCP (MPTCP)' },
+                  tcpNoDelay: {
+                    type: 'boolean',
+                    description: 'Disable Nagle algorithm (TCP_NODELAY)'
+                  },
+                  tcpKeepAliveInterval: {
+                    type: 'integer',
+                    description: 'TCP keepalive interval in seconds'
+                  },
                   dialerProxy: { type: 'string', description: 'Outbound tag for chained proxying' }
                 }
               }
@@ -279,6 +287,14 @@ export const xraySchema = {
                     description: 'TCP Fast Open (TFO)'
                   },
                   tcpMptcp: { type: 'boolean', description: 'Multipath TCP (MPTCP)' },
+                  tcpNoDelay: {
+                    type: 'boolean',
+                    description: 'Disable Nagle algorithm (TCP_NODELAY)'
+                  },
+                  tcpKeepAliveInterval: {
+                    type: 'integer',
+                    description: 'TCP keepalive interval in seconds'
+                  },
                   dialerProxy: { type: 'string', description: 'Outbound tag for chained proxying' }
                 }
               }

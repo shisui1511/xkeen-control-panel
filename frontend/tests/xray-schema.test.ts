@@ -83,24 +83,27 @@ describe('xraySchema outbound protocols & WireGuard settings (D-08)', () => {
   });
 });
 
-describe('xraySchema sockopt & dialerProxy (D-11, D-12)', () => {
-  test('множество ключей sockopt состоит ровно из 4 ожидаемых полей', () => {
+describe('xraySchema sockopt & dialerProxy (XRAY-02, XRAY-03, XRAY-04)', () => {
+  test('множество ключей sockopt состоит ровно из 6 ожидаемых полей', () => {
     const outboundProps = (xraySchema.properties.outbounds.items as any).properties;
     const sockoptProps = outboundProps.streamSettings.properties.sockopt.properties;
 
     const keys = Object.keys(sockoptProps).sort();
-    expect(keys).toEqual(['dialerProxy', 'mark', 'tcpFastOpen', 'tcpMptcp']);
+    expect(keys).toEqual([
+      'dialerProxy',
+      'mark',
+      'tcpFastOpen',
+      'tcpKeepAliveInterval',
+      'tcpMptcp',
+      'tcpNoDelay'
+    ]);
 
     expect(sockoptProps.mark.type).toBe('integer');
     expect(sockoptProps.tcpFastOpen.oneOf).toBeDefined();
     expect(sockoptProps.tcpMptcp.type).toBe('boolean');
+    expect(sockoptProps.tcpNoDelay.type).toBe('boolean');
+    expect(sockoptProps.tcpKeepAliveInterval.type).toBe('integer');
     expect(sockoptProps.dialerProxy.type).toBe('string');
-  });
-
-  test('снятое из ядра поле tcpNoDelay отсутствует в схеме sockopt', () => {
-    const outboundProps = (xraySchema.properties.outbounds.items as any).properties;
-    const sockoptProps = outboundProps.streamSettings.properties.sockopt.properties;
-    expect((sockoptProps as any).tcpNoDelay).toBeUndefined();
   });
 });
 

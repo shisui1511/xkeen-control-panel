@@ -86,37 +86,74 @@ func NewClient(conn *grpc.ClientConn) *Client {
 	}
 }
 
-// OutboundTraffic queries all outbound traffic counters with pattern "outbound>>>".
-// It parses counter names in format: outbound>>>{tag}>>>traffic>>>{direction}
-// and returns a map of outbound tags to TrafficPair.
-func (c *Client) OutboundTraffic(ctx context.Context) (map[string]TrafficPair, error) {
+// TrafficStats holds categorised traffic pairs for outbounds, inbounds and users.
+type TrafficStats struct {
+	Outbounds map[string]TrafficPair `json:"outbounds"`
+	Inbounds  map[string]TrafficPair `json:"inbounds"`
+	Users     map[string]TrafficPair `json:"users"`
+}
+
+// QueryAllTraffic queries traffic counters for outbounds, inbounds, and users from Xray.
+// It parses counter names in format: {scope}>>>{tag/email}>>>traffic>>>{direction}
+// and returns categorised maps.
+func (c *Client) QueryAllTraffic(ctx context.Context) (*TrafficStats, error) {
 	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	resp, err := c.stats.QueryStats(callCtx, &statspb.QueryStatsRequest{
-		Pattern: "outbound>>>",
+		Pattern: "",
 		Reset_:  false,
 	})
 	if err != nil {
 		return nil, normalizeGRPCError(err)
 	}
 
-	result := make(map[string]TrafficPair)
+	result := &TrafficStats{
+		Outbounds: make(map[string]TrafficPair),
+		Inbounds:  make(map[string]TrafficPair),
+		Users:     make(map[string]TrafficPair),
+	}
+
 	for _, stat := range resp.GetStat() {
 		parts := strings.Split(stat.GetName(), ">>>")
-		if len(parts) == 4 && parts[0] == "outbound" && parts[2] == "traffic" {
-			tag := parts[1]
+		if len(parts) == 4 && parts[2] == "traffic" {
+			scope := parts[0]
+			key := parts[1]
 			dir := parts[3]
-			pair := result[tag]
+
+			var targetMap map[string]TrafficPair
+			switch scope {
+			case "outbound":
+				targetMap = result.Outbounds
+			case "inbound":
+				targetMap = result.Inbounds
+			case "user":
+				targetMap = result.Users
+			default:
+				continue
+			}
+
+			pair := targetMap[key]
 			if dir == "uplink" {
 				pair.Uplink = stat.GetValue()
 			} else if dir == "downlink" {
 				pair.Downlink = stat.GetValue()
 			}
-			result[tag] = pair
+			targetMap[key] = pair
 		}
 	}
+
 	return result, nil
+}
+
+// OutboundTraffic queries all outbound traffic counters.
+// It returns a map of outbound tags to TrafficPair.
+func (c *Client) OutboundTraffic(ctx context.Context) (map[string]TrafficPair, error) {
+	stats, err := c.QueryAllTraffic(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return stats.Outbounds, nil
 }
 
 // SysStats retrieves runtime system stats from Xray.

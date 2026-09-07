@@ -213,6 +213,7 @@ func main() {
 	srv.HandleProtected("/api/mihomo/cache/fakeip/flush", api.MihomoFlushFakeIP)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/xray/reality/keygen", api.XrayRealityKeygen)
+	srv.HandleProtected("/api/xray/uuid", api.XrayUUID)
 	srv.HandleProtected("/api/xray/stats", api.XrayStats)
 	srv.HandleProtected("/api/xray/grpc/monitoring", api.XrayGRPCMonitoring)
 	srv.HandleProtected("/api/xray/test-route", api.XrayTestRoute)
