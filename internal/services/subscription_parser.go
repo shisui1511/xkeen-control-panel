@@ -263,6 +263,18 @@ func parseSubscriptionBody(body []byte, contentTypeHeader string, sub *Subscript
 		return nil, nil, fmt.Errorf("данная подписка имеет формат Clash/Mihomo YAML, но её не удалось распарсить для ядра XRay")
 	}
 
+	// 5.5) wg-quick .conf (WireGuard / AmneziaWG INI format)
+	if looksLikeWgQuickConf(content) {
+		if outs, skips, err := parseWgQuickConfToOutbounds(content, sub); err == nil && len(outs) > 0 {
+			if sub != nil {
+				sub.DetectedFormat = "wg-quick"
+				sub.LastCount = len(outs)
+				sub.LastSkipped = len(skips)
+			}
+			return outs, skips, nil
+		}
+	}
+
 	// 6) Base64 or plain share-links
 	return parseShareLinks(content, sub)
 }
@@ -637,6 +649,17 @@ func parseShareLinks(content string, sub *Subscription) ([]Outbound, []SkipReaso
 	if err == nil {
 		content = string(decoded)
 		wasBase64 = true
+	}
+
+	if wasBase64 && looksLikeWgQuickConf(content) {
+		if outs, skips, err := parseWgQuickConfToOutbounds(content, sub); err == nil && len(outs) > 0 {
+			if sub != nil {
+				sub.DetectedFormat = "wg-quick"
+				sub.LastCount = len(outs)
+				sub.LastSkipped = len(skips)
+			}
+			return outs, skips, nil
+		}
 	}
 
 	lines := strings.Split(content, "\n")

@@ -169,6 +169,13 @@ func wireguardNodeToOutbound(n *SubscriptionNode) (*Outbound, string) {
 		settings["reserved"] = n.Reserved
 	}
 
+	if n.AWG != nil {
+		settings["awg"] = n.AWG
+	}
+	if len(n.DNS) > 0 {
+		settings["dns"] = n.DNS
+	}
+
 	return &Outbound{
 		Tag:      n.Tag,
 		Protocol: "wireguard",

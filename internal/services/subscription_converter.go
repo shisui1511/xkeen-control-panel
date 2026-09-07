@@ -162,7 +162,42 @@ func (s *SubscriptionService) outboundsToNodes(outbounds []Outbound, sub *Subscr
 						if ep, _ := peer["endpoint"].(string); ep != "" {
 							node.Server = ep
 						}
+						if ka, _ := peer["keepAlive"].(int); ka > 0 {
+							node.KeepAlive = ka
+						} else if ka, _ := peer["keepAlive"].(float64); ka > 0 {
+							node.KeepAlive = int(ka)
+						}
+						if aips, ok := peer["allowedIPs"].([]string); ok {
+							node.AllowedIPs = aips
+						} else if aips, ok := peer["allowedIPs"].([]interface{}); ok {
+							var allowed []string
+							for _, a := range aips {
+								if s, ok := a.(string); ok && s != "" {
+									allowed = append(allowed, s)
+								}
+							}
+							node.AllowedIPs = allowed
+						}
 					}
+				}
+				if dnsList, ok := outbounds[i].Settings["dns"].([]string); ok {
+					node.DNS = dnsList
+				} else if dnsRaw, ok := outbounds[i].Settings["dns"].([]interface{}); ok {
+					var dnsList []string
+					for _, d := range dnsRaw {
+						if s, ok := d.(string); ok && s != "" {
+							dnsList = append(dnsList, s)
+						}
+					}
+					node.DNS = dnsList
+				}
+				if awgOpt, ok := outbounds[i].Settings["awg"].(*AWGOptions); ok && awgOpt != nil {
+					node.AWG = awgOpt.Clone()
+				} else if awgMap, ok := outbounds[i].Settings["awg"].(map[string]interface{}); ok && awgMap != nil {
+					node.AWG = parseAWGOptionsFromMap(awgMap)
+				}
+				if node.AWG != nil && node.AWG.IsEmpty() {
+					node.AWG = nil
 				}
 			}
 		}

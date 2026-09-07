@@ -71,6 +71,7 @@ type SubscriptionNode struct {
 	LocalAddresses []string `json:"local_addresses,omitempty"`
 	AllowedIPs     []string `json:"allowed_ips,omitempty"`
 	KeepAlive      int      `json:"keepalive,omitempty"`
+	DNS            []string `json:"dns,omitempty"`
 
 	// AmneziaWG obfuscation options (AWGIN-03)
 	AWG *AWGOptions `json:"awg,omitempty"`
@@ -165,6 +166,21 @@ func (o *AWGOptions) Clone() *AWGOptions {
 	return &res
 }
 
+// IsEmpty проверяет, задан ли хотя бы один параметр обфускации AWG.
+func (o *AWGOptions) IsEmpty() bool {
+	if o == nil {
+		return true
+	}
+	return o.Jc == nil && o.Jmin == nil && o.Jmax == nil &&
+		o.S1 == nil && o.S2 == nil && o.S3 == nil && o.S4 == nil &&
+		o.H1 == "" && o.H2 == "" && o.H3 == "" && o.H4 == "" &&
+		o.Version == "" && o.HeaderProtectionKey == "" &&
+		o.I1 == "" && o.I2 == "" && o.I3 == "" && o.I4 == "" && o.I5 == "" &&
+		o.ContentPaddingAddition == nil && o.RandomTrailers == nil &&
+		o.DisableCookies == nil && o.RekeyAfterTime == nil &&
+		len(o.RawOptions) == 0
+}
+
 // Clone возвращает глубокую копию SubscriptionNode.
 func (n *SubscriptionNode) Clone() SubscriptionNode {
 	if n == nil {
@@ -182,6 +198,10 @@ func (n *SubscriptionNode) Clone() SubscriptionNode {
 	if n.AllowedIPs != nil {
 		res.AllowedIPs = make([]string, len(n.AllowedIPs))
 		copy(res.AllowedIPs, n.AllowedIPs)
+	}
+	if n.DNS != nil {
+		res.DNS = make([]string, len(n.DNS))
+		copy(res.DNS, n.DNS)
 	}
 	if n.AWG != nil {
 		res.AWG = n.AWG.Clone()
