@@ -299,8 +299,8 @@ proxies:
       h4: 40
 `
 	resJmin := ValidateConfigContent("mihomo", "config.yaml", badJmin)
-	if !hasWarningCode(resJmin, "preflight.awg_flat_fields") || !strings.Contains(getWarningMessage(resJmin, "preflight.awg_flat_fields"), "jmin") {
-		t.Errorf("expected preflight.awg_flat_fields warning about jmin >= jmax")
+	if !hasWarningCode(resJmin, "preflight.awg_jmin_jmax") || !strings.Contains(getWarningMessage(resJmin, "preflight.awg_jmin_jmax"), "jmin") {
+		t.Errorf("expected preflight.awg_jmin_jmax warning about jmin >= jmax, got: %+v", resJmin.Warnings)
 	}
 
 	// S1 + 56 == S2
@@ -322,8 +322,8 @@ proxies:
       h4: 40
 `
 	resS1S2 := ValidateConfigContent("mihomo", "config.yaml", badS1S2)
-	if !hasWarningCode(resS1S2, "preflight.awg_flat_fields") || !strings.Contains(getWarningMessage(resS1S2, "preflight.awg_flat_fields"), "s1 + 56") {
-		t.Errorf("expected preflight.awg_flat_fields warning about s1 + 56 == s2")
+	if !hasWarningCode(resS1S2, "preflight.awg_s1_s2") || !strings.Contains(getWarningMessage(resS1S2, "preflight.awg_s1_s2"), "s1 + 56") {
+		t.Errorf("expected preflight.awg_s1_s2 warning about s1 + 56 == s2, got: %+v", resS1S2.Warnings)
 	}
 
 	// H <= 4
@@ -345,8 +345,8 @@ proxies:
       h4: 40
 `
 	resH := ValidateConfigContent("mihomo", "config.yaml", badH)
-	if !hasWarningCode(resH, "preflight.awg_flat_fields") || !strings.Contains(getWarningMessage(resH, "preflight.awg_flat_fields"), "> 4") {
-		t.Errorf("expected preflight.awg_flat_fields warning about H <= 4")
+	if !hasWarningCode(resH, "preflight.awg_h_min") || !strings.Contains(getWarningMessage(resH, "preflight.awg_h_min"), "> 4") {
+		t.Errorf("expected preflight.awg_h_min warning about H <= 4, got: %+v", resH.Warnings)
 	}
 
 	// Duplicate H
@@ -368,12 +368,60 @@ proxies:
       h4: 40
 `
 	resDupH := ValidateConfigContent("mihomo", "config.yaml", dupH)
-	if !hasWarningCode(resDupH, "preflight.awg_flat_fields") || !strings.Contains(getWarningMessage(resDupH, "preflight.awg_flat_fields"), "unique") {
-		t.Errorf("expected preflight.awg_flat_fields warning about duplicate H")
+	if !hasWarningCode(resDupH, "preflight.awg_h_unique") || !strings.Contains(getWarningMessage(resDupH, "preflight.awg_h_unique"), "unique") {
+		t.Errorf("expected preflight.awg_h_unique warning about duplicate H, got: %+v", resDupH.Warnings)
 	}
 
-	// Valid AmneziaWG options
-	goodAwg := `
+	// Jmax + 80 > MTU (AWGVAL-04)
+	badJmaxMtu := `
+proxies:
+  - name: "wg1"
+    type: wireguard
+    server: 1.2.3.4
+    port: 51820
+    mtu: 1200
+    amnezia-wg-option:
+      jc: 5
+      jmin: 10
+      jmax: 1150
+      s1: 20
+      s2: 100
+      h1: 10
+      h2: 20
+      h3: 30
+      h4: 40
+`
+	resJmaxMtu := ValidateConfigContent("mihomo", "config.yaml", badJmaxMtu)
+	if !hasWarningCode(resJmaxMtu, "preflight.awg_junk_mtu") {
+		t.Errorf("expected preflight.awg_junk_mtu warning about jmax + 80 > MTU, got: %+v", resJmaxMtu.Warnings)
+	}
+
+	// Header-protection-key with S < 12 (AWGVAL-03)
+	badHpkS := `
+proxies:
+  - name: "wg1"
+    type: wireguard
+    server: 1.2.3.4
+    port: 51820
+    amnezia-wg-option:
+      jc: 5
+      jmin: 10
+      jmax: 40
+      s1: 8
+      s2: 100
+      h1: 10
+      h2: 20
+      h3: 30
+      h4: 40
+      header-protection-key: "my-secret-key"
+`
+	resHpkS := ValidateConfigContent("mihomo", "config.yaml", badHpkS)
+	if !hasWarningCode(resHpkS, "preflight.awg_s_header_protection") {
+		t.Errorf("expected preflight.awg_s_header_protection warning when s1 < 12, got: %+v", resHpkS.Warnings)
+	}
+
+	// CPS <c> token in I1-I5 (AWGVAL-05)
+	badCToken := `
 proxies:
   - name: "wg1"
     type: wireguard
@@ -389,9 +437,51 @@ proxies:
       h2: 20
       h3: 30
       h4: 40
+      i1: "0A<c>1B"
+`
+	resCToken := ValidateConfigContent("mihomo", "config.yaml", badCToken)
+	if !hasWarningCode(resCToken, "preflight.awg_i_token") {
+		t.Errorf("expected preflight.awg_i_token warning for CPS <c> token, got: %+v", resCToken.Warnings)
+	}
+
+	// Valid AmneziaWG 3.1 options with range headers and random trailers (AWGVAL-02, AWGVAL-05)
+	goodAwg := `
+proxies:
+  - name: "wg1"
+    type: wireguard
+    server: 1.2.3.4
+    port: 51820
+    mtu: 1420
+    amnezia-wg-option:
+      jc: 5
+      jmin: 10
+      jmax: 40
+      s1: 20
+      s2: 100
+      s3: 15
+      s4: 30
+      h1: "1000000001-1000000010"
+      h2: "1000000011-1000000020"
+      h3: 30
+      h4: 40
+      version: "3.1"
+      header-protection-key: "valid-secret-key"
+      i1: "0A1B2C"
+      random-trailers: true
 `
 	resGood := ValidateConfigContent("mihomo", "config.yaml", goodAwg)
-	if hasWarningCode(resGood, "preflight.awg_flat_fields") {
-		t.Errorf("unexpected preflight.awg_flat_fields warning for valid AmneziaWG config: %+v", resGood.Warnings)
+	if hasWarningCode(resGood, "preflight.awg_flat_fields") ||
+		hasWarningCode(resGood, "preflight.awg_jmin_jmax") ||
+		hasWarningCode(resGood, "preflight.awg_s1_s2") ||
+		hasWarningCode(resGood, "preflight.awg_h_min") ||
+		hasWarningCode(resGood, "preflight.awg_h_unique") ||
+		hasWarningCode(resGood, "preflight.awg_s_header_protection") ||
+		hasWarningCode(resGood, "preflight.awg_junk_mtu") ||
+		hasWarningCode(resGood, "preflight.awg_i_token") {
+		t.Errorf("unexpected error warnings for valid AmneziaWG config: %+v", resGood.Warnings)
+	}
+	// random-trailers emits informational warning
+	if !hasWarningCode(resGood, "preflight.awg_random_trailers") {
+		t.Errorf("expected informational preflight.awg_random_trailers warning")
 	}
 }

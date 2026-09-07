@@ -578,8 +578,40 @@ func validatePortConflicts(kernel string, filename string, data map[string]inter
 }
 
 // -----------------------------------------------------------------------------
-// Step 7: AmneziaWG obfuscation options check
+// Step 7: AmneziaWG obfuscation options check (AWGVAL-01..AWGVAL-05)
 // -----------------------------------------------------------------------------
+
+type hFieldInfo struct {
+	raw string
+	min int64
+	max int64
+}
+
+func parseHField(val interface{}) (hFieldInfo, bool) {
+	if val == nil {
+		return hFieldInfo{}, false
+	}
+	s := strings.TrimSpace(fmt.Sprintf("%v", val))
+	if s == "" || s == "<nil>" {
+		return hFieldInfo{}, false
+	}
+
+	if strings.Contains(s, "-") {
+		parts := strings.SplitN(s, "-", 2)
+		minVal, err1 := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+		maxVal, err2 := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+		if err1 == nil && err2 == nil {
+			return hFieldInfo{raw: s, min: minVal, max: maxVal}, true
+		}
+	}
+
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err == nil {
+		return hFieldInfo{raw: s, min: n, max: n}, true
+	}
+	return hFieldInfo{raw: s, min: 0, max: 0}, false
+}
+
 func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult) {
 	rawProxies, ok := data["proxies"]
 	if !ok || rawProxies == nil {
@@ -590,7 +622,7 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult)
 		return
 	}
 
-	flatAwgKeys := []string{"jc", "jmin", "jmax", "s1", "s2", "h1", "h2", "h3", "h4"}
+	flatAwgKeys := []string{"jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "header-protection-key", "i1", "i2", "i3", "i4", "i5"}
 
 	for _, p := range proxiesList {
 		pMap, ok := p.(map[string]interface{})
@@ -626,49 +658,154 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult)
 				continue
 			}
 
-			getInt := func(k string) int {
-				v := awgMap[k]
-				n, _ := strconv.Atoi(fmt.Sprintf("%v", v))
-				return n
+			getInt := func(k string) (int, bool) {
+				v, exists := awgMap[k]
+				if !exists || v == nil {
+					return 0, false
+				}
+				s := strings.TrimSpace(fmt.Sprintf("%v", v))
+				if s == "" || s == "<nil>" {
+					return 0, false
+				}
+				n, err := strconv.Atoi(s)
+				return n, err == nil
 			}
 
-			jmin := getInt("jmin")
-			jmax := getInt("jmax")
-			s1 := getInt("s1")
-			s2 := getInt("s2")
-			h1 := getInt("h1")
-			h2 := getInt("h2")
-			h3 := getInt("h3")
-			h4 := getInt("h4")
+			jmin, hasJmin := getInt("jmin")
+			jmax, hasJmax := getInt("jmax")
+			s1, hasS1 := getInt("s1")
+			s2, hasS2 := getInt("s2")
+			s3, hasS3 := getInt("s3")
+			s4, hasS4 := getInt("s4")
 
 			// Check constraints
 			// 1. Jmin < Jmax
-			if jmin >= jmax {
+			if hasJmin && hasJmax && jmin >= jmax {
 				res.Warnings = append(res.Warnings, PreflightIssue{
-					Code:    "preflight.awg_flat_fields",
+					Code:    "preflight.awg_jmin_jmax",
 					Message: fmt.Sprintf("Proxy %q: AmneziaWG jmin (%d) must be strictly less than jmax (%d)", pName, jmin, jmax),
 				})
 			}
+
 			// 2. S1 + 56 != S2
-			if (s1 + 56) == s2 {
+			if hasS1 && hasS2 && (s1+56) == s2 {
 				res.Warnings = append(res.Warnings, PreflightIssue{
-					Code:    "preflight.awg_flat_fields",
+					Code:    "preflight.awg_s1_s2",
 					Message: fmt.Sprintf("Proxy %q: AmneziaWG constraint s1 + 56 != s2 violated (s1=%d, s2=%d)", pName, s1, s2),
 				})
 			}
-			// 3. H1-H4 > 4
-			if h1 <= 4 || h2 <= 4 || h3 <= 4 || h4 <= 4 {
+
+			// 3. Jmax + 80 > MTU
+			mtu := 1280
+			if rawMtu, exists := pMap["mtu"]; exists && rawMtu != nil {
+				if parsedMtu, err := strconv.Atoi(fmt.Sprintf("%v", rawMtu)); err == nil && parsedMtu > 0 {
+					mtu = parsedMtu
+				}
+			}
+			if hasJmax && (jmax+80) > mtu {
 				res.Warnings = append(res.Warnings, PreflightIssue{
-					Code:    "preflight.awg_flat_fields",
-					Message: fmt.Sprintf("Proxy %q: AmneziaWG parameters h1, h2, h3, h4 must all be > 4 (got h1=%d, h2=%d, h3=%d, h4=%d)", pName, h1, h2, h3, h4),
+					Code:    "preflight.awg_junk_mtu",
+					Message: fmt.Sprintf("Proxy %q: AmneziaWG jmax + 80 (%d) exceeds interface MTU (%d), risk of packet fragmentation", pName, jmax+80, mtu),
 				})
 			}
-			// 4. H1-H4 pairwise distinct
-			if h1 == h2 || h1 == h3 || h1 == h4 || h2 == h3 || h2 == h4 || h3 == h4 {
+
+			// 4. Header-protection-key requires S1..S4 >= 12
+			rawHpk := awgMap["header-protection-key"]
+			hpkStr := strings.TrimSpace(fmt.Sprintf("%v", rawHpk))
+			if rawHpk != nil && hpkStr != "" && hpkStr != "<nil>" {
+				var smallS []string
+				if hasS1 && s1 < 12 {
+					smallS = append(smallS, fmt.Sprintf("s1=%d", s1))
+				}
+				if hasS2 && s2 < 12 {
+					smallS = append(smallS, fmt.Sprintf("s2=%d", s2))
+				}
+				if hasS3 && s3 < 12 {
+					smallS = append(smallS, fmt.Sprintf("s3=%d", s3))
+				}
+				if hasS4 && s4 < 12 {
+					smallS = append(smallS, fmt.Sprintf("s4=%d", s4))
+				}
+				if len(smallS) > 0 {
+					res.Warnings = append(res.Warnings, PreflightIssue{
+						Code:    "preflight.awg_s_header_protection",
+						Message: fmt.Sprintf("Proxy %q: AmneziaWG header-protection-key requires S parameters >= 12 (violated: %s)", pName, strings.Join(smallS, ", ")),
+					})
+				}
+			}
+
+			// 5. H1-H4 > 4 and uniqueness (supporting both numbers and ranges min-max)
+			hKeys := []string{"h1", "h2", "h3", "h4"}
+			var parsedH []hFieldInfo
+			hasHMinViol := false
+
+			for _, hk := range hKeys {
+				if v, exists := awgMap[hk]; exists {
+					hInfo, ok := parseHField(v)
+					if ok {
+						if hInfo.min <= 4 || hInfo.max <= 4 {
+							hasHMinViol = true
+						}
+						parsedH = append(parsedH, hInfo)
+					}
+				}
+			}
+
+			if hasHMinViol {
 				res.Warnings = append(res.Warnings, PreflightIssue{
-					Code:    "preflight.awg_flat_fields",
+					Code:    "preflight.awg_h_min",
+					Message: fmt.Sprintf("Proxy %q: AmneziaWG parameters h1, h2, h3, h4 must all be > 4", pName),
+				})
+			}
+
+			// H uniqueness check
+			hasHUniqueViol := false
+			for i := 0; i < len(parsedH); i++ {
+				for j := i + 1; j < len(parsedH); j++ {
+					if parsedH[i].raw == parsedH[j].raw || (parsedH[i].min == parsedH[j].min && parsedH[i].max == parsedH[j].max) {
+						hasHUniqueViol = true
+						break
+					}
+				}
+				if hasHUniqueViol {
+					break
+				}
+			}
+			if hasHUniqueViol {
+				res.Warnings = append(res.Warnings, PreflightIssue{
+					Code:    "preflight.awg_h_unique",
 					Message: fmt.Sprintf("Proxy %q: AmneziaWG parameters h1, h2, h3, h4 must all be unique", pName),
 				})
+			}
+
+			// 6. CPS <c> token check in I1..I5
+			iKeys := []string{"i1", "i2", "i3", "i4", "i5"}
+			hasCToken := false
+			for _, ik := range iKeys {
+				if iv, exists := awgMap[ik]; exists && iv != nil {
+					iStr := strings.ToLower(fmt.Sprintf("%v", iv))
+					if strings.Contains(iStr, "<c>") {
+						hasCToken = true
+						break
+					}
+				}
+			}
+			if hasCToken {
+				res.Warnings = append(res.Warnings, PreflightIssue{
+					Code:    "preflight.awg_i_token",
+					Message: fmt.Sprintf("Proxy %q: CPS token <c> in I1-I5 is not supported by client", pName),
+				})
+			}
+
+			// 7. Random trailers informational warning
+			if rtVal, exists := awgMap["random-trailers"]; exists && rtVal != nil {
+				rtStr := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", rtVal)))
+				if rtStr == "true" || rtStr == "yes" || rtStr == "1" {
+					res.Warnings = append(res.Warnings, PreflightIssue{
+						Code:    "preflight.awg_random_trailers",
+						Message: fmt.Sprintf("Proxy %q: AmneziaWG random-trailers enabled; server must support this mode", pName),
+					})
+				}
 			}
 		}
 	}
