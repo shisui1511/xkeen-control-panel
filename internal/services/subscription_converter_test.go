@@ -698,4 +698,3 @@ AllowedIPs = 0.0.0.0/0
 		t.Errorf("path 4 round-trip mismatch: %+v, AWG: %+v", rtNode4, rtNode4.AWG)
 	}
 }
-
