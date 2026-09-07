@@ -33,6 +33,7 @@ proxies:
     public-key: "pubkey123"
     private-key: "privkey123"
     token: "token123"
+    header-protection-key: "hpk12345"
 `,
 			expected: `*REDACTED*`,
 		},
@@ -52,7 +53,7 @@ proxies:
 			got := string(gotBytes)
 			if tc.name == "redact sensitive keys" {
 				// verify keys are redacted
-				for _, key := range []string{"secretpassword", "mysecret", "1234-abcd", "pubkey123", "privkey123", "token123"} {
+				for _, key := range []string{"secretpassword", "mysecret", "1234-abcd", "pubkey123", "privkey123", "token123", "hpk12345"} {
 					if bytes.Contains(gotBytes, []byte(key)) {
 						t.Errorf("expected sensitive key %q to be redacted, got: %s", key, got)
 					}

@@ -19,7 +19,7 @@ var (
 	bearerRegex = regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9_\-\.+=/]+`)
 
 	// sensitiveKVRegex matches key-value pairs with sensitive fields in logs/configs
-	sensitiveKVRegex = regexp.MustCompile(`(?i)(["']?(?:privateKey|private_key|private-key|publicKey|public_key|public-key|shortId|short_id|short-id|psk|password|secret|uuid)["']?\s*[:=]\s*["']?)[^"',\s}]+(["']?)`)
+	sensitiveKVRegex = regexp.MustCompile(`(?i)(["']?(?:privateKey|private_key|private-key|publicKey|public_key|public-key|shortId|short_id|short-id|psk|password|secret|uuid|header-protection-key|header_protection_key|headerProtectionKey)["']?\s*[:=]\s*["']?)[^"',\s}]+(["']?)`)
 
 	// lanIPRegex matches private IPv4 addresses
 	lan192Regex = regexp.MustCompile(`\b192\.168\.(\d{1,3})\.(\d{1,3})\b`)
