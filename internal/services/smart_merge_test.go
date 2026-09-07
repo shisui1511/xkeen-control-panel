@@ -727,8 +727,7 @@ listeners:
 		t.Errorf("expected exotic anytls listener to be preserved, got:\n%s", merged2)
 	}
 
-	// Case 3: Template WITHOUT listeners: and existing config WITH listeners: -> listeners: is omitted
-	// (demonstrates why the builder must always emit listeners:)
+	// Case 3: Template WITHOUT listeners: and existing config WITH listeners: -> listeners: is preserved (preserve-by-default)
 	existingWithListeners := `
 proxies:
   - name: "P1"
@@ -751,7 +750,265 @@ proxies:
 	if err != nil {
 		t.Fatalf("SmartMergeMihomo failed: %v", err)
 	}
-	if strings.Contains(merged3, "listeners:") || strings.Contains(merged3, "old-listener") {
-		t.Errorf("expected listeners: to be absent when template lacks it, got:\n%s", merged3)
+	if !strings.Contains(merged3, "listeners:") || !strings.Contains(merged3, "old-listener") {
+		t.Errorf("expected existing listeners: to be preserved when template lacks it, got:\n%s", merged3)
+	}
+}
+
+func TestSmartMergeMihomo_PreserveByDefault(t *testing.T) {
+	existingYAML := `
+hosts:
+  'alpha.local': 192.168.1.50
+  'beta.corp': 10.0.0.1
+ntp:
+  enable: true
+  server: time.cloudflare.com
+  port: 123
+sub-rules:
+  my-sub-rule:
+    - DOMAIN,internal.corp,DIRECT
+    - MATCH,PROXY
+tunnels:
+  - name: internal-rdp
+    address: 192.168.1.100:3389
+    target: 10.0.0.15:3389
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  nameserver-policy:
+    'geosite:cn': 223.5.5.5
+    '+.corp.internal': 10.0.0.2
+  default-nameserver:
+    - 77.88.8.8
+  fallback:
+    - 1.1.1.1
+    - 8.8.8.8
+  fake-ip-filter:
+    - '*.custom.dev'
+proxies:
+  - name: "Existing-P1"
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+`
+
+	templateYAML := `
+mode: rule
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - Existing-P1
+rules:
+  - MATCH,PROXY
+dns:
+  enable: true
+  listen: 127.0.0.1:5353
+  enhanced-mode: fake-ip
+  nameserver:
+    - 8.8.8.8
+  fake-ip-filter:
+    - '*.tmpl.dev'
+`
+
+	merged, stats, err := SmartMergeMihomo(existingYAML, templateYAML, nil, false)
+	if err != nil {
+		t.Fatalf("SmartMergeMihomo failed: %v", err)
+	}
+
+	// 1. Verify hosts is preserved
+	if !strings.Contains(merged, "alpha.local: 192.168.1.50") && !strings.Contains(merged, "alpha.local': 192.168.1.50") {
+		t.Errorf("expected hosts to be preserved, got:\n%s", merged)
+	}
+	if !strings.Contains(merged, "beta.corp") {
+		t.Errorf("expected beta.corp in hosts to be preserved, got:\n%s", merged)
+	}
+
+	// 2. Verify ntp is preserved
+	if !strings.Contains(merged, "time.cloudflare.com") {
+		t.Errorf("expected ntp server to be preserved, got:\n%s", merged)
+	}
+
+	// 3. Verify sub-rules is preserved
+	if !strings.Contains(merged, "sub-rules:") || !strings.Contains(merged, "my-sub-rule:") {
+		t.Errorf("expected sub-rules to be preserved, got:\n%s", merged)
+	}
+
+	// 4. Verify tunnels is preserved
+	if !strings.Contains(merged, "tunnels:") || !strings.Contains(merged, "internal-rdp") {
+		t.Errorf("expected tunnels to be preserved, got:\n%s", merged)
+	}
+
+	// 5. Verify deep dns settings are preserved
+	if !strings.Contains(merged, "nameserver-policy:") || !strings.Contains(merged, "+.corp.internal") {
+		t.Errorf("expected nameserver-policy to be preserved, got:\n%s", merged)
+	}
+	if !strings.Contains(merged, "default-nameserver:") || !strings.Contains(merged, "77.88.8.8") {
+		t.Errorf("expected default-nameserver to be preserved, got:\n%s", merged)
+	}
+	if !strings.Contains(merged, "fallback:") {
+		t.Errorf("expected fallback nameservers to be preserved, got:\n%s", merged)
+	}
+
+	// 6. Verify combined fake-ip-filter contains custom, template, and Keenetic exclusions
+	if !strings.Contains(merged, "*.custom.dev") {
+		t.Errorf("expected existing fake-ip-filter to be preserved, got:\n%s", merged)
+	}
+	if !strings.Contains(merged, "*.tmpl.dev") {
+		t.Errorf("expected template fake-ip-filter to be included, got:\n%s", merged)
+	}
+	if !strings.Contains(merged, "+.keenetic.pro") {
+		t.Errorf("expected Keenetic fake-ip exclusion, got:\n%s", merged)
+	}
+
+	// 7. Verify dropped keys is empty because all existing keys were preserved
+	if len(stats.DroppedKeys) > 0 {
+		t.Errorf("expected no dropped keys, got: %v", stats.DroppedKeys)
+	}
+}
+
+func TestSmartMergeMihomo_RealWorldConfigRoundTrip(t *testing.T) {
+	// Full real-world config example with hosts, ntp, sub-rules, listeners, dns policies, etc.
+	realWorldConfig := `
+port: 7890
+socks-port: 7891
+redir-port: 7892
+tproxy-port: 7893
+mixed-port: 7894
+allow-lan: true
+bind-address: '*'
+mode: rule
+log-level: info
+ipv6: false
+secret: 'real-production-secret-xyz'
+external-controller: 127.0.0.1:9090
+
+hosts:
+  'router.lan': 192.168.1.1
+  'storage.nas': 192.168.1.200
+
+ntp:
+  enable: true
+  server: pool.ntp.org
+  port: 123
+  interval: 30
+
+sub-rules:
+  corp-security:
+    - DOMAIN-SUFFIX,corp.internal,DIRECT
+    - IP-CIDR,10.100.0.0/16,DIRECT
+
+listeners:
+  - name: tv-box-proxy
+    type: mixed
+    port: 7899
+    listen: 0.0.0.0
+
+dns:
+  enable: true
+  listen: 127.0.0.1:5353
+  enhanced-mode: fake-ip
+  nameserver-policy:
+    'geosite:youtube,google': 8.8.8.8
+    'geosite:category-ru': 77.88.8.8
+  default-nameserver:
+    - 192.168.1.1
+  fallback:
+    - 9.9.9.9
+  fake-ip-filter:
+    - '*.lan'
+    - 'xbox.*.microsoft.com'
+
+proxies:
+  - name: "Prod-WireGuard"
+    type: wireguard
+    server: 198.51.100.1
+    port: 51820
+    ip: 10.0.0.2
+    public-key: "pubkey123"
+    private-key: "privkey123"
+
+proxy-providers:
+  premium-sub:
+    type: http
+    url: "https://example.com/subs/real.yaml"
+    path: "./subs/premium.yaml"
+    interval: 3600
+`
+
+	templateYAML := `
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - Prod-WireGuard
+    use:
+      - premium-sub
+rules:
+  - GEOSITE,category-ru,DIRECT
+  - MATCH,PROXY
+`
+
+	merged, stats, err := SmartMergeMihomo(realWorldConfig, templateYAML, nil, false)
+	if err != nil {
+		t.Fatalf("SmartMergeMihomo failed on real-world config: %v", err)
+	}
+
+	// Verify all top-level custom sections survived the round-trip verbatim
+	requiredStrings := []string{
+		"real-production-secret-xyz",
+		"router.lan",
+		"storage.nas",
+		"pool.ntp.org",
+		"corp-security",
+		"corp.internal",
+		"tv-box-proxy",
+		"geosite:youtube,google",
+		"geosite:category-ru",
+		"Prod-WireGuard",
+		"premium-sub",
+		"+.keenetic.pro",
+	}
+
+	for _, s := range requiredStrings {
+		if !strings.Contains(merged, s) {
+			t.Errorf("round-trip lost critical data: missing %q in merged config:\n%s", s, merged)
+		}
+	}
+
+	if len(stats.DroppedKeys) > 0 {
+		t.Errorf("expected 0 dropped keys on real-world round-trip, got: %v", stats.DroppedKeys)
+	}
+}
+
+func TestSmartMergeMihomo_DroppedKeys(t *testing.T) {
+	// If existing has unknown or obsolete keys that were intentionally stripped or omitted:
+	// Here we test that if existing contains keys not retained in result, DroppedKeys tracks them.
+	existingWithObsolete := `
+secret: "my-secret"
+proxies:
+  - name: P1
+    type: ss
+    server: 1.1.1.1
+    port: 8388
+`
+	templateYAML := `
+mode: rule
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies:
+      - P1
+rules:
+  - MATCH,PROXY
+`
+	_, stats, err := SmartMergeMihomo(existingWithObsolete, templateYAML, nil, false)
+	if err != nil {
+		t.Fatalf("SmartMergeMihomo failed: %v", err)
+	}
+
+	// Both secret and proxies are preserved, so DroppedKeys should be empty
+	if len(stats.DroppedKeys) != 0 {
+		t.Errorf("expected empty DroppedKeys when all keys preserved, got: %v", stats.DroppedKeys)
 	}
 }
