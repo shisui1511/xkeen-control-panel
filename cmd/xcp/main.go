@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -65,8 +66,16 @@ func main() {
 		debug.SetMemoryLimit(96 * 1024 * 1024) // 96 MiB default
 	}
 	gcPercent := os.Getenv("GOGC")
-	if gcPercent == "" {
+	if n, err := strconv.Atoi(strings.TrimSpace(gcPercent)); err == nil {
+		debug.SetGCPercent(n) // honor an explicit numeric GOGC
+	} else if gcPercent == "off" {
+		// GC disabled explicitly via env; the runtime already honors it.
+	} else {
+		if gcPercent != "" {
+			log.Printf("Ignoring invalid GOGC=%q, applying router default 50", gcPercent)
+		}
 		debug.SetGCPercent(50) // 50 default
+		gcPercent = ""         // fall back to default reporting below
 	}
 
 	cfg, err := config.Load(*configPath)
