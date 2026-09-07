@@ -61,6 +61,12 @@ func main() {
 	// between collections to avoid GC thrashing under normal operation,
 	// while SetMemoryLimit remains the hard backstop against unbounded
 	// growth.
+	//
+	// Both knobs are env-overridable: when GOMEMLIMIT or GOGC is present in
+	// the environment (e.g. via xcp.env), the matching debug.Set* call is
+	// skipped and the Go runtime honors the env value directly. Setting only
+	// one leaves the other at its hardcoded router default. GOEXPERIMENT
+	// (e.g. nogreenteagc) is likewise a pure-runtime escape hatch.
 	memLimit := os.Getenv("GOMEMLIMIT")
 	if memLimit == "" {
 		debug.SetMemoryLimit(96 * 1024 * 1024) // 96 MiB default
