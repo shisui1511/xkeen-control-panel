@@ -73,12 +73,15 @@ jobs:
         include:
           - GOARCH: arm64
             name: arm64
+            qemu: qemu-aarch64-static
           - GOARCH: mipsle
             GOMIPS: softfloat
             name: mipsle
+            qemu: qemu-mipsel-static
           - GOARCH: mips
             GOMIPS: softfloat
             name: mips
+            qemu: qemu-mips-static
 
     steps:
       - uses: actions/checkout@v7
@@ -178,14 +181,47 @@ jobs:
           go build -ldflags="-s -w -X main.Version=${VERSION}" \
             -o build/xcp_${VERSION}_${{ matrix.name }} ./cmd/xcp
 
+      - name: Install QEMU and tools
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update && sudo apt-get install -y qemu-user-static upx-ucl && break
+            echo "apt-get failed, retry $i"; sleep 5
+          done
+
+      - name: Verify static linkage
+        if: steps.version.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          file "build/xcp_${VERSION}_${{ matrix.name }}"
+          file "build/xcp_${VERSION}_${{ matrix.name }}" | grep -q "statically linked"
+
+      - name: Smoke test under QEMU (uncompressed)
+        if: steps.version.outputs.skip != 'true'
+        timeout-minutes: 1
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}" -v
+
       - name: Compress with UPX (pre-release only)
         if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_stable != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          sudo apt-get update && sudo apt-get install -y upx-ucl
-          upx --best --lzma build/xcp_${VERSION}_${{ matrix.name }} -o build/xcp_${VERSION}_${{ matrix.name }}_upx
+          upx -9 --lzma build/xcp_${VERSION}_${{ matrix.name }} -o build/xcp_${VERSION}_${{ matrix.name }}_upx
           mv build/xcp_${VERSION}_${{ matrix.name }}_upx build/xcp_${VERSION}_${{ matrix.name }}
+
+      - name: Smoke test under QEMU (compressed, pre-release only)
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_stable != 'true'
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          file "build/xcp_${VERSION}_${{ matrix.name }}"
+          ${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}" -v
 
       - name: Generate checksum
         if: steps.version.outputs.skip != 'true'

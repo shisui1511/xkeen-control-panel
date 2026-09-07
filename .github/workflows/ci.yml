@@ -251,6 +251,10 @@ jobs:
             GOMIPS: softfloat
             name: mipsle
             qemu: qemu-mipsel-static
+          - GOARCH: mips
+            GOMIPS: softfloat
+            name: mips
+            qemu: qemu-mips-static
 
     steps:
       - uses: actions/checkout@v7
