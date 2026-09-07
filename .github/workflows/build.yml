@@ -213,17 +213,27 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           upx -9 --lzma build/xcp_${VERSION}_${{ matrix.name }} -o build/xcp_${VERSION}_${{ matrix.name }}_upx
-          mv build/xcp_${VERSION}_${{ matrix.name }}_upx build/xcp_${VERSION}_${{ matrix.name }}
 
       - name: Smoke test under QEMU (compressed, pre-release only)
         if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_stable != 'true'
-        continue-on-error: true
+        # Hard-fail for little-endian targets (arm64, mipsle) so a UPX-broken
+        # pre-release cannot ship the compressed binary. Big-endian mips stays
+        # advisory: UPX stubs are flaky under qemu-mips-static (see WR-02), so a
+        # failure there must not block the pre-release.
+        continue-on-error: ${{ matrix.name == 'mips' }}
         timeout-minutes: 1
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          file "build/xcp_${VERSION}_${{ matrix.name }}"
-          ${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}" -v
+          file "build/xcp_${VERSION}_${{ matrix.name }}_upx"
+          ${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}_upx" -v
+
+      - name: Promote compressed binary (pre-release only)
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_stable != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mv build/xcp_${VERSION}_${{ matrix.name }}_upx build/xcp_${VERSION}_${{ matrix.name }}
 
       - name: Generate checksum
         if: steps.version.outputs.skip != 'true'
