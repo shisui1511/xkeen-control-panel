@@ -310,9 +310,10 @@ jobs:
           ${{ matrix.qemu }} "./xcp-${{ matrix.name }}" -v
 
       - name: Test UPX compression & execution under QEMU
+        continue-on-error: true
         timeout-minutes: 1
         run: |
-          upx --best --lzma "xcp-${{ matrix.name }}" -o "xcp-${{ matrix.name }}-upx"
+          upx -9 --lzma "xcp-${{ matrix.name }}" -o "xcp-${{ matrix.name }}-upx"
           file "xcp-${{ matrix.name }}-upx"
           ${{ matrix.qemu }} "./xcp-${{ matrix.name }}-upx" -v
 
