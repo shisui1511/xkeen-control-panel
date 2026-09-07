@@ -1351,3 +1351,46 @@ ${exoticBlock}`;
     }
   });
 });
+
+describe('Mihomo relay deprecation and warnings', () => {
+  test('populateMihomoFromYAML generates warning when proxy group has type relay', () => {
+    const yamlWithRelay = `proxy-groups:
+  - name: "RelayChain"
+    type: relay
+    proxies:
+      - Node1
+      - Node2
+`;
+    const parsed = populateMihomoFromYAML(yamlWithRelay);
+    expect(parsed.groups).toHaveLength(1);
+    expect(parsed.groups[0].type).toBe('relay');
+    expect(parsed.warnings).toBeDefined();
+    expect(parsed.warnings.length).toBeGreaterThan(0);
+    expect(parsed.warnings[0]).toContain("deprecated type 'relay'");
+  });
+
+  test('generateYAML treats relay without special skip or emits url/interval like standard groups', () => {
+    const state: any = {
+      existingTproxyPort: 12345,
+      existingRedirPort: 12346,
+      subscriptions: [],
+      mihomoProviders: [],
+      proxies: [],
+      groups: [
+        {
+          id: 'group-relay',
+          name: 'RelayChain',
+          type: 'relay',
+          proxies: ['Node1', 'Node2']
+        }
+      ],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: {}
+    };
+    const yaml = generateYAML(state);
+    expect(yaml).toContain('type: relay');
+    expect(yaml).toContain('url: https://www.gstatic.com/generate_204');
+  });
+});

@@ -1205,6 +1205,10 @@
       listenersRaw = res.listenersRaw || null;
       listenersReadOnly = res.listenersReadOnly || false;
 
+      if (Array.isArray(res.warnings) && res.warnings.length > 0) {
+        saveWarnings = res.warnings.map((w: string) => ({ message: w }));
+      }
+
       lastParsedProviders = res.mihomoProviders || [];
       mihomoProviders = mergeMihomoProviders(
         subscriptions.filter((s) => s.enable_mihomo),
@@ -1995,6 +1999,20 @@
           userRules: $tp('editor.smart_merge_applied_user_rules', stats.user_rules ?? 0)
         })
       );
+
+      if (Array.isArray(stats.dropped_keys) && stats.dropped_keys.length > 0) {
+        const droppedMsg = $t('editor.smart_merge_dropped_keys', {
+          keys: stats.dropped_keys.join(', ')
+        });
+        saveWarnings = [
+          ...saveWarnings,
+          {
+            code: 'SMART_MERGE_DROPPED_KEYS',
+            message: droppedMsg
+          }
+        ];
+        showToast('warning', droppedMsg);
+      }
     } catch (err: any) {
       if (err?.status === 401) return;
       console.error(err);

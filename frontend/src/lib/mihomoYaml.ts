@@ -1039,7 +1039,7 @@ export function generateYAML(state: MihomoConfigState): string {
         lines.push(`    proxies:`);
         for (const p of g.proxies) lines.push(`      - ${yamlSafeString(p)}`);
       }
-      if (g.type !== 'select' && g.type !== 'relay') {
+      if (g.type !== 'select') {
         lines.push(`    url: ${g.url || 'https://www.gstatic.com/generate_204'}`);
         lines.push(`    interval: ${g.interval || 300}`);
         if (g.hidden === true) {
@@ -1266,6 +1266,7 @@ export interface ParsedMihomoConfig {
   listeners: Listener[];
   listenersRaw: string | null;
   listenersReadOnly: boolean;
+  warnings: string[];
 }
 
 export function parseListenersSection(rawBlock: string): {
@@ -1502,7 +1503,8 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
     mihomoProviders: [],
     listeners: [],
     listenersRaw: null,
-    listenersReadOnly: false
+    listenersReadOnly: false,
+    warnings: []
   };
 
   if (!text || text.trim() === '') {
@@ -1638,7 +1640,14 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
         }
         const typeMatch = trimmed.match(/^type:\s*(.+)$/);
         if (typeMatch) {
-          currentGroup.type = unquote(typeMatch[1]);
+          const parsedType = unquote(typeMatch[1]);
+          currentGroup.type = parsedType;
+          if (parsedType === 'relay') {
+            parsed.warnings = parsed.warnings || [];
+            parsed.warnings.push(
+              `Proxy group '${currentGroup.name || 'unnamed'}' uses deprecated type 'relay' which is obsolete in modern Mihomo.`
+            );
+          }
           continue;
         }
         const includeAllMatch = trimmed.match(/^include-all:\s*(.+)$/);
