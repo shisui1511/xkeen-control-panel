@@ -420,4 +420,3 @@ func TestTruncateLogTail(t *testing.T) {
 		t.Fatalf("expected file size <= 500 KB, got %d", stat.Size())
 	}
 }
-
