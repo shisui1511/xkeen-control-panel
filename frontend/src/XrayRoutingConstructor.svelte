@@ -1021,7 +1021,8 @@
         body: JSON.stringify({
           dest,
           server_name: serverName,
-          alpn: alpnList
+          alpn: alpnList,
+          insecure: (outboundForm as any).insecure || false
         })
       });
       const data = await res.json();

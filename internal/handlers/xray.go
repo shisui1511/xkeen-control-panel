@@ -370,6 +370,7 @@ type XrayTLSPingRequest struct {
 	Dest       string   `json:"dest"`
 	ServerName string   `json:"server_name"`
 	ALPN       []string `json:"alpn"`
+	Insecure   bool     `json:"insecure"`
 }
 
 // XrayTLSPing handles POST /api/xray/tls-ping to perform a native TLS handshake ping.
@@ -405,7 +406,7 @@ func (a *API) XrayTLSPing(w http.ResponseWriter, r *http.Request) {
 		serverName = defaultSNI
 	}
 
-	result, err := services.TLSPing(dialAddr, serverName, req.ALPN)
+	result, err := services.TLSPing(dialAddr, serverName, req.ALPN, req.Insecure)
 	if err != nil {
 		a.errorResponse(w, fmt.Sprintf("tls ping failed: %v", err), http.StatusInternalServerError)
 		return
