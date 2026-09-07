@@ -72,8 +72,121 @@ type SubscriptionNode struct {
 	AllowedIPs     []string `json:"allowed_ips,omitempty"`
 	KeepAlive      int      `json:"keepalive,omitempty"`
 
+	// AmneziaWG obfuscation options (AWGIN-03)
+	AWG *AWGOptions `json:"awg,omitempty"`
+
 	// DialerProxy holds the tag of the outbound node to chain/cascade through (D-11).
 	DialerProxy string `json:"dialer_proxy,omitempty"`
+}
+
+// AWGOptions содержит параметры обфускации протокола AmneziaWG (Classic, 2.0, 3.1).
+type AWGOptions struct {
+	Jc                     *int                   `json:"jc,omitempty"`
+	Jmin                   *int                   `json:"jmin,omitempty"`
+	Jmax                   *int                   `json:"jmax,omitempty"`
+	S1                     *int                   `json:"s1,omitempty"`
+	S2                     *int                   `json:"s2,omitempty"`
+	S3                     *int                   `json:"s3,omitempty"`
+	S4                     *int                   `json:"s4,omitempty"`
+	H1                     string                 `json:"h1,omitempty"` // число или min-max
+	H2                     string                 `json:"h2,omitempty"`
+	H3                     string                 `json:"h3,omitempty"`
+	H4                     string                 `json:"h4,omitempty"`
+	Version                string                 `json:"version,omitempty"`
+	HeaderProtectionKey    string                 `json:"header_protection_key,omitempty"`
+	I1                     string                 `json:"i1,omitempty"` // uppercase
+	I2                     string                 `json:"i2,omitempty"`
+	I3                     string                 `json:"i3,omitempty"`
+	I4                     string                 `json:"i4,omitempty"`
+	I5                     string                 `json:"i5,omitempty"`
+	ContentPaddingAddition *int                   `json:"content_padding_addition,omitempty"`
+	RandomTrailers         *bool                  `json:"random_trailers,omitempty"`
+	DisableCookies         *bool                  `json:"disable_cookies,omitempty"`
+	RekeyAfterTime         *int                   `json:"rekey_after_time,omitempty"`
+	RawOptions             map[string]interface{} `json:"raw_options,omitempty"`
+}
+
+// Clone возвращает глубокую копию AWGOptions.
+func (o *AWGOptions) Clone() *AWGOptions {
+	if o == nil {
+		return nil
+	}
+	res := *o
+	if o.Jc != nil {
+		v := *o.Jc
+		res.Jc = &v
+	}
+	if o.Jmin != nil {
+		v := *o.Jmin
+		res.Jmin = &v
+	}
+	if o.Jmax != nil {
+		v := *o.Jmax
+		res.Jmax = &v
+	}
+	if o.S1 != nil {
+		v := *o.S1
+		res.S1 = &v
+	}
+	if o.S2 != nil {
+		v := *o.S2
+		res.S2 = &v
+	}
+	if o.S3 != nil {
+		v := *o.S3
+		res.S3 = &v
+	}
+	if o.S4 != nil {
+		v := *o.S4
+		res.S4 = &v
+	}
+	if o.ContentPaddingAddition != nil {
+		v := *o.ContentPaddingAddition
+		res.ContentPaddingAddition = &v
+	}
+	if o.RandomTrailers != nil {
+		v := *o.RandomTrailers
+		res.RandomTrailers = &v
+	}
+	if o.DisableCookies != nil {
+		v := *o.DisableCookies
+		res.DisableCookies = &v
+	}
+	if o.RekeyAfterTime != nil {
+		v := *o.RekeyAfterTime
+		res.RekeyAfterTime = &v
+	}
+	if o.RawOptions != nil {
+		res.RawOptions = make(map[string]interface{}, len(o.RawOptions))
+		for k, v := range o.RawOptions {
+			res.RawOptions[k] = v
+		}
+	}
+	return &res
+}
+
+// Clone возвращает глубокую копию SubscriptionNode.
+func (n *SubscriptionNode) Clone() SubscriptionNode {
+	if n == nil {
+		return SubscriptionNode{}
+	}
+	res := *n
+	if n.Reserved != nil {
+		res.Reserved = make([]int, len(n.Reserved))
+		copy(res.Reserved, n.Reserved)
+	}
+	if n.LocalAddresses != nil {
+		res.LocalAddresses = make([]string, len(n.LocalAddresses))
+		copy(res.LocalAddresses, n.LocalAddresses)
+	}
+	if n.AllowedIPs != nil {
+		res.AllowedIPs = make([]string, len(n.AllowedIPs))
+		copy(res.AllowedIPs, n.AllowedIPs)
+	}
+	if n.AWG != nil {
+		res.AWG = n.AWG.Clone()
+	}
+	return res
 }
 
 // DialerProxyTarget represents an eligible target node for dialing proxy chaining.
@@ -185,7 +298,9 @@ func (s *Subscription) Clone() Subscription {
 	}
 	if s.Nodes != nil {
 		res.Nodes = make([]SubscriptionNode, len(s.Nodes))
-		copy(res.Nodes, s.Nodes)
+		for i := range s.Nodes {
+			res.Nodes[i] = s.Nodes[i].Clone()
+		}
 	}
 	return res
 }
