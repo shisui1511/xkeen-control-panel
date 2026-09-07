@@ -89,7 +89,7 @@ describe('pluralize() — английские правила склонения
 });
 
 import { get } from 'svelte/store';
-import { tp, loadLanguage, setLang, currentLang } from './i18n';
+import { tp, loadLanguage, currentLang } from './i18n';
 
 describe('tp() store — склоняемые подписи', () => {
   it('русские формы для proxies.nodes и proxies.groups', async () => {
