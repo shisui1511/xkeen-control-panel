@@ -71,4 +71,34 @@ describe('AWG Fields Registry', () => {
     expect(isMihomoAwg31Supported('1.20.0')).toBe(true);
     expect(isMihomoAwg31Supported('2.0.0')).toBe(true);
   });
+
+  it('все поля AWG и коды предстартовой проверки переведены в ru.json и en.json', async () => {
+    const ru = (await import('../src/locales/ru.json')).default as Record<string, string>;
+    const en = (await import('../src/locales/en.json')).default as Record<string, string>;
+
+    // Проверка labelKey всех полей реестра
+    for (const field of AWG_FIELDS) {
+      expect(ru[field.labelKey], `Отсутствует перевод ${field.labelKey} в ru.json`).toBeDefined();
+      expect(en[field.labelKey], `Отсутствует перевод ${field.labelKey} в en.json`).toBeDefined();
+    }
+
+    // Проверка кодов предстартовой валидации
+    const preflightCodes = [
+      'preflight.awg_flat_fields',
+      'preflight.awg_jmin_jmax',
+      'preflight.awg_s1_s2',
+      'preflight.awg_h_min',
+      'preflight.awg_h_unique',
+      'preflight.awg_s_header_protection',
+      'preflight.awg_junk_mtu',
+      'preflight.awg_version_incompatible',
+      'preflight.awg_i_token',
+      'preflight.awg_random_trailers'
+    ];
+
+    for (const code of preflightCodes) {
+      expect(ru[code], `Отсутствует перевод ${code} в ru.json`).toBeDefined();
+      expect(en[code], `Отсутствует перевод ${code} в en.json`).toBeDefined();
+    }
+  });
 });

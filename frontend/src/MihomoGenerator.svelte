@@ -459,7 +459,21 @@
       awgH1: 1000000001,
       awgH2: 1000000002,
       awgH3: 1000000003,
-      awgH4: 1000000004
+      awgH4: 1000000004,
+      // AmneziaWG 2.0 / 3.1 defaults
+      awgS3: undefined,
+      awgS4: undefined,
+      awgVersion: undefined,
+      awgHeaderProtectionKey: '',
+      awgI1: '',
+      awgI2: '',
+      awgI3: '',
+      awgI4: '',
+      awgI5: '',
+      awgContentPaddingAddition: undefined,
+      awgRandomTrailers: false,
+      awgDisableCookies: false,
+      awgRekeyAfterTime: undefined
     };
   }
   let lastType = 'vless';
