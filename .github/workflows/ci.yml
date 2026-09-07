@@ -302,10 +302,12 @@ jobs:
 
       - name: Install QEMU and tools
         run: |
+          ok=0
           for i in 1 2 3; do
-            sudo apt-get update && sudo apt-get install -y qemu-user-static upx-ucl && break
+            sudo apt-get update && sudo apt-get install -y qemu-user-static upx-ucl && { ok=1; break; }
             echo "apt-get failed, retry $i"; sleep 5
           done
+          [ "$ok" = 1 ] || { echo "::error::apt-get failed after 3 attempts"; exit 1; }
 
       - name: Verify static linkage
         run: |
