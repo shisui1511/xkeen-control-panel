@@ -276,10 +276,41 @@ export const mihomoSchema = {
               jmax: { type: 'integer', description: 'Maximum junk packet size' },
               s1: { type: 'integer', description: 'Handshake response padding size' },
               s2: { type: 'integer', description: 'Initiation response padding size' },
-              h1: { type: 'integer', description: 'Initiation packet magic header' },
-              h2: { type: 'integer', description: 'Response packet magic header' },
-              h3: { type: 'integer', description: 'Underload packet magic header' },
-              h4: { type: 'integer', description: 'Transport packet magic header' }
+              s3: { type: 'integer', description: 'Extended padding size 3' },
+              s4: { type: 'integer', description: 'Extended padding size 4' },
+              h1: {
+                type: ['integer', 'string'],
+                description: 'Initiation packet magic header (number or range)'
+              },
+              h2: {
+                type: ['integer', 'string'],
+                description: 'Response packet magic header (number or range)'
+              },
+              h3: {
+                type: ['integer', 'string'],
+                description: 'Underload packet magic header (number or range)'
+              },
+              h4: {
+                type: ['integer', 'string'],
+                description: 'Transport packet magic header (number or range)'
+              },
+              version: { type: 'string', description: 'AmneziaWG protocol version' },
+              'header-protection-key': {
+                type: 'string',
+                description: 'Header protection secret key'
+              },
+              i1: { type: 'string', description: 'CPS initiation token 1' },
+              i2: { type: 'string', description: 'CPS initiation token 2' },
+              i3: { type: 'string', description: 'CPS initiation token 3' },
+              i4: { type: 'string', description: 'CPS initiation token 4' },
+              i5: { type: 'string', description: 'CPS initiation token 5' },
+              'content-padding-addition': {
+                type: 'integer',
+                description: 'Content padding addition size'
+              },
+              'random-trailers': { type: 'boolean', description: 'Random trailers enabled' },
+              'disable-cookies': { type: 'boolean', description: 'Disable cookies flag' },
+              'rekey-after-time': { type: 'integer', description: 'Rekey after time (seconds)' }
             }
           }
         },

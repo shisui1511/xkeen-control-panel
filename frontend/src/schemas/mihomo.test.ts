@@ -122,3 +122,31 @@ describe('mihomoSchema listeners type enum', () => {
     expect(ruleProp.type).not.toBe('boolean');
   });
 });
+
+describe('mihomoSchema amnezia-wg-option', () => {
+  it('covers all AmneziaWG 3.1 parameters with expected types', () => {
+    const awgProps = (mihomoSchema as any).properties.proxies.items.properties['amnezia-wg-option']
+      .properties;
+    expect(awgProps).toBeDefined();
+
+    // Classic & 2.0
+    expect(awgProps.jc.type).toBe('integer');
+    expect(awgProps.jmin.type).toBe('integer');
+    expect(awgProps.jmax.type).toBe('integer');
+    expect(awgProps.s1.type).toBe('integer');
+    expect(awgProps.s2.type).toBe('integer');
+    expect(awgProps.s3.type).toBe('integer');
+    expect(awgProps.s4.type).toBe('integer');
+    expect(awgProps.h1.type).toEqual(['integer', 'string']);
+
+    // 3.1
+    expect(awgProps.version.type).toBe('string');
+    expect(awgProps['header-protection-key'].type).toBe('string');
+    expect(awgProps.i1.type).toBe('string');
+    expect(awgProps.i5.type).toBe('string');
+    expect(awgProps['content-padding-addition'].type).toBe('integer');
+    expect(awgProps['random-trailers'].type).toBe('boolean');
+    expect(awgProps['disable-cookies'].type).toBe('boolean');
+    expect(awgProps['rekey-after-time'].type).toBe('integer');
+  });
+});
