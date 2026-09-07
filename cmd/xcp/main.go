@@ -62,11 +62,16 @@ func main() {
 	// while SetMemoryLimit remains the hard backstop against unbounded
 	// growth.
 	//
-	// Both knobs are env-overridable: when GOMEMLIMIT or GOGC is present in
-	// the environment (e.g. via xcp.env), the matching debug.Set* call is
-	// skipped and the Go runtime honors the env value directly. Setting only
-	// one leaves the other at its hardcoded router default. GOEXPERIMENT
-	// (e.g. nogreenteagc) is likewise a pure-runtime escape hatch.
+	// Both knobs are env-overridable, but by different mechanisms:
+	//   - GOMEMLIMIT: when present in the environment (e.g. via xcp.env),
+	//     debug.SetMemoryLimit is skipped entirely and the Go runtime honors
+	//     the env value directly.
+	//   - GOGC: an explicit numeric value is validated and re-applied via
+	//     debug.SetGCPercent; "off" is left for the runtime to honor; an
+	//     invalid value is rejected with a log line and replaced by the
+	//     hardcoded router default (50).
+	// Setting only one knob leaves the other at its hardcoded router default.
+	// GOEXPERIMENT (e.g. nogreenteagc) is likewise a pure-runtime escape hatch.
 	memLimit := os.Getenv("GOMEMLIMIT")
 	if memLimit == "" {
 		debug.SetMemoryLimit(96 * 1024 * 1024) // 96 MiB default
