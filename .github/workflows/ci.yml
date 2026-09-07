@@ -248,9 +248,11 @@ jobs:
         include:
           - GOARCH: arm64
             name: arm64
+            qemu: qemu-aarch64-static
           - GOARCH: mipsle
             GOMIPS: softfloat
             name: mipsle
+            qemu: qemu-mipsel-static
 
     steps:
       - uses: actions/checkout@v7
@@ -294,6 +296,27 @@ jobs:
           if [ $SIZE_MB -gt 50 ]; then
             echo "::warning::Binary size is larger than 50MB: ${SIZE_MB}MB"
           fi
+
+      - name: Install QEMU and tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y qemu-user-static upx-ucl file
+
+      - name: Verify static linkage
+        run: |
+          file "xcp-${{ matrix.name }}"
+          file "xcp-${{ matrix.name }}" | grep -q "statically linked"
+
+      - name: Smoke test under QEMU (uncompressed)
+        timeout-minutes: 1
+        run: |
+          ${{ matrix.qemu }} "./xcp-${{ matrix.name }}" -v
+
+      - name: Test UPX compression & execution under QEMU
+        timeout-minutes: 1
+        run: |
+          upx --best --lzma "xcp-${{ matrix.name }}" -o "xcp-${{ matrix.name }}-upx"
+          file "xcp-${{ matrix.name }}-upx"
+          ${{ matrix.qemu }} "./xcp-${{ matrix.name }}-upx" -v
 
   # Job 6: Проверка правил коммитов и синхронизации локализации
   check-rules:
