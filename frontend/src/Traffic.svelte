@@ -344,44 +344,73 @@
   }
 
   // Xray live statistics (D-05, D-06)
-  interface XrayOutboundStat {
+  interface XrayTrafficItem {
     tag: string;
     uplink: number;
     downlink: number;
     total: number;
   }
 
-  let xrayStats = $state<XrayOutboundStat[]>([]);
+  type XrayStatsTab = 'outbounds' | 'inbounds' | 'users';
+  let activeXrayTab = $state<XrayStatsTab>('outbounds');
+
+  let xrayOutbounds = $state<XrayTrafficItem[]>([]);
+  let xrayInbounds = $state<XrayTrafficItem[]>([]);
+  let xrayUsers = $state<XrayTrafficItem[]>([]);
+
+  let currentXrayList = $derived.by(() => {
+    switch (activeXrayTab) {
+      case 'inbounds':
+        return xrayInbounds;
+      case 'users':
+        return xrayUsers;
+      case 'outbounds':
+      default:
+        return xrayOutbounds;
+    }
+  });
+
   let xrayMonitoringToggling = $state(false);
   let xrayStatsError = $state<string | null>(null);
   let xrayStatsInterval: any = null;
+
+  function parseTrafficMap(
+    mapObj: Record<string, { uplink?: number; downlink?: number }>
+  ): XrayTrafficItem[] {
+    const list: XrayTrafficItem[] = [];
+    if (!mapObj || typeof mapObj !== 'object') return list;
+    for (const [tag, pair] of Object.entries(mapObj)) {
+      if (!pair || typeof pair !== 'object') continue;
+      const up = Number((pair as any).uplink || 0);
+      const down = Number((pair as any).downlink || 0);
+      list.push({
+        tag,
+        uplink: up,
+        downlink: down,
+        total: up + down
+      });
+    }
+    return list.sort((a, b) => b.total - a.total || a.tag.localeCompare(b.tag));
+  }
 
   async function fetchXrayStats() {
     if (typeof document !== 'undefined' && document.hidden) return;
     if ($capabilities?.active_kernel !== 'xray' || !$capabilities?.xray?.grpc_ready) return;
 
     try {
-      const res = await apiFetchJSON<
-        | { data?: Record<string, { uplink?: number; downlink?: number }> }
-        | Record<string, { uplink?: number; downlink?: number }>
-      >('/api/xray/stats');
+      const res = await apiFetchJSON<any>('/api/xray/stats');
       xrayStatsError = null;
-      const raw = (res as any)?.data || res;
+      const raw = res?.data || res;
       if (raw && typeof raw === 'object') {
-        const list: XrayOutboundStat[] = [];
-        for (const [tag, pair] of Object.entries(raw)) {
-          if (!pair || typeof pair !== 'object') continue;
-          const up = Number((pair as any).uplink || 0);
-          const down = Number((pair as any).downlink || 0);
-          list.push({
-            tag,
-            uplink: up,
-            downlink: down,
-            total: up + down
-          });
+        if ('outbounds' in raw || 'inbounds' in raw || 'users' in raw) {
+          xrayOutbounds = parseTrafficMap(raw.outbounds || {});
+          xrayInbounds = parseTrafficMap(raw.inbounds || {});
+          xrayUsers = parseTrafficMap(raw.users || {});
+        } else {
+          xrayOutbounds = parseTrafficMap(raw);
+          xrayInbounds = [];
+          xrayUsers = [];
         }
-        list.sort((a, b) => b.total - a.total || a.tag.localeCompare(b.tag));
-        xrayStats = list;
       }
     } catch (e: any) {
       if (e?.status === 401) return;
@@ -442,7 +471,9 @@
       startXrayStatsPolling();
     } else {
       stopXrayStatsPolling();
-      xrayStats = [];
+      xrayOutbounds = [];
+      xrayInbounds = [];
+      xrayUsers = [];
     }
     return () => {
       stopXrayStatsPolling();
@@ -1134,11 +1165,49 @@
           </div>
         {/if}
 
+        {#if $capabilities?.xray?.grpc_ready && !xrayStatsError}
+          <div
+            class="xray-stats-tabs"
+            style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; flex-wrap: wrap;"
+          >
+            <button
+              type="button"
+              class="btn btn-sm"
+              class:btn-primary={activeXrayTab === 'outbounds'}
+              class:btn-secondary={activeXrayTab !== 'outbounds'}
+              data-testid="xray-tab-outbounds"
+              onclick={() => (activeXrayTab = 'outbounds')}
+            >
+              {$t('traffic.xray.tab_outbounds')} ({xrayOutbounds.length})
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm"
+              class:btn-primary={activeXrayTab === 'inbounds'}
+              class:btn-secondary={activeXrayTab !== 'inbounds'}
+              data-testid="xray-tab-inbounds"
+              onclick={() => (activeXrayTab = 'inbounds')}
+            >
+              {$t('traffic.xray.tab_inbounds')} ({xrayInbounds.length})
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm"
+              class:btn-primary={activeXrayTab === 'users'}
+              class:btn-secondary={activeXrayTab !== 'users'}
+              data-testid="xray-tab-users"
+              onclick={() => (activeXrayTab = 'users')}
+            >
+              {$t('traffic.xray.tab_users')} ({xrayUsers.length})
+            </button>
+          </div>
+        {/if}
+
         {#if !$capabilities?.xray?.grpc_ready}
           <div class="alert alert-info" data-testid="xray-stats-disabled-hint">
             {$t('traffic.xray.unavailable')}
           </div>
-        {:else if xrayStats.length === 0}
+        {:else if currentXrayList.length === 0}
           <div
             class="text-muted"
             data-testid="xray-stats-empty"
@@ -1151,22 +1220,34 @@
             <table class="data-table" style="width: 100%; border-collapse: collapse;">
               <thead>
                 <tr style="text-align: left; border-bottom: 1px solid var(--border);">
-                  <th style="padding: 8px;">{$t('traffic.xray.outbound')}</th>
+                  <th style="padding: 8px;">
+                    {activeXrayTab === 'outbounds'
+                      ? $t('traffic.xray.outbound')
+                      : activeXrayTab === 'inbounds'
+                        ? $t('traffic.xray.inbound')
+                        : $t('traffic.xray.user')}
+                  </th>
                   <th style="padding: 8px;">{$t('traffic.xray.downlink')}</th>
                   <th style="padding: 8px;">{$t('traffic.xray.uplink')}</th>
                   <th style="padding: 8px;">{$t('traffic.total') || 'Total'}</th>
                 </tr>
               </thead>
               <tbody>
-                {#each xrayStats as item (item.tag)}
+                {#each currentXrayList as item (item.tag)}
                   <tr
                     style="border-bottom: 1px solid var(--border-subtle);"
                     data-testid="xray-stats-row"
                   >
                     <td style="padding: 8px;">
-                      <span class="badge badge-tag badge-proxy" data-testid="xray-stats-tag"
-                        >{item.tag}</span
+                      <span
+                        class="badge badge-tag"
+                        class:badge-proxy={activeXrayTab === 'outbounds'}
+                        class:badge-direct={activeXrayTab === 'inbounds'}
+                        class:badge-secondary={activeXrayTab === 'users'}
+                        data-testid="xray-stats-tag"
                       >
+                        {item.tag}
+                      </span>
                     </td>
                     <td style="padding: 8px;" class="mono download-color">
                       ↓ {formatBytes(item.downlink)}

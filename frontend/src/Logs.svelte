@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { t, currentLang, pluralize } from './i18n';
-  import { showToast, showConfirm } from './stores';
+  import { showToast, showConfirm, capabilities } from './stores';
   import { apiFetch } from './lib/api';
   import { formatBytes } from './lib/format';
 
@@ -55,6 +55,40 @@
   let flashHealth = $state<FlashHealthInfo | null>(null);
   let runtimeLevel = $state('info');
   let isUpdatingLevel = $state(false);
+
+  // Xray restart logger state with 5s cooldown
+  let restartingXrayLogger = $state(false);
+  let restartLoggerCooldown = $state(0);
+  let restartLoggerTimer: ReturnType<typeof setInterval> | null = null;
+
+  async function handleRestartXrayLogger() {
+    if (restartingXrayLogger || restartLoggerCooldown > 0) return;
+    restartingXrayLogger = true;
+    try {
+      const res = await apiFetch('/api/xray/restart-logger', {
+        method: 'POST'
+      });
+      if (res.ok) {
+        showToast('success', $t('logs.restart_logger_success'));
+        restartLoggerCooldown = 5;
+        if (restartLoggerTimer) clearInterval(restartLoggerTimer);
+        restartLoggerTimer = setInterval(() => {
+          restartLoggerCooldown--;
+          if (restartLoggerCooldown <= 0 && restartLoggerTimer) {
+            clearInterval(restartLoggerTimer);
+            restartLoggerTimer = null;
+          }
+        }, 1000);
+      } else {
+        const err = await res.json();
+        showToast('error', err?.error || $t('logs.restart_logger_error'));
+      }
+    } catch (e: any) {
+      showToast('error', e?.message || $t('logs.restart_logger_error'));
+    } finally {
+      restartingXrayLogger = false;
+    }
+  }
 
   // Filter sources
   const SOURCE_TABS = [
@@ -474,6 +508,10 @@
       clearInterval(flashHealthInterval);
       flashHealthInterval = null;
     }
+    if (restartLoggerTimer) {
+      clearInterval(restartLoggerTimer);
+      restartLoggerTimer = null;
+    }
     disconnect();
     window.removeEventListener('visibilitychange', handleVisibilityChange);
     const mainContent = document.querySelector('.main-content') as HTMLElement;
@@ -663,23 +701,53 @@
           </button>
         </div>
 
-        <!-- Runtime Core Log-Level Switcher -->
-        <div class="runtime-level-control" title={$t('logs.runtime_level')}>
-          <span class="ctrl-label">Mihomo:</span>
-          <select
-            class="runtime-select"
-            value={runtimeLevel}
-            disabled={isUpdatingLevel}
-            onchange={(e) => changeLogLevel((e.target as HTMLSelectElement).value)}
-            aria-label={$t('logs.runtime_level')}
+        {#if $capabilities?.active_kernel === 'xray'}
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            onclick={handleRestartXrayLogger}
+            disabled={restartingXrayLogger || restartLoggerCooldown > 0}
+            title={$t('logs.restart_xray_logger_hint')}
+            data-testid="restart-xray-logger-btn"
           >
-            <option value="silent">SILENT</option>
-            <option value="error">ERROR</option>
-            <option value="warning">WARN</option>
-            <option value="info">INFO</option>
-            <option value="debug">DEBUG</option>
-          </select>
-        </div>
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+            </svg>
+            <span>
+              {restartingXrayLogger
+                ? $t('logs.restarting_logger')
+                : restartLoggerCooldown > 0
+                  ? `${$t('logs.restart_logger')} (${restartLoggerCooldown}s)`
+                  : $t('logs.restart_logger')}
+            </span>
+          </button>
+        {:else}
+          <!-- Runtime Core Log-Level Switcher -->
+          <div class="runtime-level-control" title={$t('logs.runtime_level')}>
+            <span class="ctrl-label">Mihomo:</span>
+            <select
+              class="runtime-select"
+              value={runtimeLevel}
+              disabled={isUpdatingLevel}
+              onchange={(e) => changeLogLevel((e.target as HTMLSelectElement).value)}
+              aria-label={$t('logs.runtime_level')}
+            >
+              <option value="silent">SILENT</option>
+              <option value="error">ERROR</option>
+              <option value="warning">WARN</option>
+              <option value="info">INFO</option>
+              <option value="debug">DEBUG</option>
+            </select>
+          </div>
+        {/if}
       </div>
 
       <!-- Right Controls: Search & Filtering -->

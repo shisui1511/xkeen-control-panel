@@ -346,8 +346,13 @@
                   {@const dialect = detectWireGuardDialect(node)}
                   <span class="sub-node-chip-dialect" class:awg={dialect !== 'plain'}>
                     {$t(
-                      'subscr.dialect_' +
-                        (dialect === '2.0' ? '20' : dialect === '3.1' ? '31' : dialect)
+                      dialect === '2.0'
+                        ? 'subscr.dialect_20'
+                        : dialect === '3.1'
+                          ? 'subscr.dialect_31'
+                          : dialect === 'classic'
+                            ? 'subscr.dialect_classic'
+                            : 'subscr.dialect_plain'
                     )}
                   </span>
                   {#if dialect !== 'plain'}
