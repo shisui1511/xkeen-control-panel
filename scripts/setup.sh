@@ -311,9 +311,9 @@ DESC="XKeen Control Panel"
 PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Runtime environment overrides
-if [ -f /opt/etc/xcp/xcp.env ]; then
+if [ -f $INSTALL_DIR/xcp.env ]; then
     set -a
-    . /opt/etc/xcp/xcp.env
+    . $INSTALL_DIR/xcp.env
     set +a
 fi
 
