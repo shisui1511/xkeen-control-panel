@@ -474,6 +474,37 @@ func (d *LogDispatcher) CheckFlashPressure() {
 	}
 }
 
+func truncateLogTail(filePath string, maxBytes int64) (err error) {
+	f, openErr := os.OpenFile(filePath, os.O_RDWR, 0644)
+	if openErr != nil {
+		return openErr
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+
+	buf := make([]byte, maxBytes)
+	if _, err = f.Seek(-maxBytes, io.SeekEnd); err != nil {
+		return err
+	}
+	n, readErr := f.Read(buf)
+	if readErr != nil && readErr != io.EOF {
+		return readErr
+	}
+	if err = f.Truncate(0); err != nil {
+		return err
+	}
+	if _, err = f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err = f.Write(buf[:n]); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
 func (d *LogDispatcher) emergencyTruncate(logDir string, freeBytes uint64) {
 	d.emergencyActions.Add(1)
 	alertMsg := fmt.Sprintf("[SYSTEM ALERT] Flash Guard Emergency Truncate: Free disk space on %s is low (%d KB). Truncating oversized logs to 500 KB.", logDir, freeBytes/1024)
@@ -487,16 +518,8 @@ func (d *LogDispatcher) emergencyTruncate(logDir string, freeBytes uint64) {
 			return nil
 		}
 		if info.Size() > maxFileSize {
-			// Read tail and rewrite
-			f, openErr := os.OpenFile(path, os.O_RDWR, 0644)
-			if openErr == nil {
-				defer f.Close()
-				buf := make([]byte, maxFileSize)
-				_, _ = f.Seek(-maxFileSize, io.SeekEnd)
-				n, _ := f.Read(buf)
-				_ = f.Truncate(0)
-				_, _ = f.Seek(0, io.SeekStart)
-				_, _ = f.Write(buf[:n])
+			if terr := truncateLogTail(path, maxFileSize); terr != nil {
+				log.Printf("Flash Guard: failed to truncate log %s: %v", path, terr)
 			}
 		}
 		return nil
