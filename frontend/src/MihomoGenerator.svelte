@@ -108,10 +108,23 @@
     awgJmax?: number;
     awgS1?: number;
     awgS2?: number;
-    awgH1?: number;
-    awgH2?: number;
-    awgH3?: number;
-    awgH4?: number;
+    awgS3?: number;
+    awgS4?: number;
+    awgH1?: number | string;
+    awgH2?: number | string;
+    awgH3?: number | string;
+    awgH4?: number | string;
+    awgVersion?: string;
+    awgHeaderProtectionKey?: string;
+    awgI1?: string;
+    awgI2?: string;
+    awgI3?: string;
+    awgI4?: string;
+    awgI5?: string;
+    awgContentPaddingAddition?: number;
+    awgRandomTrailers?: boolean;
+    awgDisableCookies?: boolean;
+    awgRekeyAfterTime?: number;
   }
 
   interface ProxyGroup {

@@ -36,10 +36,23 @@ export interface Proxy {
   awgJmax?: number;
   awgS1?: number;
   awgS2?: number;
-  awgH1?: number;
-  awgH2?: number;
-  awgH3?: number;
-  awgH4?: number;
+  awgS3?: number;
+  awgS4?: number;
+  awgH1?: number | string;
+  awgH2?: number | string;
+  awgH3?: number | string;
+  awgH4?: number | string;
+  awgVersion?: string;
+  awgHeaderProtectionKey?: string;
+  awgI1?: string;
+  awgI2?: string;
+  awgI3?: string;
+  awgI4?: string;
+  awgI5?: string;
+  awgContentPaddingAddition?: number;
+  awgRandomTrailers?: boolean;
+  awgDisableCookies?: boolean;
+  awgRekeyAfterTime?: number;
 }
 
 export interface ProxyGroup {
@@ -981,10 +994,37 @@ export function generateYAML(state: MihomoConfigState): string {
           lines.push(`      jmax: ${p.awgJmax ?? 70}`);
           lines.push(`      s1: ${p.awgS1 ?? 15}`);
           lines.push(`      s2: ${p.awgS2 ?? 40}`);
-          lines.push(`      h1: ${p.awgH1 ?? 1000000001}`);
-          lines.push(`      h2: ${p.awgH2 ?? 1000000002}`);
-          lines.push(`      h3: ${p.awgH3 ?? 1000000003}`);
-          lines.push(`      h4: ${p.awgH4 ?? 1000000004}`);
+          if (p.awgS3 !== undefined && p.awgS3 !== null) lines.push(`      s3: ${p.awgS3}`);
+          if (p.awgS4 !== undefined && p.awgS4 !== null) lines.push(`      s4: ${p.awgS4}`);
+
+          const formatH = (val: number | string | undefined, defVal: number) => {
+            const v = val ?? defVal;
+            if (typeof v === 'string') {
+              return String(v).includes('-') ? `"${v}"` : v;
+            }
+            return v;
+          };
+          lines.push(`      h1: ${formatH(p.awgH1, 1000000001)}`);
+          lines.push(`      h2: ${formatH(p.awgH2, 1000000002)}`);
+          lines.push(`      h3: ${formatH(p.awgH3, 1000000003)}`);
+          lines.push(`      h4: ${formatH(p.awgH4, 1000000004)}`);
+
+          if (p.awgVersion) lines.push(`      version: ${yamlSafeString(p.awgVersion)}`);
+          if (p.awgHeaderProtectionKey)
+            lines.push(`      header-protection-key: ${yamlSafeString(p.awgHeaderProtectionKey)}`);
+          if (p.awgI1) lines.push(`      i1: ${yamlSafeString(p.awgI1.trim().toUpperCase())}`);
+          if (p.awgI2) lines.push(`      i2: ${yamlSafeString(p.awgI2.trim().toUpperCase())}`);
+          if (p.awgI3) lines.push(`      i3: ${yamlSafeString(p.awgI3.trim().toUpperCase())}`);
+          if (p.awgI4) lines.push(`      i4: ${yamlSafeString(p.awgI4.trim().toUpperCase())}`);
+          if (p.awgI5) lines.push(`      i5: ${yamlSafeString(p.awgI5.trim().toUpperCase())}`);
+          if (p.awgContentPaddingAddition !== undefined && p.awgContentPaddingAddition !== null) {
+            lines.push(`      content-padding-addition: ${p.awgContentPaddingAddition}`);
+          }
+          if (p.awgRandomTrailers === true) lines.push(`      random-trailers: true`);
+          if (p.awgDisableCookies === true) lines.push(`      disable-cookies: true`);
+          if (p.awgRekeyAfterTime !== undefined && p.awgRekeyAfterTime !== null) {
+            lines.push(`      rekey-after-time: ${p.awgRekeyAfterTime}`);
+          }
         }
       }
       if (p.dialerProxy) {
@@ -1814,28 +1854,115 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
             currentProxy.awgS2 = parseInt(unquote(s2Match[1]), 10);
             continue;
           }
+          const s3Match = trimmed.match(/^s3:\s*(.+)$/);
+          if (s3Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgS3 = parseInt(unquote(s3Match[1]), 10);
+            continue;
+          }
+          const s4Match = trimmed.match(/^s4:\s*(.+)$/);
+          if (s4Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgS4 = parseInt(unquote(s4Match[1]), 10);
+            continue;
+          }
+
+          const parseH = (rawVal: string): number | string => {
+            const v = unquote(rawVal).trim();
+            if (v.includes('-')) return v;
+            const n = parseInt(v, 10);
+            return isNaN(n) ? v : n;
+          };
+
           const h1Match = trimmed.match(/^h1:\s*(.+)$/);
           if (h1Match) {
             currentProxy.awgEnabled = true;
-            currentProxy.awgH1 = parseInt(unquote(h1Match[1]), 10);
+            currentProxy.awgH1 = parseH(h1Match[1]);
             continue;
           }
           const h2Match = trimmed.match(/^h2:\s*(.+)$/);
           if (h2Match) {
             currentProxy.awgEnabled = true;
-            currentProxy.awgH2 = parseInt(unquote(h2Match[1]), 10);
+            currentProxy.awgH2 = parseH(h2Match[1]);
             continue;
           }
           const h3Match = trimmed.match(/^h3:\s*(.+)$/);
           if (h3Match) {
             currentProxy.awgEnabled = true;
-            currentProxy.awgH3 = parseInt(unquote(h3Match[1]), 10);
+            currentProxy.awgH3 = parseH(h3Match[1]);
             continue;
           }
           const h4Match = trimmed.match(/^h4:\s*(.+)$/);
           if (h4Match) {
             currentProxy.awgEnabled = true;
-            currentProxy.awgH4 = parseInt(unquote(h4Match[1]), 10);
+            currentProxy.awgH4 = parseH(h4Match[1]);
+            continue;
+          }
+
+          const verMatch = trimmed.match(/^version:\s*(.+)$/);
+          if (verMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgVersion = unquote(verMatch[1]);
+            continue;
+          }
+          const hpkMatch = trimmed.match(/^header-protection-key:\s*(.+)$/);
+          if (hpkMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgHeaderProtectionKey = unquote(hpkMatch[1]);
+            continue;
+          }
+          const i1Match = trimmed.match(/^i1:\s*(.+)$/);
+          if (i1Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgI1 = unquote(i1Match[1]).trim().toUpperCase();
+            continue;
+          }
+          const i2Match = trimmed.match(/^i2:\s*(.+)$/);
+          if (i2Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgI2 = unquote(i2Match[1]).trim().toUpperCase();
+            continue;
+          }
+          const i3Match = trimmed.match(/^i3:\s*(.+)$/);
+          if (i3Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgI3 = unquote(i3Match[1]).trim().toUpperCase();
+            continue;
+          }
+          const i4Match = trimmed.match(/^i4:\s*(.+)$/);
+          if (i4Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgI4 = unquote(i4Match[1]).trim().toUpperCase();
+            continue;
+          }
+          const i5Match = trimmed.match(/^i5:\s*(.+)$/);
+          if (i5Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgI5 = unquote(i5Match[1]).trim().toUpperCase();
+            continue;
+          }
+          const cpaMatch = trimmed.match(/^content-padding-addition:\s*(.+)$/);
+          if (cpaMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgContentPaddingAddition = parseInt(unquote(cpaMatch[1]), 10);
+            continue;
+          }
+          const rtMatch = trimmed.match(/^random-trailers:\s*(.+)$/);
+          if (rtMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgRandomTrailers = unquote(rtMatch[1]).trim() === 'true';
+            continue;
+          }
+          const dcMatch = trimmed.match(/^disable-cookies:\s*(.+)$/);
+          if (dcMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgDisableCookies = unquote(dcMatch[1]).trim() === 'true';
+            continue;
+          }
+          const ratMatch = trimmed.match(/^rekey-after-time:\s*(.+)$/);
+          if (ratMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgRekeyAfterTime = parseInt(unquote(ratMatch[1]), 10);
             continue;
           }
         }
