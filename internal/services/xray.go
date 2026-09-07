@@ -186,9 +186,8 @@ func isProhibitedIP(ip net.IP) error {
 }
 
 // TLSPing performs a native TLS handshake against the target destination.
-// InsecureSkipVerify is intentionally set to true because this utility's purpose
-// is diagnosing remote TLS configuration and parameters, not validating certificate trust chains.
-func TLSPing(dest string, serverName string, alpn []string) (*TLSPingResult, error) {
+// Certificate trust chain verification is performed by default unless insecure is explicitly true.
+func TLSPing(dest string, serverName string, alpn []string, insecure bool) (*TLSPingResult, error) {
 	dest = strings.TrimSpace(dest)
 	targetAddr := dest
 	if !strings.Contains(targetAddr, ":") {
@@ -210,7 +209,7 @@ func TLSPing(dest string, serverName string, alpn []string) (*TLSPingResult, err
 	tlsConfig := &tls.Config{
 		ServerName:         serverName,
 		NextProtos:         alpn,
-		InsecureSkipVerify: true, // Intentionally true: diagnostic tool inspecting cipher/version
+		InsecureSkipVerify: insecure,
 		MinVersion:         tls.VersionTLS12,
 	}
 
