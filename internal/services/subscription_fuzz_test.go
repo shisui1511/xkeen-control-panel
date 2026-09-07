@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -189,10 +190,30 @@ func FuzzParseSubscription(f *testing.F) {
 	f.Add("- name: wg2\n  type: wireguard\n  server: 1.2.3.4\n  port: 51820\n  private-key: priv\n  public-key: pub\n  reserved: invalid_base64")
 	f.Add(`[{"outbounds":[{"protocol":"wireguard","settings":{}}]}]`)
 	f.Add("vless://550e8400-e29b-41d4-a716-446655440000@host.example.com:443?security=tls#tag")
+	f.Add("[Interface]\nPrivateKey = YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=\nAddress = 10.0.0.2/32\nJc = 4\nS1 = 15\n\n[Peer]\nPublicKey = YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI=\nEndpoint = 1.2.3.4:51820")
+	f.Add("[Interface]\nInvalidLine\n\n[Peer]\nNoKey")
 	f.Add("")
 
 	f.Fuzz(func(t *testing.T, data string) {
 		sub := &Subscription{}
 		_, _, _ = parseSubscriptionBody([]byte(data), "", sub)
+	})
+}
+
+// FuzzParseWireGuardLink tests parsing of wireguard:// and awg:// share links with fuzz data.
+func FuzzParseWireGuardLink(f *testing.F) {
+	keyA := "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+	keyB := "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI="
+	keyC := "Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M="
+
+	f.Add(fmt.Sprintf("wireguard://%s@1.2.3.4:51820?publickey=%s&presharedkey=%s&ip=10.0.0.2&reserved=1,2,3&mtu=1420#MyWG", keyA, keyB, keyC))
+	f.Add(fmt.Sprintf("awg://%s@1.2.3.4:51820?publickey=%s&jc=4&jmin=40&jmax=70&s1=15&s2=40&h1=1000000001&i1=0a1b2c&version=3.1#MyAWG", keyA, keyB))
+	f.Add("awg://:::invalid-url")
+	f.Add("wireguard://")
+	f.Add("awg://invalid@notahost:notaport")
+	f.Add(fmt.Sprintf("awg://%s@1.2.3.4:51820?publickey=%s&jc=-999&s1=invalid&h1=100-200&disablecookies=yes", keyA, keyB))
+
+	f.Fuzz(func(t *testing.T, link string) {
+		parseWireGuardLink(link)
 	})
 }

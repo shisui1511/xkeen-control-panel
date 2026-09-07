@@ -469,6 +469,7 @@ func parseWgQuickConf(content string, tagPrefix string) ([]SubscriptionNode, err
 			KeepAlive:      peer.keepAlive,
 			AWG:            nodeAWG,
 		}
+		node.Dialect = string(DetectWireGuardDialect(&node))
 
 		nodes = append(nodes, node)
 	}

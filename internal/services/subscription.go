@@ -73,8 +73,9 @@ type SubscriptionNode struct {
 	KeepAlive      int      `json:"keepalive,omitempty"`
 	DNS            []string `json:"dns,omitempty"`
 
-	// AmneziaWG obfuscation options (AWGIN-03)
-	AWG *AWGOptions `json:"awg,omitempty"`
+	// AmneziaWG obfuscation options (AWGIN-03, AWGIN-02)
+	AWG     *AWGOptions `json:"awg,omitempty"`
+	Dialect string      `json:"dialect,omitempty"`
 
 	// DialerProxy holds the tag of the outbound node to chain/cascade through (D-11).
 	DialerProxy string `json:"dialer_proxy,omitempty"`

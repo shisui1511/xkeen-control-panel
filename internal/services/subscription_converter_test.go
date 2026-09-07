@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -470,3 +471,231 @@ func TestApplyClashFilters(t *testing.T) {
 		t.Errorf("FilterTransport failed: got %v", fn3)
 	}
 }
+
+func TestConvertSubscriptionNodesToClashYAML_Wireguard(t *testing.T) {
+	svc := &SubscriptionService{}
+	jc := 4
+	jmin := 40
+	jmax := 70
+	s1 := 15
+	s2 := 40
+	s3 := 20
+	s4 := 30
+	cpa := 12
+	rt := true
+	dc := false
+	rekey := 120
+
+	nodes := []SubscriptionNode{
+		{
+			Tag:            "pure-wg",
+			Protocol:       "wireguard",
+			Server:         "198.51.100.1:51820",
+			SecretKey:      "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=",
+			PublicKey:      "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI=",
+			PreSharedKey:   "Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M=",
+			LocalAddresses: []string{"10.0.0.2/32"},
+			DNS:            []string{"1.1.1.1", "8.8.8.8"},
+			MTU:            1420,
+			Reserved:       []int{1, 2, 3},
+		},
+		{
+			Tag:            "awg-31",
+			Protocol:       "wireguard",
+			Server:         "198.51.100.2:51820",
+			SecretKey:      "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=",
+			PublicKey:      "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI=",
+			LocalAddresses: []string{"10.0.0.3/32"},
+			MTU:            1360,
+			AWG: &AWGOptions{
+				Jc:                     &jc,
+				Jmin:                   &jmin,
+				Jmax:                   &jmax,
+				S1:                     &s1,
+				S2:                     &s2,
+				S3:                     &s3,
+				S4:                     &s4,
+				H1:                     "1000000001",
+				H2:                     "1000000002",
+				H3:                     "1000000003",
+				H4:                     "1000000004",
+				I1:                     "0A1B2C",
+				I2:                     "3D4E5F",
+				I3:                     "112233",
+				I4:                     "445566",
+				I5:                     "778899",
+				Version:                "3.1",
+				HeaderProtectionKey:    "secret-hpk-key",
+				ContentPaddingAddition: &cpa,
+				RandomTrailers:         &rt,
+				DisableCookies:         &dc,
+				RekeyAfterTime:         &rekey,
+			},
+		},
+	}
+
+	yamlContent, names := svc.convertSubscriptionNodesToClashYAML(nodes)
+	if len(names) != 2 || names[0] != "pure-wg" || names[1] != "awg-31" {
+		t.Fatalf("unexpected names: %v", names)
+	}
+
+	// 1. Check pure-wg does NOT contain amnezia-wg-option
+	blocks, _ := ParseMihomoSubscriptionBlocks(yamlContent)
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 blocks, got %d. YAML:\n%s", len(blocks), yamlContent)
+	}
+
+	node0 := ParseClashProxyNode(blocks[0])
+	if node0.Tag != "pure-wg" || node0.Protocol != "wireguard" {
+		t.Errorf("unexpected node0: %+v", node0)
+	}
+	if node0.AWG != nil {
+		t.Errorf("pure-wg must not have AWG, got %+v", node0.AWG)
+	}
+	if node0.Dialect != "plain" {
+		t.Errorf("expected plain dialect, got %s", node0.Dialect)
+	}
+
+	// 2. Check awg-31 contains all 13 fields and matches round-trip
+	node1 := ParseClashProxyNode(blocks[1])
+	if node1.Tag != "awg-31" || node1.Protocol != "wireguard" {
+		t.Errorf("unexpected node1: %+v", node1)
+	}
+	if node1.AWG == nil {
+		t.Fatalf("node1 must have AWG populated")
+	}
+	if *node1.AWG.Jc != 4 || *node1.AWG.S1 != 15 || *node1.AWG.S3 != 20 {
+		t.Errorf("mismatched AWG numeric fields: %+v", node1.AWG)
+	}
+	if node1.AWG.H1 != "1000000001" || node1.AWG.I1 != "0A1B2C" || node1.AWG.HeaderProtectionKey != "secret-hpk-key" {
+		t.Errorf("mismatched AWG string fields: %+v", node1.AWG)
+	}
+	if node1.Dialect != "3.1" {
+		t.Errorf("expected 3.1 dialect, got %s", node1.Dialect)
+	}
+}
+
+func TestRoundTrip_AllImportPaths_AWG(t *testing.T) {
+	svc := &SubscriptionService{}
+	sub := &Subscription{TagPrefix: "rt"}
+
+	keyA := "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+	keyB := "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI="
+
+	// Path 1: wg-quick .conf
+	conf := fmt.Sprintf(`[Interface]
+PrivateKey = %s
+Address = 10.0.0.2/32
+Jc = 4
+S1 = 15
+H1 = 1000000001
+I1 = 0a1b2c
+Version = 3.1
+HeaderProtectionKey = hpk-secret
+
+[Peer]
+PublicKey = %s
+Endpoint = 198.51.100.1:51820
+AllowedIPs = 0.0.0.0/0
+`, keyA, keyB)
+
+	outbounds1, _, err1 := parseSubscriptionBody([]byte(conf), "text/plain", sub)
+	if err1 != nil || len(outbounds1) != 1 {
+		t.Fatalf("failed to parse wg-quick conf: %v", err1)
+	}
+	nodes1 := svc.outboundsToNodes(outbounds1, sub)
+	yaml1, _ := svc.convertSubscriptionNodesToClashYAML(nodes1)
+	blocks1, _ := ParseMihomoSubscriptionBlocks(yaml1)
+	if len(blocks1) != 1 {
+		t.Fatalf("path 1 failed to convert to YAML block: %s", yaml1)
+	}
+	rtNode1 := ParseClashProxyNode(blocks1[0])
+	if rtNode1.AWG == nil || *rtNode1.AWG.Jc != 4 || rtNode1.AWG.I1 != "0A1B2C" || rtNode1.Dialect != "3.1" {
+		t.Errorf("path 1 round-trip mismatch: %+v, AWG: %+v", rtNode1, rtNode1.AWG)
+	}
+
+	// Path 2: awg:// share link
+	awgLink := fmt.Sprintf("awg://%s@198.51.100.2:51820?publickey=%s&ip=10.0.0.3&jc=4&s1=15&h1=1000000001&i1=0a1b2c&version=3.1&headerprotectionkey=hpk-secret#AWGLink", keyA, keyB)
+	outbounds2, _, err2 := parseSubscriptionBody([]byte(awgLink), "text/plain", sub)
+	if err2 != nil || len(outbounds2) != 1 {
+		t.Fatalf("failed to parse awg link: %v", err2)
+	}
+	nodes2 := svc.outboundsToNodes(outbounds2, sub)
+	yaml2, _ := svc.convertSubscriptionNodesToClashYAML(nodes2)
+	blocks2, _ := ParseMihomoSubscriptionBlocks(yaml2)
+	if len(blocks2) != 1 {
+		t.Fatalf("path 2 failed to convert to YAML block: %s", yaml2)
+	}
+	rtNode2 := ParseClashProxyNode(blocks2[0])
+	if rtNode2.AWG == nil || *rtNode2.AWG.Jc != 4 || rtNode2.AWG.I1 != "0A1B2C" || rtNode2.Dialect != "3.1" {
+		t.Errorf("path 2 round-trip mismatch: %+v, AWG: %+v", rtNode2, rtNode2.AWG)
+	}
+
+	// Path 3: sing-box JSON
+	singboxJSON := fmt.Sprintf(`{
+  "outbounds": [
+    {
+      "type": "wireguard",
+      "tag": "sb-awg",
+      "server": "198.51.100.3",
+      "server_port": 51820,
+      "private_key": "%s",
+      "peer_public_key": "%s",
+      "local_address": ["10.0.0.4/32"],
+      "jc": 4,
+      "s1": 15,
+      "h1": "1000000001",
+      "i1": "0a1b2c",
+      "version": "3.1",
+      "header_protection_key": "hpk-secret"
+    }
+  ]
+}`, keyA, keyB)
+	outbounds3, err3 := parseSingBoxJSON([]byte(singboxJSON))
+	if err3 != nil || len(outbounds3) != 1 {
+		t.Fatalf("failed to parse sing-box JSON: %v", err3)
+	}
+	nodes3 := svc.outboundsToNodes(outbounds3, sub)
+	yaml3, _ := svc.convertSubscriptionNodesToClashYAML(nodes3)
+	blocks3, _ := ParseMihomoSubscriptionBlocks(yaml3)
+	if len(blocks3) != 1 {
+		t.Fatalf("path 3 failed to convert to YAML block: %s", yaml3)
+	}
+	rtNode3 := ParseClashProxyNode(blocks3[0])
+	if rtNode3.AWG == nil || *rtNode3.AWG.Jc != 4 || rtNode3.AWG.I1 != "0A1B2C" || rtNode3.Dialect != "3.1" {
+		t.Errorf("path 3 round-trip mismatch: %+v, AWG: %+v", rtNode3, rtNode3.AWG)
+	}
+
+	// Path 4: Clash YAML with amnezia-wg-option
+	clashInput := fmt.Sprintf(`proxies:
+  - name: clash-awg
+    type: wireguard
+    server: 198.51.100.4
+    port: 51820
+    private-key: %s
+    public-key: %s
+    ip: 10.0.0.5/32
+    amnezia-wg-option:
+      jc: 4
+      s1: 15
+      h1: 1000000001
+      i1: 0a1b2c
+      version: 3.1
+      header-protection-key: hpk-secret
+`, keyA, keyB)
+	blocks4, _ := ParseMihomoSubscriptionBlocks(clashInput)
+	if len(blocks4) != 1 {
+		t.Fatalf("failed to parse clash input blocks")
+	}
+	node4 := ParseClashProxyNode(blocks4[0])
+	yaml4, _ := svc.convertSubscriptionNodesToClashYAML([]SubscriptionNode{node4})
+	blocks4Out, _ := ParseMihomoSubscriptionBlocks(yaml4)
+	if len(blocks4Out) != 1 {
+		t.Fatalf("path 4 failed to re-convert to YAML block: %s", yaml4)
+	}
+	rtNode4 := ParseClashProxyNode(blocks4Out[0])
+	if rtNode4.AWG == nil || *rtNode4.AWG.Jc != 4 || rtNode4.AWG.I1 != "0A1B2C" || rtNode4.Dialect != "3.1" {
+		t.Errorf("path 4 round-trip mismatch: %+v, AWG: %+v", rtNode4, rtNode4.AWG)
+	}
+}
+

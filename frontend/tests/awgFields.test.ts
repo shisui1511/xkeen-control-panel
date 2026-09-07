@@ -9,7 +9,8 @@ import {
   findAwgField,
   isAwgSecret,
   normalizeAwgValue,
-  isMihomoAwg31Supported
+  isMihomoAwg31Supported,
+  detectWireGuardDialect
 } from '../src/lib/awgFields';
 
 describe('AWG Fields Registry', () => {
@@ -100,5 +101,36 @@ describe('AWG Fields Registry', () => {
       expect(ru[code], `Отсутствует перевод ${code} в ru.json`).toBeDefined();
       expect(en[code], `Отсутствует перевод ${code} в en.json`).toBeDefined();
     }
+
+    // Проверка переводов диалектов и совместимости
+    const dialectKeys = [
+      'subscr.dialect_plain',
+      'subscr.dialect_classic',
+      'subscr.dialect_20',
+      'subscr.dialect_31',
+      'subscr.awg_preserved_mihomo',
+      'subscr.awg_incompatible_xray'
+    ];
+    for (const dk of dialectKeys) {
+      expect(ru[dk], `Отсутствует перевод ${dk} в ru.json`).toBeDefined();
+      expect(en[dk], `Отсутствует перевод ${dk} в en.json`).toBeDefined();
+    }
+  });
+
+  it('корректно определяет диалекты WireGuard / AmneziaWG', () => {
+    expect(detectWireGuardDialect({})).toBe('plain');
+    expect(detectWireGuardDialect({ dialect: '2.0' })).toBe('2.0');
+
+    // Classic
+    expect(detectWireGuardDialect({ awg: { jc: 4, h1: 1000000001 } })).toBe('classic');
+
+    // 2.0
+    expect(detectWireGuardDialect({ awg: { jc: 4, s3: 20 } })).toBe('2.0');
+
+    // 3.1
+    expect(detectWireGuardDialect({ awg: { jc: 4, s3: 20, version: '3.1' } })).toBe('3.1');
+    expect(detectWireGuardDialect({ awg: { header_protection_key: 'secret' } })).toBe('3.1');
+    expect(detectWireGuardDialect({ awg: { i1: '0A1B2C' } })).toBe('3.1');
+    expect(detectWireGuardDialect({ awg: { random_trailers: true } })).toBe('3.1');
   });
 });

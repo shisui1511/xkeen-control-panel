@@ -317,3 +317,69 @@ export function isMihomoAwg31Supported(version?: string | null): boolean {
   }
   return false;
 }
+
+export type WireGuardDialect = 'plain' | 'classic' | '2.0' | '3.1';
+
+/**
+ * Определяет диалект конфигурации WireGuard / AmneziaWG:
+ * - 'plain': стандартный WireGuard
+ * - 'classic': AmneziaWG 1.0 (jc, jmin, jmax, s1, s2, h1..h4)
+ * - '2.0': AmneziaWG 2.0 (s3, s4)
+ * - '3.1': AmneziaWG 3.1 (version, header-protection-key, i1..i5, etc.)
+ */
+export function detectWireGuardDialect(node: {
+  dialect?: string;
+  protocol?: string;
+  awg?: any;
+}): WireGuardDialect {
+  if (node.dialect && ['plain', 'classic', '2.0', '3.1'].includes(node.dialect)) {
+    return node.dialect as WireGuardDialect;
+  }
+  const awg = node.awg;
+  if (!awg) return 'plain';
+
+  // 3.1
+  if (
+    awg.version ||
+    awg.header_protection_key ||
+    awg.headerProtectionKey ||
+    awg.i1 ||
+    awg.i2 ||
+    awg.i3 ||
+    awg.i4 ||
+    awg.i5 ||
+    awg.content_padding_addition !== undefined ||
+    awg.contentPaddingAddition !== undefined ||
+    awg.random_trailers !== undefined ||
+    awg.randomTrailers !== undefined ||
+    awg.disable_cookies !== undefined ||
+    awg.disableCookies !== undefined ||
+    awg.rekey_after_time !== undefined ||
+    awg.rekeyAfterTime !== undefined ||
+    (awg.raw_options && Object.keys(awg.raw_options).length > 0)
+  ) {
+    return '3.1';
+  }
+
+  // 2.0
+  if (awg.s3 !== undefined || awg.s4 !== undefined) {
+    return '2.0';
+  }
+
+  // Classic
+  if (
+    awg.jc !== undefined ||
+    awg.jmin !== undefined ||
+    awg.jmax !== undefined ||
+    awg.s1 !== undefined ||
+    awg.s2 !== undefined ||
+    awg.h1 !== undefined ||
+    awg.h2 !== undefined ||
+    awg.h3 !== undefined ||
+    awg.h4 !== undefined
+  ) {
+    return 'classic';
+  }
+
+  return 'plain';
+}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t } from '../../i18n';
+  import { detectWireGuardDialect } from '../../lib/awgFields';
 
   export interface Node {
     tag: string;
@@ -15,6 +16,8 @@
     security?: string;
     is_new?: boolean;
     dialer_proxy?: string;
+    dialect?: string;
+    awg?: any;
   }
 
   export interface DialerProxyTarget {
@@ -338,6 +341,33 @@
               <div class="sub-node-meta-row">
                 {#if metaText}
                   <span class="sub-node-chip-blue">{metaText}</span>
+                {/if}
+                {#if node.protocol === 'wireguard'}
+                  {@const dialect = detectWireGuardDialect(node)}
+                  <span class="sub-node-chip-dialect" class:awg={dialect !== 'plain'}>
+                    {$t(
+                      'subscr.dialect_' +
+                        (dialect === '2.0' ? '20' : dialect === '3.1' ? '31' : dialect)
+                    )}
+                  </span>
+                  {#if dialect !== 'plain'}
+                    {#if source === 'mihomo' || enableMihomo}
+                      <span
+                        class="sub-node-chip-compat success"
+                        title={$t('subscr.awg_preserved_mihomo')}
+                      >
+                        Mihomo ✓
+                      </span>
+                    {/if}
+                    {#if source === 'xray' || enableXray}
+                      <span
+                        class="sub-node-chip-compat warning"
+                        title={$t('subscr.awg_incompatible_xray')}
+                      >
+                        Xray ⚠
+                      </span>
+                    {/if}
+                  {/if}
                 {/if}
               </div>
             </div>
@@ -801,6 +831,48 @@
     background: rgba(255, 255, 255, 0.12);
     border-color: rgba(255, 255, 255, 0.25);
     color: #fff;
+  }
+
+  .sub-node-chip-dialect {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: var(--fg-secondary);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    margin-top: 3px;
+    margin-left: 4px;
+    white-space: nowrap;
+  }
+  .sub-node-chip-dialect.awg {
+    background: rgba(168, 85, 247, 0.12);
+    border-color: rgba(168, 85, 247, 0.3);
+    color: #c084fc;
+  }
+
+  .sub-node-chip-compat {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    margin-top: 3px;
+    margin-left: 4px;
+    white-space: nowrap;
+  }
+  .sub-node-chip-compat.success {
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+    color: #4ade80;
+  }
+  .sub-node-chip-compat.warning {
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    color: #fbbf24;
   }
 
   .sub-node-chip-gold {

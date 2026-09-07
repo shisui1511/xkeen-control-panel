@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -199,6 +201,9 @@ func (s *SubscriptionService) outboundsToNodes(outbounds []Outbound, sub *Subscr
 				if node.AWG != nil && node.AWG.IsEmpty() {
 					node.AWG = nil
 				}
+				if node.Protocol == "wireguard" {
+					node.Dialect = string(DetectWireGuardDialect(&node))
+				}
 			}
 		}
 
@@ -316,8 +321,8 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 			pType = "shadowsocks"
 		}
 
-		// Для Shadowsocks, VMess, VLESS, Trojan, Hysteria 2
-		if pType != "vless" && pType != "vmess" && pType != "trojan" && pType != "shadowsocks" && pType != "hysteria2" && pType != "hysteria" {
+		// Для Shadowsocks, VMess, VLESS, Trojan, Hysteria 2, WireGuard
+		if pType != "vless" && pType != "vmess" && pType != "trojan" && pType != "shadowsocks" && pType != "hysteria2" && pType != "hysteria" && pType != "wireguard" {
 			continue // Неподдерживаемый протокол для Mihomo YAML конвертера
 		}
 
@@ -435,6 +440,143 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 				sb.WriteString(fmt.Sprintf("      type: %s\n", yamlSafeScalar(n.ObfsType)))
 				if n.ObfsPassword != "" {
 					sb.WriteString(fmt.Sprintf("      password: %s\n", yamlSafeScalar(n.ObfsPassword)))
+				}
+			}
+
+		case "wireguard":
+			if n.SecretKey != "" {
+				sb.WriteString(fmt.Sprintf("    private-key: %s\n", yamlSafeScalar(n.SecretKey)))
+			}
+			if n.PublicKey != "" {
+				sb.WriteString(fmt.Sprintf("    public-key: %s\n", yamlSafeScalar(n.PublicKey)))
+			}
+			if n.PreSharedKey != "" {
+				sb.WriteString(fmt.Sprintf("    pre-shared-key: %s\n", yamlSafeScalar(n.PreSharedKey)))
+			}
+
+			// Local IP(s)
+			var ipv4, ipv6 string
+			for _, addr := range n.LocalAddresses {
+				clean := strings.TrimSpace(addr)
+				ipStr := clean
+				if idx := strings.Index(ipStr, "/"); idx != -1 {
+					ipStr = ipStr[:idx]
+				}
+				parsed := net.ParseIP(ipStr)
+				if parsed != nil {
+					if parsed.To4() != nil && ipv4 == "" {
+						ipv4 = clean
+					} else if parsed.To4() == nil && ipv6 == "" {
+						ipv6 = clean
+					}
+				} else if ipv4 == "" {
+					ipv4 = clean
+				}
+			}
+			if ipv4 != "" {
+				sb.WriteString(fmt.Sprintf("    ip: %s\n", yamlSafeScalar(ipv4)))
+			}
+			if ipv6 != "" {
+				sb.WriteString(fmt.Sprintf("    ipv6: %s\n", yamlSafeScalar(ipv6)))
+			}
+
+			if len(n.DNS) > 0 {
+				sb.WriteString(fmt.Sprintf("    dns: [%s]\n", strings.Join(n.DNS, ", ")))
+			}
+
+			if n.MTU > 0 {
+				sb.WriteString(fmt.Sprintf("    mtu: %d\n", n.MTU))
+			}
+			if len(n.Reserved) == 3 {
+				sb.WriteString(fmt.Sprintf("    reserved: [%d, %d, %d]\n", n.Reserved[0], n.Reserved[1], n.Reserved[2]))
+			}
+			sb.WriteString("    udp: true\n")
+
+			// AmneziaWG obfuscation options (emit-when-set under amnezia-wg-option)
+			if n.AWG != nil && !n.AWG.IsEmpty() {
+				sb.WriteString("    amnezia-wg-option:\n")
+				awg := n.AWG
+				if awg.Jc != nil {
+					sb.WriteString(fmt.Sprintf("      jc: %d\n", *awg.Jc))
+				}
+				if awg.Jmin != nil {
+					sb.WriteString(fmt.Sprintf("      jmin: %d\n", *awg.Jmin))
+				}
+				if awg.Jmax != nil {
+					sb.WriteString(fmt.Sprintf("      jmax: %d\n", *awg.Jmax))
+				}
+				if awg.S1 != nil {
+					sb.WriteString(fmt.Sprintf("      s1: %d\n", *awg.S1))
+				}
+				if awg.S2 != nil {
+					sb.WriteString(fmt.Sprintf("      s2: %d\n", *awg.S2))
+				}
+				if awg.S3 != nil {
+					sb.WriteString(fmt.Sprintf("      s3: %d\n", *awg.S3))
+				}
+				if awg.S4 != nil {
+					sb.WriteString(fmt.Sprintf("      s4: %d\n", *awg.S4))
+				}
+				formatH := func(val string) string {
+					if strings.Contains(val, "-") {
+						return fmt.Sprintf("%q", val)
+					}
+					return val
+				}
+				if awg.H1 != "" {
+					sb.WriteString(fmt.Sprintf("      h1: %s\n", formatH(awg.H1)))
+				}
+				if awg.H2 != "" {
+					sb.WriteString(fmt.Sprintf("      h2: %s\n", formatH(awg.H2)))
+				}
+				if awg.H3 != "" {
+					sb.WriteString(fmt.Sprintf("      h3: %s\n", formatH(awg.H3)))
+				}
+				if awg.H4 != "" {
+					sb.WriteString(fmt.Sprintf("      h4: %s\n", formatH(awg.H4)))
+				}
+				if awg.I1 != "" {
+					sb.WriteString(fmt.Sprintf("      i1: %s\n", yamlSafeScalar(strings.ToUpper(awg.I1))))
+				}
+				if awg.I2 != "" {
+					sb.WriteString(fmt.Sprintf("      i2: %s\n", yamlSafeScalar(strings.ToUpper(awg.I2))))
+				}
+				if awg.I3 != "" {
+					sb.WriteString(fmt.Sprintf("      i3: %s\n", yamlSafeScalar(strings.ToUpper(awg.I3))))
+				}
+				if awg.I4 != "" {
+					sb.WriteString(fmt.Sprintf("      i4: %s\n", yamlSafeScalar(strings.ToUpper(awg.I4))))
+				}
+				if awg.I5 != "" {
+					sb.WriteString(fmt.Sprintf("      i5: %s\n", yamlSafeScalar(strings.ToUpper(awg.I5))))
+				}
+				if awg.Version != "" {
+					sb.WriteString(fmt.Sprintf("      version: %s\n", yamlSafeScalar(awg.Version)))
+				}
+				if awg.HeaderProtectionKey != "" {
+					sb.WriteString(fmt.Sprintf("      header-protection-key: %s\n", yamlSafeScalar(awg.HeaderProtectionKey)))
+				}
+				if awg.ContentPaddingAddition != nil {
+					sb.WriteString(fmt.Sprintf("      content-padding-addition: %d\n", *awg.ContentPaddingAddition))
+				}
+				if awg.RandomTrailers != nil {
+					sb.WriteString(fmt.Sprintf("      random-trailers: %t\n", *awg.RandomTrailers))
+				}
+				if awg.DisableCookies != nil {
+					sb.WriteString(fmt.Sprintf("      disable-cookies: %t\n", *awg.DisableCookies))
+				}
+				if awg.RekeyAfterTime != nil {
+					sb.WriteString(fmt.Sprintf("      rekey-after-time: %d\n", *awg.RekeyAfterTime))
+				}
+				if len(awg.RawOptions) > 0 {
+					var rawKeys []string
+					for rk := range awg.RawOptions {
+						rawKeys = append(rawKeys, rk)
+					}
+					sort.Strings(rawKeys)
+					for _, rk := range rawKeys {
+						sb.WriteString(fmt.Sprintf("      %s: %v\n", rk, awg.RawOptions[rk]))
+					}
 				}
 			}
 		}
@@ -777,6 +919,9 @@ func (s *SubscriptionService) writeFragment(path string, outbounds []Outbound, s
 		if allowedXrayProtocols[node.Protocol] {
 			allowedOutbounds = append(allowedOutbounds, outbounds[i])
 			allowedNodes = append(allowedNodes, node)
+			if node.Protocol == "wireguard" && node.AWG != nil && !node.AWG.IsEmpty() {
+				log.Printf("[Subscriptions] WARN: AmneziaWG obfuscation options will not be applied by Xray core for node %q", node.Tag)
+			}
 		} else {
 			log.Printf("[Subscriptions] Skipping outbound %q for Xray configuration: unsupported protocol %q", outbounds[i].Tag, node.Protocol)
 		}
