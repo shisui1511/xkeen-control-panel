@@ -55,6 +55,7 @@ jobs:
         with:
           version: v2.4.0 # точный пин релиза golangci-lint; поднимать осознанно
           install-mode: binary
+          args: --timeout=5m
 
       - name: Run govulncheck
         uses: golang/govulncheck-action@v1

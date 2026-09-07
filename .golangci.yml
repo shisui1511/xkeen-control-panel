@@ -1,5 +1,6 @@
 version: "2"
 run:
+  timeout: 5m
   modules-download-mode: readonly
   tests: true
 linters:
