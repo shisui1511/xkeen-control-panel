@@ -305,9 +305,35 @@ func parseWireGuardLink(link string) (*Outbound, string) {
 		}
 	}
 
+	awg := &AWGOptions{RawOptions: make(map[string]interface{})}
+	for k, values := range q {
+		if len(values) > 0 {
+			parseAWGField(awg, k, values[0])
+		}
+	}
+	if !awg.IsEmpty() {
+		settings["awg"] = awg
+	}
+
+	if dnsStr := q.Get("dns"); dnsStr != "" {
+		var dnsList []string
+		for _, d := range strings.Split(dnsStr, ",") {
+			if clean := strings.TrimSpace(d); clean != "" {
+				dnsList = append(dnsList, clean)
+			}
+		}
+		if len(dnsList) > 0 {
+			settings["dns"] = dnsList
+		}
+	}
+
 	tag := u.Fragment
 	if tag == "" {
-		tag = "WireGuard"
+		if strings.EqualFold(u.Scheme, "awg") {
+			tag = "AmneziaWG"
+		} else {
+			tag = "WireGuard"
+		}
 	}
 
 	return &Outbound{

@@ -60,7 +60,7 @@ func (s *SubscriptionService) outboundsToNodes(outbounds []Outbound, sub *Subscr
 		origTag := outbounds[i].Tag
 
 		// Add tag prefix and deduplicate tags
-		if sub.TagPrefix != "" {
+		if sub != nil && sub.TagPrefix != "" {
 			outbounds[i].Tag = fmt.Sprintf("%s-%s", sub.TagPrefix, outbounds[i].Tag)
 		}
 		tag := outbounds[i].Tag

@@ -600,3 +600,190 @@ func TestWireguardHealthNotApplicable(t *testing.T) {
 		t.Errorf("expected LatencyMs=-2 in batch check, got %d", nodeH.LatencyMs)
 	}
 }
+
+func TestParseWireGuardLink_AWG(t *testing.T) {
+	keyA := "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+	keyB := "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI="
+	keyC := "Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M="
+
+	awgLink := fmt.Sprintf("awg://%s@1.2.3.4:51820?publickey=%s&presharedkey=%s&ip=10.0.0.2&dns=1.1.1.1,8.8.8.8&jc=4&jmin=40&jmax=70&s1=15&s2=40&h1=1000000001&i1=0a1b2c&headerprotectionkey=secret-hpk&version=3.1#MyAWGNode", keyA, keyB, keyC)
+
+	ob, reason := parseWireGuardLink(awgLink)
+	if ob == nil || reason != "" {
+		t.Fatalf("unexpected failure parsing awg link: %s", reason)
+	}
+	if ob.Tag != "MyAWGNode" {
+		t.Errorf("expected tag MyAWGNode, got %s", ob.Tag)
+	}
+	if ob.Protocol != "wireguard" {
+		t.Errorf("expected protocol wireguard, got %s", ob.Protocol)
+	}
+
+	awgOpt, ok := ob.Settings["awg"].(*AWGOptions)
+	if !ok || awgOpt == nil {
+		t.Fatalf("expected AWGOptions in settings['awg']")
+	}
+	if awgOpt.Jc == nil || *awgOpt.Jc != 4 {
+		t.Errorf("expected Jc=4, got %v", awgOpt.Jc)
+	}
+	if awgOpt.Jmin == nil || *awgOpt.Jmin != 40 {
+		t.Errorf("expected Jmin=40, got %v", awgOpt.Jmin)
+	}
+	if awgOpt.Jmax == nil || *awgOpt.Jmax != 70 {
+		t.Errorf("expected Jmax=70, got %v", awgOpt.Jmax)
+	}
+	if awgOpt.S1 == nil || *awgOpt.S1 != 15 {
+		t.Errorf("expected S1=15, got %v", awgOpt.S1)
+	}
+	if awgOpt.H1 != "1000000001" {
+		t.Errorf("expected H1=1000000001, got %s", awgOpt.H1)
+	}
+	if awgOpt.I1 != "0A1B2C" {
+		t.Errorf("expected I1=0A1B2C (uppercase), got %s", awgOpt.I1)
+	}
+	if awgOpt.HeaderProtectionKey != "secret-hpk" {
+		t.Errorf("expected HeaderProtectionKey=secret-hpk, got %s", awgOpt.HeaderProtectionKey)
+	}
+	if awgOpt.Version != "3.1" {
+		t.Errorf("expected Version=3.1, got %s", awgOpt.Version)
+	}
+
+	// Verify DNS parsing
+	dnsList, ok := ob.Settings["dns"].([]string)
+	if !ok || len(dnsList) != 2 || dnsList[0] != "1.1.1.1" || dnsList[1] != "8.8.8.8" {
+		t.Errorf("unexpected DNS settings: %v", ob.Settings["dns"])
+	}
+
+	// Test parseShareLink handles awg://
+	obParsed := parseShareLink(awgLink)
+	if obParsed == nil || obParsed.Tag != "MyAWGNode" {
+		t.Fatalf("parseShareLink failed for awg://")
+	}
+
+	// Verify outboundsToNodes preserves AWG
+	svc := &SubscriptionService{}
+	nodes := svc.outboundsToNodes([]Outbound{*ob}, nil)
+	if len(nodes) != 1 || nodes[0].AWG == nil {
+		t.Fatalf("outboundsToNodes lost AWG options")
+	}
+	if *nodes[0].AWG.Jc != 4 || nodes[0].AWG.I1 != "0A1B2C" {
+		t.Errorf("corrupted AWG options in converted node: %+v", nodes[0].AWG)
+	}
+}
+
+func TestParseClashProxyNode_AWG(t *testing.T) {
+	clashYAML := `
+  - name: "AWG-Clash"
+    type: wireguard
+    server: 198.51.100.1
+    port: 51820
+    ip: 10.0.0.2
+    public-key: YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI=
+    private-key: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
+    dns: 1.1.1.1, 8.8.8.8
+    amnezia-wg-option:
+      jc: 5
+      jmin: 30
+      jmax: 80
+      s1: 20
+      s2: 50
+      h1: "2000000001"
+      h2: "2000000002"
+      i1: 0f1e2d
+      version: 3.1
+      header-protection-key: secret-clash-key
+`
+	node := ParseClashProxyNode(clashYAML)
+	if node.Tag != "AWG-Clash" {
+		t.Errorf("expected tag 'AWG-Clash', got %s", node.Tag)
+	}
+	if node.Protocol != "wireguard" {
+		t.Errorf("expected protocol 'wireguard', got %s", node.Protocol)
+	}
+	if len(node.DNS) != 2 || node.DNS[0] != "1.1.1.1" {
+		t.Errorf("expected DNS to be parsed, got %v", node.DNS)
+	}
+	if node.AWG == nil {
+		t.Fatalf("expected node.AWG to be populated")
+	}
+	if node.AWG.Jc == nil || *node.AWG.Jc != 5 {
+		t.Errorf("expected Jc=5, got %v", node.AWG.Jc)
+	}
+	if node.AWG.Jmin == nil || *node.AWG.Jmin != 30 {
+		t.Errorf("expected Jmin=30, got %v", node.AWG.Jmin)
+	}
+	if node.AWG.Jmax == nil || *node.AWG.Jmax != 80 {
+		t.Errorf("expected Jmax=80, got %v", node.AWG.Jmax)
+	}
+	if node.AWG.S1 == nil || *node.AWG.S1 != 20 {
+		t.Errorf("expected S1=20, got %v", node.AWG.S1)
+	}
+	if node.AWG.H1 != "2000000001" || node.AWG.H2 != "2000000002" {
+		t.Errorf("unexpected H1/H2: %s, %s", node.AWG.H1, node.AWG.H2)
+	}
+	if node.AWG.I1 != "0F1E2D" {
+		t.Errorf("expected I1=0F1E2D (normalized uppercase), got %s", node.AWG.I1)
+	}
+	if node.AWG.HeaderProtectionKey != "secret-clash-key" {
+		t.Errorf("expected HeaderProtectionKey=secret-clash-key, got %s", node.AWG.HeaderProtectionKey)
+	}
+	if node.AWG.Version != "3.1" {
+		t.Errorf("expected Version=3.1, got %s", node.AWG.Version)
+	}
+}
+
+func TestParseSingBoxJSON_AWG(t *testing.T) {
+	keyA := "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+	keyB := "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI="
+
+	singBoxJSON := fmt.Sprintf(`{
+  "outbounds": [
+    {
+      "type": "wireguard",
+      "tag": "singbox-awg",
+      "server": "198.51.100.1",
+      "server_port": 51820,
+      "local_address": ["10.0.0.2/32"],
+      "private_key": "%s",
+      "peer_public_key": "%s",
+      "jc": 6,
+      "s1": 25,
+      "h1": "3000000001",
+      "i1": "0c1d2e",
+      "header_protection_key": "secret-sb-key"
+    }
+  ]
+}`, keyA, keyB)
+
+	outbounds, err := parseSingBoxJSON([]byte(singBoxJSON))
+	if err != nil {
+		t.Fatalf("unexpected error parsing sing-box: %v", err)
+	}
+	if len(outbounds) != 1 {
+		t.Fatalf("expected 1 outbound, got %d", len(outbounds))
+	}
+
+	ob := outbounds[0]
+	if ob.Tag != "singbox-awg" {
+		t.Errorf("expected tag 'singbox-awg', got %s", ob.Tag)
+	}
+	awgOpt, ok := ob.Settings["awg"].(*AWGOptions)
+	if !ok || awgOpt == nil {
+		t.Fatalf("expected AWGOptions in settings['awg']")
+	}
+	if awgOpt.Jc == nil || *awgOpt.Jc != 6 {
+		t.Errorf("expected Jc=6, got %v", awgOpt.Jc)
+	}
+	if awgOpt.S1 == nil || *awgOpt.S1 != 25 {
+		t.Errorf("expected S1=25, got %v", awgOpt.S1)
+	}
+	if awgOpt.H1 != "3000000001" {
+		t.Errorf("expected H1=3000000001, got %s", awgOpt.H1)
+	}
+	if awgOpt.I1 != "0C1D2E" {
+		t.Errorf("expected I1=0C1D2E, got %s", awgOpt.I1)
+	}
+	if awgOpt.HeaderProtectionKey != "secret-sb-key" {
+		t.Errorf("expected HeaderProtectionKey=secret-sb-key, got %s", awgOpt.HeaderProtectionKey)
+	}
+}

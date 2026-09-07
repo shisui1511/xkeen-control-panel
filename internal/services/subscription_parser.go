@@ -732,7 +732,7 @@ func skipReasonForScheme(line string) string {
 		return "невалидный URL или порт в socks://"
 	case strings.HasPrefix(line, "http-proxy://"):
 		return "невалидный URL или порт в http-proxy://"
-	case strings.HasPrefix(line, "wireguard://"), strings.HasPrefix(line, "wg://"):
+	case strings.HasPrefix(line, "wireguard://"), strings.HasPrefix(line, "wg://"), strings.HasPrefix(line, "awg://"):
 		return "невалидный URL, ключ или порт в wireguard://"
 	default:
 		return "неподдерживаемый протокол или невалидный URL"
@@ -758,8 +758,8 @@ func parseShareLink(link string) (out *Outbound) {
 		return parseVMessLink(link)
 	}
 
-	// wireguard:// or wg://
-	if strings.HasPrefix(link, "wireguard://") || strings.HasPrefix(link, "wg://") {
+	// wireguard:// or wg:// or awg://
+	if strings.HasPrefix(link, "wireguard://") || strings.HasPrefix(link, "wg://") || strings.HasPrefix(link, "awg://") {
 		ob, _ := parseWireGuardLink(link)
 		return ob
 	}

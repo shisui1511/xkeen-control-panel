@@ -625,6 +625,64 @@ func ParseClashProxyNode(blockStr string) SubscriptionNode {
 				node.AllowedIPs = parts
 			}
 		}
+
+		if dns := p.get("dns"); dns != "" {
+			var dnsList []string
+			for _, d := range strings.Split(dns, ",") {
+				if s := strings.Trim(strings.TrimSpace(d), `"'`); s != "" {
+					dnsList = append(dnsList, s)
+				}
+			}
+			if len(dnsList) > 0 {
+				node.DNS = dnsList
+			}
+		} else if dns := p.get("dns._list"); dns != "" {
+			var dnsList []string
+			for _, d := range strings.Split(dns, ",") {
+				if s := strings.Trim(strings.TrimSpace(d), `"'`); s != "" {
+					dnsList = append(dnsList, s)
+				}
+			}
+			if len(dnsList) > 0 {
+				node.DNS = dnsList
+			}
+		}
+
+		var awgOpts *AWGOptions
+		for k, v := range p {
+			lowerK := strings.ToLower(k)
+			var subKey string
+			if strings.HasPrefix(lowerK, "amnezia-wg-option.") {
+				subKey = k[len("amnezia-wg-option."):]
+			} else if strings.HasPrefix(lowerK, "amnezia-wg-options.") {
+				subKey = k[len("amnezia-wg-options."):]
+			} else if strings.HasPrefix(lowerK, "amneziawg-option.") {
+				subKey = k[len("amneziawg-option."):]
+			} else if strings.HasPrefix(lowerK, "amnezia_wg_option.") {
+				subKey = k[len("amnezia_wg_option."):]
+			} else if strings.HasPrefix(lowerK, "awg-option.") {
+				subKey = k[len("awg-option."):]
+			} else if strings.HasPrefix(lowerK, "awg.") {
+				subKey = k[len("awg."):]
+			} else {
+				testOpts := &AWGOptions{}
+				if parseAWGField(testOpts, k, v) {
+					subKey = k
+				}
+			}
+
+			if subKey != "" {
+				if awgOpts == nil {
+					awgOpts = &AWGOptions{RawOptions: make(map[string]interface{})}
+				}
+				if !parseAWGField(awgOpts, subKey, v) {
+					awgOpts.RawOptions[subKey] = v
+				}
+			}
+		}
+		if awgOpts != nil && !awgOpts.IsEmpty() {
+			node.AWG = awgOpts
+		}
 	}
 
 	return node
