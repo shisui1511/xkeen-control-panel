@@ -255,6 +255,7 @@ export const AWG_FIELDS: readonly AwgFieldDef[] = [
     tier: '3.1',
     type: 'integer',
     min: 0,
+    max: 255,
     labelKey: 'proxies.awg_content_padding_addition'
   },
   {
@@ -364,6 +365,25 @@ export function normalizeAwgValue(key: string, val: any): any {
       return isNaN(parsed) ? val : parsed;
     }
   }
+  if (field.type === 'range') {
+    if (typeof val === 'number') return Math.floor(val);
+    if (typeof val === 'string') {
+      const trimmed = val.trim();
+      if (/^\d+$/.test(trimmed)) {
+        const parsed = parseInt(trimmed, 10);
+        return isNaN(parsed) ? trimmed : parsed;
+      }
+      if (/^\d+\s*-\s*\d+$/.test(trimmed)) {
+        const parts = trimmed.split('-').map((s) => s.trim());
+        const min = parseInt(parts[0], 10);
+        const max = parseInt(parts[1], 10);
+        if (!isNaN(min) && !isNaN(max)) {
+          return min <= max ? `${min}-${max}` : `${max}-${min}`;
+        }
+      }
+      return trimmed;
+    }
+  }
   if (field.type === 'boolean') {
     if (typeof val === 'boolean') return val;
     if (typeof val === 'string') {
@@ -371,6 +391,7 @@ export function normalizeAwgValue(key: string, val: any): any {
       if (lower === 'true' || lower === 'yes' || lower === '1') return true;
       if (lower === 'false' || lower === 'no' || lower === '0') return false;
     }
+    return undefined;
   }
   if (typeof val === 'string') {
     return val.trim();

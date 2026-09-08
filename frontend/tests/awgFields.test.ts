@@ -61,6 +61,19 @@ describe('AWG Fields Registry', () => {
     expect(normalizeAwgValue('random-trailers', 'true')).toBe(true);
     expect(normalizeAwgValue('random-trailers', 'false')).toBe(false);
     expect(normalizeAwgValue('disable-cookies', true)).toBe(true);
+    expect(normalizeAwgValue('disable-cookies', 'maybe')).toBeUndefined();
+
+    // Диапазоны H1..H4 (WR-08)
+    expect(normalizeAwgValue('h1', '1000')).toBe(1000);
+    expect(normalizeAwgValue('h2', '10-20')).toBe('10-20');
+    expect(normalizeAwgValue('h3', '40-10')).toBe('10-40');
+  });
+
+  it('содержит корректные ограничения для полей AWG 3.1 (WR-08)', () => {
+    const cpa = findAwgField('content-padding-addition');
+    expect(cpa).toBeDefined();
+    expect(cpa?.min).toBe(0);
+    expect(cpa?.max).toBe(255);
   });
 
   it('корректно определяет поддержку AWG 3.1 по версии ядра Mihomo', () => {
