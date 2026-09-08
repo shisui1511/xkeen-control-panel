@@ -96,15 +96,20 @@
   --fg: var(--fg-primary);
   --fg-muted: var(--fg-dim);
   --text-muted: var(--fg-dim);
-  --fg-terminal: var(--fg-primary);
   --error: var(--danger);
   --bg-hover: var(--hover);
   --bg-secondary: var(--bg-elevated);
   --bg-tertiary: var(--bg-deep);
   --bg-input: var(--bg-elevated);
-  /* terminal / code-output black — stays dark in both themes on purpose
-     (like the CodeMirror editor, a console reads as a dark surface) */
+  /* terminal / code-output surface — theme-invariant pair, both halves fixed
+     on purpose. The background stays dark in both themes (like the CodeMirror
+     editor, a console reads as a dark surface); the matching foreground stays
+     light for the same reason. Do not let the terminal foreground follow the
+     adaptive body-text token — in the light theme that paints dark ink on the
+     dark console background and the text becomes unreadable. The light value
+     here equals the dark-theme body text, so no new colour enters the palette. */
   --bg-terminal: #050d16;
+  --fg-terminal: #d9e7f4;
   --bg-card-hover: var(--bg-elevated);
   --bg-card-subtle: var(--surface-tint);
   --bg-surface-hover: var(--bg-elevated);
@@ -1846,7 +1851,7 @@ td.mono,
 .code-block,
 pre.code-output {
   background: var(--bg-terminal);
-  color: var(--fg-primary);
+  color: var(--fg-terminal);
   font-family: var(--font-family-mono);
   font-size: 12.5px;
   line-height: 1.55;
