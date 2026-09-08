@@ -1343,7 +1343,10 @@
           if (cleanKey.length !== expectedB64Len) {
             showToast(
               'error',
-              `${$t('xray.cipher')}: ${is16 ? '16 bytes (24 base64 chars)' : '32 bytes (44 base64 chars)'}`
+              $t('xray.ss2022_key_length', {
+                bytes: is16 ? 16 : 32,
+                chars: expectedB64Len
+              })
             );
             return;
           }
@@ -2420,8 +2423,22 @@
     </div>
   {:else if schemaError}
     <div class="error-state-block" style="padding: 48px; text-align: center;">
-      <div class="error-icon" style="color: var(--danger); font-size: 24px; margin-bottom: 12px;">
-        ⚠
+      <div class="error-icon">
+        <svg
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+        >
+          <path
+            d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+          />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
       </div>
       <p style="color: var(--danger); margin-bottom: 16px;">
         {$t('editor.definition_load_error', { error: schemaError })}
@@ -2769,7 +2786,7 @@
 
                 {#if testRouteError}
                   <div
-                    class="alert alert-danger"
+                    class="alert alert-error"
                     data-testid="test-route-error"
                     style="margin-top: 12px;"
                   >
@@ -2781,7 +2798,7 @@
                   <div
                     class="test-route-result card"
                     data-testid="test-route-result"
-                    style="margin-top: 12px; padding: 12px; background: var(--bg-card-subtle);"
+                    style="margin-top: 12px; padding: 12px; background: var(--bg-page);"
                   >
                     {#if testRouteResult.outbound_tag}
                       <div
@@ -3246,7 +3263,22 @@
                 role="status"
               >
                 <div style="display: flex; gap: 8px; align-items: center;">
-                  <span aria-hidden="true">⚠️</span>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    style="flex-shrink: 0;"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                    />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
                   <span>{$t('editor.dns_intercept_warning')}</span>
                 </div>
                 <button
@@ -3620,7 +3652,7 @@
                     </div>
                   </div>
                   <div class="form-row">
-                    <label class="form-label" for="outbound-uuid">UUID *</label>
+                    <label class="form-label" for="outbound-uuid">{$t('xray.uuid_label')} *</label>
                     <div class="input-with-btn">
                       <input
                         id="outbound-uuid"
@@ -3629,14 +3661,33 @@
                         placeholder="uuid"
                       />
                       <button
-                        class="btn btn-secondary"
-                        style="padding: 0 8px; min-height: 36px;"
+                        class="btn btn-secondary btn-inset"
                         onclick={generateUUID}
                         disabled={generatingUUID}
                         title={$t('app.generate')}
+                        aria-label={$t('app.generate')}
+                        data-testid="outbound-uuid-generate"
                         type="button"
                       >
-                        {generatingUUID ? '...' : '⟳'}
+                        {#if generatingUUID}
+                          <span
+                            class="spinner"
+                            style="--spinner-size: 14px; --spinner-track: currentColor; --spinner-color: transparent;"
+                          ></span>
+                        {:else}
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            aria-hidden="true"
+                          >
+                            <polyline points="23 4 23 10 17 10" />
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                          </svg>
+                        {/if}
                       </button>
                     </div>
                   </div>
@@ -3735,7 +3786,7 @@
 
                     {#if tlsPingError}
                       <div
-                        class="alert alert-danger"
+                        class="alert alert-error"
                         data-testid="tls-ping-error"
                         style="margin-bottom: 12px;"
                       >
@@ -3744,17 +3795,9 @@
                     {/if}
 
                     {#if tlsPingResult}
-                      <div
-                        class="card tls-ping-result"
-                        data-testid="tls-ping-result"
-                        style="margin-bottom: 12px; padding: 12px; background: var(--bg-card-subtle);"
-                      >
-                        <div
-                          style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;"
-                        >
-                          <span style="font-weight: 600; font-size: 13px;"
-                            >{$t('xray.tls_ping.title')}</span
-                          >
+                      <div class="card tls-ping-result" data-testid="tls-ping-result">
+                        <div class="tls-ping-head">
+                          <span class="tls-ping-title">{$t('xray.tls_ping.title')}</span>
                           {#if tlsPingResult.ok}
                             <span class="badge badge-tag badge-direct"
                               >OK ({tlsPingResult.handshake_ms}ms)</span
@@ -3765,47 +3808,36 @@
                         </div>
 
                         {#if !tlsPingResult.ok && tlsPingResult.error}
-                          <div
-                            class="text-danger"
-                            data-testid="tls-ping-failure"
-                            style="font-size: 12px; margin-bottom: 6px;"
-                          >
+                          <div class="text-danger tls-ping-failure" data-testid="tls-ping-failure">
                             {tlsPingResult.error}
                           </div>
                         {/if}
 
                         {#if tlsPingResult.ok}
-                          <div
-                            class="tls-grid"
-                            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; font-size: 12px;"
-                          >
+                          <div class="tls-grid">
                             <div>
                               <span class="text-muted">{$t('xray.tls_ping.version')}:</span>
-                              <span data-testid="tls-ping-version" style="font-weight: 500;"
+                              <span data-testid="tls-ping-version"
                                 >{tlsPingResult.tls_version || '—'}</span
                               >
                             </div>
                             <div>
                               <span class="text-muted">{$t('xray.tls_ping.alpn')}:</span>
-                              <span data-testid="tls-ping-alpn" style="font-weight: 500;"
-                                >{tlsPingResult.alpn || '—'}</span
-                              >
+                              <span data-testid="tls-ping-alpn">{tlsPingResult.alpn || '—'}</span>
                             </div>
                             <div>
                               <span class="text-muted">{$t('xray.tls_ping.cipher')}:</span>
-                              <span data-testid="tls-ping-cipher" style="font-weight: 500;"
+                              <span data-testid="tls-ping-cipher"
                                 >{tlsPingResult.cipher_suite || '—'}</span
                               >
                             </div>
                             <div>
                               <span class="text-muted">{$t('xray.tls_ping.peer_cn')}:</span>
-                              <span data-testid="tls-ping-cn" style="font-weight: 500;"
-                                >{tlsPingResult.peer_cn || '—'}</span
-                              >
+                              <span data-testid="tls-ping-cn">{tlsPingResult.peer_cn || '—'}</span>
                             </div>
                             <div>
                               <span class="text-muted">{$t('xray.tls_ping.expires')}:</span>
-                              <span data-testid="tls-ping-expires" style="font-weight: 500;"
+                              <span data-testid="tls-ping-expires"
                                 >{tlsPingResult.not_after || '—'}</span
                               >
                             </div>
@@ -3826,11 +3858,9 @@
                             </div>
                           </div>
                           {#if tlsPingResult.dns_names && tlsPingResult.dns_names.length > 0}
-                            <div style="margin-top: 8px; font-size: 12px;">
+                            <div class="tls-ping-dns">
                               <span class="text-muted">{$t('xray.tls_ping.dns_names')}:</span>
-                              <span style="word-break: break-all;"
-                                >{tlsPingResult.dns_names.join(', ')}</span
-                              >
+                              <span class="dns-value">{tlsPingResult.dns_names.join(', ')}</span>
                             </div>
                           {/if}
                         {/if}
@@ -3840,27 +3870,31 @@
                     {#if outboundForm.security === 'reality'}
                       <div class="form-row2">
                         <div class="form-col">
-                          <label class="form-label" for="outbound-pubkey">Reality Public Key</label>
+                          <label class="form-label" for="outbound-pubkey"
+                            >{$t('xray.reality_public_key')}</label
+                          >
                           <input
                             id="outbound-pubkey"
                             class="form-input"
                             bind:value={outboundForm.publicKey}
-                            placeholder="Public Key"
+                            placeholder="base64"
                           />
                         </div>
                         <div class="form-col">
-                          <label class="form-label" for="outbound-shortid">Reality Short ID</label>
+                          <label class="form-label" for="outbound-shortid"
+                            >{$t('xray.reality_short_id')}</label
+                          >
                           <input
                             id="outbound-shortid"
                             class="form-input"
                             bind:value={outboundForm.shortId}
-                            placeholder="Short ID"
+                            placeholder="0123abcd"
                           />
                         </div>
                       </div>
                       <div class="form-row">
                         <label class="form-label" for="outbound-fingerprint"
-                          >Reality Fingerprint</label
+                          >{$t('xray.reality_fingerprint')}</label
                         >
                         <select
                           id="outbound-fingerprint"
@@ -3896,7 +3930,7 @@
                     </div>
                     <div class="form-col">
                       {#if outboundForm.network === 'ws'}
-                        <label class="form-label" for="outbound-path">WebSocket Path</label>
+                        <label class="form-label" for="outbound-path">{$t('xray.ws_path')}</label>
                         <input
                           id="outbound-path"
                           class="form-input"
@@ -3904,12 +3938,14 @@
                           placeholder="/"
                         />
                       {:else}
-                        <label class="form-label" for="outbound-service">gRPC Service Name</label>
+                        <label class="form-label" for="outbound-service"
+                          >{$t('xray.grpc_service_name')}</label
+                        >
                         <input
                           id="outbound-service"
                           class="form-input"
                           bind:value={outboundForm.serviceName}
-                          placeholder="ServiceName"
+                          placeholder="grpc-service"
                         />
                       {/if}
                     </div>
@@ -3961,12 +3997,11 @@
                           id="outbound-ss-password"
                           class="form-input"
                           bind:value={outboundForm.shadowsocksPassword}
-                          placeholder="Password or Key"
+                          placeholder="base64"
                         />
                         {#if outboundForm.cipher.startsWith('2022-blake3')}
                           <button
-                            class="btn btn-secondary"
-                            style="padding: 0 8px; min-height: 36px; white-space: nowrap;"
+                            class="btn btn-secondary btn-inset"
                             onclick={() => {
                               outboundForm.shadowsocksPassword = generateShadowsocksKey(
                                 outboundForm.cipher
@@ -3974,9 +4009,22 @@
                               showToast('success', $t('xray.key_generated'));
                             }}
                             title={$t('xray.generate_key')}
+                            aria-label={$t('xray.generate_key')}
+                            data-testid="outbound-ss-generate-key"
                             type="button"
                           >
-                            {$t('xray.generate_key')}
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              aria-hidden="true"
+                            >
+                              <polyline points="23 4 23 10 17 10" />
+                              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                            </svg>
                           </button>
                         {/if}
                       </div>
@@ -3984,8 +4032,23 @@
                   </div>
                 {:else if outboundForm.protocol === 'wireguard'}
                   {#if outboundForm.isAwgObfuscated}
-                    <div class="alert alert-warning" style="margin-bottom: 12px; font-size: 13px;">
-                      {$t('xray.awg_warning')}
+                    <div class="alert alert-warning awg-obfuscation-alert">
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                        />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                      </svg>
+                      <span>{$t('xray.awg_warning')}</span>
                     </div>
                     {@const diff = analyzeAwgDiff(
                       outboundForm.rawAwgOptions || {
@@ -4038,7 +4101,7 @@
                         id="outbound-wg-secret-key"
                         class="form-input"
                         bind:value={outboundForm.wireguardSecretKey}
-                        placeholder="Private Key (base64)"
+                        placeholder="base64"
                       />
                     </div>
                     <div class="form-col">
@@ -4049,7 +4112,7 @@
                         id="outbound-wg-public-key"
                         class="form-input"
                         bind:value={outboundForm.wireguardPublicKey}
-                        placeholder="Peer Public Key (base64)"
+                        placeholder="base64"
                       />
                     </div>
                   </div>
@@ -4062,7 +4125,7 @@
                         id="outbound-wg-psk"
                         class="form-input"
                         bind:value={outboundForm.wireguardPsk}
-                        placeholder="Optional PSK (base64)"
+                        placeholder="base64"
                       />
                     </div>
                     <div class="form-col">
@@ -4077,10 +4140,7 @@
                       />
                     </div>
                   </div>
-                  <div
-                    class="form-row3"
-                    style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;"
-                  >
+                  <div class="form-row3">
                     <div class="form-col">
                       <label class="form-label" for="outbound-wg-keepalive"
                         >{$t('xray.keepalive')}</label
@@ -4105,10 +4165,7 @@
                         placeholder="1420"
                       />
                       {#if outboundForm.isAwgObfuscated}
-                        <div
-                          class="field-info-hint"
-                          style="font-size: 11px; color: var(--fg-secondary); margin-top: 2px;"
-                        >
+                        <div class="field-info-hint">
                           {$t('proxies.awg_mtu_hint')}
                         </div>
                       {/if}
@@ -4128,16 +4185,26 @@
                 {/if}
 
                 <!-- Sockopt Section -->
-                <details
-                  class="sockopt-details"
-                  style="margin-top: 14px; margin-bottom: 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm, 6px); padding: 8px 12px; background: var(--bg-card-subtle);"
-                >
-                  <summary
-                    style="cursor: pointer; font-weight: 500; font-size: 13px; color: var(--color-primary); user-select: none;"
-                  >
-                    ⚙️ {$t('xray.sockopt_title')}
+                <details class="sockopt-details">
+                  <summary class="sockopt-summary">
+                    <svg
+                      class="sockopt-summary-icon"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <circle cx="12" cy="12" r="3" />
+                      <path
+                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+                      />
+                    </svg>
+                    <span>{$t('xray.sockopt_title')}</span>
                   </summary>
-                  <div style="padding-top: 12px;">
+                  <div class="sockopt-body">
                     <div class="form-row2">
                       <div class="form-col">
                         <label class="form-label" for="sockopt-mark">{$t('xray.mark')}</label>
@@ -4148,10 +4215,7 @@
                           bind:value={outboundForm.sockoptMark}
                           placeholder="e.g. 255"
                         />
-                        <div
-                          class="form-hint"
-                          style="font-size: 11px; color: var(--color-text-muted); margin-top: 4px;"
-                        >
+                        <div class="form-hint">
                           {$t('xray.sockopt_hint')}
                         </div>
                       </div>
@@ -4168,20 +4232,20 @@
                         />
                       </div>
                     </div>
-                    <div
-                      class="form-row"
-                      style="display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px;"
-                    >
+                    <div class="sockopt-checks">
                       <label class="checkbox-container">
                         <input type="checkbox" bind:checked={outboundForm.sockoptTcpFastOpen} />
+                        <span class="checkmark"></span>
                         <span>{$t('xray.tcp_fast_open')}</span>
                       </label>
                       <label class="checkbox-container">
                         <input type="checkbox" bind:checked={outboundForm.sockoptTcpMptcp} />
+                        <span class="checkmark"></span>
                         <span>{$t('xray.tcp_mptcp')}</span>
                       </label>
                       <label class="checkbox-container">
                         <input type="checkbox" bind:checked={outboundForm.sockoptTcpNoDelay} />
+                        <span class="checkmark"></span>
                         <span>{$t('xray.tcp_nodelay')}</span>
                       </label>
                     </div>
@@ -4189,7 +4253,7 @@
                 </details>
 
                 <!-- Dialer Proxy Section -->
-                <div class="form-row" style="margin-top: 12px;">
+                <div class="form-row dialer-proxy-row">
                   <label class="form-label" for="outbound-dialer-proxy">
                     {$t('xray.dialer_proxy')}
                   </label>
@@ -4205,10 +4269,7 @@
                   </select>
 
                   {#if outboundForm.dialerProxy}
-                    <div
-                      class="dialer-chain-preview"
-                      style="margin-top: 8px; font-size: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;"
-                    >
+                    <div class="dialer-chain-preview">
                       <span class="text-muted">{$t('xray.dialer_chain')}:</span>
                       {#each dialerChainPreview.chain as node, idx}
                         <span
@@ -4220,7 +4281,7 @@
                           {node}
                         </span>
                         {#if idx < dialerChainPreview.chain.length - 1}
-                          <span style="color: var(--color-text-muted);">→</span>
+                          <span class="dialer-chain-sep" aria-hidden="true">→</span>
                         {/if}
                       {/each}
                       {#if dialerChainPreview.hasCycle}
@@ -4232,10 +4293,7 @@
                   {/if}
                 </div>
 
-                <div
-                  class="form-actions"
-                  style="position: sticky; bottom: -20px; background: var(--bg-card); padding: 12px 0 0 0; margin-top: 12px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; z-index: 10;"
-                >
+                <div class="form-actions form-actions--sticky">
                   <button
                     class="btn btn-secondary"
                     onclick={() => (showOutboundForm = false)}
@@ -5181,25 +5239,25 @@
     padding: 2px 7px;
     border-radius: 4px;
     font-size: 0.75rem;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-family-mono, monospace);
   }
 
   .badge-direct {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-    border: 1px solid rgba(34, 197, 94, 0.3);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+    color: var(--success);
+    border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
   }
 
   .badge-block {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   }
 
   .badge-proxy {
-    background: rgba(139, 92, 246, 0.15);
-    color: #a78bfa;
-    border: 1px solid rgba(139, 92, 246, 0.3);
+    background: color-mix(in srgb, var(--purple) 15%, transparent);
+    color: var(--purple);
+    border: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
   }
 
   .rule-actions {
@@ -5236,9 +5294,9 @@
   }
 
   .btn-rule-del:hover:not(:disabled) {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-    border-color: rgba(239, 68, 68, 0.3);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 30%, transparent);
   }
 
   .rule-details {
@@ -5360,10 +5418,10 @@
 
   .btn-primary {
     background: var(--accent);
-    color: #fff;
+    color: var(--btn-primary-text, #fff);
   }
   .btn-primary:hover {
-    background: var(--accent-hover, #0056b3);
+    background: var(--accent-hover);
   }
 
   .btn-secondary {
@@ -5495,7 +5553,7 @@
     border-bottom: 2px solid transparent;
     color: var(--fg-secondary);
     font-size: 0.75rem;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-family-mono, monospace);
     cursor: pointer;
     white-space: nowrap;
     transition:
@@ -5526,7 +5584,7 @@
   .preview-meta-size {
     font-size: 0.6875rem;
     color: var(--fg-muted, var(--fg-secondary));
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-family-mono, monospace);
   }
 
   .preview-tools-right {
@@ -5558,7 +5616,7 @@
     background: #1e1e1e;
     color: #d4d4d4;
     border: none;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-family-mono, monospace);
     font-size: var(--font-size-xs, 0.75rem);
     line-height: 1.5;
     overflow: auto;
@@ -5623,5 +5681,169 @@
     border: solid white;
     border-width: 0 2px 2px 0;
     transform: rotate(45deg);
+  }
+
+  /* Phase 111 — Xray outbound form (sockopt, dialerProxy, WG/SS, TLS ping) */
+  .btn-inset {
+    flex-shrink: 0;
+    min-height: 36px;
+    padding: 0 10px;
+  }
+
+  .btn-inset svg {
+    display: block;
+  }
+
+  .form-row3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+
+  .form-hint,
+  .field-info-hint {
+    font-size: var(--font-size-xs, 0.75rem);
+    color: var(--fg-secondary);
+    line-height: 1.4;
+  }
+
+  .form-hint {
+    margin-top: 4px;
+  }
+
+  .field-info-hint {
+    margin-top: 2px;
+  }
+
+  .text-muted {
+    color: var(--fg-secondary);
+  }
+
+  .text-danger {
+    color: var(--danger);
+  }
+
+  .awg-obfuscation-alert {
+    margin-bottom: 12px;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .awg-obfuscation-alert svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .error-icon {
+    color: var(--danger);
+    margin-bottom: 12px;
+  }
+
+  .error-icon svg {
+    display: block;
+    margin: 0 auto;
+  }
+
+  .sockopt-details {
+    margin-top: 14px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 6px);
+    padding: 8px 12px;
+    background: var(--bg-page);
+  }
+
+  .sockopt-summary {
+    cursor: pointer;
+    font-weight: 500;
+    font-size: var(--font-size-sm, 0.8125rem);
+    color: var(--accent);
+    user-select: none;
+  }
+
+  .sockopt-summary-icon {
+    vertical-align: -2px;
+    margin-right: 6px;
+  }
+
+  .sockopt-body {
+    padding-top: 12px;
+  }
+
+  .sockopt-checks {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .dialer-proxy-row {
+    margin-top: 12px;
+  }
+
+  .dialer-chain-preview {
+    margin-top: 8px;
+    font-size: var(--font-size-xs, 0.75rem);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .dialer-chain-sep {
+    color: var(--fg-secondary);
+  }
+
+  .form-actions--sticky {
+    position: sticky;
+    bottom: -20px;
+    background: var(--bg-card);
+    padding: 12px 0 0 0;
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
+    z-index: 10;
+  }
+
+  .tls-ping-result {
+    margin-bottom: 12px;
+    padding: 12px;
+    background: var(--bg-page);
+  }
+
+  .tls-ping-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .tls-ping-title {
+    font-weight: 600;
+    font-size: var(--font-size-sm, 0.8125rem);
+  }
+
+  .tls-ping-failure {
+    font-size: var(--font-size-xs, 0.75rem);
+    margin-bottom: 6px;
+  }
+
+  .tls-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+    font-size: var(--font-size-xs, 0.75rem);
+  }
+
+  .tls-grid span[data-testid] {
+    font-weight: 500;
+  }
+
+  .tls-ping-dns {
+    margin-top: 8px;
+    font-size: var(--font-size-xs, 0.75rem);
+  }
+
+  .tls-ping-dns .dns-value {
+    word-break: break-all;
   }
 </style>

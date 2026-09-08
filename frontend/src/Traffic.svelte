@@ -931,7 +931,7 @@
                   cy={240 - (hoveredPoint.down / chartData.maxVal) * 216}
                   r="4"
                   fill="var(--accent)"
-                  stroke="#fff"
+                  stroke="var(--bg-card)"
                   stroke-width="1.5"
                 />
               {/if}
@@ -941,7 +941,7 @@
                   cy={240 - (hoveredPoint.up / chartData.maxVal) * 216}
                   r="4"
                   fill="var(--success)"
-                  stroke="#fff"
+                  stroke="var(--bg-card)"
                   stroke-width="1.5"
                 />
               {/if}
@@ -1160,16 +1160,28 @@
             data-testid="xray-stats-error-alert"
             style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;"
           >
-            <span>⚠️</span>
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              style="flex-shrink: 0;"
+              aria-hidden="true"
+            >
+              <path
+                d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+              />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
             <span>{$t('traffic.xray.connection_lost')} ({xrayStatsError})</span>
           </div>
         {/if}
 
         {#if $capabilities?.xray?.grpc_ready && !xrayStatsError}
-          <div
-            class="xray-stats-tabs"
-            style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; flex-wrap: wrap;"
-          >
+          <div class="xray-stats-tabs">
             <button
               type="button"
               class="btn btn-sm"
@@ -1208,37 +1220,30 @@
             {$t('traffic.xray.unavailable')}
           </div>
         {:else if currentXrayList.length === 0}
-          <div
-            class="text-muted"
-            data-testid="xray-stats-empty"
-            style="padding: 16px 0; text-align: center;"
-          >
+          <div class="text-muted xray-stats-empty" data-testid="xray-stats-empty">
             {$t('traffic.xray.no_data')}
           </div>
         {:else}
           <div class="table-responsive" data-testid="xray-stats-table">
-            <table class="data-table" style="width: 100%; border-collapse: collapse;">
+            <table class="data-table">
               <thead>
-                <tr style="text-align: left; border-bottom: 1px solid var(--border);">
-                  <th style="padding: 8px;">
+                <tr>
+                  <th>
                     {activeXrayTab === 'outbounds'
                       ? $t('traffic.xray.outbound')
                       : activeXrayTab === 'inbounds'
                         ? $t('traffic.xray.inbound')
                         : $t('traffic.xray.user')}
                   </th>
-                  <th style="padding: 8px;">{$t('traffic.xray.downlink')}</th>
-                  <th style="padding: 8px;">{$t('traffic.xray.uplink')}</th>
-                  <th style="padding: 8px;">{$t('traffic.total') || 'Total'}</th>
+                  <th>{$t('traffic.xray.downlink')}</th>
+                  <th>{$t('traffic.xray.uplink')}</th>
+                  <th>{$t('traffic.total')}</th>
                 </tr>
               </thead>
               <tbody>
                 {#each currentXrayList as item (item.tag)}
-                  <tr
-                    style="border-bottom: 1px solid var(--border-subtle);"
-                    data-testid="xray-stats-row"
-                  >
-                    <td style="padding: 8px;">
+                  <tr data-testid="xray-stats-row">
+                    <td>
                       <span
                         class="badge badge-tag"
                         class:badge-proxy={activeXrayTab === 'outbounds'}
@@ -1249,13 +1254,13 @@
                         {item.tag}
                       </span>
                     </td>
-                    <td style="padding: 8px;" class="mono download-color">
+                    <td class="mono download-color">
                       ↓ {formatBytes(item.downlink)}
                     </td>
-                    <td style="padding: 8px;" class="mono upload-color">
+                    <td class="mono upload-color">
                       ↑ {formatBytes(item.uplink)}
                     </td>
-                    <td style="padding: 8px;" class="mono text-muted">
+                    <td class="mono text-muted">
                       {formatBytes(item.total)}
                     </td>
                   </tr>
@@ -1270,6 +1275,35 @@
 </div>
 
 <style>
+  /* Xray live-stats slices (Phase 111) */
+  .xray-stats-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+
+  .xray-stats-tabs .btn-sm {
+    padding: 4px 10px;
+    font-size: var(--font-size-xs, 0.75rem);
+    height: 28px;
+  }
+
+  .xray-stats-empty {
+    padding: 16px 0;
+    text-align: center;
+  }
+
+  .table-responsive {
+    overflow-x: auto;
+  }
+
+  .text-muted {
+    color: var(--fg-secondary);
+  }
+
   .badge-live-indicator {
     display: inline-flex;
     align-items: center;
@@ -1290,9 +1324,9 @@
   }
 
   .badge-live-indicator.is-live {
-    background: rgba(70, 209, 138, 0.12);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
     color: var(--success);
-    border-color: rgba(70, 209, 138, 0.25);
+    border-color: color-mix(in srgb, var(--success) 25%, transparent);
   }
 
   .badge-live-indicator.is-live .live-dot {
@@ -1302,19 +1336,19 @@
   }
 
   .badge-live-indicator.is-paused {
-    background: rgba(245, 166, 35, 0.12);
-    color: #f5a623;
-    border-color: rgba(245, 166, 35, 0.25);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 25%, transparent);
   }
 
   .badge-live-indicator.is-paused .live-dot {
-    background: #f5a623;
+    background: var(--warning);
   }
 
   .badge-live-indicator.is-offline {
-    background: rgba(100, 116, 139, 0.12);
+    background: color-mix(in srgb, var(--fg-dim) 12%, transparent);
     color: var(--fg-dim);
-    border-color: rgba(100, 116, 139, 0.2);
+    border-color: color-mix(in srgb, var(--fg-dim) 20%, transparent);
   }
 
   .badge-live-indicator.is-offline .live-dot {
@@ -1338,7 +1372,7 @@
   }
 
   .btn-reset:hover {
-    background: rgba(244, 112, 127, 0.12);
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
     border-color: var(--danger);
   }
 
@@ -1524,7 +1558,7 @@
   }
 
   .tf-pill.active {
-    color: #fff;
+    color: var(--btn-primary-text, #fff);
     background: var(--accent);
   }
 
@@ -1586,7 +1620,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-md, 8px);
     padding: 8px 12px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-md);
     z-index: 10;
     min-width: 150px;
   }
@@ -1779,7 +1813,7 @@
 
   .badge-sessions {
     font-size: 10px;
-    background: rgba(41, 194, 240, 0.12);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
     padding: 2px 6px;
     border-radius: 4px;
@@ -1795,7 +1829,7 @@
   .client-progress-track {
     width: 100%;
     height: 4px;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--surface-tint);
     border-radius: 2px;
     overflow: hidden;
   }

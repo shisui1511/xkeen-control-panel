@@ -252,7 +252,7 @@ test.describe('Phase 111: Xray Gaps and Enhancements', () => {
     await cipherSelect.selectOption('2022-blake3-aes-128-gcm');
 
     // Кнопка генерации ключа должна быть видна
-    const genKeyBtn = page.locator('button:has-text("Сгенерировать ключ")');
+    const genKeyBtn = page.locator('[data-testid="outbound-ss-generate-key"]');
     await expect(genKeyBtn).toBeVisible();
 
     // Клик по кнопке генерации ключа
