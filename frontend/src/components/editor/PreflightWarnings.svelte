@@ -4,6 +4,7 @@
   export interface PreflightWarning {
     code?: string;
     message?: string;
+    params?: Record<string, string | number>;
   }
 
   let {
@@ -17,7 +18,7 @@
   function getWarningText(w: PreflightWarning): string {
     if (w.message) return w.message;
     if (w.code) {
-      const translated = $t(w.code);
+      const translated = $t(w.code, w.params);
       if (translated && translated !== w.code) {
         return translated;
       }

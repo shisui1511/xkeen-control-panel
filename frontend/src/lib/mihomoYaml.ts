@@ -1288,6 +1288,12 @@ export function generateYAML(state: MihomoConfigState): string {
   return lines.join('\n').trimEnd();
 }
 
+/**
+ * Предупреждение парсера конфига. Строка — готовый текст (легаси), объект —
+ * код локализации + параметры интерполяции, резолвится через $t у потребителя.
+ */
+export type MihomoWarning = string | { code: string; params?: Record<string, string | number> };
+
 export interface ParsedMihomoConfig {
   proxies: Proxy[];
   groups: ProxyGroup[];
@@ -1306,7 +1312,7 @@ export interface ParsedMihomoConfig {
   listeners: Listener[];
   listenersRaw: string | null;
   listenersReadOnly: boolean;
-  warnings: string[];
+  warnings: MihomoWarning[];
 }
 
 export function parseListenersSection(rawBlock: string): {
@@ -1684,9 +1690,10 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           currentGroup.type = parsedType;
           if (parsedType === 'relay') {
             parsed.warnings = parsed.warnings || [];
-            parsed.warnings.push(
-              `Proxy group '${currentGroup.name || 'unnamed'}' uses deprecated type 'relay' which is obsolete in modern Mihomo.`
-            );
+            parsed.warnings.push({
+              code: 'mihomo.warnings.relay_deprecated',
+              params: { name: currentGroup.name || 'unnamed' }
+            });
           }
           continue;
         }

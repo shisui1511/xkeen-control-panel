@@ -1233,7 +1233,9 @@
       listenersReadOnly = res.listenersReadOnly || false;
 
       if (Array.isArray(res.warnings) && res.warnings.length > 0) {
-        saveWarnings = res.warnings.map((w: string) => ({ message: w }));
+        saveWarnings = res.warnings.map((w: any) =>
+          typeof w === 'string' ? { message: w } : { code: w.code, params: w.params }
+        );
       }
 
       lastParsedProviders = res.mihomoProviders || [];
@@ -2026,7 +2028,6 @@
           userRules: $tp('editor.smart_merge_applied_user_rules', stats.user_rules ?? 0)
         })
       );
-
     } catch (err: any) {
       if (err?.status === 401) return;
       console.error(err);

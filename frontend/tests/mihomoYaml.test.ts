@@ -1366,7 +1366,10 @@ describe('Mihomo relay deprecation and warnings', () => {
     expect(parsed.groups[0].type).toBe('relay');
     expect(parsed.warnings).toBeDefined();
     expect(parsed.warnings.length).toBeGreaterThan(0);
-    expect(parsed.warnings[0]).toContain("deprecated type 'relay'");
+    expect(parsed.warnings[0]).toEqual({
+      code: 'mihomo.warnings.relay_deprecated',
+      params: { name: 'RelayChain' }
+    });
   });
 
   test('generateYAML treats relay without special skip or emits url/interval like standard groups', () => {
