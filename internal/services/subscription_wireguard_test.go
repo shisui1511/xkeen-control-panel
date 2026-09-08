@@ -787,3 +787,45 @@ func TestParseSingBoxJSON_AWG(t *testing.T) {
 		t.Errorf("expected HeaderProtectionKey=secret-sb-key, got %s", awgOpt.HeaderProtectionKey)
 	}
 }
+
+func TestParseWireGuardLink_CaseInsensitiveParams(t *testing.T) {
+	keyA := "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+	keyB := "YmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmJmYmI="
+	keyC := "Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M="
+
+	// PascalCase parameters: PublicKey, PreSharedKey, Address, DNS, MTU, PersistentKeepalive
+	link := fmt.Sprintf("wireguard://%s@1.2.3.4:51820?PublicKey=%s&PreSharedKey=%s&Address=10.0.0.2/32&DNS=1.1.1.1&MTU=1420&PersistentKeepalive=25#PascalNode", keyA, keyB, keyC)
+
+	ob, reason := parseWireGuardLink(link)
+	if ob == nil || reason != "" {
+		t.Fatalf("unexpected failure parsing link with PascalCase params: %s", reason)
+	}
+	if ob.Tag != "PascalNode" {
+		t.Errorf("expected tag 'PascalNode', got %s", ob.Tag)
+	}
+	peers, ok := ob.Settings["peers"].([]interface{})
+	if !ok || len(peers) != 1 {
+		t.Fatalf("expected 1 peer in settings")
+	}
+	peerMap, ok := peers[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected peer map")
+	}
+	if peerMap["publicKey"] != keyB {
+		t.Errorf("expected publicKey %s, got %v", keyB, peerMap["publicKey"])
+	}
+	if peerMap["preSharedKey"] != keyC {
+		t.Errorf("expected preSharedKey %s, got %v", keyC, peerMap["preSharedKey"])
+	}
+	if peerMap["keepAlive"] != 25 {
+		t.Errorf("expected keepAlive 25, got %v", peerMap["keepAlive"])
+	}
+	if ob.Settings["mtu"] != 1420 {
+		t.Errorf("expected MTU 1420, got %v", ob.Settings["mtu"])
+	}
+	dnsList, ok := ob.Settings["dns"].([]string)
+	if !ok || len(dnsList) != 1 || dnsList[0] != "1.1.1.1" {
+		t.Errorf("unexpected DNS settings: %v", ob.Settings["dns"])
+	}
+}
+

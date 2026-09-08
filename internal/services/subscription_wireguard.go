@@ -223,13 +223,17 @@ func parseWireGuardLink(link string) (*Outbound, string) {
 	}
 
 	q := u.Query()
-	publicKey := q.Get("publickey")
-	if publicKey == "" {
-		publicKey = q.Get("publicKey")
+	normQuery := make(map[string]string, len(q))
+	for k, values := range q {
+		if len(values) > 0 {
+			cleanKey := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(k), "_", ""), "-", ""))
+			if _, exists := normQuery[cleanKey]; !exists {
+				normQuery[cleanKey] = strings.TrimSpace(values[0])
+			}
+		}
 	}
-	if publicKey == "" {
-		publicKey = q.Get("public_key")
-	}
+
+	publicKey := normQuery["publickey"]
 	if publicKey == "" {
 		return nil, "missing public key in query parameters"
 	}
@@ -237,15 +241,9 @@ func parseWireGuardLink(link string) (*Outbound, string) {
 		return nil, "invalid wireguard peer publicKey: expected 32-byte base64"
 	}
 
-	psk := q.Get("presharedkey")
+	psk := normQuery["presharedkey"]
 	if psk == "" {
-		psk = q.Get("preSharedKey")
-	}
-	if psk == "" {
-		psk = q.Get("pre_shared_key")
-	}
-	if psk == "" {
-		psk = q.Get("psk")
+		psk = normQuery["psk"]
 	}
 
 	peer := map[string]interface{}{
@@ -259,15 +257,17 @@ func parseWireGuardLink(link string) (*Outbound, string) {
 		peer["preSharedKey"] = psk
 	}
 
-	if kaStr := q.Get("keepalive"); kaStr != "" {
+	if kaStr := normQuery["keepalive"]; kaStr != "" {
+		if ka, err := strconv.Atoi(kaStr); err == nil && ka > 0 {
+			peer["keepAlive"] = ka
+		}
+	} else if kaStr := normQuery["persistentkeepalive"]; kaStr != "" {
 		if ka, err := strconv.Atoi(kaStr); err == nil && ka > 0 {
 			peer["keepAlive"] = ka
 		}
 	}
 
-	if allowedIPs := q.Get("allowed_ips"); allowedIPs != "" {
-		peer["allowedIPs"] = strings.Split(allowedIPs, ",")
-	} else if allowedIPs := q.Get("allowedIPs"); allowedIPs != "" {
+	if allowedIPs := normQuery["allowedips"]; allowedIPs != "" {
 		peer["allowedIPs"] = strings.Split(allowedIPs, ",")
 	}
 
@@ -277,9 +277,9 @@ func parseWireGuardLink(link string) (*Outbound, string) {
 	}
 
 	// Local addresses (ip / address)
-	localIP := q.Get("ip")
+	localIP := normQuery["address"]
 	if localIP == "" {
-		localIP = q.Get("address")
+		localIP = normQuery["ip"]
 	}
 	if localIP != "" {
 		var addrs []string
@@ -293,13 +293,13 @@ func parseWireGuardLink(link string) (*Outbound, string) {
 		}
 	}
 
-	if mtuStr := q.Get("mtu"); mtuStr != "" {
+	if mtuStr := normQuery["mtu"]; mtuStr != "" {
 		if mtu, err := strconv.Atoi(mtuStr); err == nil && mtu > 0 {
 			settings["mtu"] = mtu
 		}
 	}
 
-	if resStr := q.Get("reserved"); resStr != "" {
+	if resStr := normQuery["reserved"]; resStr != "" {
 		if res := decodeWireguardReserved(resStr); len(res) == 3 {
 			settings["reserved"] = res
 		}
@@ -315,7 +315,7 @@ func parseWireGuardLink(link string) (*Outbound, string) {
 		settings["awg"] = awg
 	}
 
-	if dnsStr := q.Get("dns"); dnsStr != "" {
+	if dnsStr := normQuery["dns"]; dnsStr != "" {
 		var dnsList []string
 		for _, d := range strings.Split(dnsStr, ",") {
 			if clean := strings.TrimSpace(d); clean != "" {
