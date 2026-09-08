@@ -995,7 +995,7 @@
         const parts = form.wireguardReserved
           .split(',')
           .map((s) => parseInt(s.trim(), 10))
-          .filter((n) => !isNaN(n));
+          .filter((n) => !isNaN(n) && n >= 0 && n <= 255);
         if (parts.length === 3) {
           settings.reserved = parts;
         }
@@ -1305,6 +1305,16 @@
       ) {
         showToast('error', $t('xray.fill_required_fields'));
         return;
+      }
+      if (outboundForm.wireguardReserved.trim()) {
+        const parts = outboundForm.wireguardReserved
+          .split(',')
+          .map((s) => parseInt(s.trim(), 10))
+          .filter((n) => !isNaN(n) && n >= 0 && n <= 255);
+        if (parts.length !== 3) {
+          showToast('error', $t('xray.reserved_invalid'));
+          return;
+        }
       }
     } else {
       if (!outboundForm.address.trim() || !outboundForm.port) {

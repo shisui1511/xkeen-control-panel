@@ -1169,6 +1169,7 @@
   "xray.keepalive": "Интервал KeepAlive (сек)",
   "xray.mtu": "MTU интерфейса",
   "xray.reserved": "Reserved байты (3 числа через запятую)",
+  "xray.reserved_invalid": "Неверный формат reserved: ожидается ровно 3 числа от 0 до 255",
   "xray.password_key": "Пароль / Ключ",
   "xray.generate_key": "Сгенерировать ключ",
   "xray.key_generated": "Ключ сгенерирован",

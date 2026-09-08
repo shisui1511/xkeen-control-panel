@@ -1170,6 +1170,7 @@
   "xray.keepalive": "KeepAlive Interval (sec)",
   "xray.mtu": "Interface MTU",
   "xray.reserved": "Reserved bytes (3 comma-separated numbers)",
+  "xray.reserved_invalid": "Invalid reserved format: expected exactly 3 numbers (0-255)",
   "xray.password_key": "Password / Key",
   "xray.generate_key": "Generate Key",
   "xray.key_generated": "Key generated",
