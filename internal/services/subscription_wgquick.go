@@ -47,6 +47,17 @@ func parseBoolValue(val string) (bool, error) {
 	}
 }
 
+// normalizeAWGInitPacket нормализует значение init packet (I1..I5).
+// Если значение содержит CPS-теги генератора (<c>, <b 0x...>, <r N>, <t>), сохраняет исходный регистр,
+// иначе приводит hex-строку к верхнему регистру.
+func normalizeAWGInitPacket(val string) string {
+	trimmed := strings.TrimSpace(val)
+	if strings.Contains(trimmed, "<") {
+		return trimmed
+	}
+	return strings.ToUpper(trimmed)
+}
+
 // parseAWGField парсит один ключ-значение параметра AmneziaWG в переданный AWGOptions.
 // Возвращает true, если ключ был распознан как известный параметр AWG 3.1.
 func parseAWGField(awg *AWGOptions, key, val string) bool {
@@ -105,19 +116,19 @@ func parseAWGField(awg *AWGOptions, key, val string) bool {
 		awg.H4 = val
 		return true
 	case "i1":
-		awg.I1 = strings.ToUpper(val)
+		awg.I1 = normalizeAWGInitPacket(val)
 		return true
 	case "i2":
-		awg.I2 = strings.ToUpper(val)
+		awg.I2 = normalizeAWGInitPacket(val)
 		return true
 	case "i3":
-		awg.I3 = strings.ToUpper(val)
+		awg.I3 = normalizeAWGInitPacket(val)
 		return true
 	case "i4":
-		awg.I4 = strings.ToUpper(val)
+		awg.I4 = normalizeAWGInitPacket(val)
 		return true
 	case "i5":
-		awg.I5 = strings.ToUpper(val)
+		awg.I5 = normalizeAWGInitPacket(val)
 		return true
 	case "version":
 		awg.Version = val

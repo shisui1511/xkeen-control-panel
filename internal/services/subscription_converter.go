@@ -549,19 +549,19 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 					sb.WriteString(fmt.Sprintf("      h4: %s\n", formatH(awg.H4)))
 				}
 				if awg.I1 != "" {
-					sb.WriteString(fmt.Sprintf("      i1: %s\n", yamlSafeScalar(strings.ToUpper(awg.I1))))
+					sb.WriteString(fmt.Sprintf("      i1: %s\n", yamlSafeScalar(normalizeAWGInitPacket(awg.I1))))
 				}
 				if awg.I2 != "" {
-					sb.WriteString(fmt.Sprintf("      i2: %s\n", yamlSafeScalar(strings.ToUpper(awg.I2))))
+					sb.WriteString(fmt.Sprintf("      i2: %s\n", yamlSafeScalar(normalizeAWGInitPacket(awg.I2))))
 				}
 				if awg.I3 != "" {
-					sb.WriteString(fmt.Sprintf("      i3: %s\n", yamlSafeScalar(strings.ToUpper(awg.I3))))
+					sb.WriteString(fmt.Sprintf("      i3: %s\n", yamlSafeScalar(normalizeAWGInitPacket(awg.I3))))
 				}
 				if awg.I4 != "" {
-					sb.WriteString(fmt.Sprintf("      i4: %s\n", yamlSafeScalar(strings.ToUpper(awg.I4))))
+					sb.WriteString(fmt.Sprintf("      i4: %s\n", yamlSafeScalar(normalizeAWGInitPacket(awg.I4))))
 				}
 				if awg.I5 != "" {
-					sb.WriteString(fmt.Sprintf("      i5: %s\n", yamlSafeScalar(strings.ToUpper(awg.I5))))
+					sb.WriteString(fmt.Sprintf("      i5: %s\n", yamlSafeScalar(normalizeAWGInitPacket(awg.I5))))
 				}
 				effectiveVer := awg.Version
 				if effectiveVer == "" && n.Dialect == "3.1" {

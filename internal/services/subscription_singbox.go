@@ -297,19 +297,19 @@ func convertSingBoxOutbound(sb *singBoxOutbound) *Outbound {
 			awg.H4 = sb.H4
 		}
 		if sb.I1 != "" {
-			awg.I1 = strings.ToUpper(sb.I1)
+			awg.I1 = normalizeAWGInitPacket(sb.I1)
 		}
 		if sb.I2 != "" {
-			awg.I2 = strings.ToUpper(sb.I2)
+			awg.I2 = normalizeAWGInitPacket(sb.I2)
 		}
 		if sb.I3 != "" {
-			awg.I3 = strings.ToUpper(sb.I3)
+			awg.I3 = normalizeAWGInitPacket(sb.I3)
 		}
 		if sb.I4 != "" {
-			awg.I4 = strings.ToUpper(sb.I4)
+			awg.I4 = normalizeAWGInitPacket(sb.I4)
 		}
 		if sb.I5 != "" {
-			awg.I5 = strings.ToUpper(sb.I5)
+			awg.I5 = normalizeAWGInitPacket(sb.I5)
 		}
 		if sb.Version != "" {
 			awg.Version = sb.Version

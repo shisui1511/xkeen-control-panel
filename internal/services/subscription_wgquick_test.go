@@ -402,3 +402,25 @@ AllowedIPs = 0.0.0.0/0
 		t.Errorf("expected auto-inferred version '3.1', got %s", nV3.AWG.Version)
 	}
 }
+
+func TestNormalizeAWGInitPacket(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"0a1b2c", "0A1B2C"},
+		{"0X01", "0X01"},
+		{"<b 0xf1a0><c>", "<b 0xf1a0><c>"},
+		{"<r 16><t>", "<r 16><t>"},
+		{" <b 0xa1><c> ", "<b 0xa1><c>"},
+		{"", ""},
+	}
+
+	for _, tc := range tests {
+		got := normalizeAWGInitPacket(tc.input)
+		if got != tc.expected {
+			t.Errorf("normalizeAWGInitPacket(%q) = %q, want %q", tc.input, got, tc.expected)
+		}
+	}
+}
+
