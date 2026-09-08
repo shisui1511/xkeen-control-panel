@@ -1079,7 +1079,10 @@ export function generateYAML(state: MihomoConfigState): string {
         lines.push(`    proxies:`);
         for (const p of g.proxies) lines.push(`      - ${yamlSafeString(p)}`);
       }
-      if (g.type !== 'select') {
+      // relay is just a proxy chain: name/type/proxies only. url/interval/lazy/
+      // hidden/expected-status/tolerance/max-failed-times are meaningless for it
+      // (the user already gets a deprecation warning).
+      if (g.type !== 'select' && g.type !== 'relay') {
         lines.push(`    url: ${g.url || 'https://www.gstatic.com/generate_204'}`);
         lines.push(`    interval: ${g.interval || 300}`);
         if (g.hidden === true) {

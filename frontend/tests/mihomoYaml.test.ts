@@ -1372,7 +1372,7 @@ describe('Mihomo relay deprecation and warnings', () => {
     });
   });
 
-  test('generateYAML treats relay without special skip or emits url/interval like standard groups', () => {
+  test('generateYAML emits only name/type/proxies for relay groups', () => {
     const state: any = {
       existingTproxyPort: 12345,
       existingRedirPort: 12346,
@@ -1394,7 +1394,10 @@ describe('Mihomo relay deprecation and warnings', () => {
     };
     const yaml = generateYAML(state);
     expect(yaml).toContain('type: relay');
-    expect(yaml).toContain('url: https://www.gstatic.com/generate_204');
+    expect(yaml).toContain('Node1');
+    expect(yaml).toContain('Node2');
+    expect(yaml).not.toContain('url:');
+    expect(yaml).not.toContain('interval:');
   });
 });
 
