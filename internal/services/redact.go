@@ -18,8 +18,20 @@ var (
 	// bearerRegex matches Authorization Bearer tokens
 	bearerRegex = regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9_\-\.+=/]+`)
 
-	// sensitiveKVRegex matches key-value pairs with sensitive fields in logs/configs
-	sensitiveKVRegex = regexp.MustCompile(`(?i)(["']?(?:privateKey|private_key|private-key|publicKey|public_key|public-key|shortId|short_id|short-id|psk|password|secret|uuid|header-protection-key|header_protection_key|headerProtectionKey)["']?\s*[:=]\s*["']?)[^"',\s}]+(["']?)`)
+	// sensitiveKeyAlt is the shared alternation of sensitive key names.
+	sensitiveKeyAlt = `(?:privateKey|private_key|private-key|publicKey|public_key|public-key|shortId|short_id|short-id|psk|pre-shared-key|pre_shared_key|preSharedKey|password|secret|uuid|header-protection-key|header_protection_key|headerProtectionKey)`
+
+	// sensitiveKVQuotedRegex matches quoted sensitive values ("...", '...'); the
+	// value may contain spaces and commas — capture up to the closing quote.
+	sensitiveKVQuotedRegex = regexp.MustCompile(`(?i)(["']?` + sensitiveKeyAlt + `["']?\s*[:=]\s*)(["'])[^"'\r\n]*(["'])`)
+
+	// sensitiveKVRegex matches unquoted sensitive values in logs/configs. The
+	// value class is widened to the end of the line (minus quotes and closing
+	// brace) so secrets containing spaces/commas are fully redacted rather than
+	// truncated at the first whitespace. The value must start with a
+	// non-space/non-quote char so a quoted value (already handled above) is not
+	// re-matched via the separating whitespace.
+	sensitiveKVRegex = regexp.MustCompile(`(?i)(["']?` + sensitiveKeyAlt + `["']?\s*[:=]\s*)[^\s"'\r\n}][^"'\r\n}]*`)
 
 	// lanIPRegex matches private IPv4 addresses
 	lan192Regex = regexp.MustCompile(`\b192\.168\.(\d{1,3})\.(\d{1,3})\b`)
@@ -58,8 +70,9 @@ func RedactSensitiveText(s string) string {
 	// 3. Redact Bearer tokens
 	cleaned = bearerRegex.ReplaceAllString(cleaned, "${1}*REDACTED*")
 
-	// 4. Redact Key-Value pairs
-	cleaned = sensitiveKVRegex.ReplaceAllString(cleaned, "${1}*REDACTED*${2}")
+	// 4. Redact Key-Value pairs (quoted values first, then unquoted-to-EOL)
+	cleaned = sensitiveKVQuotedRegex.ReplaceAllString(cleaned, "${1}${2}*REDACTED*${3}")
+	cleaned = sensitiveKVRegex.ReplaceAllString(cleaned, "${1}*REDACTED*")
 
 	// 5. Mask LAN IPs
 	cleaned = lan192Regex.ReplaceAllString(cleaned, "192.168.***.***")

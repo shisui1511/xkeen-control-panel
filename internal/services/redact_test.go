@@ -70,6 +70,18 @@ func TestRedactSensitiveText(t *testing.T) {
 			contains: []string{`"header-protection-key": "*REDACTED*"`, `"header_protection_key": "*REDACTED*"`},
 			omits:    []string{"secret-hpk-12345678", "secret-hpk-87654321"},
 		},
+		{
+			name:     "quoted secret with spaces is fully redacted",
+			input:    `header-protection-key: "my secret pass phrase"`,
+			contains: []string{`header-protection-key: "*REDACTED*"`},
+			omits:    []string{"my secret pass phrase", "secret pass phrase", "pass phrase"},
+		},
+		{
+			name:     "unquoted value with commas is fully redacted",
+			input:    "2026/01/01 log line password=alpha, bravo, charlie",
+			contains: []string{"password=*REDACTED*"},
+			omits:    []string{"alpha, bravo, charlie", "bravo", "charlie"},
+		},
 	}
 
 	for _, tt := range tests {
