@@ -4224,10 +4224,7 @@
                         {/if}
                       {/each}
                       {#if dialerChainPreview.hasCycle}
-                        <span
-                          class="badge badge-block"
-                          style="background: var(--color-danger, #ef4444); color: white;"
-                        >
+                        <span class="badge badge-danger">
                           {$t('xray.dialer_cycle_detected')}
                         </span>
                       {/if}
