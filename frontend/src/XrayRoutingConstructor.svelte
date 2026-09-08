@@ -1358,26 +1358,20 @@
 
     const outboundObj = buildOutboundFromForm(outboundForm);
 
+    const tagExists =
+      customOutbounds.some((o, idx) => idx !== editingOutboundIndex && o.tag === outboundObj.tag) ||
+      subscriptionOutbounds.some((o) => o.tag === outboundObj.tag) ||
+      ['direct', 'block', 'dns-out'].includes(outboundObj.tag);
+    if (tagExists) {
+      showToast('error', $t('xray.outbound_tag_exists'));
+      return;
+    }
+
     if (editingOutboundIndex !== null) {
-      const exists =
-        customOutbounds.some(
-          (o, idx) => idx !== editingOutboundIndex && o.tag === outboundObj.tag
-        ) || ['direct', 'block', 'dns-out'].includes(outboundObj.tag);
-      if (exists) {
-        showToast('error', $t('xray.outbound_tag_exists'));
-        return;
-      }
       const updated = [...customOutbounds];
       updated[editingOutboundIndex] = outboundObj;
       customOutbounds = updated;
     } else {
-      const exists =
-        customOutbounds.some((o) => o.tag === outboundObj.tag) ||
-        ['direct', 'block', 'dns-out'].includes(outboundObj.tag);
-      if (exists) {
-        showToast('error', $t('xray.outbound_tag_exists'));
-        return;
-      }
       customOutbounds = [...customOutbounds, outboundObj];
     }
 
