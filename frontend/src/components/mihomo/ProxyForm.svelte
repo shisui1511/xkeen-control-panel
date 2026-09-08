@@ -856,7 +856,7 @@
 
   <div class="form-actions">
     <button class="btn btn-secondary" onclick={onCancel}>{$t('app.cancel')}</button>
-    <button class="btn btn-primary" onclick={onSave} disabled={!awgConstraintsOk}
+    <button class="btn btn-primary" onclick={onSave}
       >{isEdit ? $t('app.save') : $t('app.create')}</button
     >
   </div>
