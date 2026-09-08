@@ -586,4 +586,123 @@ proxy-groups:
     await expect(pingVal).toContainText('—');
     await expect(nodeRow.locator('.sub-node-status-icon.default-ok')).not.toBeVisible();
   });
+
+  test('renders WireGuard and AmneziaWG dialect chips and compatibility badges (AWGIN-02, AWGIN-05, AWGIN-06)', async ({
+    page
+  }) => {
+    await page.route('**/api/proxy-providers', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'sub_wg_awg',
+            name: 'WireGuard & AWG Provider',
+            url: 'https://example.com/wg.yaml',
+            enable_mihomo: true,
+            enable_xray: true,
+            enabled: true,
+            mihomo_provider: {
+              name: 'wg-awg-provider',
+              vehicle_type: 'HTTP',
+              updated_at: new Date().toISOString(),
+              node_count: 4
+            }
+          }
+        ])
+      });
+    });
+
+    const mockNodes = [
+      {
+        tag: 'node-plain-wg',
+        name: 'Plain WireGuard Node',
+        protocol: 'wireguard',
+        dialect: 'plain',
+        alive: true,
+        tested: true,
+        delay_ms: 45
+      },
+      {
+        tag: 'node-awg-classic',
+        name: 'AmneziaWG 1.0 Classic Node',
+        protocol: 'wireguard',
+        dialect: 'classic',
+        awg: { jc: 4, h1: 1000 },
+        alive: true,
+        tested: true,
+        delay_ms: 50
+      },
+      {
+        tag: 'node-awg-20',
+        name: 'AmneziaWG 2.0 Node',
+        protocol: 'wireguard',
+        dialect: '2.0',
+        awg: { jc: 4, s3: 15 },
+        alive: true,
+        tested: true,
+        delay_ms: 55
+      },
+      {
+        tag: 'node-awg-31',
+        name: 'AmneziaWG 3.1 Node',
+        protocol: 'wireguard',
+        dialect: '3.1',
+        awg: { jc: 4, version: '3.1', header_protection_key: 'test' },
+        alive: true,
+        tested: true,
+        delay_ms: 60
+      }
+    ];
+
+    await page.route('**/api/proxy-providers/*/nodes', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockNodes)
+      });
+    });
+
+    await page.route('**/api/subscriptions/nodes*', async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(mockNodes)
+      });
+    });
+
+    await page.goto('/#/subscriptions');
+    const card = page.locator('#sub-card-sub_wg_awg');
+    await expect(card).toBeVisible();
+
+    const collapseToggle = card.locator('.collapse-toggle');
+    await collapseToggle.click();
+
+    // Verify all 4 nodes are displayed
+    const nodeRows = card.locator('.sub-node-row');
+    await expect(nodeRows).toHaveCount(4);
+
+    // Node 1: Plain WireGuard
+    const row1 = nodeRows.nth(0);
+    await expect(row1.locator('.sub-node-chip-dialect')).toHaveText('WireGuard');
+    await expect(row1.locator('.sub-node-chip-compat')).toHaveCount(0);
+
+    // Node 2: AWG 1.0 Classic
+    const row2 = nodeRows.nth(1);
+    await expect(row2.locator('.sub-node-chip-dialect')).toHaveText('AmneziaWG 1.0');
+    await expect(row2.locator('.sub-node-chip-compat.success')).toHaveText('Mihomo ✓');
+    await expect(row2.locator('.sub-node-chip-compat.warning')).toHaveText('Xray ⚠');
+
+    // Node 3: AWG 2.0
+    const row3 = nodeRows.nth(2);
+    await expect(row3.locator('.sub-node-chip-dialect')).toHaveText('AmneziaWG 2.0');
+    await expect(row3.locator('.sub-node-chip-compat.success')).toHaveText('Mihomo ✓');
+    await expect(row3.locator('.sub-node-chip-compat.warning')).toHaveText('Xray ⚠');
+
+    // Node 4: AWG 3.1
+    const row4 = nodeRows.nth(3);
+    await expect(row4.locator('.sub-node-chip-dialect')).toHaveText('AmneziaWG 3.1');
+    await expect(row4.locator('.sub-node-chip-compat.success')).toHaveText('Mihomo ✓');
+    await expect(row4.locator('.sub-node-chip-compat.warning')).toHaveText('Xray ⚠');
+  });
 });

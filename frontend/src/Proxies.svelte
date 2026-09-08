@@ -1408,7 +1408,8 @@
           tested: boolean;
           delay_ms: number;
         }[] = await res.json();
-        subNodes[subId] = data.map((n) => ({
+        subNodes[subId] = (data as any[]).map((n) => ({
+          ...n,
           tag: n.tag,
           name: n.name,
           active: false,
