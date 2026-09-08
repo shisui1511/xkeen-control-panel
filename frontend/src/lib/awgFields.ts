@@ -443,9 +443,13 @@ export function detectWireGuardDialect(node: {
   const awg = node.awg;
   if (!awg) return 'plain';
 
+  const rawVer =
+    awg.version !== undefined && awg.version !== null ? String(awg.version).trim() : '';
+  const isV3 = rawVer.startsWith('3') || rawVer.toLowerCase().startsWith('v3');
+
   // 3.1
   if (
-    awg.version ||
+    isV3 ||
     awg.header_protection_key ||
     awg.headerProtectionKey ||
     awg.i1 ||
@@ -475,7 +479,8 @@ export function detectWireGuardDialect(node: {
   }
 
   // 2.0
-  if (awg.s3 !== undefined || awg.s4 !== undefined) {
+  const isV2 = rawVer.startsWith('2') || rawVer.toLowerCase().startsWith('v2');
+  if (isV2 || awg.s3 !== undefined || awg.s4 !== undefined) {
     return '2.0';
   }
 

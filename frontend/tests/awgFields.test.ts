@@ -149,6 +149,8 @@ describe('AWG Fields Registry', () => {
 
     // 2.0
     expect(detectWireGuardDialect({ awg: { jc: 4, s3: 20 } })).toBe('2.0');
+    // version: '2' не должен ошибочно распознаваться как 3.1 (IN-02)
+    expect(detectWireGuardDialect({ awg: { jc: 4, version: '2' } })).toBe('2.0');
 
     // 3.1
     expect(detectWireGuardDialect({ awg: { jc: 4, s3: 20, version: '3.1' } })).toBe('3.1');
