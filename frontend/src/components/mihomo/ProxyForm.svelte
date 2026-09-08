@@ -151,6 +151,13 @@
     return false;
   });
 
+  const hasUnsupportedCToken = $derived(
+    np.awgEnabled &&
+      [np.awgI1, np.awgI2, np.awgI3, np.awgI4, np.awgI5].some(
+        (i) => typeof i === 'string' && /<c>/i.test(i)
+      )
+  );
+
   const awgConstraintsOk = $derived(
     !np.awgEnabled ||
       (!isJInvalid &&
@@ -160,7 +167,8 @@
         !isH3Invalid &&
         !isH4Invalid &&
         !isSHeaderProtectionInvalid &&
-        !isJunkMtuInvalid)
+        !isJunkMtuInvalid &&
+        !hasUnsupportedCToken)
   );
 
   let selectedPreset = $state<string>('');
@@ -498,10 +506,11 @@
               <input
                 id="proxy-awg-i1"
                 class="form-input"
+                class:input-warning={/<c>/i.test(np.awgI1 || '')}
                 type="text"
                 bind:value={np.awgI1}
                 disabled={!isAwg31Allowed}
-                placeholder="0x01 or <b 0xf1a0><c>"
+                placeholder="0x01 or <b 0xf1a0><t>"
               />
             </div>
             <div class="form-col">
@@ -509,6 +518,7 @@
               <input
                 id="proxy-awg-i2"
                 class="form-input"
+                class:input-warning={/<c>/i.test(np.awgI2 || '')}
                 type="text"
                 bind:value={np.awgI2}
                 disabled={!isAwg31Allowed}
@@ -520,6 +530,7 @@
               <input
                 id="proxy-awg-i3"
                 class="form-input"
+                class:input-warning={/<c>/i.test(np.awgI3 || '')}
                 type="text"
                 bind:value={np.awgI3}
                 disabled={!isAwg31Allowed}
@@ -531,6 +542,7 @@
               <input
                 id="proxy-awg-i4"
                 class="form-input"
+                class:input-warning={/<c>/i.test(np.awgI4 || '')}
                 type="text"
                 bind:value={np.awgI4}
                 disabled={!isAwg31Allowed}
@@ -542,6 +554,7 @@
               <input
                 id="proxy-awg-i5"
                 class="form-input"
+                class:input-warning={/<c>/i.test(np.awgI5 || '')}
                 type="text"
                 bind:value={np.awgI5}
                 disabled={!isAwg31Allowed}
@@ -549,6 +562,11 @@
               />
             </div>
           </div>
+          {#if hasUnsupportedCToken}
+            <div class="field-error-hint" style="margin-top: 4px;">
+              {$t('preflight.awg_i_token')}
+            </div>
+          {/if}
         </div>
 
         <div class="form-row2">
