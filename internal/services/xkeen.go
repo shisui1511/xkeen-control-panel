@@ -322,7 +322,7 @@ func (s *XKeenService) runWithTimeoutArgs(timeout time.Duration, args ...string)
 		}
 		if isLifecycleCmd {
 			log.Printf("xkeen: bypassing service lifecycle command %v on localhost (Rule #3)", args)
-			return fmt.Sprintf("Bypassed service command '%s' on localhost (Rule #3)", strings.Join(args, " ")), nil
+			return fmt.Sprintf("Bypassed service command %q on localhost (Rule #3)", strings.Join(args, " ")), nil
 		}
 	}
 
