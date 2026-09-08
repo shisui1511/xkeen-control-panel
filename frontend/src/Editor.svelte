@@ -2728,7 +2728,7 @@
     text-align: left;
     transition: all 0.2s;
     width: 100%;
-    color: var(--fg-primary);
+    color: var(--fg-terminal);
   }
 
   .template-item:hover {

@@ -1436,7 +1436,7 @@
   }
 
   .copy-row-btn:hover {
-    color: var(--fg-primary);
+    color: var(--fg-terminal);
     background: var(--surface-tint);
   }
 
@@ -1479,7 +1479,7 @@
     align-items: center;
     gap: 10px;
     font-size: 12px;
-    color: var(--fg-primary);
+    color: var(--fg-terminal);
     z-index: 10;
     animation: fadeIn 0.2s ease;
   }

@@ -481,7 +481,7 @@
     font-family: var(--font-family-mono);
     font-size: 12.5px;
     line-height: 1.6;
-    color: var(--fg-primary);
+    color: var(--fg-terminal);
     min-height: 440px;
     overflow: auto;
     white-space: pre-wrap;
