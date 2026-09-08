@@ -2716,7 +2716,7 @@
                       <div class="zkeen-group-title">
                         <span class="zkeen-group-name">{g.name}</span>
                         <div style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center;">
-                          {#if g.type === 'relay'}
+                          {#if (g.type as string) === 'relay'}
                             <span
                               class="item-badge badge-warning"
                               style="text-transform: none;"
@@ -2784,7 +2784,7 @@
               {#each groups as g (g.id)}
                 <div class="item-row">
                   <span class="item-badge type-group">{g.type}</span>
-                  {#if g.type === 'relay'}
+                  {#if (g.type as string) === 'relay'}
                     <span
                       class="item-badge badge-warning"
                       style="text-transform: none;"

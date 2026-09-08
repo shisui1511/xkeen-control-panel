@@ -201,7 +201,7 @@ export function generateRandomAwgParams(kernelVersion?: string | null): Record<s
   const jmin = Math.floor(Math.random() * 31) + 20; // 20..50
   const jmax = jmin + Math.floor(Math.random() * 51) + 20; // jmin + 20..70
 
-  let s1 = Math.floor(Math.random() * 31) + (supports31 ? 15 : 10); // 10..40 (15..45 if 3.1)
+  const s1 = Math.floor(Math.random() * 31) + (supports31 ? 15 : 10); // 10..40 (15..45 if 3.1)
   let s2 = Math.floor(Math.random() * 51) + 30; // 30..80
 
   // Гарантия: S1 + 56 != S2
