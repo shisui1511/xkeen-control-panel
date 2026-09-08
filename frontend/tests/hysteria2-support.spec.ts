@@ -79,7 +79,9 @@ test.describe('Mihomo Generator Hysteria 2 Support and Validation', () => {
     page
   }) => {
     // 1. Open Add proxy form
-    const addProxyBtn = page.locator('button:has-text("Добавить прокси")');
+    const addProxyBtn = page
+      .locator('button:has-text("Добавить вручную"), button:has-text("Добавить прокси")')
+      .first();
     await expect(addProxyBtn).toBeVisible();
     await addProxyBtn.click();
 

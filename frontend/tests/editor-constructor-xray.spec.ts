@@ -458,7 +458,7 @@ test.describe('Xray Constructor integration test suite', () => {
     await outboundsTab.click();
 
     // Нажать добавление outbound
-    const addBtn = page.locator('button.add-btn');
+    const addBtn = page.locator('button.add-btn:has-text("Добавить вручную")').first();
     await expect(addBtn).toBeVisible({ timeout: 3000 });
     await addBtn.click();
 
@@ -505,7 +505,7 @@ test.describe('Xray Constructor integration test suite', () => {
       .first();
     await outboundsTab.click();
 
-    await page.locator('button.add-btn').click();
+    await page.locator('button.add-btn:has-text("Добавить вручную")').first().click();
     await page.locator('#outbound-protocol').selectOption('vless');
     await page.locator('#outbound-security').selectOption('reality');
     await page.locator('#outbound-address').fill('unreachable.host');
@@ -531,7 +531,7 @@ test.describe('Xray Constructor integration test suite', () => {
       .first();
     await outboundsTab.click();
 
-    await page.locator('button.add-btn').click();
+    await page.locator('button.add-btn:has-text("Добавить вручную")').first().click();
     await page.locator('#outbound-protocol').selectOption('vless');
     await page.locator('#outbound-security').selectOption('reality');
 

@@ -199,7 +199,12 @@ test.describe('Editor & Constructor integration test suite', () => {
     await mihomoKernelBtn.click();
 
     // Добавляем прокси через интерфейс генератора
-    await page.locator('button.add-btn:has-text("Добавить прокси")').click();
+    await page
+      .locator(
+        'button.add-btn:has-text("Добавить вручную"), button.add-btn:has-text("Добавить прокси")'
+      )
+      .first()
+      .click();
     await page.locator('input.form-input[placeholder="my-proxy"]').fill('test-reality-proxy');
     await page.locator('input.form-input[placeholder="example.com"]').fill('reality-server.com');
     await page
