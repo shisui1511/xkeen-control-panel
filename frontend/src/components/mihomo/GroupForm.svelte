@@ -36,8 +36,19 @@
   <div class="form-row">
     <label class="form-label" for="group-type">{$t('groups.type')}</label>
     <select id="group-type" class="form-select" bind:value={ng.type}>
+      {#if ng.type === 'relay'}
+        <option value="relay" disabled>relay ({$t('app.deprecated')})</option>
+      {/if}
       {#each GROUP_TYPES as t}<option value={t}>{t}</option>{/each}
     </select>
+    {#if ng.type === 'relay'}
+      <div
+        class="alert alert-warning"
+        style="margin-top: 6px; padding: 6px 10px; font-size: 12px; border-radius: var(--radius-xs);"
+      >
+        {$t('mihomo.warnings.relay_deprecated', { name: ng.name || 'group' })}
+      </div>
+    {/if}
   </div>
   <div class="form-row">
     <label class="form-label" for="group-name">{$t('groups.group_name')}</label>

@@ -281,6 +281,7 @@
   let mihomoProviders: any[] = $state([]);
   let lastParsedProviders: any[] = $state([]);
   let saveWarnings = $state<PreflightWarning[]>([]);
+  let warningsTitle = $state<string | undefined>(undefined);
 
   function mergeMihomoProviders(dbSubs: any[], parsedProviders: any[]) {
     const dbMapByUrl = new Map<string, any>();
@@ -1300,6 +1301,7 @@
     // Reset parse warnings unconditionally on every parse so a stale warning
     // (e.g. relay) does not persist after loading a clean config.
     saveWarnings = [];
+    warningsTitle = undefined;
     if (!text || text.trim() === '') {
       applyPreset('zkeen-selective', true);
       lastParsedProviders = [];
@@ -1333,6 +1335,9 @@
             typeof w === 'string' ? { message: w } : { code: w.code, params: w.params }
           )
         : [];
+      if (saveWarnings.length > 0) {
+        warningsTitle = $t('editor.config_warnings_title');
+      }
 
       lastParsedProviders = res.mihomoProviders || [];
       mihomoProviders = mergeMihomoProviders(
@@ -2036,6 +2041,7 @@
       const yamlContent = generateYAML();
       validationError = '';
       saveWarnings = [];
+      warningsTitle = undefined;
       const listenerWarnings = collectListenerPortWarnings(currentYAML);
 
       let mergeRes: { content: string; stats?: any; warnings?: PreflightWarning[] };
@@ -2101,6 +2107,9 @@
           : [];
       const backendWarnings = saveResWarnings.length > 0 ? saveResWarnings : mergeWarnings;
       saveWarnings = [...listenerWarnings, ...backendWarnings];
+      if (saveWarnings.length > 0) {
+        warningsTitle = $t('editor.save_warnings_title');
+      }
 
       let restartUrl = '/api/service/control?action=restart';
       const activeKernel = $capabilities?.active_kernel;
@@ -2430,8 +2439,10 @@
 
         <PreflightWarnings
           warnings={saveWarnings}
+          title={warningsTitle}
           onDismiss={() => {
             saveWarnings = [];
+            warningsTitle = undefined;
           }}
         />
 
@@ -2704,7 +2715,15 @@
                       </div>
                       <div class="zkeen-group-title">
                         <span class="zkeen-group-name">{g.name}</span>
-                        <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                        <div style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center;">
+                          {#if g.type === 'relay'}
+                            <span
+                              class="item-badge badge-warning"
+                              style="text-transform: none;"
+                              title={$t('mihomo.warnings.relay_deprecated', { name: g.name })}
+                              >relay · {$t('app.deprecated')}</span
+                            >
+                          {/if}
                           {#if g.excludeFilter}
                             <span class="zkeen-exclude-badge">exclude: {g.excludeFilter}</span>
                           {/if}
@@ -2765,6 +2784,14 @@
               {#each groups as g (g.id)}
                 <div class="item-row">
                   <span class="item-badge type-group">{g.type}</span>
+                  {#if g.type === 'relay'}
+                    <span
+                      class="item-badge badge-warning"
+                      style="text-transform: none;"
+                      title={$t('mihomo.warnings.relay_deprecated', { name: g.name })}
+                      >{$t('app.deprecated')}</span
+                    >
+                  {/if}
                   <span class="item-name">{g.name}</span>
                   {#if g.includeAll}
                     <span
@@ -4341,6 +4368,10 @@
   .type-group {
     background: rgba(139, 92, 246, 0.15);
     color: #a78bfa;
+  }
+  .badge-warning {
+    background: color-mix(in srgb, var(--warning) 20%, transparent);
+    color: var(--warning);
   }
   .type-rule {
     background: rgba(255, 255, 255, 0.05);
