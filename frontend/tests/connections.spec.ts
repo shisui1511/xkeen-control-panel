@@ -263,7 +263,7 @@ test.describe('Connections page test suite', () => {
     await expect(page.locator('.live-badge.running')).toBeVisible();
 
     // Click pause button in actions
-    const pauseBtn = page.locator('.ph-actions button.btn-secondary');
+    const pauseBtn = page.locator('.ph-actions button.btn-secondary').last();
     await pauseBtn.click();
 
     // Paused badge visible
