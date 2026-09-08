@@ -684,6 +684,7 @@ func ParseClashProxyNode(blockStr string) SubscriptionNode {
 			node.AWG = awgOpts
 		}
 		node.Dialect = string(DetectWireGuardDialect(&node))
+		InferAWGVersion(&node)
 	}
 
 	return node

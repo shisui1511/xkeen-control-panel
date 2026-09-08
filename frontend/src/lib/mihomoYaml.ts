@@ -55,6 +55,14 @@ export interface Proxy {
   awgRandomTrailers?: boolean;
   awgDisableCookies?: boolean;
   awgRekeyAfterTime?: number;
+  awgJ1?: number;
+  awgJ2?: number;
+  awgJ3?: number;
+  awgItime?: number;
+  awgRekeyTimeout?: number;
+  awgRejectAfterTime?: number;
+  awgKeepaliveTimeout?: number;
+  awgMaxHandshakeAttempts?: number;
 }
 
 export interface ProxyGroup {
@@ -1008,6 +1016,11 @@ export function generateYAML(state: MihomoConfigState): string {
           lines.push(`      s2: ${p.awgS2 ?? 40}`);
           if (p.awgS3 !== undefined && p.awgS3 !== null) lines.push(`      s3: ${p.awgS3}`);
           if (p.awgS4 !== undefined && p.awgS4 !== null) lines.push(`      s4: ${p.awgS4}`);
+          if (p.awgJ1 !== undefined && p.awgJ1 !== null) lines.push(`      j1: ${p.awgJ1}`);
+          if (p.awgJ2 !== undefined && p.awgJ2 !== null) lines.push(`      j2: ${p.awgJ2}`);
+          if (p.awgJ3 !== undefined && p.awgJ3 !== null) lines.push(`      j3: ${p.awgJ3}`);
+          if (p.awgItime !== undefined && p.awgItime !== null)
+            lines.push(`      itime: ${p.awgItime}`);
 
           const formatH = (val: number | string | undefined, defVal: number) => {
             const v = val ?? defVal;
@@ -1033,7 +1046,11 @@ export function generateYAML(state: MihomoConfigState): string {
               (p.awgContentPaddingAddition !== undefined && p.awgContentPaddingAddition !== null) ||
               p.awgRandomTrailers === true ||
               p.awgDisableCookies === true ||
-              (p.awgRekeyAfterTime !== undefined && p.awgRekeyAfterTime !== null)
+              (p.awgRekeyAfterTime !== undefined && p.awgRekeyAfterTime !== null) ||
+              (p.awgRekeyTimeout !== undefined && p.awgRekeyTimeout !== null) ||
+              (p.awgRejectAfterTime !== undefined && p.awgRejectAfterTime !== null) ||
+              (p.awgKeepaliveTimeout !== undefined && p.awgKeepaliveTimeout !== null) ||
+              (p.awgMaxHandshakeAttempts !== undefined && p.awgMaxHandshakeAttempts !== null)
             );
             const effectiveVersion = p.awgVersion || (has31Fields ? '3.1' : undefined);
             if (effectiveVersion) lines.push(`      version: ${yamlSafeString(effectiveVersion)}`);
@@ -1055,6 +1072,18 @@ export function generateYAML(state: MihomoConfigState): string {
             if (p.awgDisableCookies === true) lines.push(`      disable-cookies: true`);
             if (p.awgRekeyAfterTime !== undefined && p.awgRekeyAfterTime !== null) {
               lines.push(`      rekey-after-time: ${p.awgRekeyAfterTime}`);
+            }
+            if (p.awgRekeyTimeout !== undefined && p.awgRekeyTimeout !== null) {
+              lines.push(`      rekey-timeout: ${p.awgRekeyTimeout}`);
+            }
+            if (p.awgRejectAfterTime !== undefined && p.awgRejectAfterTime !== null) {
+              lines.push(`      reject-after-time: ${p.awgRejectAfterTime}`);
+            }
+            if (p.awgKeepaliveTimeout !== undefined && p.awgKeepaliveTimeout !== null) {
+              lines.push(`      keepalive-timeout: ${p.awgKeepaliveTimeout}`);
+            }
+            if (p.awgMaxHandshakeAttempts !== undefined && p.awgMaxHandshakeAttempts !== null) {
+              lines.push(`      max-handshake-attempts: ${p.awgMaxHandshakeAttempts}`);
             }
           }
         }
@@ -1908,6 +1937,30 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
             currentProxy.awgS4 = parseInt(unquote(s4Match[1]), 10);
             continue;
           }
+          const j1Match = trimmed.match(/^j1:\s*(.+)$/);
+          if (j1Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgJ1 = parseInt(unquote(j1Match[1]), 10);
+            continue;
+          }
+          const j2Match = trimmed.match(/^j2:\s*(.+)$/);
+          if (j2Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgJ2 = parseInt(unquote(j2Match[1]), 10);
+            continue;
+          }
+          const j3Match = trimmed.match(/^j3:\s*(.+)$/);
+          if (j3Match) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgJ3 = parseInt(unquote(j3Match[1]), 10);
+            continue;
+          }
+          const itimeMatch = trimmed.match(/^itime:\s*(.+)$/);
+          if (itimeMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgItime = parseInt(unquote(itimeMatch[1]), 10);
+            continue;
+          }
 
           const parseH = (rawVal: string): number | string => {
             const v = unquote(rawVal).trim();
@@ -2005,6 +2058,30 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           if (ratMatch) {
             currentProxy.awgEnabled = true;
             currentProxy.awgRekeyAfterTime = parseInt(unquote(ratMatch[1]), 10);
+            continue;
+          }
+          const rktMatch = trimmed.match(/^rekey-timeout:\s*(.+)$/);
+          if (rktMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgRekeyTimeout = parseInt(unquote(rktMatch[1]), 10);
+            continue;
+          }
+          const rjaMatch = trimmed.match(/^reject-after-time:\s*(.+)$/);
+          if (rjaMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgRejectAfterTime = parseInt(unquote(rjaMatch[1]), 10);
+            continue;
+          }
+          const katMatch = trimmed.match(/^keepalive-timeout:\s*(.+)$/);
+          if (katMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgKeepaliveTimeout = parseInt(unquote(katMatch[1]), 10);
+            continue;
+          }
+          const mhaMatch = trimmed.match(/^max-handshake-attempts:\s*(.+)$/);
+          if (mhaMatch) {
+            currentProxy.awgEnabled = true;
+            currentProxy.awgMaxHandshakeAttempts = parseInt(unquote(mhaMatch[1]), 10);
             continue;
           }
         }

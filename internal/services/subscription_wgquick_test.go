@@ -327,3 +327,78 @@ AllowedIPs = 0.0.0.0/0
 		t.Errorf("expected DetectedFormat 'wg-quick', got %s", subB64.DetectedFormat)
 	}
 }
+
+func TestParseWgQuickConf_AWG15_And_V3Timing(t *testing.T) {
+	conf15 := `
+[Interface]
+PrivateKey = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=
+Address = 10.0.0.2/32
+Jc = 4
+J1 = 50
+J2 = 100
+J3 = 150
+Itime = 500
+
+[Peer]
+PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=
+Endpoint = 198.51.100.1:51820
+AllowedIPs = 0.0.0.0/0
+`
+	nodes15, err := parseWgQuickConf(conf15, "test15")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(nodes15) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes15))
+	}
+	n15 := nodes15[0]
+	if n15.AWG == nil {
+		t.Fatalf("expected AWG to be non-nil")
+	}
+	if *n15.AWG.J1 != 50 || *n15.AWG.J2 != 100 || *n15.AWG.J3 != 150 || *n15.AWG.Itime != 500 {
+		t.Errorf("unexpected AWG 1.5 fields: %+v", n15.AWG)
+	}
+	if n15.Dialect != "1.5" {
+		t.Errorf("expected dialect '1.5', got %s", n15.Dialect)
+	}
+	if n15.AWG.Version != "1.5" {
+		t.Errorf("expected inferred version '1.5', got %s", n15.AWG.Version)
+	}
+
+	confV3 := `
+[Interface]
+PrivateKey = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=
+Address = 10.0.0.2/32
+HeaderProtectionKey = secret-hpk
+RekeyTimeout = 120
+RejectAfterTime = 3600
+KeepaliveTimeout = 25
+MaxHandshakeAttempts = 5
+
+[Peer]
+PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=
+Endpoint = 198.51.100.2:51820
+AllowedIPs = 0.0.0.0/0
+`
+	nodesV3, err := parseWgQuickConf(confV3, "testv3")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(nodesV3) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodesV3))
+	}
+	nV3 := nodesV3[0]
+	if nV3.AWG == nil {
+		t.Fatalf("expected AWG to be non-nil")
+	}
+	if *nV3.AWG.RekeyTimeout != 120 || *nV3.AWG.RejectAfterTime != 3600 ||
+		*nV3.AWG.KeepaliveTimeout != 25 || *nV3.AWG.MaxHandshakeAttempts != 5 {
+		t.Errorf("unexpected v3 timing fields: %+v", nV3.AWG)
+	}
+	if nV3.Dialect != "3.1" {
+		t.Errorf("expected dialect '3.1', got %s", nV3.Dialect)
+	}
+	if nV3.AWG.Version != "3.1" {
+		t.Errorf("expected auto-inferred version '3.1', got %s", nV3.AWG.Version)
+	}
+}

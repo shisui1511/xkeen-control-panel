@@ -627,7 +627,14 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult)
 		return
 	}
 
-	flatAwgKeys := []string{"jc", "jmin", "jmax", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4", "header-protection-key", "i1", "i2", "i3", "i4", "i5"}
+	flatAwgKeys := []string{
+		"jc", "jmin", "jmax", "s1", "s2", "s3", "s4",
+		"j1", "j2", "j3", "itime",
+		"h1", "h2", "h3", "h4",
+		"header-protection-key", "i1", "i2", "i3", "i4", "i5",
+		"content-padding-addition", "random-trailers", "disable-cookies",
+		"rekey-after-time", "rekey-timeout", "reject-after-time", "keepalive-timeout", "max-handshake-attempts",
+	}
 
 	for _, p := range proxiesList {
 		pMap, ok := p.(map[string]interface{})

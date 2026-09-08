@@ -105,7 +105,17 @@ type AWGOptions struct {
 	RandomTrailers         *bool                  `json:"random_trailers,omitempty"`
 	DisableCookies         *bool                  `json:"disable_cookies,omitempty"`
 	RekeyAfterTime         *int                   `json:"rekey_after_time,omitempty"`
-	RawOptions             map[string]interface{} `json:"raw_options,omitempty"`
+	// AWG 1.5 fields
+	J1                   *int `json:"j1,omitempty"`
+	J2                   *int `json:"j2,omitempty"`
+	J3                   *int `json:"j3,omitempty"`
+	Itime                *int `json:"itime,omitempty"`
+	// AWG 3.1 timing fields
+	RekeyTimeout         *int `json:"rekey_timeout,omitempty"`
+	RejectAfterTime      *int `json:"reject_after_time,omitempty"`
+	KeepaliveTimeout     *int `json:"keepalive_timeout,omitempty"`
+	MaxHandshakeAttempts *int `json:"max_handshake_attempts,omitempty"`
+	RawOptions           map[string]interface{} `json:"raw_options,omitempty"`
 }
 
 // Clone возвращает глубокую копию AWGOptions.
@@ -158,6 +168,38 @@ func (o *AWGOptions) Clone() *AWGOptions {
 		v := *o.RekeyAfterTime
 		res.RekeyAfterTime = &v
 	}
+	if o.J1 != nil {
+		v := *o.J1
+		res.J1 = &v
+	}
+	if o.J2 != nil {
+		v := *o.J2
+		res.J2 = &v
+	}
+	if o.J3 != nil {
+		v := *o.J3
+		res.J3 = &v
+	}
+	if o.Itime != nil {
+		v := *o.Itime
+		res.Itime = &v
+	}
+	if o.RekeyTimeout != nil {
+		v := *o.RekeyTimeout
+		res.RekeyTimeout = &v
+	}
+	if o.RejectAfterTime != nil {
+		v := *o.RejectAfterTime
+		res.RejectAfterTime = &v
+	}
+	if o.KeepaliveTimeout != nil {
+		v := *o.KeepaliveTimeout
+		res.KeepaliveTimeout = &v
+	}
+	if o.MaxHandshakeAttempts != nil {
+		v := *o.MaxHandshakeAttempts
+		res.MaxHandshakeAttempts = &v
+	}
 	if o.RawOptions != nil {
 		res.RawOptions = make(map[string]interface{}, len(o.RawOptions))
 		for k, v := range o.RawOptions {
@@ -179,6 +221,9 @@ func (o *AWGOptions) IsEmpty() bool {
 		o.I1 == "" && o.I2 == "" && o.I3 == "" && o.I4 == "" && o.I5 == "" &&
 		o.ContentPaddingAddition == nil && o.RandomTrailers == nil &&
 		o.DisableCookies == nil && o.RekeyAfterTime == nil &&
+		o.J1 == nil && o.J2 == nil && o.J3 == nil && o.Itime == nil &&
+		o.RekeyTimeout == nil && o.RejectAfterTime == nil &&
+		o.KeepaliveTimeout == nil && o.MaxHandshakeAttempts == nil &&
 		len(o.RawOptions) == 0
 }
 

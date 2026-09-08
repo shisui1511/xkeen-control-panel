@@ -145,6 +145,46 @@ func parseAWGField(awg *AWGOptions, key, val string) bool {
 			awg.RekeyAfterTime = &n
 			return true
 		}
+	case "j1":
+		if n, err := strconv.Atoi(val); err == nil {
+			awg.J1 = &n
+			return true
+		}
+	case "j2":
+		if n, err := strconv.Atoi(val); err == nil {
+			awg.J2 = &n
+			return true
+		}
+	case "j3":
+		if n, err := strconv.Atoi(val); err == nil {
+			awg.J3 = &n
+			return true
+		}
+	case "itime":
+		if n, err := strconv.Atoi(val); err == nil {
+			awg.Itime = &n
+			return true
+		}
+	case "rekeytimeout":
+		if n, err := strconv.Atoi(val); err == nil {
+			awg.RekeyTimeout = &n
+			return true
+		}
+	case "rejectaftertime":
+		if n, err := strconv.Atoi(val); err == nil {
+			awg.RejectAfterTime = &n
+			return true
+		}
+	case "keepalivetimeout":
+		if n, err := strconv.Atoi(val); err == nil {
+			awg.KeepaliveTimeout = &n
+			return true
+		}
+	case "maxhandshakeattempts":
+		if n, err := strconv.Atoi(val); err == nil {
+			awg.MaxHandshakeAttempts = &n
+			return true
+		}
 	}
 	return false
 }
@@ -475,6 +515,7 @@ func parseWgQuickConf(content string, tagPrefix string) ([]SubscriptionNode, err
 			AWG:            nodeAWG,
 		}
 		node.Dialect = string(DetectWireGuardDialect(&node))
+		InferAWGVersion(&node)
 
 		nodes = append(nodes, node)
 	}

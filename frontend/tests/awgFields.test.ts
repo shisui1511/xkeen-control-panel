@@ -16,13 +16,15 @@ import {
 describe('AWG Fields Registry', () => {
   it('содержит корректное распределение по тирам', () => {
     const classic = getAwgFieldsByTier('classic');
+    const tier15 = getAwgFieldsByTier('1.5');
     const tier2 = getAwgFieldsByTier('2.0');
     const tier31 = getAwgFieldsByTier('3.1');
 
     expect(classic.length).toBe(9); // jc, jmin, jmax, s1, s2, h1, h2, h3, h4
+    expect(tier15.length).toBe(4); // j1, j2, j3, itime
     expect(tier2.length).toBe(2); // s3, s4
-    expect(tier31.length).toBe(11); // version, header-protection-key, i1..i5, content-padding-addition, random-trailers, disable-cookies, rekey-after-time
-    expect(AWG_FIELDS.length).toBe(22);
+    expect(tier31.length).toBe(15); // version, header-protection-key, i1..i5, content-padding-addition, random-trailers, disable-cookies, rekey-after-time, rekey-timeout, reject-after-time, keepalive-timeout, max-handshake-attempts
+    expect(AWG_FIELDS.length).toBe(30);
   });
 
   it('корректно находит поля по YAML и INI ключам', () => {
@@ -109,6 +111,7 @@ describe('AWG Fields Registry', () => {
     const dialectKeys = [
       'subscr.dialect_plain',
       'subscr.dialect_classic',
+      'subscr.dialect_15',
       'subscr.dialect_20',
       'subscr.dialect_31',
       'subscr.awg_preserved_mihomo',
@@ -123,9 +126,13 @@ describe('AWG Fields Registry', () => {
   it('корректно определяет диалекты WireGuard / AmneziaWG', () => {
     expect(detectWireGuardDialect({})).toBe('plain');
     expect(detectWireGuardDialect({ dialect: '2.0' })).toBe('2.0');
+    expect(detectWireGuardDialect({ dialect: '1.5' })).toBe('1.5');
 
     // Classic
     expect(detectWireGuardDialect({ awg: { jc: 4, h1: 1000000001 } })).toBe('classic');
+
+    // 1.5
+    expect(detectWireGuardDialect({ awg: { jc: 4, j1: 50 } })).toBe('1.5');
 
     // 2.0
     expect(detectWireGuardDialect({ awg: { jc: 4, s3: 20 } })).toBe('2.0');
@@ -135,5 +142,6 @@ describe('AWG Fields Registry', () => {
     expect(detectWireGuardDialect({ awg: { header_protection_key: 'secret' } })).toBe('3.1');
     expect(detectWireGuardDialect({ awg: { i1: '0A1B2C' } })).toBe('3.1');
     expect(detectWireGuardDialect({ awg: { random_trailers: true } })).toBe('3.1');
+    expect(detectWireGuardDialect({ awg: { rekey_timeout: 60 } })).toBe('3.1');
   });
 });

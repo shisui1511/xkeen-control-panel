@@ -203,6 +203,7 @@ func (s *SubscriptionService) outboundsToNodes(outbounds []Outbound, sub *Subscr
 				}
 				if node.Protocol == "wireguard" {
 					node.Dialect = string(DetectWireGuardDialect(&node))
+					InferAWGVersion(&node)
 				}
 			}
 		}
@@ -517,6 +518,18 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 				if awg.S4 != nil {
 					sb.WriteString(fmt.Sprintf("      s4: %d\n", *awg.S4))
 				}
+				if awg.J1 != nil {
+					sb.WriteString(fmt.Sprintf("      j1: %d\n", *awg.J1))
+				}
+				if awg.J2 != nil {
+					sb.WriteString(fmt.Sprintf("      j2: %d\n", *awg.J2))
+				}
+				if awg.J3 != nil {
+					sb.WriteString(fmt.Sprintf("      j3: %d\n", *awg.J3))
+				}
+				if awg.Itime != nil {
+					sb.WriteString(fmt.Sprintf("      itime: %d\n", *awg.Itime))
+				}
 				formatH := func(val string) string {
 					if strings.Contains(val, "-") {
 						return fmt.Sprintf("%q", val)
@@ -550,8 +563,12 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 				if awg.I5 != "" {
 					sb.WriteString(fmt.Sprintf("      i5: %s\n", yamlSafeScalar(strings.ToUpper(awg.I5))))
 				}
-				if awg.Version != "" {
-					sb.WriteString(fmt.Sprintf("      version: %s\n", yamlSafeScalar(awg.Version)))
+				effectiveVer := awg.Version
+				if effectiveVer == "" && n.Dialect == "3.1" {
+					effectiveVer = "3.1"
+				}
+				if effectiveVer != "" {
+					sb.WriteString(fmt.Sprintf("      version: %s\n", yamlSafeScalar(effectiveVer)))
 				}
 				if awg.HeaderProtectionKey != "" {
 					sb.WriteString(fmt.Sprintf("      header-protection-key: %s\n", yamlSafeScalar(awg.HeaderProtectionKey)))
@@ -567,6 +584,18 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 				}
 				if awg.RekeyAfterTime != nil {
 					sb.WriteString(fmt.Sprintf("      rekey-after-time: %d\n", *awg.RekeyAfterTime))
+				}
+				if awg.RekeyTimeout != nil {
+					sb.WriteString(fmt.Sprintf("      rekey-timeout: %d\n", *awg.RekeyTimeout))
+				}
+				if awg.RejectAfterTime != nil {
+					sb.WriteString(fmt.Sprintf("      reject-after-time: %d\n", *awg.RejectAfterTime))
+				}
+				if awg.KeepaliveTimeout != nil {
+					sb.WriteString(fmt.Sprintf("      keepalive-timeout: %d\n", *awg.KeepaliveTimeout))
+				}
+				if awg.MaxHandshakeAttempts != nil {
+					sb.WriteString(fmt.Sprintf("      max-handshake-attempts: %d\n", *awg.MaxHandshakeAttempts))
 				}
 				if len(awg.RawOptions) > 0 {
 					var rawKeys []string

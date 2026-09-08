@@ -3,7 +3,7 @@
  * Централизованный источник истины для схем валидации, UI-форм, генератора и парсера YAML/INI.
  */
 
-export type AwgTier = 'classic' | '2.0' | '3.1';
+export type AwgTier = 'classic' | '1.5' | '2.0' | '3.1';
 export type AwgFieldType = 'integer' | 'string' | 'boolean' | 'range' | 'hex';
 
 export interface AwgFieldDef {
@@ -118,6 +118,50 @@ export const AWG_FIELDS: readonly AwgFieldDef[] = [
     default: 1000000004,
     min: 5,
     labelKey: 'proxies.awg_h4'
+  },
+
+  // ---------------------------------------------------------------------------
+  // Tier 1.5: AWG 1.5 Jitter & Packet Extensions
+  // ---------------------------------------------------------------------------
+  {
+    key: 'j1',
+    iniKey: 'J1',
+    propName: 'awgJ1',
+    tier: '1.5',
+    type: 'integer',
+    min: 0,
+    max: 1280,
+    labelKey: 'proxies.awg_j1'
+  },
+  {
+    key: 'j2',
+    iniKey: 'J2',
+    propName: 'awgJ2',
+    tier: '1.5',
+    type: 'integer',
+    min: 0,
+    max: 1280,
+    labelKey: 'proxies.awg_j2'
+  },
+  {
+    key: 'j3',
+    iniKey: 'J3',
+    propName: 'awgJ3',
+    tier: '1.5',
+    type: 'integer',
+    min: 0,
+    max: 1280,
+    labelKey: 'proxies.awg_j3'
+  },
+  {
+    key: 'itime',
+    iniKey: 'Itime',
+    propName: 'awgItime',
+    tier: '1.5',
+    type: 'integer',
+    min: 0,
+    max: 65535,
+    labelKey: 'proxies.awg_itime'
   },
 
   // ---------------------------------------------------------------------------
@@ -237,6 +281,42 @@ export const AWG_FIELDS: readonly AwgFieldDef[] = [
     type: 'integer',
     min: 0,
     labelKey: 'proxies.awg_rekey_after_time'
+  },
+  {
+    key: 'rekey-timeout',
+    iniKey: 'RekeyTimeout',
+    propName: 'awgRekeyTimeout',
+    tier: '3.1',
+    type: 'integer',
+    min: 0,
+    labelKey: 'proxies.awg_rekey_timeout'
+  },
+  {
+    key: 'reject-after-time',
+    iniKey: 'RejectAfterTime',
+    propName: 'awgRejectAfterTime',
+    tier: '3.1',
+    type: 'integer',
+    min: 0,
+    labelKey: 'proxies.awg_reject_after_time'
+  },
+  {
+    key: 'keepalive-timeout',
+    iniKey: 'KeepaliveTimeout',
+    propName: 'awgKeepaliveTimeout',
+    tier: '3.1',
+    type: 'integer',
+    min: 0,
+    labelKey: 'proxies.awg_keepalive_timeout'
+  },
+  {
+    key: 'max-handshake-attempts',
+    iniKey: 'MaxHandshakeAttempts',
+    propName: 'awgMaxHandshakeAttempts',
+    tier: '3.1',
+    type: 'integer',
+    min: 0,
+    labelKey: 'proxies.awg_max_handshake_attempts'
   }
 ];
 
@@ -321,12 +401,13 @@ export function isMihomoAwg31Supported(version?: string | null): boolean {
   return false;
 }
 
-export type WireGuardDialect = 'plain' | 'classic' | '2.0' | '3.1';
+export type WireGuardDialect = 'plain' | 'classic' | '1.5' | '2.0' | '3.1';
 
 /**
  * Определяет диалект конфигурации WireGuard / AmneziaWG:
  * - 'plain': стандартный WireGuard
  * - 'classic': AmneziaWG 1.0 (jc, jmin, jmax, s1, s2, h1..h4)
+ * - '1.5': AmneziaWG 1.5 (j1, j2, j3, itime)
  * - '2.0': AmneziaWG 2.0 (s3, s4)
  * - '3.1': AmneziaWG 3.1 (version, header-protection-key, i1..i5, etc.)
  */
@@ -335,7 +416,7 @@ export function detectWireGuardDialect(node: {
   protocol?: string;
   awg?: any;
 }): WireGuardDialect {
-  if (node.dialect && ['plain', 'classic', '2.0', '3.1'].includes(node.dialect)) {
+  if (node.dialect && ['plain', 'classic', '1.5', '2.0', '3.1'].includes(node.dialect)) {
     return node.dialect as WireGuardDialect;
   }
   const awg = node.awg;
@@ -359,6 +440,14 @@ export function detectWireGuardDialect(node: {
     awg.disableCookies !== undefined ||
     awg.rekey_after_time !== undefined ||
     awg.rekeyAfterTime !== undefined ||
+    awg.rekey_timeout !== undefined ||
+    awg.rekeyTimeout !== undefined ||
+    awg.reject_after_time !== undefined ||
+    awg.rejectAfterTime !== undefined ||
+    awg.keepalive_timeout !== undefined ||
+    awg.keepaliveTimeout !== undefined ||
+    awg.max_handshake_attempts !== undefined ||
+    awg.maxHandshakeAttempts !== undefined ||
     (awg.raw_options && Object.keys(awg.raw_options).length > 0)
   ) {
     return '3.1';
@@ -367,6 +456,16 @@ export function detectWireGuardDialect(node: {
   // 2.0
   if (awg.s3 !== undefined || awg.s4 !== undefined) {
     return '2.0';
+  }
+
+  // 1.5
+  if (
+    awg.j1 !== undefined ||
+    awg.j2 !== undefined ||
+    awg.j3 !== undefined ||
+    awg.itime !== undefined
+  ) {
+    return '1.5';
   }
 
   // Classic
