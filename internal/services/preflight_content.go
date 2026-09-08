@@ -687,7 +687,11 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult)
 			// 1. Jmin < Jmax
 			if hasJmin && hasJmax && jmin >= jmax {
 				res.Warnings = append(res.Warnings, PreflightIssue{
+<<<<<<< HEAD
 					Code:    "preflight.awg_jmin_jmax",
+=======
+					Code:    "preflight.awg_flat_fields",
+>>>>>>> main
 					Message: fmt.Sprintf("Proxy %q: AmneziaWG jmin (%d) must be strictly less than jmax (%d)", pName, jmin, jmax),
 				})
 			}
