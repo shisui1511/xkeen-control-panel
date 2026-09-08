@@ -1204,6 +1204,9 @@
   }
 
   function populateMihomoFromYAML(text: string) {
+    // Reset parse warnings unconditionally on every parse so a stale warning
+    // (e.g. relay) does not persist after loading a clean config.
+    saveWarnings = [];
     if (!text || text.trim() === '') {
       applyPreset('zkeen-selective', true);
       lastParsedProviders = [];
@@ -1232,11 +1235,11 @@
       listenersRaw = res.listenersRaw || null;
       listenersReadOnly = res.listenersReadOnly || false;
 
-      if (Array.isArray(res.warnings) && res.warnings.length > 0) {
-        saveWarnings = res.warnings.map((w: any) =>
-          typeof w === 'string' ? { message: w } : { code: w.code, params: w.params }
-        );
-      }
+      saveWarnings = Array.isArray(res.warnings)
+        ? res.warnings.map((w: any) =>
+            typeof w === 'string' ? { message: w } : { code: w.code, params: w.params }
+          )
+        : [];
 
       lastParsedProviders = res.mihomoProviders || [];
       mihomoProviders = mergeMihomoProviders(
