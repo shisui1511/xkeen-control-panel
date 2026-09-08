@@ -135,7 +135,7 @@ func validateRemnawaveHeaders(data map[string]interface{}, res *PreflightResult)
 		if _, isString := rawHeader.(string); isString {
 			res.Warnings = append(res.Warnings, PreflightIssue{
 				Code:    "preflight.header_not_list",
-				Message: fmt.Sprintf("Proxy provider '%s' header is a string; Mihomo requires a map of string lists", name),
+				Message: fmt.Sprintf("Proxy provider %q header is a string; Mihomo requires a map of string lists", name),
 			})
 			continue
 		}
@@ -155,7 +155,7 @@ func validateRemnawaveHeaders(data map[string]interface{}, res *PreflightResult)
 			if _, isString := val.(string); isString {
 				res.Warnings = append(res.Warnings, PreflightIssue{
 					Code:    "preflight.header_not_list",
-					Message: fmt.Sprintf("Proxy provider '%s' header '%s' is a string; Mihomo requires list of strings", name, hName),
+					Message: fmt.Sprintf("Proxy provider %q header %q is a string; Mihomo requires list of strings", name, hName),
 				})
 			}
 		}
@@ -520,17 +520,17 @@ func validatePortConflicts(kernel string, filename string, data map[string]inter
 			if p == 5000 && k != "redir-port" {
 				res.Warnings = append(res.Warnings, PreflightIssue{
 					Code:    "preflight.port_conflict",
-					Message: fmt.Sprintf("Port %d configured in '%s' is reserved for transparent redir-port", p, k),
+					Message: fmt.Sprintf("Port %d configured in %q is reserved for transparent redir-port", p, k),
 				})
 			} else if p == 5001 && k != "tproxy-port" {
 				res.Warnings = append(res.Warnings, PreflightIssue{
 					Code:    "preflight.port_conflict",
-					Message: fmt.Sprintf("Port %d configured in '%s' is reserved for transparent tproxy-port", p, k),
+					Message: fmt.Sprintf("Port %d configured in %q is reserved for transparent tproxy-port", p, k),
 				})
 			} else if p == 1053 && k != "dns.listen" {
 				res.Warnings = append(res.Warnings, PreflightIssue{
 					Code:    "preflight.port_conflict",
-					Message: fmt.Sprintf("Port %d configured in '%s' is reserved for router DNS listener", p, k),
+					Message: fmt.Sprintf("Port %d configured in %q is reserved for router DNS listener", p, k),
 				})
 			}
 		}
@@ -566,7 +566,7 @@ func validatePortConflicts(kernel string, filename string, data map[string]inter
 					if prevTag, exists := seenPorts[p]; exists {
 						res.Warnings = append(res.Warnings, PreflightIssue{
 							Code:    "preflight.port_conflict",
-							Message: fmt.Sprintf("Port conflict: inbounds '%s' and '%s' both use port %d", prevTag, tag, p),
+							Message: fmt.Sprintf("Port conflict: inbounds %q and %q both use port %d", prevTag, tag, p),
 						})
 					} else {
 						seenPorts[p] = tag
@@ -614,7 +614,7 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult)
 		if hasFlat {
 			res.Warnings = append(res.Warnings, PreflightIssue{
 				Code:    "preflight.awg_flat_fields",
-				Message: fmt.Sprintf("Proxy '%s' has AmneziaWG parameters at root level instead of nested amnezia-wg-option block", pName),
+				Message: fmt.Sprintf("Proxy %q has AmneziaWG parameters at root level instead of nested amnezia-wg-option block", pName),
 			})
 			continue
 		}
@@ -646,28 +646,28 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult)
 			if jmin >= jmax {
 				res.Warnings = append(res.Warnings, PreflightIssue{
 					Code:    "preflight.awg_flat_fields",
-					Message: fmt.Sprintf("Proxy '%s': AmneziaWG jmin (%d) must be strictly less than jmax (%d)", pName, jmin, jmax),
+					Message: fmt.Sprintf("Proxy %q: AmneziaWG jmin (%d) must be strictly less than jmax (%d)", pName, jmin, jmax),
 				})
 			}
 			// 2. S1 + 56 != S2
 			if (s1 + 56) == s2 {
 				res.Warnings = append(res.Warnings, PreflightIssue{
 					Code:    "preflight.awg_flat_fields",
-					Message: fmt.Sprintf("Proxy '%s': AmneziaWG constraint s1 + 56 != s2 violated (s1=%d, s2=%d)", pName, s1, s2),
+					Message: fmt.Sprintf("Proxy %q: AmneziaWG constraint s1 + 56 != s2 violated (s1=%d, s2=%d)", pName, s1, s2),
 				})
 			}
 			// 3. H1-H4 > 4
 			if h1 <= 4 || h2 <= 4 || h3 <= 4 || h4 <= 4 {
 				res.Warnings = append(res.Warnings, PreflightIssue{
 					Code:    "preflight.awg_flat_fields",
-					Message: fmt.Sprintf("Proxy '%s': AmneziaWG parameters h1, h2, h3, h4 must all be > 4 (got h1=%d, h2=%d, h3=%d, h4=%d)", pName, h1, h2, h3, h4),
+					Message: fmt.Sprintf("Proxy %q: AmneziaWG parameters h1, h2, h3, h4 must all be > 4 (got h1=%d, h2=%d, h3=%d, h4=%d)", pName, h1, h2, h3, h4),
 				})
 			}
 			// 4. H1-H4 pairwise distinct
 			if h1 == h2 || h1 == h3 || h1 == h4 || h2 == h3 || h2 == h4 || h3 == h4 {
 				res.Warnings = append(res.Warnings, PreflightIssue{
 					Code:    "preflight.awg_flat_fields",
-					Message: fmt.Sprintf("Proxy '%s': AmneziaWG parameters h1, h2, h3, h4 must all be unique", pName),
+					Message: fmt.Sprintf("Proxy %q: AmneziaWG parameters h1, h2, h3, h4 must all be unique", pName),
 				})
 			}
 		}

@@ -1258,7 +1258,7 @@ func (s *TrafficQuotaService) checkQuotas() {
 			}{
 				quotaID:  q.ID,
 				severity: "critical",
-				message:  fmt.Sprintf("Лимит '%s' превышен: %s из %s (%.0f%%)", q.Name, formatBytes(current), formatBytes(q.LimitBytes), percent),
+				message:  fmt.Sprintf("Лимит %q превышен: %s из %s (%.0f%%)", q.Name, formatBytes(current), formatBytes(q.LimitBytes), percent),
 				kind:     "exceeded",
 				current:  current,
 				limit:    q.LimitBytes,
@@ -1293,7 +1293,7 @@ func (s *TrafficQuotaService) checkQuotas() {
 			}{
 				quotaID:  q.ID,
 				severity: "warning",
-				message:  fmt.Sprintf("Лимит '%s' на %.0f%%: %s из %s", q.Name, percent, formatBytes(current), formatBytes(q.LimitBytes)),
+				message:  fmt.Sprintf("Лимит %q на %.0f%%: %s из %s", q.Name, percent, formatBytes(current), formatBytes(q.LimitBytes)),
 				kind:     "threshold",
 				current:  current,
 				limit:    q.LimitBytes,

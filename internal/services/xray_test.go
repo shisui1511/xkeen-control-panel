@@ -24,7 +24,8 @@ func TestTLSPing(t *testing.T) {
 
 	addr := server.Listener.Addr().String()
 
-	res, err := services.TLSPing(addr, "example.com", []string{"h2", "http/1.1"})
+	// 1a. Success against local test TLS server when insecure=true
+	res, err := services.TLSPing(addr, "example.com", []string{"h2", "http/1.1"}, true)
 	if err != nil {
 		t.Fatalf("TLSPing returned unexpected Go error: %v", err)
 	}
@@ -44,6 +45,18 @@ func TestTLSPing(t *testing.T) {
 		t.Errorf("expected HandshakeMs >= 0, got %d", res.HandshakeMs)
 	}
 
+	// 1b. Certificate verification fails against self-signed cert when insecure=false
+	resStrict, err := services.TLSPing(addr, "example.com", []string{"h2", "http/1.1"}, false)
+	if err != nil {
+		t.Fatalf("TLSPing returned unexpected Go error: %v", err)
+	}
+	if resStrict.OK {
+		t.Errorf("expected OK=false for self-signed cert when insecure=false")
+	}
+	if !strings.Contains(strings.ToLower(resStrict.Error), "certificate") && !strings.Contains(strings.ToLower(resStrict.Error), "x509") {
+		t.Errorf("expected certificate error, got: %s", resStrict.Error)
+	}
+
 	// 2. Unreachable destination returns OK=false, non-empty error, but no Go error
 	// Listen and immediately close to get an unused port
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -53,7 +66,7 @@ func TestTLSPing(t *testing.T) {
 	closedAddr := lis.Addr().String()
 	_ = lis.Close()
 
-	resDown, err := services.TLSPing(closedAddr, "", nil)
+	resDown, err := services.TLSPing(closedAddr, "", nil, false)
 	if err != nil {
 		t.Fatalf("expected err == nil for unreachable host, got: %v", err)
 	}

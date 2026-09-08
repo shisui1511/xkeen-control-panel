@@ -275,11 +275,15 @@ func (s *DATManagerService) UpdateCustom(localPath string, remoteURL string) (in
 	tmpFile := out.Name()
 
 	// Limit response size to 50MB to prevent disk exhaustion on routers
-	written, err := io.Copy(out, io.LimitReader(resp.Body, 50*1024*1024))
-	out.Close()
-	if err != nil {
+	written, copyErr := io.Copy(out, io.LimitReader(resp.Body, 50*1024*1024))
+	closeErr := out.Close()
+	if copyErr != nil {
 		os.Remove(tmpFile)
-		return 0, fmt.Errorf("failed to write file: %w", err)
+		return 0, fmt.Errorf("failed to write file: %w", copyErr)
+	}
+	if closeErr != nil {
+		os.Remove(tmpFile)
+		return 0, fmt.Errorf("failed to close file: %w", closeErr)
 	}
 
 	// targetAbs is now fully sanitized and restricted to baseDir
@@ -803,10 +807,12 @@ func backupFile(path string) error {
 	if err != nil {
 		return err
 	}
-	defer dst.Close()
-
-	_, err = io.Copy(dst, src)
-	return err
+	_, copyErr := io.Copy(dst, src)
+	closeErr := dst.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 func rollbackFile(path string) error {

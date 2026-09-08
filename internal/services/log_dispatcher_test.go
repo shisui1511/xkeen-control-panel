@@ -1,6 +1,7 @@
 package services
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -364,5 +365,58 @@ func TestSuppressedTotalAccumulates(t *testing.T) {
 	// Total should be 20 + 30 = 50, not reset
 	if d.SuppressedTotal() != 50 {
 		t.Fatalf("expected cumulative 50 suppressed, got %d", d.SuppressedTotal())
+	}
+}
+
+func TestTruncateLogTail(t *testing.T) {
+	tmpDir := t.TempDir()
+	logPath := tmpDir + "/test.log"
+
+	// Create a 1000-byte file with known content
+	content := make([]byte, 1000)
+	for i := range content {
+		content[i] = byte('A' + (i % 26))
+	}
+	if err := os.WriteFile(logPath, content, 0644); err != nil {
+		t.Fatalf("failed to write test log: %v", err)
+	}
+
+	// Truncate tail to 200 bytes
+	if err := truncateLogTail(logPath, 200); err != nil {
+		t.Fatalf("truncateLogTail failed: %v", err)
+	}
+
+	result, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read truncated log: %v", err)
+	}
+	if len(result) != 200 {
+		t.Fatalf("expected 200 bytes, got %d", len(result))
+	}
+	// Verify it contains the tail (last 200 bytes)
+	expectedTail := content[800:]
+	if string(result) != string(expectedTail) {
+		t.Errorf("content does not match expected tail")
+	}
+
+	// Test emergencyTruncate on directory with oversized file
+	d := NewLogDispatcher(nil, tmpDir, "")
+	defer d.Stop()
+
+	// Create an oversized file > 500 KB
+	oversizedPath := tmpDir + "/large.log"
+	largeContent := make([]byte, 600*1024)
+	if err := os.WriteFile(oversizedPath, largeContent, 0644); err != nil {
+		t.Fatalf("failed to write oversized log: %v", err)
+	}
+
+	d.emergencyTruncate(tmpDir, 1000)
+
+	stat, err := os.Stat(oversizedPath)
+	if err != nil {
+		t.Fatalf("failed to stat truncated log: %v", err)
+	}
+	if stat.Size() > 500*1024 {
+		t.Fatalf("expected file size <= 500 KB, got %d", stat.Size())
 	}
 }

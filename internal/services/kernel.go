@@ -908,12 +908,16 @@ func (s *KernelService) Install(name string) error {
 			setStatus("failed", "Backup failed: "+err.Error())
 			return err
 		}
-		_, err = io.Copy(dst, src)
+		_, copyErr := io.Copy(dst, src)
 		src.Close()
-		dst.Close()
-		if err != nil {
-			setStatus("failed", "Backup failed: "+err.Error())
-			return err
+		closeErr := dst.Close()
+		if copyErr != nil {
+			setStatus("failed", "Backup failed: "+copyErr.Error())
+			return copyErr
+		}
+		if closeErr != nil {
+			setStatus("failed", "Backup failed: "+closeErr.Error())
+			return closeErr
 		}
 	}
 
@@ -1185,8 +1189,12 @@ func (s *KernelService) downloadFile(ctx context.Context, url, filepath string) 
 	}
 	defer out.Close()
 
-	_, err = io.Copy(out, resp.Body)
-	return err
+	_, copyErr := io.Copy(out, resp.Body)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 // maxKernelExtractBytes caps the size of decompressed kernel binaries (50 MB).
@@ -1220,8 +1228,15 @@ func (s *KernelService) extractZip(zipPath, binaryName string) (string, error) {
 			}
 			defer out.Close()
 
-			_, err = io.Copy(out, io.LimitReader(rc, maxKernelExtractBytes))
-			return outPath, err
+			_, copyErr := io.Copy(out, io.LimitReader(rc, maxKernelExtractBytes))
+			closeErr := out.Close()
+			if copyErr != nil {
+				return "", copyErr
+			}
+			if closeErr != nil {
+				return "", closeErr
+			}
+			return outPath, nil
 		}
 	}
 
@@ -1255,8 +1270,15 @@ func (s *KernelService) extractGz(gzPath string) (string, error) {
 	}
 	defer out.Close()
 
-	_, err = io.Copy(out, io.LimitReader(gr, maxKernelExtractBytes))
-	return outPath, err
+	_, copyErr := io.Copy(out, io.LimitReader(gr, maxKernelExtractBytes))
+	closeErr := out.Close()
+	if copyErr != nil {
+		return "", copyErr
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	return outPath, nil
 }
 
 type KernelPathDebug struct {
