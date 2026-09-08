@@ -549,14 +549,13 @@ rules:
 		t.Errorf("unexpected stats on empty existing: %+v", stats)
 	}
 
-	// Test corrupted existing
-	corruptExisting := ":::corrupted YAML content [not valid]:::"
-	mergedCorrupt, _, err := SmartMergeMihomo(corruptExisting, templateYAML, userRules, true)
-	if err != nil {
-		t.Fatalf("failed with corrupt existing: %v", err)
-	}
-	if !strings.Contains(mergedCorrupt, "Node-1") || !strings.Contains(mergedCorrupt, "DOMAIN,custom.org") {
-		t.Errorf("corrupt existing output missing expected rules/proxies:\n%s", mergedCorrupt)
+	// Test corrupted existing: must return an error instead of silently
+	// resetting to an empty config and overwriting the user's file.
+	corruptExisting := "foo: [1, 2\nbar: baz"
+	if _, _, err := SmartMergeMihomo(corruptExisting, templateYAML, userRules, true); err == nil {
+		t.Errorf("expected error for corrupt existing config, got nil")
+	} else if !strings.Contains(err.Error(), "not valid YAML") {
+		t.Errorf("expected YAML validation error, got: %v", err)
 	}
 }
 

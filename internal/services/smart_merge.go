@@ -79,8 +79,10 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 
 	if strings.TrimSpace(existingYAML) != "" {
 		if err := yaml.Unmarshal([]byte(existingYAML), &existing); err != nil {
-			// If existing is corrupted, initialize clean map
-			existing = make(map[string]interface{})
+			// Never silently discard an unparseable existing config: that is the
+			// single real path to total data loss. Surface the error so the caller
+			// refuses to overwrite the file.
+			return "", stats, fmt.Errorf("existing config is not valid YAML, refusing to overwrite: %w", err)
 		}
 	} else {
 		existing = make(map[string]interface{})
