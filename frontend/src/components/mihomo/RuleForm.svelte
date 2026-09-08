@@ -66,13 +66,12 @@
 
 <style>
   .form-card {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    padding: 16px;
+    background: transparent;
+    border: none;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
   }
 
   .form-row {
@@ -82,13 +81,15 @@
   }
   .form-row2 {
     display: flex;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 12px;
   }
   .form-col {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    flex: 1;
+    flex: 1 1 140px;
+    min-width: 140px;
   }
 
   .form-label {
@@ -116,9 +117,15 @@
   }
 
   .form-actions {
+    position: sticky;
+    bottom: -20px;
+    background: var(--bg-card);
+    padding: 12px 0 0 0;
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
     display: flex;
     gap: 8px;
     justify-content: flex-end;
-    margin-top: 4px;
+    z-index: 10;
   }
 </style>

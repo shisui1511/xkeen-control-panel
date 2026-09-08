@@ -210,5 +210,26 @@
     "fg": "--cm-bracket",
     "bg": "--cm-bg",
     "minRatio": 4.5
+  },
+  {
+    "id": "fg-terminal-on-bg-terminal-light",
+    "theme": "light",
+    "fg": "--fg-terminal",
+    "bg": "--bg-terminal",
+    "minRatio": 4.5
+  },
+  {
+    "id": "fg-terminal-on-bg-terminal-dark",
+    "theme": "dark",
+    "fg": "--fg-terminal",
+    "bg": "--bg-terminal",
+    "minRatio": 4.5
+  },
+  {
+    "id": "fg-terminal-on-bg-deep-light",
+    "theme": "light",
+    "fg": "--fg-terminal",
+    "bg": "--bg-deep",
+    "minRatio": 4.5
   }
 ]

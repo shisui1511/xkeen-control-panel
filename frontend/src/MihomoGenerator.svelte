@@ -32,6 +32,8 @@
   import PreflightWarnings, {
     type PreflightWarning
   } from './components/editor/PreflightWarnings.svelte';
+  import AwgDiffCard from './components/awg/AwgDiffCard.svelte';
+  import { analyzeAwgDiff } from './lib/awgPresets';
 
   let {
     onSwitchTab = () => {},
@@ -69,6 +71,7 @@
     type: ProxyType;
     server: string;
     port: number;
+    isImported?: boolean;
     // vless/vmess/trojan
     uuid?: string;
     flow?: string;
@@ -108,10 +111,23 @@
     awgJmax?: number;
     awgS1?: number;
     awgS2?: number;
-    awgH1?: number;
-    awgH2?: number;
-    awgH3?: number;
-    awgH4?: number;
+    awgS3?: number;
+    awgS4?: number;
+    awgH1?: number | string;
+    awgH2?: number | string;
+    awgH3?: number | string;
+    awgH4?: number | string;
+    awgVersion?: string;
+    awgHeaderProtectionKey?: string;
+    awgI1?: string;
+    awgI2?: string;
+    awgI3?: string;
+    awgI4?: string;
+    awgI5?: string;
+    awgContentPaddingAddition?: number;
+    awgRandomTrailers?: boolean;
+    awgDisableCookies?: boolean;
+    awgRekeyAfterTime?: number;
   }
 
   interface ProxyGroup {
@@ -258,12 +274,14 @@
   }
   let activePreset: string = $state('');
   let activeRuleProvider = $state<'none' | 'zkeen' | 'metacubex'>('none');
+  const mihomoVersion = $derived($capabilities?.kernels?.mihomo?.version || '');
   let externalControllerType = $state<'unix' | 'tcp'>('unix');
   let externalControllerTarget = $state<string>('127.0.0.1:9090');
   let subscriptions: any[] = $state([]);
   let mihomoProviders: any[] = $state([]);
   let lastParsedProviders: any[] = $state([]);
   let saveWarnings = $state<PreflightWarning[]>([]);
+  let warningsTitle = $state<string | undefined>(undefined);
 
   function mergeMihomoProviders(dbSubs: any[], parsedProviders: any[]) {
     const dbMapByUrl = new Map<string, any>();
@@ -399,6 +417,9 @@
   let importNodes: { link: string; outbound: any; tag: string; rowError?: string | null }[] =
     $state([]);
   let importErrorMsg = $state('');
+  let importSource = $state<'links' | 'file' | 'clipboard'>('links');
+  let isDraggingFile = $state(false);
+  let loadedFileName = $state('');
 
   // Form visibility
   let showProxyForm = $state(false);
@@ -406,6 +427,8 @@
   let showRuleForm = $state(false);
   let editingProxyId: string | null = $state(null);
   let editingGroupId: string | null = $state(null);
+  let editingRuleId: string | null = $state(null);
+  let isEditingImported = $state(false);
 
   // New proxy form
   let np: Omit<Proxy, 'id'> = $state(newProxyDefaults('vless'));
@@ -446,7 +469,21 @@
       awgH1: 1000000001,
       awgH2: 1000000002,
       awgH3: 1000000003,
-      awgH4: 1000000004
+      awgH4: 1000000004,
+      // AmneziaWG 2.0 / 3.1 defaults
+      awgS3: undefined,
+      awgS4: undefined,
+      awgVersion: undefined,
+      awgHeaderProtectionKey: '',
+      awgI1: '',
+      awgI2: '',
+      awgI3: '',
+      awgI4: '',
+      awgI5: '',
+      awgContentPaddingAddition: undefined,
+      awgRandomTrailers: false,
+      awgDisableCookies: false,
+      awgRekeyAfterTime: undefined
     };
   }
   let lastType = 'vless';
@@ -481,6 +518,16 @@
   let showApplyConfirm = $state(false);
   let applyLoading = $state(false);
   let dnsRedirectLoading = $state(false);
+
+  const blockingValidationMsg = $derived(
+    schemaError
+      ? schemaError
+      : validationError
+        ? parseValidationError(validationError, $currentLang)
+        : proxies.length === 0 && groups.length === 0
+          ? $t('mihomo.blocking_validation_error')
+          : ''
+  );
 
   const RULE_PROVIDERS: Record<
     string,
@@ -917,6 +964,7 @@
             type: (n.protocol || 'vless') as ProxyType,
             server,
             port,
+            isImported: true,
             uuid: n.uuid || '',
             password: n.password || '',
             flow: n.flow || '',
@@ -970,6 +1018,20 @@
     importLoading = false;
     importNodes = [];
     importErrorMsg = '';
+    importSource = 'links';
+    isDraggingFile = false;
+    loadedFileName = '';
+  }
+
+  function handleConfigFile(file: File) {
+    loadedFileName = file.name;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = (e.target?.result as string) || '';
+      importLink = text;
+      parseImportLink();
+    };
+    reader.readAsText(file);
   }
 
   function closeImportModal() {
@@ -984,6 +1046,10 @@
     if (node.settings.servers && node.settings.servers[0]) {
       return node.settings.servers[0].address || '';
     }
+    if (node.settings.peers && node.settings.peers[0]?.endpoint) {
+      const ep = node.settings.peers[0].endpoint;
+      return ep.includes(':') ? ep.substring(0, ep.lastIndexOf(':')) : ep;
+    }
     return '';
   }
 
@@ -994,6 +1060,10 @@
     }
     if (node.settings.servers && node.settings.servers[0]) {
       return String(node.settings.servers[0].port || '');
+    }
+    if (node.settings.peers && node.settings.peers[0]?.endpoint) {
+      const ep = node.settings.peers[0].endpoint;
+      return ep.includes(':') ? ep.substring(ep.lastIndexOf(':') + 1) : '51820';
     }
     return '';
   }
@@ -1070,7 +1140,8 @@
       name: tag,
       type: 'vless',
       server: '',
-      port: 443
+      port: 443,
+      isImported: true
     };
 
     if (proto === 'vless' || proto === 'vmess') {
@@ -1139,6 +1210,56 @@
         p.congestion = 'bbr';
         p.sni = parsed.streamSettings?.tlsSettings?.serverName || '';
       }
+    } else if (proto === 'wireguard') {
+      p.type = 'wireguard';
+      const peer = parsed.settings?.peers?.[0];
+      if (peer) {
+        const ep = peer.endpoint || '';
+        if (ep.includes(':')) {
+          p.server = ep.substring(0, ep.lastIndexOf(':'));
+          p.port = parseInt(ep.substring(ep.lastIndexOf(':') + 1), 10) || 51820;
+        } else {
+          p.server = ep;
+          p.port = 51820;
+        }
+        p.wgPublicKey = peer.publicKey || '';
+        p.wgPresharedKey = peer.preSharedKey || '';
+      }
+      p.wgPrivateKey = parsed.settings?.secretKey || '';
+      p.wgIp = Array.isArray(parsed.settings?.address)
+        ? parsed.settings.address.join(', ')
+        : parsed.settings?.address || '';
+      p.wgMtu = parsed.settings?.mtu || 1280;
+
+      const awg =
+        parsed.settings?.amneziaWgOption ||
+        parsed.amneziaWgOption ||
+        parsed.settings?.awg ||
+        parsed.awg;
+      if (awg) {
+        p.awgEnabled = true;
+        if (awg.jc !== undefined) p.awgJc = awg.jc;
+        if (awg.jmin !== undefined) p.awgJmin = awg.jmin;
+        if (awg.jmax !== undefined) p.awgJmax = awg.jmax;
+        if (awg.s1 !== undefined) p.awgS1 = awg.s1;
+        if (awg.s2 !== undefined) p.awgS2 = awg.s2;
+        if (awg.s3 !== undefined) p.awgS3 = awg.s3;
+        if (awg.s4 !== undefined) p.awgS4 = awg.s4;
+        if (awg.h1 !== undefined) p.awgH1 = awg.h1;
+        if (awg.h2 !== undefined) p.awgH2 = awg.h2;
+        if (awg.h3 !== undefined) p.awgH3 = awg.h3;
+        if (awg.h4 !== undefined) p.awgH4 = awg.h4;
+        if (awg.version !== undefined) p.awgVersion = awg.version;
+        if (awg['header-protection-key'] !== undefined)
+          p.awgHeaderProtectionKey = awg['header-protection-key'];
+        else if (awg.headerProtectionKey !== undefined)
+          p.awgHeaderProtectionKey = awg.headerProtectionKey;
+        if (awg.i1 !== undefined) p.awgI1 = awg.i1;
+        if (awg.i2 !== undefined) p.awgI2 = awg.i2;
+        if (awg.i3 !== undefined) p.awgI3 = awg.i3;
+        if (awg.i4 !== undefined) p.awgI4 = awg.i4;
+        if (awg.i5 !== undefined) p.awgI5 = awg.i5;
+      }
     }
     return p;
   }
@@ -1177,6 +1298,10 @@
   }
 
   function populateMihomoFromYAML(text: string) {
+    // Reset parse warnings unconditionally on every parse so a stale warning
+    // (e.g. relay) does not persist after loading a clean config.
+    saveWarnings = [];
+    warningsTitle = undefined;
     if (!text || text.trim() === '') {
       applyPreset('zkeen-selective', true);
       lastParsedProviders = [];
@@ -1204,6 +1329,15 @@
       listeners = res.listeners || [];
       listenersRaw = res.listenersRaw || null;
       listenersReadOnly = res.listenersReadOnly || false;
+
+      saveWarnings = Array.isArray(res.warnings)
+        ? res.warnings.map((w: any) =>
+            typeof w === 'string' ? { message: w } : { code: w.code, params: w.params }
+          )
+        : [];
+      if (saveWarnings.length > 0) {
+        warningsTitle = $t('editor.config_warnings_title');
+      }
 
       lastParsedProviders = res.mihomoProviders || [];
       mihomoProviders = mergeMihomoProviders(
@@ -1383,6 +1517,7 @@
   function editProxy(p: Proxy) {
     np = { ...p };
     editingProxyId = p.id;
+    isEditingImported = !!p.isImported;
     showProxyForm = true;
   }
 
@@ -1475,15 +1610,29 @@
   }
 
   function addRule() {
-    rules = [
-      ...rules,
-      {
-        id: crypto.randomUUID(),
-        type: nr.type || 'DOMAIN-SUFFIX',
-        value: nr.value || '',
-        outbound: nr.outbound || 'DIRECT'
-      }
-    ];
+    if (editingRuleId) {
+      rules = rules.map((r) =>
+        r.id === editingRuleId
+          ? {
+              ...r,
+              type: nr.type || 'DOMAIN-SUFFIX',
+              value: nr.value || '',
+              outbound: nr.outbound || 'DIRECT'
+            }
+          : r
+      );
+      editingRuleId = null;
+    } else {
+      rules = [
+        ...rules,
+        {
+          id: crypto.randomUUID(),
+          type: nr.type || 'DOMAIN-SUFFIX',
+          value: nr.value || '',
+          outbound: nr.outbound || 'DIRECT'
+        }
+      ];
+    }
     showRuleForm = false;
     nr = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
     isDirty = true;
@@ -1892,6 +2041,7 @@
       const yamlContent = generateYAML();
       validationError = '';
       saveWarnings = [];
+      warningsTitle = undefined;
       const listenerWarnings = collectListenerPortWarnings(currentYAML);
 
       let mergeRes: { content: string; stats?: any; warnings?: PreflightWarning[] };
@@ -1957,6 +2107,9 @@
           : [];
       const backendWarnings = saveResWarnings.length > 0 ? saveResWarnings : mergeWarnings;
       saveWarnings = [...listenerWarnings, ...backendWarnings];
+      if (saveWarnings.length > 0) {
+        warningsTitle = $t('editor.save_warnings_title');
+      }
 
       let restartUrl = '/api/service/control?action=restart';
       const activeKernel = $capabilities?.active_kernel;
@@ -2286,8 +2439,10 @@
 
         <PreflightWarnings
           warnings={saveWarnings}
+          title={warningsTitle}
           onDismiss={() => {
             saveWarnings = [];
+            warningsTitle = undefined;
           }}
         />
 
@@ -2401,6 +2556,51 @@
         <!-- PROXIES -->
         {#if activeSection === 'proxies'}
           <div class="sec-body">
+            <div
+              class="constructor-proxy-list"
+              style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;"
+            >
+              <button type="button" class="add-btn btn-action-primary" onclick={openImportModal}>
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  style="margin-right: 4px; display: inline-block; vertical-align: middle;"
+                >
+                  <path
+                    d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"
+                  />
+                </svg>
+                {$t('subscr.import_node')}
+              </button>
+              <button
+                type="button"
+                class="add-btn btn-secondary"
+                onclick={() => {
+                  editingProxyId = null;
+                  isEditingImported = false;
+                  np = newProxyDefaults('vless');
+                  showProxyForm = true;
+                }}
+              >
+                + {$t('mihomo.add_proxy_manual')}
+              </button>
+              <button
+                type="button"
+                class="add-btn import-btn"
+                onclick={loadSubscriptionProxies}
+                disabled={!hasXraySubscriptions}
+                title={hasXraySubscriptions
+                  ? $t('mihomo.import_xray_desc')
+                  : $t('mihomo.no_xray_subs')}
+              >
+                ↓ {$t('editor.constructor_import_proxies')}
+              </button>
+            </div>
+
             {#each proxies as p (p.id)}
               <div class="item-row" class:item-disabled={p.enabled === false}>
                 <span class="item-badge type-{p.type}">{p.type}</span>
@@ -2450,88 +2650,38 @@
               </div>
             {/each}
 
-            {#if showProxyForm}
-              <ProxyForm
-                bind:np
-                isEdit={!!editingProxyId}
-                onSave={addProxy}
-                onCancel={() => {
-                  showProxyForm = false;
-                  editingProxyId = null;
-                  np = newProxyDefaults('vless');
-                }}
-              />
-            {:else}
-              {#if mihomoProviders && mihomoProviders.length > 0}
-                <div
-                  class="sec-subtitle"
-                  style="margin-top: 16px; margin-bottom: 8px; border-top: 1px solid var(--border); padding-top: 12px; font-weight: 600; font-size: 13px; color: var(--fg-secondary);"
-                >
-                  {$t('mihomo.proxy_providers_hint')}
-                </div>
-                {#each mihomoProviders as sub}
-                  <div class="item-row" style="border-left: 3px solid var(--success);">
-                    <span
-                      class="item-badge type-mihomo"
-                      style="background: rgba(16, 185, 129, 0.15); color: var(--success); border-color: rgba(16, 185, 129, 0.3);"
-                      >mihomo</span
-                    >
-                    <span class="item-name">{sub.name}</span>
-                    <span
-                      class="item-meta"
-                      title={sub.url}
-                      style="max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                    >
-                      {sub.url}
-                    </span>
-                    <button
-                      type="button"
-                      class="item-btn"
-                      onclick={loadSubscriptions}
-                      title={$t('mihomo.refresh_provider')}
-                    >
-                      ⟳
-                    </button>
-                  </div>
-                {/each}
-              {/if}
-
-              <div class="constructor-proxy-list">
-                <button
-                  type="button"
-                  class="add-btn btn-action-primary"
-                  onclick={() => (showProxyForm = true)}
-                >
-                  + {$t('mihomo.add_proxy')}
-                </button>
-                <button
-                  type="button"
-                  class="add-btn import-btn"
-                  onclick={loadSubscriptionProxies}
-                  disabled={!hasXraySubscriptions}
-                  title={hasXraySubscriptions
-                    ? $t('mihomo.import_xray_desc')
-                    : $t('mihomo.no_xray_subs')}
-                >
-                  ↓ {$t('editor.constructor_import_proxies')}
-                </button>
-                <button type="button" class="add-btn import-btn" onclick={openImportModal}>
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    style="margin-right: 4px; display: inline-block; vertical-align: middle;"
-                  >
-                    <path
-                      d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"
-                    />
-                  </svg>
-                  {$t('subscr.import_node')}
-                </button>
+            {#if mihomoProviders && mihomoProviders.length > 0}
+              <div
+                class="sec-subtitle"
+                style="margin-top: 16px; margin-bottom: 8px; border-top: 1px solid var(--border); padding-top: 12px; font-weight: 600; font-size: 13px; color: var(--fg-secondary);"
+              >
+                {$t('mihomo.proxy_providers_hint')}
               </div>
+              {#each mihomoProviders as sub}
+                <div class="item-row" style="border-left: 3px solid var(--success);">
+                  <span
+                    class="item-badge type-mihomo"
+                    style="background: rgba(16, 185, 129, 0.15); color: var(--success); border-color: rgba(16, 185, 129, 0.3);"
+                    >mihomo</span
+                  >
+                  <span class="item-name">{sub.name}</span>
+                  <span
+                    class="item-meta"
+                    title={sub.url}
+                    style="max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                  >
+                    {sub.url}
+                  </span>
+                  <button
+                    type="button"
+                    class="item-btn"
+                    onclick={loadSubscriptions}
+                    title={$t('mihomo.refresh_provider')}
+                  >
+                    ⟳
+                  </button>
+                </div>
+              {/each}
             {/if}
           </div>
         {/if}
@@ -2565,7 +2715,15 @@
                       </div>
                       <div class="zkeen-group-title">
                         <span class="zkeen-group-name">{g.name}</span>
-                        <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                        <div style="display: flex; gap: 4px; flex-wrap: wrap; align-items: center;">
+                          {#if (g.type as string) === 'relay'}
+                            <span
+                              class="item-badge badge-warning"
+                              style="text-transform: none;"
+                              title={$t('mihomo.warnings.relay_deprecated', { name: g.name })}
+                              >relay · {$t('app.deprecated')}</span
+                            >
+                          {/if}
                           {#if g.excludeFilter}
                             <span class="zkeen-exclude-badge">exclude: {g.excludeFilter}</span>
                           {/if}
@@ -2626,6 +2784,14 @@
               {#each groups as g (g.id)}
                 <div class="item-row">
                   <span class="item-badge type-group">{g.type}</span>
+                  {#if (g.type as string) === 'relay'}
+                    <span
+                      class="item-badge badge-warning"
+                      style="text-transform: none;"
+                      title={$t('mihomo.warnings.relay_deprecated', { name: g.name })}
+                      >{$t('app.deprecated')}</span
+                    >
+                  {/if}
                   <span class="item-name">{g.name}</span>
                   {#if g.includeAll}
                     <span
@@ -2660,14 +2826,11 @@
                 </div>
               {/each}
 
-              {#if showGroupForm}
-                <GroupForm
-                  bind:ng
-                  isEdit={!!editingGroupId}
-                  {allProxyNames}
-                  onSave={addGroup}
-                  onCancel={() => {
-                    showGroupForm = false;
+              <div style="margin-top: 12px;">
+                <button
+                  type="button"
+                  class="add-btn btn-secondary"
+                  onclick={() => {
                     editingGroupId = null;
                     ng = {
                       name: '',
@@ -2679,13 +2842,12 @@
                       useProviders: [],
                       strategy: undefined
                     };
+                    showGroupForm = true;
                   }}
-                />
-              {:else}
-                <button class="add-btn" onclick={() => (showGroupForm = true)}>
+                >
                   + {$t('mihomo.add_group')}
                 </button>
-              {/if}
+              </div>
             {/if}
           </div>
         {/if}
@@ -2706,18 +2868,33 @@
               style="display:flex; flex-direction:column; gap:16px;"
             >
               {#each Object.entries(META_RULE_SETS_BY_CATEGORY) as [catName, items]}
+                {@const checkedCount = items.filter((it) =>
+                  selectedMetaRuleSets.has(`${it.id}|${it.type}`)
+                ).length}
                 <div
                   class="ruleset-cat-card"
                   style="background:var(--bg-elevated); border:1px solid var(--border); border-radius:var(--radius); padding:12px;"
                 >
                   <div
                     class="ruleset-cat-title"
-                    style="font-size:13px; font-weight:600; color:var(--fg-primary); margin-bottom:8px; display:flex; align-items:center; gap:6px;"
+                    style="font-size:13px; font-weight:600; color:var(--fg-primary); margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;"
                   >
-                    <span>{catName}</span>
-                    <span style="font-size:11px; font-weight:normal; color:var(--fg-dim);"
-                      >({items.length})</span
-                    >
+                    <div style="display:flex; align-items:center; gap:6px;">
+                      <span>{catName}</span>
+                      <span style="font-size:11px; font-weight:normal; color:var(--fg-dim);"
+                        >({items.length})</span
+                      >
+                    </div>
+                    {#if checkedCount > 0}
+                      <span
+                        class="badge"
+                        class:badge-primary={checkedCount === items.length}
+                        class:badge-secondary={checkedCount < items.length}
+                        style="font-size:11px; font-weight:500;"
+                      >
+                        {checkedCount}/{items.length}
+                      </span>
+                    {/if}
                   </div>
                   <div
                     class="ruleset-items-grid"
@@ -2785,8 +2962,24 @@
 
         <!-- RULES -->
         {#if activeSection === 'rules'}
+          {@const nonMatchRules = rules.filter((r) => r.type !== 'MATCH')}
+          {@const matchRule = rules.find((r) => r.type === 'MATCH')}
           <div class="sec-body">
-            {#each rules as r, i (r.id)}
+            <div style="margin-bottom: 12px;">
+              <button
+                type="button"
+                class="add-btn btn-secondary"
+                onclick={() => {
+                  editingRuleId = null;
+                  nr = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
+                  showRuleForm = true;
+                }}
+              >
+                + {$t('mihomo.add_rule')}
+              </button>
+            </div>
+
+            {#each nonMatchRules as r, i (r.id)}
               <div class="item-row item-row-rule">
                 <div class="rule-order">
                   <button class="order-btn" onclick={() => moveRule(r.id, -1)} disabled={i === 0}
@@ -2795,31 +2988,62 @@
                   <button
                     class="order-btn"
                     onclick={() => moveRule(r.id, 1)}
-                    disabled={i === rules.length - 1}>▼</button
+                    disabled={i === nonMatchRules.length - 1}>▼</button
                   >
                 </div>
                 <span class="item-badge type-rule">{r.type}</span>
-                {#if r.type !== 'MATCH'}
-                  <span class="item-name rule-value">{r.value}</span>
-                {/if}
+                <span class="item-name rule-value">{r.value}</span>
                 <span class="item-meta">→ {r.outbound}</span>
+                <button
+                  type="button"
+                  class="item-btn"
+                  onclick={() => {
+                    nr = { type: r.type, value: r.value, outbound: r.outbound };
+                    editingRuleId = r.id;
+                    showRuleForm = true;
+                  }}
+                  title={$t('app.edit')}
+                >
+                  ✎
+                </button>
                 <button class="item-del" onclick={() => removeRule(r.id)} title={$t('app.delete')}
                   >✕</button
                 >
               </div>
             {/each}
 
-            {#if showRuleForm}
-              <RuleForm
-                bind:nr
-                {allProxyNames}
-                onSave={addRule}
-                onCancel={() => (showRuleForm = false)}
-              />
-            {:else}
-              <button class="add-btn" onclick={() => (showRuleForm = true)}>
-                + {$t('mihomo.add_rule')}
-              </button>
+            {#if matchRule}
+              <div class="item-row item-row-rule match-rule-row">
+                <span class="item-badge type-match">MATCH</span>
+                <span
+                  class="item-name rule-value"
+                  style="color: var(--fg-secondary); font-style: italic;"
+                >
+                  {$t('mihomo.match_rule_desc')}
+                </span>
+                <span class="item-meta">→ {matchRule.outbound}</span>
+                <button
+                  type="button"
+                  class="item-btn"
+                  onclick={() => {
+                    nr = {
+                      type: matchRule.type,
+                      value: matchRule.value,
+                      outbound: matchRule.outbound
+                    };
+                    editingRuleId = matchRule.id;
+                    showRuleForm = true;
+                  }}
+                  title={$t('app.edit')}
+                >
+                  ✎
+                </button>
+                <button
+                  class="item-del"
+                  onclick={() => removeRule(matchRule.id)}
+                  title={$t('app.delete')}>✕</button
+                >
+              </div>
             {/if}
           </div>
         {/if}
@@ -3447,6 +3671,18 @@
             </div>
           {/if}
 
+          {#if blockingValidationMsg}
+            <div
+              class="constructor-validation-bar"
+              role="status"
+              aria-live="polite"
+              style="margin: 0 12px 10px 12px; padding: 8px 12px; background: rgba(239, 91, 107, 0.12); border: 1px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-size: 12px; display: flex; align-items: center; gap: 8px;"
+            >
+              <span style="flex-shrink: 0;">⚠️</span>
+              <span>{blockingValidationMsg}</span>
+            </div>
+          {/if}
+
           <!-- Bottom Actions Toolbar -->
           <div class="gen-preview-footer">
             <button type="button" class="btn btn-secondary" onclick={openInEditor}>
@@ -3485,7 +3721,7 @@
               class="btn btn-primary"
               data-testid="apply-changes-btn"
               onclick={handleApplyMihomo}
-              disabled={applyLoading || !yaml}
+              disabled={applyLoading || !yaml || !!blockingValidationMsg}
             >
               {applyLoading ? $t('mihomo.saving') : $t('mihomo.apply_and_restart')}
             </button>
@@ -3536,17 +3772,118 @@
     {/if}
 
     {#if importStep === 1}
-      <div class="form-group">
-        <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
-        <textarea
-          id="import-link"
-          class="input textarea-link"
-          bind:value={importLink}
-          placeholder={$t('subscr.import_link_placeholder')}
-          rows="4"
-          style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
-        ></textarea>
+      <div
+        class="import-source-tabs"
+        style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;"
+      >
+        <button
+          type="button"
+          class="btn btn-xs"
+          class:btn-primary={importSource === 'links'}
+          class:btn-secondary={importSource !== 'links'}
+          onclick={() => (importSource = 'links')}
+        >
+          {$t('subscr.import_source_links')}
+        </button>
+        <button
+          type="button"
+          class="btn btn-xs"
+          class:btn-primary={importSource === 'file'}
+          class:btn-secondary={importSource !== 'file'}
+          onclick={() => (importSource = 'file')}
+        >
+          {$t('subscr.import_source_file')}
+        </button>
+        <button
+          type="button"
+          class="btn btn-xs"
+          class:btn-primary={importSource === 'clipboard'}
+          class:btn-secondary={importSource !== 'clipboard'}
+          onclick={() => (importSource = 'clipboard')}
+        >
+          {$t('subscr.import_source_clipboard')}
+        </button>
       </div>
+
+      {#if importSource === 'links'}
+        <div class="form-group">
+          <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
+          <textarea
+            id="import-link"
+            class="input textarea-link"
+            bind:value={importLink}
+            placeholder={$t('subscr.import_link_placeholder')}
+            rows="4"
+            style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
+          ></textarea>
+        </div>
+      {:else if importSource === 'file'}
+        <div
+          class="conf-dropzone"
+          class:dragging={isDraggingFile}
+          role="region"
+          aria-label="Dropzone"
+          ondragover={(e) => {
+            e.preventDefault();
+            isDraggingFile = true;
+          }}
+          ondragleave={() => {
+            isDraggingFile = false;
+          }}
+          ondrop={(e) => {
+            e.preventDefault();
+            isDraggingFile = false;
+            const f = e.dataTransfer?.files?.[0];
+            if (f) handleConfigFile(f);
+          }}
+        >
+          <div style="font-size: 24px;">📄</div>
+          <div style="font-size: 13px; color: var(--fg-secondary);">
+            {#if loadedFileName}
+              <span style="color: var(--primary); font-weight: 600;">{loadedFileName}</span>
+              <span> ({$t('subscr.import_file_loaded')})</span>
+            {:else}
+              {$t('subscr.import_drop_or_select')}
+            {/if}
+          </div>
+          <input
+            type="file"
+            accept=".conf,.txt"
+            class="file-picker-input"
+            onchange={(e) => {
+              const f = e.currentTarget.files?.[0];
+              if (f) handleConfigFile(f);
+            }}
+          />
+        </div>
+      {:else if importSource === 'clipboard'}
+        <div
+          style="padding: 24px; text-align: center; background: var(--bg-surface-hover); border: 1px dashed var(--border); border-radius: var(--radius);"
+        >
+          <p style="font-size: 13px; color: var(--fg-secondary); margin-bottom: 12px;">
+            {$t('subscr.import_clipboard_desc')}
+          </p>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick={async () => {
+              try {
+                const text = await navigator.clipboard.readText();
+                if (!text.trim()) {
+                  importErrorMsg = $t('subscr.import_clipboard_empty');
+                  return;
+                }
+                importLink = text;
+                parseImportLink();
+              } catch (err: any) {
+                importErrorMsg = err.message || 'Clipboard access denied';
+              }
+            }}
+          >
+            📋 {$t('subscr.import_source_clipboard')}
+          </button>
+        </div>
+      {/if}
     {:else if importStep === 2 && importNodes.length > 0}
       <div class="preview-section">
         <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
@@ -3613,6 +3950,14 @@
                     style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
                   />
                 </div>
+                {#if item.outbound?.protocol === 'wireguard' || item.outbound?.settings?.amneziaWgOption || item.outbound?.amneziaWgOption}
+                  {@const awgOpts =
+                    item.outbound?.settings?.amneziaWgOption ||
+                    item.outbound?.amneziaWgOption ||
+                    {}}
+                  {@const diff = analyzeAwgDiff(awgOpts, 'mihomo', mihomoVersion)}
+                  <AwgDiffCard {diff} targetKernel="mihomo" compact />
+                {/if}
               </div>
             {/if}
           {/each}
@@ -3651,6 +3996,97 @@
       {/if}
     </div>
   </div>
+</Modal>
+
+<Modal
+  isOpen={showProxyForm}
+  title={editingProxyId
+    ? $t('mihomo.edit_proxy_title', { name: np.name || 'proxy' })
+    : $t('mihomo.new_proxy_title')}
+  onclose={() => {
+    showProxyForm = false;
+    editingProxyId = null;
+    isEditingImported = false;
+    np = newProxyDefaults('vless');
+  }}
+>
+  <ProxyForm
+    bind:np
+    isEdit={!!editingProxyId}
+    isImported={isEditingImported}
+    allProxyNames={proxies.filter((p) => p.id !== editingProxyId).map((p) => p.name)}
+    onSave={addProxy}
+    onCancel={() => {
+      showProxyForm = false;
+      editingProxyId = null;
+      isEditingImported = false;
+      np = newProxyDefaults('vless');
+    }}
+  />
+</Modal>
+
+<Modal
+  isOpen={showGroupForm}
+  title={editingGroupId
+    ? $t('mihomo.edit_group_title', { name: ng.name || 'group' })
+    : $t('mihomo.new_group_title')}
+  onclose={() => {
+    showGroupForm = false;
+    editingGroupId = null;
+    ng = {
+      name: '',
+      type: 'select',
+      proxies: [],
+      includeAll: false,
+      url: 'https://www.gstatic.com/generate_204',
+      interval: 300,
+      useProviders: [],
+      strategy: undefined
+    };
+  }}
+>
+  <GroupForm
+    bind:ng
+    {allProxyNames}
+    {mihomoProviders}
+    isEdit={!!editingGroupId}
+    onSave={addGroup}
+    onCancel={() => {
+      showGroupForm = false;
+      editingGroupId = null;
+      ng = {
+        name: '',
+        type: 'select',
+        proxies: [],
+        includeAll: false,
+        url: 'https://www.gstatic.com/generate_204',
+        interval: 300,
+        useProviders: [],
+        strategy: undefined
+      };
+    }}
+  />
+</Modal>
+
+<Modal
+  isOpen={showRuleForm}
+  title={editingRuleId ? $t('mihomo.edit_rule_title') : $t('mihomo.add_rule_title')}
+  onclose={() => {
+    showRuleForm = false;
+    editingRuleId = null;
+    nr = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
+  }}
+>
+  <RuleForm
+    bind:nr
+    {allProxyNames}
+    onSave={addRule}
+    onCancel={() => {
+      showRuleForm = false;
+      editingRuleId = null;
+      nr = { type: 'DOMAIN-SUFFIX', value: '', outbound: 'DIRECT' };
+    }}
+  />
 </Modal>
 
 <style>
@@ -3762,7 +4198,6 @@
   .gen-left {
     flex: 1;
     min-width: 320px;
-    overflow-y: auto;
     padding-right: 12px;
   }
 
@@ -3934,6 +4369,10 @@
     background: rgba(139, 92, 246, 0.15);
     color: #a78bfa;
   }
+  .badge-warning {
+    background: color-mix(in srgb, var(--warning) 20%, transparent);
+    color: var(--warning);
+  }
   .type-rule {
     background: rgba(255, 255, 255, 0.05);
     color: var(--fg-dim);
@@ -3963,6 +4402,61 @@
   .type-redir {
     background: rgba(245, 158, 11, 0.15);
     color: var(--warning);
+  }
+  .type-wireguard {
+    background: rgba(168, 85, 247, 0.15);
+    color: #c084fc;
+  }
+  .type-trojan {
+    background: rgba(236, 72, 153, 0.15);
+    color: #f472b6;
+  }
+  .type-match {
+    background: rgba(99, 102, 241, 0.15);
+    color: #818cf8;
+    font-weight: 600;
+  }
+
+  .match-rule-row {
+    margin-top: 8px;
+    border-top: 1px dashed var(--border);
+    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.02));
+    border-left: 3px solid #818cf8;
+  }
+
+  .conf-dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 24px 16px;
+    text-align: center;
+    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.02));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition:
+      border-color 0.2s ease,
+      background 0.2s ease;
+  }
+  .conf-dropzone.dragging {
+    border-color: var(--primary);
+    background: rgba(41, 194, 240, 0.08);
+  }
+
+  .file-picker-input::file-selector-button {
+    background: var(--bg-surface-hover);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-right: 8px;
+    transition: background 0.15s ease;
+  }
+  .file-picker-input::file-selector-button:hover {
+    background: var(--border);
   }
 
   .item-name {

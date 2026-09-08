@@ -34,13 +34,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -73,12 +73,15 @@ jobs:
         include:
           - GOARCH: arm64
             name: arm64
+            qemu: qemu-aarch64-static
           - GOARCH: mipsle
             GOMIPS: softfloat
             name: mipsle
+            qemu: qemu-mipsel-static
           - GOARCH: mips
             GOMIPS: softfloat
             name: mips
+            qemu: qemu-mips-static
 
     steps:
       - uses: actions/checkout@v7
@@ -141,7 +144,7 @@ jobs:
         if: steps.version.outputs.skip != 'true'
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -163,7 +166,7 @@ jobs:
         if: steps.version.outputs.skip != 'true'
         uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: false
 
       - name: Build binary
@@ -178,13 +181,58 @@ jobs:
           go build -ldflags="-s -w -X main.Version=${VERSION}" \
             -o build/xcp_${VERSION}_${{ matrix.name }} ./cmd/xcp
 
+      - name: Install QEMU and tools
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          ok=0
+          for i in 1 2 3; do
+            sudo apt-get update && sudo apt-get install -y qemu-user-static upx-ucl && { ok=1; break; }
+            echo "apt-get failed, retry $i"; sleep 5
+          done
+          [ "$ok" = 1 ] || { echo "::error::apt-get failed after 3 attempts"; exit 1; }
+
+      - name: Verify static linkage
+        if: steps.version.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          file "build/xcp_${VERSION}_${{ matrix.name }}"
+          file "build/xcp_${VERSION}_${{ matrix.name }}" | grep -q "statically linked"
+
+      - name: Smoke test under QEMU (uncompressed)
+        if: steps.version.outputs.skip != 'true'
+        timeout-minutes: 1
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}" -v
+
       - name: Compress with UPX (pre-release only)
         if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_stable != 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          sudo apt-get update && sudo apt-get install -y upx-ucl
-          upx --best --lzma build/xcp_${VERSION}_${{ matrix.name }} -o build/xcp_${VERSION}_${{ matrix.name }}_upx
+          upx -9 --lzma build/xcp_${VERSION}_${{ matrix.name }} -o build/xcp_${VERSION}_${{ matrix.name }}_upx
+
+      - name: Smoke test under QEMU (compressed, pre-release only)
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_stable != 'true'
+        # Hard-fail for little-endian targets (arm64, mipsle) so a UPX-broken
+        # pre-release cannot ship the compressed binary. Big-endian mips stays
+        # advisory: UPX stubs are flaky under qemu-mips-static (see WR-02), so a
+        # failure there must not block the pre-release.
+        continue-on-error: ${{ matrix.name == 'mips' }}
+        timeout-minutes: 1
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          file "build/xcp_${VERSION}_${{ matrix.name }}_upx"
+          ${{ matrix.qemu }} "./build/xcp_${VERSION}_${{ matrix.name }}_upx" -v
+
+      - name: Promote compressed binary (pre-release only)
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_stable != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
           mv build/xcp_${VERSION}_${{ matrix.name }}_upx build/xcp_${VERSION}_${{ matrix.name }}
 
       - name: Generate checksum

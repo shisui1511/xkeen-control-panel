@@ -1,6 +1,6 @@
 {
   "name": "xkeen-control-panel-frontend",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:unit": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "check:contrast": "node scripts/check-contrast.cjs",
     "check:bundle-size": "node scripts/check-bundle-size.cjs",
     "check:i18n": "node scripts/check-i18n.cjs",
@@ -21,7 +22,7 @@
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tsconfig/svelte": "^5.0.0",
     "@types/node": "^26.4.1",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.0",
     "eslint": "^10.9.1",
     "eslint-plugin-svelte": "^3.23.0",
     "globals": "^17.12.0",
@@ -32,7 +33,7 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.69.0",
     "vite": "^8.2.2",
-    "vitest": "^4.1.10"
+    "vitest": "^5.0.0"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",

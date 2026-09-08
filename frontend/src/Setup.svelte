@@ -99,7 +99,7 @@
       />
     </div>
 
-    <button class="btn btn-primary" style="width: 100%;" on:click={handleSetup} disabled={loading}>
+    <button class="btn btn-primary" style="width: 100%;" onclick={handleSetup} disabled={loading}>
       {loading ? $t('auth.setting_up') : $t('auth.setup_btn')}
     </button>
   </div>

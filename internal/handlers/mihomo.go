@@ -173,20 +173,22 @@ func (a *API) MihomoProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.Transport = transport
-
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		a.errorResponse(w, a.t(r, "mihomo.not_running")+": "+err.Error(), http.StatusBadGateway)
-	}
-
-	proxy.Director = func(req *http.Request) {
-		req.URL.Scheme = target.Scheme
-		req.URL.Host = target.Host
-		req.Host = target.Host
-		if secret != "" {
-			req.Header.Set("Authorization", "Bearer "+secret)
-		}
+	proxy := &httputil.ReverseProxy{
+		Transport: transport,
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			a.errorResponse(w, a.t(r, "mihomo.not_running")+": "+err.Error(), http.StatusBadGateway)
+		},
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			// X-Forwarded-* is intentionally not propagated: Rewrite mode
+			// strips inbound X-Forwarded-* and we deliberately do not call
+			// pr.SetXForwarded() — the target is the local loopback Clash
+			// API, which neither needs nor trusts client-forwarding headers.
+			pr.SetURL(target)
+			pr.Out.Host = target.Host
+			if secret != "" {
+				pr.Out.Header.Set("Authorization", "Bearer "+secret)
+			}
+		},
 	}
 
 	// Strip /api/mihomo/proxy prefix and forward the rest

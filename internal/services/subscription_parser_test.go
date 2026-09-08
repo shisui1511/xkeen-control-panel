@@ -852,3 +852,46 @@ func TestParseSSLink_EdgeCases(t *testing.T) {
 		})
 	}
 }
+
+func TestParseOutboundText_WgQuickErrors(t *testing.T) {
+	svc := &SubscriptionService{}
+
+	// Invalid wg-quick conf (missing PrivateKey)
+	badConf := `[Interface]
+Address = 10.0.0.2/32
+
+[Peer]
+PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=
+Endpoint = 1.2.3.4:51820
+`
+	res := svc.ParseOutboundText(badConf)
+	if len(res) != 1 {
+		t.Fatalf("expected exactly 1 error result, got %d", len(res))
+	}
+	if res[0].Error == "" {
+		t.Errorf("expected error for bad conf, got none")
+	}
+	if !strings.Contains(res[0].Error, "missing PrivateKey") {
+		t.Errorf("expected 'missing PrivateKey' error, got %q", res[0].Error)
+	}
+
+	// Valid conf
+	goodConf := `[Interface]
+PrivateKey = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=
+Address = 10.0.0.2/32
+
+[Peer]
+PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=
+Endpoint = 1.2.3.4:51820
+`
+	resGood := svc.ParseOutboundText(goodConf)
+	if len(resGood) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(resGood))
+	}
+	if resGood[0].Error != "" {
+		t.Errorf("unexpected error: %s", resGood[0].Error)
+	}
+	if resGood[0].Outbound == nil || resGood[0].Outbound.Protocol != "wireguard" {
+		t.Errorf("expected wireguard outbound, got %+v", resGood[0].Outbound)
+	}
+}

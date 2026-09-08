@@ -533,8 +533,10 @@ func TestCatalogMihomoTemplatesResolve(t *testing.T) {
 				t.Fatalf("Failed to parse %s as YAML: %v", path, err)
 			}
 
-			if _, hasProxies := parsed["proxies"]; hasProxies {
-				t.Errorf("Template %s must not declare hardcoded proxies section", path)
+			if tmpl.Filename != "awg-antifilter.yaml" {
+				if _, hasProxies := parsed["proxies"]; hasProxies {
+					t.Errorf("Template %s must not declare hardcoded proxies section", path)
+				}
 			}
 
 			rulesVal, ok := parsed["rules"]
@@ -725,6 +727,133 @@ func TestReferenceTemplatesPassPreflightDnsOverVless(t *testing.T) {
 				if w.Code == "preflight.dns_over_vless" {
 					t.Errorf("Template %s failed preflight with warning: %s", fn, w.Message)
 				}
+			}
+		})
+	}
+}
+
+func TestAwgAntifilterYamlStructure(t *testing.T) {
+	path := filepath.Join("mihomo", "awg-antifilter.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("Failed to read %s: %v", path, err)
+	}
+
+	var parsed map[string]interface{}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("Failed to parse %s as YAML: %v", path, err)
+	}
+
+	// Top level checks
+	if parsed["mode"] != "rule" {
+		t.Errorf("Expected mode: rule, got: %v", parsed["mode"])
+	}
+	if parsed["redir-port"] != 5000 {
+		t.Errorf("Expected redir-port: 5000, got: %v", parsed["redir-port"])
+	}
+	if parsed["tproxy-port"] != 5001 {
+		t.Errorf("Expected tproxy-port: 5001, got: %v", parsed["tproxy-port"])
+	}
+
+	// Proxies checks
+	proxies, ok := parsed["proxies"].([]interface{})
+	if !ok || len(proxies) == 0 {
+		t.Fatalf("Expected non-empty proxies list in %s", path)
+	}
+
+	p0, ok := proxies[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("First proxy is not a map in %s", path)
+	}
+	if p0["name"] != "AWG-Antifilter" {
+		t.Errorf("Expected proxy name 'AWG-Antifilter', got: %v", p0["name"])
+	}
+	if p0["type"] != "wireguard" {
+		t.Errorf("Expected proxy type 'wireguard', got: %v", p0["type"])
+	}
+	if p0["mtu"] != 1280 {
+		t.Errorf("Expected proxy mtu: 1280, got: %v", p0["mtu"])
+	}
+
+	awgOpt, ok := p0["amnezia-wg-option"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Missing amnezia-wg-option block in proxy in %s", path)
+	}
+	if awgOpt["jc"] != 4 || awgOpt["jmin"] != 40 || awgOpt["jmax"] != 70 {
+		t.Errorf("Expected jc=4, jmin=40, jmax=70, got: %v, %v, %v", awgOpt["jc"], awgOpt["jmin"], awgOpt["jmax"])
+	}
+	if awgOpt["s1"] != 15 || awgOpt["s2"] != 40 {
+		t.Errorf("Expected s1=15, s2=40, got: %v, %v", awgOpt["s1"], awgOpt["s2"])
+	}
+
+	// Rules checks
+	rules, ok := parsed["rules"].([]interface{})
+	if !ok || len(rules) == 0 {
+		t.Fatalf("Expected non-empty rules list in %s", path)
+	}
+
+	hasPort3389 := false
+	hasLoopback := false
+	hasMatch := false
+	for _, r := range rules {
+		ruleStr, ok := r.(string)
+		if !ok {
+			continue
+		}
+		if strings.Contains(ruleStr, "DST-PORT,3389,DIRECT") {
+			hasPort3389 = true
+		}
+		if strings.Contains(ruleStr, "127.0.0.0/8,DIRECT") {
+			hasLoopback = true
+		}
+		if strings.HasPrefix(ruleStr, "MATCH,") {
+			hasMatch = true
+		}
+	}
+
+	if !hasPort3389 {
+		t.Error("Missing port 3389 protection rule in awg-antifilter.yaml")
+	}
+	if !hasLoopback {
+		t.Error("Missing 127.0.0.0/8 protection rule in awg-antifilter.yaml")
+	}
+	if !hasMatch {
+		t.Error("Missing MATCH final rule in awg-antifilter.yaml")
+	}
+}
+
+func TestReferenceTemplatesSnapshotPreservation(t *testing.T) {
+	referenceFiles := []string{
+		"smart-antifilter.yaml",
+		"split-services.yaml",
+		"low-memory.yaml",
+		"multi-sub-hwid.yaml",
+		"gaming-low-latency.yaml",
+		"full-tunnel.yaml",
+	}
+
+	for _, fn := range referenceFiles {
+		t.Run(fn, func(t *testing.T) {
+			path := filepath.Join("mihomo", fn)
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("Failed to read %s: %v", path, err)
+			}
+
+			var parsed map[string]interface{}
+			if err := yaml.Unmarshal(content, &parsed); err != nil {
+				t.Fatalf("Template %s failed YAML parsing: %v", fn, err)
+			}
+
+			// All reference templates must have dns, rules, mode
+			if _, ok := parsed["dns"]; !ok {
+				t.Errorf("Template %s missing dns block", fn)
+			}
+			if _, ok := parsed["rules"]; !ok {
+				t.Errorf("Template %s missing rules block", fn)
+			}
+			if _, ok := parsed["mode"]; !ok {
+				t.Errorf("Template %s missing mode field", fn)
 			}
 		})
 	}

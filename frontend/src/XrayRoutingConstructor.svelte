@@ -10,9 +10,12 @@
   import { parseValidationError } from './lib/errorParser';
   import { findPortCollisions, parseMihomoPorts, type PortAllocation } from './lib/portChecker';
   import { apiFetch, apiFetchJSON } from './lib/api';
+  import { shadowsocksCiphers } from './schemas/xray';
   import PreflightWarnings, {
     type PreflightWarning
   } from './components/editor/PreflightWarnings.svelte';
+  import AwgDiffCard from './components/awg/AwgDiffCard.svelte';
+  import { analyzeAwgDiff } from './lib/awgPresets';
 
   let {
     onSwitchTab = () => {},
@@ -114,6 +117,8 @@
           server = o.settings.vnext[0].address;
         } else if (o.settings?.servers?.[0]?.address) {
           server = o.settings.servers[0].address;
+        } else if (o.settings?.peers?.[0]?.endpoint) {
+          server = o.settings.peers[0].endpoint;
         }
         list.push({
           tag: o.tag,
@@ -131,6 +136,8 @@
           server = o.settings.vnext[0].address;
         } else if (o.settings?.servers?.[0]?.address) {
           server = o.settings.servers[0].address;
+        } else if (o.settings?.peers?.[0]?.endpoint) {
+          server = o.settings.peers[0].endpoint;
         }
         list.push({
           tag: o.tag,
@@ -160,8 +167,106 @@
     serviceName: '',
     publicKey: '',
     shortId: '',
-    fingerprint: 'chrome'
+    fingerprint: 'chrome',
+    // Shadowsocks
+    shadowsocksPassword: '',
+    // WireGuard
+    wireguardSecretKey: '',
+    wireguardAddress: '10.0.0.2/32',
+    endpoint: '',
+    wireguardPublicKey: '',
+    wireguardPsk: '',
+    wireguardKeepAlive: 25,
+    wireguardAllowedIPs: '0.0.0.0/0, ::/0',
+    wireguardMtu: 1420,
+    wireguardReserved: '',
+    isAwgObfuscated: false,
+    rawAwgOptions: null as any,
+    // Sockopt
+    sockoptMark: '' as string | number,
+    sockoptTcpFastOpen: false,
+    sockoptTcpMptcp: false,
+    sockoptTcpNoDelay: false,
+    sockoptTcpKeepAliveInterval: '' as string | number,
+    dialerProxy: ''
   });
+
+  function generateShadowsocksKey(method: string): string {
+    const is16 = method.includes('128');
+    const byteLen = is16 ? 16 : 32;
+    const array = new Uint8Array(byteLen);
+    crypto.getRandomValues(array);
+    let binary = '';
+    for (let i = 0; i < array.length; i++) {
+      binary += String.fromCharCode(array[i]);
+    }
+    return btoa(binary);
+  }
+
+  function computeDialerChain(
+    currentTag: string,
+    targetProxy: string
+  ): { chain: string[]; hasCycle: boolean } {
+    if (!targetProxy) {
+      return { chain: [currentTag, 'DIRECT'], hasCycle: false };
+    }
+    const chain: string[] = [currentTag];
+    const visited = new Set<string>([currentTag]);
+    let curr = targetProxy;
+
+    const proxyMap = new Map<string, string>();
+    for (const o of customOutbounds) {
+      if (o?.tag) {
+        const dp = o.streamSettings?.sockopt?.dialerProxy;
+        if (dp) proxyMap.set(o.tag, dp);
+      }
+    }
+    for (const o of subscriptionOutbounds) {
+      if (o?.tag) {
+        const dp = o.streamSettings?.sockopt?.dialerProxy;
+        if (dp) proxyMap.set(o.tag, dp);
+      }
+    }
+    proxyMap.set(currentTag, targetProxy);
+
+    while (curr) {
+      chain.push(curr);
+      if (visited.has(curr)) {
+        return { chain, hasCycle: true };
+      }
+      visited.add(curr);
+      curr = proxyMap.get(curr) || '';
+      if (chain.length > 20) {
+        return { chain, hasCycle: true };
+      }
+    }
+    chain.push('DIRECT');
+    return { chain, hasCycle: false };
+  }
+
+  let dialerChainPreview = $derived.by(() => {
+    const tag = outboundForm.tag.trim() || 'CURRENT';
+    return computeDialerChain(tag, outboundForm.dialerProxy.trim());
+  });
+
+  let generatingUUID = $state(false);
+  async function generateUUID() {
+    generatingUUID = true;
+    try {
+      const res = await apiFetch('/api/xray/uuid');
+      const data = await res.json();
+      if (res.ok && data?.data?.uuid) {
+        outboundForm.uuid = data.data.uuid;
+        showToast('success', $t('xray.uuid_generated'));
+      } else {
+        outboundForm.uuid = crypto.randomUUID();
+      }
+    } catch {
+      outboundForm.uuid = crypto.randomUUID();
+    } finally {
+      generatingUUID = false;
+    }
+  }
 
   let canUndo = $state(false);
   function checkUndo() {
@@ -407,6 +512,9 @@
     { link: string; outbound: any; tag: string; rowError?: string | null }[]
   >([]);
   let importErrorMsg = $state('');
+  let importSource = $state<'links' | 'file' | 'clipboard'>('links');
+  let isDraggingFile = $state(false);
+  let loadedFileName = $state('');
 
   // Form states
   let showRuleForm = $state(false);
@@ -738,20 +846,71 @@
       serviceName: '',
       publicKey: '',
       shortId: '',
-      fingerprint: 'chrome'
+      fingerprint: 'chrome',
+      // Shadowsocks
+      shadowsocksPassword: '',
+      // WireGuard
+      wireguardSecretKey: '',
+      wireguardAddress: '10.0.0.2/32',
+      endpoint: '',
+      wireguardPublicKey: '',
+      wireguardPsk: '',
+      wireguardKeepAlive: 25,
+      wireguardAllowedIPs: '0.0.0.0/0, ::/0',
+      wireguardMtu: 1420,
+      wireguardReserved: '',
+      isAwgObfuscated: false,
+      rawAwgOptions: null as any,
+      // Sockopt
+      sockoptMark: '' as string | number,
+      sockoptTcpFastOpen: false,
+      sockoptTcpMptcp: false,
+      sockoptTcpNoDelay: false,
+      sockoptTcpKeepAliveInterval: '' as string | number,
+      dialerProxy: ''
     };
 
-    const user = o.settings?.vnext?.[0]?.users?.[0];
-    if (o.settings?.vnext?.[0]) {
-      form.address = o.settings.vnext[0].address || '';
-      form.port = o.settings.vnext[0].port || 443;
-    }
+    if (o.protocol === 'vless' || o.protocol === 'vmess') {
+      const user = o.settings?.vnext?.[0]?.users?.[0];
+      if (o.settings?.vnext?.[0]) {
+        form.address = o.settings.vnext[0].address || '';
+        form.port = o.settings.vnext[0].port || 443;
+      }
+      if (user) {
+        form.uuid = user.id || '';
+        form.flow = user.flow || '';
+        form.cipher = user.security || 'auto';
+        form.alterId = user.alterId || 0;
+      }
+    } else if (o.protocol === 'shadowsocks') {
+      const server = o.settings?.servers?.[0] || o.settings || {};
+      form.address = server.address || '';
+      form.port = server.port || 8388;
+      form.cipher = server.method || o.settings?.method || '2022-blake3-aes-128-gcm';
+      form.shadowsocksPassword = server.password || o.settings?.password || '';
+    } else if (o.protocol === 'wireguard') {
+      const s = o.settings || {};
+      form.wireguardSecretKey = s.secretKey || '';
+      form.wireguardAddress = Array.isArray(s.address)
+        ? s.address.join(', ')
+        : s.address || '10.0.0.2/32';
+      form.wireguardMtu = s.mtu || 1420;
+      if (Array.isArray(s.reserved) && s.reserved.length === 3) {
+        form.wireguardReserved = s.reserved.join(', ');
+      }
+      const peer = s.peers?.[0] || {};
+      form.endpoint = peer.endpoint || '';
+      form.wireguardPublicKey = peer.publicKey || '';
+      form.wireguardPsk = peer.preSharedKey || '';
+      form.wireguardKeepAlive = peer.keepAlive ?? 25;
+      form.wireguardAllowedIPs = Array.isArray(peer.allowedIPs)
+        ? peer.allowedIPs.join(', ')
+        : peer.allowedIPs || '0.0.0.0/0, ::/0';
 
-    if (user) {
-      form.uuid = user.id || '';
-      form.flow = user.flow || '';
-      form.cipher = user.security || 'auto';
-      form.alterId = user.alterId || 0;
+      if (s.awg || o.awg || o._isAwg || s.amneziaWgOption || o.amneziaWgOption) {
+        form.isAwgObfuscated = true;
+        form.rawAwgOptions = s.amneziaWgOption || o.amneziaWgOption || s.awg || o.awg || {};
+      }
     }
 
     const ss = o.streamSettings || {};
@@ -772,6 +931,14 @@
       form.shortId = ss.realitySettings?.shortId || '';
       form.fingerprint = ss.realitySettings?.fingerprint || 'chrome';
     }
+
+    const sockopt = ss.sockopt || {};
+    form.sockoptMark = sockopt.mark ?? '';
+    form.sockoptTcpFastOpen = !!sockopt.tcpFastOpen;
+    form.sockoptTcpMptcp = !!sockopt.tcpMptcp;
+    form.sockoptTcpNoDelay = !!sockopt.tcpNoDelay;
+    form.sockoptTcpKeepAliveInterval = sockopt.tcpKeepAliveInterval ?? '';
+    form.dialerProxy = sockopt.dialerProxy || '';
 
     return form;
   }
@@ -806,6 +973,78 @@
           ]
         }
       ];
+    } else if (form.protocol === 'shadowsocks') {
+      settings.servers = [
+        {
+          address: form.address.trim(),
+          port: Number(form.port),
+          method: form.cipher || '2022-blake3-aes-128-gcm',
+          password: form.shadowsocksPassword.trim()
+        }
+      ];
+    } else if (form.protocol === 'wireguard') {
+      settings.secretKey = form.wireguardSecretKey.trim();
+      settings.address = form.wireguardAddress
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (Number(form.wireguardMtu) > 0) {
+        settings.mtu = Number(form.wireguardMtu);
+      }
+      if (form.wireguardReserved.trim()) {
+        const parts = form.wireguardReserved
+          .split(',')
+          .map((s) => parseInt(s.trim(), 10))
+          .filter((n) => !isNaN(n) && n >= 0 && n <= 255);
+        if (parts.length === 3) {
+          settings.reserved = parts;
+        }
+      }
+      const peer: any = {
+        endpoint: form.endpoint.trim(),
+        publicKey: form.wireguardPublicKey.trim()
+      };
+      if (form.wireguardPsk.trim()) {
+        peer.preSharedKey = form.wireguardPsk.trim();
+      }
+      if (Number(form.wireguardKeepAlive) > 0) {
+        peer.keepAlive = Number(form.wireguardKeepAlive);
+      }
+      if (form.wireguardAllowedIPs.trim()) {
+        peer.allowedIPs = form.wireguardAllowedIPs
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+      } else {
+        peer.allowedIPs = ['0.0.0.0/0', '::/0'];
+      }
+      settings.peers = [peer];
+    }
+
+    const sockopt: Record<string, any> = {};
+    if (form.sockoptMark !== '' && !isNaN(Number(form.sockoptMark))) {
+      sockopt.mark = Number(form.sockoptMark);
+    }
+    if (form.sockoptTcpFastOpen) sockopt.tcpFastOpen = true;
+    if (form.sockoptTcpMptcp) sockopt.tcpMptcp = true;
+    if (form.sockoptTcpNoDelay) sockopt.tcpNoDelay = true;
+    if (
+      form.sockoptTcpKeepAliveInterval !== '' &&
+      !isNaN(Number(form.sockoptTcpKeepAliveInterval))
+    ) {
+      sockopt.tcpKeepAliveInterval = Number(form.sockoptTcpKeepAliveInterval);
+    }
+    if (form.dialerProxy.trim()) {
+      sockopt.dialerProxy = form.dialerProxy.trim();
+    }
+
+    if (form.protocol === 'wireguard') {
+      return {
+        tag: form.tag.trim(),
+        protocol: form.protocol,
+        settings,
+        ...(Object.keys(sockopt).length > 0 ? { streamSettings: { sockopt } } : {})
+      };
     }
 
     const streamSettings: any = {
@@ -844,6 +1083,10 @@
       };
     }
 
+    if (Object.keys(sockopt).length > 0) {
+      streamSettings.sockopt = sockopt;
+    }
+
     return {
       tag: form.tag.trim(),
       protocol: form.protocol,
@@ -870,7 +1113,25 @@
       serviceName: '',
       publicKey: '',
       shortId: '',
-      fingerprint: 'chrome'
+      fingerprint: 'chrome',
+      shadowsocksPassword: '',
+      wireguardSecretKey: '',
+      wireguardAddress: '10.0.0.2/32',
+      endpoint: '',
+      wireguardPublicKey: '',
+      wireguardPsk: '',
+      wireguardKeepAlive: 25,
+      wireguardAllowedIPs: '0.0.0.0/0, ::/0',
+      wireguardMtu: 1420,
+      wireguardReserved: '',
+      isAwgObfuscated: false,
+      rawAwgOptions: null,
+      sockoptMark: '',
+      sockoptTcpFastOpen: false,
+      sockoptTcpMptcp: false,
+      sockoptTcpNoDelay: false,
+      sockoptTcpKeepAliveInterval: '',
+      dialerProxy: ''
     };
     showOutboundForm = true;
   }
@@ -1041,25 +1302,79 @@
   }
 
   function saveOutbound() {
-    if (!outboundForm.tag.trim() || !outboundForm.address.trim() || !outboundForm.port) {
+    if (!outboundForm.tag.trim()) {
       showToast('error', $t('xray.fill_required_fields'));
       return;
     }
 
+    if (outboundForm.protocol === 'wireguard') {
+      if (
+        !outboundForm.wireguardSecretKey.trim() ||
+        !outboundForm.wireguardPublicKey.trim() ||
+        !outboundForm.endpoint.trim()
+      ) {
+        showToast('error', $t('xray.fill_required_fields'));
+        return;
+      }
+      if (outboundForm.wireguardReserved.trim()) {
+        const parts = outboundForm.wireguardReserved
+          .split(',')
+          .map((s) => parseInt(s.trim(), 10))
+          .filter((n) => !isNaN(n) && n >= 0 && n <= 255);
+        if (parts.length !== 3) {
+          showToast('error', $t('xray.reserved_invalid'));
+          return;
+        }
+      }
+    } else {
+      if (!outboundForm.address.trim() || !outboundForm.port) {
+        showToast('error', $t('xray.fill_required_fields'));
+        return;
+      }
+      if (outboundForm.protocol === 'shadowsocks') {
+        if (!outboundForm.shadowsocksPassword.trim()) {
+          showToast('error', $t('xray.fill_required_fields'));
+          return;
+        }
+        if (outboundForm.cipher.startsWith('2022-blake3')) {
+          const is16 = outboundForm.cipher.includes('128');
+          const expectedB64Len = is16 ? 24 : 44;
+          const cleanKey = outboundForm.shadowsocksPassword.trim();
+          if (cleanKey.length !== expectedB64Len) {
+            showToast(
+              'error',
+              $t('xray.ss2022_key_length', {
+                bytes: is16 ? 16 : 32,
+                chars: expectedB64Len
+              })
+            );
+            return;
+          }
+        }
+      }
+    }
+
+    if (dialerChainPreview.hasCycle) {
+      showToast('error', $t('xray.dialer_cycle_detected'));
+      return;
+    }
+
     const outboundObj = buildOutboundFromForm(outboundForm);
+
+    const tagExists =
+      customOutbounds.some((o, idx) => idx !== editingOutboundIndex && o.tag === outboundObj.tag) ||
+      subscriptionOutbounds.some((o) => o.tag === outboundObj.tag) ||
+      ['direct', 'block', 'dns-out'].includes(outboundObj.tag);
+    if (tagExists) {
+      showToast('error', $t('xray.outbound_tag_exists'));
+      return;
+    }
 
     if (editingOutboundIndex !== null) {
       const updated = [...customOutbounds];
       updated[editingOutboundIndex] = outboundObj;
       customOutbounds = updated;
     } else {
-      const exists =
-        customOutbounds.some((o) => o.tag === outboundObj.tag) ||
-        ['direct', 'block', 'dns-out'].includes(outboundObj.tag);
-      if (exists) {
-        showToast('error', $t('xray.outbound_tag_exists'));
-        return;
-      }
       customOutbounds = [...customOutbounds, outboundObj];
     }
 
@@ -1973,6 +2288,20 @@
     importLoading = false;
     importNodes = [];
     importErrorMsg = '';
+    importSource = 'links';
+    isDraggingFile = false;
+    loadedFileName = '';
+  }
+
+  function handleConfigFile(file: File) {
+    loadedFileName = file.name;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = (e.target?.result as string) || '';
+      importLink = text;
+      parseImportLink();
+    };
+    reader.readAsText(file);
   }
 
   function closeImportModal() {
@@ -2094,8 +2423,22 @@
     </div>
   {:else if schemaError}
     <div class="error-state-block" style="padding: 48px; text-align: center;">
-      <div class="error-icon" style="color: var(--danger); font-size: 24px; margin-bottom: 12px;">
-        ⚠
+      <div class="error-icon">
+        <svg
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+        >
+          <path
+            d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+          />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
       </div>
       <p style="color: var(--danger); margin-bottom: 16px;">
         {$t('editor.definition_load_error', { error: schemaError })}
@@ -2443,7 +2786,7 @@
 
                 {#if testRouteError}
                   <div
-                    class="alert alert-danger"
+                    class="alert alert-error"
                     data-testid="test-route-error"
                     style="margin-top: 12px;"
                   >
@@ -2455,7 +2798,7 @@
                   <div
                     class="test-route-result card"
                     data-testid="test-route-result"
-                    style="margin-top: 12px; padding: 12px; background: var(--bg-card-subtle);"
+                    style="margin-top: 12px; padding: 12px; background: var(--bg-page);"
                   >
                     {#if testRouteResult.outbound_tag}
                       <div
@@ -2920,7 +3263,22 @@
                 role="status"
               >
                 <div style="display: flex; gap: 8px; align-items: center;">
-                  <span aria-hidden="true">⚠️</span>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    style="flex-shrink: 0;"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                    />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
                   <span>{$t('editor.dns_intercept_warning')}</span>
                 </div>
                 <button
@@ -3135,30 +3493,32 @@
         <!-- OUTBOUNDS SECTION -->
         {#if activeSection === 'outbounds'}
           <div class="sec-body">
+            <div class="section-title" style="margin-bottom: 12px;">
+              {$t('editor.xray_section_outbounds')}
+            </div>
+
             <div
-              style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;"
+              class="constructor-outbounds-header"
+              style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;"
             >
-              <div class="section-title" style="margin: 0;">
-                {$t('editor.xray_section_outbounds')}
-              </div>
-              <button
-                class="btn btn-secondary"
-                onclick={openImportModal}
-                style="padding: 4px 10px; font-size: 12px; display: flex; align-items: center; gap: 4px;"
-              >
+              <button type="button" class="add-btn btn-action-primary" onclick={openImportModal}>
                 <svg
-                  width="14"
-                  height="14"
+                  width="13"
+                  height="13"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
+                  style="margin-right: 4px; display: inline-block; vertical-align: middle;"
                 >
                   <path
                     d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"
                   />
                 </svg>
                 {$t('subscr.import_node')}
+              </button>
+              <button type="button" class="add-btn btn-secondary" onclick={openAddOutbound}>
+                + {$t('xray.add_outbound_manual')}
               </button>
             </div>
 
@@ -3225,14 +3585,23 @@
               {/each}
             </div>
 
-            {#if !showOutboundForm}
-              <button class="add-btn" onclick={openAddOutbound}>
-                + {$t('xray.add_outbound_vless_vmess')}
+            <div style="margin-top: 12px;">
+              <button class="add-btn btn-secondary" onclick={openAddOutbound} type="button">
+                + {$t('xray.add_outbound_manual')}
               </button>
-            {/if}
+            </div>
 
-            {#if showOutboundForm}
-              <div class="form-card" style="margin-top: 12px;">
+            <Modal
+              isOpen={showOutboundForm}
+              title={editingOutboundIndex !== null
+                ? $t('xray.edit_outbound_title', { tag: outboundForm.tag || 'outbound' })
+                : $t('xray.add_outbound_title')}
+              onclose={() => (showOutboundForm = false)}
+            >
+              <div
+                class="modal-form-card"
+                style="display: flex; flex-direction: column; gap: 12px;"
+              >
                 <div class="form-row">
                   <label class="form-label" for="outbound-tag">{$t('xray.tag_name')} *</label>
                   <input
@@ -3242,44 +3611,48 @@
                     placeholder="PROXY"
                   />
                 </div>
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label" for="outbound-protocol">{$t('xray.protocol')}</label>
-                    <select
-                      id="outbound-protocol"
-                      class="form-select"
-                      bind:value={outboundForm.protocol}
-                    >
-                      <option value="vless">VLESS</option>
-                      <option value="vmess">VMess</option>
-                    </select>
-                  </div>
-                  <div class="form-col">
-                    <label class="form-label" for="outbound-address"
-                      >{$t('xray.server_address')} *</label
-                    >
-                    <input
-                      id="outbound-address"
-                      class="form-input"
-                      bind:value={outboundForm.address}
-                      placeholder="server.com"
-                    />
-                  </div>
+                <div class="form-row">
+                  <label class="form-label" for="outbound-protocol">{$t('xray.protocol')}</label>
+                  <select
+                    id="outbound-protocol"
+                    class="form-select"
+                    bind:value={outboundForm.protocol}
+                  >
+                    <option value="vless">VLESS</option>
+                    <option value="vmess">VMess</option>
+                    <option value="shadowsocks">Shadowsocks</option>
+                    <option value="wireguard">WireGuard</option>
+                  </select>
                 </div>
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label" for="outbound-port">{$t('xray.port')} *</label>
-                    <input
-                      id="outbound-port"
-                      class="form-input"
-                      type="number"
-                      bind:value={outboundForm.port}
-                      min="1"
-                      max="65535"
-                    />
+
+                <!-- Protocol specific fields -->
+                {#if outboundForm.protocol === 'vless' || outboundForm.protocol === 'vmess'}
+                  <div class="form-row2">
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-address"
+                        >{$t('xray.server_address')} *</label
+                      >
+                      <input
+                        id="outbound-address"
+                        class="form-input"
+                        bind:value={outboundForm.address}
+                        placeholder="server.com"
+                      />
+                    </div>
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-port">{$t('xray.port')} *</label>
+                      <input
+                        id="outbound-port"
+                        class="form-input"
+                        type="number"
+                        bind:value={outboundForm.port}
+                        min="1"
+                        max="65535"
+                      />
+                    </div>
                   </div>
-                  <div class="form-col">
-                    <label class="form-label" for="outbound-uuid">UUID *</label>
+                  <div class="form-row">
+                    <label class="form-label" for="outbound-uuid">{$t('xray.uuid_label')} *</label>
                     <div class="input-with-btn">
                       <input
                         id="outbound-uuid"
@@ -3288,283 +3661,639 @@
                         placeholder="uuid"
                       />
                       <button
-                        class="btn btn-secondary"
-                        style="padding: 0 8px; min-height: 36px;"
-                        onclick={() => (outboundForm.uuid = crypto.randomUUID())}
+                        class="btn btn-secondary btn-inset"
+                        onclick={generateUUID}
+                        disabled={generatingUUID}
                         title={$t('app.generate')}
-                        type="button">⟳</button
+                        aria-label={$t('app.generate')}
+                        data-testid="outbound-uuid-generate"
+                        type="button"
                       >
+                        {#if generatingUUID}
+                          <span
+                            class="spinner"
+                            style="--spinner-size: 14px; --spinner-track: currentColor; --spinner-color: transparent;"
+                          ></span>
+                        {:else}
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            aria-hidden="true"
+                          >
+                            <polyline points="23 4 23 10 17 10" />
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                          </svg>
+                        {/if}
+                      </button>
                     </div>
                   </div>
-                </div>
 
-                {#if outboundForm.protocol === 'vless'}
-                  <div class="form-row">
-                    <label class="form-label" for="outbound-flow">{$t('xray.flow')}</label>
-                    <select id="outbound-flow" class="form-select" bind:value={outboundForm.flow}>
-                      <option value="">{$t('app.none')}</option>
-                      <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                    </select>
-                  </div>
-                {:else if outboundForm.protocol === 'vmess'}
+                  {#if outboundForm.protocol === 'vless'}
+                    <div class="form-row">
+                      <label class="form-label" for="outbound-flow">{$t('xray.flow')}</label>
+                      <select id="outbound-flow" class="form-select" bind:value={outboundForm.flow}>
+                        <option value="">{$t('app.none')}</option>
+                        <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+                      </select>
+                    </div>
+                  {:else if outboundForm.protocol === 'vmess'}
+                    <div class="form-row2">
+                      <div class="form-col">
+                        <label class="form-label" for="outbound-cipher">{$t('xray.cipher')}</label>
+                        <select
+                          id="outbound-cipher"
+                          class="form-select"
+                          bind:value={outboundForm.cipher}
+                        >
+                          <option value="auto">auto</option>
+                          <option value="aes-128-gcm">aes-128-gcm</option>
+                          <option value="chacha20-poly1305">chacha20-poly1305</option>
+                          <option value="none">none</option>
+                        </select>
+                      </div>
+                      <div class="form-col">
+                        <label class="form-label" for="outbound-alterid">AlterID</label>
+                        <input
+                          id="outbound-alterid"
+                          class="form-input"
+                          type="number"
+                          bind:value={outboundForm.alterId}
+                          min="0"
+                        />
+                      </div>
+                    </div>
+                  {/if}
+
+                  <!-- Security Settings -->
                   <div class="form-row2">
                     <div class="form-col">
-                      <label class="form-label" for="outbound-cipher">{$t('xray.cipher')}</label>
-                      <select
-                        id="outbound-cipher"
-                        class="form-select"
-                        bind:value={outboundForm.cipher}
+                      <label class="form-label" for="outbound-security">{$t('xray.security')}</label
                       >
-                        <option value="auto">auto</option>
-                        <option value="aes-128-gcm">aes-128-gcm</option>
-                        <option value="chacha20-poly1305">chacha20-poly1305</option>
+                      <select
+                        id="outbound-security"
+                        class="form-select"
+                        bind:value={outboundForm.security}
+                      >
                         <option value="none">none</option>
+                        <option value="tls">TLS</option>
+                        {#if outboundForm.protocol === 'vless'}
+                          <option value="reality">REALITY</option>
+                        {/if}
                       </select>
                     </div>
                     <div class="form-col">
-                      <label class="form-label" for="outbound-alterid">AlterID</label>
+                      <label class="form-label" for="outbound-sni">SNI (ServerName)</label>
                       <input
-                        id="outbound-alterid"
+                        id="outbound-sni"
                         class="form-input"
-                        type="number"
-                        bind:value={outboundForm.alterId}
-                        min="0"
+                        bind:value={outboundForm.sni}
+                        placeholder="yahoo.com"
                       />
                     </div>
                   </div>
-                {/if}
 
-                <!-- Security Settings -->
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label" for="outbound-security">{$t('xray.security')}</label>
-                    <select
-                      id="outbound-security"
-                      class="form-select"
-                      bind:value={outboundForm.security}
-                    >
-                      <option value="none">none</option>
-                      <option value="tls">TLS</option>
-                      {#if outboundForm.protocol === 'vless'}
-                        <option value="reality">REALITY</option>
-                      {/if}
-                    </select>
-                  </div>
-                  <div class="form-col">
-                    <label class="form-label" for="outbound-sni">SNI (ServerName)</label>
-                    <input
-                      id="outbound-sni"
-                      class="form-input"
-                      bind:value={outboundForm.sni}
-                      placeholder="yahoo.com"
-                    />
-                  </div>
-                </div>
-
-                {#if outboundForm.security === 'reality'}
-                  <div
-                    style="margin-bottom: 12px; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;"
-                  >
-                    <button
-                      type="button"
-                      class="btn btn-secondary btn-sm"
-                      onclick={generateRealityKeys}
-                      disabled={generatingRealityKeys}
-                    >
-                      {generatingRealityKeys
-                        ? $t('xray.generating')
-                        : $t('xray.generate_reality_keys')}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn btn-secondary btn-sm"
-                      data-testid="tls-ping-btn"
-                      onclick={runTLSPing}
-                      disabled={tlsPingRunning || !outboundForm.address.trim()}
-                      title={$t('xray.tls_ping.hint')}
-                    >
-                      {tlsPingRunning ? $t('xray.tls_ping.running') : $t('xray.tls_ping.button')}
-                    </button>
-                  </div>
-
-                  {#if tlsPingError}
+                  {#if outboundForm.security === 'reality' || outboundForm.security === 'tls'}
                     <div
-                      class="alert alert-danger"
-                      data-testid="tls-ping-error"
-                      style="margin-bottom: 12px;"
+                      style="margin-bottom: 12px; display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;"
                     >
-                      {tlsPingError}
-                    </div>
-                  {/if}
-
-                  {#if tlsPingResult}
-                    <div
-                      class="card tls-ping-result"
-                      data-testid="tls-ping-result"
-                      style="margin-bottom: 12px; padding: 12px; background: var(--bg-card-subtle);"
-                    >
-                      <div
-                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;"
-                      >
-                        <span style="font-weight: 600; font-size: 13px;"
-                          >{$t('xray.tls_ping.title')}</span
+                      {#if outboundForm.security === 'reality'}
+                        <button
+                          type="button"
+                          class="btn btn-secondary btn-sm"
+                          onclick={generateRealityKeys}
+                          disabled={generatingRealityKeys}
                         >
+                          {generatingRealityKeys
+                            ? $t('xray.generating')
+                            : $t('xray.generate_reality_keys')}
+                        </button>
+                      {/if}
+                      <button
+                        type="button"
+                        class="btn btn-secondary btn-sm"
+                        data-testid="tls-ping-btn"
+                        onclick={runTLSPing}
+                        disabled={tlsPingRunning || !outboundForm.address.trim()}
+                        title={$t('xray.tls_ping.hint')}
+                      >
+                        {tlsPingRunning ? $t('xray.tls_ping.running') : $t('xray.tls_ping.button')}
+                      </button>
+                    </div>
+
+                    {#if tlsPingError}
+                      <div
+                        class="alert alert-error"
+                        data-testid="tls-ping-error"
+                        style="margin-bottom: 12px;"
+                      >
+                        {tlsPingError}
+                      </div>
+                    {/if}
+
+                    {#if tlsPingResult}
+                      <div class="card tls-ping-result" data-testid="tls-ping-result">
+                        <div class="tls-ping-head">
+                          <span class="tls-ping-title">{$t('xray.tls_ping.title')}</span>
+                          {#if tlsPingResult.ok}
+                            <span class="badge badge-tag badge-direct"
+                              >OK ({tlsPingResult.handshake_ms}ms)</span
+                            >
+                          {:else}
+                            <span class="badge badge-tag badge-block">FAIL</span>
+                          {/if}
+                        </div>
+
+                        {#if !tlsPingResult.ok && tlsPingResult.error}
+                          <div class="text-danger tls-ping-failure" data-testid="tls-ping-failure">
+                            {tlsPingResult.error}
+                          </div>
+                        {/if}
+
                         {#if tlsPingResult.ok}
-                          <span class="badge badge-tag badge-direct"
-                            >OK ({tlsPingResult.handshake_ms}ms)</span
-                          >
-                        {:else}
-                          <span class="badge badge-tag badge-block">FAIL</span>
+                          <div class="tls-grid">
+                            <div>
+                              <span class="text-muted">{$t('xray.tls_ping.version')}:</span>
+                              <span data-testid="tls-ping-version"
+                                >{tlsPingResult.tls_version || '—'}</span
+                              >
+                            </div>
+                            <div>
+                              <span class="text-muted">{$t('xray.tls_ping.alpn')}:</span>
+                              <span data-testid="tls-ping-alpn">{tlsPingResult.alpn || '—'}</span>
+                            </div>
+                            <div>
+                              <span class="text-muted">{$t('xray.tls_ping.cipher')}:</span>
+                              <span data-testid="tls-ping-cipher"
+                                >{tlsPingResult.cipher_suite || '—'}</span
+                              >
+                            </div>
+                            <div>
+                              <span class="text-muted">{$t('xray.tls_ping.peer_cn')}:</span>
+                              <span data-testid="tls-ping-cn">{tlsPingResult.peer_cn || '—'}</span>
+                            </div>
+                            <div>
+                              <span class="text-muted">{$t('xray.tls_ping.expires')}:</span>
+                              <span data-testid="tls-ping-expires"
+                                >{tlsPingResult.not_after || '—'}</span
+                              >
+                            </div>
+                            <div>
+                              <span class="text-muted">{$t('xray.tls_ping.days_left')}:</span>
+                              {#if tlsPingResult.days_until_expiry !== undefined}
+                                <span
+                                  class="badge badge-tag"
+                                  class:badge-block={tlsPingResult.days_until_expiry < 14}
+                                  class:badge-direct={tlsPingResult.days_until_expiry >= 14}
+                                  data-testid="tls-ping-days"
+                                >
+                                  {tlsPingResult.days_until_expiry}
+                                </span>
+                              {:else}
+                                <span>—</span>
+                              {/if}
+                            </div>
+                          </div>
+                          {#if tlsPingResult.dns_names && tlsPingResult.dns_names.length > 0}
+                            <div class="tls-ping-dns">
+                              <span class="text-muted">{$t('xray.tls_ping.dns_names')}:</span>
+                              <span class="dns-value">{tlsPingResult.dns_names.join(', ')}</span>
+                            </div>
+                          {/if}
                         {/if}
                       </div>
+                    {/if}
 
-                      {#if !tlsPingResult.ok && tlsPingResult.error}
-                        <div
-                          class="text-danger"
-                          data-testid="tls-ping-failure"
-                          style="font-size: 12px; margin-bottom: 6px;"
-                        >
-                          {tlsPingResult.error}
+                    {#if outboundForm.security === 'reality'}
+                      <div class="form-row2">
+                        <div class="form-col">
+                          <label class="form-label" for="outbound-pubkey"
+                            >{$t('xray.reality_public_key')}</label
+                          >
+                          <input
+                            id="outbound-pubkey"
+                            class="form-input"
+                            bind:value={outboundForm.publicKey}
+                            placeholder="base64"
+                          />
                         </div>
+                        <div class="form-col">
+                          <label class="form-label" for="outbound-shortid"
+                            >{$t('xray.reality_short_id')}</label
+                          >
+                          <input
+                            id="outbound-shortid"
+                            class="form-input"
+                            bind:value={outboundForm.shortId}
+                            placeholder="0123abcd"
+                          />
+                        </div>
+                      </div>
+                      <div class="form-row">
+                        <label class="form-label" for="outbound-fingerprint"
+                          >{$t('xray.reality_fingerprint')}</label
+                        >
+                        <select
+                          id="outbound-fingerprint"
+                          class="form-select"
+                          bind:value={outboundForm.fingerprint}
+                        >
+                          <option value="chrome">chrome</option>
+                          <option value="firefox">firefox</option>
+                          <option value="safari">safari</option>
+                          <option value="edge">edge</option>
+                          <option value="qq">qq</option>
+                        </select>
+                      </div>
+                    {/if}
+                  {/if}
+
+                  <!-- Transport Settings -->
+                  <div class="form-row2">
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-network"
+                        >{$t('xray.network_transport')}</label
+                      >
+                      <select
+                        id="outbound-network"
+                        class="form-select"
+                        bind:value={outboundForm.network}
+                      >
+                        <option value="tcp">tcp</option>
+                        <option value="ws">websocket (ws)</option>
+                        <option value="grpc">gRPC</option>
+                        <option value="xhttp">xhttp (SplitHTTP)</option>
+                      </select>
+                    </div>
+                    <div class="form-col">
+                      {#if outboundForm.network === 'ws'}
+                        <label class="form-label" for="outbound-path">{$t('xray.ws_path')}</label>
+                        <input
+                          id="outbound-path"
+                          class="form-input"
+                          bind:value={outboundForm.path}
+                          placeholder="/"
+                        />
+                      {:else}
+                        <label class="form-label" for="outbound-service"
+                          >{$t('xray.grpc_service_name')}</label
+                        >
+                        <input
+                          id="outbound-service"
+                          class="form-input"
+                          bind:value={outboundForm.serviceName}
+                          placeholder="grpc-service"
+                        />
                       {/if}
-
-                      {#if tlsPingResult.ok}
-                        <div
-                          class="tls-grid"
-                          style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; font-size: 12px;"
-                        >
-                          <div>
-                            <span class="text-muted">{$t('xray.tls_ping.version')}:</span>
-                            <span data-testid="tls-ping-version" style="font-weight: 500;"
-                              >{tlsPingResult.tls_version || '—'}</span
+                    </div>
+                  </div>
+                {:else if outboundForm.protocol === 'shadowsocks'}
+                  <div class="form-row2">
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-ss-address"
+                        >{$t('xray.server_address')} *</label
+                      >
+                      <input
+                        id="outbound-ss-address"
+                        class="form-input"
+                        bind:value={outboundForm.address}
+                        placeholder="server.com"
+                      />
+                    </div>
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-ss-port">{$t('xray.port')} *</label>
+                      <input
+                        id="outbound-ss-port"
+                        class="form-input"
+                        type="number"
+                        bind:value={outboundForm.port}
+                        min="1"
+                        max="65535"
+                      />
+                    </div>
+                  </div>
+                  <div class="form-row2">
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-ss-cipher">{$t('xray.cipher')}</label>
+                      <select
+                        id="outbound-ss-cipher"
+                        class="form-select"
+                        bind:value={outboundForm.cipher}
+                      >
+                        {#each shadowsocksCiphers as c}
+                          <option value={c}>{c}</option>
+                        {/each}
+                      </select>
+                    </div>
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-ss-password"
+                        >{$t('xray.password_key')} *</label
+                      >
+                      <div class="input-with-btn">
+                        <input
+                          id="outbound-ss-password"
+                          class="form-input"
+                          bind:value={outboundForm.shadowsocksPassword}
+                          placeholder="base64"
+                        />
+                        {#if outboundForm.cipher.startsWith('2022-blake3')}
+                          <button
+                            class="btn btn-secondary btn-inset"
+                            onclick={() => {
+                              outboundForm.shadowsocksPassword = generateShadowsocksKey(
+                                outboundForm.cipher
+                              );
+                              showToast('success', $t('xray.key_generated'));
+                            }}
+                            title={$t('xray.generate_key')}
+                            aria-label={$t('xray.generate_key')}
+                            data-testid="outbound-ss-generate-key"
+                            type="button"
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              aria-hidden="true"
                             >
-                          </div>
-                          <div>
-                            <span class="text-muted">{$t('xray.tls_ping.alpn')}:</span>
-                            <span data-testid="tls-ping-alpn" style="font-weight: 500;"
-                              >{tlsPingResult.alpn || '—'}</span
-                            >
-                          </div>
-                          <div>
-                            <span class="text-muted">{$t('xray.tls_ping.cipher')}:</span>
-                            <span data-testid="tls-ping-cipher" style="font-weight: 500;"
-                              >{tlsPingResult.cipher_suite || '—'}</span
-                            >
-                          </div>
-                          <div>
-                            <span class="text-muted">{$t('xray.tls_ping.peer_cn')}:</span>
-                            <span data-testid="tls-ping-cn" style="font-weight: 500;"
-                              >{tlsPingResult.peer_cn || '—'}</span
-                            >
-                          </div>
-                          <div>
-                            <span class="text-muted">{$t('xray.tls_ping.expires')}:</span>
-                            <span data-testid="tls-ping-expires" style="font-weight: 500;"
-                              >{tlsPingResult.not_after || '—'}</span
-                            >
-                          </div>
-                          <div>
-                            <span class="text-muted">{$t('xray.tls_ping.days_left')}:</span>
-                            {#if tlsPingResult.days_until_expiry !== undefined}
-                              <span
-                                class="badge badge-tag"
-                                class:badge-block={tlsPingResult.days_until_expiry < 14}
-                                class:badge-direct={tlsPingResult.days_until_expiry >= 14}
-                                data-testid="tls-ping-days"
-                              >
-                                {tlsPingResult.days_until_expiry}
-                              </span>
-                            {:else}
-                              <span>—</span>
-                            {/if}
-                          </div>
-                        </div>
-                        {#if tlsPingResult.dns_names && tlsPingResult.dns_names.length > 0}
-                          <div style="margin-top: 8px; font-size: 12px;">
-                            <span class="text-muted">{$t('xray.tls_ping.dns_names')}:</span>
-                            <span style="word-break: break-all;"
-                              >{tlsPingResult.dns_names.join(', ')}</span
-                            >
-                          </div>
+                              <polyline points="23 4 23 10 17 10" />
+                              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                            </svg>
+                          </button>
                         {/if}
-                      {/if}
+                      </div>
+                    </div>
+                  </div>
+                {:else if outboundForm.protocol === 'wireguard'}
+                  {#if outboundForm.isAwgObfuscated}
+                    <div class="alert alert-warning awg-obfuscation-alert">
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+                        />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                      </svg>
+                      <span>{$t('xray.awg_warning')}</span>
+                    </div>
+                    {@const diff = analyzeAwgDiff(
+                      outboundForm.rawAwgOptions || {
+                        jc: 4,
+                        jmin: 40,
+                        jmax: 70,
+                        s1: 15,
+                        s2: 40,
+                        h1: 1000000001,
+                        h2: 1000000002,
+                        h3: 1000000003,
+                        h4: 1000000004
+                      },
+                      'xray'
+                    )}
+                    <div style="margin-bottom: 12px;">
+                      <AwgDiffCard {diff} targetKernel="xray" compact />
                     </div>
                   {/if}
                   <div class="form-row2">
                     <div class="form-col">
-                      <label class="form-label" for="outbound-pubkey">Reality Public Key</label>
+                      <label class="form-label" for="outbound-wg-endpoint"
+                        >{$t('xray.endpoint')} *</label
+                      >
                       <input
-                        id="outbound-pubkey"
+                        id="outbound-wg-endpoint"
                         class="form-input"
-                        bind:value={outboundForm.publicKey}
-                        placeholder="Public Key"
+                        bind:value={outboundForm.endpoint}
+                        placeholder="server.com:51820"
                       />
                     </div>
                     <div class="form-col">
-                      <label class="form-label" for="outbound-shortid">Reality Short ID</label>
+                      <label class="form-label" for="outbound-wg-address"
+                        >{$t('xray.local_address')}</label
+                      >
                       <input
-                        id="outbound-shortid"
+                        id="outbound-wg-address"
                         class="form-input"
-                        bind:value={outboundForm.shortId}
-                        placeholder="Short ID"
+                        bind:value={outboundForm.wireguardAddress}
+                        placeholder="10.0.0.2/32, fd00::2/128"
                       />
                     </div>
                   </div>
-                  <div class="form-row">
-                    <label class="form-label" for="outbound-fingerprint">Reality Fingerprint</label>
-                    <select
-                      id="outbound-fingerprint"
-                      class="form-select"
-                      bind:value={outboundForm.fingerprint}
-                    >
-                      <option value="chrome">chrome</option>
-                      <option value="firefox">firefox</option>
-                      <option value="safari">safari</option>
-                      <option value="edge">edge</option>
-                      <option value="qq">qq</option>
-                    </select>
+                  <div class="form-row2">
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-wg-secret-key"
+                        >{$t('xray.private_key')} *</label
+                      >
+                      <input
+                        id="outbound-wg-secret-key"
+                        class="form-input"
+                        bind:value={outboundForm.wireguardSecretKey}
+                        placeholder="base64"
+                      />
+                    </div>
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-wg-public-key"
+                        >{$t('xray.public_key')} *</label
+                      >
+                      <input
+                        id="outbound-wg-public-key"
+                        class="form-input"
+                        bind:value={outboundForm.wireguardPublicKey}
+                        placeholder="base64"
+                      />
+                    </div>
+                  </div>
+                  <div class="form-row2">
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-wg-psk"
+                        >{$t('xray.preshared_key')}</label
+                      >
+                      <input
+                        id="outbound-wg-psk"
+                        class="form-input"
+                        bind:value={outboundForm.wireguardPsk}
+                        placeholder="base64"
+                      />
+                    </div>
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-wg-allowed-ips"
+                        >{$t('xray.allowed_ips')}</label
+                      >
+                      <input
+                        id="outbound-wg-allowed-ips"
+                        class="form-input"
+                        bind:value={outboundForm.wireguardAllowedIPs}
+                        placeholder="0.0.0.0/0, ::/0"
+                      />
+                    </div>
+                  </div>
+                  <div class="form-row3">
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-wg-keepalive"
+                        >{$t('xray.keepalive')}</label
+                      >
+                      <input
+                        id="outbound-wg-keepalive"
+                        class="form-input"
+                        type="number"
+                        bind:value={outboundForm.wireguardKeepAlive}
+                        placeholder="25"
+                      />
+                    </div>
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-wg-mtu">{$t('xray.mtu')}</label>
+                      <input
+                        id="outbound-wg-mtu"
+                        class="form-input"
+                        type="number"
+                        bind:value={outboundForm.wireguardMtu}
+                        min="1200"
+                        max="1500"
+                        placeholder="1420"
+                      />
+                      {#if outboundForm.isAwgObfuscated}
+                        <div class="field-info-hint">
+                          {$t('proxies.awg_mtu_hint')}
+                        </div>
+                      {/if}
+                    </div>
+                    <div class="form-col">
+                      <label class="form-label" for="outbound-wg-reserved"
+                        >{$t('xray.reserved')}</label
+                      >
+                      <input
+                        id="outbound-wg-reserved"
+                        class="form-input"
+                        bind:value={outboundForm.wireguardReserved}
+                        placeholder="1, 2, 3"
+                      />
+                    </div>
                   </div>
                 {/if}
 
-                <!-- Transport Settings -->
-                <div class="form-row2">
-                  <div class="form-col">
-                    <label class="form-label" for="outbound-network"
-                      >{$t('xray.network_transport')}</label
+                <!-- Sockopt Section -->
+                <details class="sockopt-details">
+                  <summary class="sockopt-summary">
+                    <svg
+                      class="sockopt-summary-icon"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
                     >
-                    <select
-                      id="outbound-network"
-                      class="form-select"
-                      bind:value={outboundForm.network}
-                    >
-                      <option value="tcp">tcp</option>
-                      <option value="ws">websocket (ws)</option>
-                      <option value="grpc">gRPC</option>
-                      <option value="xhttp">xhttp (SplitHTTP)</option>
-                    </select>
-                  </div>
-                  <div class="form-col">
-                    {#if outboundForm.network === 'ws'}
-                      <label class="form-label" for="outbound-path">WebSocket Path</label>
-                      <input
-                        id="outbound-path"
-                        class="form-input"
-                        bind:value={outboundForm.path}
-                        placeholder="/"
+                      <circle cx="12" cy="12" r="3" />
+                      <path
+                        d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
                       />
-                    {:else}
-                      <label class="form-label" for="outbound-service">gRPC Service Name</label>
-                      <input
-                        id="outbound-service"
-                        class="form-input"
-                        bind:value={outboundForm.serviceName}
-                        placeholder="ServiceName"
-                      />
-                    {/if}
+                    </svg>
+                    <span>{$t('xray.sockopt_title')}</span>
+                  </summary>
+                  <div class="sockopt-body">
+                    <div class="form-row2">
+                      <div class="form-col">
+                        <label class="form-label" for="sockopt-mark">{$t('xray.mark')}</label>
+                        <input
+                          id="sockopt-mark"
+                          class="form-input"
+                          type="number"
+                          bind:value={outboundForm.sockoptMark}
+                          placeholder="e.g. 255"
+                        />
+                        <div class="form-hint">
+                          {$t('xray.sockopt_hint')}
+                        </div>
+                      </div>
+                      <div class="form-col">
+                        <label class="form-label" for="sockopt-keepalive"
+                          >{$t('xray.tcp_keepalive_interval')}</label
+                        >
+                        <input
+                          id="sockopt-keepalive"
+                          class="form-input"
+                          type="number"
+                          bind:value={outboundForm.sockoptTcpKeepAliveInterval}
+                          placeholder="seconds"
+                        />
+                      </div>
+                    </div>
+                    <div class="sockopt-checks">
+                      <label class="checkbox-container">
+                        <input type="checkbox" bind:checked={outboundForm.sockoptTcpFastOpen} />
+                        <span class="checkmark"></span>
+                        <span>{$t('xray.tcp_fast_open')}</span>
+                      </label>
+                      <label class="checkbox-container">
+                        <input type="checkbox" bind:checked={outboundForm.sockoptTcpMptcp} />
+                        <span class="checkmark"></span>
+                        <span>{$t('xray.tcp_mptcp')}</span>
+                      </label>
+                      <label class="checkbox-container">
+                        <input type="checkbox" bind:checked={outboundForm.sockoptTcpNoDelay} />
+                        <span class="checkmark"></span>
+                        <span>{$t('xray.tcp_nodelay')}</span>
+                      </label>
+                    </div>
                   </div>
+                </details>
+
+                <!-- Dialer Proxy Section -->
+                <div class="form-row dialer-proxy-row">
+                  <label class="form-label" for="outbound-dialer-proxy">
+                    {$t('xray.dialer_proxy')}
+                  </label>
+                  <select
+                    id="outbound-dialer-proxy"
+                    class="form-select"
+                    bind:value={outboundForm.dialerProxy}
+                  >
+                    <option value="">{$t('xray.dialer_none')}</option>
+                    {#each outboundDetails.filter((d) => !['direct', 'block', 'dns-out'].includes(d.tag) && d.tag !== outboundForm.tag.trim()) as o}
+                      <option value={o.tag}>{o.tag} ({o.protocol})</option>
+                    {/each}
+                  </select>
+
+                  {#if outboundForm.dialerProxy}
+                    <div class="dialer-chain-preview">
+                      <span class="text-muted">{$t('xray.dialer_chain')}:</span>
+                      {#each dialerChainPreview.chain as node, idx}
+                        <span
+                          class="badge"
+                          class:badge-primary={idx === 0}
+                          class:badge-secondary={idx > 0 && node !== 'DIRECT'}
+                          class:badge-tag={node === 'DIRECT'}
+                        >
+                          {node}
+                        </span>
+                        {#if idx < dialerChainPreview.chain.length - 1}
+                          <span class="dialer-chain-sep" aria-hidden="true">→</span>
+                        {/if}
+                      {/each}
+                      {#if dialerChainPreview.hasCycle}
+                        <span class="badge badge-danger">
+                          {$t('xray.dialer_cycle_detected')}
+                        </span>
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
 
-                <div class="form-actions">
+                <div class="form-actions form-actions--sticky">
                   <button
                     class="btn btn-secondary"
                     onclick={() => (showOutboundForm = false)}
@@ -3577,7 +4306,7 @@
                   </button>
                 </div>
               </div>
-            {/if}
+            </Modal>
           </div>
         {/if}
 
@@ -3914,17 +4643,118 @@
     {/if}
 
     {#if importStep === 1}
-      <div class="form-group">
-        <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
-        <textarea
-          id="import-link"
-          class="input textarea-link"
-          bind:value={importLink}
-          placeholder={$t('subscr.import_link_placeholder')}
-          rows="4"
-          style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
-        ></textarea>
+      <div
+        class="import-source-tabs"
+        style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;"
+      >
+        <button
+          type="button"
+          class="btn btn-xs"
+          class:btn-primary={importSource === 'links'}
+          class:btn-secondary={importSource !== 'links'}
+          onclick={() => (importSource = 'links')}
+        >
+          {$t('subscr.import_source_links')}
+        </button>
+        <button
+          type="button"
+          class="btn btn-xs"
+          class:btn-primary={importSource === 'file'}
+          class:btn-secondary={importSource !== 'file'}
+          onclick={() => (importSource = 'file')}
+        >
+          {$t('subscr.import_source_file')}
+        </button>
+        <button
+          type="button"
+          class="btn btn-xs"
+          class:btn-primary={importSource === 'clipboard'}
+          class:btn-secondary={importSource !== 'clipboard'}
+          onclick={() => (importSource = 'clipboard')}
+        >
+          {$t('subscr.import_source_clipboard')}
+        </button>
       </div>
+
+      {#if importSource === 'links'}
+        <div class="form-group">
+          <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
+          <textarea
+            id="import-link"
+            class="input textarea-link"
+            bind:value={importLink}
+            placeholder={$t('subscr.import_link_placeholder')}
+            rows="4"
+            style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
+          ></textarea>
+        </div>
+      {:else if importSource === 'file'}
+        <div
+          class="conf-dropzone"
+          class:dragging={isDraggingFile}
+          role="region"
+          aria-label="Dropzone"
+          ondragover={(e) => {
+            e.preventDefault();
+            isDraggingFile = true;
+          }}
+          ondragleave={() => {
+            isDraggingFile = false;
+          }}
+          ondrop={(e) => {
+            e.preventDefault();
+            isDraggingFile = false;
+            const f = e.dataTransfer?.files?.[0];
+            if (f) handleConfigFile(f);
+          }}
+        >
+          <div style="font-size: 24px;">📄</div>
+          <div style="font-size: 13px; color: var(--fg-secondary);">
+            {#if loadedFileName}
+              <span style="color: var(--primary); font-weight: 600;">{loadedFileName}</span>
+              <span> ({$t('subscr.import_file_loaded')})</span>
+            {:else}
+              {$t('subscr.import_drop_or_select')}
+            {/if}
+          </div>
+          <input
+            type="file"
+            accept=".conf,.txt"
+            class="file-picker-input"
+            onchange={(e) => {
+              const f = e.currentTarget.files?.[0];
+              if (f) handleConfigFile(f);
+            }}
+          />
+        </div>
+      {:else if importSource === 'clipboard'}
+        <div
+          style="padding: 24px; text-align: center; background: var(--bg-surface-hover); border: 1px dashed var(--border); border-radius: var(--radius);"
+        >
+          <p style="font-size: 13px; color: var(--fg-secondary); margin-bottom: 12px;">
+            {$t('subscr.import_clipboard_desc')}
+          </p>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick={async () => {
+              try {
+                const text = await navigator.clipboard.readText();
+                if (!text.trim()) {
+                  importErrorMsg = $t('subscr.import_clipboard_empty');
+                  return;
+                }
+                importLink = text;
+                parseImportLink();
+              } catch (err: any) {
+                importErrorMsg = err.message || 'Clipboard access denied';
+              }
+            }}
+          >
+            📋 {$t('subscr.import_source_clipboard')}
+          </button>
+        </div>
+      {/if}
     {:else if importStep === 2 && importNodes.length > 0}
       <div class="preview-section">
         <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
@@ -3991,6 +4821,14 @@
                     style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
                   />
                 </div>
+                {#if item.outbound?.protocol === 'wireguard' || item.outbound?.settings?.amneziaWgOption || item.outbound?.amneziaWgOption}
+                  <div
+                    class="alert alert-warning"
+                    style="margin-top: 6px; font-size: 11px; padding: 6px 10px; border-radius: var(--radius-sm);"
+                  >
+                    {$t('subscr.import_xray_awg_warning')}
+                  </div>
+                {/if}
               </div>
             {/if}
           {/each}
@@ -4032,6 +4870,41 @@
 </Modal>
 
 <style>
+  .conf-dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 24px 16px;
+    text-align: center;
+    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.02));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition:
+      border-color 0.2s ease,
+      background 0.2s ease;
+  }
+  .conf-dropzone.dragging {
+    border-color: var(--primary);
+    background: rgba(41, 194, 240, 0.08);
+  }
+
+  .file-picker-input::file-selector-button {
+    background: var(--bg-surface-hover);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-right: 8px;
+    transition: background 0.15s ease;
+  }
+  .file-picker-input::file-selector-button:hover {
+    background: var(--border);
+  }
+
   .container {
     display: flex;
     flex-direction: column;
@@ -4366,25 +5239,25 @@
     padding: 2px 7px;
     border-radius: 4px;
     font-size: 0.75rem;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-family-mono, monospace);
   }
 
   .badge-direct {
-    background: rgba(34, 197, 94, 0.15);
-    color: #22c55e;
-    border: 1px solid rgba(34, 197, 94, 0.3);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+    color: var(--success);
+    border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
   }
 
   .badge-block {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.3);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
   }
 
   .badge-proxy {
-    background: rgba(139, 92, 246, 0.15);
-    color: #a78bfa;
-    border: 1px solid rgba(139, 92, 246, 0.3);
+    background: color-mix(in srgb, var(--purple) 15%, transparent);
+    color: var(--purple);
+    border: 1px solid color-mix(in srgb, var(--purple) 30%, transparent);
   }
 
   .rule-actions {
@@ -4421,9 +5294,9 @@
   }
 
   .btn-rule-del:hover:not(:disabled) {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
-    border-color: rgba(239, 68, 68, 0.3);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 30%, transparent);
   }
 
   .rule-details {
@@ -4545,10 +5418,10 @@
 
   .btn-primary {
     background: var(--accent);
-    color: #fff;
+    color: var(--btn-primary-text, #fff);
   }
   .btn-primary:hover {
-    background: var(--accent-hover, #0056b3);
+    background: var(--accent-hover);
   }
 
   .btn-secondary {
@@ -4680,7 +5553,7 @@
     border-bottom: 2px solid transparent;
     color: var(--fg-secondary);
     font-size: 0.75rem;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-family-mono, monospace);
     cursor: pointer;
     white-space: nowrap;
     transition:
@@ -4711,7 +5584,7 @@
   .preview-meta-size {
     font-size: 0.6875rem;
     color: var(--fg-muted, var(--fg-secondary));
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-family-mono, monospace);
   }
 
   .preview-tools-right {
@@ -4743,7 +5616,7 @@
     background: #1e1e1e;
     color: #d4d4d4;
     border: none;
-    font-family: var(--font-mono, monospace);
+    font-family: var(--font-family-mono, monospace);
     font-size: var(--font-size-xs, 0.75rem);
     line-height: 1.5;
     overflow: auto;
@@ -4808,5 +5681,169 @@
     border: solid white;
     border-width: 0 2px 2px 0;
     transform: rotate(45deg);
+  }
+
+  /* Phase 111 — Xray outbound form (sockopt, dialerProxy, WG/SS, TLS ping) */
+  .btn-inset {
+    flex-shrink: 0;
+    min-height: 36px;
+    padding: 0 10px;
+  }
+
+  .btn-inset svg {
+    display: block;
+  }
+
+  .form-row3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+
+  .form-hint,
+  .field-info-hint {
+    font-size: var(--font-size-xs, 0.75rem);
+    color: var(--fg-secondary);
+    line-height: 1.4;
+  }
+
+  .form-hint {
+    margin-top: 4px;
+  }
+
+  .field-info-hint {
+    margin-top: 2px;
+  }
+
+  .text-muted {
+    color: var(--fg-secondary);
+  }
+
+  .text-danger {
+    color: var(--danger);
+  }
+
+  .awg-obfuscation-alert {
+    margin-bottom: 12px;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .awg-obfuscation-alert svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .error-icon {
+    color: var(--danger);
+    margin-bottom: 12px;
+  }
+
+  .error-icon svg {
+    display: block;
+    margin: 0 auto;
+  }
+
+  .sockopt-details {
+    margin-top: 14px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 6px);
+    padding: 8px 12px;
+    background: var(--bg-page);
+  }
+
+  .sockopt-summary {
+    cursor: pointer;
+    font-weight: 500;
+    font-size: var(--font-size-sm, 0.8125rem);
+    color: var(--accent);
+    user-select: none;
+  }
+
+  .sockopt-summary-icon {
+    vertical-align: -2px;
+    margin-right: 6px;
+  }
+
+  .sockopt-body {
+    padding-top: 12px;
+  }
+
+  .sockopt-checks {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .dialer-proxy-row {
+    margin-top: 12px;
+  }
+
+  .dialer-chain-preview {
+    margin-top: 8px;
+    font-size: var(--font-size-xs, 0.75rem);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .dialer-chain-sep {
+    color: var(--fg-secondary);
+  }
+
+  .form-actions--sticky {
+    position: sticky;
+    bottom: -20px;
+    background: var(--bg-card);
+    padding: 12px 0 0 0;
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
+    z-index: 10;
+  }
+
+  .tls-ping-result {
+    margin-bottom: 12px;
+    padding: 12px;
+    background: var(--bg-page);
+  }
+
+  .tls-ping-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .tls-ping-title {
+    font-weight: 600;
+    font-size: var(--font-size-sm, 0.8125rem);
+  }
+
+  .tls-ping-failure {
+    font-size: var(--font-size-xs, 0.75rem);
+    margin-bottom: 6px;
+  }
+
+  .tls-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+    font-size: var(--font-size-xs, 0.75rem);
+  }
+
+  .tls-grid span[data-testid] {
+    font-weight: 500;
+  }
+
+  .tls-ping-dns {
+    margin-top: 8px;
+    font-size: var(--font-size-xs, 0.75rem);
+  }
+
+  .tls-ping-dns .dns-value {
+    word-break: break-all;
   }
 </style>

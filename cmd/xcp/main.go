@@ -11,7 +11,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -59,8 +61,33 @@ func main() {
 	// between collections to avoid GC thrashing under normal operation,
 	// while SetMemoryLimit remains the hard backstop against unbounded
 	// growth.
-	debug.SetMemoryLimit(96 * 1024 * 1024) // 96 MiB
-	debug.SetGCPercent(50)
+	//
+	// Both knobs are env-overridable, but by different mechanisms:
+	//   - GOMEMLIMIT: when present in the environment (e.g. via xcp.env),
+	//     debug.SetMemoryLimit is skipped entirely and the Go runtime honors
+	//     the env value directly.
+	//   - GOGC: an explicit numeric value is validated and re-applied via
+	//     debug.SetGCPercent; "off" is left for the runtime to honor; an
+	//     invalid value is rejected with a log line and replaced by the
+	//     hardcoded router default (50).
+	// Setting only one knob leaves the other at its hardcoded router default.
+	// GOEXPERIMENT (e.g. nogreenteagc) is likewise a pure-runtime escape hatch.
+	memLimit := os.Getenv("GOMEMLIMIT")
+	if memLimit == "" {
+		debug.SetMemoryLimit(96 * 1024 * 1024) // 96 MiB default
+	}
+	gcPercent := os.Getenv("GOGC")
+	if n, err := strconv.Atoi(strings.TrimSpace(gcPercent)); err == nil {
+		debug.SetGCPercent(n) // honor an explicit numeric GOGC
+	} else if gcPercent == "off" {
+		// GC disabled explicitly via env; the runtime already honors it.
+	} else {
+		if gcPercent != "" {
+			log.Printf("Ignoring invalid GOGC=%q, applying router default 50", gcPercent)
+		}
+		debug.SetGCPercent(50) // 50 default
+		gcPercent = ""         // fall back to default reporting below
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -70,6 +97,19 @@ func main() {
 		if err := os.MkdirAll(filepath.Dir(*configPath), 0755); err == nil {
 			_ = config.Save(*configPath, cfg)
 		}
+	}
+
+	effectiveMemLimit := memLimit
+	if effectiveMemLimit == "" {
+		effectiveMemLimit = "96MiB (default)"
+	}
+	effectiveGC := gcPercent
+	if effectiveGC == "" {
+		effectiveGC = "50 (default)"
+	}
+	goExp := os.Getenv("GOEXPERIMENT")
+	if goExp == "" {
+		goExp = "none (greenteagc default)"
 	}
 
 	// Setup logging to file if configured with size-based rotation (1 MB)
@@ -193,6 +233,7 @@ func main() {
 	srv.HandleProtected("/api/mihomo/cache/fakeip/flush", api.MihomoFlushFakeIP)
 	srv.HandleProtected("/api/mihomo/proxy/", api.MihomoProxy)
 	srv.HandleProtected("/api/xray/reality/keygen", api.XrayRealityKeygen)
+	srv.HandleProtected("/api/xray/uuid", api.XrayUUID)
 	srv.HandleProtected("/api/xray/stats", api.XrayStats)
 	srv.HandleProtected("/api/xray/grpc/monitoring", api.XrayGRPCMonitoring)
 	srv.HandleProtected("/api/xray/test-route", api.XrayTestRoute)
@@ -445,7 +486,8 @@ func main() {
 	srv.HandleProtected("/api/kernels/{name}/rollback", api.KernelRollback)
 	srv.HandleProtected("/api/kernels/{name}/download", api.KernelDownload)
 
-	log.Printf("XKeen Control Panel v%s starting...", Version)
+	log.Printf("XKeen Control Panel v%s starting... (Go: %s, GOMEMLIMIT: %s, GOGC: %s, GOEXPERIMENT: %s)",
+		Version, runtime.Version(), effectiveMemLimit, effectiveGC, goExp)
 	if cfg.Auth.PasswordHash == "" {
 		log.Printf("⚠️  No password set. Please visit http://localhost:%d to complete setup.", cfg.Port)
 	}

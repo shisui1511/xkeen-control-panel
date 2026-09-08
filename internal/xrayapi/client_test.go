@@ -60,6 +60,42 @@ func TestOutboundTraffic(t *testing.T) {
 	}
 }
 
+func TestQueryAllTraffic(t *testing.T) {
+	mock := testutil.NewMockXrayServer()
+	mock.SetStat("outbound>>>proxy-1>>>traffic>>>uplink", 1024)
+	mock.SetStat("outbound>>>proxy-1>>>traffic>>>downlink", 4096)
+	mock.SetStat("inbound>>>tproxy>>>traffic>>>uplink", 2048)
+	mock.SetStat("inbound>>>tproxy>>>traffic>>>downlink", 8192)
+	mock.SetStat("user>>>alice@example.com>>>traffic>>>uplink", 512)
+	mock.SetStat("user>>>alice@example.com>>>traffic>>>downlink", 1024)
+	mock.SetStat("other>>>something>>>traffic>>>uplink", 9999) // Unknown scope, should be ignored
+
+	conn, cleanup, err := testutil.StartMockXrayServer(mock)
+	if err != nil {
+		t.Fatalf("failed to start mock server: %v", err)
+	}
+	defer cleanup()
+
+	client := xrayapi.NewClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	stats, err := client.QueryAllTraffic(ctx)
+	if err != nil {
+		t.Fatalf("QueryAllTraffic failed: %v", err)
+	}
+
+	if len(stats.Outbounds) != 1 || stats.Outbounds["proxy-1"].Uplink != 1024 || stats.Outbounds["proxy-1"].Downlink != 4096 {
+		t.Errorf("unexpected outbounds: %+v", stats.Outbounds)
+	}
+	if len(stats.Inbounds) != 1 || stats.Inbounds["tproxy"].Uplink != 2048 || stats.Inbounds["tproxy"].Downlink != 8192 {
+		t.Errorf("unexpected inbounds: %+v", stats.Inbounds)
+	}
+	if len(stats.Users) != 1 || stats.Users["alice@example.com"].Uplink != 512 || stats.Users["alice@example.com"].Downlink != 1024 {
+		t.Errorf("unexpected users: %+v", stats.Users)
+	}
+}
+
 func TestSysStats(t *testing.T) {
 	mock := testutil.NewMockXrayServer()
 	mock.SetSysStats(&statspb.SysStatsResponse{

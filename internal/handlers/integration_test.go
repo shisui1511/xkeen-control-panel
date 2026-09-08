@@ -165,6 +165,64 @@ func TestOutboundParse_TextInput(t *testing.T) {
 	}
 }
 
+// TestOutboundParse_WgQuickConf verifies that wg-quick INI content in text is parsed as wireguard.
+func TestOutboundParse_WgQuickConf(t *testing.T) {
+	tmp := t.TempDir()
+	svc := services.NewSubscriptionService(tmp, tmp, tmp)
+	api := &API{subscriptionSvc: svc}
+
+	conf := `[Interface]
+PrivateKey = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=
+Address = 10.0.0.2/32
+DNS = 1.1.1.1
+MTU = 1280
+Jc = 4
+Jmin = 40
+Jmax = 70
+S1 = 15
+S2 = 40
+H1 = 1000000001
+H2 = 1000000002
+H3 = 1000000003
+H4 = 1000000004
+
+[Peer]
+PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=
+Endpoint = 198.51.100.1:51820
+AllowedIPs = 0.0.0.0/0
+`
+	body, _ := json.Marshal(map[string]interface{}{"text": conf})
+	req := httptest.NewRequest(http.MethodPost, "/api/outbound/parse", bytes.NewReader(body))
+	rr := httptest.NewRecorder()
+	api.OutboundParse(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			Link     string             `json:"link"`
+			Outbound *services.Outbound `json:"outbound"`
+			Error    string             `json:"error"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(resp.Data))
+	}
+	if resp.Data[0].Outbound == nil || resp.Data[0].Outbound.Protocol != "wireguard" {
+		t.Fatalf("expected wireguard outbound, got: %+v", resp.Data[0].Outbound)
+	}
+	awg, ok := resp.Data[0].Outbound.Settings["awg"]
+	if !ok || awg == nil {
+		t.Fatalf("expected awg settings to be populated")
+	}
+}
+
 // TestOutboundParse_OversizedBody verifies that an oversized request body on OutboundParse returns 413.
 func TestOutboundParse_OversizedBody(t *testing.T) {
 	tmp := t.TempDir()

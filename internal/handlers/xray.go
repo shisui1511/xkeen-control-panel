@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +37,27 @@ func (a *API) XrayRealityKeygen(w http.ResponseWriter, r *http.Request) {
 	JSONSuccess(w, kp)
 }
 
-// XrayStats handles GET /api/xray/stats to fetch outbound traffic stats from Xray via gRPC.
+// XrayUUID handles GET /api/xray/uuid to generate an RFC 4122 v4 UUID.
+func (a *API) XrayUUID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	var u [16]byte
+	if _, err := rand.Read(u[:]); err != nil {
+		a.errorResponse(w, fmt.Sprintf("failed to generate uuid: %v", err), http.StatusInternalServerError)
+		return
+	}
+	u[6] = (u[6] & 0x0f) | 0x40 // Version 4
+	u[8] = (u[8] & 0x3f) | 0x80 // Variant RFC 4122
+
+	uuidStr := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", u[0:4], u[4:6], u[6:8], u[8:10], u[10:16])
+	JSONSuccess(w, map[string]string{"uuid": uuidStr})
+}
+
+// XrayStats handles GET /api/xray/stats to fetch traffic stats from Xray via gRPC.
+// Returns { outbounds: {...}, inbounds: {...}, users: {...} }, or flat outbounds if legacy=true.
 func (a *API) XrayStats(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
@@ -58,9 +79,14 @@ func (a *API) XrayStats(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 
-	stats, err := client.OutboundTraffic(ctx)
+	stats, err := client.QueryAllTraffic(ctx)
 	if err != nil {
 		a.errorResponse(w, fmt.Sprintf("Failed to query Xray stats: %v", err), http.StatusServiceUnavailable)
+		return
+	}
+
+	if r.URL.Query().Get("legacy") == "true" {
+		JSONSuccess(w, stats.Outbounds)
 		return
 	}
 

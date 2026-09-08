@@ -121,9 +121,19 @@ func TestXrayStats(t *testing.T) {
 
 	var statsResp struct {
 		Success bool `json:"success"`
-		Data    map[string]struct {
-			Uplink   int64 `json:"uplink"`
-			Downlink int64 `json:"downlink"`
+		Data    struct {
+			Outbounds map[string]struct {
+				Uplink   int64 `json:"uplink"`
+				Downlink int64 `json:"downlink"`
+			} `json:"outbounds"`
+			Inbounds map[string]struct {
+				Uplink   int64 `json:"uplink"`
+				Downlink int64 `json:"downlink"`
+			} `json:"inbounds"`
+			Users map[string]struct {
+				Uplink   int64 `json:"uplink"`
+				Downlink int64 `json:"downlink"`
+			} `json:"users"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rrSuccess.Body.Bytes(), &statsResp); err != nil {
@@ -132,12 +142,68 @@ func TestXrayStats(t *testing.T) {
 	if !statsResp.Success {
 		t.Errorf("expected success true")
 	}
-	vless, ok := statsResp.Data["vless-us"]
+	vless, ok := statsResp.Data.Outbounds["vless-us"]
 	if !ok {
-		t.Fatalf("expected vless-us in stats")
+		t.Fatalf("expected vless-us in outbounds stats")
 	}
 	if vless.Uplink != 1024 || vless.Downlink != 2048 {
 		t.Errorf("expected 1024/2048, got %d/%d", vless.Uplink, vless.Downlink)
+	}
+
+	// 5. Legacy query param -> flat map
+	reqLegacy := httptest.NewRequest(http.MethodGet, "/api/xray/stats?legacy=true", nil)
+	rrLegacy := httptest.NewRecorder()
+	api.XrayStats(rrLegacy, reqLegacy)
+	if rrLegacy.Code != http.StatusOK {
+		t.Fatalf("expected 200 on legacy, got %d", rrLegacy.Code)
+	}
+	var legacyResp struct {
+		Success bool `json:"success"`
+		Data    map[string]struct {
+			Uplink   int64 `json:"uplink"`
+			Downlink int64 `json:"downlink"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rrLegacy.Body.Bytes(), &legacyResp); err != nil {
+		t.Fatalf("failed to parse legacy json: %v", err)
+	}
+	if legacyResp.Data["vless-us"].Uplink != 1024 {
+		t.Errorf("expected 1024 on legacy uplink")
+	}
+}
+
+func TestXrayUUID(t *testing.T) {
+	api := &API{}
+
+	// Non-GET method -> 405
+	reqPost := httptest.NewRequest(http.MethodPost, "/api/xray/uuid", nil)
+	rrPost := httptest.NewRecorder()
+	api.XrayUUID(rrPost, reqPost)
+	if rrPost.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 on POST, got %d", rrPost.Code)
+	}
+
+	// Success GET
+	req := httptest.NewRequest(http.MethodGet, "/api/xray/uuid", nil)
+	rr := httptest.NewRecorder()
+	api.XrayUUID(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	var resp struct {
+		Success bool              `json:"success"`
+		Data    map[string]string `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse json: %v", err)
+	}
+	uuidStr := resp.Data["uuid"]
+	if len(uuidStr) != 36 {
+		t.Errorf("expected 36-char uuid, got %q", uuidStr)
+	}
+	if uuidStr[14] != '4' { // version 4
+		t.Errorf("expected UUID version 4, got %c in %s", uuidStr[14], uuidStr)
 	}
 }
 

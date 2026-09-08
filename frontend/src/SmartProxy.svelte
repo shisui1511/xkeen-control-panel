@@ -1022,7 +1022,7 @@
     height: 20px;
     border-radius: 50%;
     background: var(--accent);
-    color: #fff;
+    color: var(--btn-primary-text);
     font-size: 11px;
     font-weight: 700;
   }
@@ -1374,10 +1374,10 @@
     color: var(--accent);
   }
   .text-success {
-    color: #10b981;
+    color: var(--success);
   }
   .text-warning {
-    color: #f59e0b;
+    color: var(--warning);
   }
 
   /* Mode color badges */
@@ -1391,14 +1391,14 @@
   }
 
   :global(.sp-mode-scheduled) {
-    background: rgba(41, 194, 240, 0.1);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
     color: var(--accent);
-    border: 1px solid rgba(41, 194, 240, 0.25);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   }
 
   :global(.sp-mode-disabled) {
-    background: rgba(239, 68, 68, 0.1);
-    color: #ef4444;
-    border: 1px solid rgba(239, 68, 68, 0.25);
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
   }
 </style>

@@ -36,8 +36,19 @@
   <div class="form-row">
     <label class="form-label" for="group-type">{$t('groups.type')}</label>
     <select id="group-type" class="form-select" bind:value={ng.type}>
+      {#if ng.type === 'relay'}
+        <option value="relay" disabled>relay ({$t('app.deprecated')})</option>
+      {/if}
       {#each GROUP_TYPES as t}<option value={t}>{t}</option>{/each}
     </select>
+    {#if ng.type === 'relay'}
+      <div
+        class="alert alert-warning"
+        style="margin-top: 6px; padding: 6px 10px; font-size: 12px; border-radius: var(--radius-xs);"
+      >
+        {$t('mihomo.warnings.relay_deprecated', { name: ng.name || 'group' })}
+      </div>
+    {/if}
   </div>
   <div class="form-row">
     <label class="form-label" for="group-name">{$t('groups.group_name')}</label>
@@ -160,13 +171,12 @@
 
 <style>
   .form-card {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    padding: 16px;
+    background: transparent;
+    border: none;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
   }
 
   .form-row {
@@ -176,13 +186,15 @@
   }
   .form-row2 {
     display: flex;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 12px;
   }
   .form-col {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    flex: 1;
+    flex: 1 1 140px;
+    min-width: 140px;
   }
   .form-col-sm {
     flex: 0 0 100px;
@@ -213,10 +225,10 @@
   }
 
   .form-select-inline {
-    background: none;
-    border: none;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    color: var(--fg-secondary);
+    color: var(--fg-primary);
     font-size: 12px;
     padding: 2px 4px;
     outline: none;
@@ -266,9 +278,15 @@
   }
 
   .form-actions {
+    position: sticky;
+    bottom: -20px;
+    background: var(--bg-card);
+    padding: 12px 0 0 0;
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
     display: flex;
     gap: 8px;
     justify-content: flex-end;
-    margin-top: 4px;
+    z-index: 10;
   }
 </style>

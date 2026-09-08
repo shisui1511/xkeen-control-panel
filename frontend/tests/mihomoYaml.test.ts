@@ -1351,3 +1351,184 @@ ${exoticBlock}`;
     }
   });
 });
+
+describe('Mihomo relay deprecation and warnings', () => {
+  test('populateMihomoFromYAML generates warning when proxy group has type relay', () => {
+    const yamlWithRelay = `proxy-groups:
+  - name: "RelayChain"
+    type: relay
+    proxies:
+      - Node1
+      - Node2
+`;
+    const parsed = populateMihomoFromYAML(yamlWithRelay);
+    expect(parsed.groups).toHaveLength(1);
+    expect(parsed.groups[0].type).toBe('relay');
+    expect(parsed.warnings).toBeDefined();
+    expect(parsed.warnings.length).toBeGreaterThan(0);
+    expect(parsed.warnings[0]).toEqual({
+      code: 'mihomo.warnings.relay_deprecated',
+      params: { name: 'RelayChain' }
+    });
+  });
+
+  test('generateYAML emits only name/type/proxies for relay groups', () => {
+    const state: any = {
+      existingTproxyPort: 12345,
+      existingRedirPort: 12346,
+      subscriptions: [],
+      mihomoProviders: [],
+      proxies: [],
+      groups: [
+        {
+          id: 'group-relay',
+          name: 'RelayChain',
+          type: 'relay',
+          proxies: ['Node1', 'Node2']
+        }
+      ],
+      rules: [],
+      dns: {},
+      tun: {},
+      sniffer: {}
+    };
+    const yaml = generateYAML(state);
+    expect(yaml).toContain('type: relay');
+    expect(yaml).toContain('Node1');
+    expect(yaml).toContain('Node2');
+    expect(yaml).not.toContain('url:');
+    expect(yaml).not.toContain('interval:');
+  });
+});
+
+describe('AmneziaWG 3.1 Emit-When-Set and Idempotence (AWG-04, AWG-06)', () => {
+  const baseState: any = {
+    existingTproxyPort: 12345,
+    existingRedirPort: 12346,
+    subscriptions: [],
+    mihomoProviders: [],
+    groups: [],
+    rules: [],
+    dns: {},
+    tun: {},
+    sniffer: {},
+    // Ядро с поддержкой AWG 3.1 — иначе generateYAML гейтит 3.1-ключи (WR-02).
+    capabilities: { active_kernel: 'mihomo', kernels: { mihomo: { version: '1.19.30' } } }
+  };
+
+  test('узел с параметрами 2.0 (s3, s4) эмитит их и парсит обратно', () => {
+    const state: any = {
+      ...baseState,
+      proxies: [
+        {
+          name: 'awg20-node',
+          type: 'wireguard',
+          server: '1.2.3.4',
+          port: 51820,
+          awgEnabled: true,
+          awgJc: 4,
+          awgJmin: 40,
+          awgJmax: 70,
+          awgS1: 15,
+          awgS2: 40,
+          awgS3: 20,
+          awgS4: 25,
+          awgH1: 1000000001,
+          awgH2: 1000000002,
+          awgH3: 1000000003,
+          awgH4: 1000000004
+        }
+      ]
+    };
+
+    const yaml = generateYAML(state);
+    expect(yaml).toContain('      s3: 20');
+    expect(yaml).toContain('      s4: 25');
+    expect(yaml).not.toContain('header-protection-key');
+
+    const parsed = populateMihomoFromYAML(yaml);
+    expect(parsed.proxies).toHaveLength(1);
+    const p = parsed.proxies[0];
+    expect(p.awgEnabled).toBe(true);
+    expect(p.awgS3).toBe(20);
+    expect(p.awgS4).toBe(25);
+  });
+
+  test('полный набор AWG 3.1: emit-when-set, парсинг и проверка parse(emit(x)) === x', () => {
+    const awg31Proxy: any = {
+      name: 'awg31-full',
+      type: 'wireguard',
+      server: '1.2.3.4',
+      port: 51820,
+      awgEnabled: true,
+      awgJc: 5,
+      awgJmin: 30,
+      awgJmax: 80,
+      awgS1: 16,
+      awgS2: 120,
+      awgS3: 22,
+      awgS4: 33,
+      awgH1: '1000000001-1000000010',
+      awgH2: '1000000011-1000000020',
+      awgH3: 1000000003,
+      awgH4: 1000000004,
+      awgVersion: '3.1',
+      awgHeaderProtectionKey: 'a1b2c3d4e5f607182930415263748596',
+      awgI1: '0A1B2C',
+      awgI2: '3D4E5F',
+      awgI3: '6A7B8C',
+      awgI4: '9D0E1F',
+      awgI5: '2A3B4C',
+      awgContentPaddingAddition: 16,
+      awgRandomTrailers: true,
+      awgDisableCookies: true,
+      awgRekeyAfterTime: 3600
+    };
+
+    const state: any = {
+      ...baseState,
+      proxies: [awg31Proxy]
+    };
+
+    const yaml = generateYAML(state);
+    expect(yaml).toContain('    amnezia-wg-option:');
+    expect(yaml).toContain('      s3: 22');
+    expect(yaml).toContain('      s4: 33');
+    expect(yaml).toContain('      h1: "1000000001-1000000010"');
+    expect(yaml).toContain('      h2: "1000000011-1000000020"');
+    expect(yaml).toContain('      version: "3.1"');
+    expect(yaml).toContain('      header-protection-key: "a1b2c3d4e5f607182930415263748596"');
+    expect(yaml).toContain('      i1: "0A1B2C"');
+    expect(yaml).toContain('      content-padding-addition: 16');
+    expect(yaml).toContain('      random-trailers: true');
+    expect(yaml).toContain('      disable-cookies: true');
+    expect(yaml).toContain('      rekey-after-time: 3600');
+
+    // Проверка разбора
+    const parsed = populateMihomoFromYAML(yaml);
+    expect(parsed.proxies).toHaveLength(1);
+    const p1 = parsed.proxies[0];
+    expect(p1.awgEnabled).toBe(true);
+    expect(p1.awgS3).toBe(22);
+    expect(p1.awgS4).toBe(33);
+    expect(p1.awgH1).toBe('1000000001-1000000010');
+    expect(p1.awgH2).toBe('1000000011-1000000020');
+    expect(p1.awgH3).toBe(1000000003);
+    expect(p1.awgH4).toBe(1000000004);
+    expect(p1.awgVersion).toBe('3.1');
+    expect(p1.awgHeaderProtectionKey).toBe('a1b2c3d4e5f607182930415263748596');
+    expect(p1.awgI1).toBe('0A1B2C');
+    expect(p1.awgI5).toBe('2A3B4C');
+    expect(p1.awgContentPaddingAddition).toBe(16);
+    expect(p1.awgRandomTrailers).toBe(true);
+    expect(p1.awgDisableCookies).toBe(true);
+    expect(p1.awgRekeyAfterTime).toBe(3600);
+
+    // Проверка повторного рейса: parse(emit(parsed)) === parsed
+    const secondYaml = generateYAML({
+      ...baseState,
+      proxies: parsed.proxies
+    });
+    expect(secondYaml).toBe(yaml);
+  });
+});

@@ -36,6 +36,32 @@ type singBoxOutbound struct {
 	LocalAddress  interface{} `json:"local_address"`
 	MTU           int         `json:"mtu"`
 	Reserved      interface{} `json:"reserved"`
+
+	// AmneziaWG fields
+	Jc                     *int                   `json:"jc,omitempty"`
+	Jmin                   *int                   `json:"jmin,omitempty"`
+	Jmax                   *int                   `json:"jmax,omitempty"`
+	S1                     *int                   `json:"s1,omitempty"`
+	S2                     *int                   `json:"s2,omitempty"`
+	S3                     *int                   `json:"s3,omitempty"`
+	S4                     *int                   `json:"s4,omitempty"`
+	H1                     string                 `json:"h1,omitempty"`
+	H2                     string                 `json:"h2,omitempty"`
+	H3                     string                 `json:"h3,omitempty"`
+	H4                     string                 `json:"h4,omitempty"`
+	I1                     string                 `json:"i1,omitempty"`
+	I2                     string                 `json:"i2,omitempty"`
+	I3                     string                 `json:"i3,omitempty"`
+	I4                     string                 `json:"i4,omitempty"`
+	I5                     string                 `json:"i5,omitempty"`
+	Version                string                 `json:"version,omitempty"`
+	HeaderProtectionKey    string                 `json:"header_protection_key,omitempty"`
+	ContentPaddingAddition *int                   `json:"content_padding_addition,omitempty"`
+	RandomTrailers         *bool                  `json:"random_trailers,omitempty"`
+	DisableCookies         *bool                  `json:"disable_cookies,omitempty"`
+	RekeyAfterTime         *int                   `json:"rekey_after_time,omitempty"`
+	AmneziaWG              map[string]interface{} `json:"amnezia_wg,omitempty"`
+	AWG                    map[string]interface{} `json:"awg,omitempty"`
 }
 
 type singBoxTLS struct {
@@ -204,7 +230,7 @@ func convertSingBoxOutbound(sb *singBoxOutbound) *Outbound {
 			StreamSettings: streamSettings,
 		}
 
-	case "wireguard":
+	case "wireguard", "amneziawg", "amnezia-wg", "awg":
 		var localAddrs []string
 		if sb.LocalAddress != nil {
 			switch la := sb.LocalAddress.(type) {
@@ -227,6 +253,87 @@ func convertSingBoxOutbound(sb *singBoxOutbound) *Outbound {
 		if sb.Server != "" && sb.ServerPort > 0 {
 			serverAddr = net.JoinHostPort(sb.Server, strconv.Itoa(sb.ServerPort))
 		}
+
+		var awg *AWGOptions
+		if sb.AmneziaWG != nil {
+			awg = parseAWGOptionsFromMap(sb.AmneziaWG)
+		} else if sb.AWG != nil {
+			awg = parseAWGOptionsFromMap(sb.AWG)
+		}
+		if awg == nil {
+			awg = &AWGOptions{RawOptions: make(map[string]interface{})}
+		}
+		if sb.Jc != nil {
+			awg.Jc = sb.Jc
+		}
+		if sb.Jmin != nil {
+			awg.Jmin = sb.Jmin
+		}
+		if sb.Jmax != nil {
+			awg.Jmax = sb.Jmax
+		}
+		if sb.S1 != nil {
+			awg.S1 = sb.S1
+		}
+		if sb.S2 != nil {
+			awg.S2 = sb.S2
+		}
+		if sb.S3 != nil {
+			awg.S3 = sb.S3
+		}
+		if sb.S4 != nil {
+			awg.S4 = sb.S4
+		}
+		if sb.H1 != "" {
+			awg.H1 = sb.H1
+		}
+		if sb.H2 != "" {
+			awg.H2 = sb.H2
+		}
+		if sb.H3 != "" {
+			awg.H3 = sb.H3
+		}
+		if sb.H4 != "" {
+			awg.H4 = sb.H4
+		}
+		if sb.I1 != "" {
+			awg.I1 = normalizeAWGInitPacket(sb.I1)
+		}
+		if sb.I2 != "" {
+			awg.I2 = normalizeAWGInitPacket(sb.I2)
+		}
+		if sb.I3 != "" {
+			awg.I3 = normalizeAWGInitPacket(sb.I3)
+		}
+		if sb.I4 != "" {
+			awg.I4 = normalizeAWGInitPacket(sb.I4)
+		}
+		if sb.I5 != "" {
+			awg.I5 = normalizeAWGInitPacket(sb.I5)
+		}
+		if sb.Version != "" {
+			awg.Version = sb.Version
+		}
+		if sb.HeaderProtectionKey != "" {
+			awg.HeaderProtectionKey = sb.HeaderProtectionKey
+		}
+		if sb.ContentPaddingAddition != nil {
+			awg.ContentPaddingAddition = sb.ContentPaddingAddition
+		}
+		if sb.RandomTrailers != nil {
+			awg.RandomTrailers = sb.RandomTrailers
+		}
+		if sb.DisableCookies != nil {
+			awg.DisableCookies = sb.DisableCookies
+		}
+		if sb.RekeyAfterTime != nil {
+			awg.RekeyAfterTime = sb.RekeyAfterTime
+		}
+
+		if awg.IsEmpty() {
+			awg = nil
+		}
+
 		node := &SubscriptionNode{
 			Tag:            tag,
 			Protocol:       "wireguard",
@@ -237,6 +344,7 @@ func convertSingBoxOutbound(sb *singBoxOutbound) *Outbound {
 			LocalAddresses: localAddrs,
 			MTU:            sb.MTU,
 			Reserved:       reserved,
+			AWG:            awg,
 		}
 		ob, _ := wireguardNodeToOutbound(node)
 		return ob

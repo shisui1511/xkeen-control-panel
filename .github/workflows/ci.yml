@@ -31,7 +31,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Build frontend
         run: |
@@ -42,7 +42,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: false
 
       - name: Download Go dependencies
@@ -51,12 +51,11 @@ jobs:
         run: go mod download
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.64.8
-          working-directory: .
+          version: v2.13.2 # точный пин релиза golangci-lint; совместим с Go 1.26
+          install-mode: binary
           args: --timeout=5m
-          install-mode: goinstall
 
       - name: Run govulncheck
         uses: golang/govulncheck-action@v1
@@ -75,7 +74,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Build frontend
         run: |
@@ -86,7 +85,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: false
 
       - name: Download dependencies
@@ -117,7 +116,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -180,7 +179,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -202,7 +201,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: false
 
       - name: Build Go backend
@@ -248,9 +247,15 @@ jobs:
         include:
           - GOARCH: arm64
             name: arm64
+            qemu: qemu-aarch64-static
           - GOARCH: mipsle
             GOMIPS: softfloat
             name: mipsle
+            qemu: qemu-mipsel-static
+          - GOARCH: mips
+            GOMIPS: softfloat
+            name: mips
+            qemu: qemu-mips-static
 
     steps:
       - uses: actions/checkout@v7
@@ -258,7 +263,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -271,7 +276,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: false
 
       - name: Build binary
@@ -295,6 +300,33 @@ jobs:
             echo "::warning::Binary size is larger than 50MB: ${SIZE_MB}MB"
           fi
 
+      - name: Install QEMU and tools
+        run: |
+          ok=0
+          for i in 1 2 3; do
+            sudo apt-get update && sudo apt-get install -y qemu-user-static upx-ucl && { ok=1; break; }
+            echo "apt-get failed, retry $i"; sleep 5
+          done
+          [ "$ok" = 1 ] || { echo "::error::apt-get failed after 3 attempts"; exit 1; }
+
+      - name: Verify static linkage
+        run: |
+          file "xcp-${{ matrix.name }}"
+          file "xcp-${{ matrix.name }}" | grep -q "statically linked"
+
+      - name: Smoke test under QEMU (uncompressed)
+        timeout-minutes: 1
+        run: |
+          ${{ matrix.qemu }} "./xcp-${{ matrix.name }}" -v
+
+      - name: Test UPX compression & execution under QEMU
+        continue-on-error: true
+        timeout-minutes: 1
+        run: |
+          upx -9 --lzma "xcp-${{ matrix.name }}" -o "xcp-${{ matrix.name }}-upx"
+          file "xcp-${{ matrix.name }}-upx"
+          ${{ matrix.qemu }} "./xcp-${{ matrix.name }}-upx" -v
+
   # Job 6: Проверка правил коммитов и синхронизации локализации
   check-rules:
     name: Verify Commits & i18n
@@ -307,7 +339,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Check i18n translations
         run: node scripts/check-i18n.js

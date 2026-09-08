@@ -776,50 +776,41 @@
     font-family: var(--font-family-mono);
   }
 
-  /* Rule type colored badges */
-  :global(.rule-type-domain-suffix) {
-    background: rgba(41, 194, 240, 0.12);
-    color: #29c2f0;
-    border: 1px solid rgba(41, 194, 240, 0.25);
+  /* Rule type colored badges — категорийная семантика через токены темы:
+     domain-* → accent (cyan), geo* → success (green), ip-cidr → warning (amber),
+     process/match → нейтральный. Полутоновые фоны через color-mix, чтобы
+     бейджи адаптировались к светлой теме (раньше был хардкод hex). */
+  :global(.rule-type-domain-suffix),
+  :global(.rule-type-domain) {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   }
   :global(.rule-type-domain-keyword) {
-    background: rgba(234, 179, 8, 0.12);
-    color: #eab308;
-    border: 1px solid rgba(234, 179, 8, 0.25);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    color: var(--warning);
+    border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
   }
-  :global(.rule-type-domain) {
-    background: rgba(41, 194, 240, 0.08);
-    color: #7dd3fc;
-    border: 1px solid rgba(41, 194, 240, 0.18);
-  }
-  :global(.rule-type-geoip) {
-    background: rgba(16, 185, 129, 0.12);
-    color: #10b981;
-    border: 1px solid rgba(16, 185, 129, 0.25);
-  }
+  :global(.rule-type-geoip),
   :global(.rule-type-geosite) {
-    background: rgba(16, 185, 129, 0.08);
-    color: #6ee7b7;
-    border: 1px solid rgba(16, 185, 129, 0.18);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    color: var(--success);
+    border: 1px solid color-mix(in srgb, var(--success) 25%, transparent);
   }
   :global(.rule-type-ip-cidr) {
-    background: rgba(249, 115, 22, 0.12);
-    color: #f97316;
-    border: 1px solid rgba(249, 115, 22, 0.25);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+    color: var(--warning);
+    border: 1px solid color-mix(in srgb, var(--warning) 28%, transparent);
   }
-  :global(.rule-type-process) {
-    background: rgba(156, 163, 175, 0.12);
-    color: #9ca3af;
-    border: 1px solid rgba(156, 163, 175, 0.25);
-  }
+  :global(.rule-type-process),
   :global(.rule-type-match) {
-    background: rgba(156, 163, 175, 0.1);
-    color: #9ca3af;
-    border: 1px solid rgba(156, 163, 175, 0.2);
+    background: color-mix(in srgb, var(--fg-dim) 12%, transparent);
+    color: var(--fg-secondary);
+    border: 1px solid color-mix(in srgb, var(--fg-dim) 22%, transparent);
   }
 
   .match-fallback-row td {
-    background: rgba(156, 163, 175, 0.04);
+    background: color-mix(in srgb, var(--fg-dim) 5%, transparent);
     color: var(--fg-dim);
     border-top: 1px solid var(--border);
   }

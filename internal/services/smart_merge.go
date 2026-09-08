@@ -35,11 +35,50 @@ type MergeStats struct {
 	Rules          int `json:"rules"`
 }
 
+// deepCopyMap performs a deep recursive copy of a map[string]interface{}.
+func deepCopyMap(src map[string]interface{}) map[string]interface{} {
+	if src == nil {
+		return make(map[string]interface{})
+	}
+	dst := make(map[string]interface{}, len(src))
+	for k, v := range src {
+		dst[k] = deepCopyValue(v)
+	}
+	return dst
+}
+
+// deepCopyValue recursively copies slices, maps and scalar values.
+func deepCopyValue(v interface{}) interface{} {
+	switch val := v.(type) {
+	case map[string]interface{}:
+		return deepCopyMap(val)
+	case map[interface{}]interface{}:
+		// yaml.v3 yields this for mappings with non-string keys (numeric/bool
+		// keys, merge keys). Deep-copy it too so template and result never
+		// share a mutable nested structure.
+		dst := make(map[interface{}]interface{}, len(val))
+		for k, item := range val {
+			dst[k] = deepCopyValue(item)
+		}
+		return dst
+	case []interface{}:
+		dstSlice := make([]interface{}, len(val))
+		for i, item := range val {
+			dstSlice[i] = deepCopyValue(item)
+		}
+		return dstSlice
+	default:
+		return val
+	}
+}
+
 // SmartMergeMihomo merges a configuration template into an existing Mihomo YAML config.
-// It strictly preserves user proxies, proxy-providers, ports and secrets, while applying
-// template rules, rule-providers, proxy-groups, and injecting safety bypasses & user rules.
+// It follows a preserve-by-default architecture: the result is built upon a deep copy of existing,
+// preserving custom sections like hosts, ntp, sub-rules, listeners, tunnels and deep dns settings
+// (nameserver-policy, fallback, etc.), while applying template-managed keys (rules, proxy-groups,
+// rule-providers, tun, sniffer).
 // When templateOwnsNodes is true and templateYAML contains non-empty proxies or proxy-providers,
-// those template nodes are preserved in the result instead of being overwritten by existing nodes.
+// those template nodes are adopted in the result instead of being overwritten by existing nodes.
 func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []UserRule, templateOwnsNodes bool) (string, MergeStats, error) {
 	var existing map[string]interface{}
 	var tmpl map[string]interface{}
@@ -47,8 +86,10 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 
 	if strings.TrimSpace(existingYAML) != "" {
 		if err := yaml.Unmarshal([]byte(existingYAML), &existing); err != nil {
-			// If existing is corrupted, initialize clean map
-			existing = make(map[string]interface{})
+			// Never silently discard an unparseable existing config: that is the
+			// single real path to total data loss. Surface the error so the caller
+			// refuses to overwrite the file.
+			return "", stats, fmt.Errorf("existing config is not valid YAML, refusing to overwrite: %w", err)
 		}
 	} else {
 		existing = make(map[string]interface{})
@@ -60,19 +101,19 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 	if err := yaml.Unmarshal([]byte(templateYAML), &tmpl); err != nil {
 		return "", stats, fmt.Errorf("failed to parse template YAML: %w", err)
 	}
-
-	result := make(map[string]interface{})
-
-	// 1. Copy template baseline
-	for k, v := range tmpl {
-		result[k] = v
+	if tmpl == nil {
+		tmpl = make(map[string]interface{})
 	}
 
-	// 2. Preserve essential runtime and server settings from existing config
-	preservedKeys := []string{
+	// 1. Preserve-by-default: start with a deep copy of existing config
+	result := deepCopyMap(existing)
+
+	// 2. Adopt essential runtime / server settings from template if missing in existing
+	runtimeKeys := []string{
 		"secret",
 		"external-controller",
 		"external-ui",
+		"external-controller-unix",
 		"port",
 		"socks-port",
 		"redir-port",
@@ -84,41 +125,68 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 		"log-level",
 		"ipv6",
 	}
-	for _, key := range preservedKeys {
-		if val, exists := existing[key]; exists && val != nil && val != "" {
-			result[key] = val
+	for _, key := range runtimeKeys {
+		if _, exists := result[key]; !exists {
+			if val, inTmpl := tmpl[key]; inTmpl && val != nil && val != "" {
+				result[key] = deepCopyValue(val)
+			}
 		}
 	}
 
-	// 3. Preserve User Proxies and Proxy Providers
+	// 3. Preserve User Proxies and Proxy Providers:
+	// Only adopt template nodes if templateOwnsNodes is true AND template contains non-empty nodes.
 	tmplHasProxies := false
 	if tp, ok := tmpl["proxies"].([]interface{}); ok && len(tp) > 0 {
 		tmplHasProxies = true
 	}
-	if !templateOwnsNodes || !tmplHasProxies {
-		if existingProxies, ok := existing["proxies"]; ok && existingProxies != nil {
-			if exSlice, isSlice := existingProxies.([]interface{}); isSlice && len(exSlice) > 0 {
-				result["proxies"] = existingProxies
-			}
-		}
+	if templateOwnsNodes && tmplHasProxies {
+		result["proxies"] = deepCopyValue(tmpl["proxies"])
+	} else if exProxies, ok := existing["proxies"].([]interface{}); ok && len(exProxies) > 0 {
+		result["proxies"] = deepCopyValue(exProxies)
+	} else if tmplHasProxies {
+		result["proxies"] = deepCopyValue(tmpl["proxies"])
 	}
 
 	tmplHasProviders := false
 	if tprov, ok := tmpl["proxy-providers"].(map[string]interface{}); ok && len(tprov) > 0 {
 		tmplHasProviders = true
 	}
-	if !templateOwnsNodes || !tmplHasProviders {
-		if existingProviders, ok := existing["proxy-providers"]; ok && existingProviders != nil {
-			if exMap, isMap := existingProviders.(map[string]interface{}); isMap && len(exMap) > 0 {
-				result["proxy-providers"] = existingProviders
-			}
-		}
+	if templateOwnsNodes && tmplHasProviders {
+		result["proxy-providers"] = deepCopyValue(tmpl["proxy-providers"])
+	} else if exProv, ok := existing["proxy-providers"].(map[string]interface{}); ok && len(exProv) > 0 {
+		result["proxy-providers"] = deepCopyValue(exProv)
+	} else if tmplHasProviders {
+		result["proxy-providers"] = deepCopyValue(tmpl["proxy-providers"])
 	}
 
-	// 4. Ensure Proxy Groups validity
-	// If template has proxy-groups referencing proxy-providers that exist in existing config, ensure they are linked.
+	// 4. Apply Template-managed Routing Sections:
+	// Rule-providers:
+	if rp, ok := tmpl["rule-providers"]; ok && rp != nil {
+		result["rule-providers"] = deepCopyValue(rp)
+	}
+
+	// Proxy-groups:
+	if pg, ok := tmpl["proxy-groups"]; ok && pg != nil {
+		result["proxy-groups"] = deepCopyValue(pg)
+	}
+
+	// Sniffer & TUN:
+	if sniffer, ok := tmpl["sniffer"]; ok && sniffer != nil {
+		result["sniffer"] = deepCopyValue(sniffer)
+	}
+	if tun, ok := tmpl["tun"]; ok && tun != nil {
+		result["tun"] = deepCopyValue(tun)
+	}
+
+	// Listeners: if template contains listeners, use template listeners;
+	// otherwise existing listeners are preserved verbatim in result!
+	if listeners, ok := tmpl["listeners"]; ok && listeners != nil {
+		result["listeners"] = deepCopyValue(listeners)
+	}
+
+	// Ensure Proxy Groups validity:
+	// If template has proxy-groups referencing proxy-providers that exist in config, ensure they are linked.
 	if groups, ok := result["proxy-groups"].([]interface{}); ok {
-		// Collect all available proxy / provider names
 		var availableProxies []string
 		if pSlice, ok := result["proxies"].([]interface{}); ok {
 			for _, p := range pSlice {
@@ -137,14 +205,12 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 			}
 		}
 
-		// Ensure every group has proxies or use-providers
 		for i, g := range groups {
 			if gMap, ok := g.(map[string]interface{}); ok {
 				existingList, _ := gMap["proxies"].([]interface{})
 				useProviders, _ := gMap["use"].([]interface{})
 
 				if len(existingList) == 0 && len(useProviders) == 0 {
-					// Fallback: attach available providers or DIRECT
 					if len(availableProviders) > 0 {
 						var useList []interface{}
 						for _, prov := range availableProviders {
@@ -167,23 +233,70 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 		result["proxy-groups"] = groups
 	}
 
-	// 5. Enhance DNS fake-ip-filter with Keenetic exclusions
-	if dns, ok := result["dns"].(map[string]interface{}); ok {
-		existingFilter, _ := dns["fake-ip-filter"].([]interface{})
-		filterSet := make(map[string]bool)
-		for _, f := range existingFilter {
-			if str, ok := f.(string); ok {
-				filterSet[str] = true
+	// 5. Deep merge DNS section:
+	// Preserves existing nameserver-policy, default-nameserver, fallback, fallback-filter, etc.,
+	// while adopting template baseline and unioning fake-ip-filter with Keenetic exclusions.
+	tmplDNS, hasTmplDNS := tmpl["dns"].(map[string]interface{})
+	existingDNS, hasExistingDNS := result["dns"].(map[string]interface{})
+
+	var mergedDNS map[string]interface{}
+	if hasTmplDNS {
+		if !hasExistingDNS {
+			mergedDNS = deepCopyMap(tmplDNS)
+		} else {
+			mergedDNS = deepCopyMap(existingDNS)
+
+			// Update baseline fields from template if defined
+			for _, k := range []string{"enable", "listen", "enhanced-mode", "nameserver"} {
+				if val, ok := tmplDNS[k]; ok && val != nil {
+					mergedDNS[k] = deepCopyValue(val)
+				}
 			}
 		}
-		for _, exc := range KeeneticFakeIPExclusions {
-			if !filterSet[exc] {
-				existingFilter = append(existingFilter, exc)
-				filterSet[exc] = true
+	} else if hasExistingDNS {
+		mergedDNS = deepCopyMap(existingDNS)
+	}
+
+	if mergedDNS != nil {
+		// fake-ip-filter is only meaningful under enhanced-mode: fake-ip.
+		// For redir-host (or an unset enhanced-mode) writing it just bloats the
+		// user config and inflates the diff on every save, so only merge it in
+		// when the effective enhanced-mode is fake-ip.
+		effectiveMode, _ := mergedDNS["enhanced-mode"].(string)
+		if effectiveMode == "fake-ip" {
+			// Combine fake-ip-filter without duplicates across existing, template, and Keenetic exclusions
+			filterSet := make(map[string]bool)
+			var combinedFilter []interface{}
+
+			addFilter := func(item interface{}) {
+				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+					if !filterSet[s] {
+						filterSet[s] = true
+						combinedFilter = append(combinedFilter, s)
+					}
+				}
 			}
+
+			if hasExistingDNS {
+				if exF, ok := existingDNS["fake-ip-filter"].([]interface{}); ok {
+					for _, item := range exF {
+						addFilter(item)
+					}
+				}
+			}
+			if hasTmplDNS {
+				if tmplF, ok := tmplDNS["fake-ip-filter"].([]interface{}); ok {
+					for _, item := range tmplF {
+						addFilter(item)
+					}
+				}
+			}
+			for _, exc := range KeeneticFakeIPExclusions {
+				addFilter(exc)
+			}
+			mergedDNS["fake-ip-filter"] = combinedFilter
 		}
-		dns["fake-ip-filter"] = existingFilter
-		result["dns"] = dns
+		result["dns"] = mergedDNS
 	}
 
 	// 6. Build Rules: [Safety Bypasses] -> [User Rules] -> [Template Rules]
@@ -270,6 +383,10 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 	}
 	stats.UserRules = userRulesCount
 	stats.Rules = len(finalRules)
+
+	// Preserve-by-default: result is built from deepCopyMap(existing) and no
+	// top-level key is ever deleted, so silent drops are structurally impossible.
+	// There is deliberately no "dropped keys" tracking / warning path.
 
 	out, err := yaml.Marshal(result)
 	if err != nil {

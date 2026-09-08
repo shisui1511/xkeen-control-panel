@@ -1,68 +1,70 @@
+version: "2"
 run:
   timeout: 5m
-  tests: true
   modules-download-mode: readonly
-
+  tests: true
 linters:
+  enable:
+    - misspell
+    - revive
   disable:
     - errcheck
-  enable:
-    # - errcheck    # Временно отключено — много непроверенных ошибок в legacy коде
-    - gosimple      # Упрощение кода
-    - govet         # Стандартный go vet
-    - ineffassign   # Обнаружение неиспользуемых присваиваний
-    - staticcheck   # Статический анализ
-    - unused        # Неиспользуемый код
-    - gofmt         # Форматирование
-    - goimports     # Импорты
-    - misspell      # Опечатки в комментариях
-    - revive        # Замена golint
-    - typecheck     # Проверка типов
-
-linters-settings:
-  errcheck:
-    check-blank: true
-    check-type-assertions: true
-  
-  govet:
-    enable-all: true
-    disable:
-      - shadow
-      - fieldalignment
-  
-  revive:
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    govet:
+      disable:
+        - shadow
+        - fieldalignment
+      enable-all: true
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+        - name: var-naming
+          disabled: false
+        - name: package-comments
+          disabled: true
+    staticcheck:
+      checks:
+        - "all"
+        - "-ST*"
+        - "-QF*"
+  exclusions:
+    generated: lax
     rules:
-      - name: exported
-        disabled: true
-      - name: var-naming
-        disabled: false
-      - name: package-comments
-        disabled: true
-
+      - linters:
+          - unused
+        path: embed.go
+      - linters:
+          - govet
+          - ineffassign
+          - misspell
+          - revive
+          - staticcheck
+          - unused
+        path: internal/xrayapi/gen/
+      - linters:
+          - staticcheck
+        path: _test\.go
+    paths:
+      - frontend
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-dirs:
-    - frontend
-  
-  exclude-rules:
-    # Исключаем embed.go из проверок
-    - path: embed.go
-      linters:
-        - unused
-    # Исключаем сгенерированный код gRPC/Protobuf
-    - path: internal/xrayapi/gen/
-      linters:
-        - unused
-        - revive
-        - staticcheck
-        - gosimple
-        - govet
-        - ineffassign
-        - goimports
-        - misspell
-    # Исключаем ложные срабатывания staticcheck в тестах
-    - path: _test\.go
-      linters:
-        - staticcheck
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - frontend
+      - third_party$
+      - builtin$
+      - examples$
+      - internal/xrayapi/gen/

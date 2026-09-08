@@ -20,30 +20,47 @@ import (
 const maxLogSize = 512 * 1024 // 512 KB
 
 var sensitiveYAMLKeys = map[string]bool{
-	"password":    true,
-	"secret":      true,
-	"uuid":        true,
-	"public-key":  true,
-	"publickey":   true,
-	"private-key": true,
-	"private_key": true,
-	"privatekey":  true,
-	"token":       true,
+	"password":              true,
+	"secret":                true,
+	"uuid":                  true,
+	"public-key":            true,
+	"publickey":             true,
+	"private-key":           true,
+	"private_key":           true,
+	"privatekey":            true,
+	"token":                 true,
+	"header-protection-key": true,
+	"header_protection_key": true,
+	"headerprotectionkey":   true,
+	"pre-shared-key":        true,
+	"pre_shared_key":        true,
+	"presharedkey":          true,
+	"psk":                   true,
 }
 
+// sensitiveJSONKeys stores all keys in lower case; lookups lower-case the key
+// first (see sanitizeJSONNode), so camelCase / PascalCase / kebab / snake forms
+// are all covered by a single entry.
 var sensitiveJSONKeys = map[string]bool{
-	"id":            true,
-	"secret":        true,
-	"password":      true,
-	"publicKey":     true,
-	"public_key":    true,
-	"public-key":    true,
-	"privateKey":    true,
-	"private_key":   true,
-	"private-key":   true,
-	"token":         true,
-	"password_hash": true,
-	"passwordHash":  true,
+	"id":                    true,
+	"secret":                true,
+	"password":              true,
+	"publickey":             true,
+	"public_key":            true,
+	"public-key":            true,
+	"privatekey":            true,
+	"private_key":           true,
+	"private-key":           true,
+	"token":                 true,
+	"password_hash":         true,
+	"passwordhash":          true,
+	"header-protection-key": true,
+	"header_protection_key": true,
+	"headerprotectionkey":   true,
+	"pre-shared-key":        true,
+	"pre_shared_key":        true,
+	"presharedkey":          true,
+	"psk":                   true,
 }
 
 // sanitizeYAML parses YAML data, recursively replaces sensitive values with *REDACTED*,
@@ -101,7 +118,7 @@ func sanitizeJSONNode(v interface{}) {
 	switch node := v.(type) {
 	case map[string]interface{}:
 		for k, val := range node {
-			if sensitiveJSONKeys[k] {
+			if sensitiveJSONKeys[strings.ToLower(k)] {
 				node[k] = "*REDACTED*"
 			} else {
 				sanitizeJSONNode(val)

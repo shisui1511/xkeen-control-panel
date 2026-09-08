@@ -71,9 +71,188 @@ type SubscriptionNode struct {
 	LocalAddresses []string `json:"local_addresses,omitempty"`
 	AllowedIPs     []string `json:"allowed_ips,omitempty"`
 	KeepAlive      int      `json:"keepalive,omitempty"`
+	DNS            []string `json:"dns,omitempty"`
+
+	// AmneziaWG obfuscation options (AWGIN-03, AWGIN-02)
+	AWG     *AWGOptions `json:"awg,omitempty"`
+	Dialect string      `json:"dialect,omitempty"`
 
 	// DialerProxy holds the tag of the outbound node to chain/cascade through (D-11).
 	DialerProxy string `json:"dialer_proxy,omitempty"`
+}
+
+// AWGOptions содержит параметры обфускации протокола AmneziaWG (Classic, 2.0, 3.1).
+type AWGOptions struct {
+	Jc                     *int   `json:"jc,omitempty"`
+	Jmin                   *int   `json:"jmin,omitempty"`
+	Jmax                   *int   `json:"jmax,omitempty"`
+	S1                     *int   `json:"s1,omitempty"`
+	S2                     *int   `json:"s2,omitempty"`
+	S3                     *int   `json:"s3,omitempty"`
+	S4                     *int   `json:"s4,omitempty"`
+	H1                     string `json:"h1,omitempty"` // число или min-max
+	H2                     string `json:"h2,omitempty"`
+	H3                     string `json:"h3,omitempty"`
+	H4                     string `json:"h4,omitempty"`
+	Version                string `json:"version,omitempty"`
+	HeaderProtectionKey    string `json:"header_protection_key,omitempty"`
+	I1                     string `json:"i1,omitempty"` // uppercase
+	I2                     string `json:"i2,omitempty"`
+	I3                     string `json:"i3,omitempty"`
+	I4                     string `json:"i4,omitempty"`
+	I5                     string `json:"i5,omitempty"`
+	ContentPaddingAddition *int   `json:"content_padding_addition,omitempty"`
+	RandomTrailers         *bool  `json:"random_trailers,omitempty"`
+	DisableCookies         *bool  `json:"disable_cookies,omitempty"`
+	RekeyAfterTime         *int   `json:"rekey_after_time,omitempty"`
+	// AWG 1.5 fields
+	J1    *int `json:"j1,omitempty"`
+	J2    *int `json:"j2,omitempty"`
+	J3    *int `json:"j3,omitempty"`
+	Itime *int `json:"itime,omitempty"`
+	// AWG 3.1 timing fields
+	RekeyTimeout         *int                   `json:"rekey_timeout,omitempty"`
+	RejectAfterTime      *int                   `json:"reject_after_time,omitempty"`
+	KeepaliveTimeout     *int                   `json:"keepalive_timeout,omitempty"`
+	MaxHandshakeAttempts *int                   `json:"max_handshake_attempts,omitempty"`
+	RawOptions           map[string]interface{} `json:"raw_options,omitempty"`
+}
+
+// Clone возвращает глубокую копию AWGOptions.
+func (o *AWGOptions) Clone() *AWGOptions {
+	if o == nil {
+		return nil
+	}
+	res := *o
+	if o.Jc != nil {
+		v := *o.Jc
+		res.Jc = &v
+	}
+	if o.Jmin != nil {
+		v := *o.Jmin
+		res.Jmin = &v
+	}
+	if o.Jmax != nil {
+		v := *o.Jmax
+		res.Jmax = &v
+	}
+	if o.S1 != nil {
+		v := *o.S1
+		res.S1 = &v
+	}
+	if o.S2 != nil {
+		v := *o.S2
+		res.S2 = &v
+	}
+	if o.S3 != nil {
+		v := *o.S3
+		res.S3 = &v
+	}
+	if o.S4 != nil {
+		v := *o.S4
+		res.S4 = &v
+	}
+	if o.ContentPaddingAddition != nil {
+		v := *o.ContentPaddingAddition
+		res.ContentPaddingAddition = &v
+	}
+	if o.RandomTrailers != nil {
+		v := *o.RandomTrailers
+		res.RandomTrailers = &v
+	}
+	if o.DisableCookies != nil {
+		v := *o.DisableCookies
+		res.DisableCookies = &v
+	}
+	if o.RekeyAfterTime != nil {
+		v := *o.RekeyAfterTime
+		res.RekeyAfterTime = &v
+	}
+	if o.J1 != nil {
+		v := *o.J1
+		res.J1 = &v
+	}
+	if o.J2 != nil {
+		v := *o.J2
+		res.J2 = &v
+	}
+	if o.J3 != nil {
+		v := *o.J3
+		res.J3 = &v
+	}
+	if o.Itime != nil {
+		v := *o.Itime
+		res.Itime = &v
+	}
+	if o.RekeyTimeout != nil {
+		v := *o.RekeyTimeout
+		res.RekeyTimeout = &v
+	}
+	if o.RejectAfterTime != nil {
+		v := *o.RejectAfterTime
+		res.RejectAfterTime = &v
+	}
+	if o.KeepaliveTimeout != nil {
+		v := *o.KeepaliveTimeout
+		res.KeepaliveTimeout = &v
+	}
+	if o.MaxHandshakeAttempts != nil {
+		v := *o.MaxHandshakeAttempts
+		res.MaxHandshakeAttempts = &v
+	}
+	if o.RawOptions != nil {
+		res.RawOptions = make(map[string]interface{}, len(o.RawOptions))
+		for k, v := range o.RawOptions {
+			res.RawOptions[k] = v
+		}
+	}
+	return &res
+}
+
+// IsEmpty проверяет, задан ли хотя бы один параметр обфускации AWG.
+func (o *AWGOptions) IsEmpty() bool {
+	if o == nil {
+		return true
+	}
+	return o.Jc == nil && o.Jmin == nil && o.Jmax == nil &&
+		o.S1 == nil && o.S2 == nil && o.S3 == nil && o.S4 == nil &&
+		o.H1 == "" && o.H2 == "" && o.H3 == "" && o.H4 == "" &&
+		o.Version == "" && o.HeaderProtectionKey == "" &&
+		o.I1 == "" && o.I2 == "" && o.I3 == "" && o.I4 == "" && o.I5 == "" &&
+		o.ContentPaddingAddition == nil && o.RandomTrailers == nil &&
+		o.DisableCookies == nil && o.RekeyAfterTime == nil &&
+		o.J1 == nil && o.J2 == nil && o.J3 == nil && o.Itime == nil &&
+		o.RekeyTimeout == nil && o.RejectAfterTime == nil &&
+		o.KeepaliveTimeout == nil && o.MaxHandshakeAttempts == nil &&
+		len(o.RawOptions) == 0
+}
+
+// Clone возвращает глубокую копию SubscriptionNode.
+func (n *SubscriptionNode) Clone() SubscriptionNode {
+	if n == nil {
+		return SubscriptionNode{}
+	}
+	res := *n
+	if n.Reserved != nil {
+		res.Reserved = make([]int, len(n.Reserved))
+		copy(res.Reserved, n.Reserved)
+	}
+	if n.LocalAddresses != nil {
+		res.LocalAddresses = make([]string, len(n.LocalAddresses))
+		copy(res.LocalAddresses, n.LocalAddresses)
+	}
+	if n.AllowedIPs != nil {
+		res.AllowedIPs = make([]string, len(n.AllowedIPs))
+		copy(res.AllowedIPs, n.AllowedIPs)
+	}
+	if n.DNS != nil {
+		res.DNS = make([]string, len(n.DNS))
+		copy(res.DNS, n.DNS)
+	}
+	if n.AWG != nil {
+		res.AWG = n.AWG.Clone()
+	}
+	return res
 }
 
 // DialerProxyTarget represents an eligible target node for dialing proxy chaining.
@@ -185,7 +364,9 @@ func (s *Subscription) Clone() Subscription {
 	}
 	if s.Nodes != nil {
 		res.Nodes = make([]SubscriptionNode, len(s.Nodes))
-		copy(res.Nodes, s.Nodes)
+		for i := range s.Nodes {
+			res.Nodes[i] = s.Nodes[i].Clone()
+		}
 	}
 	return res
 }

@@ -45,6 +45,9 @@
   --warning: #f0b450;
   --danger: #f4707f;
   --idle: #c9a23a;
+  --purple: #c084fc;
+  --purple-bg: rgba(168, 85, 247, 0.12);
+  --purple-border: rgba(168, 85, 247, 0.3);
 
   --accent-text: var(--accent);
   --surface-overlay-from: #0d2438;
@@ -67,6 +70,67 @@
   --color-text-secondary: var(--fg-secondary);
   --color-border-subtle: var(--border);
   --color-danger: var(--danger);
+
+  /* Semantic status aliases — consumed by Logs / SmartProxy / constructors /
+     MihomoSocketMigrateModal. Each points at a base token that already has a
+     [data-theme="light"] override, so the alias adapts per-theme with no
+     duplicate block. Several call sites carry a hardcoded hex fallback
+     (var(--color-warning, #f59e0b)); once these are defined the fallback is
+     never reached and light-theme adaptation is restored. */
+  --color-success: var(--success);
+  --color-error: var(--danger);
+  --color-warning: var(--warning);
+  --color-info: var(--accent);
+  --color-primary: var(--primary);
+  --color-border: var(--border);
+  --color-warning-fg: var(--warning);
+  --color-warning-bg: color-mix(in srgb, var(--warning) 14%, transparent);
+
+  /* Phantom-token aliases — a shadow vocabulary that several later components
+     (XrayRoutingConstructor, MihomoGenerator, Connections, Services, Logs …)
+     reference but that was never defined here. Most call sites have no
+     fallback, so `background: var(--bg-surface-hover)` silently became
+     `transparent` and `color: var(--fg)` fell through to inheritance. Each
+     alias points at a canonical token that already carries a
+     [data-theme="light"] override, so light-theme adaptation comes for free. */
+  --fg: var(--fg-primary);
+  --fg-muted: var(--fg-dim);
+  --text-muted: var(--fg-dim);
+  --error: var(--danger);
+  --bg-hover: var(--hover);
+  --bg-secondary: var(--bg-elevated);
+  --bg-tertiary: var(--bg-deep);
+  --bg-input: var(--bg-elevated);
+  /* terminal / code-output surface — theme-invariant pair, both halves fixed
+     on purpose. The background stays dark in both themes (like the CodeMirror
+     editor, a console reads as a dark surface); the matching foreground stays
+     light for the same reason. Do not let the terminal foreground follow the
+     adaptive body-text token — in the light theme that paints dark ink on the
+     dark console background and the text becomes unreadable. The light value
+     here equals the dark-theme body text, so no new colour enters the palette. */
+  --bg-terminal: #050d16;
+  --fg-terminal: #d9e7f4;
+  --bg-card-hover: var(--bg-elevated);
+  --bg-card-subtle: var(--surface-tint);
+  --bg-surface-hover: var(--bg-elevated);
+  --bg-surface-elevated: var(--bg-elevated);
+  --bg-surface-raised: var(--bg-elevated);
+  --bg-surface-active: var(--accent-soft);
+  --border-subtle: var(--border);
+  --border-color: var(--border);
+  --border-hover: var(--border-strong);
+  --border-focus: var(--accent);
+  --primary-hover: var(--accent-hover);
+  --accent-border: var(--accent-line);
+  --accent-dim: var(--accent-2);
+  --accent-subtle: var(--accent-soft);
+  --accent-rgb: 41, 194, 240;
+  --font-mono: var(--font-family-mono);
+  --radius-full: 9999px;
+  --radius-xs: 3px;
+  --space-lg: var(--spacing-6);
+  --spacing-sm: var(--spacing-2);
+  --spacing-xs: var(--spacing-1);
 
   /* Type */
   --font-family-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -155,12 +219,16 @@
   --accent: #0e8fbf;
   --primary: #0e8fbf;
   --accent-hover: #0a779f;
+  --accent-rgb: 14, 143, 191;
 
   --hover: rgba(14, 143, 191, 0.07);
 
   --success: #1a7f4e;
   --warning: #8b5c00;
   --danger: #c22a3a;
+  --purple: #7e22ce;
+  --purple-bg: rgba(126, 34, 206, 0.08);
+  --purple-border: rgba(126, 34, 206, 0.25);
   --accent-text: var(--accent-hover);
   --scrollbar-thumb: var(--border-strong);
   --scrollbar-thumb-hover: #a9b8c9;
@@ -756,7 +824,6 @@ input[type='number'] {
   text-overflow: ellipsis;
 }
 
-.nav-group summary > .group-ttl :global(svg),
 .nav-group summary > .group-ttl svg {
   width: 16px;
   height: 16px;
@@ -824,17 +891,17 @@ input[type='number'] {
   border-radius: 3px 0 0 3px;
 }
 
-.nav-item :global(svg) {
+.nav-item svg {
   flex: 0 0 15px;
   color: currentColor;
   opacity: 0.6;
 }
 
-.nav-item:hover :global(svg) {
+.nav-item:hover svg {
   opacity: 0.85;
 }
 
-.nav-item[aria-current='page'] :global(svg) {
+.nav-item[aria-current='page'] svg {
   color: var(--accent);
   opacity: 1;
 }
@@ -1783,8 +1850,8 @@ td.mono,
 /* ----- Code block / terminal output ----- */
 .code-block,
 pre.code-output {
-  background: #050d16;
-  color: var(--fg-primary);
+  background: var(--bg-terminal);
+  color: var(--fg-terminal);
   font-family: var(--font-family-mono);
   font-size: 12.5px;
   line-height: 1.55;
@@ -2208,8 +2275,7 @@ a.chip:hover {
 }
 
 /* С иконкой */
-.chip--icon svg,
-.chip--icon :global(svg) {
+.chip--icon svg {
   flex-shrink: 0;
   width: 12px;
   height: 12px;

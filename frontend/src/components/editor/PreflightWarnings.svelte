@@ -4,25 +4,46 @@
   export interface PreflightWarning {
     code?: string;
     message?: string;
+    params?: Record<string, string | number>;
   }
 
   let {
     warnings = [],
+    title,
     onDismiss
   }: {
     warnings?: PreflightWarning[];
+    title?: string;
     onDismiss?: () => void;
   } = $props();
 
   function getWarningText(w: PreflightWarning): string {
     if (w.message) return w.message;
     if (w.code) {
-      const translated = $t(w.code);
+      const translated = $t(w.code, w.params);
       if (translated && translated !== w.code) {
         return translated;
       }
     }
     return w.code || '';
+  }
+
+  function formatWarningParts(text: string): { text: string; isCode: boolean }[] {
+    const parts: { text: string; isCode: boolean }[] = [];
+    const regex = /'([^']+)'/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push({ text: text.slice(lastIndex, match.index), isCode: false });
+      }
+      parts.push({ text: match[1], isCode: true });
+      lastIndex = regex.lastIndex;
+    }
+    if (lastIndex < text.length) {
+      parts.push({ text: text.slice(lastIndex), isCode: false });
+    }
+    return parts.length > 0 ? parts : [{ text, isCode: false }];
   }
 
   let activeWarnings = $derived.by(() => {
@@ -44,10 +65,18 @@
 {#if activeWarnings.length > 0}
   <div class="alert alert-warning alert-dismissible preflight-warnings" role="alert">
     <div class="preflight-warnings-content">
-      <strong>{$t('editor.save_warnings_title')}</strong>
+      <strong>{title || $t('editor.save_warnings_title')}</strong>
       <ul class="preflight-warnings-list">
         {#each activeWarnings as warning, i (i)}
-          <li>{getWarningText(warning)}</li>
+          <li>
+            {#each formatWarningParts(getWarningText(warning)) as part}
+              {#if part.isCode}
+                <code class="warning-code-token">{part.text}</code>
+              {:else}
+                {part.text}
+              {/if}
+            {/each}
+          </li>
         {/each}
       </ul>
     </div>
@@ -86,5 +115,14 @@
 
   .preflight-warnings-list li {
     line-height: 1.4;
+  }
+
+  .warning-code-token {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.85em;
+    padding: 1px 4px;
+    border-radius: var(--radius-xs, 3px);
+    background: color-mix(in srgb, var(--warning) 18%, transparent);
+    color: var(--warning);
   }
 </style>

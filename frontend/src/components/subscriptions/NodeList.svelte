@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t } from '../../i18n';
+  import { detectWireGuardDialect } from '../../lib/awgFields';
 
   export interface Node {
     tag: string;
@@ -15,6 +16,8 @@
     security?: string;
     is_new?: boolean;
     dialer_proxy?: string;
+    dialect?: string;
+    awg?: any;
   }
 
   export interface DialerProxyTarget {
@@ -293,7 +296,9 @@
         {@const metaText =
           node.use_case || node.speed
             ? `${node.use_case || ''}${node.use_case && node.speed ? ' - ' : ''}${node.speed || ''}`
-            : `${node.protocol || ''}${node.protocol && node.transport ? ' · ' + node.transport : ''}${node.security && node.security !== 'none' ? ' · ' + node.security : ''}`}
+            : node.protocol === 'wireguard'
+              ? `${node.transport && node.transport !== 'udp' ? node.transport : ''}${node.security && node.security !== 'none' ? (node.transport ? ' · ' : '') + node.security : ''}`
+              : `${node.protocol || ''}${node.protocol && node.transport ? ' · ' + node.transport : ''}${node.security && node.security !== 'none' ? ' · ' + node.security : ''}`}
         <div class="sub-node-row" class:active={isNodeActive}>
           <button
             type="button"
@@ -338,6 +343,42 @@
               <div class="sub-node-meta-row">
                 {#if metaText}
                   <span class="sub-node-chip-blue">{metaText}</span>
+                {/if}
+                {#if node.protocol === 'wireguard'}
+                  {@const dialect = detectWireGuardDialect(node)}
+                  <span class="sub-node-chip-dialect" class:awg={dialect !== 'plain'}>
+                    {$t(
+                      dialect === '1.5'
+                        ? 'subscr.dialect_15'
+                        : dialect === '2.0'
+                          ? 'subscr.dialect_20'
+                          : dialect === '3.1'
+                            ? 'subscr.dialect_31'
+                            : dialect === 'classic'
+                              ? 'subscr.dialect_classic'
+                              : 'subscr.dialect_plain'
+                    )}
+                  </span>
+                  {#if dialect !== 'plain'}
+                    {#if source === 'mihomo' || enableMihomo}
+                      <span
+                        class="sub-node-chip-compat success"
+                        title={$t('subscr.awg_preserved_mihomo')}
+                        aria-label={`Mihomo: ${$t('subscr.awg_preserved_mihomo')}`}
+                      >
+                        Mihomo ✓
+                      </span>
+                    {/if}
+                    {#if source === 'xray' || enableXray}
+                      <span
+                        class="sub-node-chip-compat warning"
+                        title={$t('subscr.awg_incompatible_xray')}
+                        aria-label={`Xray: ${$t('subscr.awg_incompatible_xray')}`}
+                      >
+                        Xray ⚠
+                      </span>
+                    {/if}
+                  {/if}
                 {/if}
               </div>
             </div>
@@ -775,23 +816,22 @@
   }
 
   .sub-node-name-new {
-    color: #f59e0b;
+    color: var(--warning);
     font-weight: 700;
     font-size: 11px;
     letter-spacing: 0.02em;
   }
 
   .sub-node-chip-blue {
-    background: rgba(41, 194, 240, 0.08);
-    border: 1px solid rgba(41, 194, 240, 0.2);
-    color: #7dd3fc;
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+    color: var(--accent);
     padding: 2px 10px;
     border-radius: 12px;
     font-size: 11px;
     font-weight: 500;
     display: inline-flex;
     align-items: center;
-    margin-top: 3px;
     max-width: 100%;
     white-space: nowrap;
     overflow: hidden;
@@ -803,13 +843,52 @@
     color: #fff;
   }
 
+  .sub-node-chip-dialect {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: var(--fg-secondary);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+  .sub-node-chip-dialect.awg {
+    background: var(--purple-bg, rgba(168, 85, 247, 0.12));
+    border-color: var(--purple-border, rgba(168, 85, 247, 0.3));
+    color: var(--purple, #c084fc);
+  }
+
+  .sub-node-chip-compat {
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+  }
+  .sub-node-chip-compat.success {
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+    color: var(--success);
+  }
+  .sub-node-chip-compat.warning {
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+    color: var(--warning);
+  }
+
   .sub-node-chip-gold {
-    background: rgba(245, 158, 11, 0.07);
-    border: 1px solid rgba(245, 158, 11, 0.2);
-    color: #f59e0b;
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+    color: var(--warning);
     padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 9.5px;
+    border-radius: var(--radius-sm, 4px);
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.05em;
     display: inline-block;
@@ -825,6 +904,9 @@
   .sub-node-meta-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 3px;
   }
 
   .sub-node-status-container {

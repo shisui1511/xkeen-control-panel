@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -49,7 +50,8 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
-	ctx := r.Context()
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
 
 	// Ping goroutine: sends a ping every wsPingInterval and closes conn on failure.
 	stopPing := make(chan struct{})
@@ -85,10 +87,12 @@ func (a *API) LogsWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Read pump to handle client pongs/closes
+		// Read pump to handle client pongs/closes and guarantee prompt unsubscribe on disconnect
 		go func() {
 			for {
 				if _, _, err := conn.ReadMessage(); err != nil {
+					_ = conn.Close()
+					cancel()
 					break
 				}
 			}

@@ -263,6 +263,18 @@ func parseSubscriptionBody(body []byte, contentTypeHeader string, sub *Subscript
 		return nil, nil, fmt.Errorf("данная подписка имеет формат Clash/Mihomo YAML, но её не удалось распарсить для ядра XRay")
 	}
 
+	// 5.5) wg-quick .conf (WireGuard / AmneziaWG INI format)
+	if looksLikeWgQuickConf(content) {
+		if outs, skips, err := parseWgQuickConfToOutbounds(content, sub); err == nil && len(outs) > 0 {
+			if sub != nil {
+				sub.DetectedFormat = "wg-quick"
+				sub.LastCount = len(outs)
+				sub.LastSkipped = len(skips)
+			}
+			return outs, skips, nil
+		}
+	}
+
 	// 6) Base64 or plain share-links
 	return parseShareLinks(content, sub)
 }
@@ -639,6 +651,17 @@ func parseShareLinks(content string, sub *Subscription) ([]Outbound, []SkipReaso
 		wasBase64 = true
 	}
 
+	if wasBase64 && looksLikeWgQuickConf(content) {
+		if outs, skips, err := parseWgQuickConfToOutbounds(content, sub); err == nil && len(outs) > 0 {
+			if sub != nil {
+				sub.DetectedFormat = "wg-quick"
+				sub.LastCount = len(outs)
+				sub.LastSkipped = len(skips)
+			}
+			return outs, skips, nil
+		}
+	}
+
 	lines := strings.Split(content, "\n")
 	nonEmpty := 0
 	for _, line := range lines {
@@ -709,7 +732,7 @@ func skipReasonForScheme(line string) string {
 		return "невалидный URL или порт в socks://"
 	case strings.HasPrefix(line, "http-proxy://"):
 		return "невалидный URL или порт в http-proxy://"
-	case strings.HasPrefix(line, "wireguard://"), strings.HasPrefix(line, "wg://"):
+	case strings.HasPrefix(line, "wireguard://"), strings.HasPrefix(line, "wg://"), strings.HasPrefix(line, "awg://"):
 		return "невалидный URL, ключ или порт в wireguard://"
 	default:
 		return "неподдерживаемый протокол или невалидный URL"
@@ -735,8 +758,8 @@ func parseShareLink(link string) (out *Outbound) {
 		return parseVMessLink(link)
 	}
 
-	// wireguard:// or wg://
-	if strings.HasPrefix(link, "wireguard://") || strings.HasPrefix(link, "wg://") {
+	// wireguard:// or wg:// or awg://
+	if strings.HasPrefix(link, "wireguard://") || strings.HasPrefix(link, "wg://") || strings.HasPrefix(link, "awg://") {
 		ob, _ := parseWireGuardLink(link)
 		return ob
 	}
@@ -1396,6 +1419,40 @@ func (s *SubscriptionService) ParseLinks(links []string) []ParseLinksResult {
 		}
 	}
 	return results
+}
+
+// ParseOutboundText parses either a wg-quick .conf INI file or newline-separated share links.
+func (s *SubscriptionService) ParseOutboundText(text string) []ParseLinksResult {
+	trimmed := strings.TrimSpace(text)
+	if looksLikeWgQuickConf(trimmed) {
+		outs, _, err := parseWgQuickConfToOutbounds(trimmed, nil)
+		if err != nil {
+			return []ParseLinksResult{{
+				Link:  "wg-quick.conf",
+				Error: err.Error(),
+			}}
+		}
+		if len(outs) > 0 {
+			results := make([]ParseLinksResult, 0, len(outs))
+			for _, ob := range outs {
+				obCopy := ob
+				results = append(results, ParseLinksResult{
+					Link:     obCopy.Tag,
+					Outbound: &obCopy,
+				})
+			}
+			return results
+		}
+	}
+
+	var links []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			links = append(links, line)
+		}
+	}
+	return s.ParseLinks(links)
 }
 
 // parseSubscriptionUserinfo parses values from Subscription-Userinfo header:

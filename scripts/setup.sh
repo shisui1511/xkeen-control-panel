@@ -310,11 +310,34 @@ PREARGS=""
 DESC="XKeen Control Panel"
 PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+# Runtime environment overrides
+if [ -f $INSTALL_DIR/xcp.env ]; then
+    set -a
+    . $INSTALL_DIR/xcp.env
+    set +a
+fi
+
+# Escape hatch for Green Tea GC if needed (Go 1.26 default):
+# export GOEXPERIMENT=nogreenteagc
+
 . /opt/etc/init.d/rc.func
 EOF
   chmod +x "$INIT_SCRIPT"
   ok "Сервис создан"
   log_install "Created init script at $INIT_SCRIPT"
+
+  # Создание шаблонного xcp.env, если его нет
+  if [ ! -f "$INSTALL_DIR/xcp.env" ]; then
+    cat > "$INSTALL_DIR/xcp.env" <<'ENVEOF'
+# XKeen Control Panel Runtime Environment Overrides
+# GOMEMLIMIT=96MiB
+# GOGC=50
+# Escape-hatch для отключения Green Tea GC в Go 1.26:
+# export GOEXPERIMENT=nogreenteagc
+ENVEOF
+    ok "Создан шаблон оверрайдов окружения: $INSTALL_DIR/xcp.env"
+    log_install "Created environment override template at $INSTALL_DIR/xcp.env"
+  fi
 }
 
 # Попытка скачать с одного URL

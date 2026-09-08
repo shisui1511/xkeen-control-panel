@@ -1,0 +1,149 @@
+# ==============================================================================
+# awg-antifilter.yaml — Mihomo: AmneziaWG Антифильтр
+# Сценарий: Обход блокировок через AmneziaWG (пресет Compatibility, MTU 1280).
+# Защита портов управления Keenetic и приватных сетей.
+# ==============================================================================
+mixed-port: 10808
+redir-port: 5000
+tproxy-port: 5001
+routing-mark: 255
+allow-lan: true
+mode: rule
+log-level: warning
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+
+find-process-mode: off
+global-client-fingerprint: chrome
+
+# --- Подсистема DNS с защитой от DNS Loop и Fake-IP ---
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - "*.lan"
+    - "*.local"
+    - "*.keenetic.pro"
+    - "*.keenetic.link"
+    - "*.keenetic.name"
+    - "*.my.keenetic.net"
+    - "router.local"
+    - "time.*.com"
+    - "ntp.*"
+    - "*.ntp.org"
+    - "+.stun.*"
+    - "+.pool.ntp.org"
+  default-nameserver:
+    - 77.88.8.8
+    - 1.1.1.1
+  nameserver:
+    - 77.88.8.8
+    - https://common.dot.dns.yandex.net/dns-query
+  fallback:
+    - https://cloudflare-dns.com/dns-query
+    - https://dns.google/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: RU
+    ipcidr:
+      - 240.0.0.0/4
+
+sniffer:
+  enable: true
+  parse-pure-ip: true
+  sniff:
+    HTTP:
+      ports: [80, 8080-8880]
+      override-destination: true
+    TLS:
+      ports: [443, 8443]
+    QUIC:
+      ports: [443, 8443]
+  skip-domain:
+    - "Mijia Cloud"
+    - "dlg.io.mi.com"
+    - "+.apple.com"
+
+# --- Прокси (Inline AmneziaWG нода) ---
+proxies:
+  - name: "AWG-Antifilter"
+    type: wireguard
+    server: "YOUR_SERVER_IP"
+    port: 51820
+    ip: "10.0.0.2"
+    public-key: "YOUR_PEER_PUBLIC_KEY"
+    private-key: "YOUR_CLIENT_PRIVATE_KEY"
+    udp: true
+    mtu: 1280
+    remote-dns-resolve: true
+    amnezia-wg-option:
+      jc: 4
+      jmin: 40
+      jmax: 70
+      s1: 15
+      s2: 40
+      h1: 1000000001
+      h2: 1000000002
+      h3: 1000000003
+      h4: 1000000004
+
+proxy-groups:
+  - name: "Proxy"
+    type: select
+    proxies:
+      - "AWG-Antifilter"
+      - "Auto"
+      - "Fallback"
+      - "DIRECT"
+
+  - name: "Auto"
+    type: url-test
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    tolerance: 50
+    proxies:
+      - "AWG-Antifilter"
+
+  - name: "Fallback"
+    type: fallback
+    url: https://www.gstatic.com/generate_204
+    interval: 300
+    proxies:
+      - "AWG-Antifilter"
+
+# --- Провайдеры правил Антифильтра ---
+rule-providers:
+  antifilter-community:
+    type: http
+    behavior: domain
+    format: mrs
+    url: "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/antifilter-community.mrs"
+    path: ./rules/antifilter-community.mrs
+    interval: 86400
+
+  antifilter-ips:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/antifilter-ipsum.mrs"
+    path: ./rules/antifilter-ipsum.mrs
+    interval: 86400
+
+rules:
+  # Защита системных портов Keenetic и локальных сетей
+  - DST-PORT,3389,DIRECT
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+
+  # Антифильтр списки
+  - RULE-SET,antifilter-community,Proxy
+  - RULE-SET,antifilter-ips,Proxy
+
+  # Остальной трафик напрямую
+  - MATCH,DIRECT

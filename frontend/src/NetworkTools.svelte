@@ -335,7 +335,7 @@
         );
         const data = await res.json();
         if (res.ok) {
-          const answers = (data.Answer || []).map((a: any) => `${a.name} (${a.type}) -> ${a.data}`);
+          const answers = (data.Answer || []).map((a: any) => `${a.name} (${a.type}) → ${a.data}`);
           result = {
             success: true,
             records:
@@ -548,7 +548,7 @@
   <PageHeader
     title={$t('net.title')}
     subtitle={$t('net.subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_tools') }, { label: $t('nav.network') }]}
+    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('nav.network') }]}
     {onSwitchTab}
     hideHome={true}
   />
@@ -1152,14 +1152,14 @@
   }
 
   .term-output {
-    background: #050d16;
+    background: var(--bg-terminal);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: 14px 18px;
     font-family: var(--font-family-mono);
     font-size: 12.5px;
     line-height: 1.6;
-    color: var(--fg-primary);
+    color: var(--fg-terminal);
     min-height: 200px;
     overflow: auto;
     white-space: pre-wrap;
