@@ -29,7 +29,7 @@
     const styles = getComputedStyle(document.documentElement);
 
     const bgDeep = styles.getPropertyValue('--bg-deep').trim() || '#050d16';
-    const fgPrimary = styles.getPropertyValue('--fg-primary').trim() || '#d9e7f4';
+    const fgTerminal = styles.getPropertyValue('--fg-terminal').trim() || '#d9e7f4';
     const accent = styles.getPropertyValue('--accent').trim() || '#29c2f0';
     const danger = styles.getPropertyValue('--danger').trim() || '#f4707f';
     const success = styles.getPropertyValue('--success').trim() || '#46d18a';
@@ -37,7 +37,7 @@
 
     return {
       background: bgDeep,
-      foreground: fgPrimary,
+      foreground: fgTerminal,
       cursor: accent,
       cursorAccent: bgDeep,
       selectionBackground: 'rgba(41, 194, 240, 0.3)',
@@ -48,7 +48,7 @@
       blue: accent,
       magenta: '#c084fc',
       cyan: '#38bdf8',
-      white: fgPrimary,
+      white: fgTerminal,
       brightBlack: '#3e5774',
       brightRed: '#fb7185',
       brightGreen: '#4ade80',
