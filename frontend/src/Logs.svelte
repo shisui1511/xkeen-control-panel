@@ -526,7 +526,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_system')} <span class="crumb-sep">›</span>
+        {$t('nav.group_observability')} <span class="crumb-sep">›</span>
         {$t('nav.logs')}
       </div>
       <h1>{$t('logs.h1')}</h1>

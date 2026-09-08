@@ -335,7 +335,7 @@
         );
         const data = await res.json();
         if (res.ok) {
-          const answers = (data.Answer || []).map((a: any) => `${a.name} (${a.type}) -> ${a.data}`);
+          const answers = (data.Answer || []).map((a: any) => `${a.name} (${a.type}) → ${a.data}`);
           result = {
             success: true,
             records:
@@ -548,7 +548,7 @@
   <PageHeader
     title={$t('net.title')}
     subtitle={$t('net.subtitle')}
-    breadcrumbs={[{ label: $t('nav.group_tools') }, { label: $t('nav.network') }]}
+    breadcrumbs={[{ label: $t('nav.group_system') }, { label: $t('nav.network') }]}
     {onSwitchTab}
     hideHome={true}
   />

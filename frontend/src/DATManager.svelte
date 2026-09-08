@@ -375,7 +375,7 @@
   <div class="page-head">
     <div>
       <div class="crumbs">
-        {$t('nav.group_routing')} <span class="crumb-sep">›</span>
+        {$t('nav.group_system')} <span class="crumb-sep">›</span>
         {$t('nav.dat')}
       </div>
       <h1>{$t('dat.h1')}</h1>

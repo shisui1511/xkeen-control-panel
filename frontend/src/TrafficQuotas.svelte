@@ -497,7 +497,7 @@
           <div class="stat-sub">{$t('trafficquotas.sent')}</div>
         </div>
         <div class="stat-box">
-          <div class="stat-label">Σ {$t('trafficquotas.total')}</div>
+          <div class="stat-label">{$t('trafficquotas.total')}</div>
           <div class="stat-value">{formatBytes(stats.total)}</div>
           {#if sumQuotaLimit > 0}
             <div class="stat-bar" style="margin-top: 8px;">
