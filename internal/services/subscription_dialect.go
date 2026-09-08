@@ -1,5 +1,7 @@
 package services
 
+import "strings"
+
 // WireGuardDialect представляет тип/диалект конфигурации WireGuard/AmneziaWG.
 type WireGuardDialect string
 
@@ -25,14 +27,17 @@ func DetectWireGuardDialect(node *SubscriptionNode) WireGuardDialect {
 	awg := node.AWG
 
 	// Явная версия в AWGOptions (если указана)
-	switch awg.Version {
-	case "3.1", "3.0":
+	ver := strings.ToLower(strings.TrimSpace(awg.Version))
+	if strings.HasPrefix(ver, "3") || strings.HasPrefix(ver, "v3") {
 		return Dialect31
-	case "2.0":
+	}
+	if strings.HasPrefix(ver, "2") || strings.HasPrefix(ver, "v2") {
 		return Dialect20
-	case "1.5":
+	}
+	if strings.HasPrefix(ver, "1.5") || strings.HasPrefix(ver, "v1.5") {
 		return Dialect15
-	case "1.0":
+	}
+	if strings.HasPrefix(ver, "1") || strings.HasPrefix(ver, "v1") {
 		return DialectClassic
 	}
 

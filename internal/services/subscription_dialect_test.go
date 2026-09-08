@@ -114,4 +114,32 @@ func TestDetectWireGuardDialect(t *testing.T) {
 	if ver := InferAWGVersion(nodeToInfer15); ver != "1.5" || nodeToInfer15.AWG.Version != "1.5" {
 		t.Errorf("expected auto-inferred 1.5 version, got %s", ver)
 	}
+
+	// 7. Version prefixes normalization (WR-04)
+	versionTests := []struct {
+		ver      string
+		expected WireGuardDialect
+	}{
+		{"2", Dialect20},
+		{"v2", Dialect20},
+		{"2.0", Dialect20},
+		{"1.5", Dialect15},
+		{"v1.5", Dialect15},
+		{"1.0", DialectClassic},
+		{"v1", DialectClassic},
+		{"3", Dialect31},
+		{"v3", Dialect31},
+		{"3.1", Dialect31},
+	}
+	for _, vt := range versionTests {
+		nodeVer := &SubscriptionNode{
+			Protocol: "wireguard",
+			AWG: &AWGOptions{
+				Version: vt.ver,
+			},
+		}
+		if d := DetectWireGuardDialect(nodeVer); d != vt.expected {
+			t.Errorf("DetectWireGuardDialect(Version: %q) = %s, want %s", vt.ver, d, vt.expected)
+		}
+	}
 }
