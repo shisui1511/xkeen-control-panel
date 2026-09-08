@@ -295,20 +295,13 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 		host := ""
 		port := 0
 		if n.Server != "" {
-			if lastColon := strings.LastIndex(n.Server, ":"); lastColon >= 0 {
-				portStr := n.Server[lastColon+1:]
-				if p, err := strconv.Atoi(portStr); err == nil {
+			if h, pStr, err := net.SplitHostPort(n.Server); err == nil {
+				host = h
+				if p, err := strconv.Atoi(pStr); err == nil {
 					port = p
-					host = n.Server[:lastColon]
-					// Strip square brackets around IPv6 addresses if present
-					if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-						host = host[1 : len(host)-1]
-					}
-				} else {
-					host = n.Server
 				}
 			} else {
-				host = n.Server
+				host = strings.TrimPrefix(strings.TrimSuffix(n.Server, "]"), "[")
 			}
 		}
 
