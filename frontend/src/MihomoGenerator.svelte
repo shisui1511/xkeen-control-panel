@@ -2027,19 +2027,6 @@
         })
       );
 
-      if (Array.isArray(stats.dropped_keys) && stats.dropped_keys.length > 0) {
-        const droppedMsg = $t('editor.smart_merge_dropped_keys', {
-          keys: stats.dropped_keys.join(', ')
-        });
-        saveWarnings = [
-          ...saveWarnings,
-          {
-            code: 'SMART_MERGE_DROPPED_KEYS',
-            message: droppedMsg
-          }
-        ];
-        showToast('warning', droppedMsg);
-      }
     } catch (err: any) {
       if (err?.status === 401) return;
       console.error(err);

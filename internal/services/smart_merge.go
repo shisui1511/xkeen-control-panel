@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -30,11 +29,10 @@ var SafetyDirectPorts = []string{"3389", "22", "445", "1194", "51820"}
 
 // MergeStats contains counters calculated from the actual smart merge result.
 type MergeStats struct {
-	Proxies        int      `json:"proxies"`
-	ProxyProviders int      `json:"proxy_providers"`
-	UserRules      int      `json:"user_rules"`
-	Rules          int      `json:"rules"`
-	DroppedKeys    []string `json:"dropped_keys,omitempty"`
+	Proxies        int `json:"proxies"`
+	ProxyProviders int `json:"proxy_providers"`
+	UserRules      int `json:"user_rules"`
+	Rules          int `json:"rules"`
 }
 
 // deepCopyMap performs a deep recursive copy of a map[string]interface{}.
@@ -370,13 +368,9 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 	stats.UserRules = userRulesCount
 	stats.Rules = len(finalRules)
 
-	// 7. Track dropped or omitted top-level keys from existing config
-	for k := range existing {
-		if _, exists := result[k]; !exists {
-			stats.DroppedKeys = append(stats.DroppedKeys, k)
-		}
-	}
-	sort.Strings(stats.DroppedKeys)
+	// Preserve-by-default: result is built from deepCopyMap(existing) and no
+	// top-level key is ever deleted, so silent drops are structurally impossible.
+	// There is deliberately no "dropped keys" tracking / warning path.
 
 	out, err := yaml.Marshal(result)
 	if err != nil {

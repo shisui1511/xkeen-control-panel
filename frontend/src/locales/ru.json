@@ -1922,7 +1922,6 @@
   "editor.smart_merge_applied_user_rules_few": "{count} ваших исключения",
   "editor.smart_merge_applied_user_rules_many": "{count} ваших исключений",
   "editor.smart_merge_failed": "Не удалось выполнить безопасное слияние конфигурации, сохранение отменено",
-  "editor.smart_merge_dropped_keys": "SmartMerge: отброшены неподдерживаемые ключи: {keys}",
   "editor.save_warnings_title": "Конфигурация сохранена с предупреждениями",
   "mihomo.warnings.relay_deprecated": "Группа '{name}' использует устаревший тип 'relay', снятый в актуальных версиях Mihomo. Рекомендуется сменить тип группы.",
   "preflight.syntax": "Синтаксическая ошибка в файле конфигурации",

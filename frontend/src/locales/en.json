@@ -1923,7 +1923,6 @@
   "editor.smart_merge_applied_user_rules_few": "{count} user exclusions",
   "editor.smart_merge_applied_user_rules_many": "{count} user exclusions",
   "editor.smart_merge_failed": "Failed to perform safe configuration merge, save cancelled",
-  "editor.smart_merge_dropped_keys": "SmartMerge: dropped unsupported keys: {keys}",
   "editor.save_warnings_title": "Configuration saved with warnings",
   "mihomo.warnings.relay_deprecated": "Proxy group '{name}' uses deprecated type 'relay', removed in current Mihomo versions. Consider changing group type.",
   "preflight.syntax": "Syntax error in configuration file",

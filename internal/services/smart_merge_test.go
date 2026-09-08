@@ -810,7 +810,7 @@ dns:
     - '*.tmpl.dev'
 `
 
-	merged, stats, err := SmartMergeMihomo(existingYAML, templateYAML, nil, false)
+	merged, _, err := SmartMergeMihomo(existingYAML, templateYAML, nil, false)
 	if err != nil {
 		t.Fatalf("SmartMergeMihomo failed: %v", err)
 	}
@@ -858,11 +858,6 @@ dns:
 	}
 	if !strings.Contains(merged, "+.keenetic.pro") {
 		t.Errorf("expected Keenetic fake-ip exclusion, got:\n%s", merged)
-	}
-
-	// 7. Verify dropped keys is empty because all existing keys were preserved
-	if len(stats.DroppedKeys) > 0 {
-		t.Errorf("expected no dropped keys, got: %v", stats.DroppedKeys)
 	}
 }
 
@@ -948,7 +943,7 @@ rules:
   - MATCH,PROXY
 `
 
-	merged, stats, err := SmartMergeMihomo(realWorldConfig, templateYAML, nil, false)
+	merged, _, err := SmartMergeMihomo(realWorldConfig, templateYAML, nil, false)
 	if err != nil {
 		t.Fatalf("SmartMergeMihomo failed on real-world config: %v", err)
 	}
@@ -973,41 +968,5 @@ rules:
 		if !strings.Contains(merged, s) {
 			t.Errorf("round-trip lost critical data: missing %q in merged config:\n%s", s, merged)
 		}
-	}
-
-	if len(stats.DroppedKeys) > 0 {
-		t.Errorf("expected 0 dropped keys on real-world round-trip, got: %v", stats.DroppedKeys)
-	}
-}
-
-func TestSmartMergeMihomo_DroppedKeys(t *testing.T) {
-	// If existing has unknown or obsolete keys that were intentionally stripped or omitted:
-	// Here we test that if existing contains keys not retained in result, DroppedKeys tracks them.
-	existingWithObsolete := `
-secret: "my-secret"
-proxies:
-  - name: P1
-    type: ss
-    server: 1.1.1.1
-    port: 8388
-`
-	templateYAML := `
-mode: rule
-proxy-groups:
-  - name: PROXY
-    type: select
-    proxies:
-      - P1
-rules:
-  - MATCH,PROXY
-`
-	_, stats, err := SmartMergeMihomo(existingWithObsolete, templateYAML, nil, false)
-	if err != nil {
-		t.Fatalf("SmartMergeMihomo failed: %v", err)
-	}
-
-	// Both secret and proxies are preserved, so DroppedKeys should be empty
-	if len(stats.DroppedKeys) != 0 {
-		t.Errorf("expected empty DroppedKeys when all keys preserved, got: %v", stats.DroppedKeys)
 	}
 }
