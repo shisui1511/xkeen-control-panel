@@ -46,9 +46,9 @@
   }>();
 
   function getUsageColor(pct: number): string {
-    if (pct >= 90) return 'var(--error, #f4707f)';
-    if (pct >= 75) return 'var(--warning, #f0b450)';
-    return 'var(--success, #46d18a)';
+    if (pct >= 90) return 'var(--danger)';
+    if (pct >= 75) return 'var(--warning)';
+    return 'var(--success)';
   }
 
   const diskUsedPct = $derived.by(() => {
@@ -73,6 +73,14 @@
   const ramTotalMb = $derived.by(() => {
     if (!systemStats?.memory) return '0.00';
     return (systemStats.memory.total / 1024 / 1024).toFixed(1);
+  });
+
+  // Load average relative to the number of CPU cores — turns the raw figure
+  // into a saturation percentage so "0.73" reads as "37% of CPU capacity".
+  const loadPerCorePct = $derived.by(() => {
+    const cores = systemStats?.go_runtime?.gomaxprocs ?? 0;
+    if (!cores || !systemStats?.load) return null;
+    return Math.min((systemStats.load[0] / cores) * 100, 999);
   });
 </script>
 
@@ -121,7 +129,7 @@
                   class="stat-bar-fill"
                   style="width: {Math.min(diskUsedPct, 100).toFixed(
                     1
-                  )}%; background: {diskBarColor}; box-shadow: 0 0 8px {diskBarColor};"
+                  )}%; background: {diskBarColor}; box-shadow: 0 0 6px -1px {diskBarColor};"
                 ></div>
               </div>
             </div>
@@ -156,7 +164,7 @@
                 class="stat-bar-fill"
                 style="width: {Math.min(ramUsedPct, 100).toFixed(
                   1
-                )}%; background: {ramBarColor}; box-shadow: 0 0 8px {ramBarColor};"
+                )}%; background: {ramBarColor}; box-shadow: 0 0 6px -1px {ramBarColor};"
               ></div>
             </div>
           </div>
@@ -167,6 +175,11 @@
           <div class="stat-content-top">
             <div class="stat-head">
               <span class="stat-label">{$t('dash.load')}</span>
+              {#if loadPerCorePct !== null}
+                <span class="stat-pct" style="color: {getUsageColor(loadPerCorePct)};"
+                  >{loadPerCorePct.toFixed(0)}%</span
+                >
+              {/if}
             </div>
             <div class="stat-value">
               {systemStats.load[0].toFixed(2)}
@@ -197,27 +210,16 @@
                 >
                   <defs>
                     <linearGradient id="loadGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stop-color="#29c2f0" stop-opacity="0.45" />
-                      <stop offset="100%" stop-color="#29c2f0" stop-opacity="0.0" />
+                      <stop class="sparkline-grad-from" offset="0%" />
+                      <stop class="sparkline-grad-to" offset="100%" />
                     </linearGradient>
                   </defs>
-                  <!-- Reference baseline -->
-                  <line
-                    x1="0"
-                    y1="41"
-                    x2="200"
-                    y2="41"
-                    stroke="rgba(255, 255, 255, 0.08)"
-                    stroke-width="1"
-                  />
+                  <line class="sparkline-baseline" x1="0" y1="41" x2="200" y2="41" />
                   <path d={sparklineData.fill} fill="url(#loadGrad)" />
                   <path
+                    class="sparkline-line"
                     d={sparklineData.line}
-                    fill="none"
-                    stroke="var(--accent, #29c2f0)"
-                    stroke-width="1.75"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+                    vector-effect="non-scaling-stroke"
                   />
                 </svg>
               </div>
@@ -259,18 +261,33 @@
 <style>
   .system-resources-card {
     width: 100%;
+    container: sysres / inline-size;
   }
 
+  /* Four metrics — always an even grid so the last card never orphans
+     onto a row of its own. Two up by default, four up once there is room. */
   .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 16px;
   }
 
+  @container sysres (max-width: 400px) {
+    .stats-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @container sysres (min-width: 820px) {
+    .stats-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
   .stat-box {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
-    border-radius: var(--radius-md, 10px);
+    background: var(--surface-tint);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     padding: 14px;
     display: flex;
     flex-direction: column;
@@ -278,14 +295,6 @@
     min-height: 126px;
     gap: 8px;
     position: relative;
-    transition:
-      background 0.15s ease,
-      border-color 0.15s ease;
-  }
-
-  .stat-box:hover {
-    background: rgba(255, 255, 255, 0.035);
-    border-color: rgba(255, 255, 255, 0.12);
   }
 
   .stat-content-top {
@@ -309,7 +318,7 @@
     font-size: 13px;
     font-weight: 600;
     text-transform: none; /* D-07: natural case, no uppercase fatigue */
-    color: var(--fg-secondary, #8fa3b8);
+    color: var(--fg-secondary);
     letter-spacing: -0.01em;
   }
 
@@ -322,7 +331,7 @@
   .stat-value {
     font-size: 22px;
     font-weight: 600;
-    color: var(--fg-primary, #ffffff);
+    color: var(--fg-primary);
     line-height: 1.2;
     display: flex;
     align-items: baseline;
@@ -333,12 +342,12 @@
   .stat-unit {
     font-size: 13px;
     font-weight: 500;
-    color: var(--fg-secondary, #8fa3b8);
+    color: var(--fg-secondary);
   }
 
   .res-sub {
     font-size: 11.5px;
-    color: var(--fg-muted, var(--fg-secondary, #8fa3b8));
+    color: var(--fg-secondary);
     line-height: 1.4;
     white-space: nowrap;
     overflow: hidden;
@@ -355,7 +364,7 @@
   .stat-bar {
     width: 100%;
     height: 6px;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--border);
     border-radius: 999px;
     overflow: hidden;
     margin-top: 4px;
@@ -374,13 +383,42 @@
     height: 36px;
     position: relative;
     overflow: hidden;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
   }
 
   .sparkline {
     width: 100%;
     height: 100%;
     display: block;
+  }
+
+  .sparkline-grad-from {
+    stop-color: var(--accent);
+    stop-opacity: 0.28;
+  }
+
+  .sparkline-grad-to {
+    stop-color: var(--accent);
+    stop-opacity: 0;
+  }
+
+  .sparkline-baseline {
+    stroke: var(--border);
+    stroke-width: 1;
+  }
+
+  .sparkline-line {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .stat-bar-fill {
+      transition: none;
+    }
   }
 
   .uptime-badge-row {
@@ -395,17 +433,17 @@
     gap: 5px;
     font-size: 11px;
     font-weight: 600;
-    color: var(--success, #46d18a);
-    background: rgba(70, 209, 138, 0.1);
-    border: 1px solid rgba(70, 209, 138, 0.2);
+    color: var(--success);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success) 28%, transparent);
     padding: 2px 7px;
-    border-radius: var(--radius-sm, 6px);
+    border-radius: var(--radius-sm);
   }
 
   .uptime-dot {
     width: 5px;
     height: 5px;
     border-radius: 50%;
-    background: var(--success, #46d18a);
+    background: var(--success);
   }
 </style>

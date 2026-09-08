@@ -345,7 +345,8 @@
     if (values.length < 2) return '';
     const w = 200,
       h = 42;
-    const max = Math.max(...values, 0.01);
+    // Headroom above the peak so the highest sample never glues to the top edge.
+    const max = Math.max(...values, 0.01) * 1.15;
     const pts = values.map((v, i) => {
       const x = (i / (values.length - 1)) * w;
       const y = h - 4 - (v / max) * (h - 10);
