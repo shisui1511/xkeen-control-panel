@@ -1024,7 +1024,7 @@
 
   .flash-health-badge.pressure {
     border-color: var(--color-error);
-    background: rgba(239, 68, 68, 0.1);
+    background: color-mix(in srgb, var(--color-error) 12%, transparent);
     color: var(--color-error);
   }
 
@@ -1035,7 +1035,7 @@
 
   .flash-alert-tag {
     background: var(--color-error);
-    color: #fff;
+    color: var(--btn-primary-text);
     font-size: 10px;
     font-weight: 700;
     padding: 1px 5px;
@@ -1046,7 +1046,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: rgba(239, 68, 68, 0.15);
+    background: color-mix(in srgb, var(--color-error) 16%, transparent);
     border: 1px solid var(--color-error);
     border-radius: var(--radius-md);
     padding: 8px 14px;
@@ -1223,13 +1223,13 @@
 
   .source-pill.active {
     background: var(--accent);
-    color: #03182a;
+    color: var(--btn-primary-text);
     font-weight: 700;
   }
 
   .source-pill.error-tab.active {
     background: var(--color-error);
-    color: #fff;
+    color: var(--btn-primary-text);
   }
 
   /* Level Select */
@@ -1288,7 +1288,7 @@
     padding: 0 12px;
     box-sizing: border-box;
     white-space: nowrap;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid var(--border-light);
     transition: background 0.1s ease;
   }
 
@@ -1299,7 +1299,7 @@
   }
 
   .log-row:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--hover);
   }
 
   .log-row:hover .copy-row-btn {
@@ -1307,25 +1307,25 @@
   }
 
   .row-error {
-    background: rgba(239, 68, 68, 0.08);
-    color: #fca5a5;
+    background: color-mix(in srgb, var(--danger) 9%, transparent);
+    color: var(--danger);
   }
 
   .row-error:hover {
-    background: rgba(239, 68, 68, 0.14);
+    background: color-mix(in srgb, var(--danger) 15%, transparent);
   }
 
   .row-warning {
-    background: rgba(245, 158, 11, 0.06);
-    color: #fcd34d;
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
+    color: var(--warning);
   }
 
   .row-warning:hover {
-    background: rgba(245, 158, 11, 0.12);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
   }
 
   .row-debug {
-    color: #94a3b8;
+    color: var(--fg-dim);
   }
 
   .col-ts {
@@ -1348,7 +1348,7 @@
     font-weight: 700;
     text-transform: uppercase;
     border-radius: 3px;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--surface-tint);
     color: var(--fg-dim);
     max-width: 70px;
     overflow: hidden;
@@ -1373,22 +1373,22 @@
 
   .lvl-error {
     background: var(--color-error);
-    color: #fff;
+    color: var(--btn-primary-text);
   }
 
   .lvl-warn {
-    background: #d97706;
-    color: #fff;
+    background: var(--warning);
+    color: var(--btn-primary-text);
   }
 
   .lvl-info {
-    background: rgba(41, 194, 240, 0.2);
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
     color: var(--accent);
   }
 
   .lvl-debug {
-    background: rgba(148, 163, 184, 0.2);
-    color: #94a3b8;
+    background: color-mix(in srgb, var(--fg-dim) 20%, transparent);
+    color: var(--fg-dim);
   }
 
   .col-subsystem {
@@ -1413,8 +1413,8 @@
   }
 
   :global(.log-mark) {
-    background: #fbbf24;
-    color: #0f172a;
+    background: var(--warning);
+    color: var(--btn-primary-text);
     padding: 0 2px;
     border-radius: 2px;
     font-weight: 700;
@@ -1437,7 +1437,7 @@
 
   .copy-row-btn:hover {
     color: var(--fg-primary);
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--surface-tint);
   }
 
   /* Empty State */
