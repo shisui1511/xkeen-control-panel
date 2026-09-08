@@ -523,6 +523,46 @@ rules:
 	}
 }
 
+func TestSmartMergeMihomo_EditorEmptyExplicitNodesFallBackToTemplate(t *testing.T) {
+	// Editor mode (templateOwnsNodes=false): an explicit `proxies: []` /
+	// `proxy-providers: {}` in existing must not blank out non-empty template
+	// nodes — the merge should fall back to the template list.
+	existingYAML := `
+secret: "keep-me"
+proxies: []
+proxy-providers: {}
+`
+	templateYAML := `
+proxies:
+  - name: "Tmpl-Node"
+    type: vless
+    server: t.com
+    port: 443
+proxy-providers:
+  tmpl-provider:
+    type: http
+    url: "https://t.com/sub"
+rules:
+  - MATCH,PROXY
+`
+	merged, stats, err := SmartMergeMihomo(existingYAML, templateYAML, nil, false)
+	if err != nil {
+		t.Fatalf("SmartMergeMihomo failed: %v", err)
+	}
+	if !strings.Contains(merged, "Tmpl-Node") {
+		t.Errorf("expected template node to fill in for explicit empty existing proxies, got:\n%s", merged)
+	}
+	if !strings.Contains(merged, "tmpl-provider") {
+		t.Errorf("expected template provider to fill in for explicit empty existing proxy-providers, got:\n%s", merged)
+	}
+	if !strings.Contains(merged, "keep-me") {
+		t.Errorf("expected unrelated existing keys to be preserved, got:\n%s", merged)
+	}
+	if stats.Proxies != 1 || stats.ProxyProviders != 1 {
+		t.Errorf("expected 1 proxy / 1 provider in stats, got %+v", stats)
+	}
+}
+
 func TestSmartMergeMihomo_EmptyAndCorruptExisting(t *testing.T) {
 	templateYAML := `
 mode: rule

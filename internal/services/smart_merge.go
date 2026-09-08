@@ -141,7 +141,7 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 	}
 	if templateOwnsNodes && tmplHasProxies {
 		result["proxies"] = deepCopyValue(tmpl["proxies"])
-	} else if exProxies, ok := existing["proxies"]; ok && exProxies != nil {
+	} else if exProxies, ok := existing["proxies"].([]interface{}); ok && len(exProxies) > 0 {
 		result["proxies"] = deepCopyValue(exProxies)
 	} else if tmplHasProxies {
 		result["proxies"] = deepCopyValue(tmpl["proxies"])
@@ -153,7 +153,7 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 	}
 	if templateOwnsNodes && tmplHasProviders {
 		result["proxy-providers"] = deepCopyValue(tmpl["proxy-providers"])
-	} else if exProv, ok := existing["proxy-providers"]; ok && exProv != nil {
+	} else if exProv, ok := existing["proxy-providers"].(map[string]interface{}); ok && len(exProv) > 0 {
 		result["proxy-providers"] = deepCopyValue(exProv)
 	} else if tmplHasProviders {
 		result["proxy-providers"] = deepCopyValue(tmpl["proxy-providers"])
