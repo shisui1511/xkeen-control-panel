@@ -601,6 +601,11 @@ func parseHField(val interface{}) (hFieldInfo, bool) {
 		minVal, err1 := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
 		maxVal, err2 := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
 		if err1 == nil && err2 == nil {
+			// Normalize reversed ranges ("40-10") so downstream min/max and
+			// overlap checks stay correct.
+			if minVal > maxVal {
+				minVal, maxVal = maxVal, minVal
+			}
 			return hFieldInfo{raw: s, min: minVal, max: maxVal}, true
 		}
 	}
@@ -758,11 +763,13 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult)
 				})
 			}
 
-			// H uniqueness check
+			// H uniqueness check — flag exact duplicates AND overlapping
+			// intervals [min,max] (an overlap makes packet classification
+			// ambiguous). Mirrors rangesOverlap() in ProxyForm.svelte.
 			hasHUniqueViol := false
 			for i := 0; i < len(parsedH); i++ {
 				for j := i + 1; j < len(parsedH); j++ {
-					if parsedH[i].raw == parsedH[j].raw || (parsedH[i].min == parsedH[j].min && parsedH[i].max == parsedH[j].max) {
+					if parsedH[i].min <= parsedH[j].max && parsedH[j].min <= parsedH[i].max {
 						hasHUniqueViol = true
 						break
 					}

@@ -372,6 +372,53 @@ proxies:
 		t.Errorf("expected preflight.awg_h_unique warning about duplicate H, got: %+v", resDupH.Warnings)
 	}
 
+	// Overlapping H ranges (not exact duplicates) — WR-06
+	overlapH := `
+proxies:
+  - name: "wg1"
+    type: wireguard
+    server: 1.2.3.4
+    port: 51820
+    amnezia-wg-option:
+      jc: 5
+      jmin: 10
+      jmax: 40
+      s1: 20
+      s2: 100
+      h1: "10-20"
+      h2: "15-25"
+      h3: 30
+      h4: 40
+`
+	resOverlapH := ValidateConfigContent("mihomo", "config.yaml", overlapH)
+	if !hasWarningCode(resOverlapH, "preflight.awg_h_unique") {
+		t.Errorf("expected preflight.awg_h_unique warning for overlapping H ranges, got: %+v", resOverlapH.Warnings)
+	}
+
+	// Reversed H range ("40-10") is normalized, not silently mis-parsed — WR-06
+	reversedH := `
+proxies:
+  - name: "wg1"
+    type: wireguard
+    server: 1.2.3.4
+    port: 51820
+    amnezia-wg-option:
+      jc: 5
+      jmin: 10
+      jmax: 40
+      s1: 20
+      s2: 100
+      h1: "40-10"
+      h2: 100
+      h3: 200
+      h4: 300
+`
+	resReversedH := ValidateConfigContent("mihomo", "config.yaml", reversedH)
+	// h1 normalizes to [10,40]; no overlap with 100/200/300 and all > 4 → no H warnings
+	if hasWarningCode(resReversedH, "preflight.awg_h_unique") || hasWarningCode(resReversedH, "preflight.awg_h_min") {
+		t.Errorf("reversed range 40-10 should normalize to [10,40] without H warnings, got: %+v", resReversedH.Warnings)
+	}
+
 	// Jmax + 80 > MTU (AWGVAL-04)
 	badJmaxMtu := `
 proxies:
