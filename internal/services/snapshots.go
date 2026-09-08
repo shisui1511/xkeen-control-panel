@@ -146,7 +146,10 @@ func (s *SnapshotService) Create(label string) (SnapshotMeta, error) {
 		return SnapshotMeta{}, err
 	}
 	// Flush and stat to get size
-	f.Close()
+	if err := f.Close(); err != nil {
+		os.Remove(archivePath)
+		return SnapshotMeta{}, fmt.Errorf("close archive: %w", err)
+	}
 
 	fi, err := os.Stat(archivePath)
 	if err != nil {
@@ -460,6 +463,11 @@ func (s *SnapshotService) SaveUploaded(r io.Reader, filename string) (SnapshotMe
 	if n, _ := r.Read(oneByte[:]); n > 0 {
 		os.Remove(archivePath)
 		return SnapshotMeta{}, fmt.Errorf("uploaded file exceeds maximum size of 15 MB")
+	}
+
+	if err := f.Close(); err != nil {
+		os.Remove(archivePath)
+		return SnapshotMeta{}, fmt.Errorf("close archive: %w", err)
 	}
 
 	meta := SnapshotMeta{

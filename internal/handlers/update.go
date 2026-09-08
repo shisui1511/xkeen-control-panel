@@ -750,7 +750,10 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	// Sync before Close — ensure data is flushed to disk (power-loss safety on router)
-	return out.Sync()
+	if err := out.Sync(); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 // verifyFileChecksum downloads checksums.txt from the release and verifies the SHA-256
