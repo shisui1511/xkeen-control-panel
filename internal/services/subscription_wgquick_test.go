@@ -458,4 +458,52 @@ AllowedIPs = 0.0.0.0/0
 	}
 }
 
+func TestParseWgQuickConf_PeerOverrides_VersionAndTiming(t *testing.T) {
+	conf := `[Interface]
+PrivateKey = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=
+Address = 10.0.0.2/32
+Version = 2.0
+J1 = 10
+Itime = 50
+RekeyTimeout = 60
+
+[Peer]
+PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=
+Endpoint = 198.51.100.1:51820
+AllowedIPs = 0.0.0.0/0
+Version = 3.1
+J1 = 20
+Itime = 100
+RekeyTimeout = 120
+RejectAfterTime = 500
+`
+	nodes, err := parseWgQuickConf(conf, "test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(nodes))
+	}
+	awg := nodes[0].AWG
+	if awg == nil {
+		t.Fatalf("expected non-nil AWG")
+	}
+	if awg.Version != "3.1" {
+		t.Errorf("expected Version '3.1', got %q", awg.Version)
+	}
+	if awg.J1 == nil || *awg.J1 != 20 {
+		t.Errorf("expected J1 20, got %v", awg.J1)
+	}
+	if awg.Itime == nil || *awg.Itime != 100 {
+		t.Errorf("expected Itime 100, got %v", awg.Itime)
+	}
+	if awg.RekeyTimeout == nil || *awg.RekeyTimeout != 120 {
+		t.Errorf("expected RekeyTimeout 120, got %v", awg.RekeyTimeout)
+	}
+	if awg.RejectAfterTime == nil || *awg.RejectAfterTime != 500 {
+		t.Errorf("expected RejectAfterTime 500, got %v", awg.RejectAfterTime)
+	}
+}
+
+
 

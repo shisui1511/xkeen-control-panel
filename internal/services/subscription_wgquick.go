@@ -500,6 +500,9 @@ func parseWgQuickConf(content string, tagPrefix string) ([]SubscriptionNode, err
 				if peerClone.HeaderProtectionKey != "" {
 					nodeAWG.HeaderProtectionKey = peerClone.HeaderProtectionKey
 				}
+				if peerClone.Version != "" {
+					nodeAWG.Version = peerClone.Version
+				}
 				if peerClone.ContentPaddingAddition != nil {
 					nodeAWG.ContentPaddingAddition = peerClone.ContentPaddingAddition
 				}
@@ -511,6 +514,30 @@ func parseWgQuickConf(content string, tagPrefix string) ([]SubscriptionNode, err
 				}
 				if peerClone.RekeyAfterTime != nil {
 					nodeAWG.RekeyAfterTime = peerClone.RekeyAfterTime
+				}
+				if peerClone.J1 != nil {
+					nodeAWG.J1 = peerClone.J1
+				}
+				if peerClone.J2 != nil {
+					nodeAWG.J2 = peerClone.J2
+				}
+				if peerClone.J3 != nil {
+					nodeAWG.J3 = peerClone.J3
+				}
+				if peerClone.Itime != nil {
+					nodeAWG.Itime = peerClone.Itime
+				}
+				if peerClone.RekeyTimeout != nil {
+					nodeAWG.RekeyTimeout = peerClone.RekeyTimeout
+				}
+				if peerClone.RejectAfterTime != nil {
+					nodeAWG.RejectAfterTime = peerClone.RejectAfterTime
+				}
+				if peerClone.KeepaliveTimeout != nil {
+					nodeAWG.KeepaliveTimeout = peerClone.KeepaliveTimeout
+				}
+				if peerClone.MaxHandshakeAttempts != nil {
+					nodeAWG.MaxHandshakeAttempts = peerClone.MaxHandshakeAttempts
 				}
 				for rk, rv := range peerClone.RawOptions {
 					nodeAWG.RawOptions[rk] = rv
