@@ -117,6 +117,8 @@
           server = o.settings.vnext[0].address;
         } else if (o.settings?.servers?.[0]?.address) {
           server = o.settings.servers[0].address;
+        } else if (o.settings?.peers?.[0]?.endpoint) {
+          server = o.settings.peers[0].endpoint;
         }
         list.push({
           tag: o.tag,
