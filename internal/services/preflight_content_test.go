@@ -280,6 +280,20 @@ proxies:
 		t.Errorf("expected preflight.awg_flat_fields warning for flat fields")
 	}
 
+	// Flat version field on wireguard proxy (WR-07)
+	flatVer := `
+proxies:
+  - name: "wg1"
+    type: wireguard
+    server: 1.2.3.4
+    port: 51820
+    version: "3.1"
+`
+	resFlatVer := ValidateConfigContent("mihomo", "config.yaml", flatVer)
+	if !hasWarningCode(resFlatVer, "preflight.awg_flat_fields") {
+		t.Errorf("expected preflight.awg_flat_fields warning for flat version field")
+	}
+
 	// Jmin >= Jmax
 	badJmin := `
 proxies:

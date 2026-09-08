@@ -628,6 +628,7 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult)
 	}
 
 	flatAwgKeys := []string{
+		"version",
 		"jc", "jmin", "jmax", "s1", "s2", "s3", "s4",
 		"j1", "j2", "j3", "itime",
 		"h1", "h2", "h3", "h4",
