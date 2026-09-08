@@ -797,6 +797,15 @@ func validateAmneziaWgOptions(data map[string]interface{}, res *PreflightResult)
 				})
 			}
 
+			// TODO(AUDIT-05 / Phase 114): emit PreflightIssue{Code: "preflight.awg_version_incompatible"}
+			// (soft, Valid stays true) when 3.1 knobs are present here (version / i1..i5 /
+			// header-protection-key / content-padding-addition / random-trailers /
+			// disable-cookies / rekey-after-time) AND the installed mihomo version is < 1.19.30.
+			// Deferred: ValidateConfigContent currently receives only the kernel *type*, not its
+			// version; threading kernelVersion touches >4 call sites (config.go x2 + template/test
+			// suites) and there is no version probe at those sites yet. Port the threshold from
+			// frontend isMihomoAwg31Supported when implementing.
+
 			// 7. Random trailers informational warning
 			if rtVal, exists := awgMap["random-trailers"]; exists && rtVal != nil {
 				rtStr := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", rtVal)))
