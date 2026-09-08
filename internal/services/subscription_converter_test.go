@@ -698,3 +698,46 @@ AllowedIPs = 0.0.0.0/0
 		t.Errorf("path 4 round-trip mismatch: %+v, AWG: %+v", rtNode4, rtNode4.AWG)
 	}
 }
+
+func TestConvertSubscriptionNodesToClashYAML_SkipsInvalidWireGuardWithoutKeys(t *testing.T) {
+	svc := &SubscriptionService{}
+	nodes := []SubscriptionNode{
+		{
+			Tag:       "wg-missing-both-keys",
+			Protocol:  "wireguard",
+			Server:    "1.2.3.4:51820",
+			SecretKey: "",
+			PublicKey: "",
+		},
+		{
+			Tag:       "wg-missing-secret",
+			Protocol:  "wireguard",
+			Server:    "1.2.3.4:51820",
+			SecretKey: "",
+			PublicKey: "pubkey123=",
+		},
+		{
+			Tag:       "wg-missing-public",
+			Protocol:  "wireguard",
+			Server:    "1.2.3.4:51820",
+			SecretKey: "privkey123=",
+			PublicKey: "",
+		},
+		{
+			Tag:       "wg-valid",
+			Protocol:  "wireguard",
+			Server:    "1.2.3.4:51820",
+			SecretKey: "privkey123=",
+			PublicKey: "pubkey123=",
+		},
+	}
+
+	_, names := svc.convertSubscriptionNodesToClashYAML(nodes)
+	if len(names) != 1 {
+		t.Fatalf("expected exactly 1 valid node emitted, got %d: %v", len(names), names)
+	}
+	if names[0] != "wg-valid" {
+		t.Errorf("expected 'wg-valid', got %q", names[0])
+	}
+}
+

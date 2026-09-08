@@ -327,6 +327,10 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 			continue // Неподдерживаемый протокол для Mihomo YAML конвертера
 		}
 
+		if pType == "wireguard" && (strings.TrimSpace(n.SecretKey) == "" || strings.TrimSpace(n.PublicKey) == "") {
+			continue // пропускаем невалидные узлы без обязательных ключей
+		}
+
 		if pType == "hysteria" {
 			pType = "hysteria2"
 		}
