@@ -756,7 +756,6 @@ input[type='number'] {
   text-overflow: ellipsis;
 }
 
-.nav-group summary > .group-ttl :global(svg),
 .nav-group summary > .group-ttl svg {
   width: 16px;
   height: 16px;
@@ -824,17 +823,17 @@ input[type='number'] {
   border-radius: 3px 0 0 3px;
 }
 
-.nav-item :global(svg) {
+.nav-item svg {
   flex: 0 0 15px;
   color: currentColor;
   opacity: 0.6;
 }
 
-.nav-item:hover :global(svg) {
+.nav-item:hover svg {
   opacity: 0.85;
 }
 
-.nav-item[aria-current='page'] :global(svg) {
+.nav-item[aria-current='page'] svg {
   color: var(--accent);
   opacity: 1;
 }
@@ -2208,8 +2207,7 @@ a.chip:hover {
 }
 
 /* С иконкой */
-.chip--icon svg,
-.chip--icon :global(svg) {
+.chip--icon svg {
   flex-shrink: 0;
   width: 12px;
   height: 12px;
