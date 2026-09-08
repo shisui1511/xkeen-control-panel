@@ -14,6 +14,8 @@
   import PreflightWarnings, {
     type PreflightWarning
   } from './components/editor/PreflightWarnings.svelte';
+  import AwgDiffCard from './components/awg/AwgDiffCard.svelte';
+  import { analyzeAwgDiff } from './lib/awgPresets';
 
   let {
     onSwitchTab = () => {},
@@ -177,6 +179,7 @@
     wireguardMtu: 1420,
     wireguardReserved: '',
     isAwgObfuscated: false,
+    rawAwgOptions: null as any,
     // Sockopt
     sockoptMark: '' as string | number,
     sockoptTcpFastOpen: false,
@@ -507,6 +510,9 @@
     { link: string; outbound: any; tag: string; rowError?: string | null }[]
   >([]);
   let importErrorMsg = $state('');
+  let importSource = $state<'links' | 'file' | 'clipboard'>('links');
+  let isDraggingFile = $state(false);
+  let loadedFileName = $state('');
 
   // Form states
   let showRuleForm = $state(false);
@@ -852,6 +858,7 @@
       wireguardMtu: 1420,
       wireguardReserved: '',
       isAwgObfuscated: false,
+      rawAwgOptions: null as any,
       // Sockopt
       sockoptMark: '' as string | number,
       sockoptTcpFastOpen: false,
@@ -900,6 +907,7 @@
 
       if (s.awg || o.awg || o._isAwg || s.amneziaWgOption || o.amneziaWgOption) {
         form.isAwgObfuscated = true;
+        form.rawAwgOptions = s.amneziaWgOption || o.amneziaWgOption || s.awg || o.awg || {};
       }
     }
 
@@ -1105,6 +1113,7 @@
       wireguardMtu: 1420,
       wireguardReserved: '',
       isAwgObfuscated: false,
+      rawAwgOptions: null,
       sockoptMark: '',
       sockoptTcpFastOpen: false,
       sockoptTcpMptcp: false,
@@ -2242,6 +2251,20 @@
     importLoading = false;
     importNodes = [];
     importErrorMsg = '';
+    importSource = 'links';
+    isDraggingFile = false;
+    loadedFileName = '';
+  }
+
+  function handleConfigFile(file: File) {
+    loadedFileName = file.name;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = (e.target?.result as string) || '';
+      importLink = text;
+      parseImportLink();
+    };
+    reader.readAsText(file);
   }
 
   function closeImportModal() {
@@ -3404,30 +3427,32 @@
         <!-- OUTBOUNDS SECTION -->
         {#if activeSection === 'outbounds'}
           <div class="sec-body">
+            <div class="section-title" style="margin-bottom: 12px;">
+              {$t('editor.xray_section_outbounds')}
+            </div>
+
             <div
-              style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;"
+              class="constructor-outbounds-header"
+              style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;"
             >
-              <div class="section-title" style="margin: 0;">
-                {$t('editor.xray_section_outbounds')}
-              </div>
-              <button
-                class="btn btn-secondary"
-                onclick={openImportModal}
-                style="padding: 4px 10px; font-size: 12px; display: flex; align-items: center; gap: 4px;"
-              >
+              <button type="button" class="add-btn btn-action-primary" onclick={openImportModal}>
                 <svg
-                  width="14"
-                  height="14"
+                  width="13"
+                  height="13"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
                   stroke-width="2"
+                  style="margin-right: 4px; display: inline-block; vertical-align: middle;"
                 >
                   <path
                     d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12V22M12 12L15 15M12 12L9 15"
                   />
                 </svg>
                 {$t('subscr.import_node')}
+              </button>
+              <button type="button" class="add-btn btn-secondary" onclick={openAddOutbound}>
+                + {$t('xray.add_outbound_manual')}
               </button>
             </div>
 
@@ -3494,14 +3519,23 @@
               {/each}
             </div>
 
-            {#if !showOutboundForm}
-              <button class="add-btn" onclick={openAddOutbound}>
-                + {$t('xray.add_outbound_vless_vmess')}
+            <div style="margin-top: 12px;">
+              <button class="add-btn btn-secondary" onclick={openAddOutbound} type="button">
+                + {$t('xray.add_outbound_manual')}
               </button>
-            {/if}
+            </div>
 
-            {#if showOutboundForm}
-              <div class="form-card" style="margin-top: 12px;">
+            <Modal
+              isOpen={showOutboundForm}
+              title={editingOutboundIndex !== null
+                ? $t('xray.edit_outbound_title', { tag: outboundForm.tag || 'outbound' })
+                : $t('xray.add_outbound_title')}
+              onclose={() => (showOutboundForm = false)}
+            >
+              <div
+                class="modal-form-card"
+                style="display: flex; flex-direction: column; gap: 12px;"
+              >
                 <div class="form-row">
                   <label class="form-label" for="outbound-tag">{$t('xray.tag_name')} *</label>
                   <input
@@ -3914,6 +3948,23 @@
                     <div class="alert alert-warning" style="margin-bottom: 12px; font-size: 13px;">
                       {$t('xray.awg_warning')}
                     </div>
+                    {@const diff = analyzeAwgDiff(
+                      outboundForm.rawAwgOptions || {
+                        jc: 4,
+                        jmin: 40,
+                        jmax: 70,
+                        s1: 15,
+                        s2: 40,
+                        h1: 1000000001,
+                        h2: 1000000002,
+                        h3: 1000000003,
+                        h4: 1000000004
+                      },
+                      'xray'
+                    )}
+                    <div style="margin-bottom: 12px;">
+                      <AwgDiffCard {diff} targetKernel="xray" compact />
+                    </div>
                   {/if}
                   <div class="form-row2">
                     <div class="form-col">
@@ -4010,8 +4061,18 @@
                         class="form-input"
                         type="number"
                         bind:value={outboundForm.wireguardMtu}
+                        min="1200"
+                        max="1500"
                         placeholder="1420"
                       />
+                      {#if outboundForm.isAwgObfuscated}
+                        <div
+                          class="field-info-hint"
+                          style="font-size: 11px; color: var(--fg-secondary); margin-top: 2px;"
+                        >
+                          {$t('proxies.awg_mtu_hint')}
+                        </div>
+                      {/if}
                     </div>
                     <div class="form-col">
                       <label class="form-label" for="outbound-wg-reserved"
@@ -4137,7 +4198,10 @@
                   {/if}
                 </div>
 
-                <div class="form-actions">
+                <div
+                  class="form-actions"
+                  style="position: sticky; bottom: -20px; background: var(--bg-card); padding: 12px 0 0 0; margin-top: 12px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; z-index: 10;"
+                >
                   <button
                     class="btn btn-secondary"
                     onclick={() => (showOutboundForm = false)}
@@ -4150,7 +4214,7 @@
                   </button>
                 </div>
               </div>
-            {/if}
+            </Modal>
           </div>
         {/if}
 
@@ -4487,17 +4551,118 @@
     {/if}
 
     {#if importStep === 1}
-      <div class="form-group">
-        <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
-        <textarea
-          id="import-link"
-          class="input textarea-link"
-          bind:value={importLink}
-          placeholder={$t('subscr.import_link_placeholder')}
-          rows="4"
-          style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
-        ></textarea>
+      <div
+        class="import-source-tabs"
+        style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;"
+      >
+        <button
+          type="button"
+          class="btn btn-xs"
+          class:btn-primary={importSource === 'links'}
+          class:btn-secondary={importSource !== 'links'}
+          onclick={() => (importSource = 'links')}
+        >
+          {$t('subscr.import_source_links')}
+        </button>
+        <button
+          type="button"
+          class="btn btn-xs"
+          class:btn-primary={importSource === 'file'}
+          class:btn-secondary={importSource !== 'file'}
+          onclick={() => (importSource = 'file')}
+        >
+          {$t('subscr.import_source_file')}
+        </button>
+        <button
+          type="button"
+          class="btn btn-xs"
+          class:btn-primary={importSource === 'clipboard'}
+          class:btn-secondary={importSource !== 'clipboard'}
+          onclick={() => (importSource = 'clipboard')}
+        >
+          {$t('subscr.import_source_clipboard')}
+        </button>
       </div>
+
+      {#if importSource === 'links'}
+        <div class="form-group">
+          <label for="import-link" class="form-label">{$t('subscr.import_link_label')}</label>
+          <textarea
+            id="import-link"
+            class="input textarea-link"
+            bind:value={importLink}
+            placeholder={$t('subscr.import_link_placeholder')}
+            rows="4"
+            style="resize: none; font-family: var(--font-family-mono, monospace); font-size: 12px; width: 100%; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 8px; color: var(--fg);"
+          ></textarea>
+        </div>
+      {:else if importSource === 'file'}
+        <div
+          class="conf-dropzone"
+          class:dragging={isDraggingFile}
+          role="region"
+          aria-label="Dropzone"
+          ondragover={(e) => {
+            e.preventDefault();
+            isDraggingFile = true;
+          }}
+          ondragleave={() => {
+            isDraggingFile = false;
+          }}
+          ondrop={(e) => {
+            e.preventDefault();
+            isDraggingFile = false;
+            const f = e.dataTransfer?.files?.[0];
+            if (f) handleConfigFile(f);
+          }}
+        >
+          <div style="font-size: 24px;">📄</div>
+          <div style="font-size: 13px; color: var(--fg-secondary);">
+            {#if loadedFileName}
+              <span style="color: var(--primary); font-weight: 600;">{loadedFileName}</span>
+              <span> ({$t('subscr.import_file_loaded')})</span>
+            {:else}
+              {$t('subscr.import_drop_or_select')}
+            {/if}
+          </div>
+          <input
+            type="file"
+            accept=".conf,.txt"
+            class="file-picker-input"
+            onchange={(e) => {
+              const f = e.currentTarget.files?.[0];
+              if (f) handleConfigFile(f);
+            }}
+          />
+        </div>
+      {:else if importSource === 'clipboard'}
+        <div
+          style="padding: 24px; text-align: center; background: var(--bg-surface-hover); border: 1px dashed var(--border); border-radius: var(--radius);"
+        >
+          <p style="font-size: 13px; color: var(--fg-secondary); margin-bottom: 12px;">
+            {$t('subscr.import_clipboard_desc')}
+          </p>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onclick={async () => {
+              try {
+                const text = await navigator.clipboard.readText();
+                if (!text.trim()) {
+                  importErrorMsg = $t('subscr.import_clipboard_empty');
+                  return;
+                }
+                importLink = text;
+                parseImportLink();
+              } catch (err: any) {
+                importErrorMsg = err.message || 'Clipboard access denied';
+              }
+            }}
+          >
+            📋 {$t('subscr.import_source_clipboard')}
+          </button>
+        </div>
+      {/if}
     {:else if importStep === 2 && importNodes.length > 0}
       <div class="preview-section">
         <h3 class="preview-title" style="margin: 0 0 12px 0; font-size: 14px;">
@@ -4564,6 +4729,14 @@
                     style="flex-grow: 1; font-size: 12px; box-sizing: border-box; background: var(--bg-surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); padding: 4px 8px; color: var(--fg); width: auto;"
                   />
                 </div>
+                {#if item.outbound?.protocol === 'wireguard' || item.outbound?.settings?.amneziaWgOption || item.outbound?.amneziaWgOption}
+                  <div
+                    class="alert alert-warning"
+                    style="margin-top: 6px; font-size: 11px; padding: 6px 10px; border-radius: var(--radius-sm);"
+                  >
+                    {$t('subscr.import_xray_awg_warning')}
+                  </div>
+                {/if}
               </div>
             {/if}
           {/each}
@@ -4605,6 +4778,41 @@
 </Modal>
 
 <style>
+  .conf-dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 24px 16px;
+    text-align: center;
+    background: var(--bg-surface-hover, rgba(255, 255, 255, 0.02));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition:
+      border-color 0.2s ease,
+      background 0.2s ease;
+  }
+  .conf-dropzone.dragging {
+    border-color: var(--primary);
+    background: rgba(41, 194, 240, 0.08);
+  }
+
+  .file-picker-input::file-selector-button {
+    background: var(--bg-surface-hover);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-right: 8px;
+    transition: background 0.15s ease;
+  }
+  .file-picker-input::file-selector-button:hover {
+    background: var(--border);
+  }
+
   .container {
     display: flex;
     flex-direction: column;
