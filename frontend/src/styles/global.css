@@ -86,6 +86,45 @@
   --color-warning-fg: var(--warning);
   --color-warning-bg: color-mix(in srgb, var(--warning) 14%, transparent);
 
+  /* Phantom-token aliases — a shadow vocabulary that several later components
+     (XrayRoutingConstructor, MihomoGenerator, Connections, Services, Logs …)
+     reference but that was never defined here. Most call sites have no
+     fallback, so `background: var(--bg-surface-hover)` silently became
+     `transparent` and `color: var(--fg)` fell through to inheritance. Each
+     alias points at a canonical token that already carries a
+     [data-theme="light"] override, so light-theme adaptation comes for free. */
+  --fg: var(--fg-primary);
+  --fg-muted: var(--fg-dim);
+  --text-muted: var(--fg-dim);
+  --fg-terminal: var(--fg-primary);
+  --error: var(--danger);
+  --bg-hover: var(--hover);
+  --bg-secondary: var(--bg-elevated);
+  --bg-tertiary: var(--bg-deep);
+  --bg-input: var(--bg-elevated);
+  --bg-terminal: var(--bg-deep);
+  --bg-card-hover: var(--bg-elevated);
+  --bg-card-subtle: var(--surface-tint);
+  --bg-surface-hover: var(--bg-elevated);
+  --bg-surface-elevated: var(--bg-elevated);
+  --bg-surface-raised: var(--bg-elevated);
+  --bg-surface-active: var(--accent-soft);
+  --border-subtle: var(--border);
+  --border-color: var(--border);
+  --border-hover: var(--border-strong);
+  --border-focus: var(--accent);
+  --primary-hover: var(--accent-hover);
+  --accent-border: var(--accent-line);
+  --accent-dim: var(--accent-2);
+  --accent-subtle: var(--accent-soft);
+  --accent-rgb: 41, 194, 240;
+  --font-mono: var(--font-family-mono);
+  --radius-full: 9999px;
+  --radius-xs: 3px;
+  --space-lg: var(--spacing-6);
+  --spacing-sm: var(--spacing-2);
+  --spacing-xs: var(--spacing-1);
+
   /* Type */
   --font-family-sans: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-family-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -173,6 +212,7 @@
   --accent: #0e8fbf;
   --primary: #0e8fbf;
   --accent-hover: #0a779f;
+  --accent-rgb: 14, 143, 191;
 
   --hover: rgba(14, 143, 191, 0.07);
 
