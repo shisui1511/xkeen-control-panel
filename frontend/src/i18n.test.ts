@@ -8,7 +8,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { pluralize } from './i18n';
+import { get } from 'svelte/store';
+import { pluralize, tp, loadLanguage, currentLang } from './i18n';
 
 const ONE = 'подписка';
 const FEW = 'подписки';
@@ -87,9 +88,6 @@ describe('pluralize() — английские правила склонения
     expect(pluralize(21, ONE, '', MANY, 'en')).toBe(MANY);
   });
 });
-
-import { get } from 'svelte/store';
-import { tp, loadLanguage, currentLang } from './i18n';
 
 describe('tp() store — склоняемые подписи', () => {
   it('русские формы для proxies.nodes и proxies.groups', async () => {
