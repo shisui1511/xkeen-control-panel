@@ -80,7 +80,7 @@
           }
         }, 1000);
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => null);
         showToast('error', err?.error || $t('logs.restart_logger_error'));
       }
     } catch (e: any) {
