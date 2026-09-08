@@ -4167,10 +4167,8 @@
                     bind:value={outboundForm.dialerProxy}
                   >
                     <option value="">{$t('xray.dialer_none')}</option>
-                    {#each customOutbounds as o}
-                      {#if o.tag !== outboundForm.tag.trim()}
-                        <option value={o.tag}>{o.tag} ({o.protocol})</option>
-                      {/if}
+                    {#each outboundDetails.filter((d) => !['direct', 'block', 'dns-out'].includes(d.tag) && d.tag !== outboundForm.tag.trim()) as o}
+                      <option value={o.tag}>{o.tag} ({o.protocol})</option>
                     {/each}
                   </select>
 
