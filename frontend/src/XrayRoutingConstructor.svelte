@@ -1311,6 +1311,24 @@
         showToast('error', $t('xray.fill_required_fields'));
         return;
       }
+      if (outboundForm.protocol === 'shadowsocks') {
+        if (!outboundForm.shadowsocksPassword.trim()) {
+          showToast('error', $t('xray.fill_required_fields'));
+          return;
+        }
+        if (outboundForm.cipher.startsWith('2022-blake3')) {
+          const is16 = outboundForm.cipher.includes('128');
+          const expectedB64Len = is16 ? 24 : 44;
+          const cleanKey = outboundForm.shadowsocksPassword.trim();
+          if (cleanKey.length !== expectedB64Len) {
+            showToast(
+              'error',
+              `${$t('xray.cipher')}: ${is16 ? '16 bytes (24 base64 chars)' : '32 bytes (44 base64 chars)'}`
+            );
+            return;
+          }
+        }
+      }
     }
 
     if (dialerChainPreview.hasCycle) {
