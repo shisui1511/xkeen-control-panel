@@ -1021,6 +1021,32 @@
       settings.peers = [peer];
     }
 
+    const sockopt: Record<string, any> = {};
+    if (form.sockoptMark !== '' && !isNaN(Number(form.sockoptMark))) {
+      sockopt.mark = Number(form.sockoptMark);
+    }
+    if (form.sockoptTcpFastOpen) sockopt.tcpFastOpen = true;
+    if (form.sockoptTcpMptcp) sockopt.tcpMptcp = true;
+    if (form.sockoptTcpNoDelay) sockopt.tcpNoDelay = true;
+    if (
+      form.sockoptTcpKeepAliveInterval !== '' &&
+      !isNaN(Number(form.sockoptTcpKeepAliveInterval))
+    ) {
+      sockopt.tcpKeepAliveInterval = Number(form.sockoptTcpKeepAliveInterval);
+    }
+    if (form.dialerProxy.trim()) {
+      sockopt.dialerProxy = form.dialerProxy.trim();
+    }
+
+    if (form.protocol === 'wireguard') {
+      return {
+        tag: form.tag.trim(),
+        protocol: form.protocol,
+        settings,
+        ...(Object.keys(sockopt).length > 0 ? { streamSettings: { sockopt } } : {})
+      };
+    }
+
     const streamSettings: any = {
       network: form.network || 'tcp'
     };
@@ -1057,22 +1083,6 @@
       };
     }
 
-    const sockopt: Record<string, any> = {};
-    if (form.sockoptMark !== '' && !isNaN(Number(form.sockoptMark))) {
-      sockopt.mark = Number(form.sockoptMark);
-    }
-    if (form.sockoptTcpFastOpen) sockopt.tcpFastOpen = true;
-    if (form.sockoptTcpMptcp) sockopt.tcpMptcp = true;
-    if (form.sockoptTcpNoDelay) sockopt.tcpNoDelay = true;
-    if (
-      form.sockoptTcpKeepAliveInterval !== '' &&
-      !isNaN(Number(form.sockoptTcpKeepAliveInterval))
-    ) {
-      sockopt.tcpKeepAliveInterval = Number(form.sockoptTcpKeepAliveInterval);
-    }
-    if (form.dialerProxy.trim()) {
-      sockopt.dialerProxy = form.dialerProxy.trim();
-    }
     if (Object.keys(sockopt).length > 0) {
       streamSettings.sockopt = sockopt;
     }
