@@ -504,6 +504,3 @@ RejectAfterTime = 500
 		t.Errorf("expected RejectAfterTime 500, got %v", awg.RejectAfterTime)
 	}
 }
-
-
-

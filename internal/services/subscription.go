@@ -83,38 +83,38 @@ type SubscriptionNode struct {
 
 // AWGOptions содержит параметры обфускации протокола AmneziaWG (Classic, 2.0, 3.1).
 type AWGOptions struct {
-	Jc                     *int                   `json:"jc,omitempty"`
-	Jmin                   *int                   `json:"jmin,omitempty"`
-	Jmax                   *int                   `json:"jmax,omitempty"`
-	S1                     *int                   `json:"s1,omitempty"`
-	S2                     *int                   `json:"s2,omitempty"`
-	S3                     *int                   `json:"s3,omitempty"`
-	S4                     *int                   `json:"s4,omitempty"`
-	H1                     string                 `json:"h1,omitempty"` // число или min-max
-	H2                     string                 `json:"h2,omitempty"`
-	H3                     string                 `json:"h3,omitempty"`
-	H4                     string                 `json:"h4,omitempty"`
-	Version                string                 `json:"version,omitempty"`
-	HeaderProtectionKey    string                 `json:"header_protection_key,omitempty"`
-	I1                     string                 `json:"i1,omitempty"` // uppercase
-	I2                     string                 `json:"i2,omitempty"`
-	I3                     string                 `json:"i3,omitempty"`
-	I4                     string                 `json:"i4,omitempty"`
-	I5                     string                 `json:"i5,omitempty"`
-	ContentPaddingAddition *int                   `json:"content_padding_addition,omitempty"`
-	RandomTrailers         *bool                  `json:"random_trailers,omitempty"`
-	DisableCookies         *bool                  `json:"disable_cookies,omitempty"`
-	RekeyAfterTime         *int                   `json:"rekey_after_time,omitempty"`
+	Jc                     *int   `json:"jc,omitempty"`
+	Jmin                   *int   `json:"jmin,omitempty"`
+	Jmax                   *int   `json:"jmax,omitempty"`
+	S1                     *int   `json:"s1,omitempty"`
+	S2                     *int   `json:"s2,omitempty"`
+	S3                     *int   `json:"s3,omitempty"`
+	S4                     *int   `json:"s4,omitempty"`
+	H1                     string `json:"h1,omitempty"` // число или min-max
+	H2                     string `json:"h2,omitempty"`
+	H3                     string `json:"h3,omitempty"`
+	H4                     string `json:"h4,omitempty"`
+	Version                string `json:"version,omitempty"`
+	HeaderProtectionKey    string `json:"header_protection_key,omitempty"`
+	I1                     string `json:"i1,omitempty"` // uppercase
+	I2                     string `json:"i2,omitempty"`
+	I3                     string `json:"i3,omitempty"`
+	I4                     string `json:"i4,omitempty"`
+	I5                     string `json:"i5,omitempty"`
+	ContentPaddingAddition *int   `json:"content_padding_addition,omitempty"`
+	RandomTrailers         *bool  `json:"random_trailers,omitempty"`
+	DisableCookies         *bool  `json:"disable_cookies,omitempty"`
+	RekeyAfterTime         *int   `json:"rekey_after_time,omitempty"`
 	// AWG 1.5 fields
-	J1                   *int `json:"j1,omitempty"`
-	J2                   *int `json:"j2,omitempty"`
-	J3                   *int `json:"j3,omitempty"`
-	Itime                *int `json:"itime,omitempty"`
+	J1    *int `json:"j1,omitempty"`
+	J2    *int `json:"j2,omitempty"`
+	J3    *int `json:"j3,omitempty"`
+	Itime *int `json:"itime,omitempty"`
 	// AWG 3.1 timing fields
-	RekeyTimeout         *int `json:"rekey_timeout,omitempty"`
-	RejectAfterTime      *int `json:"reject_after_time,omitempty"`
-	KeepaliveTimeout     *int `json:"keepalive_timeout,omitempty"`
-	MaxHandshakeAttempts *int `json:"max_handshake_attempts,omitempty"`
+	RekeyTimeout         *int                   `json:"rekey_timeout,omitempty"`
+	RejectAfterTime      *int                   `json:"reject_after_time,omitempty"`
+	KeepaliveTimeout     *int                   `json:"keepalive_timeout,omitempty"`
+	MaxHandshakeAttempts *int                   `json:"max_handshake_attempts,omitempty"`
 	RawOptions           map[string]interface{} `json:"raw_options,omitempty"`
 }
 

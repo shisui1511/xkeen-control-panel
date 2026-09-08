@@ -854,5 +854,3 @@ func TestIsValidWireguardKey_URLSafe(t *testing.T) {
 		t.Errorf("expected short key to be invalid")
 	}
 }
-
-

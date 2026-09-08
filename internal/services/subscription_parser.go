@@ -1455,7 +1455,6 @@ func (s *SubscriptionService) ParseOutboundText(text string) []ParseLinksResult 
 	return s.ParseLinks(links)
 }
 
-
 // parseSubscriptionUserinfo parses values from Subscription-Userinfo header:
 // e.g., upload=123; download=456; total=789; expire=0
 func parseSubscriptionUserinfo(header string) (upload, download, total, expire int64) {

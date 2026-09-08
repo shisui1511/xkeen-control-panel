@@ -858,4 +858,3 @@ func TestReferenceTemplatesSnapshotPreservation(t *testing.T) {
 		})
 	}
 }
-

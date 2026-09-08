@@ -772,5 +772,3 @@ func TestConvertSubscriptionNodesToClashYAML_SafeEscapingDNSAndRawOptions(t *tes
 		t.Errorf("expected RawOptions int in YAML, got:\n%s", yaml)
 	}
 }
-
-

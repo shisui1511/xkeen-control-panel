@@ -895,4 +895,3 @@ Endpoint = 1.2.3.4:51820
 		t.Errorf("expected wireguard outbound, got %+v", resGood[0].Outbound)
 	}
 }
-
