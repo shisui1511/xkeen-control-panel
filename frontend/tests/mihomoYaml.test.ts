@@ -1411,7 +1411,9 @@ describe('AmneziaWG 3.1 Emit-When-Set and Idempotence (AWG-04, AWG-06)', () => {
     rules: [],
     dns: {},
     tun: {},
-    sniffer: {}
+    sniffer: {},
+    // Ядро с поддержкой AWG 3.1 — иначе generateYAML гейтит 3.1-ключи (WR-02).
+    capabilities: { active_kernel: 'mihomo', kernels: { mihomo: { version: '1.19.30' } } }
   };
 
   test('узел с параметрами 2.0 (s3, s4) эмитит их и парсит обратно', () => {

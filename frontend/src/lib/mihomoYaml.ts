@@ -1,3 +1,5 @@
+import { isMihomoAwg31Supported } from './awgFields';
+
 export interface Proxy {
   id: string;
   name: string;
@@ -762,6 +764,16 @@ export function slugifyProviderName(
 export function generateYAML(state: MihomoConfigState): string {
   const lines: string[] = [];
 
+  // AWG-05: гейт версии ядра для ключей AmneziaWG 3.1. Источник тот же, что у
+  // ProxyForm.isAwg31Allowed (активное ядро + версия mihomo). Если 3.1 не
+  // поддерживается (старое ядро / активен Xray / нет данных о ядре), 3.1-only
+  // ключи не эмитятся — иначе ядро не распарсит конфиг и служба не стартует.
+  // Classic/2.0-ключи эмитятся всегда, вывод для них байт-в-байт не меняется.
+  const awgCaps = state.capabilities;
+  const awgActiveKernel = awgCaps?.active_kernel || 'mihomo';
+  const awg31Supported =
+    awgActiveKernel !== 'xray' && isMihomoAwg31Supported(awgCaps?.kernels?.mihomo?.version);
+
   // external-controller or external-controller-unix (defaults to Unix Domain Socket)
   if (state.externalControllerType === 'tcp' && state.externalControllerTarget) {
     lines.push(`external-controller: ${state.externalControllerTarget}`);
@@ -1009,23 +1021,28 @@ export function generateYAML(state: MihomoConfigState): string {
           lines.push(`      h3: ${formatH(p.awgH3, 1000000003)}`);
           lines.push(`      h4: ${formatH(p.awgH4, 1000000004)}`);
 
-          if (p.awgVersion) lines.push(`      version: ${yamlSafeString(p.awgVersion)}`);
-          if (p.awgHeaderProtectionKey)
-            lines.push(`      header-protection-key: ${yamlSafeString(p.awgHeaderProtectionKey)}`);
-          // I1..I5 — шаблоны junk-пакетов с регистрозависимыми CPS-тегами
-          // (<b 0x…>, <c>, <r N>, <t>): регистр не трогаем, только trim.
-          if (p.awgI1) lines.push(`      i1: ${yamlSafeString(p.awgI1.trim())}`);
-          if (p.awgI2) lines.push(`      i2: ${yamlSafeString(p.awgI2.trim())}`);
-          if (p.awgI3) lines.push(`      i3: ${yamlSafeString(p.awgI3.trim())}`);
-          if (p.awgI4) lines.push(`      i4: ${yamlSafeString(p.awgI4.trim())}`);
-          if (p.awgI5) lines.push(`      i5: ${yamlSafeString(p.awgI5.trim())}`);
-          if (p.awgContentPaddingAddition !== undefined && p.awgContentPaddingAddition !== null) {
-            lines.push(`      content-padding-addition: ${p.awgContentPaddingAddition}`);
-          }
-          if (p.awgRandomTrailers === true) lines.push(`      random-trailers: true`);
-          if (p.awgDisableCookies === true) lines.push(`      disable-cookies: true`);
-          if (p.awgRekeyAfterTime !== undefined && p.awgRekeyAfterTime !== null) {
-            lines.push(`      rekey-after-time: ${p.awgRekeyAfterTime}`);
+          // Ключи AWG 3.1 — только если ядро их поддерживает (AWG-05 / WR-02).
+          if (awg31Supported) {
+            if (p.awgVersion) lines.push(`      version: ${yamlSafeString(p.awgVersion)}`);
+            if (p.awgHeaderProtectionKey)
+              lines.push(
+                `      header-protection-key: ${yamlSafeString(p.awgHeaderProtectionKey)}`
+              );
+            // I1..I5 — шаблоны junk-пакетов с регистрозависимыми CPS-тегами
+            // (<b 0x…>, <c>, <r N>, <t>): регистр не трогаем, только trim.
+            if (p.awgI1) lines.push(`      i1: ${yamlSafeString(p.awgI1.trim())}`);
+            if (p.awgI2) lines.push(`      i2: ${yamlSafeString(p.awgI2.trim())}`);
+            if (p.awgI3) lines.push(`      i3: ${yamlSafeString(p.awgI3.trim())}`);
+            if (p.awgI4) lines.push(`      i4: ${yamlSafeString(p.awgI4.trim())}`);
+            if (p.awgI5) lines.push(`      i5: ${yamlSafeString(p.awgI5.trim())}`);
+            if (p.awgContentPaddingAddition !== undefined && p.awgContentPaddingAddition !== null) {
+              lines.push(`      content-padding-addition: ${p.awgContentPaddingAddition}`);
+            }
+            if (p.awgRandomTrailers === true) lines.push(`      random-trailers: true`);
+            if (p.awgDisableCookies === true) lines.push(`      disable-cookies: true`);
+            if (p.awgRekeyAfterTime !== undefined && p.awgRekeyAfterTime !== null) {
+              lines.push(`      rekey-after-time: ${p.awgRekeyAfterTime}`);
+            }
           }
         }
       }
