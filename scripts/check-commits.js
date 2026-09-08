@@ -39,7 +39,7 @@ if (commits.length === 0) {
 }
 
 // Регулярное выражение для Conventional Commits (с опциональным скопом и флагом breaking change !)
-const conventionalRegex = /^(feat|fix|docs|style|refactor|perf|test|chore|ci)(?:\([^)]+\))?!?: (.*)$/s;
+const conventionalRegex = /^(feat|fix|docs|style|refactor|perf|test|build|chore|ci|revert)(?:\([^)]+\))?!?: (.*)$/s;
 const cyrillicRegex = /[а-яА-ЯёЁ]/;
 
 let hasErrors = false;
@@ -53,9 +53,7 @@ commits.forEach((commitContent, idx) => {
   // 1. Проверяем формат Conventional Commits
   // Игнорируем мерж-коммиты и авто-коммиты воркмувов/код-ревью фазы 60
   if (
-    subject.startsWith('Merge pull request') ||
-    subject.startsWith('Merge branch') ||
-    subject.startsWith('Merge:') ||
+    subject.toLowerCase().startsWith('merge') ||
     subject.startsWith('chore: merge executor worktree') ||
     subject.includes('(60):')
   ) {
