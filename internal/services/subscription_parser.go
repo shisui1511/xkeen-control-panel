@@ -1426,7 +1426,13 @@ func (s *SubscriptionService) ParseOutboundText(text string) []ParseLinksResult 
 	trimmed := strings.TrimSpace(text)
 	if looksLikeWgQuickConf(trimmed) {
 		outs, _, err := parseWgQuickConfToOutbounds(trimmed, nil)
-		if err == nil && len(outs) > 0 {
+		if err != nil {
+			return []ParseLinksResult{{
+				Link:  "wg-quick.conf",
+				Error: err.Error(),
+			}}
+		}
+		if len(outs) > 0 {
 			results := make([]ParseLinksResult, 0, len(outs))
 			for _, ob := range outs {
 				obCopy := ob
