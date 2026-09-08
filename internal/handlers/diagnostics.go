@@ -32,6 +32,10 @@ var sensitiveYAMLKeys = map[string]bool{
 	"header-protection-key": true,
 	"header_protection_key": true,
 	"headerprotectionkey":   true,
+	"pre-shared-key":        true,
+	"pre_shared_key":        true,
+	"presharedkey":          true,
+	"psk":                   true,
 }
 
 // sensitiveJSONKeys stores all keys in lower case; lookups lower-case the key
