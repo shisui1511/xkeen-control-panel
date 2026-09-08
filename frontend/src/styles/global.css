@@ -45,6 +45,9 @@
   --warning: #f0b450;
   --danger: #f4707f;
   --idle: #c9a23a;
+  --purple: #c084fc;
+  --purple-bg: rgba(168, 85, 247, 0.12);
+  --purple-border: rgba(168, 85, 247, 0.3);
 
   --accent-text: var(--accent);
   --surface-overlay-from: #0d2438;
@@ -161,6 +164,9 @@
   --success: #1a7f4e;
   --warning: #8b5c00;
   --danger: #c22a3a;
+  --purple: #7e22ce;
+  --purple-bg: rgba(126, 34, 206, 0.08);
+  --purple-border: rgba(126, 34, 206, 0.25);
   --accent-text: var(--accent-hover);
   --scrollbar-thumb: var(--border-strong);
   --scrollbar-thumb-hover: #a9b8c9;

@@ -296,7 +296,9 @@
         {@const metaText =
           node.use_case || node.speed
             ? `${node.use_case || ''}${node.use_case && node.speed ? ' - ' : ''}${node.speed || ''}`
-            : `${node.protocol || ''}${node.protocol && node.transport ? ' · ' + node.transport : ''}${node.security && node.security !== 'none' ? ' · ' + node.security : ''}`}
+            : node.protocol === 'wireguard'
+              ? `${node.transport && node.transport !== 'udp' ? node.transport : ''}${node.security && node.security !== 'none' ? (node.transport ? ' · ' : '') + node.security : ''}`
+              : `${node.protocol || ''}${node.protocol && node.transport ? ' · ' + node.transport : ''}${node.security && node.security !== 'none' ? ' · ' + node.security : ''}`}
         <div class="sub-node-row" class:active={isNodeActive}>
           <button
             type="button"
@@ -362,6 +364,7 @@
                       <span
                         class="sub-node-chip-compat success"
                         title={$t('subscr.awg_preserved_mihomo')}
+                        aria-label={`Mihomo: ${$t('subscr.awg_preserved_mihomo')}`}
                       >
                         Mihomo ✓
                       </span>
@@ -370,6 +373,7 @@
                       <span
                         class="sub-node-chip-compat warning"
                         title={$t('subscr.awg_incompatible_xray')}
+                        aria-label={`Xray: ${$t('subscr.awg_incompatible_xray')}`}
                       >
                         Xray ⚠
                       </span>
@@ -828,7 +832,6 @@
     font-weight: 500;
     display: inline-flex;
     align-items: center;
-    margin-top: 3px;
     max-width: 100%;
     white-space: nowrap;
     overflow: hidden;
@@ -850,45 +853,42 @@
     font-weight: 600;
     display: inline-flex;
     align-items: center;
-    margin-top: 3px;
-    margin-left: 4px;
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
   .sub-node-chip-dialect.awg {
-    background: rgba(168, 85, 247, 0.12);
-    border-color: rgba(168, 85, 247, 0.3);
-    color: #c084fc;
+    background: var(--purple-bg, rgba(168, 85, 247, 0.12));
+    border-color: var(--purple-border, rgba(168, 85, 247, 0.3));
+    color: var(--purple, #c084fc);
   }
 
   .sub-node-chip-compat {
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
     font-weight: 600;
     display: inline-flex;
     align-items: center;
-    margin-top: 3px;
-    margin-left: 4px;
     white-space: nowrap;
   }
   .sub-node-chip-compat.success {
-    background: rgba(34, 197, 94, 0.12);
-    border: 1px solid rgba(34, 197, 94, 0.25);
-    color: #4ade80;
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+    color: var(--success);
   }
   .sub-node-chip-compat.warning {
-    background: rgba(245, 158, 11, 0.12);
-    border: 1px solid rgba(245, 158, 11, 0.25);
-    color: #fbbf24;
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+    color: var(--warning);
   }
 
   .sub-node-chip-gold {
-    background: rgba(245, 158, 11, 0.07);
-    border: 1px solid rgba(245, 158, 11, 0.2);
-    color: #f59e0b;
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+    color: var(--warning);
     padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 9.5px;
+    border-radius: var(--radius-sm, 4px);
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.05em;
     display: inline-block;
@@ -904,6 +904,9 @@
   .sub-node-meta-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 3px;
   }
 
   .sub-node-status-container {
