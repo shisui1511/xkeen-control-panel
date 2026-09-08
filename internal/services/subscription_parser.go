@@ -1421,6 +1421,35 @@ func (s *SubscriptionService) ParseLinks(links []string) []ParseLinksResult {
 	return results
 }
 
+// ParseOutboundText parses either a wg-quick .conf INI file or newline-separated share links.
+func (s *SubscriptionService) ParseOutboundText(text string) []ParseLinksResult {
+	trimmed := strings.TrimSpace(text)
+	if looksLikeWgQuickConf(trimmed) {
+		outs, _, err := parseWgQuickConfToOutbounds(trimmed, nil)
+		if err == nil && len(outs) > 0 {
+			results := make([]ParseLinksResult, 0, len(outs))
+			for _, ob := range outs {
+				obCopy := ob
+				results = append(results, ParseLinksResult{
+					Link:     obCopy.Tag,
+					Outbound: &obCopy,
+				})
+			}
+			return results
+		}
+	}
+
+	var links []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			links = append(links, line)
+		}
+	}
+	return s.ParseLinks(links)
+}
+
+
 // parseSubscriptionUserinfo parses values from Subscription-Userinfo header:
 // e.g., upload=123; download=456; total=789; expire=0
 func parseSubscriptionUserinfo(header string) (upload, download, total, expire int64) {

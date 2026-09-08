@@ -1,6 +1,6 @@
 {
-  "version": "3.1.0",
-  "updated_at": "2026-09-05",
+  "version": "3.2.0",
+  "updated_at": "2026-09-08",
   "templates": [
     {
       "name": "Xray: Routing — Selective (GeoSite/GeoIP)",
@@ -91,6 +91,12 @@
       "description": "Весь трафик через прокси (mode: rule) с защитой LAN, системного резолвера и удаленного доступа",
       "type": "mihomo",
       "filename": "full-tunnel.yaml"
+    },
+    {
+      "name": "Mihomo: AmneziaWG Антифильтр",
+      "description": "Готовая конфигурация с AmneziaWG (пресет Compatibility, MTU 1280) и обходом блокировок через Антифильтр",
+      "type": "mihomo",
+      "filename": "awg-antifilter.yaml"
     }
   ]
 }

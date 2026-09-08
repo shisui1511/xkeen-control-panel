@@ -8,6 +8,11 @@ import (
 	"strings"
 )
 
+// LooksLikeWgQuickConf экспортирует проверку формата wg-quick .conf для хендлеров.
+func LooksLikeWgQuickConf(content string) bool {
+	return looksLikeWgQuickConf(content)
+}
+
 // looksLikeWgQuickConf возвращает true, если содержимое напоминает wg-quick .conf конфигурацию.
 func looksLikeWgQuickConf(content string) bool {
 	trimmed := strings.TrimSpace(content)

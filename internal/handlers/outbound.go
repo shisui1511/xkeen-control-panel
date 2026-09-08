@@ -39,6 +39,18 @@ func (a *API) OutboundParse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If text is provided and it looks like a wg-quick .conf file, parse it directly.
+	if req.Text != "" && services.LooksLikeWgQuickConf(req.Text) {
+		results := a.subscriptionSvc.ParseOutboundText(req.Text)
+		JSONSuccess(w, results)
+		return
+	}
+	if len(req.Links) == 1 && services.LooksLikeWgQuickConf(req.Links[0]) {
+		results := a.subscriptionSvc.ParseOutboundText(req.Links[0])
+		JSONSuccess(w, results)
+		return
+	}
+
 	links := req.Links
 	// Support plain text input: split by newlines
 	if len(links) == 0 && req.Text != "" {

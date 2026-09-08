@@ -1021,9 +1021,22 @@ export function generateYAML(state: MihomoConfigState): string {
           lines.push(`      h3: ${formatH(p.awgH3, 1000000003)}`);
           lines.push(`      h4: ${formatH(p.awgH4, 1000000004)}`);
 
-          // Ключи AWG 3.1 — только если ядро их поддерживает (AWG-05 / WR-02).
+          // Ключи AWG 3.1 — только если ядро их поддерживает (AWG-05 / WR-02 / AWGUX-05).
           if (awg31Supported) {
-            if (p.awgVersion) lines.push(`      version: ${yamlSafeString(p.awgVersion)}`);
+            const has31Fields = Boolean(
+              p.awgHeaderProtectionKey ||
+              p.awgI1 ||
+              p.awgI2 ||
+              p.awgI3 ||
+              p.awgI4 ||
+              p.awgI5 ||
+              (p.awgContentPaddingAddition !== undefined && p.awgContentPaddingAddition !== null) ||
+              p.awgRandomTrailers === true ||
+              p.awgDisableCookies === true ||
+              (p.awgRekeyAfterTime !== undefined && p.awgRekeyAfterTime !== null)
+            );
+            const effectiveVersion = p.awgVersion || (has31Fields ? '3.1' : undefined);
+            if (effectiveVersion) lines.push(`      version: ${yamlSafeString(effectiveVersion)}`);
             if (p.awgHeaderProtectionKey)
               lines.push(
                 `      header-protection-key: ${yamlSafeString(p.awgHeaderProtectionKey)}`
