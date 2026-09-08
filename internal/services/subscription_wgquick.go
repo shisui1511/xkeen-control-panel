@@ -377,6 +377,10 @@ func parseWgQuickConf(content string, tagPrefix string) ([]SubscriptionNode, err
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("wg-quick conf: read error: %w", err)
+	}
+
 	if currentPeer != nil {
 		peers = append(peers, *currentPeer)
 	}
