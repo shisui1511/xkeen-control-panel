@@ -99,6 +99,12 @@ func isValidWireguardKey(key string) bool {
 	if err != nil {
 		b, err = base64.RawStdEncoding.DecodeString(clean)
 	}
+	if err != nil {
+		b, err = base64.URLEncoding.DecodeString(clean)
+	}
+	if err != nil {
+		b, err = base64.RawURLEncoding.DecodeString(clean)
+	}
 	return err == nil && len(b) == 32
 }
 

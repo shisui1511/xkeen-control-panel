@@ -829,3 +829,30 @@ func TestParseWireGuardLink_CaseInsensitiveParams(t *testing.T) {
 	}
 }
 
+func TestIsValidWireguardKey_URLSafe(t *testing.T) {
+	// Standard base64 with + and /
+	stdKey := "a+b/c+d/e+f/g+h/i+j/k+l/m+n/o+p/q+r/s+t/u+8="
+	if !isValidWireguardKey(stdKey) {
+		t.Errorf("expected standard base64 key to be valid")
+	}
+
+	// URL-safe base64 with - and _
+	urlSafeKey := strings.ReplaceAll(strings.ReplaceAll(stdKey, "+", "-"), "/", "_")
+	if !isValidWireguardKey(urlSafeKey) {
+		t.Errorf("expected URL-safe base64 key %q to be valid", urlSafeKey)
+	}
+
+	// Unpadded URL-safe base64
+	unpaddedURLSafeKey := strings.TrimRight(urlSafeKey, "=")
+	if !isValidWireguardKey(unpaddedURLSafeKey) {
+		t.Errorf("expected unpadded URL-safe base64 key %q to be valid", unpaddedURLSafeKey)
+	}
+
+	// Invalid length
+	shortKey := "YWJj"
+	if isValidWireguardKey(shortKey) {
+		t.Errorf("expected short key to be invalid")
+	}
+}
+
+
