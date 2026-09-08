@@ -52,6 +52,15 @@ func deepCopyValue(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:
 		return deepCopyMap(val)
+	case map[interface{}]interface{}:
+		// yaml.v3 yields this for mappings with non-string keys (numeric/bool
+		// keys, merge keys). Deep-copy it too so template and result never
+		// share a mutable nested structure.
+		dst := make(map[interface{}]interface{}, len(val))
+		for k, item := range val {
+			dst[k] = deepCopyValue(item)
+		}
+		return dst
 	case []interface{}:
 		dstSlice := make([]interface{}, len(val))
 		for i, item := range val {
