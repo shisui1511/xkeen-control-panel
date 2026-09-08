@@ -272,7 +272,10 @@ export function normalizeAwgValue(key: string, val: any): any {
   if (!field) return val;
 
   if (field.type === 'hex' && typeof val === 'string') {
-    return val.trim().toUpperCase();
+    // I1..I5 — это шаблоны генерации junk-пакетов AmneziaWG с регистрозависимыми
+    // CPS-тегами (<b 0x…>, <c>, <r N>, <t>). Приведение к UPPERCASE разрушает синтаксис,
+    // а регистр hex-байт семантически безразличен — поэтому не трогаем регистр вообще.
+    return val.trim();
   }
   if (field.type === 'integer') {
     if (typeof val === 'number') return Math.floor(val);

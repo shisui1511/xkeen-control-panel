@@ -681,11 +681,8 @@
                   class="form-input"
                   type="text"
                   bind:value={np.awgI1}
-                  oninput={(e) => {
-                    np.awgI1 = e.currentTarget.value.toUpperCase();
-                  }}
                   disabled={!isAwg31Allowed}
-                  placeholder="0x01"
+                  placeholder="0x01 or <b 0xf1a0><c>"
                 />
               </div>
               <div class="form-col">
@@ -695,9 +692,6 @@
                   class="form-input"
                   type="text"
                   bind:value={np.awgI2}
-                  oninput={(e) => {
-                    np.awgI2 = e.currentTarget.value.toUpperCase();
-                  }}
                   disabled={!isAwg31Allowed}
                   placeholder="0x02"
                 />
@@ -709,9 +703,6 @@
                   class="form-input"
                   type="text"
                   bind:value={np.awgI3}
-                  oninput={(e) => {
-                    np.awgI3 = e.currentTarget.value.toUpperCase();
-                  }}
                   disabled={!isAwg31Allowed}
                   placeholder="0x03"
                 />
@@ -723,9 +714,6 @@
                   class="form-input"
                   type="text"
                   bind:value={np.awgI4}
-                  oninput={(e) => {
-                    np.awgI4 = e.currentTarget.value.toUpperCase();
-                  }}
                   disabled={!isAwg31Allowed}
                   placeholder="0x04"
                 />
@@ -737,9 +725,6 @@
                   class="form-input"
                   type="text"
                   bind:value={np.awgI5}
-                  oninput={(e) => {
-                    np.awgI5 = e.currentTarget.value.toUpperCase();
-                  }}
                   disabled={!isAwg31Allowed}
                   placeholder="0x05"
                 />

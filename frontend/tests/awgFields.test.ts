@@ -44,9 +44,12 @@ describe('AWG Fields Registry', () => {
   });
 
   it('нормализует значения полей', () => {
-    // Hex поля нормализуются в UPPERCASE
-    expect(normalizeAwgValue('i1', '0a1b2c')).toBe('0A1B2C');
-    expect(normalizeAwgValue('I2', '  3d4e5f  ')).toBe('3D4E5F');
+    // Hex-поля I1..I5 — только trim, регистр НЕ трогаем: это шаблоны junk-пакетов
+    // с регистрозависимыми CPS-тегами (<b 0x…>, <c>, <r N>, <t>) (CR-01).
+    expect(normalizeAwgValue('i1', '0a1b2c')).toBe('0a1b2c');
+    expect(normalizeAwgValue('I2', '  3d4e5f  ')).toBe('3d4e5f');
+    expect(normalizeAwgValue('i3', '0A<c>1B')).toBe('0A<c>1B');
+    expect(normalizeAwgValue('i4', '  <b 0xf1a0>  ')).toBe('<b 0xf1a0>');
 
     // Числовые поля
     expect(normalizeAwgValue('jc', '4')).toBe(4);

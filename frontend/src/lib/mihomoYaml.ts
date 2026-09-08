@@ -1012,11 +1012,13 @@ export function generateYAML(state: MihomoConfigState): string {
           if (p.awgVersion) lines.push(`      version: ${yamlSafeString(p.awgVersion)}`);
           if (p.awgHeaderProtectionKey)
             lines.push(`      header-protection-key: ${yamlSafeString(p.awgHeaderProtectionKey)}`);
-          if (p.awgI1) lines.push(`      i1: ${yamlSafeString(p.awgI1.trim().toUpperCase())}`);
-          if (p.awgI2) lines.push(`      i2: ${yamlSafeString(p.awgI2.trim().toUpperCase())}`);
-          if (p.awgI3) lines.push(`      i3: ${yamlSafeString(p.awgI3.trim().toUpperCase())}`);
-          if (p.awgI4) lines.push(`      i4: ${yamlSafeString(p.awgI4.trim().toUpperCase())}`);
-          if (p.awgI5) lines.push(`      i5: ${yamlSafeString(p.awgI5.trim().toUpperCase())}`);
+          // I1..I5 — шаблоны junk-пакетов с регистрозависимыми CPS-тегами
+          // (<b 0x…>, <c>, <r N>, <t>): регистр не трогаем, только trim.
+          if (p.awgI1) lines.push(`      i1: ${yamlSafeString(p.awgI1.trim())}`);
+          if (p.awgI2) lines.push(`      i2: ${yamlSafeString(p.awgI2.trim())}`);
+          if (p.awgI3) lines.push(`      i3: ${yamlSafeString(p.awgI3.trim())}`);
+          if (p.awgI4) lines.push(`      i4: ${yamlSafeString(p.awgI4.trim())}`);
+          if (p.awgI5) lines.push(`      i5: ${yamlSafeString(p.awgI5.trim())}`);
           if (p.awgContentPaddingAddition !== undefined && p.awgContentPaddingAddition !== null) {
             lines.push(`      content-padding-addition: ${p.awgContentPaddingAddition}`);
           }
@@ -1924,31 +1926,31 @@ export function populateMihomoFromYAML(text: string): ParsedMihomoConfig {
           const i1Match = trimmed.match(/^i1:\s*(.+)$/);
           if (i1Match) {
             currentProxy.awgEnabled = true;
-            currentProxy.awgI1 = unquote(i1Match[1]).trim().toUpperCase();
+            currentProxy.awgI1 = unquote(i1Match[1]).trim();
             continue;
           }
           const i2Match = trimmed.match(/^i2:\s*(.+)$/);
           if (i2Match) {
             currentProxy.awgEnabled = true;
-            currentProxy.awgI2 = unquote(i2Match[1]).trim().toUpperCase();
+            currentProxy.awgI2 = unquote(i2Match[1]).trim();
             continue;
           }
           const i3Match = trimmed.match(/^i3:\s*(.+)$/);
           if (i3Match) {
             currentProxy.awgEnabled = true;
-            currentProxy.awgI3 = unquote(i3Match[1]).trim().toUpperCase();
+            currentProxy.awgI3 = unquote(i3Match[1]).trim();
             continue;
           }
           const i4Match = trimmed.match(/^i4:\s*(.+)$/);
           if (i4Match) {
             currentProxy.awgEnabled = true;
-            currentProxy.awgI4 = unquote(i4Match[1]).trim().toUpperCase();
+            currentProxy.awgI4 = unquote(i4Match[1]).trim();
             continue;
           }
           const i5Match = trimmed.match(/^i5:\s*(.+)$/);
           if (i5Match) {
             currentProxy.awgEnabled = true;
-            currentProxy.awgI5 = unquote(i5Match[1]).trim().toUpperCase();
+            currentProxy.awgI5 = unquote(i5Match[1]).trim();
             continue;
           }
           const cpaMatch = trimmed.match(/^content-padding-addition:\s*(.+)$/);
