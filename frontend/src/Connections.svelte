@@ -1287,13 +1287,13 @@
   }
 
   .live-badge.running {
-    color: #46d18a;
-    border-color: rgba(70, 209, 138, 0.3);
+    color: var(--success);
+    border-color: color-mix(in srgb, var(--success) 30%, transparent);
   }
 
   .live-badge.paused {
-    color: #f5a623;
-    border-color: rgba(245, 166, 35, 0.3);
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 30%, transparent);
   }
 
   .live-dot {
@@ -1303,17 +1303,17 @@
   }
 
   .live-dot.success {
-    background: #46d18a;
-    box-shadow: 0 0 6px rgba(70, 209, 138, 0.6);
+    background: var(--success);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--success) 60%, transparent);
   }
 
   .live-dot.warning {
-    background: #f5a623;
-    box-shadow: 0 0 6px rgba(245, 166, 35, 0.6);
+    background: var(--warning);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 60%, transparent);
   }
 
   .live-dot.error {
-    background: #f4707f;
+    background: var(--danger);
   }
 
   /* Monolithic Smart Toolbar (CONN-02) */
@@ -1418,7 +1418,7 @@
 
   .f-chip.active {
     background: var(--accent);
-    color: #03182a;
+    color: var(--btn-primary-text);
     font-weight: 700;
   }
 
@@ -1468,11 +1468,11 @@
   }
 
   .text-upload {
-    color: #46d18a;
+    color: var(--success);
   }
 
   .text-download {
-    color: #29c2f0;
+    color: var(--accent);
   }
 
   .btn-danger-soft {
@@ -1694,7 +1694,7 @@
 
   .badge-direct {
     background: rgba(70, 209, 138, 0.15);
-    color: #46d18a;
+    color: var(--success);
     font-size: 10px;
     font-weight: 700;
     padding: 2px 6px;
@@ -1710,7 +1710,7 @@
 
   .chain-node {
     font-size: 11px;
-    color: #29c2f0;
+    color: var(--accent);
     background: rgba(41, 194, 240, 0.08);
     padding: 1px 5px;
     border-radius: 3px;
@@ -1741,7 +1741,7 @@
   /* Speeds (CONN-04) */
   .speed-active {
     font-size: 10.5px;
-    color: #29c2f0;
+    color: var(--accent);
     font-weight: 600;
     margin-top: 2px;
   }
@@ -1797,7 +1797,7 @@
     bottom: 0;
     width: 420px;
     max-width: 90vw;
-    background: #0d2338;
+    background: var(--bg-card);
     border-left: 1px solid var(--border);
     box-shadow: -8px 0 24px rgba(0, 0, 0, 0.5);
     z-index: 101;

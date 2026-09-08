@@ -2451,7 +2451,7 @@
 
   .mode-pill-btn.active {
     background: var(--accent);
-    color: #03182a;
+    color: var(--btn-primary-text);
     font-weight: 700;
   }
 

@@ -816,16 +816,16 @@
   }
 
   .sub-node-name-new {
-    color: #f59e0b;
+    color: var(--warning);
     font-weight: 700;
     font-size: 11px;
     letter-spacing: 0.02em;
   }
 
   .sub-node-chip-blue {
-    background: rgba(41, 194, 240, 0.08);
-    border: 1px solid rgba(41, 194, 240, 0.2);
-    color: #7dd3fc;
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+    color: var(--accent);
     padding: 2px 10px;
     border-radius: 12px;
     font-size: 11px;

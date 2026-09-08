@@ -1152,7 +1152,7 @@
   }
 
   .term-output {
-    background: #050d16;
+    background: var(--bg-terminal);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     padding: 14px 18px;

@@ -102,7 +102,9 @@
   --bg-secondary: var(--bg-elevated);
   --bg-tertiary: var(--bg-deep);
   --bg-input: var(--bg-elevated);
-  --bg-terminal: var(--bg-deep);
+  /* terminal / code-output black — stays dark in both themes on purpose
+     (like the CodeMirror editor, a console reads as a dark surface) */
+  --bg-terminal: #050d16;
   --bg-card-hover: var(--bg-elevated);
   --bg-card-subtle: var(--surface-tint);
   --bg-surface-hover: var(--bg-elevated);
@@ -1843,7 +1845,7 @@ td.mono,
 /* ----- Code block / terminal output ----- */
 .code-block,
 pre.code-output {
-  background: #050d16;
+  background: var(--bg-terminal);
   color: var(--fg-primary);
   font-family: var(--font-family-mono);
   font-size: 12.5px;

@@ -558,7 +558,7 @@
   .terminal-screen {
     flex: 1;
     position: relative;
-    background: #050d16;
+    background: var(--bg-terminal);
     padding: 10px 14px;
     overflow: hidden;
     min-height: 0;

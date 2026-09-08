@@ -216,15 +216,15 @@
   }
 
   .diag-sum-card.success {
-    background: rgba(16, 185, 129, 0.06);
-    border-color: rgba(16, 185, 129, 0.2);
-    color: #10b981;
+    background: color-mix(in srgb, var(--success) 7%, transparent);
+    border-color: color-mix(in srgb, var(--success) 22%, transparent);
+    color: var(--success);
   }
 
   .diag-sum-card.warning {
-    background: rgba(245, 158, 11, 0.06);
-    border-color: rgba(245, 158, 11, 0.2);
-    color: #f59e0b;
+    background: color-mix(in srgb, var(--warning) 7%, transparent);
+    border-color: color-mix(in srgb, var(--warning) 22%, transparent);
+    color: var(--warning);
   }
 
   .diag-sum-card .title {

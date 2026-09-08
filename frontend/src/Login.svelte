@@ -197,9 +197,9 @@
     place-items: center;
     background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 60%, #0e6f96 100%);
     box-shadow:
-      0 0 0 1px rgba(41, 194, 240, 0.3),
-      0 14px 36px -12px rgba(41, 194, 240, 0.7);
-    color: #03182a;
+      0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent),
+      0 14px 36px -12px color-mix(in srgb, var(--accent) 70%, transparent);
+    color: var(--btn-primary-text);
   }
 
   .login-brand .brand-names {

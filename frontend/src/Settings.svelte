@@ -1980,7 +1980,7 @@
   .channel-btn.active {
     background: var(--accent);
     border-color: var(--accent);
-    color: #fff;
+    color: var(--btn-primary-text);
   }
 
   .channel-btn:disabled {
@@ -2143,7 +2143,7 @@
 
   .seg-opt.seg-active {
     background: var(--accent);
-    color: #fff;
+    color: var(--btn-primary-text);
   }
 
   /* Toggle switch */
