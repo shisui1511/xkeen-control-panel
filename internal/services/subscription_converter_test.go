@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -740,4 +741,36 @@ func TestConvertSubscriptionNodesToClashYAML_SkipsInvalidWireGuardWithoutKeys(t 
 		t.Errorf("expected 'wg-valid', got %q", names[0])
 	}
 }
+
+func TestConvertSubscriptionNodesToClashYAML_SafeEscapingDNSAndRawOptions(t *testing.T) {
+	svc := &SubscriptionService{}
+	nodes := []SubscriptionNode{
+		{
+			Tag:       "wg-safe-yaml",
+			Protocol:  "wireguard",
+			Server:    "1.2.3.4:51820",
+			SecretKey: "privkey123=",
+			PublicKey: "pubkey123=",
+			DNS:       []string{"1.1.1.1", "2606:4700:4700::1111#cloudflare"},
+			AWG: &AWGOptions{
+				RawOptions: map[string]interface{}{
+					"custom-str": "value: with colon # and comment",
+					"custom-int": 42,
+				},
+			},
+		},
+	}
+
+	yaml, _ := svc.convertSubscriptionNodesToClashYAML(nodes)
+	if !strings.Contains(yaml, `dns: ['1.1.1.1', '2606:4700:4700::1111#cloudflare']`) {
+		t.Errorf("expected escaped DNS in YAML, got:\n%s", yaml)
+	}
+	if !strings.Contains(yaml, `custom-str: 'value: with colon # and comment'`) {
+		t.Errorf("expected escaped RawOptions string in YAML, got:\n%s", yaml)
+	}
+	if !strings.Contains(yaml, `custom-int: 42`) {
+		t.Errorf("expected RawOptions int in YAML, got:\n%s", yaml)
+	}
+}
+
 

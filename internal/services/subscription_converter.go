@@ -486,7 +486,11 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 			}
 
 			if len(n.DNS) > 0 {
-				sb.WriteString(fmt.Sprintf("    dns: [%s]\n", strings.Join(n.DNS, ", ")))
+				safeDNS := make([]string, len(n.DNS))
+				for i, d := range n.DNS {
+					safeDNS[i] = yamlSafeScalar(d)
+				}
+				sb.WriteString(fmt.Sprintf("    dns: [%s]\n", strings.Join(safeDNS, ", ")))
 			}
 
 			if n.MTU > 0 {
@@ -608,7 +612,12 @@ func (s *SubscriptionService) convertSubscriptionNodesToClashYAML(nodes []Subscr
 					}
 					sort.Strings(rawKeys)
 					for _, rk := range rawKeys {
-						sb.WriteString(fmt.Sprintf("      %s: %v\n", rk, awg.RawOptions[rk]))
+						v := awg.RawOptions[rk]
+						if strVal, ok := v.(string); ok {
+							sb.WriteString(fmt.Sprintf("      %s: %s\n", rk, yamlSafeScalar(strVal)))
+						} else {
+							sb.WriteString(fmt.Sprintf("      %s: %v\n", rk, v))
+						}
 					}
 				}
 			}
