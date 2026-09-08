@@ -258,37 +258,44 @@ func SmartMergeMihomo(existingYAML string, templateYAML string, userRules []User
 	}
 
 	if mergedDNS != nil {
-		// Combine fake-ip-filter without duplicates across existing, template, and Keenetic exclusions
-		filterSet := make(map[string]bool)
-		var combinedFilter []interface{}
+		// fake-ip-filter is only meaningful under enhanced-mode: fake-ip.
+		// For redir-host (or an unset enhanced-mode) writing it just bloats the
+		// user config and inflates the diff on every save, so only merge it in
+		// when the effective enhanced-mode is fake-ip.
+		effectiveMode, _ := mergedDNS["enhanced-mode"].(string)
+		if effectiveMode == "fake-ip" {
+			// Combine fake-ip-filter without duplicates across existing, template, and Keenetic exclusions
+			filterSet := make(map[string]bool)
+			var combinedFilter []interface{}
 
-		addFilter := func(item interface{}) {
-			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
-				if !filterSet[s] {
-					filterSet[s] = true
-					combinedFilter = append(combinedFilter, s)
+			addFilter := func(item interface{}) {
+				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+					if !filterSet[s] {
+						filterSet[s] = true
+						combinedFilter = append(combinedFilter, s)
+					}
 				}
 			}
-		}
 
-		if hasExistingDNS {
-			if exF, ok := existingDNS["fake-ip-filter"].([]interface{}); ok {
-				for _, item := range exF {
-					addFilter(item)
+			if hasExistingDNS {
+				if exF, ok := existingDNS["fake-ip-filter"].([]interface{}); ok {
+					for _, item := range exF {
+						addFilter(item)
+					}
 				}
 			}
-		}
-		if hasTmplDNS {
-			if tmplF, ok := tmplDNS["fake-ip-filter"].([]interface{}); ok {
-				for _, item := range tmplF {
-					addFilter(item)
+			if hasTmplDNS {
+				if tmplF, ok := tmplDNS["fake-ip-filter"].([]interface{}); ok {
+					for _, item := range tmplF {
+						addFilter(item)
+					}
 				}
 			}
+			for _, exc := range KeeneticFakeIPExclusions {
+				addFilter(exc)
+			}
+			mergedDNS["fake-ip-filter"] = combinedFilter
 		}
-		for _, exc := range KeeneticFakeIPExclusions {
-			addFilter(exc)
-		}
-		mergedDNS["fake-ip-filter"] = combinedFilter
 		result["dns"] = mergedDNS
 	}
 

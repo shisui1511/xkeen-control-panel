@@ -36,6 +36,7 @@ rules:
   - MATCH,PROXY
 dns:
   enable: true
+  enhanced-mode: fake-ip
   fake-ip-filter:
     - "*.lan"
 `
@@ -556,6 +557,45 @@ rules:
 		t.Errorf("expected error for corrupt existing config, got nil")
 	} else if !strings.Contains(err.Error(), "not valid YAML") {
 		t.Errorf("expected YAML validation error, got: %v", err)
+	}
+}
+
+func TestSmartMergeMihomo_FakeIPFilterOnlyInFakeIPMode(t *testing.T) {
+	// enhanced-mode: redir-host -> no fake-ip-filter / Keenetic exclusions injected
+	existingRedirHost := `
+dns:
+  enable: true
+  enhanced-mode: redir-host
+  nameserver:
+    - 1.1.1.1
+`
+	templateYAML := `
+rules:
+  - MATCH,PROXY
+`
+	merged, _, err := SmartMergeMihomo(existingRedirHost, templateYAML, nil, false)
+	if err != nil {
+		t.Fatalf("SmartMergeMihomo failed: %v", err)
+	}
+	if strings.Contains(merged, "fake-ip-filter") {
+		t.Errorf("expected no fake-ip-filter under redir-host mode, got:\n%s", merged)
+	}
+	if strings.Contains(merged, "+.keenetic.pro") {
+		t.Errorf("expected no Keenetic fake-ip exclusions under redir-host mode, got:\n%s", merged)
+	}
+
+	// enhanced-mode: fake-ip -> exclusions injected
+	existingFakeIP := `
+dns:
+  enable: true
+  enhanced-mode: fake-ip
+`
+	mergedFakeIP, _, err := SmartMergeMihomo(existingFakeIP, templateYAML, nil, false)
+	if err != nil {
+		t.Fatalf("SmartMergeMihomo failed: %v", err)
+	}
+	if !strings.Contains(mergedFakeIP, "+.keenetic.pro") {
+		t.Errorf("expected Keenetic fake-ip exclusions under fake-ip mode, got:\n%s", mergedFakeIP)
 	}
 }
 
