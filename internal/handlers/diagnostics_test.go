@@ -96,7 +96,10 @@ func TestSanitizeJSON(t *testing.T) {
                 "private-key": "user-privkey-3",
                 "token": "user-token",
                 "password_hash": "my-hash-val",
-                "passwordHash": "my-other-hash-val"
+                "passwordHash": "my-other-hash-val",
+                "HeaderProtectionKey": "hpk-pascal-secret",
+                "headerProtectionKey": "hpk-camel-secret",
+                "Pre-Shared-Key": "psk-secret-val"
               }
             ]
           }
@@ -123,7 +126,7 @@ func TestSanitizeJSON(t *testing.T) {
 			}
 			got := string(gotBytes)
 			if tc.name == "redact sensitive keys" {
-				for _, key := range []string{"user-uuid-123", "user-secret", "user-password", "user-pubkey", "user-privkey", "user-privkey-2", "user-privkey-3", "user-token", "my-hash-val", "my-other-hash-val"} {
+				for _, key := range []string{"user-uuid-123", "user-secret", "user-password", "user-pubkey", "user-privkey", "user-privkey-2", "user-privkey-3", "user-token", "my-hash-val", "my-other-hash-val", "hpk-pascal-secret", "hpk-camel-secret", "psk-secret-val"} {
 					if bytes.Contains(gotBytes, []byte(key)) {
 						t.Errorf("expected sensitive key %q to be redacted, got: %s", key, got)
 					}
