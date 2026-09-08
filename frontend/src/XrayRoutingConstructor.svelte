@@ -3933,7 +3933,12 @@
                           <button
                             class="btn btn-secondary"
                             style="padding: 0 8px; min-height: 36px; white-space: nowrap;"
-                            onclick={() => generateShadowsocksKey(outboundForm.cipher)}
+                            onclick={() => {
+                              outboundForm.shadowsocksPassword = generateShadowsocksKey(
+                                outboundForm.cipher
+                              );
+                              showToast('success', $t('xray.key_generated'));
+                            }}
                             title={$t('xray.generate_key')}
                             type="button"
                           >
