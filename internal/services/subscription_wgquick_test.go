@@ -424,3 +424,38 @@ func TestNormalizeAWGInitPacket(t *testing.T) {
 	}
 }
 
+func TestParseWgQuickConf_Comments(t *testing.T) {
+	conf := `# Interface Header Comment
+[Interface]
+# Interface internal comment
+PrivateKey = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=
+Address = 10.0.0.2/32
+
+# Above Peer 1
+[Peer]
+PublicKey = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb=
+Endpoint = 198.51.100.1:51820
+AllowedIPs = 0.0.0.0/0
+
+[Peer]
+# Inside Peer 2
+PublicKey = ccccccccccccccccccccccccccccccccccccccccccc=
+Endpoint = 198.51.100.2:51820
+AllowedIPs = 0.0.0.0/0
+`
+	nodes, err := parseWgQuickConf(conf, "test")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(nodes))
+	}
+	if nodes[0].Name != "Above Peer 1" {
+		t.Errorf("expected node 0 name 'Above Peer 1', got %q", nodes[0].Name)
+	}
+	if nodes[1].Name != "Inside Peer 2" {
+		t.Errorf("expected node 1 name 'Inside Peer 2', got %q", nodes[1].Name)
+	}
+}
+
+

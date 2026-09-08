@@ -260,7 +260,13 @@ func parseWgQuickConf(content string, tagPrefix string) ([]SubscriptionNode, err
 
 		// Комментарии всей строки
 		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			lastComment = strings.TrimSpace(strings.TrimLeft(line, "#; "))
+			commentText := strings.TrimSpace(strings.TrimLeft(line, "#; "))
+			if currentSection == "peer" && currentPeer != nil && currentPeer.comment == "" && currentPeer.publicKey == "" && currentPeer.endpoint == "" {
+				currentPeer.comment = commentText
+				lastComment = ""
+			} else {
+				lastComment = commentText
+			}
 			continue
 		}
 
@@ -269,6 +275,7 @@ func parseWgQuickConf(content string, tagPrefix string) ([]SubscriptionNode, err
 			secName := strings.ToLower(strings.TrimSpace(line[1 : len(line)-1]))
 			if secName == "interface" {
 				currentSection = "interface"
+				lastComment = ""
 			} else if secName == "peer" {
 				currentSection = "peer"
 				if currentPeer != nil {
@@ -278,10 +285,11 @@ func parseWgQuickConf(content string, tagPrefix string) ([]SubscriptionNode, err
 					comment: lastComment,
 					awg:     &AWGOptions{RawOptions: make(map[string]interface{})},
 				}
+				lastComment = ""
 			} else {
 				currentSection = secName
+				lastComment = ""
 			}
-			lastComment = ""
 			continue
 		}
 
@@ -292,6 +300,10 @@ func parseWgQuickConf(content string, tagPrefix string) ([]SubscriptionNode, err
 		}
 		key := strings.TrimSpace(parts[0])
 		val := strings.TrimSpace(parts[1])
+
+		if currentSection == "interface" {
+			lastComment = ""
+		}
 
 		// Очистка строчных инлайн-комментариев (только если предваряются пробелом или табом)
 		if idx := strings.Index(val, " #"); idx != -1 {
