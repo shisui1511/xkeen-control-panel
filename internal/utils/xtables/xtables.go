@@ -55,7 +55,7 @@ func WaitArgs(ctx context.Context) []string {
 
 	for _, args := range candidateWaitArgs {
 		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
-		full := append(append([]string{}, args...), "-t", "mangle", "-S")
+		full := append(append([]string{}, args...), "-t", "mangle", "-n", "-L")
 		out, err := exec.CommandContext(probeCtx, probeBinary, full...).CombinedOutput()
 		cancel()
 
