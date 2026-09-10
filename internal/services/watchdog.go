@@ -158,18 +158,16 @@ func (w *WatchdogService) CheckHealth() {
 		w.wg.Add(1)
 		go func() {
 			defer w.wg.Done()
-			ok := w.EmergencyDisarmTProxy()
+			outcome := w.EmergencyDisarmTProxy()
 			w.mu.Lock()
 			w.disarmInFlight = false
-			// Only latch disarmed on confirmed success. On failure, leave it
-			// false so the next qualifying health check (consecutiveFailures
-			// is still >= watchdogMaxFailures) retries instead of the
-			// circuit breaker silently sitting there having never actually
-			// removed the interception rule.
-			w.disarmed = ok
+			// Only latch disarmed on confirmed success (DisarmDisarmed). On failure
+			// or already-clean, leave it false so the next qualifying health check
+			// can evaluate state rather than permanently disabling the circuit breaker.
+			w.disarmed = (outcome == DisarmDisarmed)
 			w.mu.Unlock()
-			if !ok {
-				log.Printf("Watchdog: EmergencyDisarmTProxy failed — will retry on next qualifying health check")
+			if outcome != DisarmDisarmed {
+				log.Printf("Watchdog: EmergencyDisarmTProxy outcome %s — will retry on next qualifying health check", outcome)
 			}
 		}()
 	}
@@ -209,6 +207,31 @@ var builtinMangleChains = map[string]bool{
 	"PREROUTING": true, "INPUT": true, "FORWARD": true, "OUTPUT": true, "POSTROUTING": true,
 }
 
+// DisarmOutcome represents the result of an EmergencyDisarmTProxy attempt.
+type DisarmOutcome int
+
+const (
+	// DisarmFailed indicates at least one family could not be verified clean.
+	DisarmFailed DisarmOutcome = iota
+	// DisarmAlreadyClean indicates no TPROXY interception rules were present to disarm.
+	DisarmAlreadyClean
+	// DisarmDisarmed indicates interception rules were present, removed, and verified gone.
+	DisarmDisarmed
+)
+
+func (o DisarmOutcome) String() string {
+	switch o {
+	case DisarmFailed:
+		return "failed"
+	case DisarmAlreadyClean:
+		return "already-clean"
+	case DisarmDisarmed:
+		return "disarmed"
+	default:
+		return "unknown"
+	}
+}
+
 // EmergencyDisarmTProxy removes the TPROXY interception rule(s) installed by
 // XKeen from the iptables (and ip6tables, when present) mangle table so LAN
 // devices regain direct internet access when the proxy kernel has failed
@@ -216,13 +239,10 @@ var builtinMangleChains = map[string]bool{
 // directly (not via the xkeen binary) because the XKeen binary itself may be
 // the thing that's wedged.
 //
-// It reports whether the disarm can be considered handled: true if every
-// family it could query came back clean (rules removed, or confirmed none
-// present); false on an execution failure (iptables missing, xtables lock
-// contention, permission error) so the caller can retry on the next
-// qualifying health check instead of silently latching a failed attempt as
-// success.
-func (w *WatchdogService) EmergencyDisarmTProxy() bool {
+// It reports a DisarmOutcome: DisarmDisarmed if rules were found and their removal
+// was confirmed via re-reading the mangle table; DisarmAlreadyClean if no rules
+// were found; or DisarmFailed if execution or verification failed.
+func (w *WatchdogService) EmergencyDisarmTProxy() DisarmOutcome {
 	ctx := context.Background()
 
 	saveV4 := w.iptablesSaveBin
@@ -250,16 +270,17 @@ func (w *WatchdogService) EmergencyDisarmTProxy() bool {
 	if !okV4 || !okV6 {
 		log.Printf("Watchdog: EmergencyDisarmTProxy incomplete (ipv4 ok=%v removed=%d, ipv6 ok=%v removed=%d) — TPROXY interception may still be active",
 			okV4, removedV4, okV6, removedV6)
-		return false
+		return DisarmFailed
 	}
 
 	if removedV4+removedV6 == 0 {
 		log.Printf("Watchdog: EmergencyDisarmTProxy: no %s rules found in mangle table (already absent or interception not installed)", tproxyChainMarker)
-	} else {
-		log.Printf("Watchdog: EmergencyDisarmTProxy removed %d TPROXY interception rule(s) (ipv4=%d, ipv6=%d)",
-			removedV4+removedV6, removedV4, removedV6)
+		return DisarmAlreadyClean
 	}
-	return true
+
+	log.Printf("Watchdog: EmergencyDisarmTProxy removed %d TPROXY interception rule(s) (ipv4=%d, ipv6=%d)",
+		removedV4+removedV6, removedV4, removedV6)
+	return DisarmDisarmed
 }
 
 // splitIptablesRule splits an iptables-save rule string into individual command-line

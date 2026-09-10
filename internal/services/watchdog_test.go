@@ -632,9 +632,9 @@ COMMIT
 	w.ip6tablesBin = ip6Del
 	w.ip6tablesSaveBin = ip6Save
 
-	ok := w.EmergencyDisarmTProxy()
-	if !ok {
-		t.Fatal("expected EmergencyDisarmTProxy to succeed on iptables 1.4.21")
+	outcome := w.EmergencyDisarmTProxy()
+	if outcome != DisarmDisarmed {
+		t.Fatalf("expected DisarmDisarmed on iptables 1.4.21, got %v", outcome)
 	}
 
 	logData, err := os.ReadFile(logPath)
