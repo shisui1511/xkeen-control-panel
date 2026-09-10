@@ -1,0 +1,176 @@
+package xtables
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func writeFakeIptablesDialect(t *testing.T, script string) string {
+	t.Helper()
+	dir := t.TempDir()
+	binPath := filepath.Join(dir, "iptables")
+	if err := os.WriteFile(binPath, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return binPath
+}
+
+func equalSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestWaitArgs_FullDialect(t *testing.T) {
+	ResetForTest()
+	script := "#!/bin/sh\nexit 0\n"
+	writeFakeIptablesDialect(t, script)
+
+	args := WaitArgs(context.Background())
+	expected := []string{"-w", "5"}
+	if !equalSlices(args, expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+
+	mu.Lock()
+	good := haveGood
+	mu.Unlock()
+	if !good {
+		t.Fatal("expected haveGood=true after successful probe")
+	}
+}
+
+func TestWaitArgs_142xDialect(t *testing.T) {
+	ResetForTest()
+	script := `#!/bin/sh
+PREV=""
+for arg in "$@"; do
+    if [ "$PREV" = "-w" ] && [ "$arg" = "5" ]; then
+        cat <<'EOF' >&2
+Bad argument '5'
+Try ` + "`" + `iptables -h' or 'iptables --help' for more information.
+EOF
+        exit 2
+    fi
+    PREV="$arg"
+done
+exit 0
+`
+	writeFakeIptablesDialect(t, script)
+
+	args := WaitArgs(context.Background())
+	expected := []string{"-w"}
+	if !equalSlices(args, expected) {
+		t.Fatalf("expected %v, got %v", expected, args)
+	}
+
+	mu.Lock()
+	good := haveGood
+	mu.Unlock()
+	if !good {
+		t.Fatal("expected haveGood=true after successful probe")
+	}
+}
+
+func TestWaitArgs_LockBusy(t *testing.T) {
+	ResetForTest()
+	busyScript := `#!/bin/sh
+echo "Another app is currently holding the xtables lock. Perhaps you want to use the -w option?" >&2
+exit 4
+`
+	writeFakeIptablesDialect(t, busyScript)
+
+	args := WaitArgs(context.Background())
+	// (1) WaitArgs does not return a result richer than first failed variant (returns [])
+	if len(args) > 0 {
+		t.Fatalf("expected empty/unranked args on lock contention, got %v", args)
+	}
+
+	// (2) internal flag haveGood remains false
+	mu.Lock()
+	good := haveGood
+	mu.Unlock()
+	if good {
+		t.Fatal("expected haveGood=false when probe hit xtables lock busy")
+	}
+
+	// (3) after swapping with always-successful script, next call re-probes and returns full dialect
+	okScript := "#!/bin/sh\nexit 0\n"
+	writeFakeIptablesDialect(t, okScript)
+
+	args2 := WaitArgs(context.Background())
+	expected := []string{"-w", "5"}
+	if !equalSlices(args2, expected) {
+		t.Fatalf("expected %v after recovery from busy lock, got %v", expected, args2)
+	}
+
+	mu.Lock()
+	good2 := haveGood
+	mu.Unlock()
+	if !good2 {
+		t.Fatal("expected haveGood=true after successful recovery probe")
+	}
+}
+
+func TestWaitArgs_MissingBinary(t *testing.T) {
+	ResetForTest()
+	emptyDir := t.TempDir()
+	t.Setenv("PATH", emptyDir)
+
+	args := WaitArgs(context.Background())
+	if len(args) != 0 {
+		t.Fatalf("expected empty slice when iptables is missing, got %v", args)
+	}
+
+	mu.Lock()
+	good := haveGood
+	mu.Unlock()
+	if good {
+		t.Fatal("expected haveGood=false when iptables is missing")
+	}
+
+	// Next call should try to probe again (not cached)
+	args2 := WaitArgs(context.Background())
+	if len(args2) != 0 {
+		t.Fatalf("expected empty slice on second attempt when iptables is missing, got %v", args2)
+	}
+}
+
+func TestWaitArgs_CachesAfterSuccess(t *testing.T) {
+	ResetForTest()
+	dir := t.TempDir()
+	counterFile := filepath.Join(dir, "invocations.log")
+	script := fmt.Sprintf("#!/bin/sh\necho \"run\" >> %s\nexit 0\n", counterFile)
+	writeFakeIptablesDialect(t, script)
+
+	args1 := WaitArgs(context.Background())
+	expected := []string{"-w", "5"}
+	if !equalSlices(args1, expected) {
+		t.Fatalf("first call: expected %v, got %v", expected, args1)
+	}
+
+	args2 := WaitArgs(context.Background())
+	if !equalSlices(args2, expected) {
+		t.Fatalf("second call: expected %v, got %v", expected, args2)
+	}
+
+	data, err := os.ReadFile(counterFile)
+	if err != nil {
+		t.Fatalf("failed to read counter file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected exactly 1 probe execution, got %d (invocations: %v)", len(lines), lines)
+	}
+}
