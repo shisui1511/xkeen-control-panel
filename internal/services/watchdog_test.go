@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/shisui1511/xkeen-control-panel/internal/utils/xtables"
 )
 
 func TestWatchdogService_New(t *testing.T) {
@@ -81,27 +83,122 @@ func TestWatchdogService_CheckHealth_FailureCounterAndTrip(t *testing.T) {
 	}
 }
 
-// installFakeIptables writes a fake iptables-save (prints saveOutput) and a
-// fake iptables that appends its invocation args as one line to a log file,
-// into a temp bin dir, and returns (saveBinPath, delBinPath, deletionsLogPath).
-func installFakeIptables(t *testing.T, saveOutput string) (saveBin, delBin, logPath string) {
+type fakeDialect int
+
+const (
+	dialectWaitSeconds fakeDialect = iota
+	dialect1421
+	dialectNoWait
+	dialectLockBusy
+)
+
+type fakeIptablesConfig struct {
+	SaveOutputs   []string
+	Dialect       fakeDialect
+	DeleteFailure string
+}
+
+// installFakeIptablesConfig installs a configurable fake iptables-save and iptables in a temp dir.
+func installFakeIptablesConfig(t *testing.T, cfg fakeIptablesConfig) (saveBin, delBin, logPath string) {
 	t.Helper()
 	binDir := t.TempDir()
 	logPath = filepath.Join(binDir, "deletions.log")
 
+	saveOutputs := cfg.SaveOutputs
+	if len(saveOutputs) == 0 {
+		saveOutputs = []string{"*mangle\nCOMMIT\n"}
+	}
+	for i, out := range saveOutputs {
+		outPath := filepath.Join(binDir, fmt.Sprintf("save_out_%d", i))
+		if err := os.WriteFile(outPath, []byte(out), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lastOutPath := filepath.Join(binDir, fmt.Sprintf("save_out_%d", len(saveOutputs)-1))
+
 	saveBin = filepath.Join(binDir, "iptables-save")
-	saveScript := fmt.Sprintf("#!/bin/sh\ncat <<'EOF'\n%s\nEOF\n", saveOutput)
+	counterFile := filepath.Join(binDir, "save_counter")
+	saveScript := fmt.Sprintf(`#!/bin/sh
+CF="%s"
+COUNT=0
+if [ -f "$CF" ]; then
+    COUNT=$(cat "$CF")
+fi
+echo "$((COUNT + 1))" > "$CF"
+OUT="%s/save_out_$COUNT"
+if [ ! -f "$OUT" ]; then
+    OUT="%s"
+fi
+cat "$OUT"
+`, counterFile, binDir, lastOutPath)
+
 	if err := os.WriteFile(saveBin, []byte(saveScript), 0755); err != nil {
 		t.Fatal(err)
 	}
 
 	delBin = filepath.Join(binDir, "iptables")
-	delScript := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %s\nexit 0\n", logPath)
-	if err := os.WriteFile(delBin, []byte(delScript), 0755); err != nil {
+	delScriptBuilder := strings.Builder{}
+	delScriptBuilder.WriteString("#!/bin/sh\n")
+
+	switch cfg.Dialect {
+	case dialectLockBusy:
+		delScriptBuilder.WriteString(`echo "Another app is currently holding the xtables lock. Perhaps you want to use the -w option?" >&2
+exit 4
+`)
+	case dialectNoWait:
+		delScriptBuilder.WriteString(`for arg in "$@"; do
+    if [ "$arg" = "-w" ]; then
+        echo "iptables: unrecognized option '-w'" >&2
+        exit 2
+    fi
+done
+`)
+	case dialect1421:
+		delScriptBuilder.WriteString(`PREV=""
+for arg in "$@"; do
+    if [ "$PREV" = "-w" ] && [ "$arg" = "5" ]; then
+        cat <<'EOF' >&2
+Bad argument '5'
+Try ` + "`" + `iptables -h' or 'iptables --help' for more information.
+EOF
+        exit 2
+    fi
+    PREV="$arg"
+done
+`)
+	case dialectWaitSeconds:
+		// accepts all options
+	}
+
+	if cfg.DeleteFailure != "" {
+		delScriptBuilder.WriteString(fmt.Sprintf(`for arg in "$@"; do
+    if [ "$arg" = "-D" ]; then
+        echo "%s" >&2
+        exit 1
+    fi
+done
+`, cfg.DeleteFailure))
+	}
+
+	delScriptBuilder.WriteString(fmt.Sprintf(`echo "$@" >> "%s"
+exit 0
+`, logPath))
+
+	if err := os.WriteFile(delBin, []byte(delScriptBuilder.String()), 0755); err != nil {
 		t.Fatal(err)
 	}
 
 	return saveBin, delBin, logPath
+}
+
+// installFakeIptables writes a fake iptables-save (prints saveOutput) and a
+// fake iptables that appends its invocation args as one line to a log file,
+// into a temp bin dir, and returns (saveBinPath, delBinPath, deletionsLogPath).
+func installFakeIptables(t *testing.T, saveOutput string) (saveBin, delBin, logPath string) {
+	return installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs: []string{saveOutput},
+		Dialect:     dialectWaitSeconds,
+	})
 }
 
 // TestDisarmTProxyFamily_RealTargetInCustomChain verifies CR-03: XKeen's
@@ -122,7 +219,7 @@ COMMIT
 `
 	saveBin, delBin, logPath := installFakeIptables(t, saveOutput)
 
-	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin)
+	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -157,7 +254,7 @@ COMMIT
 `
 	saveBin, delBin, logPath := installFakeIptables(t, saveOutput)
 
-	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin)
+	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -180,7 +277,7 @@ COMMIT
 `
 	saveBin, delBin, logPath := installFakeIptables(t, saveOutput)
 
-	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin)
+	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -197,7 +294,7 @@ COMMIT
 // so the circuit breaker can retry on a later qualifying health check
 // instead of silently giving up after one transient failure.
 func TestWatchdogService_EmergencyDisarmTProxy_FailureDoesNotLatch(t *testing.T) {
-	removed, ok := disarmTProxyFamily(context.Background(), "nonexistent-iptables-save", "iptables")
+	removed, ok := disarmTProxyFamily(context.Background(), "nonexistent-iptables-save", "iptables", []string{"-w", "5"})
 	if removed != 0 {
 		t.Fatalf("expected 0 rules removed when iptables-save is unavailable, got %d", removed)
 	}
@@ -213,7 +310,7 @@ func TestWatchdogService_EmergencyDisarmTProxy_FailureDoesNotLatch(t *testing.T)
 	if err := os.WriteFile(failingSave, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	_, ok = disarmTProxyFamily(context.Background(), failingSave, "iptables")
+	_, ok = disarmTProxyFamily(context.Background(), failingSave, "iptables", []string{"-w", "5"})
 	if ok {
 		t.Fatalf("expected ok=false when %s exits non-zero", failingSave)
 	}
@@ -400,7 +497,7 @@ COMMIT
 `
 	saveBin, delBin, logPath := installFakeIptables(t, saveOutput)
 
-	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin)
+	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
 	if !ok {
 		t.Fatal("expected ok=true")
 	}
@@ -497,6 +594,74 @@ func TestValidateXrayRoutingTags_NoIssues(t *testing.T) {
 
 	if issues := ValidateXrayRoutingTags(tmpDir); len(issues) != 0 {
 		t.Fatalf("expected no issues, got %v", issues)
+	}
+}
+
+func TestEmergencyDisarmTProxy_EndToEnd_1421Dialect(t *testing.T) {
+	xtables.ResetForTest()
+
+	saveOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, logPath := installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs: []string{saveOutput},
+		Dialect:     dialect1421,
+	})
+
+	binDir := filepath.Dir(saveBin)
+	// Install ip6tables and ip6tables-save in binDir
+	ip6Save := filepath.Join(binDir, "ip6tables-save")
+	if err := os.WriteFile(ip6Save, []byte("#!/bin/sh\ncat <<'EOF'\n*mangle\nCOMMIT\nEOF\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ip6Del := filepath.Join(binDir, "ip6tables")
+	if err := os.WriteFile(ip6Del, []byte(fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %s\nexit 0\n", logPath)), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	tmpDir := t.TempDir()
+	xkeenSvc := NewXKeenService(filepath.Join(tmpDir, "xkeen"), tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesBin = delBin
+	w.iptablesSaveBin = saveBin
+	w.ip6tablesBin = ip6Del
+	w.ip6tablesSaveBin = ip6Save
+
+	ok := w.EmergencyDisarmTProxy()
+	if !ok {
+		t.Fatal("expected EmergencyDisarmTProxy to succeed on iptables 1.4.21")
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read log: %v", err)
+	}
+	lines := strings.Split(string(logData), "\n")
+	foundDelete := false
+	for _, l := range lines {
+		if strings.Contains(l, "-t mangle") && strings.Contains(l, "-D PREROUTING") {
+			foundDelete = true
+			tokens := strings.Fields(l)
+			for i, tok := range tokens {
+				if tok == "-w" {
+					if i+1 < len(tokens) && tokens[i+1] == "5" {
+						t.Fatalf("deletion command contains '5' after '-w': %s", l)
+					}
+					break
+				}
+			}
+			if !strings.Contains(l, "-j TPROXY") {
+				t.Fatalf("deletion command does not contain '-j TPROXY': %s", l)
+			}
+			break
+		}
+	}
+	if !foundDelete {
+		t.Fatalf("expected deletion command in log, got:\n%s", string(logData))
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/shisui1511/xkeen-control-panel/internal/utils"
+	"github.com/shisui1511/xkeen-control-panel/internal/utils/xtables"
 )
 
 // watchdogCheckInterval is how often the watchdog polls kernel health.
@@ -241,8 +242,10 @@ func (w *WatchdogService) EmergencyDisarmTProxy() bool {
 		delV6 = "ip6tables"
 	}
 
-	removedV4, okV4 := disarmTProxyFamily(ctx, saveV4, delV4)
-	removedV6, okV6 := disarmTProxyFamily(ctx, saveV6, delV6)
+	waitArgs := xtables.WaitArgs(ctx)
+
+	removedV4, okV4 := disarmTProxyFamily(ctx, saveV4, delV4, waitArgs)
+	removedV6, okV6 := disarmTProxyFamily(ctx, saveV6, delV6, waitArgs)
 
 	if !okV4 || !okV6 {
 		log.Printf("Watchdog: EmergencyDisarmTProxy incomplete (ipv4 ok=%v removed=%d, ipv6 ok=%v removed=%d) — TPROXY interception may still be active",
@@ -324,7 +327,7 @@ func splitIptablesRule(line string) []string {
 // attempt). ok is false only on a genuine execution failure such as xtables
 // lock contention or a permission error, where we can't tell whether the
 // interception rule is actually gone.
-func disarmTProxyFamily(ctx context.Context, saveBin, delBin string) (removed int, ok bool) {
+func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []string) (removed int, ok bool) {
 	saveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	out, err := exec.CommandContext(saveCtx, saveBin, "-t", "mangle").Output()
 	cancel()
@@ -389,7 +392,8 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string) (removed in
 			continue
 		}
 		args[0] = "-D" // "-A CHAIN ..." -> "-D CHAIN ..." removes exactly this rule
-		delArgs := append([]string{"-w", "5", "-t", "mangle"}, args...)
+		delArgs := append(append([]string{}, waitArgs...), "-t", "mangle")
+		delArgs = append(delArgs, args...)
 
 		delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
 		delOut, delErr := exec.CommandContext(delCtx, delBin, delArgs...).CombinedOutput()
