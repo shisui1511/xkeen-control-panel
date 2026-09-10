@@ -48,7 +48,12 @@ func TestWatchdogService_CheckHealth_FailureCounterAndTrip(t *testing.T) {
 	}
 	xkeenSvc := NewXKeenService(dummy, tmpDir)
 	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
-	saveBin, delBin, _ := installFakeIptables(t, "")
+	saveOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, _ := installFakeIptables(t, saveOutput)
 	w.iptablesSaveBin = saveBin
 	w.iptablesBin = delBin
 	w.ip6tablesSaveBin = saveBin
@@ -687,5 +692,207 @@ func TestValidateXrayRoutingTags_NoOutboundFragments(t *testing.T) {
 	tmpDir := t.TempDir()
 	if issues := ValidateXrayRoutingTags(tmpDir); len(issues) != 0 {
 		t.Fatalf("expected no issues when there are no outbound fragments, got %v", issues)
+	}
+}
+
+func TestEmergencyDisarmTProxy_ConfirmsViaReread(t *testing.T) {
+	xtables.ResetForTest()
+
+	saveOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	// Fake iptables-save returns the rule on every read, simulating a failure
+	// to actually delete or a stubborn rule that persists despite iptables exiting 0.
+	saveBin, delBin, _ := installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs: []string{saveOutput, saveOutput, saveOutput},
+		Dialect:     dialectWaitSeconds,
+	})
+
+	binDir := filepath.Dir(saveBin)
+	ip6Save := filepath.Join(binDir, "ip6tables-save")
+	if err := os.WriteFile(ip6Save, []byte("#!/bin/sh\ncat <<'EOF'\n*mangle\nCOMMIT\nEOF\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ip6Del := filepath.Join(binDir, "ip6tables")
+	if err := os.WriteFile(ip6Del, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	tmpDir := t.TempDir()
+	xkeenSvc := NewXKeenService(filepath.Join(tmpDir, "xkeen"), tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesBin = delBin
+	w.iptablesSaveBin = saveBin
+	w.ip6tablesBin = ip6Del
+	w.ip6tablesSaveBin = ip6Save
+
+	outcome := w.EmergencyDisarmTProxy()
+	if outcome != DisarmFailed {
+		t.Fatalf("expected DisarmFailed when rule persists in mangle table, got %v", outcome)
+	}
+
+	w.mu.Lock()
+	disarmed := w.disarmed
+	w.mu.Unlock()
+	if disarmed {
+		t.Fatal("expected w.disarmed to remain false on failed disarm")
+	}
+}
+
+func TestDisarmTProxyFamily_SecondPassCatchesRace(t *testing.T) {
+	saveWithRule := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	cleanMangle := "*mangle\nCOMMIT\n"
+
+	// First read: rule exists. Second read: rule still exists (simulating race/reinstall).
+	// Third read: clean.
+	saveBin, delBin, logPath := installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs: []string{saveWithRule, saveWithRule, cleanMangle},
+		Dialect:     dialectWaitSeconds,
+	})
+
+	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
+	if !ok {
+		t.Fatal("expected ok=true after second pass cleared the rule")
+	}
+	if removed != 2 {
+		t.Fatalf("expected removed=2 (1 per pass), got %d", removed)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read log: %v", err)
+	}
+	var delLines []string
+	for _, line := range strings.Split(strings.TrimSpace(string(logData)), "\n") {
+		if strings.TrimSpace(line) != "" {
+			delLines = append(delLines, line)
+		}
+	}
+	if len(delLines) != 2 {
+		t.Fatalf("expected exactly 2 deletion attempts (no infinite retry loop), got %d:\n%s", len(delLines), string(logData))
+	}
+}
+
+func TestDisarmTProxyFamily_MissingIP6Tables(t *testing.T) {
+	tmpDir := t.TempDir()
+	missingSave := filepath.Join(tmpDir, "nonexistent-ip6tables-save")
+	missingDel := filepath.Join(tmpDir, "nonexistent-ip6tables")
+
+	removed, ok := disarmTProxyFamily(context.Background(), missingSave, missingDel, []string{"-w", "5"})
+	if removed != 0 {
+		t.Fatalf("expected removed=0 for missing binary, got %d", removed)
+	}
+	if !ok {
+		t.Fatal("expected ok=true when ip6tables is not installed on system")
+	}
+
+	xtables.ResetForTest()
+	saveOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, _ := installFakeIptables(t, saveOutput)
+	binDir := filepath.Dir(saveBin)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	xkeenSvc := NewXKeenService(filepath.Join(tmpDir, "xkeen"), tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesBin = delBin
+	w.iptablesSaveBin = saveBin
+	w.ip6tablesBin = missingDel
+	w.ip6tablesSaveBin = missingSave
+
+	outcome := w.EmergencyDisarmTProxy()
+	if outcome != DisarmDisarmed {
+		t.Fatalf("expected DisarmDisarmed when ipv4 succeeds even if ipv6 is missing, got %v", outcome)
+	}
+}
+
+func TestEmergencyDisarmTProxy_AlreadyCleanOutcome(t *testing.T) {
+	xtables.ResetForTest()
+
+	saveBin, delBin, logPath := installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs: []string{"*mangle\n:PREROUTING ACCEPT [0:0]\n-A PREROUTING -j ACCEPT\nCOMMIT\n"},
+		Dialect:     dialectWaitSeconds,
+	})
+
+	binDir := filepath.Dir(saveBin)
+	ip6Save := filepath.Join(binDir, "ip6tables-save")
+	if err := os.WriteFile(ip6Save, []byte("#!/bin/sh\ncat <<'EOF'\n*mangle\nCOMMIT\nEOF\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ip6Del := filepath.Join(binDir, "ip6tables")
+	if err := os.WriteFile(ip6Del, []byte(fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %s\nexit 0\n", logPath)), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	tmpDir := t.TempDir()
+	xkeenSvc := NewXKeenService(filepath.Join(tmpDir, "xkeen"), tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesBin = delBin
+	w.iptablesSaveBin = saveBin
+	w.ip6tablesBin = ip6Del
+	w.ip6tablesSaveBin = ip6Save
+
+	outcome := w.EmergencyDisarmTProxy()
+	if outcome != DisarmAlreadyClean {
+		t.Fatalf("expected DisarmAlreadyClean, got %v", outcome)
+	}
+
+	countDeletions := func() int {
+		data, err := os.ReadFile(logPath)
+		if err != nil {
+			return 0
+		}
+		count := 0
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, "-D") {
+				count++
+			}
+		}
+		return count
+	}
+
+	if dels := countDeletions(); dels != 0 {
+		t.Fatalf("expected 0 deletions on clean table, got %d", dels)
+	}
+
+	logLenBefore := 0
+	if data, err := os.ReadFile(logPath); err == nil {
+		logLenBefore = len(data)
+	}
+
+	// Idempotency: second call returns same outcome without deletions
+	outcome2 := w.EmergencyDisarmTProxy()
+	if outcome2 != DisarmAlreadyClean {
+		t.Fatalf("expected second call to also return DisarmAlreadyClean, got %v", outcome2)
+	}
+	if dels := countDeletions(); dels != 0 {
+		t.Fatalf("expected 0 deletions after second call, got %d", dels)
+	}
+	logLenAfter := 0
+	if data, err := os.ReadFile(logPath); err == nil {
+		logLenAfter = len(data)
+	}
+	if logLenAfter != logLenBefore {
+		t.Fatalf("expected second call to produce no additional commands, log length grew from %d to %d", logLenBefore, logLenAfter)
+	}
+
+	w.mu.Lock()
+	disarmed := w.disarmed
+	w.mu.Unlock()
+	if disarmed {
+		t.Fatal("expected w.disarmed to remain false on DisarmAlreadyClean")
 	}
 }

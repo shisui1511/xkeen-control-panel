@@ -499,7 +499,7 @@ func isCommandNotFound(err error) bool {
 	if errors.As(err, &execErr) {
 		return errors.Is(execErr.Err, exec.ErrNotFound)
 	}
-	return false
+	return errors.Is(err, os.ErrNotExist)
 }
 
 // defaultMihomoConfigYAML is a minimal, self-contained recovery config: DIRECT-only
