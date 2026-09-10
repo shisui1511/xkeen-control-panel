@@ -327,18 +327,13 @@ func splitIptablesRule(line string) []string {
 // attempt). ok is false only on a genuine execution failure such as xtables
 // lock contention or a permission error, where we can't tell whether the
 // interception rule is actually gone.
-func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []string) (removed int, ok bool) {
+// listMangleRules lists all rule appending lines ("-A ") from the mangle table using saveBin.
+func listMangleRules(ctx context.Context, saveBin string) ([]string, error) {
 	saveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	out, err := exec.CommandContext(saveCtx, saveBin, "-t", "mangle").Output()
 	cancel()
 	if err != nil {
-		if isCommandNotFound(err) {
-			// This iptables family isn't present on this system — nothing to
-			// disarm here, not a failure.
-			return 0, true
-		}
-		log.Printf("Watchdog: EmergencyDisarmTProxy: failed to list mangle table via %s: %v", saveBin, err)
-		return 0, false
+		return nil, err
 	}
 
 	var lines []string
@@ -347,7 +342,21 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 			lines = append(lines, l)
 		}
 	}
+	return lines, nil
+}
 
+// isXkeenTproxyRule reports whether an iptables rule targets TPROXY or has the XKeen marker.
+func isXkeenTproxyRule(line string, fields []string) bool {
+	for i, f := range fields {
+		if f == "-j" && i+1 < len(fields) && fields[i+1] == tproxyTarget {
+			return true
+		}
+	}
+	return strings.Contains(line, tproxyChainMarker)
+}
+
+// selectTproxyRules finds all rules in mangle lines that intercept traffic or jump into custom chains doing so.
+func selectTproxyRules(lines []string) map[string]bool {
 	toDelete := map[string]bool{} // dedup: a line could match both signals
 	customChains := map[string]bool{}
 	for _, line := range lines {
@@ -356,14 +365,7 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 			continue
 		}
 		chain := fields[1]
-		matchesTarget := false
-		for i, f := range fields {
-			if f == "-j" && i+1 < len(fields) && fields[i+1] == tproxyTarget {
-				matchesTarget = true
-				break
-			}
-		}
-		if matchesTarget || strings.Contains(line, tproxyChainMarker) {
+		if isXkeenTproxyRule(line, fields) {
 			toDelete[line] = true
 			if !builtinMangleChains[chain] {
 				customChains[chain] = true
@@ -385,30 +387,88 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 			}
 		}
 	}
+	return toDelete
+}
 
-	for line := range toDelete {
-		args := splitIptablesRule(line)
-		if len(args) == 0 {
-			continue
+// disarmTProxyFamily removes TPROXY interception rules for a given family (v4 or v6)
+// and confirms their removal via re-reading the mangle table.
+func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []string) (removed int, ok bool) {
+	lines, err := listMangleRules(ctx, saveBin)
+	if err != nil {
+		if isCommandNotFound(err) {
+			// This iptables family isn't present on this system — nothing to
+			// disarm here, not a failure.
+			return 0, true
 		}
-		args[0] = "-D" // "-A CHAIN ..." -> "-D CHAIN ..." removes exactly this rule
-		delArgs := append(append([]string{}, waitArgs...), "-t", "mangle")
-		delArgs = append(delArgs, args...)
-
-		delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
-		delOut, delErr := exec.CommandContext(delCtx, delBin, delArgs...).CombinedOutput()
-		delCancel()
-		if delErr != nil {
-			log.Printf("Watchdog: EmergencyDisarmTProxy: failed to remove rule via %s (%q): %v — %s",
-				delBin, line, delErr, strings.TrimSpace(string(delOut)))
-			return removed, false
-		}
-
-		log.Printf("Watchdog: removed TPROXY interception rule via %s: %s", delBin, line)
-		removed++
+		log.Printf("Watchdog: EmergencyDisarmTProxy: failed to list mangle table via %s: %v", saveBin, err)
+		return 0, false
 	}
 
-	return removed, true
+	toDelete := selectTproxyRules(lines)
+	if len(toDelete) == 0 {
+		return 0, true
+	}
+
+	deleteRules := func(rules map[string]bool) (deleted int, hasErr bool) {
+		for line := range rules {
+			args := splitIptablesRule(line)
+			if len(args) == 0 {
+				continue
+			}
+			args[0] = "-D" // "-A CHAIN ..." -> "-D CHAIN ..." removes exactly this rule
+			delArgs := append(append([]string{}, waitArgs...), "-t", "mangle")
+			delArgs = append(delArgs, args...)
+
+			delCtx, delCancel := context.WithTimeout(ctx, 10*time.Second)
+			delOut, delErr := exec.CommandContext(delCtx, delBin, delArgs...).CombinedOutput()
+			delCancel()
+			if delErr != nil {
+				log.Printf("Watchdog: EmergencyDisarmTProxy: failed to remove rule via %s (%q): %v — %s",
+					delBin, line, delErr, strings.TrimSpace(string(delOut)))
+				hasErr = true
+				continue
+			}
+
+			log.Printf("Watchdog: removed TPROXY interception rule via %s: %s", delBin, line)
+			deleted++
+		}
+		return deleted, hasErr
+	}
+
+	delCount, _ := deleteRules(toDelete)
+	removed += delCount
+
+	// Re-read mangle table to verify removal (second read)
+	lines2, err := listMangleRules(ctx, saveBin)
+	if err != nil {
+		log.Printf("Watchdog: EmergencyDisarmTProxy: failed to re-read mangle table via %s: %v", saveBin, err)
+		return removed, false
+	}
+	remaining := selectTproxyRules(lines2)
+	if len(remaining) == 0 {
+		return removed, true
+	}
+
+	// Race or re-installation: execute exactly one additional deletion pass
+	log.Printf("Watchdog: EmergencyDisarmTProxy: %d interception rule(s) remain after first pass — retrying one additional pass via %s",
+		len(remaining), delBin)
+	delCount2, _ := deleteRules(remaining)
+	removed += delCount2
+
+	// Third read to confirm verdict
+	lines3, err := listMangleRules(ctx, saveBin)
+	if err != nil {
+		log.Printf("Watchdog: EmergencyDisarmTProxy: failed to re-read mangle table via %s after second pass: %v", saveBin, err)
+		return removed, false
+	}
+	remaining3 := selectTproxyRules(lines3)
+	if len(remaining3) == 0 {
+		return removed, true
+	}
+
+	log.Printf("Watchdog: EmergencyDisarmTProxy: %d interception rule(s) still remain after second pass via %s",
+		len(remaining3), delBin)
+	return removed, false
 }
 
 // isCommandNotFound reports whether err comes from exec failing to locate

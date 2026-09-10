@@ -191,12 +191,13 @@ exit 0
 	return saveBin, delBin, logPath
 }
 
-// installFakeIptables writes a fake iptables-save (prints saveOutput) and a
+// installFakeIptables writes a fake iptables-save (prints saveOutput on first read,
+// then clean mangle table on subsequent reads to simulate successful removal) and a
 // fake iptables that appends its invocation args as one line to a log file,
 // into a temp bin dir, and returns (saveBinPath, delBinPath, deletionsLogPath).
 func installFakeIptables(t *testing.T, saveOutput string) (saveBin, delBin, logPath string) {
 	return installFakeIptablesConfig(t, fakeIptablesConfig{
-		SaveOutputs: []string{saveOutput},
+		SaveOutputs: []string{saveOutput, "*mangle\nCOMMIT\n"},
 		Dialect:     dialectWaitSeconds,
 	})
 }
@@ -606,7 +607,7 @@ func TestEmergencyDisarmTProxy_EndToEnd_1421Dialect(t *testing.T) {
 COMMIT
 `
 	saveBin, delBin, logPath := installFakeIptablesConfig(t, fakeIptablesConfig{
-		SaveOutputs: []string{saveOutput},
+		SaveOutputs: []string{saveOutput, "*mangle\nCOMMIT\n"},
 		Dialect:     dialect1421,
 	})
 
