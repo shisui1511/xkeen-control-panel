@@ -118,6 +118,9 @@ const maxTrafficFileSize = 5 * 1024 * 1024 // 5 MB
 // generous margin that only trips for a genuinely stalled connection (STAB-02).
 const wsReadDeadline = 30 * time.Second
 
+// kernelAsleepPollInterval bounds sleep duration before rechecking kernel liveness (D-24).
+const kernelAsleepPollInterval = 15 * time.Second
+
 // mihomoConnMetadata holds metadata about connection protocol and client
 type mihomoConnMetadata struct {
 	Network  string `json:"network"`
@@ -169,6 +172,11 @@ type TrafficQuotaService struct {
 	resetTime          int64
 	trackerInitialized bool
 
+	// Kernel liveness check and sleep coordination (WD-05).
+	kernelAliveCheck func() bool
+	wakeCh           chan struct{}
+	asleep           bool
+
 	// checkQuotasMu serializes checkQuotas() invocations. It is invoked both
 	// from the periodic resetTicker in collectorLoop and from every processed
 	// connections snapshot (potentially several times per second under active
@@ -190,6 +198,7 @@ func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaServ
 		proxyStats:     make(map[string]*ProxyTraffic),
 		alerts:         []TrafficAlert{},
 		stopCh:         make(chan struct{}),
+		wakeCh:         make(chan struct{}, 1),
 		connSubs:       make(map[chan []byte]struct{}),
 		trafficSubs:    make(map[chan []byte]struct{}),
 		httpClient:     &http.Client{Timeout: 5 * time.Second},
@@ -201,6 +210,128 @@ func NewTrafficQuotaService(dataDir, mihomoURL, secret string) *TrafficQuotaServ
 
 func (s *TrafficQuotaService) SetMihomoService(svc *MihomoService) {
 	s.mihomoSvc = svc
+}
+
+// SetKernelAliveCheck configures the predicate used to determine whether the Mihomo
+// kernel is actively running (D-22, WD-05). When not set (e.g. in tests), the service
+// assumes the kernel is running.
+func (s *TrafficQuotaService) SetKernelAliveCheck(fn func() bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.kernelAliveCheck = fn
+}
+
+// NotifyKernelStarted provides a non-blocking notification that the Mihomo kernel
+// has started (D-24). Wakes sleeping WebSocket reconnection and collector loops immediately.
+func (s *TrafficQuotaService) NotifyKernelStarted() {
+	select {
+	case s.wakeCh <- struct{}{}:
+	default:
+	}
+}
+
+// kernelAlive reports whether the Mihomo kernel is running according to the
+// injected kernelAliveCheck predicate. Returns true if no check is installed (D-22).
+func (s *TrafficQuotaService) kernelAlive() bool {
+	s.mu.RLock()
+	fn := s.kernelAliveCheck
+	s.mu.RUnlock()
+	if fn == nil {
+		return true
+	}
+	return fn()
+}
+
+// sleepUntilKernelAlive blocks until a wake notification is received, the fallback
+// poll timer fires, or the service is stopped (D-24). Returns false if stopCh is closed.
+func (s *TrafficQuotaService) sleepUntilKernelAlive(label string) bool {
+	select {
+	case <-s.stopCh:
+		return false
+	case <-s.wakeCh:
+		// Re-signal so sibling loops (trafficWSLoop / connectionsWSLoop) also wake up immediately.
+		s.NotifyKernelStarted()
+		return true
+	case <-time.After(kernelAsleepPollInterval):
+		return true
+	}
+}
+
+// handleKernelSleep transitions the service into asleep state upon detecting
+// that the Mihomo kernel is not running (D-23, D-25, D-26).
+func (s *TrafficQuotaService) handleKernelSleep(label string) {
+	s.mu.Lock()
+	if s.asleep {
+		s.mu.Unlock()
+		return
+	}
+	s.asleep = true
+
+	// Drain any pending wake notification so sleep does not immediately wake without new events.
+	select {
+	case <-s.wakeCh:
+	default:
+	}
+
+	log.Printf("TrafficQuota: [%s] Mihomo kernel is not running, entering sleep mode", label)
+
+	// Clear connection tracking map so deltas start from zero upon resume.
+	s.connectionTracker.Range(func(key, value interface{}) bool {
+		s.connectionTracker.Delete(key)
+		return true
+	})
+	s.trackerInitialized = false
+	s.activeConnsCount = 0
+	s.tcpConnsCount = 0
+	s.udpConnsCount = 0
+
+	// Force write state to disk (D-26).
+	_ = s.saveLocked(true)
+
+	peaksCopy := s.peaks
+	topClientsCopy := make([]ClientTraffic, len(s.topClients))
+	copy(topClientsCopy, s.topClients)
+	totalClientsBytesCopy := s.totalClientsBytes
+	s.mu.Unlock()
+
+	// Broadcast zero traffic snapshot to subscribers (D-25).
+	trafficPayload := map[string]interface{}{
+		"up":                  int64(0),
+		"down":                int64(0),
+		"connections":         int64(0),
+		"tcp_connections":     int64(0),
+		"udp_connections":     int64(0),
+		"peaks":               peaksCopy,
+		"top_clients":         topClientsCopy,
+		"total_clients_bytes": totalClientsBytesCopy,
+	}
+	if raw, err := json.Marshal(trafficPayload); err == nil {
+		s.broadcastTraffic(raw)
+	}
+
+	// Broadcast empty connections array to subscribers (D-25).
+	connPayload := struct {
+		Connections []mihomoConn `json:"connections"`
+	}{
+		Connections: []mihomoConn{},
+	}
+	if raw, err := json.Marshal(connPayload); err == nil {
+		s.broadcastConnections(raw)
+	}
+}
+
+// handleKernelWake transitions the service out of asleep state when the kernel is running (D-26).
+func (s *TrafficQuotaService) handleKernelWake(label string) {
+	s.mu.Lock()
+	if !s.asleep {
+		s.mu.Unlock()
+		return
+	}
+	s.asleep = false
+	log.Printf("TrafficQuota: [%s] Mihomo kernel is running, resuming active monitoring", label)
+	s.mu.Unlock()
+
+	s.checkQuotas()
 }
 
 func (s *TrafficQuotaService) getMihomoConnectionInfo() (wsURL string, header http.Header, dialer websocket.Dialer) {
@@ -608,7 +739,9 @@ func (s *TrafficQuotaService) collectorLoop() {
 		select {
 		case <-resetTicker.C:
 			s.checkResets()
-			s.checkQuotas()
+			if s.kernelAlive() {
+				s.checkQuotas()
+			}
 		case <-s.stopCh:
 			return
 		}
@@ -649,6 +782,18 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func() erro
 		default:
 		}
 
+		if !s.kernelAlive() {
+			s.handleKernelSleep(label)
+			for !s.kernelAlive() {
+				if !s.sleepUntilKernelAlive(label) {
+					return
+				}
+			}
+			s.handleKernelWake(label)
+			backoff = baseBackoff
+			consecutiveFailures = 0
+		}
+
 		start := time.Now()
 		err := streamFn()
 		if err == nil {
@@ -676,6 +821,8 @@ func (s *TrafficQuotaService) wsReconnectLoop(label string, streamFn func() erro
 
 		select {
 		case <-time.After(backoff):
+		case <-s.wakeCh:
+			s.NotifyKernelStarted()
 		case <-s.stopCh:
 			return
 		}

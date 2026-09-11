@@ -35,10 +35,11 @@ type XKeenService struct {
 	logMu      sync.Mutex
 	restartLog []RestartLogEntry
 
-	stateMu         sync.Mutex
-	intentionalStop bool
-	inRestartUntil  time.Time
-	now             func() time.Time
+	stateMu           sync.Mutex
+	intentionalStop   bool
+	inRestartUntil    time.Time
+	kernelStartedHook func()
+	now               func() time.Time
 }
 
 func NewXKeenService(binary, dataDir string) *XKeenService {
@@ -162,10 +163,14 @@ func (s *XKeenService) Status() (string, error) {
 func (s *XKeenService) Start() (string, error) {
 	s.stateMu.Lock()
 	s.intentionalStop = false
+	hook := s.kernelStartedHook
 	s.stateMu.Unlock()
 
 	out, err := s.runWithTimeout("-start", 30*time.Second)
 	s.RecordAction("start", out, err)
+	if err == nil && hook != nil {
+		hook()
+	}
 	return out, err
 }
 
@@ -198,6 +203,7 @@ func (s *XKeenService) SwitchKernel(name string) (string, error) {
 	s.stateMu.Lock()
 	s.intentionalStop = false
 	s.inRestartUntil = s.now().Add(xkeenRestartWindow)
+	hook := s.kernelStartedHook
 	s.stateMu.Unlock()
 
 	var out string
@@ -208,7 +214,19 @@ func (s *XKeenService) SwitchKernel(name string) (string, error) {
 		out, err = s.runWithTimeout("-mihomo", 30*time.Second)
 	}
 	s.RecordAction("switch_kernel:"+name, out, err)
+	if err == nil && name == "mihomo" && hook != nil {
+		hook()
+	}
 	return out, err
+}
+
+// SetKernelStartedHook configures a callback invoked when a kernel is successfully
+// started via Start() or switched to mihomo via SwitchKernel("mihomo") (D-24).
+// The hook is invoked outside stateMu to prevent lock inversion.
+func (s *XKeenService) SetKernelStartedHook(fn func()) {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+	s.kernelStartedHook = fn
 }
 
 // IntentionalStop reports whether the kernel was stopped intentionally via panel Stop() (D-01).

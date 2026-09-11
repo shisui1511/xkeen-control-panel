@@ -318,6 +318,19 @@ func main() {
 	trafficQuotaSvc := services.NewTrafficQuotaService(cfg.DataDir, cfg.MihomoAPIURL, cfg.MihomoSecret)
 	trafficQuotaSvc.SetMihomoService(api.MihomoService())
 	trafficQuotaSvc.Start()
+	trafficQuotaSvc.SetKernelAliveCheck(func() bool {
+		if kSvc := api.KernelService(); kSvc != nil {
+			for _, info := range kSvc.List() {
+				if info.Name == "mihomo" && info.ProcessStatus == "running" {
+					return true
+				}
+			}
+		}
+		return false
+	})
+	if xSvc := api.XKeenService(); xSvc != nil {
+		xSvc.SetKernelStartedHook(trafficQuotaSvc.NotifyKernelStarted)
+	}
 	api.SetTrafficQuotaService(trafficQuotaSvc)
 	defer trafficQuotaSvc.Stop()
 

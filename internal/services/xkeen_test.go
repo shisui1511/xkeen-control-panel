@@ -334,3 +334,59 @@ func TestXKeenService_RestartWindow(t *testing.T) {
 		t.Fatal("expected invalid SwitchKernel to NOT activate restart window")
 	}
 }
+
+func TestXKeenService_KernelStartedHook(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	script := `#!/bin/sh
+if [ "$1" = "-fail" ]; then
+	exit 1
+fi
+exit 0
+`
+	if err := os.WriteFile(dummy, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewXKeenService(dummy, tmpDir)
+
+	hookCalls := 0
+	svc.SetKernelStartedHook(func() {
+		hookCalls++
+		// Verify no deadlock: calling service methods from inside the hook
+		_ = svc.IntentionalStop()
+	})
+
+	// 1. Successful Start() triggers hook
+	if _, err := svc.Start(); err != nil {
+		t.Fatalf("unexpected start error: %v", err)
+	}
+	if hookCalls != 1 {
+		t.Fatalf("expected hookCalls=1 after successful Start(), got %d", hookCalls)
+	}
+
+	// 2. Successful SwitchKernel("mihomo") triggers hook
+	if _, err := svc.SwitchKernel("mihomo"); err != nil {
+		t.Fatalf("unexpected switch error: %v", err)
+	}
+	if hookCalls != 2 {
+		t.Fatalf("expected hookCalls=2 after SwitchKernel('mihomo'), got %d", hookCalls)
+	}
+
+	// 3. SwitchKernel("xray") does NOT trigger hook
+	if _, err := svc.SwitchKernel("xray"); err != nil {
+		t.Fatalf("unexpected switch error: %v", err)
+	}
+	if hookCalls != 2 {
+		t.Fatalf("expected hookCalls=2 after SwitchKernel('xray'), got %d", hookCalls)
+	}
+
+	// 4. Failed Start() does NOT trigger hook
+	svc.BinaryPath = filepath.Join(tmpDir, "nonexistent")
+	if _, err := svc.Start(); err == nil {
+		t.Fatal("expected error with nonexistent binary")
+	}
+	if hookCalls != 2 {
+		t.Fatalf("expected hookCalls=2 after failed Start(), got %d", hookCalls)
+	}
+}
