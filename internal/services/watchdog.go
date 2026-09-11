@@ -334,30 +334,6 @@ func splitIptablesRule(line string) []string {
 	return args
 }
 
-// disarmTProxyFamily removes every mangle-table rule that installs XKeen's
-// TPROXY interception, for one iptables family (saveBin/delBin is either
-// "iptables-save"/"iptables" or "ip6tables-save"/"ip6tables"). It lists the
-// live rules via saveBin and identifies matches two ways:
-//  1. any rule invoking the real `-j TPROXY` netfilter target (the
-//     interception mechanism XKeen actually uses per this project's own
-//     analysis — see tproxyTarget), regardless of which chain it lives in;
-//  2. any rule mentioning tproxyChainMarker as a fallback, in case a given
-//     build names its chain/comment "XKEEN_TPROXY" literally.
-//
-// If a match (1) lives in a custom (non-builtin) chain, this also removes
-// the jump rule(s) that reference that chain (e.g. "-A PREROUTING -j
-// xkeen"), so the interception is fully disarmed rather than leaving a
-// dangling-but-still-invoked custom chain. Each matching "-A ..." line is
-// converted to the equivalent "-D ..." invocation and executed — the exact
-// rule signature is discovered live rather than hardcoded/guessed.
-//
-// Returns the number of rules removed and whether the operation can be
-// trusted as complete. ok is true both when rules were found and removed and
-// when the binary simply isn't present on this system (ip6tables may not be
-// installed on all router variants — that's not a failure of the disarm
-// attempt). ok is false only on a genuine execution failure such as xtables
-// lock contention or a permission error, where we can't tell whether the
-// interception rule is actually gone.
 // listMangleRules lists all rule appending lines ("-A ") from the mangle table using saveBin.
 func listMangleRules(ctx context.Context, saveBin string) ([]string, error) {
 	saveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -421,8 +397,30 @@ func selectTproxyRules(lines []string) map[string]bool {
 	return toDelete
 }
 
-// disarmTProxyFamily removes TPROXY interception rules for a given family (v4 or v6)
-// and confirms their removal via re-reading the mangle table.
+// disarmTProxyFamily removes every mangle-table rule that installs XKeen's
+// TPROXY interception, for one iptables family (saveBin/delBin is either
+// "iptables-save"/"iptables" or "ip6tables-save"/"ip6tables"). It lists the
+// live rules via saveBin and identifies matches two ways:
+//  1. any rule invoking the real `-j TPROXY` netfilter target (the
+//     interception mechanism XKeen actually uses per this project's own
+//     analysis — see tproxyTarget), regardless of which chain it lives in;
+//  2. any rule mentioning tproxyChainMarker as a fallback, in case a given
+//     build names its chain/comment "XKEEN_TPROXY" literally.
+//
+// If a match (1) lives in a custom (non-builtin) chain, this also removes
+// the jump rule(s) that reference that chain (e.g. "-A PREROUTING -j
+// xkeen"), so the interception is fully disarmed rather than leaving a
+// dangling-but-still-invoked custom chain. Each matching "-A ..." line is
+// converted to the equivalent "-D ..." invocation and executed — the exact
+// rule signature is discovered live rather than hardcoded/guessed.
+//
+// Returns the number of rules removed and whether the operation can be
+// trusted as complete. ok is true both when rules were found and removed and
+// when the binary simply isn't present on this system (ip6tables may not be
+// installed on all router variants — that's not a failure of the disarm
+// attempt). ok is false only on a genuine execution failure such as xtables
+// lock contention or a permission error, where we can't tell whether the
+// interception rule is actually gone.
 func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []string) (removed int, ok bool) {
 	lines, err := listMangleRules(ctx, saveBin)
 	if err != nil {
