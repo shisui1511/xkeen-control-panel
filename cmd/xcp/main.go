@@ -112,12 +112,13 @@ func main() {
 		goExp = "none (greenteagc default)"
 	}
 
-	// Setup logging to file if configured with size-based rotation (1 MB)
+	// Setup logging to file if configured with size-based rotation (1 MB) and deduplication (D-16, D-38)
 	if cfg.XCPLogPath != "" {
-		logWriter, err := utils.NewRotateWriter(cfg.XCPLogPath, 1*1024*1024)
+		rotator, err := utils.NewRotateWriter(cfg.XCPLogPath, 1*1024*1024)
 		if err == nil {
-			log.SetOutput(logWriter)
-			defer logWriter.Close()
+			dedupWriter := utils.NewDeduplicatingWriter(rotator)
+			log.SetOutput(dedupWriter)
+			defer dedupWriter.Close()
 		} else {
 			log.Printf("Failed to initialize log rotator for %s: %v", cfg.XCPLogPath, err)
 		}

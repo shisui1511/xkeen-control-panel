@@ -2,6 +2,9 @@ package utils
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -304,5 +307,111 @@ func TestDeduplicatingWriter_BufferMutation(t *testing.T) {
 	lines := mock.Lines()
 	if len(lines) != 1 || lines[0] != "original message" {
 		t.Fatalf("buffer mutation corrupted stored line: %v", lines)
+	}
+}
+
+// Test 9: суточная симуляция простоя ядра на реальной цепочке записи в файл (целевой сценарий)
+func TestDeduplicatingWriter_DailySimulation(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "xcp.log")
+
+	rotator, err := NewRotateWriter(logPath, 1*1024*1024)
+	if err != nil {
+		t.Fatalf("failed to create RotateWriter: %v", err)
+	}
+
+	w := NewDeduplicatingWriter(rotator)
+	currTime := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	w.now = func() time.Time { return currTime }
+
+	firstLine := "2026/09/12 12:00:00 Watchdog: kernel health check failed (1/3), reason: XKeen is not running\n"
+	w.Write([]byte(firstLine))
+
+	const totalIterations = 2880 // 24h * 60m / 0.5m = 2880 checks at 30s
+	for i := 2; i <= totalIterations; i++ {
+		currTime = currTime.Add(30 * time.Second)
+
+		if i <= 18 {
+			w.Write([]byte("2026/09/12 12:00:00 Watchdog: kernel health check failed (3/3), reason: XKeen is not running\n"))
+			if i == 3 || i == 4 || i == 6 || i == 10 || i == 18 {
+				w.Write([]byte(fmt.Sprintf("2026/09/12 12:00:00 Watchdog: EmergencyDisarmTProxy failed (attempt %d/5)\n", i%5+1)))
+			}
+		} else if i == 19 {
+			w.Write([]byte("2026/09/12 12:00:00 Watchdog: entered degraded state after 5 failed emergency disarm attempt(s)\n"))
+			w.Write([]byte("2026/09/12 12:00:00 TrafficQuotaService: kernel stopped, entering sleep mode\n"))
+		}
+
+		// 24 unique messages from other subsystems, once per hour (every 120 cycles)
+		if i%120 == 0 {
+			w.Write([]byte(fmt.Sprintf("2026/09/12 12:00:00 Subsystem check hour %d: status OK\n", i/120)))
+		}
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close writer: %v", err)
+	}
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(string(content), "\n"), "\n")
+	totalLines := len(lines)
+
+	// Assertion 1: total lines <= 100
+	if totalLines > 100 {
+		t.Fatalf("expected <= 100 lines, got %d:\n%s", totalLines, string(content))
+	}
+
+	// Assertion 2: no rotation files (xcp.log.1, xcp.log.2)
+	if _, err := os.Stat(logPath + ".1"); err == nil {
+		t.Fatalf("expected no rotation file %s.1", logPath)
+	}
+	if _, err := os.Stat(logPath + ".2"); err == nil {
+		t.Fatalf("expected no rotation file %s.2", logPath)
+	}
+
+	// Assertion 3: first line present verbatim
+	if len(lines) == 0 || lines[0] != strings.TrimRight(firstLine, "\n") {
+		t.Fatalf("first line not preserved verbatim: expected %q, got %q", strings.TrimRight(firstLine, "\n"), lines[0])
+	}
+}
+
+// Test 10: измерение патологического худшего случая (непрерывный суточный повтор одного сообщения)
+func TestDeduplicatingWriter_ContinuousRepeatBudget(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "xcp.log")
+
+	rotator, err := NewRotateWriter(logPath, 1*1024*1024)
+	if err != nil {
+		t.Fatalf("failed to create RotateWriter: %v", err)
+	}
+
+	w := NewDeduplicatingWriter(rotator)
+	currTime := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	w.now = func() time.Time { return currTime }
+
+	const totalIterations = 2880 // 24h at 30s intervals
+	for i := 1; i <= totalIterations; i++ {
+		w.Write([]byte("2026/09/12 12:00:00 Continuous repetitive message\n"))
+		currTime = currTime.Add(30 * time.Second)
+	}
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("failed to close writer: %v", err)
+	}
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(string(content), "\n"), "\n")
+	totalLines := len(lines)
+
+	maxAllowed := int(24*time.Hour/dedupPeriodicFlush) + 2
+	if totalLines > maxAllowed {
+		t.Fatalf("expected at most %d lines (24h/periodicFlush + 2), got %d", maxAllowed, totalLines)
 	}
 }
