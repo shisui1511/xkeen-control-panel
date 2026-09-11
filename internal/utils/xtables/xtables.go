@@ -14,8 +14,8 @@ import (
 
 var (
 	mu       sync.Mutex
-	cached   []string
-	haveGood bool
+	cached   = make(map[string][]string)
+	haveGood = make(map[string]bool)
 )
 
 // candidateWaitArgs defines the probe ladder from most capable to most compatible.
@@ -39,7 +39,6 @@ var argParseFailureMarkers = []string{
 
 const (
 	probeTimeout = 5 * time.Second
-	probeBinary  = "iptables"
 )
 
 // WaitArgs probes and returns the xtables lock-waiting argument slice supported
@@ -47,10 +46,20 @@ const (
 // of the process. Failures (e.g. lock contention or missing binary) are not cached
 // and return an empty slice for the current call only.
 func WaitArgs(ctx context.Context) []string {
+	return WaitArgsFor(ctx, "iptables")
+}
+
+// WaitArgsFor probes and returns the xtables lock-waiting argument slice supported
+// by the specified binary (e.g. "iptables", "ip6tables"). Successful results are
+// cached per binary for the lifetime of the process.
+func WaitArgsFor(ctx context.Context, probeBinary string) []string {
+	if probeBinary == "" {
+		probeBinary = "iptables"
+	}
 	mu.Lock()
 	defer mu.Unlock()
-	if haveGood {
-		return append([]string{}, cached...)
+	if haveGood[probeBinary] {
+		return append([]string{}, cached[probeBinary]...)
 	}
 
 	for _, args := range candidateWaitArgs {
@@ -60,9 +69,9 @@ func WaitArgs(ctx context.Context) []string {
 		cancel()
 
 		if err == nil {
-			cached = append([]string{}, args...)
-			haveGood = true
-			return append([]string{}, cached...)
+			cached[probeBinary] = append([]string{}, args...)
+			haveGood[probeBinary] = true
+			return append([]string{}, cached[probeBinary]...)
 		}
 
 		if isCommandNotFound(err) {
@@ -121,6 +130,6 @@ func isCommandNotFound(err error) bool {
 func ResetForTest() {
 	mu.Lock()
 	defer mu.Unlock()
-	haveGood = false
-	cached = nil
+	haveGood = make(map[string]bool)
+	cached = make(map[string][]string)
 }

@@ -263,10 +263,11 @@ func (w *WatchdogService) EmergencyDisarmTProxy() DisarmOutcome {
 		delV6 = "ip6tables"
 	}
 
-	waitArgs := xtables.WaitArgs(ctx)
+	waitArgsV4 := xtables.WaitArgsFor(ctx, delV4)
+	waitArgsV6 := xtables.WaitArgsFor(ctx, delV6)
 
-	removedV4, okV4 := disarmTProxyFamily(ctx, saveV4, delV4, waitArgs)
-	removedV6, okV6 := disarmTProxyFamily(ctx, saveV6, delV6, waitArgs)
+	removedV4, okV4 := disarmTProxyFamily(ctx, saveV4, delV4, waitArgsV4)
+	removedV6, okV6 := disarmTProxyFamily(ctx, saveV6, delV6, waitArgsV6)
 
 	if !okV4 || !okV6 {
 		log.Printf("Watchdog: EmergencyDisarmTProxy incomplete (ipv4 ok=%v removed=%d, ipv6 ok=%v removed=%d) — TPROXY interception may still be active",

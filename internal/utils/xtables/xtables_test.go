@@ -44,7 +44,7 @@ func TestWaitArgs_FullDialect(t *testing.T) {
 	}
 
 	mu.Lock()
-	good := haveGood
+	good := haveGood["iptables"]
 	mu.Unlock()
 	if !good {
 		t.Fatal("expected haveGood=true after successful probe")
@@ -76,7 +76,7 @@ exit 0
 	}
 
 	mu.Lock()
-	good := haveGood
+	good := haveGood["iptables"]
 	mu.Unlock()
 	if !good {
 		t.Fatal("expected haveGood=true after successful probe")
@@ -99,7 +99,7 @@ exit 4
 
 	// (2) internal flag haveGood remains false
 	mu.Lock()
-	good := haveGood
+	good := haveGood["iptables"]
 	mu.Unlock()
 	if good {
 		t.Fatal("expected haveGood=false when probe hit xtables lock busy")
@@ -116,7 +116,7 @@ exit 4
 	}
 
 	mu.Lock()
-	good2 := haveGood
+	good2 := haveGood["iptables"]
 	mu.Unlock()
 	if !good2 {
 		t.Fatal("expected haveGood=true after successful recovery probe")
@@ -134,7 +134,7 @@ func TestWaitArgs_MissingBinary(t *testing.T) {
 	}
 
 	mu.Lock()
-	good := haveGood
+	good := haveGood["iptables"]
 	mu.Unlock()
 	if good {
 		t.Fatal("expected haveGood=false when iptables is missing")
@@ -201,10 +201,64 @@ exit 0
 	}
 
 	mu.Lock()
-	good := haveGood
+	good := haveGood["iptables"]
 	mu.Unlock()
 	if !good {
 		t.Fatal("expected haveGood=true after fallback to -w succeeded")
 	}
 }
+
+// TestWaitArgsFor_IndependentPerBinary verifies WR-03:
+// WaitArgsFor probes and caches per-binary independently so that differing
+// dialects between iptables (e.g. -w 5) and ip6tables (e.g. -w) do not
+// overwrite each other.
+func TestWaitArgsFor_IndependentPerBinary(t *testing.T) {
+	ResetForTest()
+	dir := t.TempDir()
+
+	// fake iptables supports -w 5
+	v4Script := "#!/bin/sh\nexit 0\n"
+	v4Bin := filepath.Join(dir, "iptables")
+	if err := os.WriteFile(v4Bin, []byte(v4Script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// fake ip6tables rejects 5 after -w, accepts -w
+	v6Script := `#!/bin/sh
+PREV=""
+for arg in "$@"; do
+    if [ "$PREV" = "-w" ] && [ "$arg" = "5" ]; then
+        echo "Bad argument '5'" >&2
+        exit 2
+    fi
+    PREV="$arg"
+done
+exit 0
+`
+	v6Bin := filepath.Join(dir, "ip6tables")
+	if err := os.WriteFile(v6Bin, []byte(v6Script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	argsV4 := WaitArgsFor(context.Background(), "iptables")
+	expectedV4 := []string{"-w", "5"}
+	if !equalSlices(argsV4, expectedV4) {
+		t.Fatalf("expected iptables args %v, got %v", expectedV4, argsV4)
+	}
+
+	argsV6 := WaitArgsFor(context.Background(), "ip6tables")
+	expectedV6 := []string{"-w"}
+	if !equalSlices(argsV6, expectedV6) {
+		t.Fatalf("expected ip6tables args %v, got %v", expectedV6, argsV6)
+	}
+
+	// Re-check iptables from cache to ensure not overwritten by ip6tables probe
+	argsV4Cached := WaitArgsFor(context.Background(), "iptables")
+	if !equalSlices(argsV4Cached, expectedV4) {
+		t.Fatalf("expected cached iptables args %v, got %v", expectedV4, argsV4Cached)
+	}
+}
+
 
