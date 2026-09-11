@@ -10,6 +10,7 @@
   } from './stores';
   import { usePoller } from './lib/poller';
   import Skeleton from './components/Skeleton.svelte';
+  import Button from './components/Button.svelte';
   import { apiFetch } from './lib/api';
   import { activateRestartGrace } from './lib/serviceGrace';
   import MihomoSocketMigrateModal from './components/mihomo/MihomoSocketMigrateModal.svelte';
@@ -57,7 +58,7 @@
 
   let kernels = $state<Kernel[]>([]);
   let kernelsLoaded = $state(false);
-  const statusIntervals: Record<string, ReturnType<typeof setInterval>> = {};
+  const statusTimeouts: Record<string, ReturnType<typeof setTimeout>> = {};
 
   // Restart log
   interface RestartLogEntry {
@@ -83,6 +84,9 @@
   }
 
   let watchdogStatus = $state<WatchdogStatus | null>(null);
+  let isResettingWatchdog = $state(false);
+  let statusLoaded = $state(false);
+  let statusPollError = $state(false);
 
   const watchdogBadge = $derived.by(() => {
     if (!watchdogStatus?.state) return null;
@@ -100,6 +104,31 @@
     }
   });
 
+  async function handleResetWatchdog() {
+    if (isResettingWatchdog) return;
+    isResettingWatchdog = true;
+    try {
+      const res = await apiFetch('/api/service/watchdog/reset', { method: 'POST' });
+      if (!res.ok) {
+        let errMessage = '';
+        try {
+          const errData = await res.json();
+          errMessage = errData?.error || errData?.message || '';
+        } catch (_) {
+          errMessage = await res.text().catch(() => '');
+        }
+        showToast('error', $t('watchdog.reset_failed', { error: errMessage || res.statusText }));
+        return;
+      }
+      await fetchStatus();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', $t('watchdog.reset_failed', { error: e?.message || $t('app.error') }));
+    } finally {
+      isResettingWatchdog = false;
+    }
+  }
+
   async function fetchRestartLog() {
     try {
       const res = await apiFetch('/api/service/restart-log');
@@ -116,7 +145,8 @@
     const map: Record<string, string> = {
       start: $t('svc.log_action_start'),
       stop: $t('svc.log_action_stop'),
-      restart: $t('svc.log_action_restart')
+      restart: $t('svc.log_action_restart'),
+      watchdog_reset: $t('svc.log_action_watchdog_reset')
     };
     if (action.startsWith('switch_kernel:')) {
       return $t('svc.log_action_switch') + ' ' + action.split(':')[1];
@@ -146,11 +176,14 @@
     try {
       const res = await apiFetch('/api/service/status', { signal });
       if (res.ok) {
+        statusPollError = false;
         const text = await res.text();
         try {
           const parsed = JSON.parse(text);
           if (parsed && parsed.success && parsed.data) {
-            watchdogStatus = parsed.data.watchdog ?? null;
+            if (parsed.data.watchdog !== undefined) {
+              watchdogStatus = parsed.data.watchdog;
+            }
             xkeenInfo = {
               isRunning: parsed.data.is_running,
               activeKernel: parsed.data.active_kernel || '',
@@ -178,6 +211,7 @@
           parseRawText(text);
         }
       } else {
+        statusPollError = true;
         xkeenStatus = $t('app.error');
         xkeenInfo = {
           isRunning: false,
@@ -191,6 +225,7 @@
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       if (e?.status === 401) return;
+      statusPollError = true;
       xkeenStatus = $t('app.unavailable');
       xkeenInfo = {
         isRunning: false,
@@ -201,6 +236,8 @@
         raw: $t('app.unavailable')
       };
       throw e;
+    } finally {
+      statusLoaded = true;
     }
   }
 
@@ -241,7 +278,7 @@
         const list = Array.isArray(envelope) ? envelope : (envelope.data ?? []);
         kernels = list;
         kernels.forEach((k: (typeof kernels)[0]) => {
-          if (k.status !== 'idle' && !statusIntervals[k.name]) {
+          if (k.status !== 'idle' && !statusTimeouts[k.name]) {
             startPolling(k.name);
           }
         });
@@ -421,7 +458,7 @@
 
   function checkIfFinishedChecking() {
     const isAnyChecking =
-      Object.keys(statusIntervals).length > 0 || kernels.some((k) => k.status === 'checking');
+      Object.keys(statusTimeouts).length > 0 || kernels.some((k) => k.status === 'checking');
     if (!isAnyChecking) {
       isKernelChecking.set(false);
     }
@@ -439,14 +476,14 @@
           kernels = [...kernels];
         }
         if (data.status === 'idle' || data.status === 'done' || data.status === 'failed') {
-          clearInterval(statusIntervals[name]);
-          delete statusIntervals[name];
+          clearTimeout(statusTimeouts[name]);
+          delete statusTimeouts[name];
           fetchKernels();
           checkIfFinishedChecking();
         }
       } else {
-        clearInterval(statusIntervals[name]);
-        delete statusIntervals[name];
+        clearTimeout(statusTimeouts[name]);
+        delete statusTimeouts[name];
         const idx = kernels.findIndex((k) => k.name === name);
         if (
           idx >= 0 &&
@@ -461,8 +498,8 @@
       }
     } catch (e: any) {
       if (e?.status === 401) return;
-      clearInterval(statusIntervals[name]);
-      delete statusIntervals[name];
+      clearTimeout(statusTimeouts[name]);
+      delete statusTimeouts[name];
       const idx = kernels.findIndex((k) => k.name === name);
       if (idx >= 0) {
         kernels[idx] = { ...kernels[idx], status: 'failed' };
@@ -473,9 +510,15 @@
   }
 
   function startPolling(name: string) {
-    if (statusIntervals[name]) clearInterval(statusIntervals[name]);
+    if (statusTimeouts[name]) clearTimeout(statusTimeouts[name]);
     fetchKernelStatus(name);
-    statusIntervals[name] = setInterval(() => fetchKernelStatus(name), 2000);
+    const scheduleNext = () => {
+      statusTimeouts[name] = setTimeout(() => {
+        fetchKernelStatus(name);
+        scheduleNext();
+      }, 2000);
+    };
+    scheduleNext();
   }
 
   let xray = $derived(Array.isArray(kernels) ? kernels.find((k) => k.name === 'xray') : undefined);
@@ -516,7 +559,7 @@
     return () => {
       kernelPoller.stop();
       statusPoller.stop();
-      Object.values(statusIntervals).forEach(clearInterval);
+      Object.values(statusTimeouts).forEach(clearTimeout);
     };
   });
 </script>
@@ -1023,6 +1066,68 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Watchdog Card (WD-06, D-31) -->
+  <div class="card watchdog-card">
+    <div class="card-head-row">
+      <div>
+        <h2 class="card-title">{$t('watchdog.section_title')}</h2>
+        {#if statusPollError}
+          <p class="card-subtitle watchdog-stale-text">{$t('watchdog.stale_note')}</p>
+        {/if}
+      </div>
+      {#if watchdogBadge}
+        <span class={watchdogBadge.cssClass}>{$t(watchdogBadge.labelKey)}</span>
+      {/if}
+    </div>
+
+    {#if !statusLoaded && !watchdogStatus}
+      <div class="watchdog-skeleton">
+        <Skeleton type="text-line" width="60%" />
+        <Skeleton type="text-line" width="40%" />
+      </div>
+    {:else if watchdogStatus}
+      {#if watchdogStatus.state === 'armed' || watchdogStatus.state === 'idle'}
+        <div class="watchdog-no-incidents">
+          {$t('watchdog.no_incidents')}
+        </div>
+      {:else}
+        <div class="watchdog-content">
+          <div
+            class="watchdog-row"
+            class:watchdog-interception-alert={watchdogStatus.interception_active}
+          >
+            <span class="watchdog-label">
+              {$t(
+                watchdogStatus.interception_active
+                  ? 'watchdog.interception_active'
+                  : 'watchdog.interception_cleared'
+              )}
+            </span>
+          </div>
+          {#if watchdogStatus.disarm_attempts > 0}
+            <div class="watchdog-row">
+              <span class="watchdog-label">
+                {$t('watchdog.attempts', { n: watchdogStatus.disarm_attempts })}
+              </span>
+            </div>
+          {/if}
+          {#if watchdogStatus.last_disarm_error}
+            <div class="watchdog-row watchdog-error-row">
+              <span class="watchdog-label">
+                {$t('watchdog.last_error', { error: watchdogStatus.last_disarm_error })}
+              </span>
+            </div>
+          {/if}
+        </div>
+        <div class="watchdog-footer">
+          <Button variant="secondary" loading={isResettingWatchdog} onclick={handleResetWatchdog}>
+            {$t(watchdogStatus.state === 'degraded' ? 'watchdog.cta_retry' : 'watchdog.cta_reset')}
+          </Button>
+        </div>
+      {/if}
+    {/if}
   </div>
 
   <!-- Bottom Grid: Restart History & Entware System Status (SRV-03, SRV-04) -->
@@ -1635,6 +1740,59 @@
     font-size: 11px;
     color: var(--fg-dim);
     margin-top: 2px;
+  }
+
+  .watchdog-card {
+    margin-bottom: var(--spacing-6, 24px);
+  }
+
+  .watchdog-stale-text {
+    font-size: var(--font-size-xs, 12px);
+    color: var(--fg-dim);
+  }
+
+  .watchdog-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2, 8px);
+    padding: var(--spacing-2, 8px) 0;
+  }
+
+  .watchdog-no-incidents {
+    font-size: var(--font-size-sm, 13px);
+    color: var(--fg-secondary);
+    padding: var(--spacing-2, 8px) 0;
+  }
+
+  .watchdog-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-2, 8px);
+    padding: var(--spacing-2, 8px) 0;
+  }
+
+  .watchdog-row {
+    font-size: var(--font-size-sm, 13px);
+    color: var(--fg-primary);
+  }
+
+  .watchdog-interception-alert {
+    color: var(--danger);
+    font-weight: 600;
+  }
+
+  .watchdog-error-row {
+    font-family: var(--font-family-mono, monospace);
+    font-size: var(--font-size-xs, 12px);
+    color: var(--danger);
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+  .watchdog-footer {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: var(--spacing-3, 12px);
   }
 
   @media (max-width: 900px) {

@@ -2053,5 +2053,20 @@
   "watchdog.state_armed": "В строю",
   "watchdog.state_idle": "Ядро остановлено",
   "watchdog.state_degraded": "Деградация",
-  "watchdog.state_disarmed": "Перехват снят"
+  "watchdog.state_disarmed": "Перехват снят",
+  "watchdog.banner_degraded_title": "Watchdog не может снять перехват TPROXY",
+  "watchdog.banner_degraded_desc": "5 попыток подряд не удались. Перехват трафика может быть всё ещё активен. Проверьте ядро и повторите вручную.",
+  "watchdog.banner_disarmed_title": "Аварийный disarm выполнен",
+  "watchdog.banner_disarmed_desc": "Watchdog снял перехват TPROXY после сбоя ядра. Прямое подключение активно.",
+  "watchdog.cta_retry": "Повторить попытку",
+  "watchdog.cta_reset": "Сбросить",
+  "watchdog.reset_failed": "Не удалось выполнить сброс: {error}",
+  "watchdog.stale_note": "Данные могут быть неактуальны (сбой опроса)",
+  "watchdog.section_title": "Watchdog",
+  "watchdog.attempts": "Попыток disarm: {n} из 5",
+  "watchdog.last_error": "Последняя ошибка: {error}",
+  "watchdog.interception_active": "Перехват TPROXY может быть активен",
+  "watchdog.interception_cleared": "Перехват TPROXY снят",
+  "watchdog.no_incidents": "Инцидентов не зафиксировано",
+  "svc.log_action_watchdog_reset": "Сброс Watchdog"
 }

@@ -98,6 +98,65 @@
   let statusError = $state(false);
   let statusLoading = $state(true);
 
+  interface WatchdogStatus {
+    state: string;
+    consecutive_failures: number;
+    disarm_attempts: number;
+    last_disarm_error: string;
+    interception_active: boolean;
+    interception_family: string;
+    next_attempt_at: number;
+    degraded_at: number;
+  }
+
+  let watchdogStatus = $state<WatchdogStatus | null>(null);
+  let isResettingWatchdog = $state(false);
+
+  const isWatchdogIncident = $derived(
+    watchdogStatus?.state === 'degraded' || watchdogStatus?.state === 'disarmed'
+  );
+
+  const watchdogBadge = $derived.by(() => {
+    if (!watchdogStatus?.state) return null;
+    switch (watchdogStatus.state) {
+      case 'armed':
+        return { cssClass: 'badge badge-success', labelKey: 'watchdog.state_armed' };
+      case 'idle':
+        return { cssClass: 'badge', labelKey: 'watchdog.state_idle' };
+      case 'degraded':
+        return { cssClass: 'badge badge-danger', labelKey: 'watchdog.state_degraded' };
+      case 'disarmed':
+        return { cssClass: 'badge badge-warning', labelKey: 'watchdog.state_disarmed' };
+      default:
+        return null;
+    }
+  });
+
+  async function handleResetWatchdog() {
+    if (isResettingWatchdog) return;
+    isResettingWatchdog = true;
+    try {
+      const res = await apiFetch('/api/service/watchdog/reset', { method: 'POST' });
+      if (!res.ok) {
+        let errMessage = '';
+        try {
+          const errData = await res.json();
+          errMessage = errData?.error || errData?.message || '';
+        } catch (_) {
+          errMessage = await res.text().catch(() => '');
+        }
+        showToast('error', $t('watchdog.reset_failed', { error: errMessage || res.statusText }));
+        return;
+      }
+      await fetchLiveStatus();
+    } catch (e: any) {
+      if (e?.status === 401) return;
+      showToast('error', $t('watchdog.reset_failed', { error: e?.message || $t('app.error') }));
+    } finally {
+      isResettingWatchdog = false;
+    }
+  }
+
   interface SystemStats {
     memory: { total: number; used: number; free: number };
     disk: { total: number; used: number; free: number };
@@ -252,6 +311,9 @@
           if (parsed && parsed.success && parsed.data) {
             isXkeenRunning = parsed.data.is_running;
             xkeenRaw = parsed.data.raw || '';
+            if (parsed.data.watchdog) {
+              watchdogStatus = parsed.data.watchdog;
+            }
           } else {
             xkeenRaw = text;
             isXkeenRunning = guessXkeenRunning(text);
@@ -260,6 +322,8 @@
           xkeenRaw = text;
           isXkeenRunning = guessXkeenRunning(text);
         }
+      } else {
+        statusError = true;
       }
 
       const mihomoText =
@@ -444,7 +508,7 @@
       if (basePath === 'mihomo-gen' || basePath === 'constructor') {
         return 'editor';
       }
-      return basePath;
+      return basePath || 'dashboard';
     }
     return 'dashboard';
   }
@@ -989,10 +1053,56 @@
           {/if}
 
           <!-- Problems Panel (conditional) -->
-          {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring}
+          {#if (systemStats && systemStats.invalid_config) || ($capabilities !== null && !$capabilities?.mihomo?.api_reachable && $capabilities?.mihomo?.process_running) || ($capabilities !== null && !$capabilities?.kernels?.xray?.installed && !$capabilities?.kernels?.mihomo?.installed) || ($capabilities !== null && $capabilities?.mihomo?.is_insecure_lan) || isKernelCrashed || isDiskLow || isSSLExpiring || isWatchdogIncident}
             <div style="margin-bottom: 18px;">
               <Card title={$t('dash.problems_panel')}>
                 <div class="problems-list">
+                  {#if isWatchdogIncident && watchdogStatus}
+                    <div
+                      class="problem-item {watchdogStatus.state === 'degraded'
+                        ? 'alert-error'
+                        : 'alert-warning'}"
+                    >
+                      <div class="problem-content">
+                        <span class="problem-icon"><Icon name="warning" size={16} /></span>
+                        <div>
+                          <strong class="problem-title">
+                            {$t(
+                              watchdogStatus.state === 'degraded'
+                                ? 'watchdog.banner_degraded_title'
+                                : 'watchdog.banner_disarmed_title'
+                            )}
+                          </strong>
+                          <div class="problem-desc">
+                            {$t(
+                              watchdogStatus.state === 'degraded'
+                                ? 'watchdog.banner_degraded_desc'
+                                : 'watchdog.banner_disarmed_desc'
+                            )}
+                            {#if statusError}
+                              <span class="watchdog-stale-desc">({$t('watchdog.stale_note')})</span>
+                            {/if}
+                          </div>
+                          {#if watchdogStatus.last_disarm_error}
+                            <div class="watchdog-error-detail">
+                              {watchdogStatus.last_disarm_error}
+                            </div>
+                          {/if}
+                        </div>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        loading={isResettingWatchdog}
+                        onclick={handleResetWatchdog}
+                      >
+                        {$t(
+                          watchdogStatus.state === 'degraded'
+                            ? 'watchdog.cta_retry'
+                            : 'watchdog.cta_reset'
+                        )}
+                      </Button>
+                    </div>
+                  {/if}
                   {#if isKernelCrashed}
                     <div class="problem-item alert-error">
                       <div class="problem-content">
@@ -1134,6 +1244,11 @@
               <div class="dash-col-left">
                 <!-- Service Status Group (DASH-03) -->
                 <div class="dash-section">
+                  {#if watchdogBadge}
+                    <div class="dash-watchdog-badge-row">
+                      <span class={watchdogBadge.cssClass}>{$t(watchdogBadge.labelKey)}</span>
+                    </div>
+                  {/if}
                   <ServiceStatusGroup
                     {serviceStatus}
                     capabilities={$capabilities}
@@ -1578,6 +1693,28 @@
     padding: 4px 8px;
     margin-left: auto;
     flex-shrink: 0;
+  }
+
+  .dash-watchdog-badge-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: var(--spacing-2, 8px);
+  }
+
+  .watchdog-stale-desc {
+    display: inline-block;
+    margin-left: var(--spacing-1, 4px);
+    color: var(--fg-dim);
+    font-size: var(--font-size-xs, 12px);
+  }
+
+  .watchdog-error-detail {
+    font-family: var(--font-family-mono, monospace);
+    font-size: var(--font-size-xs, 12px);
+    color: var(--fg-secondary);
+    margin-top: var(--spacing-2, 8px);
+    word-break: break-word;
+    white-space: pre-wrap;
   }
 
   /* Fullscreen editor layout geometry (.dashboard-layout.editor-active,

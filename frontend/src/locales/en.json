@@ -2054,5 +2054,20 @@
   "watchdog.state_armed": "Armed",
   "watchdog.state_idle": "Idle",
   "watchdog.state_degraded": "Degraded",
-  "watchdog.state_disarmed": "Disarmed"
+  "watchdog.state_disarmed": "Disarmed",
+  "watchdog.banner_degraded_title": "Watchdog could not clear TPROXY interception",
+  "watchdog.banner_degraded_desc": "5 consecutive attempts failed. Traffic interception may still be active. Check the kernel and retry manually.",
+  "watchdog.banner_disarmed_title": "Emergency disarm completed",
+  "watchdog.banner_disarmed_desc": "Watchdog cleared TPROXY interception after a kernel failure. Direct connection is active.",
+  "watchdog.cta_retry": "Retry Disarm",
+  "watchdog.cta_reset": "Reset Watchdog",
+  "watchdog.reset_failed": "Reset failed: {error}",
+  "watchdog.stale_note": "Data may be out of date (poll failed)",
+  "watchdog.section_title": "Watchdog",
+  "watchdog.attempts": "Disarm attempts: {n} of 5",
+  "watchdog.last_error": "Last error: {error}",
+  "watchdog.interception_active": "TPROXY interception may still be active",
+  "watchdog.interception_cleared": "TPROXY interception cleared",
+  "watchdog.no_incidents": "No incidents recorded",
+  "svc.log_action_watchdog_reset": "Watchdog reset"
 }
