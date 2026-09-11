@@ -457,7 +457,7 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 		return deleted, hasErr
 	}
 
-	delCount, _ := deleteRules(toDelete)
+	delCount, hasErr1 := deleteRules(toDelete)
 	removed += delCount
 
 	// Re-read mangle table to verify removal (second read)
@@ -468,13 +468,16 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 	}
 	remaining := selectTproxyRules(lines2)
 	if len(remaining) == 0 {
+		if hasErr1 {
+			log.Printf("Watchdog: EmergencyDisarmTProxy: rule deletion encountered errors via %s, but subsequent re-read confirmed mangle table clean", delBin)
+		}
 		return removed, true
 	}
 
 	// Race or re-installation: execute exactly one additional deletion pass
 	log.Printf("Watchdog: EmergencyDisarmTProxy: %d interception rule(s) remain after first pass — retrying one additional pass via %s",
 		len(remaining), delBin)
-	delCount2, _ := deleteRules(remaining)
+	delCount2, hasErr2 := deleteRules(remaining)
 	removed += delCount2
 
 	// Third read to confirm verdict
@@ -485,6 +488,9 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 	}
 	remaining3 := selectTproxyRules(lines3)
 	if len(remaining3) == 0 {
+		if hasErr1 || hasErr2 {
+			log.Printf("Watchdog: EmergencyDisarmTProxy: deletion encountered errors during passes via %s, but third read confirmed mangle table clean", delBin)
+		}
 		return removed, true
 	}
 
