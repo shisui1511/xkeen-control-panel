@@ -174,3 +174,37 @@ func TestWaitArgs_CachesAfterSuccess(t *testing.T) {
 		t.Fatalf("expected exactly 1 probe execution, got %d (invocations: %v)", len(lines), lines)
 	}
 }
+
+// TestWaitArgs_AdvancesOnUnrecognizedError verifies WR-01:
+// When the probe candidate fails with an error text that is not a standard arg-parse
+// string (e.g. 1.4.21 treating '5' as a non-existent chain name), the probe ladder
+// must not bail out immediately — it must continue to the next candidate (e.g. -w).
+func TestWaitArgs_AdvancesOnUnrecognizedError(t *testing.T) {
+	ResetForTest()
+	script := `#!/bin/sh
+PREV=""
+for arg in "$@"; do
+    if [ "$PREV" = "-w" ] && [ "$arg" = "5" ]; then
+        echo "iptables: No chain/target/match by that name." >&2
+        exit 1
+    fi
+    PREV="$arg"
+done
+exit 0
+`
+	writeFakeIptablesDialect(t, script)
+
+	args := WaitArgs(context.Background())
+	expected := []string{"-w"}
+	if !equalSlices(args, expected) {
+		t.Fatalf("expected %v when -w 5 produces non-arg-parse error, got %v", expected, args)
+	}
+
+	mu.Lock()
+	good := haveGood
+	mu.Unlock()
+	if !good {
+		t.Fatal("expected haveGood=true after fallback to -w succeeded")
+	}
+}
+

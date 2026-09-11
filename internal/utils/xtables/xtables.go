@@ -70,18 +70,30 @@ func WaitArgs(ctx context.Context) []string {
 			return []string{}
 		}
 
-		if !isArgParseFailure(string(out)) {
-			// Honest failure (e.g. xtables lock busy) — do not degrade the
+		if isLockBusy(string(out)) {
+			// Honest failure: xtables lock busy — do not degrade the
 			// dialect and do not cache; caller gets the most compatible
 			// variant for this call only (D-06).
-			log.Printf("xtables: probe failed with non-argument error: %v (%s); not degrading dialect and not caching",
-				err, strings.TrimSpace(string(out)))
+			log.Printf("xtables: lock busy during probe of %s %v: %v (%s); using most compatible variant for this call only (not cached)",
+				probeBinary, args, err, strings.TrimSpace(string(out)))
 			return []string{}
 		}
+
+		// Otherwise: probe failed due to unsupported dialect (e.g. 1.4.21 rejecting
+		// wait-seconds argument or treating it as chain name). Try next candidate.
+		log.Printf("xtables: probe %s %v failed (%v: %s); trying next candidate",
+			probeBinary, args, err, strings.TrimSpace(string(out)))
+		continue
 	}
 
 	log.Printf("xtables: probe exhausted without success; using most compatible variant for this call only (not cached)")
 	return []string{}
+}
+
+// isLockBusy checks if the command output indicates that xtables lock is currently held by another process.
+func isLockBusy(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "xtables lock") || strings.Contains(lower, "holding the xtables lock")
 }
 
 // isArgParseFailure checks if the command output indicates an argument parsing failure.
