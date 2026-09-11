@@ -249,6 +249,40 @@ COMMIT
 	}
 }
 
+// TestDisarmTProxyFamily_CustomChainGoto verifies IN-02:
+// If a custom chain with TPROXY interception is entered via -g (goto) rather than -j,
+// both the rule in the custom chain and the -g rule must be removed.
+func TestDisarmTProxyFamily_CustomChainGoto(t *testing.T) {
+	saveOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+:xkeen - [0:0]
+-A PREROUTING -g xkeen
+-A xkeen -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, logPath := installFakeIptables(t, saveOutput)
+
+	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if removed != 2 {
+		t.Fatalf("expected 2 rules removed (the TPROXY rule + the -g goto into its chain), got %d", removed)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("expected deletions to have been invoked: %v", err)
+	}
+	log := string(logData)
+	if !strings.Contains(log, "-D xkeen") {
+		t.Errorf("expected the TPROXY rule in the custom chain to be deleted, log:\n%s", log)
+	}
+	if !strings.Contains(log, "-D PREROUTING -g xkeen") {
+		t.Errorf("expected the PREROUTING -g goto into the custom chain to be deleted, log:\n%s", log)
+	}
+}
+
 // TestDisarmTProxyFamily_LiteralChainMarker verifies the fallback match on
 // tproxyChainMarker still works for builds that do name a chain
 // "XKEEN_TPROXY" literally.

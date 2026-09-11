@@ -355,7 +355,7 @@ func listMangleRules(ctx context.Context, saveBin string) ([]string, error) {
 // isXkeenTproxyRule reports whether an iptables rule targets TPROXY or has the XKeen marker.
 func isXkeenTproxyRule(line string, fields []string) bool {
 	for i, f := range fields {
-		if f == "-j" && i+1 < len(fields) && fields[i+1] == tproxyTarget {
+		if (f == "-j" || f == "-g") && i+1 < len(fields) && fields[i+1] == tproxyTarget {
 			return true
 		}
 	}
@@ -387,7 +387,7 @@ func selectTproxyRules(lines []string) map[string]bool {
 		for _, line := range lines {
 			fields := splitIptablesRule(line)
 			for i, f := range fields {
-				if f == "-j" && i+1 < len(fields) && customChains[fields[i+1]] {
+				if (f == "-j" || f == "-g") && i+1 < len(fields) && customChains[fields[i+1]] {
 					toDelete[line] = true
 					break
 				}
