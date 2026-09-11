@@ -209,7 +209,14 @@ if [[ "$DISARMED" = true ]] && [[ "$RULES_AFTER" -eq 0 ]]; then
     echo "$OUT_DIR"
     exit 0
 else
-    echo "DISARM NOT VERIFIED: снято правил: $((RULES_BEFORE - RULES_AFTER)), осталось: $RULES_AFTER. Артефакты сохранены в $OUT_DIR"
+    # IN-01: если RULES_AFTER > RULES_BEFORE (правило переустановлено во
+    # время опроса быстрее, чем было изначально), простая разница дает
+    # вводящее в заблуждение отрицательное число — зажимаем снизу нулём.
+    REMOVED_COUNT=$((RULES_BEFORE - RULES_AFTER))
+    if [[ "$REMOVED_COUNT" -lt 0 ]]; then
+        REMOVED_COUNT=0
+    fi
+    echo "DISARM NOT VERIFIED: снято правил: $REMOVED_COUNT, осталось: $RULES_AFTER (было: $RULES_BEFORE). Артефакты сохранены в $OUT_DIR"
     echo "$OUT_DIR"
     exit 1
 fi
