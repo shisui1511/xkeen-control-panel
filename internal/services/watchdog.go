@@ -275,7 +275,7 @@ func (w *WatchdogService) EmergencyDisarmTProxy() DisarmOutcome {
 	}
 
 	if removedV4+removedV6 == 0 {
-		log.Printf("Watchdog: EmergencyDisarmTProxy: no %s rules found in mangle table (already absent or interception not installed)", tproxyChainMarker)
+		log.Printf("Watchdog: EmergencyDisarmTProxy: no TPROXY interception rules found in mangle table (already absent or interception not installed)")
 		return DisarmAlreadyClean
 	}
 
@@ -470,6 +470,8 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 	if len(remaining) == 0 {
 		if hasErr1 {
 			log.Printf("Watchdog: EmergencyDisarmTProxy: rule deletion encountered errors via %s, but subsequent re-read confirmed mangle table clean", delBin)
+		} else if len(toDelete) > 0 && delCount == 0 {
+			log.Printf("Watchdog: EmergencyDisarmTProxy: TPROXY rules disappeared from mangle table before deletion via %s (cleared concurrently)", delBin)
 		}
 		return removed, true
 	}
