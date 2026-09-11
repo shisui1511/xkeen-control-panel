@@ -34,6 +34,26 @@ const watchdogMaxFailures = 3
 // ~2.5 minute cadence.
 const disarmedRecheckInterval = 5
 
+// Watchdog state constants for API and UI.
+const (
+	WatchdogStateArmed    = "armed"
+	WatchdogStateIdle     = "idle"
+	WatchdogStateDegraded = "degraded"
+	WatchdogStateDisarmed = "disarmed"
+)
+
+// WatchdogSnapshot captures the internal watchdog state at a single point in time.
+type WatchdogSnapshot struct {
+	State               string
+	ConsecutiveFailures int
+	DisarmAttempts      int
+	LastDisarmError     string
+	InterceptionActive  bool
+	InterceptionFamily  string
+	NextAttemptAt       time.Time
+	DegradedAt          time.Time
+}
+
 // WatchdogService supervises the health of the currently active proxy kernel
 // (Xray/Mihomo, driven via XKeenService) and acts as a circuit breaker: after
 // watchdogMaxFailures consecutive failed health checks it removes the
@@ -55,6 +75,13 @@ type WatchdogService struct {
 	disarmInFlight         bool
 	disarmEpoch            uint64
 	disarmedRecheckCounter int
+	interceptionActive     bool
+	interceptionFamily     string
+	lastResetAt            time.Time
+	disarmAttempts         int
+	nextDisarmAttempt      time.Time
+	degradedAt             time.Time
+	lastDisarmError        string
 
 	iptablesSaveBin  string
 	iptablesBin      string
@@ -158,6 +185,8 @@ func (w *WatchdogService) CheckHealth() {
 		w.disarmed = false
 		w.disarmedRecheckCounter = 0
 		w.disarmEpoch++
+		w.interceptionActive = false
+		w.interceptionFamily = ""
 		w.mu.Unlock()
 		return
 	}
@@ -184,9 +213,23 @@ func (w *WatchdogService) CheckHealth() {
 	}
 	w.mu.Unlock()
 
-	if recheckDue && w.tproxyRulePresent() {
+	if recheckDue {
+		v4, v6 := w.tproxyInterceptionFamilies()
+		var family string
+		switch {
+		case v4 && v6:
+			family = "ipv4+ipv6"
+		case v4:
+			family = "ipv4"
+		case v6:
+			family = "ipv6"
+		default:
+			family = ""
+		}
 		w.mu.Lock()
-		if w.disarmed && !w.disarmInFlight {
+		w.interceptionActive = v4 || v6
+		w.interceptionFamily = family
+		if (v4 || v6) && w.disarmed && !w.disarmInFlight {
 			log.Printf("Watchdog: TPROXY interception rule reappeared while latched disarmed — unlatching to allow a fresh disarm attempt")
 			w.disarmed = false
 		}
@@ -214,6 +257,10 @@ func (w *WatchdogService) CheckHealth() {
 			// outcome is stale and must not block the new failure cycle from disarming (CR-01).
 			if epoch == w.disarmEpoch {
 				w.disarmed = (outcome != DisarmFailed)
+				w.interceptionActive = (outcome == DisarmFailed)
+				if outcome != DisarmFailed {
+					w.interceptionFamily = ""
+				}
 			} else {
 				log.Printf("Watchdog: EmergencyDisarmTProxy outcome %v discarded — health recovered and re-failed while attempt was in flight", outcome)
 			}
@@ -230,6 +277,36 @@ func (w *WatchdogService) ConsecutiveFailures() int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.consecutiveFailures
+}
+
+// stateLocked derives the current watchdog state from latches and timestamps.
+// Must be called with w.mu held.
+func (w *WatchdogService) stateLocked() string {
+	if !w.degradedAt.IsZero() {
+		return WatchdogStateDegraded
+	}
+	if w.disarmed {
+		return WatchdogStateDisarmed
+	}
+	return WatchdogStateArmed
+}
+
+// Snapshot returns an atomic point-in-time snapshot of the watchdog state.
+// It never spawns subprocesses or queries netfilter directly.
+func (w *WatchdogService) Snapshot() WatchdogSnapshot {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	return WatchdogSnapshot{
+		State:               w.stateLocked(),
+		ConsecutiveFailures: w.consecutiveFailures,
+		DisarmAttempts:      w.disarmAttempts,
+		LastDisarmError:     w.lastDisarmError,
+		InterceptionActive:  w.interceptionActive,
+		InterceptionFamily:  w.interceptionFamily,
+		NextAttemptAt:       w.nextDisarmAttempt,
+		DegradedAt:          w.degradedAt,
+	}
 }
 
 // tproxyChainMarker is a literal chain/comment name some XKeen builds may
@@ -345,17 +422,9 @@ func (w *WatchdogService) resolveXtablesBins() (saveV4, delV4, saveV6, delV6 str
 	return saveV4, delV4, saveV6, delV6
 }
 
-// tproxyRulePresent performs a non-destructive check of both mangle tables
-// (iptables and, when present, ip6tables) for a live TPROXY interception
-// rule, without deleting anything. Used by CheckHealth's periodic re-latch
-// check (WR-03) to detect a rule that was reinstalled by an external
-// mechanism (e.g. a supervisor restart-looping XKeen) while the watchdog was
-// latched disarmed and the kernel never reported healthy again. A read
-// failure for a given family is treated as "not confirmed reinstalled"
-// rather than forcing a spurious unlatch on a transient error — a missing
-// ip6tables (xtables.IsCommandNotFound) is expected on many router variants
-// and must not be logged as one.
-func (w *WatchdogService) tproxyRulePresent() bool {
+// tproxyInterceptionFamilies performs a non-destructive check of both IPv4 and IPv6
+// mangle tables, returning whether TPROXY interception rules are present in each family.
+func (w *WatchdogService) tproxyInterceptionFamilies() (v4, v6 bool) {
 	ctx := context.Background()
 	saveV4, _, saveV6, _ := w.resolveXtablesBins()
 
@@ -367,7 +436,22 @@ func (w *WatchdogService) tproxyRulePresent() bool {
 		return len(selectTproxyRules(lines)) > 0
 	}
 
-	return check(saveV4) || check(saveV6)
+	return check(saveV4), check(saveV6)
+}
+
+// tproxyRulePresent performs a non-destructive check of both mangle tables
+// (iptables and, when present, ip6tables) for a live TPROXY interception
+// rule, without deleting anything. Used by CheckHealth's periodic re-latch
+// check (WR-03) to detect a rule that was reinstalled by an external
+// mechanism (e.g. a supervisor restart-looping XKeen) while the watchdog was
+// latched disarmed and the kernel never reported healthy again. A read
+// failure for a given family is treated as "not confirmed reinstalled"
+// rather than forcing a spurious unlatch on a transient error — a missing
+// ip6tables (xtables.IsCommandNotFound) is expected on many router variants
+// and must not be logged as one.
+func (w *WatchdogService) tproxyRulePresent() bool {
+	v4, v6 := w.tproxyInterceptionFamilies()
+	return v4 || v6
 }
 
 // splitIptablesRule splits an iptables-save rule string into individual command-line

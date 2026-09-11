@@ -2049,5 +2049,9 @@
   "mihomo.edit_rule_title": "Редактирование правила",
   "subscr.import_clipboard_desc": "Вставьте конфигурацию или ссылки напрямую из буфера обмена",
   "subscr.import_clipboard_empty": "Буфер обмена пуст",
-  "subscr.import_file_loaded": "Файл загружен"
+  "subscr.import_file_loaded": "Файл загружен",
+  "watchdog.state_armed": "В строю",
+  "watchdog.state_idle": "Ядро остановлено",
+  "watchdog.state_degraded": "Деградация",
+  "watchdog.state_disarmed": "Перехват снят"
 }

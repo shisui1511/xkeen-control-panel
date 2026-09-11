@@ -349,6 +349,7 @@ func main() {
 	// without internet access.
 	watchdogSvc := services.NewWatchdogService(api.XKeenService(), cfg.MihomoConfigDir, cfg.XRayConfigDir)
 	watchdogSvc.Start()
+	api.SetWatchdogService(watchdogSvc)
 	defer watchdogSvc.Stop()
 
 	// Unified Log Dispatcher (LOGHUB-04, LOGHUB-05, LOGHUB-06)

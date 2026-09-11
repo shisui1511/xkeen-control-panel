@@ -7,12 +7,13 @@ import (
 )
 
 type ServiceStatusResponse struct {
-	IsRunning    bool   `json:"is_running"`
-	ActiveKernel string `json:"active_kernel"`
-	PID          int    `json:"pid"`
-	Uptime       string `json:"uptime"`
-	BinaryPath   string `json:"binary_path"`
-	Raw          string `json:"raw"`
+	IsRunning    bool                    `json:"is_running"`
+	ActiveKernel string                  `json:"active_kernel"`
+	PID          int                     `json:"pid"`
+	Uptime       string                  `json:"uptime"`
+	BinaryPath   string                  `json:"binary_path"`
+	Raw          string                  `json:"raw"`
+	Watchdog     *WatchdogStatusResponse `json:"watchdog,omitempty"`
 }
 
 func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +51,11 @@ func (a *API) ServiceStatus(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(lower, "running") || strings.Contains(lower, "запущен") {
 			resp.IsRunning = true
 		}
+	}
+
+	if a.watchdogSvc != nil {
+		wd := newWatchdogStatusResponse(a.watchdogSvc.Snapshot())
+		resp.Watchdog = &wd
 	}
 
 	JSONSuccess(w, resp)

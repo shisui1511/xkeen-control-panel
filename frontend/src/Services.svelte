@@ -70,6 +70,36 @@
   let restartLog = $state<RestartLogEntry[]>([]);
   let restartLogExpanded = $state(false);
 
+  // Watchdog status
+  interface WatchdogStatus {
+    state: string;
+    consecutive_failures: number;
+    disarm_attempts: number;
+    last_disarm_error: string;
+    interception_active: boolean;
+    interception_family: string;
+    next_attempt_at: number;
+    degraded_at: number;
+  }
+
+  let watchdogStatus = $state<WatchdogStatus | null>(null);
+
+  const watchdogBadge = $derived.by(() => {
+    if (!watchdogStatus?.state) return null;
+    switch (watchdogStatus.state) {
+      case 'armed':
+        return { cssClass: 'badge badge-success', labelKey: 'watchdog.state_armed' };
+      case 'idle':
+        return { cssClass: 'badge', labelKey: 'watchdog.state_idle' };
+      case 'degraded':
+        return { cssClass: 'badge badge-danger', labelKey: 'watchdog.state_degraded' };
+      case 'disarmed':
+        return { cssClass: 'badge badge-warning', labelKey: 'watchdog.state_disarmed' };
+      default:
+        return null;
+    }
+  });
+
   async function fetchRestartLog() {
     try {
       const res = await apiFetch('/api/service/restart-log');
@@ -120,6 +150,7 @@
         try {
           const parsed = JSON.parse(text);
           if (parsed && parsed.success && parsed.data) {
+            watchdogStatus = parsed.data.watchdog ?? null;
             xkeenInfo = {
               isRunning: parsed.data.is_running,
               activeKernel: parsed.data.active_kernel || '',
@@ -569,6 +600,9 @@
             <span class="status-badge stopped">
               <span class="status-dot error"></span>{$t('svc.stopped')}
             </span>
+          {/if}
+          {#if watchdogBadge}
+            <span class={watchdogBadge.cssClass}>{$t(watchdogBadge.labelKey)}</span>
           {/if}
         </div>
       </div>

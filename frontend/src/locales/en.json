@@ -2050,5 +2050,9 @@
   "mihomo.edit_rule_title": "Edit Routing Rule",
   "subscr.import_clipboard_desc": "Paste configuration or links directly from the clipboard",
   "subscr.import_clipboard_empty": "Clipboard is empty",
-  "subscr.import_file_loaded": "File loaded"
+  "subscr.import_file_loaded": "File loaded",
+  "watchdog.state_armed": "Armed",
+  "watchdog.state_idle": "Idle",
+  "watchdog.state_degraded": "Degraded",
+  "watchdog.state_disarmed": "Disarmed"
 }
