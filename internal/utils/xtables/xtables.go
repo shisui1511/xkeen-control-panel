@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -74,7 +75,7 @@ func WaitArgsFor(ctx context.Context, probeBinary string) []string {
 			return append([]string{}, cached[probeBinary]...)
 		}
 
-		if isCommandNotFound(err) {
+		if IsCommandNotFound(err) {
 			log.Printf("xtables: %s not found on PATH; using most compatible variant for this call only (not cached)", probeBinary)
 			return []string{}
 		}
@@ -115,14 +116,14 @@ func isArgParseFailure(output string) bool {
 	return false
 }
 
-// isCommandNotFound reports whether err comes from exec failing to locate
-// the binary on PATH (as opposed to the binary running and failing).
-func isCommandNotFound(err error) bool {
+// IsCommandNotFound reports whether err comes from exec failing to locate
+// the binary on PATH or at an absolute path (as opposed to the binary running and failing).
+func IsCommandNotFound(err error) bool {
 	var execErr *exec.Error
 	if errors.As(err, &execErr) {
 		return errors.Is(execErr.Err, exec.ErrNotFound)
 	}
-	return false
+	return errors.Is(err, os.ErrNotExist)
 }
 
 // ResetForTest clears the process-wide cache so tests can re-probe against

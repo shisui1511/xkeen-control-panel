@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -418,7 +417,7 @@ func selectTproxyRules(lines []string) map[string]bool {
 func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []string) (removed int, ok bool) {
 	lines, err := listMangleRules(ctx, saveBin)
 	if err != nil {
-		if isCommandNotFound(err) {
+		if xtables.IsCommandNotFound(err) {
 			// This iptables family isn't present on this system — nothing to
 			// disarm here, not a failure.
 			return 0, true
@@ -494,15 +493,7 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 	return removed, false
 }
 
-// isCommandNotFound reports whether err comes from exec failing to locate
-// the binary on PATH (as opposed to the binary running and failing).
-func isCommandNotFound(err error) bool {
-	var execErr *exec.Error
-	if errors.As(err, &execErr) {
-		return errors.Is(execErr.Err, exec.ErrNotFound)
-	}
-	return errors.Is(err, os.ErrNotExist)
-}
+
 
 // defaultMihomoConfigYAML is a minimal, self-contained recovery config: DIRECT-only
 // routing with no external dependencies (no rule-providers/proxy-providers), so
