@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"errors"
+	"net/http"
+
 	"github.com/shisui1511/xkeen-control-panel/internal/services"
 )
 
@@ -37,4 +40,41 @@ func newWatchdogStatusResponse(s services.WatchdogSnapshot) WatchdogStatusRespon
 		NextAttemptAt:       nextAttemptAt,
 		DegradedAt:          degradedAt,
 	}
+}
+
+// WatchdogStatus returns the current snapshot of watchdog state as JSON.
+func (a *API) WatchdogStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	if a.watchdogSvc == nil {
+		JSONError(w, http.StatusServiceUnavailable, "watchdog service not available")
+		return
+	}
+	JSONSuccess(w, newWatchdogStatusResponse(a.watchdogSvc.Snapshot()))
+}
+
+// WatchdogReset triggers a manual reset of watchdog counters, latches, and cooldowns.
+func (a *API) WatchdogReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		a.errorResponse(w, a.t(r, "error.method_not_allowed"), http.StatusMethodNotAllowed)
+		return
+	}
+	if a.watchdogSvc == nil {
+		JSONError(w, http.StatusServiceUnavailable, "watchdog service not available")
+		return
+	}
+
+	snapshot, err := a.watchdogSvc.TryReset()
+	if err != nil {
+		if errors.Is(err, services.ErrWatchdogResetInFlight) || errors.Is(err, services.ErrWatchdogResetCooldown) {
+			JSONError(w, http.StatusConflict, err.Error())
+			return
+		}
+		JSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	JSONSuccess(w, newWatchdogStatusResponse(snapshot))
 }

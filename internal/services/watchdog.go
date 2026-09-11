@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -33,6 +34,15 @@ const watchdogMaxFailures = 3
 // after interception returns. At the default 30s check interval this is a
 // ~2.5 minute cadence.
 const disarmedRecheckInterval = 5
+
+// watchdogResetCooldown is the minimum interval between manual watchdog resets.
+const watchdogResetCooldown = 5 * time.Second
+
+// Sentinel errors returned by TryReset.
+var (
+	ErrWatchdogResetInFlight = errors.New("watchdog disarm in flight")
+	ErrWatchdogResetCooldown = errors.New("watchdog reset cooldown active")
+)
 
 // Watchdog state constants for API and UI.
 const (
@@ -307,6 +317,57 @@ func (w *WatchdogService) Snapshot() WatchdogSnapshot {
 		NextAttemptAt:       w.nextDisarmAttempt,
 		DegradedAt:          w.degradedAt,
 	}
+}
+
+// TryReset attempts an atomic manual reset of watchdog counters and latches.
+// Rejects with ErrWatchdogResetInFlight if a disarm operation is currently running,
+// or with ErrWatchdogResetCooldown if called within watchdogResetCooldown of the last reset.
+// Records the reset action in XKeenService restart log and triggers an out-of-order health check.
+func (w *WatchdogService) TryReset() (WatchdogSnapshot, error) {
+	w.mu.Lock()
+	if w.disarmInFlight {
+		w.mu.Unlock()
+		return WatchdogSnapshot{}, ErrWatchdogResetInFlight
+	}
+
+	if !w.lastResetAt.IsZero() && time.Since(w.lastResetAt) < watchdogResetCooldown {
+		w.mu.Unlock()
+		return WatchdogSnapshot{}, ErrWatchdogResetCooldown
+	}
+
+	w.lastResetAt = time.Now()
+	w.consecutiveFailures = 0
+	w.disarmAttempts = 0
+	w.disarmedRecheckCounter = 0
+	w.lastDisarmError = ""
+	w.nextDisarmAttempt = time.Time{}
+	w.degradedAt = time.Time{}
+	w.disarmed = false
+	w.disarmEpoch++
+
+	snapshot := WatchdogSnapshot{
+		State:               w.stateLocked(),
+		ConsecutiveFailures: w.consecutiveFailures,
+		DisarmAttempts:      w.disarmAttempts,
+		LastDisarmError:     w.lastDisarmError,
+		InterceptionActive:  w.interceptionActive,
+		InterceptionFamily:  w.interceptionFamily,
+		NextAttemptAt:       w.nextDisarmAttempt,
+		DegradedAt:          w.degradedAt,
+	}
+	w.mu.Unlock()
+
+	if w.xkeenSvc != nil {
+		w.xkeenSvc.RecordAction("watchdog_reset", "", nil)
+	}
+
+	w.wg.Add(1)
+	go func() {
+		defer w.wg.Done()
+		w.CheckHealth()
+	}()
+
+	return snapshot, nil
 }
 
 // tproxyChainMarker is a literal chain/comment name some XKeen builds may

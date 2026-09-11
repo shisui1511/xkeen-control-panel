@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -96,5 +98,93 @@ func TestWatchdogStatusResponse_FromSnapshot(t *testing.T) {
 	}
 	if zeroRaw["degraded_at"] != float64(0) {
 		t.Errorf("expected zero degraded_at=0, got %v", zeroRaw["degraded_at"])
+	}
+}
+
+func TestWatchdogStatus_ReturnsSnapshot(t *testing.T) {
+	wd := services.NewWatchdogService(nil, "", "")
+	api := &API{watchdogSvc: wd}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/service/watchdog/status", nil)
+	rec := httptest.NewRecorder()
+
+	api.WatchdogStatus(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var envelope struct {
+		Success bool                   `json:"success"`
+		Data    WatchdogStatusResponse `json:"data"`
+	}
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !envelope.Success {
+		t.Errorf("expected envelope.Success=true, got false")
+	}
+	if envelope.Data.State != "armed" {
+		t.Errorf("expected state='armed', got %q", envelope.Data.State)
+	}
+}
+
+func TestWatchdogReset_CooldownRejectsSecondCall(t *testing.T) {
+	wd := services.NewWatchdogService(nil, "", "")
+	api := &API{watchdogSvc: wd}
+
+	// First POST should succeed with 200
+	req1 := httptest.NewRequest(http.MethodPost, "/api/service/watchdog/reset", nil)
+	rec1 := httptest.NewRecorder()
+	api.WatchdogReset(rec1, req1)
+
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("expected first reset status 200, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+
+	var env1 struct {
+		Success bool `json:"success"`
+	}
+	if err := json.Unmarshal(rec1.Body.Bytes(), &env1); err != nil {
+		t.Fatalf("failed to parse first response: %v", err)
+	}
+	if !env1.Success {
+		t.Errorf("expected first call Success=true")
+	}
+
+	// Immediate second POST should be rejected with 409 Conflict
+	req2 := httptest.NewRequest(http.MethodPost, "/api/service/watchdog/reset", nil)
+	rec2 := httptest.NewRecorder()
+	api.WatchdogReset(rec2, req2)
+
+	if rec2.Code != http.StatusConflict {
+		t.Fatalf("expected second reset status 409 Conflict, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+
+	var env2 struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(rec2.Body.Bytes(), &env2); err != nil {
+		t.Fatalf("failed to parse second response: %v", err)
+	}
+	if env2.Success {
+		t.Errorf("expected second call Success=false")
+	}
+}
+
+func TestWatchdogReset_MethodGuard(t *testing.T) {
+	wd := services.NewWatchdogService(nil, "", "")
+	api := &API{watchdogSvc: wd}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/service/watchdog/reset", nil)
+	rec := httptest.NewRecorder()
+
+	api.WatchdogReset(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status 405 Method Not Allowed, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

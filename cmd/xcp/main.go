@@ -221,6 +221,8 @@ func main() {
 	srv.HandleProtected("/api/service/control", api.ServiceControl)
 	srv.HandleProtected("/api/service/dns-redirect", api.ServiceDNSRedirect)
 	srv.HandleProtected("/api/service/restart-log", api.ServiceRestartLog)
+	srv.HandleProtected("/api/service/watchdog/status", api.WatchdogStatus)
+	srv.HandleProtected("/api/service/watchdog/reset", api.WatchdogReset)
 	srv.HandleProtected("/api/logs/ws", api.LogsWebSocket)
 	srv.HandleProtected("/api/logs/history", api.LogsHistory)
 	srv.HandleProtected("/api/logs/flash-health", api.LogsFlashHealth)
