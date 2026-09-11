@@ -970,4 +970,102 @@ func TestWatchdogService_Stop_Idempotent(t *testing.T) {
 	w.Stop()
 }
 
+// TestWatchdogService_CheckHealth_EpochDiscardsStaleInFlightDisarm verifies CR-01:
+// If the kernel recovers while a slow EmergencyDisarmTProxy goroutine is in flight,
+// the in-flight outcome must be discarded instead of latching w.disarmed=true.
+// When a subsequent independent failure sequence occurs, a new disarm attempt
+// must be permitted.
+func TestWatchdogService_CheckHealth_EpochDiscardsStaleInFlightDisarm(t *testing.T) {
+	const disarmDelay = 150 * time.Millisecond
+
+	binDir := t.TempDir()
+	slowSave := filepath.Join(binDir, "iptables-save")
+	script := fmt.Sprintf("#!/bin/sh\nsleep %.2f\nexit 0\n", disarmDelay.Seconds())
+	if err := os.WriteFile(slowSave, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	tmpDir := t.TempDir()
+	statusFile := filepath.Join(tmpDir, "status.txt")
+	if err := os.WriteFile(statusFile, []byte("XKeen is not running"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	scriptBin := filepath.Join(tmpDir, "xkeen")
+	wrapper := fmt.Sprintf("#!/bin/sh\ncat %s\nif grep -q 'running' %s; then exit 0; else exit 1; fi\n", statusFile, statusFile)
+	if err := os.WriteFile(scriptBin, []byte(wrapper), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	xkeenSvc := NewXKeenService(scriptBin, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+
+	// Step 1: Trip the circuit breaker (3 failures)
+	for i := 0; i < watchdogMaxFailures; i++ {
+		w.CheckHealth()
+	}
+
+	w.mu.Lock()
+	inFlight := w.disarmInFlight
+	w.mu.Unlock()
+	if !inFlight {
+		t.Fatal("expected disarmInFlight=true after initial 3 failures")
+	}
+
+	// Step 2: Kernel recovers while disarm goroutine is still running!
+	if err := os.WriteFile(statusFile, []byte("XKeen is running"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	w.CheckHealth()
+
+	w.mu.Lock()
+	failures := w.consecutiveFailures
+	disarmed := w.disarmed
+	w.mu.Unlock()
+	if failures != 0 {
+		t.Fatalf("expected 0 failures after recovery, got %d", failures)
+	}
+	if disarmed {
+		t.Fatal("expected disarmed=false immediately after recovery")
+	}
+
+	// Step 3: Wait for in-flight disarm goroutine to complete
+	deadline := time.Now().Add(1 * time.Second)
+	for {
+		w.mu.Lock()
+		inFlight = w.disarmInFlight
+		disarmed = w.disarmed
+		w.mu.Unlock()
+		if !inFlight {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for in-flight disarm to finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Stale outcome must be discarded! disarmed must still be false!
+	if disarmed {
+		t.Fatal("CR-01 regression: stale in-flight disarm outcome latched disarmed=true after recovery")
+	}
+
+	// Step 4: Kernel fails again (new independent failure)
+	if err := os.WriteFile(statusFile, []byte("XKeen is not running"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < watchdogMaxFailures; i++ {
+		w.CheckHealth()
+	}
+
+	w.mu.Lock()
+	inFlight = w.disarmInFlight
+	w.mu.Unlock()
+	if !inFlight {
+		t.Fatal("CR-01 regression: second failure cycle failed to trigger EmergencyDisarmTProxy because breaker was blocked")
+	}
+
+	w.Stop()
+}
+
 

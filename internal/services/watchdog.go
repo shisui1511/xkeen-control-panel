@@ -42,6 +42,7 @@ type WatchdogService struct {
 	consecutiveFailures int
 	disarmed            bool
 	disarmInFlight      bool
+	disarmEpoch         uint64
 
 	iptablesSaveBin  string
 	iptablesBin      string
@@ -144,6 +145,7 @@ func (w *WatchdogService) CheckHealth() {
 		}
 		w.consecutiveFailures = 0
 		w.disarmed = false
+		w.disarmEpoch++
 		return
 	}
 
@@ -153,6 +155,7 @@ func (w *WatchdogService) CheckHealth() {
 
 	if w.consecutiveFailures >= watchdogMaxFailures && !w.disarmed && !w.disarmInFlight {
 		w.disarmInFlight = true
+		epoch := w.disarmEpoch
 		log.Printf("Watchdog: %d consecutive kernel failures — triggering emergency TPROXY disarm", w.consecutiveFailures)
 		// Tracked by wg so Stop() (called during graceful shutdown/restart)
 		// waits for an in-flight disarm sequence instead of abandoning it
@@ -163,11 +166,14 @@ func (w *WatchdogService) CheckHealth() {
 			outcome := w.EmergencyDisarmTProxy()
 			w.mu.Lock()
 			w.disarmInFlight = false
-			// Latch on any non-failure outcome: DisarmDisarmed (we removed them) and
-			// DisarmAlreadyClean (verified nothing to remove) are both terminal — there is
-			// no interception left to disarm. Only a genuine execution/verification failure
-			// should keep the breaker armed for another attempt.
-			w.disarmed = (outcome != DisarmFailed)
+			// Latch only if the epoch has not changed while the disarm was in flight.
+			// If the kernel recovered and subsequently failed again, this previous attempt's
+			// outcome is stale and must not block the new failure cycle from disarming (CR-01).
+			if epoch == w.disarmEpoch {
+				w.disarmed = (outcome != DisarmFailed)
+			} else {
+				log.Printf("Watchdog: EmergencyDisarmTProxy outcome %v discarded — health recovered and re-failed while attempt was in flight", outcome)
+			}
 			w.mu.Unlock()
 			if outcome == DisarmFailed {
 				log.Printf("Watchdog: EmergencyDisarmTProxy failed — will retry on next qualifying health check")
