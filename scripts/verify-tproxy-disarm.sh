@@ -151,7 +151,21 @@ echo "[5/7] Ожидание срабатывания watchdog (до $WAIT_SEC �
 START_TIME=$(date +%s)
 DISARMED=false
 
+CURRENT_RULES="?"
 while true; do
+    # WR-04: проверяем бюджет времени ДО SSH-опроса (а не только после
+    # успешного чтения mangle), иначе устойчивая потеря связи с роутером
+    # (например, сам скрипт только что остановил ядро и наблюдает за
+    # сетью, которую этот же тест потревожил) заставляет цикл выполняться
+    # бесконечно через ветку `continue` ниже, никогда не достигая
+    # заявленного --wait.
+    NOW=$(date +%s)
+    ELAPSED=$((NOW - START_TIME))
+    if [[ $ELAPSED -ge $WAIT_SEC ]]; then
+        echo "Таймаут ожидания ($WAIT_SEC сек) истек, осталось правил (последнее известное значение): $CURRENT_RULES"
+        break
+    fi
+
     if ! REMOTE_OUT=$(ssh "$SSH_ALIAS" "iptables-save -t mangle 2>&1; ip6tables-save -t mangle 2>&1 || true" 2>&1); then
         echo "ПРЕДУПРЕЖДЕНИЕ: SSH-опрос не удался (ошибка связи), пропускаю итерацию..." >&2
         sleep 10
@@ -161,13 +175,6 @@ while true; do
     if [[ "$CURRENT_RULES" -eq 0 ]]; then
         DISARMED=true
         echo "Правила TPROXY исчезли из iptables mangle!"
-        break
-    fi
-
-    NOW=$(date +%s)
-    ELAPSED=$((NOW - START_TIME))
-    if [[ $ELAPSED -ge $WAIT_SEC ]]; then
-        echo "Таймаут ожидания ($WAIT_SEC сек) истек, осталось правил: $CURRENT_RULES"
         break
     fi
 
