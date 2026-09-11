@@ -152,7 +152,12 @@ START_TIME=$(date +%s)
 DISARMED=false
 
 while true; do
-    CURRENT_RULES=$(ssh "$SSH_ALIAS" "iptables-save -t mangle 2>&1; ip6tables-save -t mangle 2>&1 || true" | grep -E '\-j TPROXY|XKEEN_TPROXY' | wc -l || true)
+    if ! REMOTE_OUT=$(ssh "$SSH_ALIAS" "iptables-save -t mangle 2>&1; ip6tables-save -t mangle 2>&1 || true" 2>&1); then
+        echo "ПРЕДУПРЕЖДЕНИЕ: SSH-опрос не удался (ошибка связи), пропускаю итерацию..." >&2
+        sleep 10
+        continue
+    fi
+    CURRENT_RULES=$(printf '%s\n' "$REMOTE_OUT" | grep -cE '\-j TPROXY|XKEEN_TPROXY' || true)
     if [[ "$CURRENT_RULES" -eq 0 ]]; then
         DISARMED=true
         echo "Правила TPROXY исчезли из iptables mangle!"
