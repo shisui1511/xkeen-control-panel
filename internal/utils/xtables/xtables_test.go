@@ -311,5 +311,3 @@ func TestWaitArgsFor_ConcurrentProbesDifferentBinaries(t *testing.T) {
 
 	<-slowDone
 }
-
-

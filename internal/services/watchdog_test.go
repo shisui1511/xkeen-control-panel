@@ -1101,5 +1101,3 @@ func TestWatchdogService_CheckHealth_EpochDiscardsStaleInFlightDisarm(t *testing
 
 	w.Stop()
 }
-
-
