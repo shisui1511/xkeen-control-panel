@@ -1042,6 +1042,113 @@ func TestWatchdogService_CheckHealth_AlreadyCleanLatchesDisarmed(t *testing.T) {
 	}
 }
 
+// TestWatchdogService_CheckHealth_ReinstalledRuleUnlatchesDisarmed verifies
+// WR-03: once latched disarmed, the watchdog previously stayed silent
+// forever unless the kernel reported a full recovery — even if the TPROXY
+// interception rule was reinstalled by an external mechanism (e.g. a
+// supervisor restart-looping a crashing XKeen) while the kernel remained
+// unhealthy throughout. CheckHealth must periodically re-verify the mangle
+// table non-destructively and unlatch (allowing a fresh disarm attempt) as
+// soon as it finds the rule back, without waiting for xkeen -status to ever
+// report healthy again.
+func TestWatchdogService_CheckHealth_ReinstalledRuleUnlatchesDisarmed(t *testing.T) {
+	xtables.ResetForTest()
+
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	cleanOutput := "*mangle\nCOMMIT\n"
+
+	// index0: clean (consumed by the initial DisarmAlreadyClean latch).
+	// index1: rule present (consumed by the periodic non-destructive re-check
+	//         that must trigger the unlatch).
+	// index2: rule present (consumed by the fresh disarm attempt's own read).
+	// index3: clean (consumed by that attempt's re-read confirming removal).
+	saveBin, delBin, logPath := installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs: []string{cleanOutput, ruleOutput, ruleOutput, cleanOutput},
+		Dialect:     dialectWaitSeconds,
+	})
+
+	// ip6tables is always clean and separate from the shared iptables fake
+	// above, so it never consumes from that sequence and never contributes
+	// a deletion of its own.
+	binDir := filepath.Dir(saveBin)
+	ip6Save := filepath.Join(binDir, "ip6tables-save")
+	if err := os.WriteFile(ip6Save, []byte("#!/bin/sh\ncat <<'EOF'\n*mangle\nCOMMIT\nEOF\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ip6Del := filepath.Join(binDir, "ip6tables")
+	if err := os.WriteFile(ip6Del, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesBin = delBin
+	w.iptablesSaveBin = saveBin
+	w.ip6tablesBin = ip6Del
+	w.ip6tablesSaveBin = ip6Save
+
+	waitForLatch := func(want bool) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			w.mu.Lock()
+			disarmed := w.disarmed
+			inFlight := w.disarmInFlight
+			w.mu.Unlock()
+			if disarmed == want && !inFlight {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for disarmed=%v (last disarmed=%v inFlight=%v)", want, disarmed, inFlight)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	// Three consecutive failures trip the breaker; the mangle table is clean
+	// at this point (index0), so the outcome is DisarmAlreadyClean and the
+	// watchdog latches disarmed=true.
+	for i := 1; i <= watchdogMaxFailures; i++ {
+		w.CheckHealth()
+	}
+	waitForLatch(true)
+
+	// Kernel never recovers, so nothing resets the latch via the healthy
+	// branch. Drive disarmedRecheckInterval more unhealthy checks; the
+	// disarmedRecheckInterval-th one must perform the non-destructive
+	// re-check, find the reinstalled rule (index1), unlatch, and — because
+	// consecutiveFailures is already well past watchdogMaxFailures — trigger
+	// a fresh EmergencyDisarmTProxy attempt in the same call.
+	for i := 1; i <= disarmedRecheckInterval; i++ {
+		w.CheckHealth()
+	}
+	waitForLatch(true)
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read deletion log: %v", err)
+	}
+	var delLines []string
+	for _, line := range strings.Split(strings.TrimSpace(string(logData)), "\n") {
+		if strings.Contains(line, "-D") {
+			delLines = append(delLines, line)
+		}
+	}
+	if len(delLines) != 1 {
+		t.Fatalf("expected exactly 1 deletion command for the reinstalled rule, got %d:\n%s", len(delLines), string(logData))
+	}
+}
+
 // TestWatchdogService_Stop_Idempotent verifies IN-05:
 // Calling Stop() multiple times must not panic on closing stopCh.
 func TestWatchdogService_Stop_Idempotent(t *testing.T) {

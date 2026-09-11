@@ -23,6 +23,17 @@ const watchdogCheckInterval = 30 * time.Second
 // before the watchdog trips the emergency TPROXY disarm (STAB-05).
 const watchdogMaxFailures = 3
 
+// disarmedRecheckInterval is the number of unhealthy CheckHealth cycles
+// between non-destructive mangle-table re-checks while w.disarmed is latched
+// true (WR-03). A restart-loop (e.g. a supervisor repeatedly restarting a
+// crashing XKeen, which reinstalls its TPROXY rule on every restart) can
+// leave the kernel permanently unhealthy without ever reporting a recovery,
+// which is the only event that currently clears the latch — without a
+// periodic re-check the watchdog would stay silently latched disarmed even
+// after interception returns. At the default 30s check interval this is a
+// ~2.5 minute cadence.
+const disarmedRecheckInterval = 5
+
 // WatchdogService supervises the health of the currently active proxy kernel
 // (Xray/Mihomo, driven via XKeenService) and acts as a circuit breaker: after
 // watchdogMaxFailures consecutive failed health checks it removes the
@@ -38,11 +49,12 @@ type WatchdogService struct {
 	stopOnce sync.Once
 	wg       sync.WaitGroup
 
-	mu                  sync.Mutex
-	consecutiveFailures int
-	disarmed            bool
-	disarmInFlight      bool
-	disarmEpoch         uint64
+	mu                     sync.Mutex
+	consecutiveFailures    int
+	disarmed               bool
+	disarmInFlight         bool
+	disarmEpoch            uint64
+	disarmedRecheckCounter int
 
 	iptablesSaveBin  string
 	iptablesBin      string
@@ -137,7 +149,6 @@ func (w *WatchdogService) CheckHealth() {
 	healthy := err == nil && isKernelStatusHealthy(status)
 
 	w.mu.Lock()
-	defer w.mu.Unlock()
 
 	if healthy {
 		if w.consecutiveFailures > 0 {
@@ -145,13 +156,45 @@ func (w *WatchdogService) CheckHealth() {
 		}
 		w.consecutiveFailures = 0
 		w.disarmed = false
+		w.disarmedRecheckCounter = 0
 		w.disarmEpoch++
+		w.mu.Unlock()
 		return
 	}
 
 	w.consecutiveFailures++
 	log.Printf("Watchdog: kernel health check failed (%d/%d): status=%q err=%v",
 		w.consecutiveFailures, watchdogMaxFailures, strings.TrimSpace(status), err)
+
+	// WR-03: while latched disarmed, the failure-threshold check below is
+	// gated on "!w.disarmed" and so stays silent even if the interception
+	// rule was reinstalled by an external mechanism without the kernel ever
+	// reporting healthy again (the only event that currently clears the
+	// latch). Periodically perform a non-destructive re-check of the mangle
+	// table and unlatch if the rule is back, so the threshold check below
+	// can trigger a fresh EmergencyDisarmTProxy cycle instead of never
+	// noticing.
+	recheckDue := false
+	if w.disarmed && !w.disarmInFlight {
+		w.disarmedRecheckCounter++
+		if w.disarmedRecheckCounter >= disarmedRecheckInterval {
+			w.disarmedRecheckCounter = 0
+			recheckDue = true
+		}
+	}
+	w.mu.Unlock()
+
+	if recheckDue && w.tproxyRulePresent() {
+		w.mu.Lock()
+		if w.disarmed && !w.disarmInFlight {
+			log.Printf("Watchdog: TPROXY interception rule reappeared while latched disarmed — unlatching to allow a fresh disarm attempt")
+			w.disarmed = false
+		}
+		w.mu.Unlock()
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
 	if w.consecutiveFailures >= watchdogMaxFailures && !w.disarmed && !w.disarmInFlight {
 		w.disarmInFlight = true
@@ -254,22 +297,7 @@ func (o DisarmOutcome) String() string {
 func (w *WatchdogService) EmergencyDisarmTProxy() DisarmOutcome {
 	ctx := context.Background()
 
-	saveV4 := w.iptablesSaveBin
-	if saveV4 == "" {
-		saveV4 = "iptables-save"
-	}
-	delV4 := w.iptablesBin
-	if delV4 == "" {
-		delV4 = "iptables"
-	}
-	saveV6 := w.ip6tablesSaveBin
-	if saveV6 == "" {
-		saveV6 = "ip6tables-save"
-	}
-	delV6 := w.ip6tablesBin
-	if delV6 == "" {
-		delV6 = "ip6tables"
-	}
+	saveV4, delV4, saveV6, delV6 := w.resolveXtablesBins()
 
 	waitArgsV4 := xtables.WaitArgsFor(ctx, delV4)
 	waitArgsV6 := xtables.WaitArgsFor(ctx, delV6)
@@ -291,6 +319,55 @@ func (w *WatchdogService) EmergencyDisarmTProxy() DisarmOutcome {
 	log.Printf("Watchdog: EmergencyDisarmTProxy removed %d TPROXY interception rule(s) (ipv4=%d, ipv6=%d)",
 		removedV4+removedV6, removedV4, removedV6)
 	return DisarmDisarmed
+}
+
+// resolveXtablesBins returns the iptables-save/iptables and ip6tables-save/
+// ip6tables binary paths to use, falling back to the bare command names
+// (resolved via PATH at exec time) when the service has no override
+// configured (overrides are used by tests to point at fake binaries).
+func (w *WatchdogService) resolveXtablesBins() (saveV4, delV4, saveV6, delV6 string) {
+	saveV4 = w.iptablesSaveBin
+	if saveV4 == "" {
+		saveV4 = "iptables-save"
+	}
+	delV4 = w.iptablesBin
+	if delV4 == "" {
+		delV4 = "iptables"
+	}
+	saveV6 = w.ip6tablesSaveBin
+	if saveV6 == "" {
+		saveV6 = "ip6tables-save"
+	}
+	delV6 = w.ip6tablesBin
+	if delV6 == "" {
+		delV6 = "ip6tables"
+	}
+	return saveV4, delV4, saveV6, delV6
+}
+
+// tproxyRulePresent performs a non-destructive check of both mangle tables
+// (iptables and, when present, ip6tables) for a live TPROXY interception
+// rule, without deleting anything. Used by CheckHealth's periodic re-latch
+// check (WR-03) to detect a rule that was reinstalled by an external
+// mechanism (e.g. a supervisor restart-looping XKeen) while the watchdog was
+// latched disarmed and the kernel never reported healthy again. A read
+// failure for a given family is treated as "not confirmed reinstalled"
+// rather than forcing a spurious unlatch on a transient error — a missing
+// ip6tables (xtables.IsCommandNotFound) is expected on many router variants
+// and must not be logged as one.
+func (w *WatchdogService) tproxyRulePresent() bool {
+	ctx := context.Background()
+	saveV4, _, saveV6, _ := w.resolveXtablesBins()
+
+	check := func(saveBin string) bool {
+		lines, err := listMangleRules(ctx, saveBin)
+		if err != nil {
+			return false
+		}
+		return len(selectTproxyRules(lines)) > 0
+	}
+
+	return check(saveV4) || check(saveV6)
 }
 
 // splitIptablesRule splits an iptables-save rule string into individual command-line
