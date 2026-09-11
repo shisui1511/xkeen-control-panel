@@ -106,7 +106,7 @@ if ! ssh "$SSH_ALIAS" "pidof xcp" >/dev/null 2>&1; then
 fi
 
 # Определение пути к xkeen на роутере
-XKEEN_BIN=$(ssh "$SSH_ALIAS" "which xkeen 2>/dev/null || [ -x /opt/sbin/xkeen ] && echo /opt/sbin/xkeen || echo xkeen")
+XKEEN_BIN=$(ssh "$SSH_ALIAS" 'command -v xkeen 2>/dev/null || { [ -x /opt/sbin/xkeen ] && echo /opt/sbin/xkeen; } || echo xkeen')
 
 # 2. Снимок «до»
 echo "[2/7] Снятие снимка mangle ДО отключения ядра..."
