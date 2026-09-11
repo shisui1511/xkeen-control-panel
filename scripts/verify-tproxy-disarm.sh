@@ -32,10 +32,16 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --out)
+            [[ $# -ge 2 ]] || { echo "ОШИБКА: отсутствует значение для параметра --out" >&2; exit 2; }
             OUT_DIR="$2"
             shift 2
             ;;
         --wait)
+            [[ $# -ge 2 ]] || { echo "ОШИБКА: отсутствует значение для параметра --wait" >&2; exit 2; }
+            if ! [[ "$2" =~ ^[0-9]+$ ]]; then
+                echo "ОШИБКА: параметр --wait должен быть целым неотрицательным числом (секунды): $2" >&2
+                exit 2
+            fi
             WAIT_SEC="$2"
             shift 2
             ;;
@@ -146,7 +152,7 @@ START_TIME=$(date +%s)
 DISARMED=false
 
 while true; do
-    CURRENT_RULES=$(ssh "$SSH_ALIAS" "iptables-save -t mangle 2>&1" | grep -E '\-j TPROXY|XKEEN_TPROXY' | wc -l || true)
+    CURRENT_RULES=$(ssh "$SSH_ALIAS" "iptables-save -t mangle 2>&1; ip6tables-save -t mangle 2>&1 || true" | grep -E '\-j TPROXY|XKEEN_TPROXY' | wc -l || true)
     if [[ "$CURRENT_RULES" -eq 0 ]]; then
         DISARMED=true
         echo "Правила TPROXY исчезли из iptables mangle!"
