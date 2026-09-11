@@ -1,8 +1,10 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1469,5 +1471,254 @@ COMMIT
 	lastErr := w.Snapshot().LastDisarmError
 	if !strings.Contains(lastErr, "IPv4 disarmed") || !strings.Contains(lastErr, "IPv6 failed") {
 		t.Fatalf("expected LastDisarmError to contain 'IPv4 disarmed' and 'IPv6 failed', got: %q", lastErr)
+	}
+}
+
+func TestWatchdogService_Degraded(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+
+	saveOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, logPath := installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs:   []string{saveOutput},
+		Dialect:       dialectWaitSeconds,
+		DeleteFailure: "failed to delete rule",
+	})
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	t0 := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	currTime := t0
+	w.now = func() time.Time { return currTime }
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() {
+		log.SetOutput(os.Stderr)
+	})
+
+	// Run health checks through all 5 disarm attempts:
+	// Trip breaker: 3 failures
+	for i := 0; i < watchdogMaxFailures; i++ {
+		w.CheckHealth()
+	}
+	waitDisarmSettled(t, w)
+	// Attempts 2 to 5 using backoff intervals: [30s, 1m, 2m, 5m]
+	intervals := []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}
+	for i, delay := range intervals {
+		currTime = currTime.Add(delay)
+		w.CheckHealth()
+		waitDisarmSettled(t, w)
+		if w.Snapshot().DisarmAttempts != i+2 {
+			t.Fatalf("expected attempt %d, got %d", i+2, w.Snapshot().DisarmAttempts)
+		}
+	}
+
+	// Test 1: Fifth consecutive failed attempt sets degradedAt and State becomes degraded
+	snap := w.Snapshot()
+	if snap.State != WatchdogStateDegraded {
+		t.Fatalf("expected state %q, got %q", WatchdogStateDegraded, snap.State)
+	}
+	if snap.DegradedAt.IsZero() {
+		t.Fatal("expected degradedAt to be non-zero")
+	}
+
+	// Test 4: Entering degraded logged exactly one summary line
+	logOutput := logBuf.String()
+	degradedLogs := 0
+	for _, l := range strings.Split(logOutput, "\n") {
+		if strings.Contains(l, "entered degraded state after 5 failed emergency disarm attempt(s)") {
+			degradedLogs++
+			if !strings.Contains(l, snap.LastDisarmError) {
+				t.Fatalf("summary line must contain last error text, line: %s", l)
+			}
+		}
+	}
+	if degradedLogs != 1 {
+		t.Fatalf("expected exactly 1 degraded summary line, got %d", degradedLogs)
+	}
+
+	// Record iptables log size and app log lines count before the 20 subsequent checks
+	iptablesLogBefore, _ := os.ReadFile(logPath)
+	logLinesBefore := len(strings.Split(strings.TrimSpace(logBuf.String()), "\n"))
+
+	// Test 2 & 3: Subsequent 20 failed health checks in degraded do NOT call iptables and add 0 log lines
+	for i := 0; i < 20; i++ {
+		currTime = currTime.Add(watchdogCheckInterval)
+		w.CheckHealth()
+	}
+
+	iptablesLogAfter, _ := os.ReadFile(logPath)
+	if len(iptablesLogAfter) != len(iptablesLogBefore) {
+		t.Fatalf("iptables calls must not grow in degraded state (was %d bytes, now %d bytes)",
+			len(iptablesLogBefore), len(iptablesLogAfter))
+	}
+
+	logLinesAfter := len(strings.Split(strings.TrimSpace(logBuf.String()), "\n"))
+	if logLinesAfter != logLinesBefore {
+		t.Fatalf("no log lines should be added in degraded state (was %d lines, now %d lines)",
+			logLinesBefore, logLinesAfter)
+	}
+}
+
+func TestWatchdogService_DegradedRecovery(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+
+	saveOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, _ := installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs:   []string{saveOutput},
+		Dialect:       dialectWaitSeconds,
+		DeleteFailure: "failed to delete rule",
+	})
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	t0 := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	currTime := t0
+	w.now = func() time.Time { return currTime }
+
+	// Trip circuit breaker and exhaust all 5 attempts into degraded
+	for i := 0; i < watchdogMaxFailures; i++ {
+		w.CheckHealth()
+	}
+	waitDisarmSettled(t, w)
+	intervals := []time.Duration{30 * time.Second, time.Minute, 2 * time.Minute, 5 * time.Minute}
+	for _, delay := range intervals {
+		currTime = currTime.Add(delay)
+		w.CheckHealth()
+		waitDisarmSettled(t, w)
+	}
+
+	if w.Snapshot().State != WatchdogStateDegraded {
+		t.Fatalf("expected state %q, got %q", WatchdogStateDegraded, w.Snapshot().State)
+	}
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() {
+		log.SetOutput(os.Stderr)
+	})
+
+	// Test 5: Kernel recovers!
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is running\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	w.CheckHealth()
+
+	snap := w.Snapshot()
+	if snap.State != WatchdogStateArmed {
+		t.Fatalf("expected state to return to %q, got %q", WatchdogStateArmed, snap.State)
+	}
+	if !snap.DegradedAt.IsZero() {
+		t.Fatalf("expected degradedAt to be cleared, got %v", snap.DegradedAt)
+	}
+	if snap.DisarmAttempts != 0 {
+		t.Fatalf("expected disarmAttempts to be 0, got %d", snap.DisarmAttempts)
+	}
+	if !snap.NextAttemptAt.IsZero() {
+		t.Fatalf("expected nextAttemptAt to be cleared, got %v", snap.NextAttemptAt)
+	}
+	if snap.LastDisarmError != "" {
+		t.Fatalf("expected lastDisarmError to be empty, got %q", snap.LastDisarmError)
+	}
+
+	// Assert one recovery line was logged mentioning degraded
+	recoveryFound := false
+	for _, l := range strings.Split(logBuf.String(), "\n") {
+		if strings.Contains(l, "kernel recovered from degraded state") {
+			recoveryFound = true
+			break
+		}
+	}
+	if !recoveryFound {
+		t.Fatalf("expected recovery log line mentioning degraded state, got:\n%s", logBuf.String())
+	}
+}
+
+func TestWatchdogService_StableFailureLine(t *testing.T) {
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+
+	saveBin, delBin, _ := installFakeIptables(t, "*mangle\nCOMMIT\n")
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() {
+		log.SetOutput(os.Stderr)
+	})
+
+	stripTimestamp := func(line string) string {
+		if len(line) > 20 && line[4] == '/' && line[7] == '/' && line[10] == ' ' && line[13] == ':' {
+			return line[20:]
+		}
+		return line
+	}
+
+	collectUniqueFailureLines := func(text string) map[string]bool {
+		unique := make(map[string]bool)
+		for _, l := range strings.Split(text, "\n") {
+			l = strings.TrimSpace(l)
+			if l == "" || !strings.Contains(l, "kernel health check failed") {
+				continue
+			}
+			unique[stripTimestamp(l)] = true
+		}
+		return unique
+	}
+
+	// Run 4 failures (past threshold of 3)
+	for i := 0; i < 4; i++ {
+		w.CheckHealth()
+	}
+	waitDisarmSettled(t, w)
+
+	uniqueAt4 := collectUniqueFailureLines(logBuf.String())
+	if len(uniqueAt4) != watchdogMaxFailures {
+		t.Fatalf("expected %d unique failure lines at 4 failures, got %d: %v",
+			watchdogMaxFailures, len(uniqueAt4), uniqueAt4)
+	}
+
+	// Run 36 more failures (total 40)
+	for i := 0; i < 36; i++ {
+		w.CheckHealth()
+	}
+	waitDisarmSettled(t, w)
+
+	uniqueAt40 := collectUniqueFailureLines(logBuf.String())
+	if len(uniqueAt40) != len(uniqueAt4) {
+		t.Fatalf("failure lines must be stable and not grow: had %d unique lines, now %d: %v",
+			len(uniqueAt4), len(uniqueAt40), uniqueAt40)
 	}
 }

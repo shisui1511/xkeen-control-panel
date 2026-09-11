@@ -228,7 +228,10 @@ func (w *WatchdogService) CheckHealth() {
 	w.mu.Lock()
 
 	if healthy {
-		if w.consecutiveFailures > 0 {
+		wasDegraded := !w.degradedAt.IsZero()
+		if wasDegraded {
+			log.Printf("Watchdog: kernel recovered from degraded state after %d failed health check(s)", w.consecutiveFailures)
+		} else if w.consecutiveFailures > 0 {
 			log.Printf("Watchdog: kernel recovered after %d failed health check(s)", w.consecutiveFailures)
 		}
 		w.consecutiveFailures = 0
@@ -237,13 +240,27 @@ func (w *WatchdogService) CheckHealth() {
 		w.disarmEpoch++
 		w.interceptionActive = false
 		w.interceptionFamily = ""
+		w.disarmAttempts = 0
+		w.nextDisarmAttempt = time.Time{}
+		w.degradedAt = time.Time{}
+		w.lastDisarmError = ""
+		w.mu.Unlock()
+		return
+	}
+
+	if !w.degradedAt.IsZero() {
+		w.consecutiveFailures++
 		w.mu.Unlock()
 		return
 	}
 
 	w.consecutiveFailures++
+	displayFailures := w.consecutiveFailures
+	if displayFailures > watchdogMaxFailures {
+		displayFailures = watchdogMaxFailures
+	}
 	log.Printf("Watchdog: kernel health check failed (%d/%d): status=%q err=%v",
-		w.consecutiveFailures, watchdogMaxFailures, strings.TrimSpace(status), err)
+		displayFailures, watchdogMaxFailures, strings.TrimSpace(status), err)
 
 	// WR-03: while latched disarmed, the failure-threshold check below is
 	// gated on "!w.disarmed" and so stays silent even if the interception
@@ -299,7 +316,7 @@ func (w *WatchdogService) CheckHealth() {
 	if canDisarm {
 		w.disarmInFlight = true
 		epoch := w.disarmEpoch
-		log.Printf("Watchdog: %d consecutive kernel failures — triggering emergency TPROXY disarm", w.consecutiveFailures)
+		log.Printf("Watchdog: %d consecutive kernel failures — triggering emergency TPROXY disarm", watchdogMaxFailures)
 		// Tracked by wg so Stop() (called during graceful shutdown/restart)
 		// waits for an in-flight disarm sequence instead of abandoning it
 		// mid-way through mutating iptables state.
@@ -324,25 +341,21 @@ func (w *WatchdogService) CheckHealth() {
 					w.disarmed = false
 					w.interceptionActive = true
 					w.disarmAttempts++
-					if w.disarmAttempts < watchdogMaxDisarmAttempts {
+					if w.disarmAttempts >= watchdogMaxDisarmAttempts {
+						w.degradedAt = w.now()
+						w.nextDisarmAttempt = time.Time{}
+						log.Printf("Watchdog: entered degraded state after %d failed emergency disarm attempt(s): %s; TPROXY interception may remain active",
+							w.disarmAttempts, w.lastDisarmError)
+					} else {
 						w.nextDisarmAttempt = w.now().Add(watchdogBackoffGrid[w.disarmAttempts-1])
 						log.Printf("Watchdog: EmergencyDisarmTProxy failed (attempt %d/%d) — next attempt in %v at %s",
 							w.disarmAttempts, watchdogMaxDisarmAttempts, watchdogBackoffGrid[w.disarmAttempts-1], w.nextDisarmAttempt.Format(time.RFC3339))
-					} else {
-						gridIdx := w.disarmAttempts - 1
-						if gridIdx >= len(watchdogBackoffGrid) {
-							gridIdx = len(watchdogBackoffGrid) - 1
-						}
-						w.nextDisarmAttempt = w.now().Add(watchdogBackoffGrid[gridIdx])
 					}
 				}
 			} else {
 				log.Printf("Watchdog: EmergencyDisarmTProxy outcome %v discarded — health recovered and re-failed while attempt was in flight", outcome)
 			}
 			w.mu.Unlock()
-			if outcome == DisarmFailed {
-				log.Printf("Watchdog: EmergencyDisarmTProxy failed — will retry on next qualifying health check")
-			}
 		}()
 	}
 }
