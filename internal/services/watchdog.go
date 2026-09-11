@@ -405,6 +405,16 @@ func splitIptablesRule(line string) []string {
 			current.WriteRune(r)
 		}
 	}
+	// WR-06: an unpaired quote (malformed iptables-save output, or manual
+	// third-party edits to the rule set) would otherwise leave inQuotes
+	// true and silently swallow the rest of the line — including spaces —
+	// into a single argument, producing a malformed "-D ..." command that
+	// either fails opaquely or, worse, could coincidentally match and
+	// delete an unrelated rule. Refuse to guess: log and skip the line.
+	if inQuotes {
+		log.Printf("splitIptablesRule: unterminated quote in line, skipping: %q", line)
+		return nil
+	}
 	if current.Len() > 0 {
 		args = append(args, current.String())
 	}

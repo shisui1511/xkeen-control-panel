@@ -513,6 +513,13 @@ func TestSplitIptablesRule(t *testing.T) {
 			input: ``,
 			want:  nil,
 		},
+		{
+			// WR-06 regression: an unpaired quote must not silently swallow
+			// the rest of the line into one argument — the line is skipped
+			// entirely (nil) rather than producing a malformed "-D ..." command.
+			input: `-A xkeen -m comment --comment "Unterminated -j ACCEPT`,
+			want:  nil,
+		},
 	}
 
 	for _, c := range cases {
