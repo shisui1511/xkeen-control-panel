@@ -161,13 +161,14 @@ func (w *WatchdogService) CheckHealth() {
 			outcome := w.EmergencyDisarmTProxy()
 			w.mu.Lock()
 			w.disarmInFlight = false
-			// Only latch disarmed on confirmed success (DisarmDisarmed). On failure
-			// or already-clean, leave it false so the next qualifying health check
-			// can evaluate state rather than permanently disabling the circuit breaker.
-			w.disarmed = (outcome == DisarmDisarmed)
+			// Latch on any non-failure outcome: DisarmDisarmed (we removed them) and
+			// DisarmAlreadyClean (verified nothing to remove) are both terminal — there is
+			// no interception left to disarm. Only a genuine execution/verification failure
+			// should keep the breaker armed for another attempt.
+			w.disarmed = (outcome != DisarmFailed)
 			w.mu.Unlock()
-			if outcome != DisarmDisarmed {
-				log.Printf("Watchdog: EmergencyDisarmTProxy outcome %s — will retry on next qualifying health check", outcome)
+			if outcome == DisarmFailed {
+				log.Printf("Watchdog: EmergencyDisarmTProxy failed — will retry on next qualifying health check")
 			}
 		}()
 	}

@@ -893,6 +893,66 @@ func TestEmergencyDisarmTProxy_AlreadyCleanOutcome(t *testing.T) {
 	disarmed := w.disarmed
 	w.mu.Unlock()
 	if disarmed {
-		t.Fatal("expected w.disarmed to remain false on DisarmAlreadyClean")
+		t.Fatal("expected w.disarmed to remain false on direct EmergencyDisarmTProxy call without CheckHealth")
 	}
 }
+
+// TestWatchdogService_CheckHealth_AlreadyCleanLatchesDisarmed verifies CR-01:
+// when the kernel fails health checks but the mangle table is already clean
+// (the normal outage shape where kernel stopped cleanly), CheckHealth() must
+// latch w.disarmed=true so it does not spawn a new disarm sequence every 30s.
+func TestWatchdogService_CheckHealth_AlreadyCleanLatchesDisarmed(t *testing.T) {
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	cleanSave, delBin, _ := installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs: []string{"*mangle\nCOMMIT\n"},
+		Dialect:     dialectWaitSeconds,
+	})
+
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesBin = delBin
+	w.iptablesSaveBin = cleanSave
+	w.ip6tablesBin = delBin
+	w.ip6tablesSaveBin = cleanSave
+
+	for i := 1; i <= watchdogMaxFailures; i++ {
+		w.CheckHealth()
+	}
+
+	// Wait for the async disarm goroutine to finish and latch disarmed
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		w.mu.Lock()
+		disarmed := w.disarmed
+		inFlight := w.disarmInFlight
+		w.mu.Unlock()
+		if disarmed && !inFlight {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected w.disarmed=true after DisarmAlreadyClean outcome (inFlight=%v)", inFlight)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// Next failure check must NOT re-trigger disarm (remains latched)
+	w.CheckHealth()
+	w.mu.Lock()
+	inFlight := w.disarmInFlight
+	disarmed := w.disarmed
+	w.mu.Unlock()
+	if inFlight {
+		t.Fatal("expected disarmInFlight=false on subsequent health check when already disarmed")
+	}
+	if !disarmed {
+		t.Fatal("expected disarmed to remain true on subsequent health check")
+	}
+}
+
