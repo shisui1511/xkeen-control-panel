@@ -16,6 +16,12 @@ WAIT_SEC=240
 RESTORE=true
 DRY_RUN=false
 
+# WR-05: ни один вызов ssh не должен иметь возможности зависнуть на
+# неопределенное время (зависшая TCP-сессия, интерактивный запрос пароля
+# при отсутствии ключевой аутентификации) в обход логики --wait, которая
+# применяется только к циклу опроса в шаге 5, а не к отдельным вызовам.
+SSH_OPTS=(-o ConnectTimeout=10 -o BatchMode=yes)
+
 usage() {
     cat <<'EOF'
 Использование: scripts/verify-tproxy-disarm.sh [опции]
@@ -96,27 +102,27 @@ echo "Каталог артефактов: $OUT_DIR"
 
 # 1. Preflight
 echo "[1/7] Проверка доступности роутера ($SSH_ALIAS)..."
-if ! ssh -q "$SSH_ALIAS" true; then
+if ! ssh "${SSH_OPTS[@]}" -q "$SSH_ALIAS" true; then
     echo "ОШИБКА: Роутер ($SSH_ALIAS) недоступен по SSH" >&2
     exit 2
 fi
 
 echo "[1/7] Сбор версий iptables..."
-ssh "$SSH_ALIAS" "iptables --version 2>&1; ip6tables --version 2>&1 || true" > "$OUT_DIR/iptables-version.txt"
+ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "iptables --version 2>&1; ip6tables --version 2>&1 || true" > "$OUT_DIR/iptables-version.txt"
 cat "$OUT_DIR/iptables-version.txt"
 
 echo "[1/7] Проверка процесса панели xcp..."
-if ! ssh "$SSH_ALIAS" "pidof xcp" >/dev/null 2>&1; then
+if ! ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "pidof xcp" >/dev/null 2>&1; then
     echo "ОШИБКА: Процесс xcp не запущен на $SSH_ALIAS" >&2
     exit 2
 fi
 
 # Определение пути к xkeen на роутере
-XKEEN_BIN=$(ssh "$SSH_ALIAS" 'command -v xkeen 2>/dev/null || { [ -x /opt/sbin/xkeen ] && echo /opt/sbin/xkeen; } || echo xkeen')
+XKEEN_BIN=$(ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" 'command -v xkeen 2>/dev/null || { [ -x /opt/sbin/xkeen ] && echo /opt/sbin/xkeen; } || echo xkeen')
 
 # 2. Снимок «до»
 echo "[2/7] Снятие снимка mangle ДО отключения ядра..."
-ssh "$SSH_ALIAS" "iptables-save -t mangle 2>&1; echo '--- IP6TABLES ---'; ip6tables-save -t mangle 2>&1 || true" > "$OUT_DIR/mangle-before.txt"
+ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "iptables-save -t mangle 2>&1; echo '--- IP6TABLES ---'; ip6tables-save -t mangle 2>&1 || true" > "$OUT_DIR/mangle-before.txt"
 
 RULES_BEFORE=$(grep -E '\-j TPROXY|XKEEN_TPROXY' "$OUT_DIR/mangle-before.txt" | wc -l || true)
 echo "Обнаружено активных правил перехвата TPROXY: $RULES_BEFORE"
@@ -129,14 +135,14 @@ fi
 
 # 3. Отметка смещения в логе
 echo "[3/7] Фиксация текущей позиции в xcp.log..."
-LOG_LINES_BEFORE=$(ssh "$SSH_ALIAS" "wc -l < /opt/var/log/xcp.log 2>/dev/null || echo 0")
+LOG_LINES_BEFORE=$(ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "wc -l < /opt/var/log/xcp.log 2>/dev/null || echo 0")
 
 # Установка trap на восстановление ядра при любом выходе
 restore_kernel() {
     local exit_code=$?
     if [[ "$RESTORE" = true ]]; then
         echo "Восстановление ядра на $SSH_ALIAS..."
-        ssh "$SSH_ALIAS" "$XKEEN_BIN -start" >/dev/null 2>&1 || true
+        ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "$XKEEN_BIN -start" >/dev/null 2>&1 || true
     fi
     exit $exit_code
 }
@@ -144,7 +150,7 @@ trap restore_kernel EXIT
 
 # 4. Триггер — остановка ядра
 echo "[4/7] Остановка ядра XKeen ($XKEEN_BIN -stop)..."
-ssh "$SSH_ALIAS" "$XKEEN_BIN -stop" >/dev/null 2>&1 || true
+ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "$XKEEN_BIN -stop" >/dev/null 2>&1 || true
 
 # 5. Ожидание срабатывания watchdog
 echo "[5/7] Ожидание срабатывания watchdog (до $WAIT_SEC сек)..."
@@ -166,7 +172,7 @@ while true; do
         break
     fi
 
-    if ! REMOTE_OUT=$(ssh "$SSH_ALIAS" "iptables-save -t mangle 2>&1; ip6tables-save -t mangle 2>&1 || true" 2>&1); then
+    if ! REMOTE_OUT=$(ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "iptables-save -t mangle 2>&1; ip6tables-save -t mangle 2>&1 || true" 2>&1); then
         echo "ПРЕДУПРЕЖДЕНИЕ: SSH-опрос не удался (ошибка связи), пропускаю итерацию..." >&2
         sleep 10
         continue
@@ -184,13 +190,13 @@ done
 
 # 6. Снимок «после» и построение diff
 echo "[6/7] Снятие снимка mangle ПОСЛЕ прогона..."
-ssh "$SSH_ALIAS" "iptables-save -t mangle 2>&1; echo '--- IP6TABLES ---'; ip6tables-save -t mangle 2>&1 || true" > "$OUT_DIR/mangle-after.txt"
+ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "iptables-save -t mangle 2>&1; echo '--- IP6TABLES ---'; ip6tables-save -t mangle 2>&1 || true" > "$OUT_DIR/mangle-after.txt"
 
 diff -u "$OUT_DIR/mangle-before.txt" "$OUT_DIR/mangle-after.txt" > "$OUT_DIR/mangle.diff" || true
 
 # 7. Извлечение окна лога
 echo "[7/7] Извлечение записей Watchdog из xcp.log..."
-ssh "$SSH_ALIAS" "tail -n +$((LOG_LINES_BEFORE + 1)) /opt/var/log/xcp.log 2>/dev/null || true" | grep 'Watchdog:' > "$OUT_DIR/xcp-log-window.txt" || true
+ssh "${SSH_OPTS[@]}" "$SSH_ALIAS" "tail -n +$((LOG_LINES_BEFORE + 1)) /opt/var/log/xcp.log 2>/dev/null || true" | grep 'Watchdog:' > "$OUT_DIR/xcp-log-window.txt" || true
 
 RULES_AFTER=$(grep -E '\-j TPROXY|XKEEN_TPROXY' "$OUT_DIR/mangle-after.txt" | wc -l || true)
 
