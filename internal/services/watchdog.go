@@ -464,48 +464,49 @@ func disarmTProxyFamily(ctx context.Context, saveBin, delBin string, waitArgs []
 		return deleted, hasErr
 	}
 
-	delCount, hasErr1 := deleteRules(toDelete)
-	removed += delCount
+	// WR-02: iptables' "-D" removes exactly one physical match per invocation.
+	// selectTproxyRules dedups by rule text, so if the mangle table holds 3+
+	// physically identical copies of the same rule (e.g. XKeen looping
+	// crash-restart re-installs its interception rule before the watchdog
+	// catches up), a single deletion pass per unique rule text leaves
+	// duplicates behind. Loop deletion+re-read passes — driven by whether
+	// selectTproxyRules still finds a match, not a hardcoded pass count —
+	// until the table is clean or maxDisarmPasses is reached (a hard ceiling
+	// so a persistently re-installed rule can't spin this forever).
+	const maxDisarmPasses = 5
+	var hasErrAny bool
+	pass := 0
+	for {
+		pass++
+		delCount, hasErr := deleteRules(toDelete)
+		removed += delCount
+		hasErrAny = hasErrAny || hasErr
 
-	// Re-read mangle table to verify removal (second read)
-	lines2, err := listMangleRules(ctx, saveBin)
-	if err != nil {
-		log.Printf("Watchdog: EmergencyDisarmTProxy: failed to re-read mangle table via %s: %v", saveBin, err)
-		return removed, false
-	}
-	remaining := selectTproxyRules(lines2)
-	if len(remaining) == 0 {
-		if hasErr1 {
-			log.Printf("Watchdog: EmergencyDisarmTProxy: rule deletion encountered errors via %s, but subsequent re-read confirmed mangle table clean", delBin)
-		} else if len(toDelete) > 0 && delCount == 0 {
-			log.Printf("Watchdog: EmergencyDisarmTProxy: TPROXY rules disappeared from mangle table before deletion via %s (cleared concurrently)", delBin)
+		lines, err := listMangleRules(ctx, saveBin)
+		if err != nil {
+			log.Printf("Watchdog: EmergencyDisarmTProxy: failed to re-read mangle table via %s after pass %d: %v", saveBin, pass, err)
+			return removed, false
 		}
-		return removed, true
-	}
-
-	// Race or re-installation: execute exactly one additional deletion pass
-	log.Printf("Watchdog: EmergencyDisarmTProxy: %d interception rule(s) remain after first pass — retrying one additional pass via %s",
-		len(remaining), delBin)
-	delCount2, hasErr2 := deleteRules(remaining)
-	removed += delCount2
-
-	// Third read to confirm verdict
-	lines3, err := listMangleRules(ctx, saveBin)
-	if err != nil {
-		log.Printf("Watchdog: EmergencyDisarmTProxy: failed to re-read mangle table via %s after second pass: %v", saveBin, err)
-		return removed, false
-	}
-	remaining3 := selectTproxyRules(lines3)
-	if len(remaining3) == 0 {
-		if hasErr1 || hasErr2 {
-			log.Printf("Watchdog: EmergencyDisarmTProxy: deletion encountered errors during passes via %s, but third read confirmed mangle table clean", delBin)
+		remaining := selectTproxyRules(lines)
+		if len(remaining) == 0 {
+			if hasErrAny {
+				log.Printf("Watchdog: EmergencyDisarmTProxy: rule deletion encountered errors via %s, but re-read after pass %d confirmed mangle table clean", delBin, pass)
+			} else if pass == 1 && delCount == 0 {
+				log.Printf("Watchdog: EmergencyDisarmTProxy: TPROXY rules disappeared from mangle table before deletion via %s (cleared concurrently)", delBin)
+			}
+			return removed, true
 		}
-		return removed, true
-	}
 
-	log.Printf("Watchdog: EmergencyDisarmTProxy: %d interception rule(s) still remain after second pass via %s",
-		len(remaining3), delBin)
-	return removed, false
+		if pass >= maxDisarmPasses {
+			log.Printf("Watchdog: EmergencyDisarmTProxy: %d interception rule(s) still remain after %d passes via %s",
+				len(remaining), pass, delBin)
+			return removed, false
+		}
+
+		log.Printf("Watchdog: EmergencyDisarmTProxy: %d interception rule(s) remain after pass %d — retrying via %s",
+			len(remaining), pass, delBin)
+		toDelete = remaining
+	}
 }
 
 // defaultMihomoConfigYAML is a minimal, self-contained recovery config: DIRECT-only

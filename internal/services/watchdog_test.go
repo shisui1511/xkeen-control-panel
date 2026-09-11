@@ -815,6 +815,58 @@ COMMIT
 	}
 }
 
+// TestDisarmTProxyFamily_ThreePhysicalDuplicatesFullyCleared verifies WR-02:
+// when 3+ physically identical copies of the interception rule are present
+// (e.g. XKeen re-installing its rule across a crash-restart loop before the
+// watchdog catches up), the old implementation hard-capped retries at one
+// extra pass and gave up (DisarmFailed) with a duplicate still active.
+// selectTproxyRules dedups matching rule text into a single map entry, so
+// each pass issues exactly one "-D" per unique rule text — but "-D" only
+// removes one physical match, so 3 duplicates require 3 passes to fully
+// clear. This must now loop until clean instead of stopping after 2 passes.
+func TestDisarmTProxyFamily_ThreePhysicalDuplicatesFullyCleared(t *testing.T) {
+	ruleLine := "-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1"
+	mangleWithCopies := func(n int) string {
+		var b strings.Builder
+		b.WriteString("*mangle\n:PREROUTING ACCEPT [0:0]\n")
+		for i := 0; i < n; i++ {
+			b.WriteString(ruleLine)
+			b.WriteString("\n")
+		}
+		b.WriteString("COMMIT\n")
+		return b.String()
+	}
+
+	// Read 0 (initial): 3 physical copies. Read 1 (after pass 1): 2 copies
+	// remain. Read 2 (after pass 2): 1 copy remains. Read 3 (after pass 3): clean.
+	saveBin, delBin, logPath := installFakeIptablesConfig(t, fakeIptablesConfig{
+		SaveOutputs: []string{mangleWithCopies(3), mangleWithCopies(2), mangleWithCopies(1), mangleWithCopies(0)},
+		Dialect:     dialectWaitSeconds,
+	})
+
+	removed, ok := disarmTProxyFamily(context.Background(), saveBin, delBin, []string{"-w", "5"})
+	if !ok {
+		t.Fatal("expected ok=true once all 3 physical duplicates are cleared across passes")
+	}
+	if removed != 3 {
+		t.Fatalf("expected removed=3 (1 per pass across 3 passes), got %d", removed)
+	}
+
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read log: %v", err)
+	}
+	var delLines []string
+	for _, line := range strings.Split(strings.TrimSpace(string(logData)), "\n") {
+		if strings.TrimSpace(line) != "" {
+			delLines = append(delLines, line)
+		}
+	}
+	if len(delLines) != 3 {
+		t.Fatalf("expected exactly 3 deletion attempts (one per physical duplicate), got %d:\n%s", len(delLines), string(logData))
+	}
+}
+
 func TestDisarmTProxyFamily_MissingIP6Tables(t *testing.T) {
 	tmpDir := t.TempDir()
 	missingSave := filepath.Join(tmpDir, "nonexistent-ip6tables-save")
