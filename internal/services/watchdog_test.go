@@ -198,15 +198,46 @@ exit 0
 	return saveBin, delBin, logPath
 }
 
-// installFakeIptables writes a fake iptables-save (prints saveOutput on first read,
-// then clean mangle table on subsequent reads to simulate successful removal) and a
-// fake iptables that appends its invocation args as one line to a log file,
-// into a temp bin dir, and returns (saveBinPath, delBinPath, deletionsLogPath).
+// installFakeIptables writes a fake iptables-save (prints saveOutput until
+// a -D deletion is logged by fake iptables, then clean mangle table to simulate successful removal)
+// and a fake iptables that appends its invocation args as one line to a log file.
 func installFakeIptables(t *testing.T, saveOutput string) (saveBin, delBin, logPath string) {
-	return installFakeIptablesConfig(t, fakeIptablesConfig{
-		SaveOutputs: []string{saveOutput, "*mangle\nCOMMIT\n"},
-		Dialect:     dialectWaitSeconds,
-	})
+	t.Helper()
+	binDir := t.TempDir()
+	logPath = filepath.Join(binDir, "deletions.log")
+
+	ruleOutPath := filepath.Join(binDir, "save_rule")
+	if err := os.WriteFile(ruleOutPath, []byte(saveOutput), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cleanOutPath := filepath.Join(binDir, "save_clean")
+	if err := os.WriteFile(cleanOutPath, []byte("*mangle\nCOMMIT\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	saveBin = filepath.Join(binDir, "iptables-save")
+	saveScript := fmt.Sprintf(`#!/bin/sh
+LP="%s"
+if [ -f "$LP" ] && grep -q -- "-D" "$LP" 2>/dev/null; then
+    cat "%s"
+else
+    cat "%s"
+fi
+`, logPath, cleanOutPath, ruleOutPath)
+	if err := os.WriteFile(saveBin, []byte(saveScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	delBin = filepath.Join(binDir, "iptables")
+	delScript := fmt.Sprintf(`#!/bin/sh
+echo "$@" >> "%s"
+exit 0
+`, logPath)
+	if err := os.WriteFile(delBin, []byte(delScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	return saveBin, delBin, logPath
 }
 
 // TestDisarmTProxyFamily_RealTargetInCustomChain verifies CR-03: XKeen's
@@ -368,9 +399,10 @@ func TestWatchdogService_EmergencyDisarmTProxy_FailureDoesNotLatch(t *testing.T)
 func TestWatchdogService_Stop_WaitsForInFlightDisarm(t *testing.T) {
 	const disarmDelay = 200 * time.Millisecond
 
+	ruleOutput := "*mangle\n:PREROUTING ACCEPT [0:0]\n-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1\nCOMMIT\n"
 	binDir := t.TempDir()
 	slowSave := filepath.Join(binDir, "iptables-save")
-	script := fmt.Sprintf("#!/bin/sh\nsleep %.2f\nexit 1\n", disarmDelay.Seconds())
+	script := fmt.Sprintf("#!/bin/sh\nsleep %.2f\ncat <<'EOF'\n%s\nEOF\n", disarmDelay.Seconds(), ruleOutput)
 	if err := os.WriteFile(slowSave, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -410,13 +442,23 @@ func TestWatchdogService_Stop_WaitsForInFlightDisarm(t *testing.T) {
 // (30s) tick — it should run as soon as Start() launches the loop, so a
 // kernel that's already wedged at boot is detected promptly.
 func TestWatchdogService_Start_RunsFirstCheckImmediately(t *testing.T) {
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
 	tmpDir := t.TempDir()
 	dummy := filepath.Join(tmpDir, "xkeen")
 	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	saveBin, delBin, _ := installFakeIptables(t, ruleOutput)
 	xkeenSvc := NewXKeenService(dummy, tmpDir)
 	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
 
 	w.Start()
 	defer w.Stop()
@@ -431,13 +473,23 @@ func TestWatchdogService_Start_RunsFirstCheckImmediately(t *testing.T) {
 }
 
 func TestWatchdogService_CheckHealth_RecoveryResetsCounter(t *testing.T) {
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
 	tmpDir := t.TempDir()
 	dummy := filepath.Join(tmpDir, "xkeen")
 	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	saveBin, delBin, _ := installFakeIptables(t, ruleOutput)
 	xkeenSvc := NewXKeenService(dummy, tmpDir)
 	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
 
 	w.CheckHealth()
 	w.CheckHealth()
@@ -994,14 +1046,21 @@ func TestEmergencyDisarmTProxy_AlreadyCleanOutcome(t *testing.T) {
 
 // TestWatchdogService_CheckHealth_AlreadyCleanLatchesDisarmed verifies CR-01:
 // when the kernel fails health checks but the mangle table is already clean
-// (the normal outage shape where kernel stopped cleanly), CheckHealth() must
-// latch w.disarmed=true so it does not spawn a new disarm sequence every 30s.
+// at the moment of emergency disarm, CheckHealth() must latch w.disarmed=true
+// so it does not spawn a new disarm sequence every 30s.
 func TestWatchdogService_CheckHealth_AlreadyCleanLatchesDisarmed(t *testing.T) {
 	xtables.ResetForTest()
 
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	cleanOutput := "*mangle\nCOMMIT\n"
+
 	tmpDir := t.TempDir()
 	cleanSave, delBin, _ := installFakeIptablesConfig(t, fakeIptablesConfig{
-		SaveOutputs: []string{"*mangle\nCOMMIT\n"},
+		SaveOutputs: []string{ruleOutput, cleanOutput},
 		Dialect:     dialectWaitSeconds,
 	})
 
@@ -1070,13 +1129,14 @@ COMMIT
 `
 	cleanOutput := "*mangle\nCOMMIT\n"
 
-	// index0: clean (consumed by the initial DisarmAlreadyClean latch).
-	// index1: rule present (consumed by the periodic non-destructive re-check
+	// index0: rule present (consumed by initial CheckHealth check).
+	// index1: clean (consumed by the initial DisarmAlreadyClean latch).
+	// index2: rule present (consumed by the periodic non-destructive re-check
 	//         that must trigger the unlatch).
-	// index2: rule present (consumed by the fresh disarm attempt's own read).
-	// index3: clean (consumed by that attempt's re-read confirming removal).
+	// index3: rule present (consumed by the fresh disarm attempt's own read).
+	// index4: clean (consumed by that attempt's re-read confirming removal).
 	saveBin, delBin, logPath := installFakeIptablesConfig(t, fakeIptablesConfig{
-		SaveOutputs: []string{cleanOutput, ruleOutput, ruleOutput, cleanOutput},
+		SaveOutputs: []string{ruleOutput, cleanOutput, ruleOutput, ruleOutput, cleanOutput},
 		Dialect:     dialectWaitSeconds,
 	})
 
@@ -1182,7 +1242,8 @@ func TestWatchdogService_CheckHealth_EpochDiscardsStaleInFlightDisarm(t *testing
 
 	binDir := t.TempDir()
 	slowSave := filepath.Join(binDir, "iptables-save")
-	script := fmt.Sprintf("#!/bin/sh\nsleep %.2f\nexit 0\n", disarmDelay.Seconds())
+	ruleOutput := "*mangle\n:PREROUTING ACCEPT [0:0]\n-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1\nCOMMIT\n"
+	script := fmt.Sprintf("#!/bin/sh\nsleep %.2f\ncat <<'EOF'\n%s\nEOF\n", disarmDelay.Seconds(), ruleOutput)
 	if err := os.WriteFile(slowSave, []byte(script), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -1298,7 +1359,12 @@ func TestWatchdogService_GracePeriod(t *testing.T) {
 	// Test 1: Service created without Start() (startedAt is zero).
 	// 3 consecutive failures immediately trigger disarm attempt (existing behavior preserved).
 	w1 := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
-	saveBin, delBin, _ := installFakeIptables(t, "*mangle\nCOMMIT\n")
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, _ := installFakeIptables(t, ruleOutput)
 	w1.iptablesSaveBin = saveBin
 	w1.iptablesBin = delBin
 	w1.ip6tablesSaveBin = saveBin
@@ -1314,10 +1380,11 @@ func TestWatchdogService_GracePeriod(t *testing.T) {
 
 	// Test 2: Service started via Start(). Simulated clock starts at t0.
 	w2 := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
-	w2.iptablesSaveBin = saveBin
-	w2.iptablesBin = delBin
-	w2.ip6tablesSaveBin = saveBin
-	w2.ip6tablesBin = delBin
+	saveBin2, delBin2, _ := installFakeIptables(t, ruleOutput)
+	w2.iptablesSaveBin = saveBin2
+	w2.iptablesBin = delBin2
+	w2.ip6tablesSaveBin = saveBin2
+	w2.ip6tablesBin = delBin2
 
 	simTime := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	w2.now = func() time.Time { return simTime }
@@ -1665,9 +1732,13 @@ func TestWatchdogService_StableFailureLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, _ := installFakeIptables(t, ruleOutput)
 	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
-
-	saveBin, delBin, _ := installFakeIptables(t, "*mangle\nCOMMIT\n")
 	w.iptablesSaveBin = saveBin
 	w.iptablesBin = delBin
 	w.ip6tablesSaveBin = saveBin
@@ -1808,5 +1879,303 @@ COMMIT
 	}
 	if snap.DisarmAttempts != 5 {
 		t.Fatalf("expected 5 disarm attempts, got %d", snap.DisarmAttempts)
+	}
+}
+
+// TestWatchdogService_IntentionalStop verifies scenarios 1, 2, and 4:
+// A stopped kernel with clean mangle table enters idle state, consecutive failures
+// remain zero, no disarm commands are issued, and exactly one log line is emitted over 20 cycles.
+func TestWatchdogService_IntentionalStop(t *testing.T) {
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	dummyScript := `#!/bin/sh
+if [ "$1" = "-status" ]; then
+    echo "XKeen is not running"
+    exit 1
+fi
+exit 0
+`
+	if err := os.WriteFile(dummy, []byte(dummyScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanSave, delBin, logPath := installFakeIptables(t, "*mangle\nCOMMIT\n")
+
+	// Scenario 1 & 4: Intentional stop via panel (xkeenSvc.Stop()), clean mangle table
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	if _, err := xkeenSvc.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if !xkeenSvc.IntentionalStop() {
+		t.Fatal("expected IntentionalStop=true after xkeenSvc.Stop()")
+	}
+
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesSaveBin = cleanSave
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = cleanSave
+	w.ip6tablesBin = delBin
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	for i := 0; i < 20; i++ {
+		w.CheckHealth()
+	}
+
+	if w.ConsecutiveFailures() != 0 {
+		t.Fatalf("expected 0 consecutive failures in idle, got %d", w.ConsecutiveFailures())
+	}
+	if snap := w.Snapshot(); snap.State != WatchdogStateIdle {
+		t.Fatalf("expected state %q, got %q", WatchdogStateIdle, snap.State)
+	}
+
+	// Subprocess iptables deletion calls must be 0
+	if data, err := os.ReadFile(logPath); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		t.Fatalf("expected no deletions in idle mode, got: %s", string(data))
+	}
+
+	// Exactly one log line across 20 cycles
+	logLines := strings.Split(strings.TrimSpace(logBuf.String()), "\n")
+	var idleLines []string
+	for _, l := range logLines {
+		if strings.Contains(l, "kernel stopped intentionally, disarm disabled") {
+			idleLines = append(idleLines, l)
+		}
+	}
+	if len(idleLines) != 1 {
+		t.Fatalf("expected exactly 1 idle log line across 20 cycles, got %d:\n%s", len(idleLines), logBuf.String())
+	}
+
+	// Scenario 2: Stopped via console without panel (intentionalStop=false), but clean mangle table
+	xkeenSvcConsole := NewXKeenService(dummy, tmpDir)
+	if xkeenSvcConsole.IntentionalStop() {
+		t.Fatal("expected IntentionalStop=false for fresh service instance")
+	}
+	wConsole := NewWatchdogService(xkeenSvcConsole, tmpDir, tmpDir)
+	wConsole.iptablesSaveBin = cleanSave
+	wConsole.iptablesBin = delBin
+	wConsole.ip6tablesSaveBin = cleanSave
+	wConsole.ip6tablesBin = delBin
+
+	wConsole.CheckHealth()
+	if wConsole.ConsecutiveFailures() != 0 {
+		t.Fatalf("expected 0 consecutive failures for console stop, got %d", wConsole.ConsecutiveFailures())
+	}
+	if snap := wConsole.Snapshot(); snap.State != WatchdogStateIdle {
+		t.Fatalf("expected idle state for console stop, got %q", snap.State)
+	}
+}
+
+// TestWatchdogService_IntentionalStopOverriddenByRules verifies scenario 3 (D-03):
+// When intentionalStop is active but TPROXY rules are present in mangle,
+// intentionalStop is cleared immediately, treated as an incident, and consecutiveFailures
+// increments until emergency disarm is triggered.
+func TestWatchdogService_IntentionalStopOverriddenByRules(t *testing.T) {
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	dummyScript := `#!/bin/sh
+if [ "$1" = "-status" ]; then
+    echo "XKeen is not running"
+    exit 1
+fi
+exit 0
+`
+	if err := os.WriteFile(dummy, []byte(dummyScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, logPath := installFakeIptables(t, ruleOutput)
+
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	if _, err := xkeenSvc.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if !xkeenSvc.IntentionalStop() {
+		t.Fatal("expected IntentionalStop=true before check")
+	}
+
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	// Check 1: rules present override intentionalStop
+	w.CheckHealth()
+
+	if xkeenSvc.IntentionalStop() {
+		t.Fatal("D-03 failure: expected intentionalStop to be cleared by rules presence")
+	}
+	if snap := w.Snapshot(); snap.State == WatchdogStateIdle {
+		t.Fatal("expected state not to be idle when TPROXY rules are active")
+	}
+	if got := w.ConsecutiveFailures(); got != 1 {
+		t.Fatalf("expected failure counter to increment to 1, got %d", got)
+	}
+
+	// Check 2 and 3: continue failure streak to trigger disarm
+	w.CheckHealth()
+	w.CheckHealth()
+	if got := w.ConsecutiveFailures(); got != 3 {
+		t.Fatalf("expected failure counter 3, got %d", got)
+	}
+
+	waitDisarmSettled(t, w)
+
+	if snap := w.Snapshot(); snap.State != WatchdogStateDisarmed {
+		t.Fatalf("expected state %q after emergency disarm, got %q", WatchdogStateDisarmed, snap.State)
+	}
+
+	delData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read deletions log: %v", err)
+	}
+	if !strings.Contains(string(delData), "-D") {
+		t.Fatalf("expected -D deletion command in log, got:\n%s", string(delData))
+	}
+
+	if !strings.Contains(logBuf.String(), "TPROXY interception rules present while kernel stopped — treating as incident") {
+		t.Fatalf("expected D-03 incident log line, got:\n%s", logBuf.String())
+	}
+}
+
+// TestWatchdogService_RestartWindowSuppressesFailures verifies scenario 5 (D-06):
+// During the maintenance restart window, consecutiveFailures does not increment.
+// Once the window expires, failures resume incrementing normally.
+func TestWatchdogService_RestartWindowSuppressesFailures(t *testing.T) {
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	dummy := filepath.Join(tmpDir, "xkeen")
+	if err := os.WriteFile(dummy, []byte("#!/bin/sh\necho \"XKeen is not running\"\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	ruleOutput := `*mangle
+:PREROUTING ACCEPT [0:0]
+-A PREROUTING -p tcp -j TPROXY --on-port 7892 --on-ip 127.0.0.1 --tproxy-mark 0x1/0x1
+COMMIT
+`
+	saveBin, delBin, _ := installFakeIptables(t, ruleOutput)
+
+	xkeenSvc := NewXKeenService(dummy, tmpDir)
+	simTime := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	xkeenSvc.now = func() time.Time { return simTime }
+
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.now = func() time.Time { return simTime }
+	w.iptablesSaveBin = saveBin
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = saveBin
+	w.ip6tablesBin = delBin
+
+	// Trigger Restart to activate restart window
+	if _, err := xkeenSvc.Restart(); err != nil {
+		t.Fatal(err)
+	}
+	if !xkeenSvc.InRestart() {
+		t.Fatal("expected InRestart=true immediately after Restart()")
+	}
+
+	// 5 checks during the restart window: consecutiveFailures must remain 0
+	for i := 0; i < 5; i++ {
+		simTime = simTime.Add(10 * time.Second) // total 50s, window is 60s
+		w.CheckHealth()
+		if got := w.ConsecutiveFailures(); got != 0 {
+			t.Fatalf("expected 0 failures during restart window at step %d, got %d", i, got)
+		}
+	}
+
+	// Advance time past the 60s restart window
+	simTime = simTime.Add(20 * time.Second) // now 70s > 60s
+	if xkeenSvc.InRestart() {
+		t.Fatal("expected InRestart=false after restart window elapsed")
+	}
+
+	// Health checks now increment failure counter
+	w.CheckHealth()
+	if got := w.ConsecutiveFailures(); got != 1 {
+		t.Fatalf("expected failures=1 after window expired, got %d", got)
+	}
+	w.CheckHealth()
+	if got := w.ConsecutiveFailures(); got != 2 {
+		t.Fatalf("expected failures=2, got %d", got)
+	}
+}
+
+// TestWatchdogService_IdleRecoversOnHealthyKernel verifies scenario 6 (D-07):
+// Recovering from idle on a healthy kernel returns state to armed, clears intentionalStop,
+// and logs a single line about resuming guard.
+func TestWatchdogService_IdleRecoversOnHealthyKernel(t *testing.T) {
+	xtables.ResetForTest()
+
+	tmpDir := t.TempDir()
+	statusFile := filepath.Join(tmpDir, "status.txt")
+	if err := os.WriteFile(statusFile, []byte("XKeen is not running"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	scriptBin := filepath.Join(tmpDir, "xkeen")
+	wrapper := fmt.Sprintf("#!/bin/sh\ncat %s\nif grep -q 'running' %s; then exit 0; else exit 1; fi\n", statusFile, statusFile)
+	if err := os.WriteFile(scriptBin, []byte(wrapper), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanSave, delBin, _ := installFakeIptables(t, "*mangle\nCOMMIT\n")
+
+	xkeenSvc := NewXKeenService(scriptBin, tmpDir)
+	if _, err := xkeenSvc.Stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	w := NewWatchdogService(xkeenSvc, tmpDir, tmpDir)
+	w.iptablesSaveBin = cleanSave
+	w.iptablesBin = delBin
+	w.ip6tablesSaveBin = cleanSave
+	w.ip6tablesBin = delBin
+
+	// Enter idle
+	w.CheckHealth()
+	if snap := w.Snapshot(); snap.State != WatchdogStateIdle {
+		t.Fatalf("expected idle state, got %q", snap.State)
+	}
+	if !xkeenSvc.IntentionalStop() {
+		t.Fatal("expected intentionalStop=true while in idle")
+	}
+
+	var logBuf bytes.Buffer
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	// Kernel recovers
+	if err := os.WriteFile(statusFile, []byte("XKeen is running"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	w.CheckHealth()
+
+	if snap := w.Snapshot(); snap.State != WatchdogStateArmed {
+		t.Fatalf("expected state %q after recovery, got %q", WatchdogStateArmed, snap.State)
+	}
+	if xkeenSvc.IntentionalStop() {
+		t.Fatal("D-07 failure: expected intentionalStop to be cleared upon healthy recovery")
+	}
+
+	if !strings.Contains(logBuf.String(), "kernel recovered from idle state — resuming guard") {
+		t.Fatalf("expected recovery log line about resuming guard, got:\n%s", logBuf.String())
 	}
 }

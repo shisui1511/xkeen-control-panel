@@ -106,6 +106,8 @@ type WatchdogService struct {
 
 	mu                     sync.Mutex
 	consecutiveFailures    int
+	idle                   bool
+	idleRecheckCounter     int
 	disarmed               bool
 	disarmInFlight         bool
 	disarmEpoch            uint64
@@ -222,19 +224,30 @@ func (w *WatchdogService) CheckHealth() {
 		return
 	}
 
+	// 1. Окно штатного рестарта (D-06).
+	if w.xkeenSvc.InRestart() {
+		return
+	}
+
 	status, err := w.xkeenSvc.Status()
 	healthy := err == nil && isKernelStatusHealthy(status)
 
-	w.mu.Lock()
-
 	if healthy {
+		w.xkeenSvc.ClearIntentionalStop()
+
+		w.mu.Lock()
 		wasDegraded := !w.degradedAt.IsZero()
+		wasIdle := w.idle
 		if wasDegraded {
 			log.Printf("Watchdog: kernel recovered from degraded state after %d failed health check(s)", w.consecutiveFailures)
+		} else if wasIdle {
+			log.Printf("Watchdog: kernel recovered from idle state — resuming guard")
 		} else if w.consecutiveFailures > 0 {
 			log.Printf("Watchdog: kernel recovered after %d failed health check(s)", w.consecutiveFailures)
 		}
 		w.consecutiveFailures = 0
+		w.idle = false
+		w.idleRecheckCounter = 0
 		w.disarmed = false
 		w.disarmedRecheckCounter = 0
 		w.disarmEpoch++
@@ -248,40 +261,48 @@ func (w *WatchdogService) CheckHealth() {
 		return
 	}
 
+	intentionalStop := w.xkeenSvc.IntentionalStop()
+
+	w.mu.Lock()
 	if !w.degradedAt.IsZero() {
 		w.consecutiveFailures++
 		w.mu.Unlock()
 		return
 	}
 
-	w.consecutiveFailures++
-	displayFailures := w.consecutiveFailures
-	if displayFailures > watchdogMaxFailures {
-		displayFailures = watchdogMaxFailures
-	}
-	log.Printf("Watchdog: kernel health check failed (%d/%d): status=%q err=%v",
-		displayFailures, watchdogMaxFailures, strings.TrimSpace(status), err)
+	isDisarmed := w.disarmed
+	isIdle := w.idle
+	checkRules := false
 
-	// WR-03: while latched disarmed, the failure-threshold check below is
-	// gated on "!w.disarmed" and so stays silent even if the interception
-	// rule was reinstalled by an external mechanism without the kernel ever
-	// reporting healthy again (the only event that currently clears the
-	// latch). Periodically perform a non-destructive re-check of the mangle
-	// table and unlatch if the rule is back, so the threshold check below
-	// can trigger a fresh EmergencyDisarmTProxy cycle instead of never
-	// noticing.
-	recheckDue := false
-	if w.disarmed && !w.disarmInFlight {
-		w.disarmedRecheckCounter++
-		if w.disarmedRecheckCounter >= disarmedRecheckInterval {
-			w.disarmedRecheckCounter = 0
-			recheckDue = true
+	if isDisarmed {
+		// WR-03: while latched disarmed, periodically check if rules were reinstalled
+		if !w.disarmInFlight {
+			w.disarmedRecheckCounter++
+			if w.disarmedRecheckCounter >= disarmedRecheckInterval {
+				w.disarmedRecheckCounter = 0
+				checkRules = true
+			}
+		}
+	} else if isIdle {
+		// While in idle, periodically check if rules appeared
+		w.idleRecheckCounter++
+		if w.idleRecheckCounter >= disarmedRecheckInterval {
+			w.idleRecheckCounter = 0
+			checkRules = true
+		}
+	} else {
+		// When not disarmed and not idle: check rules on first failure (or when intentional stop is signaled)
+		// to determine whether to enter idle or fail. In intermediate failure cycles, use cached rulesActive.
+		if w.consecutiveFailures == 0 || intentionalStop {
+			checkRules = true
 		}
 	}
+	rulesActive := w.interceptionActive
 	w.mu.Unlock()
 
-	if recheckDue {
+	if checkRules {
 		v4, v6 := w.tproxyInterceptionFamilies()
+		rulesActive = v4 || v6
 		var family string
 		switch {
 		case v4 && v6:
@@ -294,17 +315,53 @@ func (w *WatchdogService) CheckHealth() {
 			family = ""
 		}
 		w.mu.Lock()
-		w.interceptionActive = v4 || v6
+		w.interceptionActive = rulesActive
 		w.interceptionFamily = family
-		if (v4 || v6) && w.disarmed && !w.disarmInFlight {
+		if rulesActive && w.disarmed && !w.disarmInFlight {
 			log.Printf("Watchdog: TPROXY interception rule reappeared while latched disarmed — unlatching to allow a fresh disarm attempt")
 			w.disarmed = false
+			isDisarmed = false
 		}
 		w.mu.Unlock()
 	}
 
+	if !isDisarmed {
+		// 3. Приоритет факта над намерением (D-03).
+		if intentionalStop && rulesActive {
+			w.xkeenSvc.ClearIntentionalStop()
+			intentionalStop = false
+			log.Printf("Watchdog: TPROXY interception rules present while kernel stopped — treating as incident")
+			w.mu.Lock()
+			w.idle = false
+			w.idleRecheckCounter = 0
+			w.mu.Unlock()
+		}
+
+		// 4. Штатный простой (D-01, D-02, D-09).
+		if intentionalStop || !rulesActive {
+			w.mu.Lock()
+			wasIdle := w.idle
+			w.idle = true
+			w.consecutiveFailures = 0
+			w.mu.Unlock()
+
+			if !wasIdle {
+				log.Printf("Watchdog: kernel stopped intentionally, disarm disabled")
+			}
+			return
+		}
+	}
+
 	w.mu.Lock()
-	defer w.mu.Unlock()
+	w.idle = false
+	w.idleRecheckCounter = 0
+	w.consecutiveFailures++
+	displayFailures := w.consecutiveFailures
+	if displayFailures > watchdogMaxFailures {
+		displayFailures = watchdogMaxFailures
+	}
+	log.Printf("Watchdog: kernel health check failed (%d/%d): status=%q err=%v",
+		displayFailures, watchdogMaxFailures, strings.TrimSpace(status), err)
 
 	canDisarm := w.consecutiveFailures >= watchdogMaxFailures &&
 		!w.disarmed &&
@@ -358,6 +415,7 @@ func (w *WatchdogService) CheckHealth() {
 			w.mu.Unlock()
 		}()
 	}
+	w.mu.Unlock()
 }
 
 // ConsecutiveFailures returns the current failure streak (for diagnostics/tests).
@@ -375,6 +433,9 @@ func (w *WatchdogService) stateLocked() string {
 	}
 	if w.disarmed {
 		return WatchdogStateDisarmed
+	}
+	if w.idle {
+		return WatchdogStateIdle
 	}
 	return WatchdogStateArmed
 }
@@ -417,6 +478,8 @@ func (w *WatchdogService) TryReset() (WatchdogSnapshot, error) {
 	w.consecutiveFailures = 0
 	w.disarmAttempts = 0
 	w.disarmedRecheckCounter = 0
+	w.idle = false
+	w.idleRecheckCounter = 0
 	w.lastDisarmError = ""
 	w.nextDisarmAttempt = time.Time{}
 	w.degradedAt = time.Time{}
