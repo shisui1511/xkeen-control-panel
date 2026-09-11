@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeFakeIptablesDialect(t *testing.T, script string) string {
@@ -259,6 +260,56 @@ exit 0
 	if !equalSlices(argsV4Cached, expectedV4) {
 		t.Fatalf("expected cached iptables args %v, got %v", expectedV4, argsV4Cached)
 	}
+}
+
+// TestWaitArgsFor_ConcurrentProbesDifferentBinaries verifies WR-03:
+// Cold probing of one binary (e.g. slow iptables) must not block cold probing
+// or cached access of another binary (e.g. fast ip6tables) by holding a global lock.
+func TestWaitArgsFor_ConcurrentProbesDifferentBinaries(t *testing.T) {
+	ResetForTest()
+	dir := t.TempDir()
+
+	// Slow iptables: sleeps 300ms
+	slowScript := "#!/bin/sh\nsleep 0.3\nexit 0\n"
+	slowBin := filepath.Join(dir, "iptables")
+	if err := os.WriteFile(slowBin, []byte(slowScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fast ip6tables: exits immediately
+	fastScript := "#!/bin/sh\nexit 0\n"
+	fastBin := filepath.Join(dir, "ip6tables")
+	if err := os.WriteFile(fastBin, []byte(fastScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	// Launch slow probe in background
+	slowDone := make(chan struct{})
+	go func() {
+		defer close(slowDone)
+		WaitArgsFor(context.Background(), "iptables")
+	}()
+
+	// Brief pause to ensure the slow probe has started exec.CommandContext
+	time.Sleep(50 * time.Millisecond)
+
+	// Probe ip6tables while iptables is still probing
+	start := time.Now()
+	argsV6 := WaitArgsFor(context.Background(), "ip6tables")
+	elapsed := time.Since(start)
+
+	if len(argsV6) == 0 {
+		t.Fatal("expected non-empty args for ip6tables")
+	}
+
+	// If global lock was held across the slow probe, elapsed would be >= 250ms.
+	if elapsed >= 200*time.Millisecond {
+		t.Fatalf("WR-03 regression: WaitArgsFor(ip6tables) was blocked by slow iptables probe (%v)", elapsed)
+	}
+
+	<-slowDone
 }
 
 

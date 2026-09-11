@@ -17,7 +17,14 @@ var (
 	mu       sync.Mutex
 	cached   = make(map[string][]string)
 	haveGood = make(map[string]bool)
+
+	probeMus sync.Map
 )
+
+func getProbeMutex(binary string) *sync.Mutex {
+	v, _ := probeMus.LoadOrStore(binary, &sync.Mutex{})
+	return v.(*sync.Mutex)
+}
 
 // candidateWaitArgs defines the probe ladder from most capable to most compatible.
 var candidateWaitArgs = [][]string{
@@ -57,11 +64,26 @@ func WaitArgsFor(ctx context.Context, probeBinary string) []string {
 	if probeBinary == "" {
 		probeBinary = "iptables"
 	}
+
 	mu.Lock()
-	defer mu.Unlock()
 	if haveGood[probeBinary] {
-		return append([]string{}, cached[probeBinary]...)
+		res := append([]string{}, cached[probeBinary]...)
+		mu.Unlock()
+		return res
 	}
+	mu.Unlock()
+
+	probeMu := getProbeMutex(probeBinary)
+	probeMu.Lock()
+	defer probeMu.Unlock()
+
+	mu.Lock()
+	if haveGood[probeBinary] {
+		res := append([]string{}, cached[probeBinary]...)
+		mu.Unlock()
+		return res
+	}
+	mu.Unlock()
 
 	for _, args := range candidateWaitArgs {
 		probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
@@ -70,9 +92,11 @@ func WaitArgsFor(ctx context.Context, probeBinary string) []string {
 		cancel()
 
 		if err == nil {
+			mu.Lock()
 			cached[probeBinary] = append([]string{}, args...)
 			haveGood[probeBinary] = true
-			return append([]string{}, cached[probeBinary]...)
+			mu.Unlock()
+			return append([]string{}, args...)
 		}
 
 		if IsCommandNotFound(err) {
